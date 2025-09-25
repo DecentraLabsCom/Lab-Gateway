@@ -36,5 +36,4 @@ mysql_data/
 Thumbs.db
 
 # Project specific
-MIGRATION_LOG.md
-PENDING_IMPROVEMENTS.md
+improvements_docs/
