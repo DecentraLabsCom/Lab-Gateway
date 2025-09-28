@@ -202,7 +202,6 @@ The Full Version uses the auth-service as a Git submodule. Here's how to manage 
 - ✅ After completing a new feature in auth-service
 - ✅ When preparing for integration testing
 - ✅ Before creating a release
-- ❌ NOT after every small commit in auth-service
 
 ### 🛠️ **Update Commands**
 
