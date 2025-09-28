@@ -1,17 +1,18 @@
 # Lab Gateway 🧪
 
-Lab Gateway is a laboratory virtualization solution that enables remote access to development and testing environments. It's available in two versions with different levels of features and authentication.
+Lab Gateway is a laboratory virtualization solution that enables remote access to lab environments. It's available in two versions with different levels of features and authentication.
 
 ## 📋 Available Versions
 
 ### Lite Version (Branch `lite`)
 Basic version with essential features:
-- ✅ RDP access to virtual laboratories
+- ✅ RDP/VNC/SSH access to lab computers
 - ✅ Intuitive web interface
+- ✅ Auth through input JWTs
 - ✅ Reverse proxy with OpenResty
-- ✅ MySQL database for configuration
+- ✅ MySQL database for Guacamole configuration
 - ✅ Complete containerization with Docker
-- ✅ Simplified configuration
+- ✅ Simple configuration
 
 **Ideal for**: Development environments, personal testing, quick deployments.
 
@@ -19,7 +20,7 @@ Basic version with essential features:
 Complete version with advanced authentication:
 - ✅ All Lite version features
 - ✅ **Blockchain-based authentication**
-- ✅ **JWT token system**
+- ✅ **JWT generation system**
 - ✅ **Advanced user management**
 - ✅ **REST APIs for integration**
 - ✅ **Administration dashboard**
@@ -56,9 +57,10 @@ Each version includes its own detailed documentation:
 | **Docker Compose** | ✅ | ✅ |
 | **MySQL + Guacamole** | ✅ | ✅ |
 | **OpenResty Proxy** | ✅ | ✅ |
+| **Auth Through JWT** | ✅ | ✅ |
 | **Blockchain Authentication** | ❌ | ✅ |
 | **Spring Boot Auth Service** | ❌ | ✅ |
-| **JWT Tokens** | ❌ | ✅ |
+| **JWT Generation** | ❌ | ✅ |
 | **REST APIs** | ❌ | ✅ |
 | **Admin Dashboard** | ❌ | ✅ |
 | **Redis Session Store** | ❌ | ✅ |
@@ -100,17 +102,11 @@ lab-gateway/
 4. **Push** to the branch (`git push origin feature/amazing-feature`)
 5. **Open** a Pull Request
 
-## 📄 License
-
-This project is licensed under the MIT License specified in [LICENSE.txt](./LICENSE.txt).
-
 ## � Support
 
 - **Issues**: [GitHub Issues](https://github.com/DecentraLabsCom/lite-lab-gateway/issues)
 - **Documentation**: Check LITE-VERSION.md or FULL-VERSION.md according to your version
-- **Email**: Contact through GitHub
 
 ---
 
 > **Note**: This README serves as a navigation hub. For specific installation and configuration instructions, check the documentation for each version.
-
