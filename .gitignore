@@ -5,6 +5,9 @@
 *.env
 secrets/ # Directory for secret files (in case we implement Docker Secrets)
 
+# Full version-specific auth service
+auth-service/
+
 # Logs
 *.log
 logs/
