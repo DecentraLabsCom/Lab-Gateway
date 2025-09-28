@@ -9,6 +9,3 @@
 
 ## Development
 * [Logging Configuration](LOGGING.md)
-
-## Reference
-* [License](LICENSE.txt)
