@@ -1,5 +1,40 @@
 # 🚀 DecentraLabs Gateway
 
+A secure, containerized laboratory access gateway with optional blockchain-based authentication.
+
+## 🔀 Available Versions
+
+This project offers two versions to meet different requirements:
+
+### 🪶 **Lite Version** (`lite` branch)
+- **Purpose**: Basic JWT-validated gateway for lab access
+- **Components**: OpenResty + Guacamole + MySQL
+- **Authentication**: External JWT validation (expects JWT from external auth service)
+- **Use Case**: When you have an existing authentication system
+- **Benefits**: Lightweight, minimal resource usage, simple deployment
+
+### 🚀 **Full Version** (`full` branch) - **Current Branch**
+- **Purpose**: Complete blockchain-based authentication system
+- **Components**: Auth Service (Spring Boot) + Redis + OpenResty + Guacamole + MySQL
+- **Authentication**: Blockchain wallet signature verification + JWT generation
+- **Features**: 
+  - Wallet-based authentication
+  - Smart contract integration
+  - Real-time dashboard
+  - Comprehensive monitoring
+  - Multi-provider lab support
+- **Use Case**: Complete decentralized lab access solution
+
+## 🔄 Switching Between Versions
+
+```bash
+# Switch to lite version (minimal setup)
+git checkout lite
+
+# Switch to full version (with blockchain auth service)
+git checkout full
+```
+
 ## ⚡ Quick Start
 
 ### Automated Setup (Recommended)
@@ -43,16 +78,29 @@ If you prefer manual configuration:
 
 1. **Copy environment template:**
    ```bash
-   cp .env.example .env
+   # For full version (current branch)
+   cp .env.full .env
+   
+   # Or for lite version
+   # cp .env.lite .env
    ```
 
 2. **Edit `.env` file** with your configuration:
    ```env
+   # Basic Configuration
    SERVER_NAME=yourdomain.com          # Your domain
    HTTPS_PORT=443                      # 443 for production, 8443 for dev
    HTTP_PORT=80                        # 80 for production, 8080 for dev
+   
+   # Database Configuration
    MYSQL_ROOT_PASSWORD=secure_password # MySQL root password
    MYSQL_PASSWORD=guac_db_password     # Guacamole database password
+   
+   # Full Version: Blockchain Authentication (only for full version)
+   CONTRACT_ADDRESS=0xYourContractAddress
+   RPC_URL=https://your-blockchain-rpc.com
+   WALLET_ADDRESS=0xYourWalletAddress
+   WALLET_PRIVATE_KEY=0xYourPrivateKey
    ```
 
 3. **Add SSL certificates** to `certs/` folder:

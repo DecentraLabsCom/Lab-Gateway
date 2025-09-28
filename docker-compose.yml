@@ -1,4 +1,86 @@
 services:
+  # Authentication Service - Blockchain-based JWT authentication
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    environment:
+      - BASE_DOMAIN=${BASE_DOMAIN:-https://sarlab.dia.uned.es}
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-0xContractAddress}
+      - RPC_URL=${RPC_URL:-https://rpc.blockchain.com}
+      - WALLET_ADDRESS=${WALLET_ADDRESS:-0x183F062B6A8C39B9A9e71898741ACf8f25E11561}
+      - WALLET_PRIVATE_KEY=${WALLET_PRIVATE_KEY:-0xPrivateKey}
+      - DATABASE_URL=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}
+      - DATABASE_USER=${MYSQL_USER}
+      - DATABASE_PASSWORD=${MYSQL_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,https://marketplace-decentralabs.vercel.app}
+      - MARKETPLACE_PUBLIC_KEY_URL=${MARKETPLACE_PUBLIC_KEY_URL:-https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem}
+      - LOG_LEVEL_AUTH=${LOG_LEVEL_AUTH:-INFO}
+    volumes:
+      - ./certs:/usr/local/tomcat/keys:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/auth/health"]
+      timeout: 10s
+      retries: 5
+      interval: 30s
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '1.0'
+        reservations:
+          memory: 384M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=auth-service"
+    restart: always
+    networks:
+      - guacnet
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7.2-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      timeout: 3s
+      retries: 5
+      interval: 10s
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.2'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=redis"
+    restart: always
+    networks:
+      - guacnet
+
   openresty:
     build:
       context: ./openresty
@@ -19,6 +101,8 @@ services:
       - ISSUER=${ISSUER}
     depends_on:
       guacamole:
+        condition: service_healthy
+      auth-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f -L http://localhost:80/ -H 'Host: ${SERVER_NAME}' --connect-timeout 5 --insecure"]
@@ -153,3 +237,4 @@ networks:
 
 volumes:
   mysql_data:
+  redis_data:
