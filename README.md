@@ -1,4 +1,39 @@
-# 🚀 DecentraLabs Gateway
+# 🪶 DecentraLabs Gateway - Lite Version
+
+A lightweight, containerized laboratory access gateway with JWT validation.
+
+## 🔀 Available Versions
+
+This project offers two versions to meet different requirements:
+
+### 🪶 **Lite Version** (`lite` branch) - **Current Branch**
+- **Purpose**: Basic JWT-validated gateway for lab access
+- **Components**: OpenResty + Guacamole + MySQL
+- **Authentication**: External JWT validation (expects JWT from external auth service)
+- **Use Case**: When you have an existing authentication system
+- **Benefits**: Lightweight, minimal resource usage, simple deployment
+
+### 🚀 **Full Version** (`full` branch)
+- **Purpose**: Complete blockchain-based authentication system
+- **Components**: Auth Service (Spring Boot) + Redis + OpenResty + Guacamole + MySQL
+- **Authentication**: Blockchain wallet signature verification + JWT generation
+- **Features**: 
+  - Wallet-based authentication
+  - Smart contract integration
+  - Real-time dashboard
+  - Comprehensive monitoring
+  - Multi-provider lab support
+- **Use Case**: Complete decentralized lab access solution
+
+## 🔄 Switching Between Versions
+
+```bash
+# Switch to lite version (minimal setup) - current
+git checkout lite
+
+# Switch to full version (with blockchain auth service)
+git checkout full
+```
 
 ## ⚡ Quick Start
 
