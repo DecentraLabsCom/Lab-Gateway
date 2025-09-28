@@ -76,7 +76,7 @@ setup.bat
 
 2. **Configure environment:**
    ```bash
-   cp .env.full .env
+   cp .env.example .env
    # Edit .env with your configuration
    ```
 
@@ -358,7 +358,7 @@ For production environments:
 - **Documentation**: Check the `/dev` directory for detailed technical docs
 - **Logs**: Use `docker-compose logs [service]` for troubleshooting
 - **Issues**: Report issues on the project repository
-- **Configuration**: Review `.env.full` for all available options
+- **Configuration**: Review `.env.example` for all available options
 
 ---
 

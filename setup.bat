@@ -29,11 +29,11 @@ echo.
 REM Check if .env file exists
 if not exist .env (
     echo 📝 Creating .env file from template...
-    if exist .env.full (
-        copy .env.full .env >nul
-        echo ✅ Copied .env.full to .env
+    if exist .env.example (
+        copy .env.example .env >nul
+        echo ✅ Copied .env.example to .env
     ) else (
-        echo ❌ .env.full template not found. Please create .env manually.
+        echo ❌ .env.example template not found. Please create .env manually.
         pause
         exit /b 1
     )

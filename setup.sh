@@ -40,11 +40,11 @@ echo ""
 # Check if .env file exists
 if [ ! -f .env ]; then
     echo "📝 Creating .env file from template..."
-    if [ -f .env.full ]; then
-        cp .env.full .env
-        echo "✅ Copied .env.full to .env"
+    if [ -f .env.example ]; then
+        cp .env.example .env
+        echo "✅ Copied .env.example to .env"
     else
-        echo "❌ .env.full template not found. Please create .env manually."
+        echo "❌ .env.example template not found. Please create .env manually."
         exit 1
     fi
 else

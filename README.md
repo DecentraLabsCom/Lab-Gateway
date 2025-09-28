@@ -79,7 +79,7 @@ If you prefer manual configuration:
 1. **Copy environment template:**
    ```bash
    # For full version (current branch)
-   cp .env.full .env
+   cp .env.example .env
    ```
 
 2. **Edit `.env` file** with your configuration:
@@ -242,7 +242,7 @@ Access: https://lab.university.edu
 
 ```
 ├── docker-compose.yml           # Main orchestration (5 services)
-├── .env.full                    # Environment template for full version
+├── .env.example                 # Environment template for full version
 ├── setup.sh / setup.bat         # Setup scripts
 ├── auth-service/                # Spring Boot authentication service
 │   ├── Dockerfile               # Tomcat container configuration
