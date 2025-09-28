@@ -1,43 +1,70 @@
 # 🪶 DecentraLabs Gateway - Lite Version
 
-A lightweight, containerized laboratory access gateway with JWT validation.
+## 🎯 Overview
 
-## 🔀 Available Versions
+The Lite Version of DecentraLabs Gateway provides a lightweight, JWT-validated laboratory access system. It's designed for environments where you already have an existing authentication system and just need secure lab access.
 
-This project offers two versions to meet different requirements:
+## 🔀 Version Information
 
-### 🪶 **Lite Version** (`lite` branch) - **Current Branch**
+You are currently on the **Lite Version** branch. This project offers two versions:
+
+### 🪶 **Lite Version** (Current Branch)
 - **Purpose**: Basic JWT-validated gateway for lab access
 - **Components**: OpenResty + Guacamole + MySQL
 - **Authentication**: External JWT validation (expects JWT from external auth service)
 - **Use Case**: When you have an existing authentication system
 - **Benefits**: Lightweight, minimal resource usage, simple deployment
 
-### 🚀 **Full Version** (`full` branch)
+### 🚀 **Full Version** 
 - **Purpose**: Complete blockchain-based authentication system
 - **Components**: Auth Service (Spring Boot) + Redis + OpenResty + Guacamole + MySQL
 - **Authentication**: Blockchain wallet signature verification + JWT generation
-- **Features**: 
-  - Wallet-based authentication
-  - Smart contract integration
-  - Real-time dashboard
-  - Comprehensive monitoring
-  - Multi-provider lab support
+- **Features**: Wallet-based auth, smart contract integration, real-time dashboard
 - **Use Case**: Complete decentralized lab access solution
 
-## 🔄 Switching Between Versions
-
+**Switch to Full Version:**
 ```bash
-# Switch to lite version (minimal setup) - current
-git checkout lite
-
-# Switch to full version (with blockchain auth service)
-git checkout full
+git switch full
 ```
 
-## ⚡ Quick Start
+## 🏗️ Architecture
 
-### Automated Setup (Recommended)
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  External Auth  │    │   OpenResty     │    │   Guacamole     │
+│    Service      ├────┤  (Nginx + Lua)  ├────┤  (Lab Access)   │
+│   (Issues JWT)  │    │  (JWT Validation)│    └─────────────────┘
+└─────────────────┘    └─────────────────┘             │
+                                                        │
+                                              ┌─────────────────┐
+                                              │     MySQL       │
+                                              │   (Database)    │
+                                              └─────────────────┘
+```
+
+## 🌟 Features
+
+### ✅ Lightweight Design
+- **Minimal Components**: Only essential services (OpenResty, Guacamole, MySQL)
+- **Low Resource Usage**: Optimized for small deployments
+- **Quick Deployment**: Fast startup and easy configuration
+- **Simple Maintenance**: Fewer components to manage
+
+### ✅ JWT Authentication
+- **External JWT Validation**: Validates tokens from your existing auth service
+- **Flexible Integration**: Works with any JWT-issuing authentication system
+- **Secure Access Control**: Comprehensive token validation
+- **Session Management**: Automatic session handling and cleanup
+
+### ✅ Essential Security
+- **SSL/TLS Termination**: Secure HTTPS connections
+- **Security Headers**: Basic security header configuration
+- **Access Logging**: Request logging and monitoring
+- **Input Validation**: Basic request validation
+
+## 🚀 Quick Deployment
+
+### Using Setup Scripts (Recommended)
 
 The setup scripts will automatically:
 - ✅ Check Docker prerequisites
@@ -47,32 +74,20 @@ The setup scripts will automatically:
 - ✅ Generate SSL certificates for localhost (if needed)
 - ✅ Start all services automatically
 
+**Windows:**
+```cmd
+setup.bat
+```
+
 **Linux/macOS:**
 ```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-**Windows:**
-```cmd
-setup.bat
-```
-
 That's it! The script will guide you through the setup and start the services automatically.
 
-#### 🎯 Setup Script Features
-
-The automated setup scripts provide:
-
-- **🔍 Prerequisites check**: Verifies Docker and Docker Compose installation
-- **🔐 Smart password management**: Auto-generates secure passwords or lets you set custom ones
-- **🌐 Intelligent domain configuration**: Automatically configures for localhost (dev) or production
-- **� Flexible port selection**: Choose between standard (443/80) or custom ports
-- **�📜 SSL certificate handling**: Generates self-signed certs for localhost, guides for production
-- **🚀 One-command deployment**: Starts all services automatically after configuration
-- **⚠️ Safe overwrite protection**: Asks before overwriting existing `.env` files
-
-### Manual Setup (Advanced Users)
+### Manual Deployment
 
 If you prefer manual configuration:
 
@@ -103,242 +118,217 @@ If you prefer manual configuration:
    docker-compose up -d
    ```
 
-## 🔐 JWT Authentication Setup
+## ⚙️ Configuration
 
-This lite gateway validates JWT tokens from an Auth2 Service before allowing access to Guacamole.
+### 🔧 Environment Variables
 
-### Required Configuration
+The lite version requires minimal configuration in `.env`:
 
-1. **Environment Variables** (in `.env` file):
-   ```env
-   SERVER_NAME=yourdomain.com                    # Must match JWT 'aud' claim
-   ISSUER=https://auth-service.com/auth     # Must match JWT 'iss' claim
-   ```
+```env
+# Basic Configuration
+SERVER_NAME=yourdomain.com
+HTTPS_PORT=443
+HTTP_PORT=80
 
-2. **Public Key** (in `certs/public_key.pem`):
-   - Must be the public key from the Auth Service
-   - Used to verify JWT token signatures
+# Database Configuration
+MYSQL_ROOT_PASSWORD=secure_password
+MYSQL_DATABASE=guacamole_db
+MYSQL_USER=guacamole_user
+MYSQL_PASSWORD=db_password
 
-### JWT Token Requirements
+# Guacamole Configuration
+GUAC_ADMIN_USER=guacadmin
+GUAC_ADMIN_PASS=guacadmin
+ISSUER=YourAuthServiceName
+```
 
-The Auth Service must issue JWT tokens with these claims:
+### 🔑 Required Files
+
+Place these files in the `certs/` directory:
+
+```
+certs/
+├── fullchain.pem      # SSL certificate chain
+├── privkey.pem        # SSL private key
+└── public_key.pem     # JWT public key (from your auth service)
+```
+
+## 🔐 JWT Integration
+
+### External Authentication Service Requirements
+
+Your authentication service must issue JWT tokens with these claims:
 
 ```json
 {
-  "iss": "https://auth-service.com/auth",    # Issuer (the auth service)
-  "aud": "https://yourdomain.com/guacamole", # Audience (this gateway)
-  "sub": "username",                         # Subject (user identifier)
-  "jti": "unique-token-id",                  # JWT ID (prevents replay)
-  "exp": 1693478400,                         # Expiration timestamp
-  "iat": 1693474800                          # Issued at timestamp
+  "iss": "https://your-auth-service.com",     # Issuer (your auth service)
+  "aud": "https://yourdomain.com/guacamole",  # Audience (this gateway)
+  "sub": "username",                          # Subject (user identifier)
+  "jti": "unique-token-id",                   # JWT ID (prevents replay)
+  "exp": 1693478400,                          # Expiration timestamp
+  "iat": 1693474800                           # Issued at timestamp
 }
 ```
 
 ### Access URLs
 
-- **With JWT**: `https://yourdomain.com/guacamole/?jwt=YOUR_TOKEN`
-- **Direct login**: `https://yourdomain.com/guacamole/` (uses Guacamole's built-in auth)
+Users access the lab gateway using JWT tokens from your auth service:
 
-## 🔐 SSL Certificates
+```
+https://yourdomain.com/guacamole/?jwt=YOUR_JWT_TOKEN
+```
 
-The setup scripts handle SSL certificates automatically:
+### Public Key Configuration
 
-### For Development (localhost)
-- **Automatic**: The setup script generates self-signed certificates
-- **Manual**: Place your own certificates in the `certs/` folder
+The `public_key.pem` file must contain the public key that corresponds to the private key used by your authentication service to sign JWT tokens.
 
-### For Production
-You need valid SSL certificates. The setup script will guide you, but you need to obtain them from:
+## 📊 Service Management
 
-- **Let's Encrypt** (free):
-  ```bash
-  certbot certonly --standalone -d yourdomain.com
-  cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem certs/
-  cp /etc/letsencrypt/live/yourdomain.com/privkey.pem certs/
-  ```
-
-- **Cloud Providers**: AWS ACM, Cloudflare, etc.
-- **Commercial CA**: DigiCert, GlobalSign, etc.
-
-### JWT Public Key
-
-The `public_key.pem` file contains the **public key from the Authentication Service** that issues JWT tokens. This key is used by the gateway to verify that incoming JWT tokens are valid and haven't been tampered with.
-
-#### 🔑 Key Requirements
-
-**Important**: The `public_key.pem` must be the public key that corresponds to the private key used by the Auth Service to sign JWT tokens.
-
-#### 🔄 JWT Authentication Flow
-
-1. **Auth Service** (e.g., `https://sarlab.dia.uned.es/auth`) signs JWT tokens with its **private key**
-2. **Gateway** receives JWT tokens from users and verifies them using the **public key**
-3. If verification succeeds, the gateway allows access to Guacamole
-4. If verification fails, access is denied
-
-#### 📋 How to Obtain the Public Key
-
-**From your Auth Service provider:**
+### Health Checks
 ```bash
-# If the auth service provides a JWKS endpoint
-curl https://auth-service.com/.well-known/jwks.json
+# Check all services
+docker-compose ps
 
-# If the auth service provides the public key directly
-curl https://auth-service.com/public-key.pem > certs/public_key.pem
+# Check specific service logs
+docker-compose logs -f openresty
+docker-compose logs -f guacamole
+docker-compose logs -f mysql
 ```
 
-**For development/testing only or if you want to run your own auth service** (generates a new key pair):
+### Service Control
 ```bash
-# Generate private key (this is kept in the auth service)
-openssl genrsa -out jwt_private.pem 2048
+# Restart services
+docker-compose restart [service_name]
 
-# Extract public key (use this in the gateway)
-openssl rsa -in jwt_private.pem -pubout -out certs/public_key.pem
+# Stop all services
+docker-compose down
+
+# Update services
+docker-compose pull && docker-compose up -d
 ```
 
-#### ⚠️ Security Notes
+## 🔍 Monitoring & Logging
 
-- **Never generate your own keys for production** - use the public key from your Auth Service
-- The private key should **only exist on your Auth Service**, never on the gateway
-- If you change keys on your Auth Service, update `public_key.pem` on the gateway
-- The gateway validates JWT claims: `iss` (issuer), `aud` (audience), `exp` (expiration), and `jti` (JWT ID)
-
-## 🌐 Configuration Examples
-
-The setup scripts use intelligent defaults, but you can customize ports in `.env` after setup:
-
-### Local Development
-```env
-SERVER_NAME=localhost
-ISSUER=https://localhost/auth
-HTTPS_PORT=8443  # Development port (no admin needed)
-HTTP_PORT=8080   # Development port (no admin needed)
-```
-Access: https://localhost:8443
-
-### Production
-```env
-SERVER_NAME=lab.university.edu
-ISSUER=https://lab.university.edu/auth
-HTTPS_PORT=443   # Standard HTTPS port
-HTTP_PORT=80     # Standard HTTP port
-```
-Access: https://lab.university.edu
-
-## 📂 Project Structure
-
-```
-├── docker-compose.yml           # Main orchestration
-├── .env.example                 # Environment template
-├── setup.sh / setup.bat         # Setup scripts
-├── certs/                       # SSL certificates and keys (not in git)
-│   ├── fullchain.pem            # SSL certificate chain
-│   ├── privkey.pem              # SSL private key
-│   └── public_key.pem           # JWT verification public key (from Auth Service)
-├── openresty/                   # NGINX + Lua proxy
-│   ├── Dockerfile
-│   ├── nginx.conf
-│   ├── lab_access.conf
-│   └── lua/                     # Authentication scripts
-├── guacamole/                   # Guacamole container
-│   ├── Dockerfile
-│   ├── guacamole.properties
-│   ├── extensions/
-│   └── lib/
-├── mysql/                       # Database initialization
-│   ├── 001-create-schema.sql
-│   ├── 002-create-admin-user.sql
-│   └── 003-rdp-example.sql
-└── web/                         # Homepage
-    ├── index.html
-    └── assets/
+### Access Logs
+OpenResty provides detailed access logging:
+```bash
+docker-compose logs -f openresty
 ```
 
-## 🔑 Default Credentials
+### Database Monitoring
+```bash
+# Access MySQL
+docker exec -it [mysql_container] mysql -u root -p
 
-- **Username**: `guacadmin`
-- **Password**: `guacadmin`
-
-⚠️ **Change these in production!** Access the Guacamole admin panel to create new users and disable the default account.
-
-## 🎯 Usage
-
-### Access Methods
-
-1. **Direct Access**: https://yourdomain.com/guacamole/
-2. **JWT Authentication**: https://yourdomain.com/guacamole/?jwt=YOUR_TOKEN
-3. **Homepage**: https://yourdomain.com/
-
-### Adding Connections
-
-1. Login to Guacamole admin panel
-2. Go to Settings → Connections
-3. Add RDP/VNC/SSH connections as needed
+# Monitor database connections
+docker exec -it [mysql_container] mysqladmin processlist -u root -p
+```
 
 ## 🛠️ Development
 
-### View Logs
-```bash
-docker-compose logs -f openresty
-docker-compose logs -f guacamole
-```
+### Local Development Setup
 
-### Restart Services
-```bash
-docker-compose restart openresty
-docker-compose restart guacamole
-```
+1. **Start services:**
+   ```bash
+   docker-compose up -d
+   ```
 
-### Database Access
+2. **Access services:**
+   - Guacamole: https://localhost:8443/guacamole
+   - MySQL: localhost:3306
+
+### Testing JWT Integration
+
+Test your JWT tokens:
 ```bash
-# Get the database password from .env file
-docker exec -it dockerlabgateway-mysql-1 mysql -u guacamole_user -p guacamole_db
-# Enter the password from MYSQL_PASSWORD in your .env file
+# Decode JWT payload (for debugging)
+echo "YOUR_JWT_TOKEN" | cut -d. -f2 | base64 -d | jq .
+
+# Test gateway access
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+     https://yourdomain.com/guacamole/
 ```
 
 ## 🔒 Security Considerations
 
-- **Setup script helps with security**: Auto-generates strong passwords
-- Change default admin password after first login
-- Use valid SSL certificates in production (not self-signed)
-- Keep JWT private keys secure
-- Regular security updates
-- Network firewall configuration
-- Monitor access logs
+### Production Checklist
 
-## 📚 Documentation
+- [ ] Change all default passwords
+- [ ] Configure proper SSL certificates
+- [ ] Set correct JWT public key from your auth service
+- [ ] Configure appropriate issuer and audience
+- [ ] Set up log monitoring
+- [ ] Configure backup strategies
+- [ ] Regular security updates
 
-- [OpenResty Documentation](https://openresty.org/)
-- [Apache Guacamole Manual](https://guacamole.apache.org/doc/gug/)
-- [Docker Compose Reference](https://docs.docker.com/compose/)
+### Minimal Attack Surface
 
-## 🆘 Troubleshooting
+The lite version minimizes security risks by:
+- Fewer components to secure
+- No blockchain integration complexity
+- Simplified network topology
+- Standard JWT validation
+
+## 🚨 Troubleshooting
 
 ### Common Issues
 
-**Port conflicts:**
-- Change `HTTPS_PORT` and `HTTP_PORT` in `.env`
-- Check what's using ports: `netstat -tulpn | grep :443`
+**JWT validation fails:**
+```bash
+# Check public key matches your auth service
+# Verify token expiration and claims
+# Check issuer and audience configuration
+```
 
-**Certificate errors:**
-- Verify certificate files exist in `certs/`
-- Check certificate validity: `openssl x509 -in certs/fullchain.pem -text -noout`
-- Ensure `SERVER_NAME` matches certificate CN/SAN
+**SSL certificate errors:**
+```bash
+# Verify certificate files exist in certs/
+openssl x509 -in certs/fullchain.pem -text -noout
+```
 
-**Database connection issues:**
-- Check MySQL container logs: `docker-compose logs mysql`
-- Verify database credentials match those in `.env` file
+**Guacamole connection issues:**
+```bash
+# Check container logs
+docker-compose logs guacamole
 
-**Guacamole not accessible:**
-- Check if all containers are running: `docker-compose ps`
-- Verify OpenResty configuration: `docker-compose logs openresty`
+# Verify database connection
+docker-compose logs mysql
+```
 
-**JWT Authentication issues:**
-- Verify `public_key.pem` matches the Auth Service's private key
-- Check JWT token format: `echo "JWT_TOKEN" | base64 -d` (decode payload)
-- Ensure `iss` claim matches `ISSUER` in `.env`
-- Ensure `aud` claim matches `https://SERVER_NAME/guacamole`
-- Check OpenResty logs for detailed JWT validation errors: `docker-compose logs openresty`
-- Verify token hasn't expired (`exp` claim)
-- Ensure `jti` (JWT ID) is unique for each token
+### Performance Optimization
 
-For more help, open an issue on GitHub.
+For better performance:
+- Use external MySQL database in production
+- Configure proper resource limits
+- Enable log rotation
+- Monitor memory usage
+
+## 📈 Migration to Full Version
+
+If you later need blockchain authentication features:
+
+1. **Switch to full branch:**
+   ```bash
+   git switch full
+   ```
+
+2. **Deploy full version:**
+   ```bash
+   ./setup.sh  # or setup.bat on Windows
+   ```
+
+3. **Configure blockchain settings:**
+   - Set up smart contract addresses
+   - Configure blockchain RPC endpoints
+   - Set up wallet authentication
+
+## 📞 Support
+
+- **Documentation**: Check this README and setup scripts
+- **Logs**: Use `docker-compose logs [service]` for troubleshooting
+- **Issues**: Report issues on the project repository
+- **Configuration**: Review `.env.example` for all available options
+
+---
+
+*The Lite Version provides a simple, efficient solution for JWT-based laboratory access when you already have an authentication system in place.*
