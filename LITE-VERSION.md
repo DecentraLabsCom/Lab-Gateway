@@ -62,7 +62,7 @@ setup.bat
 
 2. **Configure environment:**
    ```bash
-   cp .env.lite .env
+   cp .env.example .env
    # Edit .env with your configuration
    ```
 
@@ -280,7 +280,7 @@ If you later need blockchain authentication features:
 - **Documentation**: Check this README and setup scripts
 - **Logs**: Use `docker-compose logs [service]` for troubleshooting
 - **Issues**: Report issues on the project repository
-- **Configuration**: Review `.env.lite` for all available options
+- **Configuration**: Review `.env.example` for all available options
 
 ---
 
