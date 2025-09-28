@@ -80,9 +80,6 @@ If you prefer manual configuration:
    ```bash
    # For full version (current branch)
    cp .env.full .env
-   
-   # Or for lite version
-   # cp .env.lite .env
    ```
 
 2. **Edit `.env` file** with your configuration:
@@ -116,41 +113,45 @@ If you prefer manual configuration:
    docker-compose up -d
    ```
 
-## 🔐 JWT Authentication Setup
+## 🔐 Blockchain Authentication Setup
 
-This lite gateway validates JWT tokens from an Auth2 Service before allowing access to Guacamole.
+This full version includes a complete blockchain-based authentication service that generates JWT tokens for lab access.
 
-### Required Configuration
+### Authentication Flow
 
-1. **Environment Variables** (in `.env` file):
-   ```env
-   SERVER_NAME=yourdomain.com                    # Must match JWT 'aud' claim
-   ISSUER=https://auth-service.com/auth     # Must match JWT 'iss' claim
-   ```
+1. **Wallet Authentication**: Users connect their crypto wallets (MetaMask, etc.)
+2. **Signature Challenge**: The auth service generates a challenge message
+3. **Signature Verification**: User signs the challenge with their wallet
+4. **Blockchain Validation**: Service queries smart contracts for lab reservations
+5. **JWT Generation**: Valid reservations result in JWT tokens for lab access
 
-2. **Public Key** (in `certs/public_key.pem`):
-   - Must be the public key from the Auth Service
-   - Used to verify JWT token signatures
+### Generated JWT Token Claims
 
-### JWT Token Requirements
-
-The Auth Service must issue JWT tokens with these claims:
+The integrated auth service generates JWT tokens with these claims:
 
 ```json
 {
-  "iss": "https://auth-service.com/auth",    # Issuer (the auth service)
+  "iss": "https://yourdomain.com/auth",      # Issuer (integrated auth service)
   "aud": "https://yourdomain.com/guacamole", # Audience (this gateway)
-  "sub": "username",                         # Subject (user identifier)
+  "sub": "0x742d35Cc...aE7aF2",             # Subject (wallet address)
   "jti": "unique-token-id",                  # JWT ID (prevents replay)
   "exp": 1693478400,                         # Expiration timestamp
-  "iat": 1693474800                          # Issued at timestamp
+  "iat": 1693474800,                         # Issued at timestamp
+  "labs": [                                  # Lab access permissions
+    {
+      "provider": "university-labs",
+      "lab_id": "chemistry-reactor-01",
+      "reservation_id": "res_894736"
+    }
+  ]
 }
 ```
 
 ### Access URLs
 
-- **With JWT**: `https://yourdomain.com/guacamole/?jwt=YOUR_TOKEN`
-- **Direct login**: `https://yourdomain.com/guacamole/` (uses Guacamole's built-in auth)
+- **Authentication Service**: `https://yourdomain.com/auth` (wallet authentication)
+- **Lab Access**: Automatic redirect after successful authentication
+- **Direct Guacamole**: `https://yourdomain.com/guacamole/` (with valid JWT)
 
 ## 🔐 SSL Certificates
 
@@ -240,17 +241,21 @@ Access: https://lab.university.edu
 ## 📂 Project Structure
 
 ```
-├── docker-compose.yml           # Main orchestration
-├── .env.example                 # Environment template
+├── docker-compose.yml           # Main orchestration (5 services)
+├── .env.full                    # Environment template for full version
 ├── setup.sh / setup.bat         # Setup scripts
+├── auth-service/                # Spring Boot authentication service
+│   ├── Dockerfile               # Tomcat container configuration
+│   ├── pom.xml                  # Maven dependencies
+│   └── src/                     # Spring Boot source code
 ├── certs/                       # SSL certificates and keys (not in git)
 │   ├── fullchain.pem            # SSL certificate chain
 │   ├── privkey.pem              # SSL private key
-│   └── public_key.pem           # JWT verification public key (from Auth Service)
+│   └── public_key.pem           # JWT signing public key
 ├── openresty/                   # NGINX + Lua proxy
 │   ├── Dockerfile
 │   ├── nginx.conf
-│   ├── lab_access.conf
+│   ├── lab_access.conf          # Enhanced with auth service routing
 │   └── lua/                     # Authentication scripts
 ├── guacamole/                   # Guacamole container
 │   ├── Dockerfile
@@ -261,9 +266,11 @@ Access: https://lab.university.edu
 │   ├── 001-create-schema.sql
 │   ├── 002-create-admin-user.sql
 │   └── 003-rdp-example.sql
-└── web/                         # Homepage
-    ├── index.html
-    └── assets/
+├── web/                         # Homepage
+│   ├── index.html
+│   └── assets/
+├── FULL-VERSION.md             # Detailed documentation for full version
+└── dev/                        # Development documentation
 ```
 
 ## 🔑 Default Credentials
@@ -291,12 +298,16 @@ Access: https://lab.university.edu
 
 ### View Logs
 ```bash
+docker-compose logs -f auth-service
 docker-compose logs -f openresty
 docker-compose logs -f guacamole
+docker-compose logs -f redis
+docker-compose logs -f mysql
 ```
 
 ### Restart Services
 ```bash
+docker-compose restart auth-service
 docker-compose restart openresty
 docker-compose restart guacamole
 ```

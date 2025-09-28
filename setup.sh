@@ -1,147 +1,163 @@
 #!/bin/bash
 
-# =================================================================
-# DecentraLabs Gateway - Quick Setup Script
-# =================================================================
+# DecentraLabs Gateway - Full Version Deployment Script
+# This script deploys the complete blockchain-based authentication system
 
-echo "🚀 DecentraLabs Gateway - Quick Setup"
-echo "======================================"
-echo
+set -e
 
-# Check prerequisites
-echo "🔍 Checking prerequisites..."
-if ! command -v docker &> /dev/null; then
-    echo "❌ Docker is not installed. Please install Docker first."
-    echo "   Visit: https://docs.docker.com/get-docker/"
+echo "🚀 DecentraLabs Gateway - Full Version Deployment"
+echo "=================================================="
+echo ""
+
+# Check if we're in the correct branch
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+if [ "$CURRENT_BRANCH" != "full" ]; then
+    echo "⚠️  Warning: You're not on the 'full' branch (current: $CURRENT_BRANCH)"
+    echo "   To switch to full version: git checkout full"
+    echo ""
+    read -p "Continue anyway? [y/N]: " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# Check if Docker is running
+if ! docker info >/dev/null 2>&1; then
+    echo "❌ Docker is not running. Please start Docker and try again."
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-    echo "❌ Docker Compose is not installed."
-    echo "   Visit: https://docs.docker.com/compose/install/"
+# Check if docker-compose is available
+if ! command -v docker-compose >/dev/null 2>&1; then
+    echo "❌ docker-compose is not installed. Please install Docker Compose and try again."
     exit 1
 fi
 
 echo "✅ Docker and Docker Compose are available"
-echo
+echo ""
 
-# Check if .env already exists
-if [ -f ".env" ]; then
-    echo "⚠️  .env file already exists!"
-    read -p "Do you want to overwrite it? (y/N): " overwrite
-    if [[ ! $overwrite =~ ^[Yy]$ ]]; then
-        echo "Setup cancelled."
-        exit 0
+# Check if .env file exists
+if [ ! -f .env ]; then
+    echo "📝 Creating .env file from template..."
+    if [ -f .env.full ]; then
+        cp .env.full .env
+        echo "✅ Copied .env.full to .env"
+    else
+        echo "❌ .env.full template not found. Please create .env manually."
+        exit 1
     fi
-fi
-
-# Copy template
-cp .env.example .env
-echo "✅ Created .env file from template"
-echo
-
-# Ask for domain
-echo "🌐 Domain Configuration"
-echo "----------------------"
-echo "Enter your domain name (or press Enter for localhost):"
-read -p "Domain [localhost]: " domain
-domain=${domain:-localhost}
-
-# Update .env with intelligent defaults
-if [[ "$domain" == "localhost" ]]; then
-    echo "🔧 Configuring for local development..."
-    sed -i 's/SERVER_NAME=.*/SERVER_NAME=localhost/' .env
-    sed -i 's/ISSUER=.*/ISSUER=https:\/\/localhost\/auth/' .env
-    sed -i 's/HTTPS_PORT=.*/HTTPS_PORT=8443/' .env
-    sed -i 's/HTTP_PORT=.*/HTTP_PORT=8080/' .env
-    echo "   - Server: https://localhost:8443"
-    echo "   - Using development ports (8443/8080) - no admin needed"
 else
-    echo "🔧 Configuring for production..."
-    sed -i "s/SERVER_NAME=.*/SERVER_NAME=$domain/" .env
-    sed -i "s/ISSUER=.*/ISSUER=https:\/\/$domain\/auth/" .env
-    sed -i 's/HTTPS_PORT=.*/HTTPS_PORT=443/' .env
-    sed -i 's/HTTP_PORT=.*/HTTP_PORT=80/' .env
-    echo "   - Server: https://$domain"
-    echo "   - Using standard ports (443/80)"
+    echo "✅ .env file already exists"
 fi
-
-echo "💡 To use different ports, edit HTTPS_PORT/HTTP_PORT in .env after setup"
-
-echo
-echo "🔐 SSL Certificates"
-echo "-------------------"
 
 # Check if certificates exist
-if [ ! -d "certs" ]; then
-    mkdir -p certs
+if [ ! -d "certs" ] || [ ! -f "certs/fullchain.pem" ] || [ ! -f "certs/privkey.pem" ]; then
+    echo ""
+    echo "⚠️  SSL certificates not found in certs/ directory"
+    echo "   You need the following files:"
+    echo "   - certs/fullchain.pem (SSL certificate)"
+    echo "   - certs/privkey.pem (SSL private key)"
+    echo "   - certs/public_key.pem (JWT public key)"
+    echo ""
+    read -p "Continue without certificates? [y/N]: " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Please add certificates to certs/ directory and try again."
+        exit 1
+    fi
 fi
 
-if [ ! -f "certs/fullchain.pem" ] || [ ! -f "certs/privkey.pem" ]; then
-    echo "❌ SSL certificates not found!"
-    echo
-    echo "You need to add SSL certificates to the 'certs' folder:"
-    echo "  - certs/fullchain.pem (certificate)"
-    echo "  - certs/privkey.pem (private key)"
-    echo "  - certs/public_key.pem (JWT public key)"
-    echo
-    
-    if [[ "$domain" == "localhost" ]]; then
-        read -p "Generate self-signed certificates for localhost? (Y/n): " generate
-        if [[ ! $generate =~ ^[Nn]$ ]]; then
-            echo "🔧 Generating self-signed certificates..."
-            
-            # Generate self-signed certificate for localhost
-            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                -keyout certs/privkey.pem \
-                -out certs/fullchain.pem \
-                -subj "/C=ES/ST=Local/L=Dev/O=Dev/CN=localhost"
-            
-            # Generate JWT keys
-            openssl genrsa -out certs/jwt_private.pem 2048
-            openssl rsa -in certs/jwt_private.pem -pubout -out certs/public_key.pem
-            
-            echo "✅ Self-signed certificates generated!"
+echo ""
+echo "🏗️  Building and starting services..."
+echo "   This may take several minutes on first run..."
+echo ""
+
+# Build and start services
+docker-compose down --remove-orphans
+docker-compose build --no-cache
+docker-compose up -d
+
+echo ""
+echo "⏳ Waiting for services to be ready..."
+
+# Wait for services to be healthy
+SERVICES=("mysql" "redis" "auth-service" "guacamole" "openresty")
+MAX_WAIT=300  # 5 minutes
+WAIT_TIME=0
+
+for service in "${SERVICES[@]}"; do
+    echo -n "   Waiting for $service..."
+    while [ $WAIT_TIME -lt $MAX_WAIT ]; do
+        if docker-compose ps $service | grep -q "healthy\|running"; then
+            echo " ✅"
+            break
         fi
-    else
-        echo "For production, you need valid SSL certificates from:"
-        echo "  - Let's Encrypt (certbot)"
-        echo "  - Your certificate authority"
-        echo "  - Cloud provider (AWS ACM, etc.)"
-    fi
-else
-    echo "✅ SSL certificates found"
-fi
-
-echo
-echo "🎯 Next Steps"
-echo "-------------"
-echo "1. Review and customize .env file if needed"
-echo "2. Ensure SSL certificates are in place"
-
-# Ask if user wants to start services
-echo
-read -p "🚀 Start the services now? (Y/n): " start_services
-if [[ ! $start_services =~ ^[Nn]$ ]]; then
-    echo "Starting DecentraLabs Gateway services..."
-    if command -v docker-compose &> /dev/null; then
-        docker-compose up -d
-    else
-        docker compose up -d
-    fi
+        sleep 5
+        WAIT_TIME=$((WAIT_TIME + 5))
+        echo -n "."
+    done
     
-    echo
-    echo "✅ Services started successfully!"
-    echo "🌐 Access your gateway at:"
-    echo "   https://$domain$([ "$domain" == "localhost" ] && echo ":8443" || echo "")"
-    echo
-    echo "📊 To view logs: docker-compose logs -f"
-    echo "🔧 To stop: docker-compose down"
-else
-    echo "3. Run: docker-compose up -d"
-    echo "4. Access: https://$domain$([ "$domain" == "localhost" ] && echo ":8443" || echo "")"
-fi
+    if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+        echo " ❌ (timeout)"
+        echo "Service $service failed to start properly."
+        echo "Check logs with: docker-compose logs $service"
+        exit 1
+    fi
+    WAIT_TIME=0
+done
 
-echo
-echo "📚 For more information, see README.md"
-echo "🚀 Setup complete!"
+echo ""
+echo "🎉 Deployment completed successfully!"
+echo ""
+echo "📋 Service Status:"
+docker-compose ps
+
+echo ""
+echo "🌐 Access URLs:"
+echo "   Homepage: https://$(grep SERVER_NAME .env | cut -d'=' -f2)"
+echo "   Guacamole: https://$(grep SERVER_NAME .env | cut -d'=' -f2)/guacamole/"
+echo "   Auth Service: https://$(grep SERVER_NAME .env | cut -d'=' -f2)/auth"
+echo ""
+echo "🔑 Default Guacamole Credentials:"
+echo "   Username: $(grep GUAC_ADMIN_USER .env | cut -d'=' -f2)"
+echo "   Password: $(grep GUAC_ADMIN_PASS .env | cut -d'=' -f2)"
+echo ""
+echo "📊 Useful Commands:"
+echo "   View logs: docker-compose logs -f [service_name]"
+echo "   Restart service: docker-compose restart [service_name]"
+echo "   Stop all: docker-compose down"
+echo "   Update: docker-compose pull && docker-compose up -d"
+echo ""
+echo "🔧 Configuration:"
+echo "   Environment: .env"
+echo "   Certificates: certs/"
+echo "   Auth Service Config: auth-service/src/main/resources/"
+echo ""
+
+# Show any potential issues
+echo "🔍 Health Check Results:"
+for service in "${SERVICES[@]}"; do
+    status=$(docker-compose ps -q $service | xargs docker inspect --format='{{.State.Health.Status}}' 2>/dev/null || echo "no-healthcheck")
+    case $status in
+        "healthy")
+            echo "   $service: ✅ Healthy"
+            ;;
+        "unhealthy")
+            echo "   $service: ❌ Unhealthy"
+            ;;
+        "starting")
+            echo "   $service: ⏳ Starting"
+            ;;
+        "no-healthcheck")
+            echo "   $service: ℹ️  Running (no health check)"
+            ;;
+        *)
+            echo "   $service: ❓ Unknown status: $status"
+            ;;
+    esac
+done
+
+echo ""
+echo "✨ Full version deployment complete!"
+echo "   Your blockchain-based authentication system is now running."
