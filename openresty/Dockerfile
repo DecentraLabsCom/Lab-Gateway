@@ -19,9 +19,18 @@ RUN luarocks --tree=$TREE install lua-resty-http && \
     luarocks --tree=$TREE install lua-resty-jwt && \
     luarocks --tree=$TREE install lua-resty-openssl
 
-# Directory for custom scripts
-RUN mkdir -p /etc/openresty/lua
+# Directory for custom scripts and config
+RUN mkdir -p /etc/openresty/lua /var/www/html
+
+# Copy all configuration and script files
+COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+COPY lab_access.conf /etc/openresty/lab_access.conf
+COPY lua/ /etc/openresty/lua/
+
+# Copy SSL initialization script
+COPY init-ssl.sh /usr/local/bin/init-ssl.sh
+RUN chmod +x /usr/local/bin/init-ssl.sh
 
 EXPOSE 80 443
 
-CMD ["/usr/local/openresty/bin/openresty", "-g", "daemon off;"]
+CMD ["/usr/local/bin/init-ssl.sh"]
