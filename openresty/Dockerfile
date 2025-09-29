@@ -26,12 +26,6 @@ RUN mkdir -p /etc/openresty/lua /etc/ssl/private
 COPY init-ssl.sh /usr/local/bin/init-ssl.sh
 RUN chmod +x /usr/local/bin/init-ssl.sh
 
-# Create startup script that initializes SSL and starts OpenResty
-RUN echo '#!/bin/sh' > /usr/local/bin/start-openresty.sh && \
-    echo '/usr/local/bin/init-ssl.sh' >> /usr/local/bin/start-openresty.sh && \
-    echo 'exec /usr/local/openresty/bin/openresty -g "daemon off;"' >> /usr/local/bin/start-openresty.sh && \
-    chmod +x /usr/local/bin/start-openresty.sh
-
 EXPOSE 80 443
 
-CMD ["/usr/local/bin/start-openresty.sh"]
+CMD ["/usr/local/bin/init-ssl.sh"]

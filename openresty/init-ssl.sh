@@ -1,35 +1,30 @@
 #!/bin/sh
-
 # =================================================================
-# SSL Certificate Initialization Script for OpenResty
-# Automatically generates self-signed certificates if they don't exist
+# OpenResty SSL Certificate Initialization Script
 # =================================================================
 
-CERT_DIR="/etc/ssl/private"
-CERT_FILE="$CERT_DIR/fullchain.pem"
-KEY_FILE="$CERT_DIR/privkey.pem"
-PUBLIC_KEY_FILE="$CERT_DIR/public_key.pem"
+SSL_DIR="/etc/ssl/private"
+CERT_FILE="$SSL_DIR/fullchain.pem"
+KEY_FILE="$SSL_DIR/privkey.pem"
+PUBLIC_KEY_FILE="$SSL_DIR/public_key.pem"
+TEMP_SSL_DIR="/tmp/ssl"
 
-echo "Initializing SSL certificates..."
+echo "=== OpenResty SSL Certificate Check ==="
+echo "Certificate: $CERT_FILE"
+echo "Private Key: $KEY_FILE"
 
-# Create certificate directory if it doesn't exist  
-mkdir -p "$CERT_DIR"
+# Create SSL directory if it doesn't exist
+mkdir -p "$SSL_DIR"
 
-# Check if certificates already exist
-if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
-    echo "SSL certificates already exist, skipping generation"
+# Check if certificates exist
+if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+    echo "SSL certificates not found - generating self-signed certificates for development"
     
-    # Validate certificates
-    if ! openssl x509 -in "$CERT_FILE" -text -noout >/dev/null 2>&1; then
-        echo "Warning: SSL certificate appears to be invalid"
-    else
-        echo "SSL certificates validated successfully"
-    fi
-else  
-    echo "SSL certificates not found, generating self-signed certificates for development..."
+    # Create temporary SSL directory and generate certificates there
+    mkdir -p "$TEMP_SSL_DIR"
     
-    # Create OpenSSL configuration for proper certificate generation
-    cat > /tmp/openssl.conf <<EOF
+    # Create OpenSSL config file for proper certificate generation
+    cat > "$TEMP_SSL_DIR/openssl.conf" << EOF
 [req]
 distinguished_name = req_distinguished_name
 req_extensions = v3_req
@@ -37,14 +32,15 @@ prompt = no
 
 [req_distinguished_name]
 C = ES
-ST = Madrid
-L = Madrid
+ST = Development
+L = Local
 O = DecentraLabs
 OU = Development
 CN = localhost
 
 [v3_req]
-keyUsage = keyEncipherment, dataEncipherment
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
@@ -52,30 +48,14 @@ subjectAltName = @alt_names
 DNS.1 = localhost
 DNS.2 = *.localhost
 IP.1 = 127.0.0.1
-IP.2 = ::1
 EOF
 
-    # Generate private key
-    openssl genrsa -out "$KEY_FILE" 2048
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to generate private key"
-        exit 1
-    fi
-    
-    # Generate certificate signing request
-    openssl req -new -key "$KEY_FILE" -out /tmp/server.csr -config /tmp/openssl.conf
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to generate certificate signing request"
-        exit 1
-    fi
-    
-    # Generate self-signed certificate
-    openssl x509 -req -in /tmp/server.csr -signkey "$KEY_FILE" -out "$CERT_FILE" \
-        -days 365 -extensions v3_req -extfile /tmp/openssl.conf
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to generate certificate"
-        exit 1
-    fi
+    # Generate self-signed certificate for localhost
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout "$TEMP_SSL_DIR/privkey.pem" \
+        -out "$TEMP_SSL_DIR/fullchain.pem" \
+        -config "$TEMP_SSL_DIR/openssl.conf" \
+        -extensions v3_req
     
     # Generate JWT public key for auth-service (if not exists)
     if [ ! -f "$PUBLIC_KEY_FILE" ]; then
@@ -85,19 +65,30 @@ EOF
         rm -f /tmp/jwt_private.pem
     fi
     
-    # Set proper permissions
-    chmod 600 "$KEY_FILE"
-    chmod 644 "$CERT_FILE"
-    chmod 644 "$PUBLIC_KEY_FILE"
-    
-    # Clean up temporary files
-    rm -f /tmp/server.csr /tmp/openssl.conf
-    
-    echo "Self-signed SSL certificates generated successfully"
-    echo "Certificate: $CERT_FILE"
-    echo "Private Key: $KEY_FILE"
-    echo "JWT Public Key: $PUBLIC_KEY_FILE"
-    echo "Note: These are self-signed certificates for development only"
+    # Copy generated certificates to the SSL directory
+    if [ -f "$TEMP_SSL_DIR/fullchain.pem" ] && [ -f "$TEMP_SSL_DIR/privkey.pem" ]; then
+        cp "$TEMP_SSL_DIR/fullchain.pem" "$CERT_FILE"
+        cp "$TEMP_SSL_DIR/privkey.pem" "$KEY_FILE"
+        chmod 644 "$CERT_FILE"
+        chmod 600 "$KEY_FILE"
+        chmod 644 "$PUBLIC_KEY_FILE"
+        echo "✅ Self-signed certificates generated successfully"
+        echo "   Valid for: localhost, *.localhost, 127.0.0.1"
+        echo "   JWT Public Key: $PUBLIC_KEY_FILE"
+        echo "   WARNING: These are self-signed certificates for development only!"
+    else
+        echo "❌ Failed to generate certificates - this will cause nginx startup failure"
+        exit 1
+    fi
+else
+    echo "✅ SSL certificates found"
+    # Validate certificate
+    if openssl x509 -in "$CERT_FILE" -noout -checkend 86400 2>/dev/null; then
+        echo "   Status: Valid (expires in more than 24 hours)"
+    else
+        echo "   Status: Warning - Certificate expires soon or is invalid"
+    fi
 fi
 
-echo "SSL initialization completed"
+echo "=== Starting OpenResty ==="
+exec /usr/local/openresty/bin/openresty -g "daemon off;"
