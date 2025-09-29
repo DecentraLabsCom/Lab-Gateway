@@ -1,32 +1,37 @@
-# Lab Gateway 🧪
+# Lab Gateway Overview
 
 Lab Gateway is a laboratory virtualization solution that enables remote access to lab environments. It's available in two versions with different levels of features and authentication.
 
 ## 📋 Available Versions
 
 ### Lite Version (Branch `lite`)
+
 Basic version with essential features:
-- ✅ RDP/VNC/SSH access to lab computers
-- ✅ Intuitive web interface
-- ✅ Auth through input JWTs
-- ✅ Reverse proxy with OpenResty
-- ✅ MySQL database for Guacamole configuration
-- ✅ Complete containerization with Docker
-- ✅ Simple configuration
+
+* ✅ RDP/VNC/SSH access to lab computers
+* ✅ Intuitive web interface
+* ✅ Auth through input JWTs
+* ✅ Reverse proxy with OpenResty
+* ✅ MySQL database for Guacamole configuration
+* ✅ Complete containerization with Docker
+* ✅ Simple configuration
 
 **Ideal for**: Development environments, personal testing, quick deployments.
 
 ### Full Version (Branch `full`)
+
 Complete version with advanced authentication:
-- ✅ All Lite version features
-- ✅ **Blockchain-based authorization**
-- ✅ **JWT validation system**
+
+* ✅ All Lite version features
+* ✅ **Blockchain-based authorization**
+* ✅ **JWT validation system**
 
 **Ideal for**: Production environments, enterprise deployments, maximum security.
 
 ## 🚀 Quick Start
 
 ### Select Version
+
 ```bash
 # Clone the repository
 git clone https://github.com/DecentraLabsCom/lite-lab-gateway.git
@@ -39,41 +44,44 @@ git switch full    # For complete version
 ```
 
 ### Configuration and Installation
+
 Each version includes its own detailed documentation:
 
-- **Lite Version**: See [LITE-VERSION.md](./LITE-VERSION.md)
-- **Full Version**: See [FULL-VERSION.md](./FULL-VERSION.md)
+* **Lite Version**: See [LITE-VERSION.md](LITE-VERSION.md)
+* **Full Version**: See [FULL-VERSION.md](FULL-VERSION.md)
 
 ## 🔄 Detailed Comparison
 
-| Feature | Lite | Full |
-|---|---|---|
-| **RDP Access** | ✅ | ✅ |
-| **Web Interface** | ✅ | ✅ |
-| **Docker Compose** | ✅ | ✅ |
-| **MySQL + Guacamole** | ✅ | ✅ |
-| **OpenResty Proxy** | ✅ | ✅ |
-| **AuthX Through JWT** | ✅ | ✅ |
-| **Blockchain Authorization** | ❌ | ✅ |
-| **Spring Boot Auth Service** | ❌ | ✅ |
-| **JWT Generation** | ❌ | ✅ |
-| **Auth REST APIs** | ❌ | ✅ |
-| **Redis Session Store** | ❌ | ✅ |
-| **Complete Auditing** | ❌ | ✅ |
+| Feature                      | Lite | Full |
+| ---------------------------- | ---- | ---- |
+| **RDP Access**               | ✅    | ✅    |
+| **Web Interface**            | ✅    | ✅    |
+| **Docker Compose**           | ✅    | ✅    |
+| **MySQL + Guacamole**        | ✅    | ✅    |
+| **OpenResty Proxy**          | ✅    | ✅    |
+| **AuthX Through JWT**        | ✅    | ✅    |
+| **Blockchain Authorization** | ❌    | ✅    |
+| **Spring Boot Auth Service** | ❌    | ✅    |
+| **JWT Generation**           | ❌    | ✅    |
+| **Auth REST APIs**           | ❌    | ✅    |
+| **Redis Session Store**      | ❌    | ✅    |
+| **Complete Auditing**        | ❌    | ✅    |
 
 ## �️ Technology Stack
 
 ### Core Components (Both Versions)
-- **OpenResty** - Reverse proxy and load balancer
-- **Apache Guacamole** - RDP/VNC gateway
-- **MySQL** - Primary database
-- **Docker & Docker Compose** - Containerization
+
+* **OpenResty** - Reverse proxy and load balancer
+* **Apache Guacamole** - RDP/VNC gateway
+* **MySQL** - Primary database
+* **Docker & Docker Compose** - Containerization
 
 ### Full Version Additions
-- **Spring Boot** - Authentication service
-- **Redis** - Session store and cache
-- **JWT** - Generates authentication tokens
-- **Blockchain Integration** - Decentralized authorization
+
+* **Spring Boot** - Authentication service
+* **Redis** - Session store and cache
+* **JWT** - Generates authentication tokens
+* **Blockchain Integration** - Decentralized authorization
 
 ## � Project Structure
 
@@ -83,7 +91,8 @@ lab-gateway/
 ├── 📁 guacamole/          # RDP/VNC client
 ├── 📁 mysql/              # DB scripts and schemas
 ├── 📁 web/                # Web frontend
-├── 📁 certs/              # SSL certificates
+├── 📁 auth-service/       # Auth service (only in the full version)
+├── 📁 certs/              # SSL certificates (if created by setup)
 ├── 📄 docker-compose.yml  # Service orchestration
 ├── 📄 .env.example        # Configuration template
 └── 📄 setup.sh/.bat       # Installation scripts
@@ -99,9 +108,9 @@ lab-gateway/
 
 ## � Support
 
-- **Issues**: [GitHub Issues](https://github.com/DecentraLabsCom/lite-lab-gateway/issues)
-- **Documentation**: Check LITE-VERSION.md or FULL-VERSION.md according to your version
+* **Issues**: [GitHub Issues](https://github.com/DecentraLabsCom/lite-lab-gateway/issues)
+* **Documentation**: Check LITE-VERSION.md or FULL-VERSION.md according to your version
 
----
+***
 
 > **Note**: This README serves as a navigation hub. For specific installation and configuration instructions, check the documentation for each version.
