@@ -19,12 +19,8 @@ Basic version with essential features:
 ### Full Version (Branch `full`)
 Complete version with advanced authentication:
 - ✅ All Lite version features
-- ✅ **Blockchain-based authentication**
-- ✅ **JWT generation system**
-- ✅ **Advanced user management**
-- ✅ **REST APIs for integration**
-- ✅ **Administration dashboard**
-- ✅ **Complete logging and auditing**
+- ✅ **Blockchain-based authorization**
+- ✅ **JWT validation system**
 
 **Ideal for**: Production environments, enterprise deployments, maximum security.
 
@@ -57,12 +53,11 @@ Each version includes its own detailed documentation:
 | **Docker Compose** | ✅ | ✅ |
 | **MySQL + Guacamole** | ✅ | ✅ |
 | **OpenResty Proxy** | ✅ | ✅ |
-| **Auth Through JWT** | ✅ | ✅ |
-| **Blockchain Authentication** | ❌ | ✅ |
+| **AuthX Through JWT** | ✅ | ✅ |
+| **Blockchain Authorization** | ❌ | ✅ |
 | **Spring Boot Auth Service** | ❌ | ✅ |
 | **JWT Generation** | ❌ | ✅ |
-| **REST APIs** | ❌ | ✅ |
-| **Admin Dashboard** | ❌ | ✅ |
+| **Auth REST APIs** | ❌ | ✅ |
 | **Redis Session Store** | ❌ | ✅ |
 | **Complete Auditing** | ❌ | ✅ |
 
@@ -77,8 +72,8 @@ Each version includes its own detailed documentation:
 ### Full Version Additions
 - **Spring Boot** - Authentication service
 - **Redis** - Session store and cache
-- **JWT** - Authentication tokens
-- **Blockchain Integration** - Decentralized authentication
+- **JWT** - Generates authentication tokens
+- **Blockchain Integration** - Decentralized authorization
 
 ## � Project Structure
 
