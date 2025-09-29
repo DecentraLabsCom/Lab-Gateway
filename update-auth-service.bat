@@ -8,9 +8,10 @@ set "COMMIT_MESSAGE=%~1"
 if "%COMMIT_MESSAGE%"=="" set "COMMIT_MESSAGE=Update auth-service submodule"
 
 echo 🔄 Updating auth-service submodule...
+echo 📍 Strategy: full branch -> main branch (auth-service)
 
-REM Update the submodule to latest remote version
-git submodule update --remote auth-service
+REM Update the submodule to latest main branch
+git submodule update --remote --merge auth-service
 if errorlevel 1 (
     echo ❌ Failed to update submodule
     exit /b 1

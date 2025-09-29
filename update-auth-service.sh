@@ -10,9 +10,10 @@ if [ -z "$COMMIT_MESSAGE" ]; then
 fi
 
 echo "🔄 Updating auth-service submodule..."
+echo "📍 Strategy: full branch -> main branch (auth-service)"
 
-# Update the submodule to latest remote version
-git submodule update --remote auth-service
+# Update the submodule to latest main branch
+git submodule update --remote --merge auth-service
 
 # Check if there are changes
 if git diff --quiet auth-service; then

@@ -1,3 +1,4 @@
 [submodule "auth-service"]
 	path = auth-service
 	url = https://github.com/DecentraLabsCom/auth-service.git
+	branch = main
