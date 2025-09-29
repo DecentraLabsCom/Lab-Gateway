@@ -9,17 +9,17 @@ The Lite Version of DecentraLabs Gateway provides a lightweight, JWT-validated l
 You are currently on the **Lite Version** branch. This project offers two versions:
 
 ### 🪶 **Lite Version** (Current Branch)
-- **Purpose**: Basic JWT-validated gateway for lab access
+- **Purpose**: JWT-validated gateway for lab access
 - **Components**: OpenResty + Guacamole + MySQL
 - **Authentication**: External JWT validation (expects JWT from external auth service)
-- **Use Case**: When you have an existing authentication system
-- **Benefits**: Lightweight, minimal resource usage, simple deployment
+- **Use Case**: When you already have an existing authentication system
+- **Benefits**: Lightweight and minimal resource usage
 
 ### 🚀 **Full Version** 
 - **Purpose**: Complete blockchain-based authentication system
 - **Components**: Auth Service (Spring Boot) + Redis + OpenResty + Guacamole + MySQL
-- **Authentication**: Blockchain wallet signature verification + JWT generation
-- **Features**: Wallet-based auth, smart contract integration, real-time dashboard
+- **Authentication**: Blockchain wallet signature verification or signed JWT verification + blockchain smart contract checks
+- **Features**: Wallet-based auth, smart contract integration
 - **Use Case**: Complete decentralized lab access solution
 
 **Switch to Full Version:**
@@ -31,11 +31,11 @@ git switch full
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  External Auth  │    │   OpenResty     │    │   Guacamole     │
+│  External Auth  │    │    OpenResty    │    │   Guacamole     │
 │    Service      ├────┤  (Nginx + Lua)  ├────┤  (Lab Access)   │
-│   (Issues JWT)  │    │  (JWT Validation)│    └─────────────────┘
-└─────────────────┘    └─────────────────┘             │
-                                                        │
+│   (Issues JWT)  │    │ (JWT validation)│    └─────────────────┘
+└─────────────────┘    └─────────────────┘            │
+                                                      │
                                               ┌─────────────────┐
                                               │     MySQL       │
                                               │   (Database)    │
@@ -248,60 +248,6 @@ echo "YOUR_JWT_TOKEN" | cut -d. -f2 | base64 -d | jq .
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
      https://yourdomain.com/guacamole/
 ```
-
-## 🔒 Security Considerations
-
-### Production Checklist
-
-- [ ] Change all default passwords
-- [ ] Configure proper SSL certificates
-- [ ] Set correct JWT public key from your auth service
-- [ ] Configure appropriate issuer and audience
-- [ ] Set up log monitoring
-- [ ] Configure backup strategies
-- [ ] Regular security updates
-
-### Minimal Attack Surface
-
-The lite version minimizes security risks by:
-- Fewer components to secure
-- No blockchain integration complexity
-- Simplified network topology
-- Standard JWT validation
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-**JWT validation fails:**
-```bash
-# Check public key matches your auth service
-# Verify token expiration and claims
-# Check issuer and audience configuration
-```
-
-**SSL certificate errors:**
-```bash
-# Verify certificate files exist in certs/
-openssl x509 -in certs/fullchain.pem -text -noout
-```
-
-**Guacamole connection issues:**
-```bash
-# Check container logs
-docker-compose logs guacamole
-
-# Verify database connection
-docker-compose logs mysql
-```
-
-### Performance Optimization
-
-For better performance:
-- Use external MySQL database in production
-- Configure proper resource limits
-- Enable log rotation
-- Monitor memory usage
 
 ## 📈 Migration to Full Version
 
