@@ -1,4 +1,4 @@
-# 🪶 DecentraLabs Gateway - Lite Version
+# Lite Version Guide
 
 ## 🎯 Overview
 
@@ -10,9 +10,9 @@ The Lite Version of DecentraLabs Gateway provides a lightweight, JWT-validated l
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │  External Auth  │    │   OpenResty     │    │   Guacamole     │
 │    Service      ├────┤  (Nginx + Lua)  ├────┤  (Lab Access)   │
-│   (Issues JWT)  │    │  (JWT Validation)│    └─────────────────┘
+│   (Issues JWT)  │    │ (JWT Validation)│    └─────────────────┘
 └─────────────────┘    └─────────────────┘             │
-                                                        │
+                                                       │
                                               ┌─────────────────┐
                                               │     MySQL       │
                                               │   (Database)    │
@@ -22,54 +22,60 @@ The Lite Version of DecentraLabs Gateway provides a lightweight, JWT-validated l
 ## 🌟 Features
 
 ### ✅ Lightweight Design
-- **Minimal Components**: Only essential services (OpenResty, Guacamole, MySQL)
-- **Low Resource Usage**: Optimized for small deployments
-- **Quick Deployment**: Fast startup and easy configuration
-- **Simple Maintenance**: Fewer components to manage
+
+* **Minimal Components**: Only essential services (OpenResty, Guacamole, MySQL)
+* **Low Resource Usage**: Optimized for small deployments
+* **Quick Deployment**: Fast startup and easy configuration
+* **Simple Maintenance**: Fewer components to manage
 
 ### ✅ JWT Authentication
-- **External JWT Validation**: Validates tokens from your existing auth service
-- **Flexible Integration**: Works with any JWT-issuing authentication system
-- **Secure Access Control**: Comprehensive token validation
-- **Session Management**: Automatic session handling and cleanup
+
+* **External JWT Validation**: Validates tokens from your existing auth service
+* **Flexible Integration**: Works with any JWT-issuing authentication system
+* **Secure Access Control**: Comprehensive token validation
+* **Session Management**: Automatic session handling and cleanup
 
 ### ✅ Essential Security
-- **SSL/TLS Termination**: Secure HTTPS connections
-- **Security Headers**: Basic security header configuration
-- **Access Logging**: Request logging and monitoring
-- **Input Validation**: Basic request validation
+
+* **SSL/TLS Termination**: Secure HTTPS connections
+* **Security Headers**: Basic security header configuration
+* **Access Logging**: Request logging and monitoring
+* **Input Validation**: Basic request validation
 
 ## 🚀 Quick Deployment
 
 ### Using Setup Scripts (Recommended)
 
 **Windows:**
+
 ```cmd
 setup.bat
 ```
 
 **Linux/macOS:**
+
 ```bash
 ./setup.sh
 ```
 
 ### Manual Deployment
 
-1. **Ensure you're on the lite branch:**
-   ```bash
-   git checkout lite
-   ```
+1.  **Ensure you're on the lite branch:**
 
-2. **Configure environment:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
+    ```bash
+    git checkout lite
+    ```
+2.  **Configure environment:**
 
-3. **Deploy services:**
-   ```bash
-   docker-compose up -d
-   ```
+    ```bash
+    cp .env.example .env
+    # Edit .env with your configuration
+    ```
+3.  **Deploy services:**
+
+    ```bash
+    docker-compose up -d
+    ```
 
 ## ⚙️ Configuration
 
@@ -138,6 +144,7 @@ The `public_key.pem` file must contain the public key that corresponds to the pr
 ## 📊 Service Management
 
 ### Health Checks
+
 ```bash
 # Check all services
 docker-compose ps
@@ -149,6 +156,7 @@ docker-compose logs -f mysql
 ```
 
 ### Service Control
+
 ```bash
 # Restart services
 docker-compose restart [service_name]
@@ -163,12 +171,15 @@ docker-compose pull && docker-compose up -d
 ## 🔍 Monitoring & Logging
 
 ### Access Logs
+
 OpenResty provides detailed access logging:
+
 ```bash
 docker-compose logs -f openresty
 ```
 
 ### Database Monitoring
+
 ```bash
 # Access MySQL
 docker exec -it [mysql_container] mysql -u root -p
@@ -181,18 +192,19 @@ docker exec -it [mysql_container] mysqladmin processlist -u root -p
 
 ### Local Development Setup
 
-1. **Start services:**
-   ```bash
-   docker-compose up -d
-   ```
+1.  **Start services:**
 
+    ```bash
+    docker-compose up -d
+    ```
 2. **Access services:**
-   - Guacamole: https://localhost:8443/guacamole
-   - MySQL: localhost:3306
+   * Guacamole: https://localhost:8443/guacamole
+   * MySQL: localhost:3306
 
 ### Testing JWT Integration
 
 Test your JWT tokens:
+
 ```bash
 # Decode JWT payload (for debugging)
 echo "YOUR_JWT_TOKEN" | cut -d. -f2 | base64 -d | jq .
@@ -206,27 +218,29 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
 
 ### Production Checklist
 
-- [ ] Change all default passwords
-- [ ] Configure proper SSL certificates
-- [ ] Set correct JWT public key from your auth service
-- [ ] Configure appropriate issuer and audience
-- [ ] Set up log monitoring
-- [ ] Configure backup strategies
-- [ ] Regular security updates
+* [ ] Change all default passwords
+* [ ] Configure proper SSL certificates
+* [ ] Set correct JWT public key from your auth service
+* [ ] Configure appropriate issuer and audience
+* [ ] Set up log monitoring
+* [ ] Configure backup strategies
+* [ ] Regular security updates
 
 ### Minimal Attack Surface
 
 The lite version minimizes security risks by:
-- Fewer components to secure
-- No blockchain integration complexity
-- Simplified network topology
-- Standard JWT validation
+
+* Fewer components to secure
+* No blockchain integration complexity
+* Simplified network topology
+* Standard JWT validation
 
 ## 🚨 Troubleshooting
 
 ### Common Issues
 
 **JWT validation fails:**
+
 ```bash
 # Check public key matches your auth service
 # Verify token expiration and claims
@@ -234,12 +248,14 @@ The lite version minimizes security risks by:
 ```
 
 **SSL certificate errors:**
+
 ```bash
 # Verify certificate files exist in certs/
 openssl x509 -in certs/fullchain.pem -text -noout
 ```
 
 **Guacamole connection issues:**
+
 ```bash
 # Check container logs
 docker-compose logs guacamole
@@ -251,37 +267,38 @@ docker-compose logs mysql
 ### Performance Optimization
 
 For better performance:
-- Use external MySQL database in production
-- Configure proper resource limits
-- Enable log rotation
-- Monitor memory usage
+
+* Use external MySQL database in production
+* Configure proper resource limits
+* Enable log rotation
+* Monitor memory usage
 
 ## 📈 Migration to Full Version
 
 If you later need blockchain authentication features:
 
-1. **Switch to full branch:**
-   ```bash
-   git checkout full
-   ```
+1.  **Switch to full branch:**
 
-2. **Deploy full version:**
-   ```bash
-   ./deploy-full.sh  # or deploy-full.bat on Windows
-   ```
+    ```bash
+    git checkout full
+    ```
+2.  **Deploy full version:**
 
+    ```bash
+    ./deploy-full.sh  # or deploy-full.bat on Windows
+    ```
 3. **Configure blockchain settings:**
-   - Set up smart contract addresses
-   - Configure blockchain RPC endpoints
-   - Set up wallet authentication
+   * Set up smart contract addresses
+   * Configure blockchain RPC endpoints
+   * Set up wallet authentication
 
 ## 📞 Support
 
-- **Documentation**: Check this README and setup scripts
-- **Logs**: Use `docker-compose logs [service]` for troubleshooting
-- **Issues**: Report issues on the project repository
-- **Configuration**: Review `.env.example` for all available options
+* **Documentation**: Check this README and setup scripts
+* **Logs**: Use `docker-compose logs [service]` for troubleshooting
+* **Issues**: Report issues on the project repository
+* **Configuration**: Review `.env.example` for all available options
 
----
+***
 
-*The Lite Version provides a simple, efficient solution for JWT-based laboratory access when you already have an authentication system in place.*
+_The Lite Version provides a simple, efficient solution for JWT-based laboratory access when you already have an authentication system in place._
