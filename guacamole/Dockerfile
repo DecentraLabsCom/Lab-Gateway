@@ -14,11 +14,7 @@ RUN ln -s /etc/guacamole /usr/local/tomcat/.guacamole
 COPY extensions /etc/guacamole/extensions/
 COPY lib /usr/local/tomcat/lib/
 
-# Copy initialization script
-COPY init-guacamole.sh /usr/local/bin/init-guacamole.sh
-RUN chmod +x /usr/local/bin/init-guacamole.sh
+# Copy configuration
+COPY guacamole.properties /etc/guacamole/
 
 EXPOSE 8080
-
-# Use our initialization script as the entry point
-CMD ["/usr/local/bin/init-guacamole.sh"]
