@@ -9,14 +9,8 @@ secrets/ # Directory for secret files (in case we implement Docker Secrets)
 *.log
 logs/
 
-# SSL Certificates and keys (security)
-certs/*.key
-certs/privkey.pem
-certs/fullchain.pem
-certs/*_private.pem
-
-# JWT keys (keep public key, hide private)
-certs/jwt_private.pem
+# Certificates and keys (security)
+certs/
 
 # Database data (persistent volumes)
 mysql_data/
