@@ -3,7 +3,7 @@ local config = ngx.shared.config
 -- Read config from environment variables or use default values
 local admin_user = os.getenv("GUAC_ADMIN_USER") or "guacadmin"
 local admin_pass = os.getenv("GUAC_ADMIN_PASS") or "guacadmin"
-local server_name = os.getenv("SERVER_NAME") or "sarlab.dia.uned.es"
+local server_name = os.getenv("SERVER_NAME") or "localhost"
 local issuer = os.getenv("ISSUER") or "https://sarlab.dia.uned.es/auth"
 
 config:set("server_name", server_name)
