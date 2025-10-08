@@ -18,10 +18,12 @@ end
 -- Check if JTI is in shared dict to validate the cookie
 local username = dict:get("username:" .. jti)
 if not username then
-        ngx.log(ngx.INFO, "JTI in cookie is not valid: " .. jti)
+        ngx.log(ngx.INFO, "JTI in cookie is not valid: " .. tostring(jti))
+        -- Return 401 without using ngx.say/ngx.exit which can be problematic in some contexts
         ngx.status = ngx.HTTP_UNAUTHORIZED
-        ngx.say("Invalid or expired cookie")
-        return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+        ngx.header["Content-Type"] = "text/plain"
+        ngx.log(ngx.WARN, "Invalid or expired cookie for JTI: " .. tostring(jti))
+        return
 end
 
 -- Set Authorization header with username

@@ -25,9 +25,9 @@ if eof then
 		-- Store the session token for this user
 		local ok, err = dict:set("token:" .. string.lower(decoded.username), decoded.authToken, 7200)
 		if not ok then
-			ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
-			ngx.log(ngx.ERR, "Error when registering token in shared dict.")
-			return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+			ngx.log(ngx.ERR, "Error when registering token in shared dict: " .. tostring(err))
+			-- Cannot call ngx.exit/say in body_filter phase; log and return silently
+			return
 		end
 		ngx.log(ngx.INFO, "Session token stored for " .. decoded.username)
 	end
