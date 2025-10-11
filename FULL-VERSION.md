@@ -1,4 +1,4 @@
-# 🚀 DecentraLabs Gateway - Full Version
+# Full Version Guide
 
 ## 🎯 Overview
 
@@ -29,61 +29,68 @@ The Full Version of DecentraLabs Gateway provides a complete blockchain-based au
 ## 🌟 Features
 
 ### ✅ Blockchain Authentication
-- **Wallet Signature Verification**: Users authenticate using their crypto wallet
-- **Smart Contract Integration**: Validates lab reservations on-chain
-- **JWT Token Generation**: Issues secure access tokens for lab sessions
-- **Multi-Provider Support**: Supports both own and external labs
+
+* **Wallet Signature Verification**: Users authenticate using their crypto wallet
+* **Smart Contract Integration**: Validates lab reservations on-chain
+* **JWT Token Generation**: Issues secure access tokens for lab sessions
+* **Multi-Provider Support**: Supports both own and external labs
 
 ### ✅ Authentication Service (Spring Boot)
-- **RESTful API**: Comprehensive authentication endpoints
-- **Blockchain Integration**: Web3j for smart contract interaction
-- **JWT Management**: Token generation and validation
-- **Redis Caching**: Performance optimization for frequent queries
-- **Health Monitoring**: Built-in health checks and metrics
+
+* **RESTful API**: Comprehensive authentication endpoints
+* **Blockchain Integration**: Web3j for smart contract interaction
+* **JWT Management**: Token generation and validation
+* **Redis Caching**: Performance optimization for frequent queries
+* **Health Monitoring**: Built-in health checks and metrics
 
 ### ✅ Enhanced Gateway Features
-- **CORS Support**: Cross-origin resource sharing for web applications
-- **Rate Limiting**: Protection against abuse and DoS attacks
-- **Security Headers**: Comprehensive security header configuration
-- **Real-time Monitoring**: Detailed logging and error tracking
+
+* **CORS Support**: Cross-origin resource sharing for web applications
+* **Rate Limiting**: Protection against abuse and DoS attacks
+* **Security Headers**: Comprehensive security header configuration
+* **Real-time Monitoring**: Detailed logging and error tracking
 
 ### ✅ Advanced Infrastructure
-- **Redis Cache**: Fast session management and data caching
-- **Improved Networking**: Service discovery and load balancing
-- **Health Checks**: Comprehensive health monitoring for all services
-- **Resource Management**: Optimized resource allocation and limits
+
+* **Redis Cache**: Fast session management and data caching
+* **Improved Networking**: Service discovery and load balancing
+* **Health Checks**: Comprehensive health monitoring for all services
+* **Resource Management**: Optimized resource allocation and limits
 
 ## 🚀 Quick Deployment
 
 ### Using Setup Scripts (Recommended)
 
 **Windows:**
+
 ```cmd
 setup.bat
 ```
 
 **Linux/macOS:**
+
 ```bash
 ./setup.sh
 ```
 
 ### Manual Deployment
 
-1. **Ensure you're on the full branch:**
-   ```bash
-   git checkout full
-   ```
+1.  **Ensure you're on the full branch:**
 
-2. **Configure environment:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
+    ```bash
+    git checkout full
+    ```
+2.  **Configure environment:**
 
-3. **Deploy services:**
-   ```bash
-   docker-compose up -d --build
-   ```
+    ```bash
+    cp .env.example .env
+    # Edit .env with your configuration
+    ```
+3.  **Deploy services:**
+
+    ```bash
+    docker-compose up -d --build
+    ```
 
 ## ⚙️ Configuration
 
@@ -124,6 +131,7 @@ certs/
 ## 🔐 Authentication Flow
 
 ### 1. Wallet Challenge
+
 ```
 POST /auth/auth
 {
@@ -138,6 +146,7 @@ Response:
 ```
 
 ### 2. Signature Verification
+
 ```
 POST /auth/auth2
 {
@@ -154,6 +163,7 @@ Response:
 ```
 
 ### 3. Lab Access
+
 The JWT token contains lab access permissions based on blockchain reservations:
 
 ```json
@@ -177,23 +187,27 @@ The JWT token contains lab access permissions based on blockchain reservations:
 ## 📊 API Endpoints
 
 ### Authentication Endpoints
-- `POST /auth/auth` - Request wallet challenge
-- `POST /auth/auth2` - Verify signature and get JWT
-- `GET /auth/jwks` - Get public keys (JWKS format)
-- `GET /auth/health` - Health check endpoint
+
+* `POST /auth/auth` - Request wallet challenge
+* `POST /auth/auth2` - Verify signature and get JWT
+* `GET /auth/jwks` - Get public keys (JWKS format)
+* `GET /auth/health` - Health check endpoint
 
 ### Administrative Endpoints
-- `GET /auth/metrics` - Service metrics
-- `GET /auth/status` - Detailed service status
-- `POST /auth/refresh` - Refresh JWT token
+
+* `GET /auth/metrics` - Service metrics
+* `GET /auth/status` - Detailed service status
+* `POST /auth/refresh` - Refresh JWT token
 
 ### Marketplace Integration
-- `POST /auth/marketplace-auth` - Marketplace JWT validation
-- `POST /auth/marketplace-auth2` - Extended marketplace validation
+
+* `POST /auth/marketplace-auth` - Marketplace JWT validation
+* `POST /auth/marketplace-auth2` - Extended marketplace validation
 
 ## 🔍 Monitoring & Logging
 
 ### Service Health Checks
+
 ```bash
 # Check all services
 docker-compose ps
@@ -206,6 +220,7 @@ curl https://yourdomain.com/auth/metrics
 ```
 
 ### Log Access
+
 ```bash
 # Auth service logs
 docker-compose logs -f auth-service
@@ -220,30 +235,32 @@ docker-compose logs -f --tail=100
 ### Performance Monitoring
 
 The auth service provides detailed metrics:
-- Request rate and response times
-- Blockchain query performance
-- JWT token generation stats
-- Cache hit/miss ratios
-- Error rates and types
+
+* Request rate and response times
+* Blockchain query performance
+* JWT token generation stats
+* Cache hit/miss ratios
+* Error rates and types
 
 ## 🛠️ Development
 
 ### Local Development Setup
 
-1. **Start services in development mode:**
-   ```bash
-   SPRING_PROFILES_ACTIVE=dev docker-compose up -d
-   ```
+1.  **Start services in development mode:**
 
+    ```bash
+    SPRING_PROFILES_ACTIVE=dev docker-compose up -d
+    ```
 2. **Access services:**
-   - Auth Service: http://localhost:8080/auth
-   - Guacamole: https://localhost:8443/guacamole
-   - MySQL: localhost:3306
-   - Redis: localhost:6379
+   * Auth Service: http://localhost:8080/auth
+   * Guacamole: https://localhost:8443/guacamole
+   * MySQL: localhost:3306
+   * Redis: localhost:6379
 
 ### Debugging
 
 Enable debug logging:
+
 ```env
 LOG_LEVEL_AUTH=DEBUG
 LOG_LEVEL_SECURITY=DEBUG
@@ -254,6 +271,7 @@ JPA_SHOW_SQL=true
 ### Hot Reload
 
 The auth service supports hot reload in development:
+
 ```bash
 # Rebuild only auth service
 docker-compose build auth-service
@@ -264,30 +282,32 @@ docker-compose up -d auth-service
 
 ### Production Checklist
 
-- [ ] Change all default passwords
-- [ ] Configure proper SSL certificates
-- [ ] Set secure blockchain private keys
-- [ ] Configure appropriate CORS origins
-- [ ] Enable rate limiting
-- [ ] Set up log monitoring and alerting
-- [ ] Configure backup strategies
-- [ ] Implement secret management
-- [ ] Regular security updates
+* [ ] Change all default passwords
+* [ ] Configure proper SSL certificates
+* [ ] Set secure blockchain private keys
+* [ ] Configure appropriate CORS origins
+* [ ] Enable rate limiting
+* [ ] Set up log monitoring and alerting
+* [ ] Configure backup strategies
+* [ ] Implement secret management
+* [ ] Regular security updates
 
 ### Network Security
 
 The full version includes enhanced security:
-- Service-to-service communication isolation
-- Rate limiting and DDoS protection
-- Comprehensive security headers
-- JWT token expiration and rotation
-- Input validation and sanitization
+
+* Service-to-service communication isolation
+* Rate limiting and DDoS protection
+* Comprehensive security headers
+* JWT token expiration and rotation
+* Input validation and sanitization
 
 ## 🚨 Troubleshooting
 
 ### Common Issues
 
 **Auth service fails to start:**
+
 ```bash
 # Check logs
 docker-compose logs auth-service
@@ -299,6 +319,7 @@ docker-compose logs auth-service
 ```
 
 **Blockchain connection failures:**
+
 ```bash
 # Check RPC endpoint
 curl -X POST -H "Content-Type: application/json" \
@@ -309,6 +330,7 @@ curl -X POST -H "Content-Type: application/json" \
 ```
 
 **JWT validation errors:**
+
 ```bash
 # Verify public key matches auth service
 # Check token expiration and claims
@@ -318,15 +340,17 @@ curl -X POST -H "Content-Type: application/json" \
 ### Performance Issues
 
 **High response times:**
-- Check Redis cache configuration
-- Monitor blockchain RPC latency
-- Review database query performance
-- Check resource limits in docker-compose.yml
+
+* Check Redis cache configuration
+* Monitor blockchain RPC latency
+* Review database query performance
+* Check resource limits in docker-compose.yml
 
 **Memory usage:**
-- Monitor Java heap size in auth service
-- Check Redis memory usage
-- Review MySQL buffer pool configuration
+
+* Monitor Java heap size in auth service
+* Check Redis memory usage
+* Review MySQL buffer pool configuration
 
 ## 📈 Scaling & Production
 
@@ -355,11 +379,11 @@ For production environments:
 
 ## 📞 Support
 
-- **Documentation**: Check the `/dev` directory for detailed technical docs
-- **Logs**: Use `docker-compose logs [service]` for troubleshooting
-- **Issues**: Report issues on the project repository
-- **Configuration**: Review `.env.example` for all available options
+* **Documentation**: Check the `/dev` directory for detailed technical docs
+* **Logs**: Use `docker-compose logs [service]` for troubleshooting
+* **Issues**: Report issues on the project repository
+* **Configuration**: Review `.env.example` for all available options
 
----
+***
 
-*The Full Version provides a complete, production-ready blockchain authentication system for decentralized laboratory access.*
+_The Full Version provides a complete, production-ready blockchain authentication system for decentralized laboratory access._
