@@ -99,6 +99,8 @@ services:
       - GUAC_ADMIN_PASS=${GUAC_ADMIN_PASS}
       - SERVER_NAME=${SERVER_NAME}
       - ISSUER=${ISSUER}
+      - HTTPS_PORT=${HTTPS_PORT}
+      - HTTP_PORT=${HTTP_PORT}
     depends_on:
       guacamole:
         condition: service_healthy
