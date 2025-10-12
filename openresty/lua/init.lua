@@ -1,3 +1,12 @@
+-- ============================================================================
+-- init.lua - Initialization Phase (init_by_lua)
+-- ============================================================================
+-- Runs once when OpenResty starts (before worker processes are forked).
+-- Purpose: Load configuration from environment variables and read the public
+-- key file for JWT verification. Stores config in ngx.shared.config and the
+-- public key in ngx.shared.cache for use by all workers.
+-- ============================================================================
+
 local config = ngx.shared.config
 
 -- Read config from environment variables or use default values
