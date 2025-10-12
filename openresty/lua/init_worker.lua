@@ -1,3 +1,12 @@
+-- ============================================================================
+-- init_worker.lua - Worker Initialization Phase (init_worker_by_lua)
+-- ============================================================================
+-- Runs once per worker process when it starts.
+-- Purpose: Set up a periodic timer (every 60 seconds) that checks for expired
+-- JWT sessions. For expired sessions, it terminates active Guacamole connections
+-- and revokes Guacamole session tokens via the Guacamole REST API.
+-- ============================================================================
+
 local http = require "resty.http"
 local cjson = require "cjson.safe"
 

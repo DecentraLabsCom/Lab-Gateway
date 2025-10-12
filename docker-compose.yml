@@ -181,8 +181,6 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_HOSTNAME: mysql
-    volumes:
-      - ./guacamole/extensions:/etc/guacamole/extensions
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/guacamole/"]
       timeout: 10s

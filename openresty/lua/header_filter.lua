@@ -1,3 +1,12 @@
+-- ============================================================================
+-- header_filter.lua - Header Filter Phase (header_filter_by_lua)
+-- ============================================================================
+-- Runs when processing response HEADERS from Guacamole (before body).
+-- Purpose: Extract JWT from URL parameter (?jwt=...), verify signature,
+-- validate claims (iss, aud, jti), and set a short-lived JTI cookie for the
+-- client. Stores JTI-username mapping in shared dict for session tracking.
+-- ============================================================================
+
 local jwt = require "resty.jwt"
 local dict = ngx.shared.cache
 --local http = require "resty.http"
