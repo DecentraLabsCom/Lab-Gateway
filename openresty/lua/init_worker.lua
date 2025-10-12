@@ -7,9 +7,11 @@
 -- and revokes Guacamole session tokens via the Guacamole REST API.
 -- ============================================================================
 
+-- Load modules once per worker (cached automatically by OpenResty)
 local http = require "resty.http"
 local cjson = require "cjson.safe"
 
+-- Cache shared dict and config references
 local dict = ngx.shared.cache
 local config = ngx.shared.config
 local admin_user = config:get("admin_user")
@@ -17,30 +19,35 @@ local admin_pass = config:get("admin_pass")
 local guac_uri = config:get("guac_uri")
 local guac_url = "http://127.0.0.1:8080" .. guac_uri .. "/api"
 
--- Function to close active connections based on the information in the JWT
+-- Function to check and close expired sessions
 local function check_expired_sessions()
 
 	local httpc = http.new()
 
-	-- Obtain a session token from Guacamole (not the JWT)
+	-- Obtain admin auth token from Guacamole
 	local res, err = httpc:request_uri(guac_url .. "/tokens", {
 		method = "POST",
-	        body = "username=" .. admin_user .. "&password=" .. admin_pass,
-	        headers = { ["Content-Type"] = "application/x-www-form-urlencoded" }
+		body = "username=" .. admin_user .. "&password=" .. admin_pass,
+		headers = { ["Content-Type"] = "application/x-www-form-urlencoded" }
 	})
 
 	if not res or res.status ~= 200 then
-		ngx.log(ngx.ERR, "Error retrieving Guacamole's token.")
-	        return
+		ngx.log(ngx.ERR, "Worker - Error retrieving Guacamole admin token")
+		return
 	end
 
 	local auth_data = cjson.decode(res.body)
+	if not auth_data then
+		ngx.log(ngx.ERR, "Worker - Failed to decode Guacamole auth response")
+		return
+	end
+
 	local auth_token = auth_data.authToken
 	local data_source = auth_data.dataSource
 
 	if not auth_token then
-		ngx.log(ngx.ERR, "Failed to obtain Guacamole's token.")
-	        return
+		ngx.log(ngx.ERR, "Worker - Failed to obtain Guacamole admin token")
+		return
 	end
 
 	-- Get list of active connections
@@ -51,22 +58,28 @@ local function check_expired_sessions()
 	})
 
 	if not res or res.status ~= 200 then
-		ngx.log(ngx.ERR, "Error retrieving active connections.")
+		ngx.log(ngx.ERR, "Worker - Error retrieving active connections")
 		return
 	end
 
 	local active_connections = cjson.decode(res.body)
+	if not active_connections then
+		ngx.log(ngx.WARN, "Worker - No active connections or failed to decode response")
+		return
+	end
+
 	local now = ngx.time()
 
+	-- Check each active connection for expiration
 	for identifier, conn in pairs(active_connections) do
 		local username = string.lower(conn.username)
 
 		-- Get expiration time from shared dict
 		local exp = dict:get("exp:" .. username)
 		if not exp then
-			ngx.log(ngx.ERR, "No expiration time found for ", username)
+			ngx.log(ngx.DEBUG, "Worker - No expiration time found for " .. username)
 		elseif now > tonumber(exp) then
-			ngx.log(ngx.INFO, "Closing expired session (" .. identifier  .. ") for ", username)
+			ngx.log(ngx.INFO, "Worker - Closing expired session (" .. identifier .. ") for " .. username)
 
 			-- Terminate the active session
 			local patch_body = cjson.encode({
@@ -83,20 +96,20 @@ local function check_expired_sessions()
 			})
 
 			if not res or res.status ~= 204 then
-			    ngx.log(ngx.ERR, "Error terminating connection for " .. username)
+				ngx.log(ngx.ERR, "Worker - Error terminating connection for " .. username)
 			else
-			    dict:delete("exp:" .. username)
-			    ngx.log(ngx.INFO, "Connection terminated for " .. username)
+				dict:delete("exp:" .. username)
+				ngx.log(ngx.INFO, "Worker - Connection terminated for " .. username)
 			end
 
-			-- Obtain Guacamole's session token for the user whose connection we have terminated
+			-- Obtain Guacamole's session token for revocation
 			local user_token = dict:get("token:" .. username)
 			if not user_token then
-				ngx.log(ngx.ERR, "No token found for " .. username)
+				ngx.log(ngx.DEBUG, "Worker - No token found for " .. username .. ", skipping revocation")
 				goto continue
 			end
 
-			-- Revoke the token
+			-- Revoke the Guacamole session token
 			res, err = httpc:request_uri(guac_url .. "/tokens/" .. user_token .. 
 					"?token=" .. auth_token, {
 				method = "DELETE",
@@ -104,19 +117,20 @@ local function check_expired_sessions()
 			})
 
 			if not res or res.status ~= 204 then
-				ngx.log(ngx.ERR, "Error revoking Guacamole's token.")
+				ngx.log(ngx.ERR, "Worker - Error revoking Guacamole token for " .. username)
 			end
+			-- Always delete from dict to prevent memory leaks, even if revocation failed
 			dict:delete("token:" .. username)
-			ngx.log(ngx.INFO, "Session token revoked for " .. username)
-
+			ngx.log(ngx.INFO, "Worker - Session token revoked for " .. username)
+			
 			::continue::
 		end
 	end
 
 end
 
--- Set a periodic execution (60 seconds - matches the timeout config set in guacamole.properties)
+-- Set up periodic timer (60 seconds - matches guacamole.properties timeout)
 local ok, err = ngx.timer.every(60, check_expired_sessions)
 if not ok then
-	ngx.log(ngx.ERR, "Error initializing the timer.")
+	ngx.log(ngx.ERR, "Worker - Error initializing periodic timer: " .. tostring(err))
 end
