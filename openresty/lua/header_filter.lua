@@ -7,6 +7,7 @@
 -- client. Stores JTI-username mapping in shared dict for session tracking.
 -- ============================================================================
 
+-- Load modules once per worker (cached automatically by OpenResty)
 local jwt = require "resty.jwt"
 local dict = ngx.shared.cache
 --local http = require "resty.http"
@@ -17,7 +18,7 @@ local cookies = ngx.var.http_cookie
 if cookies then
 	local token = string.match(cookies, "JTI=([^;]+)")
 	if token then
-		ngx.log(ngx.INFO, "Cookie with a token already available. Nothing to do here.")
+		ngx.log(ngx.DEBUG, "Header filter - Cookie with JTI already present. Skipping JWT processing.")
 		return
 	end
 end
@@ -25,22 +26,21 @@ end
 -- Get JWT from URL parameter
 local token = ngx.var.arg_jwt
 if not token or token == "" then
-	ngx.log(ngx.INFO, "No token found in the URL parameters. No cookie to you.")
+	ngx.log(ngx.DEBUG, "Header filter - No JWT found in URL parameters.")
 	return
 end
 
--- Make sure the public key read in init_by_lua is available
-local public_key = dict:get("public_key")
-if not public_key then
-	ngx.log(ngx.ERR, "header_filter: public key not available; skipping JWT handling in header filter")
-	-- Cannot use ngx.say/ngx.exit in header_filter_by_lua*. Return silently so request proceeds.
-	return
-end
-
--- Get the JWT object and check if it is valid
+-- Validate JWT format before accessing shared dict
 local jwt_object = jwt:load_jwt(token)
 if not jwt_object.valid then
-	ngx.log(ngx.WARN, "Invalid token format: " .. tostring(jwt_object.reason))
+	ngx.log(ngx.WARN, "Header filter - Invalid JWT format: " .. tostring(jwt_object.reason))
+	return
+end
+
+-- Only access shared dict after validating JWT format
+local public_key = dict:get("public_key")
+if not public_key then
+	ngx.log(ngx.ERR, "Header filter - Public key not available; skipping JWT verification")
 	return
 end
 
@@ -93,69 +93,68 @@ end
 
 ----------------------------------------------------------------------
 
--- Verify the JWT with the public key
+-- Verify JWT signature with public key
 local jwt_obj = jwt:verify_jwt_obj(public_key, jwt_object)
 if not jwt_obj or not jwt_obj.verified then
-	ngx.log(ngx.WARN, "Invalid or expired token in header_filter")
+	ngx.log(ngx.WARN, "Header filter - Invalid or expired JWT signature")
 	return
 end
 
--- Validate JTI
+-- Validate JTI exists
 local jti = jwt_obj.payload.jti
 if not jti then
-	ngx.log(ngx.WARN, "JTI is missing in JWT")
+	ngx.log(ngx.WARN, "Header filter - JTI claim missing in JWT")
 	return
 end
 
--- Check whether the JTI is already in shared dict
-local username = dict:get("username:" .. jti)
-if username then
-	ngx.log(ngx.INFO, "JTI already exists in memory: " .. tostring(jti))
-	return
-end
-
--- Extract the username
-local username = string.lower(jwt_obj.payload.sub)
+-- Extract username (sub claim)
+local username = jwt_obj.payload.sub
 if not username then
-	ngx.log(ngx.WARN, "No username (sub) found in JWT")
+	ngx.log(ngx.WARN, "Header filter - Username (sub) claim missing in JWT")
 	return
 end
+local username_lower = string.lower(username)
 
--- Register the JTI-username pair in shared dict with an expiration time (2 hours)
-local ok, err = dict:set("username:" .. jti, username, 7200)
-if not ok then
-	ngx.log(ngx.ERR, "Error when registering JTI in shared dict: " .. tostring(err))
-	return
-end
-
--- Register the expiration of the session for this user
-local ok, err = dict:set("exp:" .. username, jwt_obj.payload.exp, 7200)
-if not ok then
-	ngx.log(ngx.ERR, "Error when registering expiration time in shared dict: " .. tostring(err))
-	return
-end
-
+-- Validate issuer (iss claim)
 local config = ngx.shared.config
-
--- Check iss
 local req_issuer = config:get("issuer")
 local issuer = jwt_obj.payload.iss
 if not issuer or issuer ~= req_issuer then
-	ngx.log(ngx.WARN, "Missing or invalid 'iss' claim: " .. tostring(issuer))
+	ngx.log(ngx.WARN, "Header filter - Invalid issuer claim: " .. tostring(issuer) .. " (expected: " .. req_issuer .. ")")
 	return
 end
 
--- Check aud
+-- Validate audience (aud claim)
 local req_audience = "https://" .. config:get("server_name") .. config:get("guac_uri")
 local audience = jwt_obj.payload.aud
 if not audience or audience ~= req_audience then
-	ngx.log(ngx.WARN, "Missing or invalid 'aud' claim: " .. tostring(audience))
+	ngx.log(ngx.WARN, "Header filter - Invalid audience claim: " .. tostring(audience))
 	return
 end
 
--- Create the cookie and return it
-local config = ngx.shared.config
+-- Check if JTI is already registered (prevent replay)
+local existing_username = dict:get("username:" .. jti)
+if existing_username then
+	ngx.log(ngx.DEBUG, "Header filter - JTI already registered: " .. tostring(jti))
+	return
+end
+
+-- All validations passed, register JTI-username mapping
+local ok, err = dict:set("username:" .. jti, username_lower, 7200)
+if not ok then
+	ngx.log(ngx.ERR, "Header filter - Error storing JTI in shared dict: " .. tostring(err))
+	return
+end
+
+-- Register session expiration time
+local ok, err = dict:set("exp:" .. username_lower, jwt_obj.payload.exp, 7200)
+if not ok then
+	ngx.log(ngx.ERR, "Header filter - Error storing expiration in shared dict: " .. tostring(err))
+	return
+end
+
+-- Set JTI cookie for the client
 local guac_uri = config:get("guac_uri")
 ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=30; Domain=" .. 
 				ngx.var.server_name .. "; Path=" .. guac_uri .. ";"
-ngx.log(ngx.INFO, "Cookie sent!")
+ngx.log(ngx.INFO, "Header filter - JWT validated and cookie set for " .. username)
