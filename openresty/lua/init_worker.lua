@@ -32,7 +32,8 @@ local function check_expired_sessions()
 	})
 
 	if not res or res.status ~= 200 then
-		ngx.log(ngx.ERR, "Worker - Error retrieving Guacamole admin token")
+		ngx.log(ngx.WARN, "Worker - Guacamole not ready or authentication failed (status: " .. 
+			(res and res.status or "connection refused") .. "), will retry in 60s")
 		return
 	end
 
@@ -129,8 +130,22 @@ local function check_expired_sessions()
 
 end
 
--- Set up periodic timer (60 seconds - matches guacamole.properties timeout)
-local ok, err = ngx.timer.every(60, check_expired_sessions)
+-- Delay first check to allow Guacamole to fully start (90 seconds)
+local ok, err = ngx.timer.at(90, function(premature)
+	if premature then return end
+	
+	-- After first check, set up periodic timer (60 seconds - matches guacamole.properties timeout)
+	local ok_periodic, err_periodic = ngx.timer.every(60, check_expired_sessions)
+	if not ok_periodic then
+		ngx.log(ngx.ERR, "Worker - Error initializing periodic timer: " .. tostring(err_periodic))
+	else
+		ngx.log(ngx.INFO, "Worker - Periodic session check initialized (every 60s)")
+	end
+	
+	-- Run first check immediately after delay
+	check_expired_sessions()
+end)
+
 if not ok then
-	ngx.log(ngx.ERR, "Worker - Error initializing periodic timer: " .. tostring(err))
+	ngx.log(ngx.ERR, "Worker - Error initializing delayed startup timer: " .. tostring(err))
 end
