@@ -191,6 +191,5 @@ end
 
 -- Set JTI cookie for the client
 local guac_uri = config:get("guac_uri")
-ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=30; Domain=" .. 
-				ngx.var.server_name .. "; Path=" .. guac_uri .. ";"
+ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=30; Path=" .. guac_uri .. "; Secure; HttpOnly; SameSite=Lax"
 ngx.log(ngx.INFO, "Header filter - JWT validated and cookie set for " .. username)
