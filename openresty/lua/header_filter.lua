@@ -124,11 +124,13 @@ if not issuer or issuer ~= req_issuer then
 	return
 end
 
--- Validate audience (aud claim)
-local req_audience = "https://" .. config:get("server_name") .. config:get("guac_uri")
+-- Validate audience (aud claim) - include port if not 443
+local https_port = config:get("https_port")
+local port_suffix = (https_port == "443") and "" or (":" .. https_port)
+local req_audience = "https://" .. config:get("server_name") .. port_suffix .. config:get("guac_uri")
 local audience = jwt_obj.payload.aud
 if not audience or audience ~= req_audience then
-	ngx.log(ngx.WARN, "Header filter - Invalid audience claim: " .. tostring(audience))
+	ngx.log(ngx.WARN, "Header filter - Invalid audience claim: " .. tostring(audience) .. " (expected: " .. req_audience .. ")")
 	return
 end
 
