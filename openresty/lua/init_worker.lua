@@ -130,8 +130,8 @@ local function check_expired_sessions()
 
 end
 
--- Delay first check to allow Guacamole to fully start (90 seconds)
-local ok, err = ngx.timer.at(90, function(premature)
+-- Delay first check to allow Guacamole to fully start (30 seconds)
+local ok, err = ngx.timer.at(30, function(premature)
 	if premature then return end
 	
 	-- After first check, set up periodic timer (60 seconds - matches guacamole.properties timeout)
