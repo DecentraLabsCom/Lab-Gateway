@@ -2,7 +2,7 @@
 -- init_worker.lua - Worker Initialization Phase (init_worker_by_lua)
 -- ============================================================================
 -- Runs once per worker process when it starts.
--- Purpose: Set up a periodic timer (every 60 seconds) that checks for expired
+-- Purpose: Set up a periodic timer (every 30 seconds) that checks for expired
 -- JWT sessions. For expired sessions, it terminates active Guacamole connections
 -- and revokes Guacamole session tokens via the Guacamole REST API.
 -- ============================================================================
@@ -77,9 +77,7 @@ local function check_expired_sessions()
 
 		-- Get expiration time from shared dict
 		local exp = dict:get("exp:" .. username)
-		if not exp then
-			ngx.log(ngx.DEBUG, "Worker - No expiration time found for " .. username)
-		elseif now > tonumber(exp) then
+		if now > tonumber(exp) then
 			ngx.log(ngx.INFO, "Worker - Closing expired session (" .. identifier .. ") for " .. username)
 
 			-- Terminate the active session
@@ -134,8 +132,8 @@ end
 local ok, err = ngx.timer.at(30, function(premature)
 	if premature then return end
 	
-	-- After first check, set up periodic timer (60 seconds - matches guacamole.properties timeout)
-	local ok_periodic, err_periodic = ngx.timer.every(60, check_expired_sessions)
+	-- After first check, set up periodic timer (30 seconds)
+	local ok_periodic, err_periodic = ngx.timer.every(30, check_expired_sessions)
 	if not ok_periodic then
 		ngx.log(ngx.ERR, "Worker - Error initializing periodic timer: " .. tostring(err_periodic))
 	else
