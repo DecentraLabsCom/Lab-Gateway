@@ -36,6 +36,23 @@ if not username then
 	return
 end
 
+-- Validate JWT has not expired
+local exp = dict:get("exp:" .. username)
+if not exp then
+	ngx.log(ngx.WARN, "Access - No expiration found for user: " .. username)
+	ngx.status = ngx.HTTP_UNAUTHORIZED
+	ngx.header["Content-Type"] = "text/plain"
+	return
+end
+
+local now = ngx.time()
+if now > tonumber(exp) then
+	ngx.log(ngx.INFO, "Access - JWT expired for user: " .. username .. " (exp: " .. exp .. ", now: " .. now .. ")")
+	ngx.status = ngx.HTTP_UNAUTHORIZED
+	ngx.header["Content-Type"] = "text/plain"
+	return
+end
+
 -- Set Authorization header with username
 ngx.req.set_header("Authorization", username)
 ngx.log(ngx.INFO, "Access - Valid cookie. Authorization header set for " .. username)

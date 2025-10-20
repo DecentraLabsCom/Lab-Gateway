@@ -189,7 +189,12 @@ if not ok then
 	return
 end
 
--- Set JTI cookie for the client
+-- Set JTI cookie for the client with duration matching JWT expiration
 local guac_uri = config:get("guac_uri")
-ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=30; Path=" .. guac_uri .. "; Secure; HttpOnly; SameSite=Lax"
-ngx.log(ngx.INFO, "Header filter - JWT validated and cookie set for " .. username)
+local now = ngx.time()
+local max_age = jwt_obj.payload.exp - now
+if max_age < 0 then
+	max_age = 0  -- Token already expired, set cookie to expire immediately
+end
+ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=" .. max_age .. "; Path=" .. guac_uri .. "; Secure; HttpOnly; SameSite=Lax"
+ngx.log(ngx.INFO, "Header filter - JWT validated and cookie set for " .. username .. " (expires in " .. max_age .. "s)")
