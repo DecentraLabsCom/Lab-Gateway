@@ -25,7 +25,7 @@ if (status == 301 or status == 302 or status == 303 or status == 307 or status =
         local server_name = config:get("server_name") or "localhost"
         
         -- Handle relative paths (start with /) - convert to absolute with port
-        if location:match("^/") then
+        if location:sub(1, 1) == "/" then
             local new_location = "https://" .. server_name
             if https_port ~= "443" then
                 new_location = new_location .. ":" .. https_port
@@ -33,28 +33,24 @@ if (status == 301 or status == 302 or status == 303 or status == 307 or status =
             new_location = new_location .. location
             ngx.header["Location"] = new_location
             ngx.log(ngx.INFO, "Header filter - Converted relative Location from " .. location .. " to " .. new_location)
-        -- Handle absolute URLs missing the port (has pattern https://host/ without :port)
-        elseif https_port ~= "443" and location:match("^https?://[^:]+/") then
-            -- Extract protocol and path
-            local protocol = location:match("^(https?)://")
-            local path = location:match("^https?://[^/]+(/.*)$") or "/"
-            
-            -- Rebuild with port
-            local new_location = protocol .. "://" .. server_name .. ":" .. https_port .. path
-            ngx.header["Location"] = new_location
-            ngx.log(ngx.INFO, "Header filter - Rewrote absolute Location from " .. location .. " to " .. new_location)
+        -- Handle absolute URLs missing the port
+        elseif https_port ~= "443" then
+            -- Regex match to extract protocol and path
+            local protocol, host, path = location:match("^(https?)://([^:/]+)(/.*)$")
+            if protocol and host then
+                local new_location = protocol .. "://" .. server_name .. ":" .. https_port .. path
+                ngx.header["Location"] = new_location
+                ngx.log(ngx.INFO, "Header filter - Rewrote absolute Location from " .. location .. " to " .. new_location)
+            end
         end
     end
 end
 
--- Check existing cookies first
-local cookies = ngx.var.http_cookie
-if cookies then
-	local token = string.match(cookies, "JTI=([^;]+)")
-	if token then
-		ngx.log(ngx.DEBUG, "Header filter - Cookie with JTI already present. Skipping JWT processing.")
-		return
-	end
+-- Check existing cookies first - use nginx variable for faster access
+local existing_jti = ngx.var.cookie_JTI
+if existing_jti then
+	ngx.log(ngx.DEBUG, "Header filter - Cookie with JTI already present. Skipping JWT processing.")
+	return
 end
 
 -- Get JWT from URL parameter

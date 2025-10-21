@@ -118,13 +118,99 @@ local function check_expired_sessions()
 			if not res or res.status ~= 204 then
 				ngx.log(ngx.ERR, "Worker - Error revoking Guacamole token for " .. username)
 			end
-			-- Always delete from dict to prevent memory leaks, even if revocation failed
-			dict:delete("token:" .. username)
-			ngx.log(ngx.INFO, "Worker - Session token revoked for " .. username)
-			
-			::continue::
+		-- Always delete from dict to prevent memory leaks, even if revocation failed
+		dict:delete("token:" .. username)
+		dict:delete("guac_token:" .. user_token)  -- Clean up reverse mapping
+		ngx.log(ngx.INFO, "Worker - Session token revoked for " .. username)			::continue::
 		end
 	end
+
+end
+
+-- Function to revoke sessions for users whose tunnels have closed
+local function check_tunnel_closures()
+
+	-- Early return if no pending closures (optimization to avoid unnecessary work)
+	if not dict:get("has_pending_closures") then
+		return
+	end
+
+	local httpc = http.new()
+
+	-- Obtain admin auth token from Guacamole
+	local res, err = httpc:request_uri(guac_url .. "/tokens", {
+		method = "POST",
+		body = "username=" .. admin_user .. "&password=" .. admin_pass,
+		headers = { ["Content-Type"] = "application/x-www-form-urlencoded" }
+	})
+
+	if not res or res.status ~= 200 then
+		ngx.log(ngx.WARN, "Worker - Guacamole not ready for tunnel closure check")
+		return
+	end
+
+	local auth_data = cjson.decode(res.body)
+	if not auth_data or not auth_data.authToken then
+		ngx.log(ngx.ERR, "Worker - Failed to obtain Guacamole admin token for tunnel closure check")
+		return
+	end
+
+	local auth_token = auth_data.authToken
+
+	-- Get all keys matching pending_user:* (O(n) but only over pending users, not all dict keys)
+	local keys = dict:get_keys(0)
+	local has_more = false
+	
+	for _, key in ipairs(keys) do
+		if key:match("^pending_user:") then
+			has_more = true
+			local username = key:sub(14)  -- Remove "pending_user:" prefix (13 chars + 1)
+			local closed_time = dict:get("tunnel_closed:" .. username)
+			
+			-- Only process if the tunnel_closed marker still exists
+			if closed_time then
+				ngx.log(ngx.INFO, "Worker - Processing tunnel closure for user: " .. username)
+				
+				-- Get user's Guacamole session token for revocation
+				local user_token = dict:get("token:" .. username)
+				if not user_token then
+					ngx.log(ngx.DEBUG, "Worker - No token found for " .. username .. ", skipping revocation")
+					dict:delete("tunnel_closed:" .. username)  -- Clean up marker
+					dict:delete(key)  -- Clean up pending_user marker
+					goto continue_tunnel
+				end
+
+				-- Revoke the Guacamole session token
+				res, err = httpc:request_uri(guac_url .. "/tokens/" .. user_token .. 
+						"?token=" .. auth_token, {
+					method = "DELETE",
+					headers = {}
+				})
+
+				if not res or res.status ~= 204 then
+					ngx.log(ngx.ERR, "Worker - Error revoking Guacamole token for " .. username)
+				else
+					ngx.log(ngx.INFO, "Worker - Session token revoked for " .. username .. " after tunnel closure")
+				end
+				
+				-- Clean up dict entries
+				dict:delete("token:" .. username)
+				dict:delete("guac_token:" .. user_token)  -- Clean up reverse mapping
+				dict:delete("tunnel_closed:" .. username)  -- Remove tunnel_closed marker
+			end
+			
+			-- Always delete pending_user marker
+			dict:delete(key)
+		
+			::continue_tunnel::
+		end
+	end
+
+-- Clear flag if no more pending closures
+if not has_more then
+	dict:delete("has_pending_closures")
+	ngx.log(ngx.DEBUG, "Worker - No more pending tunnel closures, flag cleared")
+end
 
 end
 
@@ -132,16 +218,25 @@ end
 local ok, err = ngx.timer.at(30, function(premature)
 	if premature then return end
 	
-	-- After first check, set up periodic timer (30 seconds)
+	-- After first check, set up periodic timer for expired sessions (30 seconds)
 	local ok_periodic, err_periodic = ngx.timer.every(30, check_expired_sessions)
 	if not ok_periodic then
-		ngx.log(ngx.ERR, "Worker - Error initializing periodic timer: " .. tostring(err_periodic))
+		ngx.log(ngx.ERR, "Worker - Error initializing periodic timer for expired sessions: " .. tostring(err_periodic))
 	else
-		ngx.log(ngx.INFO, "Worker - Periodic session check initialized (every 60s)")
+		ngx.log(ngx.INFO, "Worker - Periodic expired session check initialized (every 30s)")
 	end
 	
-	-- Run first check immediately after delay
+	-- Set up periodic timer for tunnel closures (2 seconds)
+	local ok_tunnel, err_tunnel = ngx.timer.every(2, check_tunnel_closures)
+	if not ok_tunnel then
+		ngx.log(ngx.ERR, "Worker - Error initializing periodic timer for tunnel closures: " .. tostring(err_tunnel))
+	else
+		ngx.log(ngx.INFO, "Worker - Periodic tunnel closure check initialized (every 2s)")
+	end
+	
+	-- Run first checks immediately after delay (after setting up timers to ensure they're registered even if checks fail)
 	check_expired_sessions()
+	check_tunnel_closures()
 end)
 
 if not ok then

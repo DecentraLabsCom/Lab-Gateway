@@ -52,10 +52,18 @@ if eof then
 	-- Only access shared dict when we have data to store (avoid lock contention)
 	local dict = ngx.shared.cache
 	local username_lower = string.lower(decoded.username)
-	local ok, err = dict:set("token:" .. username_lower, decoded.authToken, 7200)
 	
+	-- Store bidirectional mapping for O(1) lookups
+	local ok, err = dict:set("token:" .. username_lower, decoded.authToken, 7200)
 	if not ok then
 		ngx.log(ngx.ERR, "Body filter - Error storing token in shared dict: " .. tostring(err))
+		return
+	end
+	
+	-- Store reverse mapping: guac_token -> username (for fast username lookup in log.lua)
+	local ok_reverse, err_reverse = dict:set("guac_token:" .. decoded.authToken, username_lower, 7200)
+	if not ok_reverse then
+		ngx.log(ngx.ERR, "Body filter - Error storing reverse token mapping: " .. tostring(err_reverse))
 		return
 	end
 	
