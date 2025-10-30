@@ -1,31 +1,31 @@
 @echo off
-REM Script to update auth-service submodule automatically
-REM Usage: update-auth-service.bat "commit message"
+REM Script to update blockchain-services submodule automatically
+REM Usage: update-blockchain-services.bat "commit message"
 
 setlocal enabledelayedexpansion
 
 set "COMMIT_MESSAGE=%~1"
-if "%COMMIT_MESSAGE%"=="" set "COMMIT_MESSAGE=Update auth-service submodule"
+if "%COMMIT_MESSAGE%"=="" set "COMMIT_MESSAGE=Update blockchain-services submodule"
 
-echo Updating auth-service submodule...
-echo Strategy: full branch to main branch (auth-service)
+echo Updating blockchain-services submodule...
+echo Strategy: full branch to main branch (blockchain-services)
 
 REM Update the submodule to latest main branch
-git submodule update --remote --merge auth-service
+git submodule update --remote --merge blockchain-services
 if errorlevel 1 (
     echo Failed to update submodule
     exit /b 1
 )
 
 REM Check if there are changes (basic check)
-git diff --quiet auth-service
+git diff --quiet blockchain-services
 if not errorlevel 1 (
-    echo Auth-service is already up to date
+    echo Blockchain-services is already up to date
     exit /b 0
 )
 
 REM Add and commit the submodule update
-git add auth-service
+git add blockchain-services
 if errorlevel 1 (
     echo Failed to add submodule changes
     exit /b 1
@@ -37,6 +37,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Auth-service submodule updated successfully!
+echo Blockchain-services submodule updated successfully!
 echo Commit message: %COMMIT_MESSAGE%
 echo Don't forget to: git push

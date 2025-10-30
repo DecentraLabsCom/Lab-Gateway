@@ -1,8 +1,8 @@
 services:
-  # Authentication Service - Blockchain-based JWT authentication
-  auth-service:
+  # Blockchain Services - Authentication and wallet operations
+  blockchain-services:
     build:
-      context: ./auth-service
+      context: ./blockchain-services
       dockerfile: Dockerfile
     environment:
       - BASE_DOMAIN=${BASE_DOMAIN:-https://sarlab.dia.uned.es}
@@ -44,7 +44,7 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
-        labels: "service=auth-service"
+        labels: "service=blockchain-services"
     restart: always
     networks:
       - guacnet
@@ -104,7 +104,7 @@ services:
     depends_on:
       guacamole:
         condition: service_healthy
-      auth-service:
+      blockchain-services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f -L http://localhost:80/ -H 'Host: ${SERVER_NAME}' --connect-timeout 5 --insecure"]

@@ -81,7 +81,7 @@ The setup scripts will automatically:
 - ✅ Configure domain and ports (localhost vs production)
 - ✅ Generate SSL certificates for localhost (if needed)
 - ✅ Configure blockchain settings
-- ✅ Start all services automatically (including auth-service)
+- ✅ Start all services automatically (including blockchain-services)
 
 **Windows:**
 ```cmd
@@ -185,14 +185,14 @@ certs/
 └── public_key.pem     # JWT public key (from marketplace/auth provider)
 ```
 
-## Auth-Service Submodule Management
+## Blockchain-Services Submodule Management
 
-The Full Version uses the auth-service as a Git submodule. Here's how to manage it:
+The Full Version uses the blockchain-services as a Git submodule. Here's how to manage it:
 
 ### 📋 **When to Update the Submodule**
 
 **Update Strategy - By Feature (Recommended):**
-- ✅ After completing a new feature in auth-service
+- ✅ After completing a new feature in blockchain-services
 - ✅ When preparing for integration testing
 - ✅ Before creating a release
 
@@ -201,21 +201,21 @@ The Full Version uses the auth-service as a Git submodule. Here's how to manage 
 **Manual Update:**
 ```bash
 # Update submodule to latest version
-git submodule update --remote auth-service
+git submodule update --remote blockchain-services
 
 # Commit the submodule update
-git add auth-service
-git commit -m "Update auth-service to latest version"
+git add blockchain-services
+git commit -m "Update blockchain-services to latest version"
 git push
 ```
 
 **Automated Update (Recommended):**
 ```bash
 # Windows
-.\update-auth-service.bat "Integrate new blockchain features"
+.\update-blockchain-services.bat "Integrate new blockchain features"
 
 # Linux/macOS
-./update-auth-service.sh "Integrate new blockchain features"
+./update-blockchain-services.sh "Integrate new blockchain features"
 ```
 
 ### 🔍 **Submodule Status**
@@ -234,11 +234,11 @@ git submodule update --init --recursive
 
 ### 💡 **Development Workflow**
 
-1. **Develop in auth-service repository** (separate directory)
-2. **Test and commit changes** in auth-service
-3. **Push auth-service changes** to GitHub
+1. **Develop in blockchain-services repository** (separate directory)
+2. **Test and commit changes** in blockchain-services
+3. **Push blockchain-services changes** to GitHub
 4. **Run update script** in Lab Gateway when ready to integrate
-5. **Test full system** with updated auth-service
+5. **Test full system** with updated blockchain-services
 6. **Push Lab Gateway changes**
 
 ## 🛠️ Development
@@ -271,8 +271,8 @@ JPA_SHOW_SQL=true
 The auth service supports hot reload in development:
 ```bash
 # Rebuild only auth service
-docker-compose build auth-service
-docker-compose up -d auth-service
+docker-compose build blockchain-services
+docker-compose up -d blockchain-services
 ```
 
 ## 🪶 Migration from Lite Version
