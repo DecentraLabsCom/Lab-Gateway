@@ -20,13 +20,20 @@ Basic version with essential features:
 
 ### Full Version (Branch `full`)
 
-Complete version with advanced authentication:
+Complete version with advanced blockchain-based authentication and wallet operations:
 
 * ✅ All Lite version features
-* ✅ **Blockchain-based authorization**
-* ✅ **JWT validation system**
+* ✅ **Blockchain Services Integration** (Spring Boot microservice)
+* ✅ **JWT Generation**: Issues and processes secure tokens with blockchain claims
+* ✅ **Redis Caching**: Performance optimization for blockchain queries
+* ✅ **Wallet Support**: Ethereum wallet support for blockchain actions and features
+* ✅ **Smart Contract Authorization**: Validates lab reservation requests on-chain
+* ✅ **Institutional Treasury Management**: Deposit or withdraw funds from the institutional treasury, set user spending limits, etc.
+* ✅ **Event Listening**: Real-time monitoring of contract events
+* ✅ **Transaction Signing**: Programmatic transaction capabilities
+* ✅ **RESTful APIs**: Comprehensive authentication endpoints
 
-**Ideal for**: Production environments, enterprise deployments, maximum security.
+**Ideal for**: Production environments, enterprise deployments, maximum security, management and decentralization.
 
 ## 🚀 Quick Start
 
@@ -61,11 +68,13 @@ Each version includes its own detailed documentation:
 | **OpenResty Proxy**          | ✅    | ✅    |
 | **AuthX Through JWT**        | ✅    | ✅    |
 | **Blockchain Authorization** | ❌    | ✅    |
-| **Spring Boot Auth Service** | ❌    | ✅    |
 | **JWT Generation**           | ❌    | ✅    |
-| **Auth REST APIs**           | ❌    | ✅    |
 | **Redis Session Store**      | ❌    | ✅    |
-| **Complete Auditing**        | ❌    | ✅    |
+| **Wallet Support**           | ❌    | ✅    |
+| **Institutional Treasury Mgt**| ❌    | ✅    |
+| **Event Listening**          | ❌    | ✅    |
+| **Transaction Signing**      | ❌    | ✅    |
+| **On-Chain Reservation Validation** | ❌    | ✅    |
 
 ## Requirements
 
@@ -166,10 +175,11 @@ Required files in `certs/` directory:
 
 ### Full Version Additions
 
-* **Spring Boot** - Authentication service
+* **Blockchain Services** (Spring Boot) - Authentication and wallet operations microservice
+* **Web3j** - Ethereum blockchain integration
 * **Redis** - Session store and cache
-* **JWT** - Generates authentication tokens
-* **Blockchain Integration** - Decentralized authorization
+* **JWT** - Generates authentication tokens with blockchain claims
+* **Smart Contract Events** - Real-time blockchain monitoring
 
 ## � Project Structure
 
@@ -179,7 +189,7 @@ lab-gateway/
 ├── 📁 guacamole/          # RDP/VNC client
 ├── 📁 mysql/              # DB scripts and schemas
 ├── 📁 web/                # Web frontend
-├── 📁 auth-service/       # Auth service (only in the full version)
+├── 📁 blockchain-services/# Blockchain auth & wallet service (full version only)
 ├── 📁 certs/              # SSL certificates (if created by setup)
 ├── 📄 docker-compose.yml  # Service orchestration
 ├── 📄 .env.example        # Configuration template
