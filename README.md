@@ -104,7 +104,7 @@ This can be achieved through various network topologies:
 
 #### Option A: Dual Network Interface (Most Secure)
 ```
-Internet ──> [NIC1: Public IP] Lab Gateway [NIC2: Private IP] ──> Lab Network
+Internet ──> [NIC1: Public IP] Lab Gateway [NIC2: Private IP] ──> Lab Computers
 ```
 - ✅ Two physical or virtual Network Interface Cards (NICs)
 - ✅ Physical network isolation between public and lab networks
@@ -113,13 +113,13 @@ Internet ──> [NIC1: Public IP] Lab Gateway [NIC2: Private IP] ──> Lab Ne
 
 #### Option B: Single Network Interface (Most Common)
 ```
-Internet ──> Router/Firewall ──> [NIC: Private IP] Lab Gateway ──> Lab Servers
+Internet ──> Router/Firewall ──> [NIC: Private IP] Lab Gateway ──> Lab Computers
 ```
 - ✅ Single NIC with routing configuration
 - ✅ Works with cloud providers (AWS, Azure, GCP, DigitalOcean, etc.)
 - ✅ Works with CDN/proxies (CloudFlare, CloudFront, etc.)
 - ✅ Works with VPS/dedicated servers
-- ✅ Labs accessed via private IPs, VPN tunnels, or localhost
+- ✅ Labs accessed via private IPs or VPN tunnels
 - ✅ Most flexible and commonly deployed
 
 #### Option C: VLAN Segmentation (Enterprise)
@@ -161,8 +161,6 @@ Lab Gateway (Docker) ──> host.docker.internal ──> Local Labs
 - Let's Encrypt (free, automated renewal)
 - Commercial certificate providers
 - Wildcard certificates for multiple subdomains
-
-Required files in `certs/` directory:
 
 ## �️ Technology Stack
 
