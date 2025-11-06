@@ -1,0 +1,27 @@
+{
+    "diagnostics": {
+        "globals": [
+            "ngx",
+            "cjson",
+            "redis",
+            "http",
+            "mysql",
+            "encode_base64",
+            "decode_base64",
+            "ngx_md5"
+        ],
+        "disable": [
+            "undefined-global",
+            "inject-field",
+            "undefined-field"
+        ]
+    },
+    "runtime": {
+        "version": "LuaJIT"
+    },
+    "workspace": {
+        "library": [
+            "${3rd}/openresty/library"
+        ]
+    }
+}
