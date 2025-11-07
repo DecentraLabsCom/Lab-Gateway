@@ -1,0 +1,53 @@
+{{
+
+    "diagnostics": {    "diagnostics": {
+
+        "globals": [        "globals": [
+
+            "ngx",            "ngx",
+
+            "cjson",            "cjson",
+
+            "redis",            "redis",
+
+            "http",            "http",
+
+            "mysql",            "mysql",
+
+            "encode_base64",            "encode_base64",
+
+            "decode_base64",            "decode_base64",
+
+            "ngx_md5"            "ngx_md5"
+
+        ],        ],
+
+        "disable": [        "disable": [
+
+            "undefined-global",            "undefined-global",
+
+            "inject-field",            "inject-field",
+
+            "undefined-field"            "undefined-field"
+
+        ]        ]
+
+    },    },
+
+    "runtime": {    "runtime": {
+
+        "version": "LuaJIT"        "version": "LuaJIT"
+
+    },    },
+
+    "workspace": {    "workspace": {
+
+        "library": [        "library": [
+
+            "${3rd}/openresty/library"            "${3rd}/openresty/library"
+
+        ]        ]
+
+    }    }
+
+}}
