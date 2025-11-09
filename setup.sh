@@ -2,7 +2,7 @@
 
 # =================================================================
 # DecentraLabs Gateway - Full Version Setup Script (Linux/macOS)
-# Complete blockchain-based authentication system with auth-service
+# Complete blockchain-based authentication system with blockchain-services
 # =================================================================
 
 echo "DecentraLabs Gateway - Full Version Setup"
@@ -52,7 +52,6 @@ echo "=================="
 echo "Enter database passwords (leave empty for auto-generated):"
 read -p "MySQL root password: " mysql_root_password
 read -p "Guacamole database password: " mysql_password
-read -p "Redis password: " redis_password
 
 if [ -z "$mysql_root_password" ]; then
     mysql_root_password="R00t_P@ss_${RANDOM}_$(date +%s)"
@@ -64,15 +63,9 @@ if [ -z "$mysql_password" ]; then
     echo "Generated database password: $mysql_password"
 fi
 
-if [ -z "$redis_password" ]; then
-    redis_password="Redis_${RANDOM}_$(date +%s)"
-    echo "Generated Redis password: $redis_password"
-fi
-
 # Update passwords in .env file
 sed -i "s/MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$mysql_root_password/" .env
 sed -i "s/MYSQL_PASSWORD=.*/MYSQL_PASSWORD=$mysql_password/" .env
-sed -i "s/REDIS_PASSWORD=.*/REDIS_PASSWORD=$redis_password/" .env
 
 # Update Guacamole properties file to match the configuration in .env
 echo "Updating Guacamole configuration..."
@@ -82,7 +75,6 @@ echo
 echo "IMPORTANT: Save these passwords securely!"
 echo "   Root password: $mysql_root_password"
 echo "   Database password: $mysql_password"
-echo "   Redis password: $redis_password"
 echo
 
 # Domain Configuration
@@ -134,7 +126,7 @@ if [ ! -f "certs/fullchain.pem" ]; then
     echo "You need to add SSL certificates to the 'certs' folder:"
     echo "  * certs/fullchain.pem (certificate)"
     echo "  * certs/privkey.pem (private key)"
-    echo "  * certs/public_key.pem (auth-service's public key)"
+    echo "  * certs/public_key.pem (blockchain-services public key)"
     echo
     if [ "$domain" == "localhost" ]; then
         echo "We will generate self-signed certificates for you..."
@@ -153,7 +145,7 @@ echo "Next Steps"
 echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
-echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS)"
+echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
 echo "4. Run: docker-compose up -d"
 if [ "$domain" == "localhost" ]; then
     echo "5. Access: https://localhost:8443"
@@ -161,7 +153,7 @@ else
     echo "5. Access: https://$domain"
 fi
 echo "   * Guacamole: /guacamole/"
-echo "   * Auth Service: /auth"
+echo "   * Blockchain Services API: /auth"
 echo
 
 # Ask if user wants to start services
@@ -170,7 +162,7 @@ if [[ "$start_services" =~ ^[Nn]$ ]] || [[ "$start_services" =~ ^[Nn][Oo]$ ]]; t
     echo "Configuration complete!"
     echo
     echo "Next steps:"
-    echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS)"
+echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
     echo "2. Run: docker-compose up -d"
     echo "3. Access your services"
     echo
@@ -205,7 +197,7 @@ if [ $compose_result -eq 0 ]; then
         echo "Access your lab at: https://$domain"
     fi
     echo "   * Guacamole: /guacamole/ (guacadmin / guacadmin)"
-    echo "   * Auth Service: /auth"
+    echo "   * Blockchain Services API: /auth"
     echo
     echo "To check status: docker-compose ps"
     echo "To view logs: docker-compose logs -f"
@@ -213,7 +205,7 @@ if [ $compose_result -eq 0 ]; then
     echo "Configuration:"
     echo "   Environment: .env"
     echo "   Certificates: certs/"
-    echo "   Auth Service Config: auth-service/src/main/resources/"
+    echo "   Blockchain Services Config: blockchain-services/src/main/resources/"
     echo
     echo "Full version deployment complete!"
     echo "Your blockchain-based authentication system is now running."

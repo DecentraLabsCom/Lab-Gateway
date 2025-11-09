@@ -10,7 +10,7 @@ You are currently on the **Full Version** branch. This project offers two versio
 
 ### 🚀 **Full Version** (Current Branch)
 - **Purpose**: Complete blockchain-based authentication system
-- **Components**: Auth Service (Spring Boot) + Redis + OpenResty + Guacamole + MySQL
+- **Components**: Blockchain Services (Spring Boot) + OpenResty + Guacamole + MySQL
 - **Authentication**: Blockchain wallet signature verification or signed JWT verification + blockchain smart contract checks
 - **Features**: Wallet-based auth, smart contract integration
 - **Use Case**: Complete decentralized lab access solution
@@ -31,23 +31,22 @@ git switch lite
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   User Wallet   │    │  OpenResty      │    │  Auth Service   │
-│   or JWT        ├────┤  (Nginx + Lua)  ├────┤  (Spring Boot)  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+┌─────────────────┐    ┌─────────────────┐    ┌───────────────────┐
+│   User Wallet   │    │  OpenResty      │    │Blockchain Services│
+│   or JWT        ├────┤  (Nginx + Lua)  ├────┤   (Spring Boot)   │
+└─────────────────┘    └─────────────────┘    └───────────────────┘
                                 │                        │
                                 │                        │
                        ┌─────────────────┐    ┌─────────────────┐
-                       │   Guacamole     │    │     Redis       │
-                       │  (Lab Access)   │    │   (Caching)     │
-                       └─────────────────┘    └─────────────────┘
-                                │                        │
-                                │                        │
-                       ┌─────────────────┐    ┌─────────────────┐
-                       │     MySQL       │    │   Blockchain    │
-                       │   (Database)    │    │   (Smart        │
+                       │   Guacamole     │    │   Blockchain    │
+                       │  (Lab Access)   │    │   (Smart        │
                        └─────────────────┘    │   Contracts)    │
-                                              └─────────────────┘
+                                │              └─────────────────┘
+                                │                        
+                       ┌─────────────────┐
+                       │     MySQL       │
+                       │   (Database)    │
+                       └─────────────────┘
 ```
 
 ## 🌟 Features
@@ -61,7 +60,6 @@ git switch lite
 - **RESTful API**: Comprehensive authentication endpoints
 - **Blockchain Integration**: Web3j for smart contract interaction
 - **JWT Management**: Token validation and generation
-- **Redis Caching**: Performance optimization for frequent queries
 - **Health Monitoring**: Built-in health checks and metrics
 
 ### ✅ Enhanced Gateway Features
@@ -80,7 +78,7 @@ The setup scripts will automatically:
 - ✅ Set up database passwords (auto-generated or custom)
 - ✅ Configure domain and ports (localhost vs production)
 - ✅ Generate SSL certificates for localhost (if needed)
-- ✅ Configure blockchain settings
+- ✅ Configure blockchain & institutional wallet settings
 - ✅ Start all services automatically (including blockchain-services)
 
 **Windows:**
@@ -112,9 +110,11 @@ If you prefer manual configuration:
    RPC_URL=https://your-blockchain-rpc-endpoint.com
    WALLET_ADDRESS=0xYourWalletAddress
    WALLET_PRIVATE_KEY=0xYourPrivateKey
-
-   # Redis Configuration
-   REDIS_PASSWORD=secure_redis_password
+   INSTITUTIONAL_WALLET_ADDRESS=0xInstitutionalWallet
+   INSTITUTIONAL_WALLET_PASSWORD=Sup3rSecret!
+   WALLET_ENCRYPTION_SALT=ChangeThisSalt
+   WALLET_PERSISTENCE_ENABLED=true
+   WALLET_FILE_PATH=/app/data/wallets.json
 
    # Security Configuration
    ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
@@ -142,13 +142,21 @@ If you prefer manual configuration:
 
 ### 🔧 Environment Variables
 
-The full version requires additional configuration in `.env`:
+The gateway uses **modular configuration** with separate `.env` files:
+
+- **`.env`** - Gateway-specific configuration (server, database, Guacamole)
+- **`blockchain-services/.env`** - Blockchain service configuration (contracts, wallets, RPC)
+
+This separation keeps concerns isolated and makes the blockchain service independently configurable.
+
+#### Gateway Configuration (`.env`)
 
 ```env
 # Basic Configuration
 SERVER_NAME=yourdomain.com
 HTTPS_PORT=443
 HTTP_PORT=80
+BASE_DOMAIN=https://yourdomain.com
 
 # Database Configuration
 MYSQL_ROOT_PASSWORD=secure_password
@@ -156,23 +164,35 @@ MYSQL_DATABASE=guacamole_db
 MYSQL_USER=guacamole_user
 MYSQL_PASSWORD=db_password
 
-# Blockchain Configuration
+# Guacamole
+GUAC_ADMIN_USER=guacadmin
+GUAC_ADMIN_PASS=secure_admin_password
+AUTO_LOGOUT_ON_DISCONNECT=true
+```
+
+#### Blockchain Service Configuration (`blockchain-services/.env`)
+
+```env
+# Smart Contract
 CONTRACT_ADDRESS=0xYourSmartContractAddress
-RPC_URL=https://your-blockchain-rpc-endpoint.com
-WALLET_ADDRESS=0xYourWalletAddress
-WALLET_PRIVATE_KEY=0xYourPrivateKey
 
-# Redis Configuration
-REDIS_PASSWORD=secure_redis_password
+# Network RPC URLs (with failover support)
+ETHEREUM_SEPOLIA_RPC_URL=https://rpc1.com,https://rpc2.com,https://rpc3.com
 
-# Security Configuration
+# Institutional Wallet (for automated transactions)
+INSTITUTIONAL_WALLET_ADDRESS=0xYourWalletAddress
+INSTITUTIONAL_WALLET_PASSWORD=YourSecurePassword
+
+# Security
+WALLET_ENCRYPTION_SALT=RandomString32CharsOrMore
 ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
-
-# Performance Tuning
-TOMCAT_MAX_THREADS=200
-LOG_LEVEL_AUTH=INFO
 ```
+
+**Setup:**
+1. Copy templates: `cp .env.example .env && cp blockchain-services/.env.example blockchain-services/.env`
+2. Edit both `.env` files with your values
+3. See `blockchain-services/.env.example` for complete configuration options
 
 ### 🔑 Required Files
 
@@ -184,6 +204,10 @@ certs/
 ├── privkey.pem        # SSL private key
 └── public_key.pem     # JWT public key (from marketplace/auth provider)
 ```
+
+## ?? Blockchain Wallet Persistence
+
+The `blockchain-services` container mounts `./blockchain-data` into `/app/data` to keep the encrypted institutional wallet (`wallets.json`) between restarts. Create this folder before running Docker, lock down permissions, and add it to your backup plan. It is already ignored by git so you won't accidentally commit secrets.
 
 ## Blockchain-Services Submodule Management
 
@@ -254,7 +278,6 @@ git submodule update --init --recursive
    - Auth Service: http://localhost:8080/auth
    - Guacamole: https://localhost:8443/guacamole
    - MySQL: localhost:3306
-   - Redis: localhost:6379
 
 ### Debugging
 
@@ -289,7 +312,7 @@ If you're upgrading from the Lite Version:
    ./setup.sh  # or setup.bat on Windows
    ```
 
-3. **Configure blockchain settings** in `.env`
+3. **Configure blockchain + institutional wallet settings** in `.env`
 4. **Update your frontend** to use wallet authentication
 5. **Test the complete authentication flow**
 

@@ -14,7 +14,7 @@ certs/
 
 # Database data (persistent volumes)
 mysql_data/
-redis_data/
+blockchain-data/
 
 # Auth Service specific files
 auth-service/target/

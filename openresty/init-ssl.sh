@@ -57,9 +57,9 @@ EOF
         -config "$TEMP_SSL_DIR/openssl.conf" \
         -extensions v3_req
     
-    # Generate JWT public key for auth-service (if not exists)
+    # Generate JWT public key for blockchain-services (if not exists)
     if [ ! -f "$PUBLIC_KEY_FILE" ]; then
-        echo "Generating JWT public key for auth-service..."
+        echo "Generating JWT public key for blockchain-services..."
         openssl genrsa -out /tmp/jwt_private.pem 2048
         openssl rsa -in /tmp/jwt_private.pem -pubout -out "$PUBLIC_KEY_FILE"
         rm -f /tmp/jwt_private.pem

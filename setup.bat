@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 REM =================================================================
 REM DecentraLabs Gateway - Full Version Setup Script (Windows)
-REM Complete blockchain-based authentication system with auth-service
+REM Complete blockchain-based authentication system with blockchain-services
 REM =================================================================
 
 echo DecentraLabs Gateway - Full Version Setup
@@ -59,7 +59,6 @@ echo ===================
 echo Enter database passwords (leave empty for auto-generated):
 set /p "mysql_root_password=MySQL root password: "
 set /p "mysql_password=Guacamole database password: "
-set /p "redis_password=Redis password: "
 
 if "%mysql_root_password%"=="" (
     set mysql_root_password=R00t_P@ss_%RANDOM%_%TIME:~9%
@@ -73,16 +72,9 @@ if "%mysql_password%"=="" (
     echo Generated database password: !mysql_password!
 )
 
-if "%redis_password%"=="" (
-    set redis_password=Redis_%RANDOM%_%TIME:~9%
-    set redis_password=!redis_password: =!
-    echo Generated Redis password: !redis_password!
-)
-
 REM Update passwords in .env file
 powershell -Command "(Get-Content .env) -replace 'MYSQL_ROOT_PASSWORD=.*', 'MYSQL_ROOT_PASSWORD=!mysql_root_password!' | Set-Content .env"
 powershell -Command "(Get-Content .env) -replace 'MYSQL_PASSWORD=.*', 'MYSQL_PASSWORD=!mysql_password!' | Set-Content .env"
-powershell -Command "(Get-Content .env) -replace 'REDIS_PASSWORD=.*', 'REDIS_PASSWORD=!redis_password!' | Set-Content .env"
 
 REM Update Guacamole properties file to match the configuration in .env
 echo Updating Guacamole configuration...
@@ -92,7 +84,6 @@ echo.
 echo IMPORTANT: Save these passwords securely!
 echo    Root password: !mysql_root_password!
 echo    Database password: !mysql_password!
-echo    Redis password: !redis_password!
 echo.
 
 echo Domain Configuration
@@ -144,7 +135,7 @@ if not exist certs\fullchain.pem (
     echo You need to add SSL certificates to the 'certs' folder:
     echo   * certs\fullchain.pem (certificate)
     echo   * certs\privkey.pem (private key)
-    echo   * certs\public_key.pem (auth-service's public key)
+    echo   * certs\public_key.pem (blockchain-services public key)
     echo.
     if "!domain!"=="localhost" (
         echo We will generate self-signed certificates for you...
@@ -168,7 +159,7 @@ echo Next Steps
 echo ==============
 echo 1. Review and customize .env file if needed
 echo 2. Ensure SSL certificates are in place
-echo 3. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS)
+echo 3. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)
 echo 4. Run: docker-compose up -d
 if "!domain!"=="localhost" (
     echo 5. Access: https://localhost:8443
@@ -177,7 +168,7 @@ if "!domain!"=="localhost" (
 echo 5. Access: https://!domain!
 :access_info_done
 echo    * Guacamole: /guacamole/
-echo    * Auth Service: /auth
+echo    * Blockchain Services API: /auth
 echo.
 
 REM Ask if user wants to start services
@@ -203,7 +194,7 @@ if errorlevel 0 (
     echo Access your lab at: https://!domain!
     :final_access_done
     echo    * Guacamole: /guacamole/ (guacadmin / guacadmin)
-    echo    * Auth Service: /auth
+    echo    * Blockchain Services API: /auth
     echo.
     echo To check status: docker-compose ps
     echo To view logs: docker-compose logs -f
@@ -211,7 +202,7 @@ if errorlevel 0 (
     echo Configuration:
     echo    Environment: .env
     echo    Certificates: certs\
-    echo    Auth Service Config: auth-service\src\main\resources\
+    echo    Blockchain Services Config: blockchain-services\src\main\resources\
     echo.
     echo Full version deployment complete!
     echo Your blockchain-based authentication system is now running.
@@ -225,7 +216,7 @@ goto :end
 echo Configuration complete!
 echo.
 echo Next steps:
-echo 1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS)
+echo 1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)
 echo 2. Run: docker-compose up -d
 echo 3. Access your services
 echo.
