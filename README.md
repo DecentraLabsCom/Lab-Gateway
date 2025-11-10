@@ -25,7 +25,6 @@ Complete version with advanced blockchain-based authentication and wallet operat
 * ✅ All Lite version features
 * ✅ **Blockchain Services Integration** (Spring Boot microservice)
 * ✅ **JWT Generation**: Issues and processes secure tokens with blockchain claims
-* ✅ **Redis Caching**: Performance optimization for blockchain queries
 * ✅ **Wallet Support**: Ethereum wallet support for blockchain actions and features
 * ✅ **Smart Contract Authorization**: Validates lab reservation requests on-chain
 * ✅ **Institutional Treasury Management**: Deposit or withdraw funds from the institutional treasury, set user spending limits, etc.
@@ -69,7 +68,6 @@ Each version includes its own detailed documentation:
 | **AuthX Through JWT**        | ✅    | ✅    |
 | **Blockchain Authorization** | ❌    | ✅    |
 | **JWT Generation**           | ❌    | ✅    |
-| **Redis Session Store**      | ❌    | ✅    |
 | **Wallet Support**           | ❌    | ✅    |
 | **Institutional Treasury Mgt**| ❌    | ✅    |
 | **Event Listening**          | ❌    | ✅    |
@@ -162,7 +160,7 @@ Lab Gateway (Docker) ──> host.docker.internal ──> Local Labs
 - Commercial certificate providers
 - Wildcard certificates for multiple subdomains
 
-## �️ Technology Stack
+## Technology Stack
 
 ### Core Components (Both Versions)
 
@@ -175,11 +173,10 @@ Lab Gateway (Docker) ──> host.docker.internal ──> Local Labs
 
 * **Blockchain Services** (Spring Boot) - Authentication and wallet operations microservice
 * **Web3j** - Ethereum blockchain integration
-* **Redis** - Session store and cache
 * **JWT** - Generates authentication tokens with blockchain claims
 * **Smart Contract Events** - Real-time blockchain monitoring
 
-## � Project Structure
+## Project Structure
 
 ```
 lab-gateway/
@@ -202,7 +199,7 @@ lab-gateway/
 4. **Push** to the branch (`git push origin feature/amazing-feature`)
 5. **Open** a Pull Request
 
-## � Support
+## Support
 
 * **Issues**: [GitHub Issues](https://github.com/DecentraLabsCom/lite-lab-gateway/issues)
 * **Documentation**: Check LITE-VERSION.md or FULL-VERSION.md according to your version
