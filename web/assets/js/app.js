@@ -85,43 +85,43 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 10000);
     }
 
-    // Subtle parallax effect for stars
-    let parallaxElements = [
-        { element: document.querySelector('.stars'), speed: 0.5 },
-        { element: document.querySelector('.twinkling'), speed: 0.3 }
-    ];
-
-    window.addEventListener('scroll', function() {
-        const scrolled = window.pageYOffset;
-        
-        parallaxElements.forEach(item => {
-            if (item.element) {
-                const rate = scrolled * -item.speed;
-                item.element.style.transform = `translateY(${rate}px)`;
-            }
-        });
-    });
-
-    // System status monitoring (simulated)
+    // System status monitoring - checks both Guacamole and blockchain-services
     function updateSystemStatus() {
         const statusIndicator = document.querySelector('.status-indicator');
         const statusText = statusIndicator.querySelector('.status-text');
         
-        // Simulate status check
-        fetch('/guacamole/')
-            .then(response => {
-                if (response.ok) {
-                    statusIndicator.className = 'status-indicator online';
-                    statusText.textContent = 'System Online';
-                } else {
-                    statusIndicator.className = 'status-indicator offline';
-                    statusText.textContent = 'System Unavailable';
-                }
-            })
-            .catch(() => {
+        // Check both services in parallel
+        Promise.all([
+            fetch('/guacamole/')
+                .then(response => ({ service: 'guacamole', ok: response.ok }))
+                .catch(() => ({ service: 'guacamole', ok: false })),
+            fetch('/health')
+                .then(response => response.ok ? response.json() : Promise.reject())
+                .then(data => ({ service: 'blockchain', ok: data.status === 'UP' || data.status === 'DEGRADED' }))
+                .catch(() => ({ service: 'blockchain', ok: false }))
+        ])
+        .then(results => {
+            const guacamoleOk = results[0].ok;
+            const blockchainOk = results[1].ok;
+            
+            if (guacamoleOk && blockchainOk) {
+                statusIndicator.className = 'status-indicator online';
+                statusText.textContent = 'System Online';
+            } else if (guacamoleOk || blockchainOk) {
+                statusIndicator.className = 'status-indicator online';
+                const availableServices = [];
+                if (guacamoleOk) availableServices.push('Labs');
+                if (blockchainOk) availableServices.push('Blockchain');
+                statusText.textContent = `Partial: ${availableServices.join(', ')}`;
+            } else {
                 statusIndicator.className = 'status-indicator offline';
-                statusText.textContent = 'Checking Status...';
-            });
+                statusText.textContent = 'System Unavailable';
+            }
+        })
+        .catch(() => {
+            statusIndicator.className = 'status-indicator offline';
+            statusText.textContent = 'Checking Status...';
+        });
     }
 
     // Check status every 30 seconds
