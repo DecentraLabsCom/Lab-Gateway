@@ -41,7 +41,7 @@ git switch lite
                        │   Guacamole     │    │   Blockchain    │
                        │  (Lab Access)   │    │   (Smart        │
                        └─────────────────┘    │   Contracts)    │
-                                │              └─────────────────┘
+                                │             └─────────────────┘
                                 │                        
                        ┌─────────────────┐
                        │     MySQL       │
