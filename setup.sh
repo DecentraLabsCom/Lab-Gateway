@@ -5,9 +5,45 @@
 # Complete blockchain-based authentication system with blockchain-services
 # =================================================================
 
+set -euo pipefail
+
+ROOT_ENV_FILE=".env"
+BLOCKCHAIN_ENV_FILE="blockchain-services/.env"
+
 echo "DecentraLabs Gateway - Full Version Setup"
 echo "=========================================="
 echo
+
+update_env_var() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+
+    if grep -qE "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        echo "${key}=${value}" >> "$file"
+    fi
+}
+
+get_env_default() {
+    local key="$1"
+    local file="$2"
+    local value=""
+    if [ -f "$file" ]; then
+        value=$(grep -E "^${key}=" "$file" | head -n 1 | cut -d'=' -f2-)
+    fi
+    echo "$value"
+}
+
+update_env_in_all() {
+    local key="$1"
+    local value="$2"
+    update_env_var "$ROOT_ENV_FILE" "$key" "$value"
+    if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
+        update_env_var "$BLOCKCHAIN_ENV_FILE" "$key" "$value"
+    fi
+}
 
 # Check prerequisites
 echo "Checking prerequisites..."
@@ -23,25 +59,42 @@ if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/
     exit 1
 fi
 
-echo "Docker and Docker Compose are available"
+if ! command -v git &> /dev/null; then
+    echo "Git is required to initialize blockchain-services."
+    exit 1
+fi
+
+echo "Docker, Docker Compose, and Git are available"
+echo
+
+echo "Ensuring blockchain-services submodule is present..."
+git submodule update --init --recursive blockchain-services
+echo "blockchain-services submodule ready."
 echo
 
 # Check if .env already exists
-if [ -f ".env" ]; then
+if [ -f "$ROOT_ENV_FILE" ]; then
     echo ".env file already exists!"
     read -p "Do you want to overwrite it? (y/N): " overwrite
     overwrite=$(echo "$overwrite" | tr -d ' ')
     if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
-        echo "Setup cancelled."
-        exit 0
+        echo "Keeping existing .env file."
+    else
+        cp .env.example "$ROOT_ENV_FILE"
+        echo "Overwritten .env file from template"
     fi
-    # User said yes, so overwrite
-    cp .env.example .env
-    echo "Overwritten .env file from template"
 else
-    # No .env exists, create it
-    cp .env.example .env
+    cp .env.example "$ROOT_ENV_FILE"
     echo "Created .env file from template"
+fi
+echo
+
+# Ensure blockchain-services/.env exists
+if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
+    echo "blockchain-services/.env already exists."
+else
+    cp blockchain-services/.env.example "$BLOCKCHAIN_ENV_FILE"
+    echo "Created blockchain-services/.env from template"
 fi
 echo
 
@@ -63,9 +116,9 @@ if [ -z "$mysql_password" ]; then
     echo "Generated database password: $mysql_password"
 fi
 
-# Update passwords in .env file
-sed -i "s/MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$mysql_root_password/" .env
-sed -i "s/MYSQL_PASSWORD=.*/MYSQL_PASSWORD=$mysql_password/" .env
+# Update passwords in env files
+update_env_in_all "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
+update_env_in_all "MYSQL_PASSWORD" "$mysql_password"
 
 # Update Guacamole properties file to match the configuration in .env
 echo "Updating Guacamole configuration..."
@@ -91,20 +144,20 @@ fi
 # Update .env file with intelligent defaults
 if [ "$domain" == "localhost" ]; then
     echo "Configuring for local development..."
-    sed -i 's/SERVER_NAME=.*/SERVER_NAME=localhost/' .env
-    sed -i 's/BASE_DOMAIN=.*/BASE_DOMAIN=https:\/\/localhost/' .env
-    sed -i 's/ISSUER=.*/ISSUER=https:\/\/localhost\/auth/' .env
-    sed -i 's/HTTPS_PORT=.*/HTTPS_PORT=8443/' .env
-    sed -i 's/HTTP_PORT=.*/HTTP_PORT=8080/' .env
+update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "localhost"
+update_env_var "$ROOT_ENV_FILE" "BASE_DOMAIN" "https://localhost"
+update_env_var "$ROOT_ENV_FILE" "ISSUER" "https://localhost/auth"
+update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "8443"
+update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "8080"
     echo "   * Server: https://localhost:8443"
     echo "   * Using development ports (8443/8080)"
 else
     echo "Configuring for production..."
-    sed -i "s/SERVER_NAME=.*/SERVER_NAME=$domain/" .env
-    sed -i "s/BASE_DOMAIN=.*/BASE_DOMAIN=https:\/\/$domain/" .env
-    sed -i "s/ISSUER=.*/ISSUER=https:\/\/$domain\/auth/" .env
-    sed -i 's/HTTPS_PORT=.*/HTTPS_PORT=443/' .env
-    sed -i 's/HTTP_PORT=.*/HTTP_PORT=80/' .env
+    update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "$domain"
+    update_env_var "$ROOT_ENV_FILE" "BASE_DOMAIN" "https://$domain"
+    update_env_var "$ROOT_ENV_FILE" "ISSUER" "https://$domain/auth"
+    update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "443"
+    update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "80"
     echo "   * Server: https://$domain"
     echo "   * Using standard ports (443/80)"
 fi
@@ -115,22 +168,29 @@ echo
 echo "SSL Certificates"
 echo "================"
 
-# Check certificates
-if [ ! -d "certs" ]; then
-    mkdir -p certs
-fi
+mkdir -p certs
+mkdir -p blockchain-data
 
-if [ ! -f "certs/fullchain.pem" ]; then
+if [ ! -f "certs/fullchain.pem" ] || [ ! -f "certs/privkey.pem" ]; then
     echo "SSL certificates not found!"
     echo
     echo "You need to add SSL certificates to the 'certs' folder:"
     echo "  * certs/fullchain.pem (certificate)"
     echo "  * certs/privkey.pem (private key)"
-    echo "  * certs/public_key.pem (blockchain-services public key)"
-    echo
-    if [ "$domain" == "localhost" ]; then
-        echo "We will generate self-signed certificates for you..."
-    else
+    if [ "$domain" == "localhost" ] && command -v openssl &> /dev/null; then
+        read -p "Generate a self-signed certificate for localhost now? (Y/n): " generate_cert
+        generate_cert=$(echo "$generate_cert" | tr -d ' ')
+        if [[ -z "$generate_cert" || "$generate_cert" =~ ^[Yy]$ ]]; then
+            openssl req -x509 -nodes -newkey rsa:2048 \
+                -keyout certs/privkey.pem \
+                -out certs/fullchain.pem \
+                -days 365 \
+                -subj "/CN=localhost"
+            echo "Generated self-signed certificate for localhost."
+        fi
+    fi
+    if [ "$domain" != "localhost" ]; then
+        echo
         echo "You can get valid certificates from:"
         echo "  * Let's Encrypt (certbot)"
         echo "  * Your certificate authority"
@@ -141,12 +201,83 @@ else
 fi
 
 echo
+echo "JWT Signing Keys"
+echo "================"
+if [ ! -f "certs/private_key.pem" ] || [ ! -f "certs/public_key.pem" ]; then
+    echo "Blockchain Services requires RSA keys in certs/private_key.pem and certs/public_key.pem"
+    if command -v openssl &> /dev/null; then
+        read -p "Generate RSA key pair for JWT signing now? (Y/n): " generate_keys
+        generate_keys=$(echo "$generate_keys" | tr -d ' ')
+        if [[ -z "$generate_keys" || "$generate_keys" =~ ^[Yy]$ ]]; then
+            openssl genrsa -out certs/private_key.pem 2048
+            openssl rsa -in certs/private_key.pem -pubout -out certs/public_key.pem
+            cp certs/public_key.pem certs/certificate.pem
+            echo "Generated RSA key pair for blockchain-services."
+        fi
+    else
+        echo "OpenSSL not found. Please add the RSA key pair manually."
+    fi
+else
+    echo "JWT signing key pair found"
+fi
+
+echo
+echo "Blockchain Services Configuration"
+echo "================================="
+
+contract_default=$(get_env_default "CONTRACT_ADDRESS" "$ROOT_ENV_FILE")
+read -p "Contract address [${contract_default:-0xYourDiamondContractAddress}]: " contract_address
+contract_address=${contract_address:-$contract_default}
+if [ -n "$contract_address" ]; then
+    update_env_in_all "CONTRACT_ADDRESS" "$contract_address"
+fi
+
+rpc_default=$(get_env_default "RPC_URL" "$ROOT_ENV_FILE")
+read -p "Fallback RPC URL [${rpc_default:-https://1rpc.io/sepolia}]: " rpc_url
+rpc_url=${rpc_url:-$rpc_default}
+if [ -n "$rpc_url" ]; then
+    update_env_in_all "RPC_URL" "$rpc_url"
+fi
+
+sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$ROOT_ENV_FILE")
+read -p "Comma-separated Sepolia RPC URLs [${sepolia_default:-https://1rpc.io/sepolia,https://rpc.sepolia.org}]: " sepolia_rpc
+sepolia_rpc=${sepolia_rpc:-$sepolia_default}
+if [ -n "$sepolia_rpc" ]; then
+    update_env_in_all "ETHEREUM_SEPOLIA_RPC_URL" "$sepolia_rpc"
+fi
+
+allowed_origins_default=$(get_env_default "ALLOWED_ORIGINS" "$ROOT_ENV_FILE")
+read -p "Allowed origins for CORS [${allowed_origins_default:-http://localhost:3000}]: " allowed_origins
+allowed_origins=${allowed_origins:-$allowed_origins_default}
+if [ -n "$allowed_origins" ]; then
+    update_env_in_all "ALLOWED_ORIGINS" "$allowed_origins"
+fi
+
+public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$ROOT_ENV_FILE")
+read -p "Marketplace public key URL [${public_key_url_default:-https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem}]: " marketplace_pk
+marketplace_pk=${marketplace_pk:-$public_key_url_default}
+if [ -n "$marketplace_pk" ]; then
+    update_env_in_all "MARKETPLACE_PUBLIC_KEY_URL" "$marketplace_pk"
+fi
+
+echo
+echo "Institutional Wallet Reminder"
+echo "-----------------------------"
+echo "This script does not create wallets automatically."
+echo "After the stack is running, create or import the institutional wallet"
+echo "using the blockchain-services web console (or the /wallet API) and then"
+echo "update INSTITUTIONAL_WALLET_ADDRESS / PASSWORD in:"
+echo "  - .env"
+echo "  - blockchain-services/.env"
+echo "Wallet data is stored in ./blockchain-data (already created)."
+
+echo
 echo "Next Steps"
 echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
-echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
-echo "4. Run: docker-compose up -d"
+echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, RPC_URL, INSTITUTIONAL_WALLET_*)"
+echo "4. Run: docker compose up -d (or docker-compose up -d)"
 if [ "$domain" == "localhost" ]; then
     echo "5. Access: https://localhost:8443"
 else
@@ -163,7 +294,7 @@ if [[ "$start_services" =~ ^[Nn]$ ]] || [[ "$start_services" =~ ^[Nn][Oo]$ ]]; t
     echo
     echo "Next steps:"
 echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
-    echo "2. Run: docker-compose up -d"
+echo "2. Run: docker compose up -d (or docker-compose up -d)"
     echo "3. Access your services"
     echo
     echo "For more information, see README.md"
@@ -176,17 +307,17 @@ echo "Building and starting services..."
 echo "This may take several minutes on first run..."
 
 # Use appropriate docker-compose command
-if command -v docker-compose &> /dev/null; then
-    docker-compose down --remove-orphans
-    docker-compose build --no-cache
-    docker-compose up -d
-    compose_result=$?
-else
-    docker compose down --remove-orphans
-    docker compose build --no-cache
-    docker compose up -d
-    compose_result=$?
+compose_cmd=(docker-compose)
+if ! command -v docker-compose &> /dev/null; then
+    compose_cmd=(docker compose)
 fi
+
+set +e
+"${compose_cmd[@]}" down --remove-orphans
+"${compose_cmd[@]}" build --no-cache
+"${compose_cmd[@]}" up -d
+compose_result=$?
+set -e
 
 if [ $compose_result -eq 0 ]; then
     echo
@@ -199,8 +330,9 @@ if [ $compose_result -eq 0 ]; then
     echo "   * Guacamole: /guacamole/ (guacadmin / guacadmin)"
     echo "   * Blockchain Services API: /auth"
     echo
-    echo "To check status: docker-compose ps"
-    echo "To view logs: docker-compose logs -f"
+    compose_display="${compose_cmd[*]}"
+    echo "To check status: $compose_display ps"
+    echo "To view logs: $compose_display logs -f"
     echo
     echo "Configuration:"
     echo "   Environment: .env"

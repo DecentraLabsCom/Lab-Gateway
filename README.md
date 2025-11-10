@@ -73,13 +73,13 @@ git switch lite
 ### Using Setup Scripts (Recommended)
 
 The setup scripts will automatically:
-- ✅ Check Docker prerequisites
-- ✅ Configure environment variables
-- ✅ Set up database passwords (auto-generated or custom)
-- ✅ Configure domain and ports (localhost vs production)
-- ✅ Generate SSL certificates for localhost (if needed)
-- ✅ Configure blockchain & institutional wallet settings
-- ✅ Start all services automatically (including blockchain-services)
+- ✅ Check Docker, Docker Compose, and Git prerequisites
+- ✅ Initialize/refresh the `blockchain-services` submodule and env files
+- ✅ Configure environment variables (database, domain, blockchain, CORS)
+- ✅ Generate database passwords and, if OpenSSL is available, offer to create self-signed TLS/JWT keys for localhost
+- ✅ Create the `blockchain-data/` directory for wallet persistence
+- ✅ Optionally start every container with `docker compose up -d`
+- ☑️ Remind you to create/import the institutional wallet later from the blockchain-services web console
 
 **Windows:**
 ```cmd
@@ -135,7 +135,7 @@ If you prefer manual configuration:
 
 4. **Start the services:**
    ```bash
-   docker-compose up -d --build
+   docker compose up -d --build
    ```
 
 ## ⚙️ Configuration
@@ -209,6 +209,20 @@ certs/
 
 The `blockchain-services` container mounts `./blockchain-data` into `/app/data` to keep the encrypted institutional wallet (`wallets.json`) between restarts. Create this folder before running Docker, lock down permissions, and add it to your backup plan. It is already ignored by git so you won't accidentally commit secrets.
 
+> The setup scripts create this directory automatically. Make sure it is backed up and has restricted permissions in production.
+
+## Institutional Wallet Setup
+
+The setup scripts no longer create wallets automatically. To provision the institutional wallet:
+
+1. Run `setup.sh`/`setup.bat`, review the blockchain values, and start the stack (`docker compose up -d`).
+2. Visit your blockchain-services console (`https://localhost:8443/wallet-dashboard` or `https://your-domain/wallet-dashboard`) and authenticate as an administrator.
+3. Use the wallet section to **create** or **import** the institutional wallet (you can still call the `/wallet/create` API if you prefer).
+4. Copy the resulting wallet address and the password you chose into **both** `.env` and `blockchain-services/.env` (`INSTITUTIONAL_WALLET_ADDRESS` / `INSTITUTIONAL_WALLET_PASSWORD`).
+5. Verify the encrypted wallet file (`wallets.json`) exists under `blockchain-data/`.
+
+This manual step keeps the private material in your control while the setup scripts continue to manage the rest of the deployment.
+
 ## Blockchain-Services Submodule Management
 
 The Full Version uses the blockchain-services as a Git submodule. Here's how to manage it:
@@ -271,7 +285,7 @@ git submodule update --init --recursive
 
 1. **Start services in development mode:**
    ```bash
-   SPRING_PROFILES_ACTIVE=dev docker-compose up -d
+   SPRING_PROFILES_ACTIVE=dev docker compose up -d
    ```
 
 2. **Access services:**
@@ -294,8 +308,8 @@ JPA_SHOW_SQL=true
 The auth service supports hot reload in development:
 ```bash
 # Rebuild only auth service
-docker-compose build blockchain-services
-docker-compose up -d blockchain-services
+docker compose build blockchain-services
+docker compose up -d blockchain-services
 ```
 
 ## 🪶 Migration from Lite Version
@@ -319,7 +333,7 @@ If you're upgrading from the Lite Version:
 ## 📞 Support
 
 - **Documentation**: Check this README and setup scripts
-- **Logs**: Use `docker-compose logs [service]` for troubleshooting
+- **Logs**: Use `docker compose logs [service]` for troubleshooting
 - **Issues**: Report issues on the project repository
 - **Configuration**: Review `.env.example` for all available options
 
