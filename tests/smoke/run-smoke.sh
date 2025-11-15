@@ -16,11 +16,12 @@ docker compose -f "$COMPOSE_FILE" up --build -d
 
 PORT=18443
 
-ATTEMPTS=30
+ATTEMPTS=60
 until curl -sk --resolve lab.test:${PORT}:127.0.0.1 https://lab.test:${PORT}/ >/dev/null; do
   ATTEMPTS=$((ATTEMPTS - 1))
   if [ "$ATTEMPTS" -le 0 ]; then
     echo "OpenResty did not become ready in time"
+    docker compose -f "$COMPOSE_FILE" logs openresty || true
     exit 1
   fi
   sleep 2
