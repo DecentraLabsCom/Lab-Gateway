@@ -1,5 +1,5 @@
 # 🚀 DecentraLabs Gateway - Full Version
-![Gateway Tests](../../actions/workflows/gateway-tests.yml/badge.svg)
+[![Gateway Tests](../../actions/workflows/gateway-tests.yml/badge.svg)](https://github.com/DecentraLabsCom/Lab-Gateway/actions/workflows/gateway-tests.yml)
 
 ## 🎯 Overview
 
