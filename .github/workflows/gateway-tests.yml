@@ -1,0 +1,29 @@
+name: Gateway Tests
+
+on:
+  push:
+    branches: ["full", "lite", "main"]
+  pull_request:
+    branches: ["full", "lite", "main"]
+
+jobs:
+  lua-and-smoke-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run Lua unit tests with coverage
+        run: >
+          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace
+          openresty/openresty:alpine-fat sh -c
+          "luarocks install luacov >/dev/null &&
+           luajit -lluacov openresty/tests/run.lua &&
+           luacov"
+
+      - name: Run OpenResty smoke test
+        run: |
+          chmod +x tests/smoke/run-smoke.sh
+          tests/smoke/run-smoke.sh

@@ -16,6 +16,7 @@ local server_name = os.getenv("SERVER_NAME") or "localhost"
 local issuer = os.getenv("ISSUER") or "https://sarlab.dia.uned.es/auth"
 local https_port = os.getenv("HTTPS_PORT") or "443"
 local auto_logout = os.getenv("AUTO_LOGOUT_ON_DISCONNECT") or "false"
+local guac_api_url = os.getenv("GUAC_API_URL")
 
 config:set("server_name", server_name)
 config:set("guac_uri", "/guacamole")
@@ -24,6 +25,11 @@ config:set("admin_user", admin_user)
 config:set("admin_pass", admin_pass)
 config:set("https_port", https_port)
 config:set("auto_logout_on_disconnect", auto_logout:lower() == "true")
+if guac_api_url and guac_api_url ~= "" then
+    config:set("guac_api_url", guac_api_url)
+else
+    config:set("guac_api_url", "http://127.0.0.1:8080/guacamole/api")
+end
 
 -- Read the public key from a file
 local file = io.open("/etc/ssl/private/public_key.pem", "r")

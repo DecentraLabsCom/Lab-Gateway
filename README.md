@@ -1,4 +1,5 @@
 # 🚀 DecentraLabs Gateway - Full Version
+![Gateway Tests](../../actions/workflows/gateway-tests.yml/badge.svg)
 
 ## 🎯 Overview
 
@@ -311,6 +312,32 @@ The auth service supports hot reload in development:
 docker compose build blockchain-services
 docker compose up -d blockchain-services
 ```
+
+### Gateway Tests
+
+Unit tests cover the OpenResty gateway logic (Lua handlers and session guard). They run via the OpenResty container so you do not need a local Lua installation:
+
+```bash
+docker run --rm -v "${PWD}:/workspace" -w /workspace openresty/openresty:alpine-fat luajit openresty/tests/run.lua
+```
+
+On PowerShell use `${PWD}` in the `-v` mapping. The command executes every spec under `openresty/tests/unit/` through a lightweight Lua test runner.
+
+For an end-to-end smoke check (OpenResty ↔ Guacamole proxy logic) use:
+
+```bash
+tests/smoke/run-smoke.sh
+```
+
+The script spins up a miniature docker-compose environment with mock services, validates that JWT cookies are issued, and ensures Guacamole receives the propagated `Authorization` header.
+
+To collect LuaCov coverage metrics:
+
+```bash
+docker run --rm -v "${PWD}:/workspace" -w /workspace openresty/openresty:alpine-fat sh -c "luarocks install luacov >/dev/null && luajit -lluacov openresty/tests/run.lua && luacov"
+```
+
+Coverage data will be written to `luacov.report.out` and `luacov.stats.out`.
 
 ## 🪶 Migration from Lite Version
 

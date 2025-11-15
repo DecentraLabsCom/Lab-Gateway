@@ -11,6 +11,8 @@ logs/
 
 # Certificates and keys (security)
 certs/
+luacov.stats.out
+luacov.report.out
 
 # Database data (persistent volumes)
 mysql_data/
