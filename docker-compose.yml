@@ -67,7 +67,7 @@ services:
       guacamole:
         condition: service_healthy
       blockchain-services:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f -L http://localhost:80/ -H 'Host: ${SERVER_NAME}' --connect-timeout 5 --insecure"]
       timeout: 10s
