@@ -38,7 +38,7 @@ fi
 RESPONSE=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -b "$COOKIE_FILE" https://lab.test:${PORT}/guacamole/api/echo)
 echo "Smoke response: $RESPONSE"
 
-if ! echo "$RESPONSE" | grep -q '"authorization":"smoke-user"'; then
+if ! echo "$RESPONSE" | grep -Eq '"authorization"[[:space:]]*:[[:space:]]*"smoke-user"'; then
   echo "Authorization header not propagated through OpenResty"
   exit 1
 fi
