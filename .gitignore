@@ -10,7 +10,7 @@ secrets/ # Directory for secret files (in case we implement Docker Secrets)
 logs/
 
 # Certificates and keys (security)
-certs/
+/certs/
 luacov.stats.out
 luacov.report.out
 
