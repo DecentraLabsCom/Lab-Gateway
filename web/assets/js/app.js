@@ -34,21 +34,6 @@ document.addEventListener('DOMContentLoaded', function() {
         observer.observe(accessPanel);
     }
 
-    // Typewriter animation for title
-    function typeWriter(element, text, speed = 100) {
-        let i = 0;
-        element.innerHTML = '';
-        
-        function typing() {
-            if (i < text.length) {
-                element.innerHTML += text.charAt(i);
-                i++;
-                setTimeout(typing, speed);
-            }
-        }
-        typing();
-    }
-
     // Enhanced hover effect for buttons
     const accessButtons = document.querySelectorAll('.access-btn');
     accessButtons.forEach(btn => {
