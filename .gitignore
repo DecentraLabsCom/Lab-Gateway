@@ -43,13 +43,14 @@ target/
 
 # IDE files
 .idea/
+.vscode/
 *.swp
 *.swo
-# Note: .vscode/settings.json is intentionally committed for workspace configuration
 
 # OS files
+.DS_Store
 Thumbs.db
-# Note: .DS_Store files are tracked to maintain directory structure
 
-# Ignore dev notes but keep roadmaps committed
-# Note: dev/ directory documentation is intentionally committed
+# GitHub Copilot workspace tools and temporary files
+.github/java-upgrade/
+.github/**/logs/
