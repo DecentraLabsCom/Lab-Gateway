@@ -1,8 +1,10 @@
 # Lite Version Guide
 
+> **Note**: You are viewing documentation for the **Lite Version** (branch `lite`). For the full blockchain-based version with wallet authentication and institutional treasury management, see the [main README](README.md) on the `main` branch.
+
 ## 🎯 Overview
 
-The Lite Version of DecentraLabs Gateway provides a lightweight, JWT-validated laboratory access system. It's designed for environments where you already have an existing authentication system and just need secure lab access.
+The Lite Version of DecentraLabs Gateway provides a lightweight, JWT-validated laboratory access system. It's designed for environments where you already have an existing authentication system and just need secure lab access without blockchain integration.
 
 ## 🏗️ Architecture
 
@@ -55,6 +57,7 @@ setup.bat
 **Linux/macOS:**
 
 ```bash
+chmod +x setup.sh
 ./setup.sh
 ```
 
@@ -74,7 +77,7 @@ setup.bat
 3.  **Deploy services:**
 
     ```bash
-    docker-compose up -d
+    docker compose up -d
     ```
 
 ## ⚙️ Configuration
@@ -147,25 +150,25 @@ The `public_key.pem` file must contain the public key that corresponds to the pr
 
 ```bash
 # Check all services
-docker-compose ps
+docker compose ps
 
 # Check specific service logs
-docker-compose logs -f openresty
-docker-compose logs -f guacamole
-docker-compose logs -f mysql
+docker compose logs -f openresty
+docker compose logs -f guacamole
+docker compose logs -f mysql
 ```
 
 ### Service Control
 
 ```bash
 # Restart services
-docker-compose restart [service_name]
+docker compose restart [service_name]
 
 # Stop all services
-docker-compose down
+docker compose down
 
 # Update services
-docker-compose pull && docker-compose up -d
+docker compose pull && docker compose up -d
 ```
 
 ## 🔍 Monitoring & Logging
@@ -175,7 +178,7 @@ docker-compose pull && docker-compose up -d
 OpenResty provides detailed access logging:
 
 ```bash
-docker-compose logs -f openresty
+docker compose logs -f openresty
 ```
 
 ### Database Monitoring
@@ -195,7 +198,7 @@ docker exec -it [mysql_container] mysqladmin processlist -u root -p
 1.  **Start services:**
 
     ```bash
-    docker-compose up -d
+    docker compose up -d
     ```
 2. **Access services:**
    * Guacamole: https://localhost:8443/guacamole
@@ -247,21 +250,14 @@ The lite version minimizes security risks by:
 # Check issuer and audience configuration
 ```
 
-**SSL certificate errors:**
-
-```bash
-# Verify certificate files exist in certs/
-openssl x509 -in certs/fullchain.pem -text -noout
-```
-
 **Guacamole connection issues:**
 
 ```bash
 # Check container logs
-docker-compose logs guacamole
+docker compose logs guacamole
 
 # Verify database connection
-docker-compose logs mysql
+docker compose logs mysql
 ```
 
 ### Performance Optimization
@@ -273,30 +269,33 @@ For better performance:
 * Enable log rotation
 * Monitor memory usage
 
-## 📈 Migration to Full Version
+## 🚀 Upgrade to Full Version
 
-If you later need blockchain authentication features:
+If you later need blockchain authentication features and institutional treasury management:
 
-1.  **Switch to full branch:**
+1.  **Switch to main branch:**
 
     ```bash
-    git checkout full
+    git checkout main
     ```
 2.  **Deploy full version:**
 
     ```bash
-    ./deploy-full.sh  # or deploy-full.bat on Windows
+    ./setup.sh  # or setup.bat on Windows
     ```
 3. **Configure blockchain settings:**
-   * Set up smart contract addresses
+   * Set up smart contract addresses in `blockchain-services/.env`
    * Configure blockchain RPC endpoints
    * Set up wallet authentication
+   * Create or import institutional wallet
+
+See the [main README](README.md) for complete documentation on the full version.
 
 ## 📞 Support
 
-* **Documentation**: Check this README and setup scripts
-* **Logs**: Use `docker-compose logs [service]` for troubleshooting
-* **Issues**: Report issues on the project repository
+* **Documentation**: Check this README and the [main README](README.md) for full version features
+* **Logs**: Use `docker compose logs [service]` for troubleshooting
+* **Issues**: Report issues on the [project repository](https://github.com/DecentraLabsCom/lite-lab-gateway/issues)
 * **Configuration**: Review `.env.example` for all available options
 
 ***

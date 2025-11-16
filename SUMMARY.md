@@ -2,17 +2,13 @@
 
 ## Introduction
 
-* [Lab Gateway Overview](README.md)
+* [DecentraLabs Gateway - Main Version](README.md)
 
-## Getting Started
+## Alternative Version
 
 * [Lite Version Guide](LITE-VERSION.md)
-* [Full Version Guide](FULL-VERSION.md)
 
-## CONFIGURING LAB CONNECTIONS
+## Configuration
 
 * [Guacamole Connections](configuring-lab-connections/guacamole-connections.md)
-
-## Development
-
 * [Logging Configuration](LOGGING.md)
