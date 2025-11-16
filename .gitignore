@@ -5,14 +5,10 @@
 *.env
 secrets/ # Directory for secret files (in case we implement Docker Secrets)
 
-# Lite and full version files
+# Runtime certificate directory (generated at setup)
 certs/
-guacamole/
-mysql/
-openresty/
-web/
 
-# Full version-specific auth service
+# Full version-specific auth service (deprecated)
 auth-service/
 
 # Logs
@@ -35,26 +31,25 @@ auth-service/.idea/
 auth-service/keys/
 auth-service/secrets/
 
-# Maven and Java build artifacts
-*.jar
-*.war
+# Maven and Java build artifacts (but allow committed JARs in guacamole/)
 *.class
 target/
 .mvn/
+# Note: JARs in guacamole/extensions/ and guacamole/lib/ are intentionally committed
 
 # Temporary files
 *.tmp
 *.bak
 
 # IDE files
-.vscode/
 .idea/
 *.swp
 *.swo
+# Note: .vscode/settings.json is intentionally committed for workspace configuration
 
 # OS files
-.DS_Store
 Thumbs.db
+# Note: .DS_Store files are tracked to maintain directory structure
 
-# Project specific
-dev/
+# Ignore dev notes but keep roadmaps committed
+# Note: dev/ directory documentation is intentionally committed
