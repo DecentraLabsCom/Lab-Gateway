@@ -12,6 +12,7 @@ services:
       - DATABASE_URL=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}
       - DATABASE_USER=${MYSQL_USER}
       - DATABASE_PASSWORD=${MYSQL_PASSWORD}
+      - BASE_DOMAIN=https://${SERVER_NAME}:${HTTPS_PORT}
     volumes:
       - ./certs:/app/config/keys:ro
       - ./blockchain-data:/app/data
