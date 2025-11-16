@@ -54,3 +54,6 @@ Thumbs.db
 # GitHub Copilot workspace tools and temporary files
 .github/java-upgrade/
 .github/**/logs/
+
+# Development notes and planning (keep local only)
+dev/
