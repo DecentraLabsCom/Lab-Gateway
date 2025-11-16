@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: ["full", "lite", "main"]
 
+permissions:
+  contents: read
+
 jobs:
   lua-and-smoke-tests:
     runs-on: ubuntu-latest

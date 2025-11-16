@@ -34,15 +34,6 @@ document.addEventListener('DOMContentLoaded', function() {
         observer.observe(accessPanel);
     }
 
-    // Particle effect on cursor (optional)
-    let mouseX = 0;
-    let mouseY = 0;
-
-    document.addEventListener('mousemove', function(e) {
-        mouseX = e.clientX;
-        mouseY = e.clientY;
-    });
-
     // Typewriter animation for title
     function typeWriter(element, text, speed = 100) {
         let i = 0;
