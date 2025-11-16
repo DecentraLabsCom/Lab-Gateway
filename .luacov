@@ -1,0 +1,8 @@
+statsfile = "luacov.stats.out"
+reportfile = "luacov.report.out"
+include = {
+    "openresty/lua/modules/.*"
+}
+exclude = {
+    "openresty/tests/.*"
+}

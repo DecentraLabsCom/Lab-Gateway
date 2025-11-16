@@ -19,17 +19,28 @@ auth-service/
 *.log
 logs/
 
-# SSL Certificates and keys (security)
-certs/*.key
-certs/privkey.pem
-certs/fullchain.pem
-certs/*_private.pem
+# Certificates and keys (security)
+/certs/
+luacov.stats.out
+luacov.report.out
 
-# JWT keys (keep public key, hide private)
-certs/jwt_private.pem
-
-# Database data (persistent volume)
+# Database data (persistent volumes)
 mysql_data/
+blockchain-data/
+
+# Auth Service specific files
+auth-service/target/
+auth-service/.vscode/
+auth-service/.idea/
+auth-service/keys/
+auth-service/secrets/
+
+# Maven and Java build artifacts
+*.jar
+*.war
+*.class
+target/
+.mvn/
 
 # Temporary files
 *.tmp

@@ -1,0 +1,4 @@
+[submodule "blockchain-services"]
+	path = blockchain-services
+	url = https://github.com/DecentraLabsCom/blockchain-services.git
+	branch = main
