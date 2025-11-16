@@ -121,7 +121,6 @@ This separation keeps concerns isolated and makes the blockchain service indepen
 SERVER_NAME=yourdomain.com
 HTTPS_PORT=443
 HTTP_PORT=80
-BASE_DOMAIN=https://yourdomain.com
 
 # Database Configuration
 MYSQL_ROOT_PASSWORD=secure_password
@@ -178,15 +177,25 @@ The `blockchain-services` container mounts `./blockchain-data` into `/app/data` 
 
 ### Institutional Wallet Setup
 
-The setup scripts no longer create wallets automatically. To provision the institutional wallet:
+The institutional wallet is managed automatically by blockchain-services:
 
-1. Run `setup.sh`/`setup.bat`, review the blockchain values, and start the stack (`docker compose up -d`).
-2. Visit your blockchain-services console (`https://localhost:8443/wallet-dashboard` or `https://your-domain/wallet-dashboard`) and authenticate as an administrator.
-3. Use the wallet section to **create** or **import** the institutional wallet (you can still call the `/wallet/create` API if you prefer).
-4. Copy the resulting wallet address and the password you chose into **both** `.env` and `blockchain-services/.env` (`INSTITUTIONAL_WALLET_ADDRESS` / `INSTITUTIONAL_WALLET_PASSWORD`).
-5. Verify the encrypted wallet file (`wallets.json`) exists under `blockchain-data/`.
+1. **First-time setup**: Create or import the wallet via:
+   - Web console: `https://localhost:8443/wallet-dashboard` (or `https://your-domain/wallet-dashboard`)
+   - Or API: Call `/wallet/create` or `/wallet/import` endpoints
 
-This manual step keeps the private material in your control while the setup scripts continue to manage the rest of the deployment.
+2. **Automatic configuration**: After creation/import, blockchain-services automatically:
+   - Stores the encrypted wallet in `blockchain-data/wallets.json`
+   - Writes credentials to `blockchain-data/wallet-config.properties`
+   - Loads the wallet on every restart using the stored configuration
+
+3. **Manual override (optional)**: Only needed if using external secret management:
+   ```env
+   # In blockchain-services/.env - leave empty for automatic configuration
+   INSTITUTIONAL_WALLET_ADDRESS=  # Auto-configured from wallet-config.properties
+   INSTITUTIONAL_WALLET_PASSWORD= # Auto-configured from wallet-config.properties
+   ```
+
+The encrypted wallet and configuration files are stored in `blockchain-data/` which is mounted as a Docker volume and excluded from git.
 
 ## 🔄 Blockchain-Services Submodule Management
 

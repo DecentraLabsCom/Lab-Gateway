@@ -145,7 +145,6 @@ fi
 if [ "$domain" == "localhost" ]; then
     echo "Configuring for local development..."
 update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "localhost"
-update_env_var "$ROOT_ENV_FILE" "BASE_DOMAIN" "https://localhost"
 update_env_var "$ROOT_ENV_FILE" "ISSUER" "https://localhost/auth"
 update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "8443"
 update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "8080"
@@ -154,7 +153,6 @@ update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "8080"
 else
     echo "Configuring for production..."
     update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "$domain"
-    update_env_var "$ROOT_ENV_FILE" "BASE_DOMAIN" "https://$domain"
     update_env_var "$ROOT_ENV_FILE" "ISSUER" "https://$domain/auth"
     update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "443"
     update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "80"

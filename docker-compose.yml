@@ -9,7 +9,6 @@ services:
       - ./blockchain-services/.env  # Blockchain-specific configuration (optional overrides)
     environment:
       # Override only gateway-specific integrations
-      - BASE_DOMAIN=${BASE_DOMAIN:-https://sarlab.dia.uned.es}
       - DATABASE_URL=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}
       - DATABASE_USER=${MYSQL_USER}
       - DATABASE_PASSWORD=${MYSQL_PASSWORD}
