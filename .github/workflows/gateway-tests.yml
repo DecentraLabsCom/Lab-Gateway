@@ -25,8 +25,11 @@ jobs:
           submodules: recursive
 
       - name: Run Lua unit tests with coverage
+        env:
+          LUA_PATH: "/workspace/lua/?.lua;/workspace/lua/?/init.lua;;"
         run: >
           docker run --rm
+          -e LUA_PATH="${LUA_PATH}"
           -v "${{ github.workspace }}/openresty:/workspace"
           -w /workspace
           openresty/openresty:alpine-fat sh -c
