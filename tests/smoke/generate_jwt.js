@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const crypto = require("crypto");
 
 const header = { alg: "RS256", typ: "JWT" };
@@ -16,11 +17,13 @@ function base64url(obj) {
 }
 
 const signingInput = base64url(header) + "." + base64url(payload);
-const key = fs.readFileSync("./certs/jwt-private.pem");
+const keyPath = path.join(__dirname, "certs", "jwt-private.pem");
+const key = fs.readFileSync(keyPath);
 const signature = crypto
   .createSign("RSA-SHA256")
   .update(signingInput)
   .sign(key)
   .toString("base64url");
 
-fs.writeFileSync("./jwt.txt", signingInput + "." + signature);
+const outputPath = path.join(__dirname, "jwt.txt");
+fs.writeFileSync(outputPath, signingInput + "." + signature);

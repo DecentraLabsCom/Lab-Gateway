@@ -62,5 +62,6 @@ if file then
     -- Store public key in shared dict
     ngx.shared.cache:set("public_key", public_key)
 else
+    ---@diagnostic disable-next-line: param-type-mismatch
     ngx.log(ngx.ERR, "Unable to read public key file")
 end
