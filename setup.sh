@@ -144,16 +144,14 @@ fi
 # Update .env file with intelligent defaults
 if [ "$domain" == "localhost" ]; then
     echo "Configuring for local development..."
-update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "localhost"
-update_env_var "$ROOT_ENV_FILE" "ISSUER" "https://localhost/auth"
-update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "8443"
-update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "8080"
+    update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "localhost"
+    update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "8443"
+    update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "8080"
     echo "   * Server: https://localhost:8443"
     echo "   * Using development ports (8443/8080)"
 else
     echo "Configuring for production..."
     update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "$domain"
-    update_env_var "$ROOT_ENV_FILE" "ISSUER" "https://$domain/auth"
     update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "443"
     update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "80"
     echo "   * Server: https://$domain"

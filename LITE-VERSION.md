@@ -101,8 +101,9 @@ MYSQL_PASSWORD=db_password
 # Guacamole Configuration
 GUAC_ADMIN_USER=guacadmin
 GUAC_ADMIN_PASS=guacadmin
-ISSUER=YourAuthServiceName
 ```
+
+The issuer advertised in JWT validation comes from `SERVER_NAME` and `HTTPS_PORT`. Only override it if absolutely necessary by setting the `ISSUER` environment variable when launching OpenResty (for example `docker run -e ISSUER=https://custom/auth ...`).
 
 ### 🔑 Required Files
 

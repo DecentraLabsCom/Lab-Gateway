@@ -13,10 +13,33 @@ local config = ngx.shared.config
 local admin_user = os.getenv("GUAC_ADMIN_USER") or "guacadmin"
 local admin_pass = os.getenv("GUAC_ADMIN_PASS") or "guacadmin"
 local server_name = os.getenv("SERVER_NAME") or "localhost"
-local issuer = os.getenv("ISSUER") or "https://sarlab.dia.uned.es/auth"
 local https_port = os.getenv("HTTPS_PORT") or "443"
 local auto_logout = os.getenv("AUTO_LOGOUT_ON_DISCONNECT") or "false"
 local guac_api_url = os.getenv("GUAC_API_URL")
+
+local function trim(value)
+    if not value then
+        return nil
+    end
+    return (value:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+local function build_default_issuer()
+    local override = trim(os.getenv("ISSUER"))
+    if override and override ~= "" then
+        return override
+    end
+
+    local name = trim(server_name) or "localhost"
+    local port_segment = ""
+    if https_port and https_port ~= "" and https_port ~= "443" then
+        port_segment = ":" .. https_port
+    end
+
+    return string.format("https://%s%s%s", name, port_segment, "/auth")
+end
+
+local issuer = build_default_issuer()
 
 config:set("server_name", server_name)
 config:set("guac_uri", "/guacamole")

@@ -5,7 +5,7 @@ const header = { alg: "RS256", typ: "JWT" };
 const payload = {
   sub: "smoke-user",
   jti: "smoke-jti-123",
-  iss: "https://smoke.issuer",
+  iss: "https://lab.test:18443/auth",
   aud: "https://lab.test:18443/guacamole",
   exp: 1893456000
 };

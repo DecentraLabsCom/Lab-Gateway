@@ -16,7 +16,6 @@ services:
       GUAC_ADMIN_USER: admin
       GUAC_ADMIN_PASS: secret
       SERVER_NAME: lab.test
-      ISSUER: https://smoke.issuer
       HTTPS_PORT: "18443"
       GUAC_API_URL: http://guacamole:8080/guacamole/api
     volumes:

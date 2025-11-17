@@ -134,6 +134,9 @@ GUAC_ADMIN_PASS=secure_admin_password
 AUTO_LOGOUT_ON_DISCONNECT=true
 ```
 
+OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
+environment. All authentication endpoints live under the fixed `/auth` base path to match both services.
+
 #### Blockchain Service Configuration (`blockchain-services/.env`)
 
 ```env

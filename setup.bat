@@ -132,7 +132,6 @@ if "!domain!"=="" set "domain=localhost"
 if /i "!domain!"=="localhost" (
     echo Configuring for local development...
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "localhost"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "ISSUER" "https://localhost/auth"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "8443"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "8080"
     echo    * Server: https://localhost:8443
@@ -140,7 +139,6 @@ if /i "!domain!"=="localhost" (
 ) else (
     echo Configuring for production...
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "!domain!"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "ISSUER" "https://!domain!/auth"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "443"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "80"
     echo    * Server: https://!domain!
