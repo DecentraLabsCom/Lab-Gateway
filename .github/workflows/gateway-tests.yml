@@ -26,10 +26,12 @@ jobs:
 
       - name: Run Lua unit tests with coverage
         run: >
-          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace
+          docker run --rm
+          -v "${{ github.workspace }}/openresty:/workspace"
+          -w /workspace
           openresty/openresty:alpine-fat sh -c
           "luarocks install luacov >/dev/null &&
-           luajit -lluacov openresty/tests/run.lua &&
+           luajit -lluacov tests/run.lua &&
            luacov"
 
       - name: Run OpenResty smoke test
