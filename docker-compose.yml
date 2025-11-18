@@ -99,6 +99,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./mysql/000-ensure-user.sh:/docker-entrypoint-initdb.d/000-ensure-user.sh:ro
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
       - ./mysql/002-create-admin-user.sql:/docker-entrypoint-initdb.d/002-create-admin-user.sql:ro
       - ./mysql/003-rdp-example.sql:/docker-entrypoint-initdb.d/003-rdp-example.sql:ro
