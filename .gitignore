@@ -8,9 +8,6 @@ secrets/ # Directory for secret files (in case we implement Docker Secrets)
 # Runtime certificate directory (generated at setup)
 certs/
 
-# Full version-specific auth service (deprecated)
-auth-service/
-
 # Logs
 *.log
 logs/
@@ -59,3 +56,6 @@ Thumbs.db
 dev/
 docs-lab-station/
 ops-worker/hosts.json
+
+# Smart contracts
+contracts/

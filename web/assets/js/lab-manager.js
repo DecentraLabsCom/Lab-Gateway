@@ -53,6 +53,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostListEl = $('#hostList');
     const hostState = {};
     let hostNames = loadHosts();
+    
+        // Reservation timeline elements
+        const timelineInput = $('#timelineReservationId');
+        const timelineBtn = $('#loadTimelineBtn');
+        const timelineResult = $('#timelineResult');
+    
+        if (timelineBtn && timelineInput && timelineResult) {
+            timelineBtn.addEventListener('click', fetchTimeline);
+            timelineInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    fetchTimeline();
+                }
+            });
+        }
 
     if (addHostBtn && hostInput) {
         addHostBtn.addEventListener('click', addHost);
@@ -390,4 +405,225 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`${command} failed on ${host}`, 'error');
         }
     }
+    
+        async function fetchTimeline() {
+            if (!timelineResult || !timelineInput) return;
+            const reservationId = (timelineInput.value || '').trim();
+            if (!reservationId) {
+                setTimelineMessage('Provide a reservation id.');
+                timelineInput.focus();
+                return;
+            }
+            setTimelineMessage('Loading timeline...');
+            try {
+                const res = await fetch(`/ops/api/reservations/timeline?reservationId=${encodeURIComponent(reservationId)}`);
+                const body = await res.json();
+                if (!res.ok) {
+                    const msg = body?.error || 'Unable to load timeline.';
+                    setTimelineMessage(msg);
+                    showToast(msg, 'error');
+                    return;
+                }
+                renderTimeline(body);
+                showToast('Timeline loaded', 'success');
+            } catch (err) {
+                console.error(err);
+                setTimelineMessage('Timeline request failed.');
+                showToast('Timeline request failed', 'error');
+            }
+        }
+    
+        function setTimelineMessage(message) {
+            if (!timelineResult) return;
+            timelineResult.classList.add('empty');
+            timelineResult.textContent = message;
+        }
+    
+        function renderTimeline(data) {
+            if (!timelineResult) return;
+            const summary = buildTimelineSummary(data);
+            const phases = buildTimelinePhases(data.phases || {});
+            const operations = buildTimelineOperations(data.operations || []);
+            const heartbeat = buildTimelineHeartbeat(data.heartbeat, data.host);
+            timelineResult.classList.remove('empty');
+            timelineResult.innerHTML = summary + phases + operations + heartbeat;
+        }
+    
+        function buildTimelineSummary(data) {
+            const reservation = data.reservation || {};
+            const host = data.host || {};
+            const rows = [
+                { label: 'Reservation', value: reservation.reservationId || 'n/a', mono: true },
+                { label: 'Lab', value: host.labId || reservation.labId || 'n/a' },
+                { label: 'Host', value: host.name || 'n/a' },
+                { label: 'Status', value: reservation.status || 'unknown' },
+                { label: 'Schedule', value: formatRange(reservation.start, reservation.end) },
+            ];
+            return `
+                <div class="timeline-summary">
+                    ${rows.map(row => `
+                        <div>
+                            <div class="label">${row.label}</div>
+                            <div class="value ${row.mono ? 'mono' : ''}">${htmlEscape(row.value)}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+    
+        function buildTimelinePhases(phases) {
+            const config = [
+                { key: 'wake', label: 'Wake' },
+                { key: 'prepare', label: 'Prepare' },
+                { key: 'schedulerEnd', label: 'Scheduler End' },
+                { key: 'release', label: 'Release' },
+                { key: 'power', label: 'Power' },
+            ];
+            const pills = config.map(item => {
+                const phase = phases[item.key];
+                if (!phase) {
+                    return `<span class="pill soft">${item.label}: pending</span>`;
+                }
+                const cls = phase.success ? 'good' : 'bad';
+                const title = buildPhaseTitle(phase);
+                const status = phase.status || (phase.success ? 'ok' : 'error');
+                return `<span class="pill ${cls}" title="${htmlEscape(title)}">${item.label}: ${htmlEscape(status)}</span>`;
+            }).join('');
+            return `
+                <div class="timeline-phases">
+                    <h3>Phases</h3>
+                    <div class="pill-group">${pills}</div>
+                </div>
+            `;
+        }
+    
+        function buildTimelineOperations(operations) {
+            if (!operations.length) {
+                return `
+                    <div class="timeline-steps">
+                        <h3>Operation Log</h3>
+                        <div class="timeline-step">No orchestration events captured yet.</div>
+                    </div>
+                `;
+            }
+            const steps = operations.map((op, idx) => renderTimelineStep(op, idx)).join('');
+            return `
+                <div class="timeline-steps">
+                    <h3>Operation Log</h3>
+                    ${steps}
+                </div>
+            `;
+        }
+    
+        function renderTimelineStep(op, idx) {
+            const success = !!op.success;
+            const status = op.status || (success ? 'success' : 'error');
+            const metaParts = [formatDate(op.createdAt)];
+            if (op.durationMs !== null && op.durationMs !== undefined) {
+                metaParts.push(`${op.durationMs} ms`);
+            }
+            if (op.responseCode) {
+                metaParts.push(`code ${op.responseCode}`);
+            }
+            const meta = metaParts.filter(Boolean).join(' · ');
+            return `
+                <div class="timeline-step ${success ? 'success' : 'error'}">
+                    <div class="timeline-step-header">
+                        <span>${htmlEscape(op.action || `Step ${idx + 1}`)}</span>
+                        <span class="pill ${success ? 'good' : 'bad'}">${htmlEscape(status)}</span>
+                    </div>
+                    <div class="meta">${htmlEscape(meta)}</div>
+                    ${op.message ? `<div class="message">${htmlEscape(op.message)}</div>` : ''}
+                </div>
+            `;
+        }
+    
+        function buildTimelineHeartbeat(heartbeat, host) {
+            if (!heartbeat) {
+                const name = host?.name;
+                const message = name ? `No heartbeat data for ${name} yet.` : 'No heartbeat data.';
+                return `
+                    <div class="timeline-heartbeat">
+                        <h3>Heartbeat</h3>
+                        <div class="muted-text">${htmlEscape(message)}</div>
+                    </div>
+                `;
+            }
+            return `
+                <div class="timeline-heartbeat">
+                    <h3>Heartbeat (${htmlEscape(formatDate(heartbeat.timestamp))})</h3>
+                    <div class="pill-group">
+                        ${renderHeartbeatPill('Ready', heartbeat.ready)}
+                        ${renderHeartbeatPill('Local mode', heartbeat.localMode)}
+                        ${renderHeartbeatPill('Local session', heartbeat.localSession)}
+                    </div>
+                    <div class="meta">Power: ${htmlEscape(renderPowerInfo(heartbeat.lastPower))}</div>
+                    <div class="meta">Forced logoff: ${htmlEscape(renderLogoffInfo(heartbeat.lastForcedLogoff))}</div>
+                </div>
+            `;
+        }
+    
+        function renderHeartbeatPill(label, value) {
+            const state = formatBool(value);
+            const cls = value === true ? 'good' : value === false ? 'soft' : 'soft';
+            return `<span class="pill ${cls}">${label}: ${state}</span>`;
+        }
+    
+        function renderPowerInfo(info) {
+            if (!info || (!info.timestamp && !info.mode)) {
+                return 'n/a';
+            }
+            const parts = [];
+            if (info.mode) parts.push(info.mode);
+            if (info.timestamp) parts.push(formatDate(info.timestamp));
+            return parts.join(' @ ');
+        }
+    
+        function renderLogoffInfo(info) {
+            if (!info || (!info.timestamp && !info.user)) {
+                return 'n/a';
+            }
+            const parts = [];
+            if (info.user) parts.push(info.user);
+            if (info.timestamp) parts.push(formatDate(info.timestamp));
+            return parts.join(' · ');
+        }
+    
+        function buildPhaseTitle(phase) {
+            const parts = [];
+            if (phase.createdAt) parts.push(formatDate(phase.createdAt));
+            if (phase.message) parts.push(phase.message);
+            return parts.join(' · ');
+        }
+    
+        function formatRange(start, end) {
+            if (!start && !end) return 'n/a';
+            return `${formatDate(start)} → ${formatDate(end)}`;
+        }
+    
+        function formatDate(value) {
+            if (!value) return 'n/a';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) {
+                return value;
+            }
+            return date.toLocaleString();
+        }
+    
+        function formatBool(value) {
+            if (value === true) return 'yes';
+            if (value === false) return 'no';
+            return 'n/a';
+        }
+    
+        function htmlEscape(value) {
+            const str = (value ?? '').toString();
+            return str.replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[ch] || ch);
+        }
 });

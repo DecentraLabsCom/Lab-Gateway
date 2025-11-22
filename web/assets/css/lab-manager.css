@@ -245,6 +245,93 @@ body {
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.error { border-color: #ff6b6b; color: #ffb3b3; }
 .toast.success { border-color: var(--success); color: var(--success); }
+.mono { font-family: 'Courier New', Courier, monospace; word-break: break-all; }
+
+.timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.timeline.empty {
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    color: var(--muted);
+    background: #0f1422;
+}
+.timeline-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    background: #0f1422;
+}
+.timeline-summary .label { color: var(--muted); font-size: 0.85rem; }
+.timeline-summary .value { font-weight: 600; }
+.timeline-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.timeline-step {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: #0d1220;
+}
+.timeline-step-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+}
+.timeline-step .meta { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+.timeline-step.success { border-color: var(--success); }
+.timeline-step.error { border-color: #ff6b6b; }
+.timeline-step .message { margin-top: 6px; font-size: 0.9rem; }
+.timeline-phases {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    background: #0f1422;
+}
+.timeline-phases h3,
+.timeline-steps h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+}
+.timeline .pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.timeline-steps {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    background: #0d1220;
+}
+.timeline-steps .timeline-step { margin-bottom: 10px; }
+.timeline-steps .timeline-step:last-child { margin-bottom: 0; }
+.timeline-heartbeat {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    background: #0f1422;
+}
+.timeline-heartbeat h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+}
+.timeline-heartbeat .pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
 
 .modal {
     position: fixed;

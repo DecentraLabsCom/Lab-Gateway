@@ -85,8 +85,41 @@ Enable with `OPS_POLL_ENABLED=true` (env) and set `OPS_POLL_INTERVAL=60` (second
 - Fetch heartbeat and latest session-guard event line.
 - Upsert host catalog + insert heartbeat snapshot.
 
+## Reservation automation (optional)
+
+`OPS_RESERVATION_AUTOMATION=true` (default value) lets the worker wake/prepare/release Lab Stations around each booking automatically. Requirements:
+
+1. Every host entry in `hosts.json` must declare the blockchain lab IDs it can serve:
+
+   ```json
+   {
+     "name": "lab-ws-01",
+     "address": "lab-ws-01",
+     "labs": ["1", "chemistry-lab"]
+   }
+   ```
+
+2. `MYSQL_DSN` must point to the same database that contains the `lab_reservations` table (see `mysql/004-auth-service-schema.sql`).
+
+When enabled, the worker:
+
+- Looks ahead `OPS_RESERVATION_START_LEAD` seconds (default 120) and triggers `/api/reservations/start` once for CONFIRMED reservations; successful runs mark the DB row as `ACTIVE`.
+- Waits `OPS_RESERVATION_END_DELAY` seconds (default 60) after the end time to invoke `/api/reservations/end`; successful runs mark the row as `COMPLETED`.
+- Writes summary rows to `reservation_operations` using `action = "scheduler:start" | "scheduler:end"` so you can audit or retry.
+
+Tuning knobs:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OPS_RESERVATION_AUTOMATION` | `true` | Master toggle. |
+| `OPS_RESERVATION_SCAN_INTERVAL` | `30` | How often to scan MySQL (seconds). |
+| `OPS_RESERVATION_START_LEAD` | `120` | Seconds before `start_time` to prepare the host / lab station. |
+| `OPS_RESERVATION_END_DELAY` | `60` | Seconds after `end_time` to release/power actions. |
+| `OPS_RESERVATION_LOOKBACK` | `21600` | Maximum age (seconds) of reservations to consider when catching up. |
+| `OPS_RESERVATION_RETRY_COOLDOWN` | `60` | Minimum seconds between scheduler attempts for the same reservation. |
+
 ## Deployment notes
 
 - OpenResty proxies `/ops/` to this service (see `openresty/lab_access.conf`).
-- Use a dedicated network-only account for WinRM (`SeDenyInteractiveLogonRight` on the host).
+- Use a dedicated network-only account for WinRM (`SeDenyInteractiveLogonRight` on the host / lab station).
 - Keep secrets outside git; `hosts.json` is gitignored on purpose.

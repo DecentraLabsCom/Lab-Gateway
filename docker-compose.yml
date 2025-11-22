@@ -210,6 +210,10 @@ services:
       - OPS_CONFIG=/app/hosts.json
       - OPS_POLL_ENABLED=true
       - OPS_POLL_INTERVAL=60
+      - OPS_RESERVATION_AUTOMATION=true
+      - OPS_RESERVATION_SCAN_INTERVAL=30
+      - OPS_RESERVATION_START_LEAD=120
+      - OPS_RESERVATION_END_DELAY=60
       - MYSQL_DSN=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
     volumes:
       - ./ops-worker/hosts.json:/app/hosts.json:ro

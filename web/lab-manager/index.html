@@ -147,6 +147,25 @@
                     </div>
                 </div>
             </section>
+
+            <section class="grid single-column">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Reservation Timeline</h2>
+                            <p>Inspect WoL/prepare/release telemetry for a booking.</p>
+                        </div>
+                        <div class="actions inline-actions">
+                            <input type="text" id="timelineReservationId" class="host-input" placeholder="0x... reservation hash">
+                            <button class="primary-btn" id="loadTimelineBtn"><i class="fas fa-search"></i> Load</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="hint">Paste the on-chain reservation key (transaction hash) to view its orchestration steps.</div>
+                        <div id="timelineResult" class="timeline empty">Awaiting reservation id.</div>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 

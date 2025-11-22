@@ -8,12 +8,12 @@ import logging
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, jsonify, request
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, Connection
 from wakeonlan import send_magic_packet
 import winrm
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -35,15 +35,26 @@ def load_config() -> Dict[str, Any]:
 
 class HostRegistry:
     def __init__(self, cfg: Dict[str, Any]):
-        self.hosts = {}
+        self.hosts: Dict[str, Dict[str, Any]] = {}
+        self.lab_index: Dict[str, Dict[str, Any]] = {}
         for host in cfg.get("hosts", []):
             if "name" not in host or "address" not in host:
                 continue
             key = host["name"].lower()
             self.hosts[key] = host
+            for lab_id in host.get("labs", []):
+                lab_key = str(lab_id).strip().lower()
+                if not lab_key:
+                    continue
+                self.lab_index[lab_key] = host
 
     def get(self, name: str) -> Optional[Dict[str, Any]]:
         return self.hosts.get(name.lower()) if name else None
+
+    def get_by_lab(self, lab_id: Optional[Any]) -> Optional[Dict[str, Any]]:
+        if lab_id is None:
+            return None
+        return self.lab_index.get(str(lab_id).strip().lower())
 
     def all_hosts(self):
         return list(self.hosts.values())
@@ -538,19 +549,17 @@ def _get_mandatory_field(payload: Dict[str, Any], *keys: str) -> Optional[str]:
     return None
 
 
-@APP.route("/api/reservations/start", methods=["POST"])
-def api_reservation_start():
-    payload = request.get_json(force=True, silent=True) or {}
+def handle_reservation_start(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     reservation_id = _get_mandatory_field(payload, "reservationId", "reservation_id")
     host_name = _get_mandatory_field(payload, "host", "hostName")
     lab_id = _get_mandatory_field(payload, "labId", "lab_id")
 
     if not reservation_id or not host_name:
-        return jsonify({"error": "reservationId and host are required"}), 400
+        return {"error": "reservationId and host are required"}, 400
 
     host = HOSTS.get(host_name)
     if not host:
-        return jsonify({"error": f"host '{host_name}' not found"}), 404
+        return {"error": f"host '{host_name}' not found"}, 404
 
     wake_enabled = parse_bool(payload.get("wake", True), True)
     prepare_enabled = parse_bool(payload.get("prepare", True), True)
@@ -581,22 +590,20 @@ def api_reservation_start():
         "labId": lab_id,
         "steps": steps,
     }
-    return jsonify(response), status_code
+    return response, status_code
 
 
-@APP.route("/api/reservations/end", methods=["POST"])
-def api_reservation_end():
-    payload = request.get_json(force=True, silent=True) or {}
+def handle_reservation_end(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     reservation_id = _get_mandatory_field(payload, "reservationId", "reservation_id")
     host_name = _get_mandatory_field(payload, "host", "hostName")
     lab_id = _get_mandatory_field(payload, "labId", "lab_id")
 
     if not reservation_id or not host_name:
-        return jsonify({"error": "reservationId and host are required"}), 400
+        return {"error": "reservationId and host are required"}, 400
 
     host = HOSTS.get(host_name)
     if not host:
-        return jsonify({"error": f"host '{host_name}' not found"}), 404
+        return {"error": f"host '{host_name}' not found"}, 404
 
     release_enabled = parse_bool(payload.get("release", True), True)
     power_cfg = payload.get("powerAction")
@@ -629,7 +636,197 @@ def api_reservation_end():
         "labId": lab_id,
         "steps": steps,
     }
-    return jsonify(response), status_code
+    return response, status_code
+
+
+@APP.route("/api/reservations/start", methods=["POST"])
+def api_reservation_start():
+    payload = request.get_json(force=True, silent=True) or {}
+    response, status = handle_reservation_start(payload)
+    return jsonify(response), status
+
+
+@APP.route("/api/reservations/end", methods=["POST"])
+def api_reservation_end():
+    payload = request.get_json(force=True, silent=True) or {}
+    response, status = handle_reservation_end(payload)
+    return jsonify(response), status
+
+
+def _to_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc).isoformat()
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def build_reservation_timeline(reservation_id: str) -> Dict[str, Any]:
+    if not DB_ENGINE:
+        raise RuntimeError("Database not configured")
+
+    with DB_ENGINE.begin() as conn:
+        reservation = conn.execute(
+            text(
+                """
+                SELECT transaction_hash, lab_id, status, start_time, end_time,
+                       wallet_address, created_at, updated_at
+                FROM lab_reservations
+                WHERE transaction_hash = :reservation_id
+                """
+            ),
+            {"reservation_id": reservation_id},
+        ).mappings().first()
+
+        if not reservation:
+            raise LookupError("Reservation not found")
+
+        lab_id = reservation.get("lab_id")
+        host = HOSTS.get_by_lab(lab_id)
+        host_name = (host or {}).get("name")
+
+        operations = conn.execute(
+            text(
+                """
+                SELECT action, status, success, message, payload,
+                       response_code, duration_ms, created_at
+                FROM reservation_operations
+                WHERE reservation_id = :reservation_id
+                ORDER BY created_at ASC, id ASC
+                """
+            ),
+            {"reservation_id": reservation_id},
+        ).mappings().all()
+
+        op_entries: List[Dict[str, Any]] = []
+        for op in operations:
+            payload = op.get("payload")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except json.JSONDecodeError:
+                    pass
+            op_entries.append(
+                {
+                    "action": op.get("action"),
+                    "status": op.get("status"),
+                    "success": bool(op.get("success")),
+                    "message": op.get("message"),
+                    "payload": payload,
+                    "responseCode": op.get("response_code"),
+                    "durationMs": op.get("duration_ms"),
+                    "createdAt": _to_iso(op.get("created_at")),
+                }
+            )
+
+        latest_heartbeat = None
+        if host_name:
+            latest_heartbeat = _fetch_latest_heartbeat(conn, host_name)
+
+        phases = _summarize_phases(op_entries)
+
+        reservation_payload = {
+            "reservationId": reservation.get("transaction_hash"),
+            "labId": lab_id,
+            "status": reservation.get("status"),
+            "start": _to_iso(reservation.get("start_time")),
+            "end": _to_iso(reservation.get("end_time")),
+            "walletAddress": reservation.get("wallet_address"),
+            "createdAt": _to_iso(reservation.get("created_at")),
+            "updatedAt": _to_iso(reservation.get("updated_at")),
+        }
+
+        return {
+            "reservation": reservation_payload,
+            "host": {
+                "name": host_name,
+                "labId": lab_id,
+                "config": host,
+            },
+            "operations": op_entries,
+            "phases": phases,
+            "heartbeat": latest_heartbeat,
+        }
+
+
+def _fetch_latest_heartbeat(conn: Connection, host_name: str) -> Optional[Dict[str, Any]]:
+    row = conn.execute(
+        text(
+            """
+            SELECT h.timestamp_utc, h.ready, h.local_mode, h.local_session,
+                   h.last_power_action_ts, h.last_power_action_mode,
+                   h.last_forced_logoff_ts, h.last_forced_logoff_user,
+                   h.raw_json
+            FROM lab_host_heartbeat h
+            JOIN lab_hosts ho ON ho.id = h.host_id
+            WHERE ho.name = :host
+            ORDER BY h.timestamp_utc DESC
+            LIMIT 1
+            """
+        ),
+        {"host": host_name},
+    ).mappings().first()
+
+    if not row:
+        return None
+
+    raw = row.get("raw_json")
+    parsed_raw = None
+    if isinstance(raw, str):
+        try:
+            parsed_raw = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed_raw = None
+
+    return {
+        "timestamp": _to_iso(row.get("timestamp_utc")),
+        "ready": row.get("ready"),
+        "localMode": row.get("local_mode"),
+        "localSession": row.get("local_session"),
+        "lastPower": {
+            "timestamp": _to_iso(row.get("last_power_action_ts")),
+            "mode": row.get("last_power_action_mode"),
+        },
+        "lastForcedLogoff": {
+            "timestamp": _to_iso(row.get("last_forced_logoff_ts")),
+            "user": row.get("last_forced_logoff_user"),
+        },
+        "raw": parsed_raw,
+    }
+
+
+def _summarize_phases(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def picker(prefixes: List[str]) -> Optional[Dict[str, Any]]:
+        for entry in reversed(operations):
+            action = entry.get("action") or ""
+            if any(action.startswith(prefix) for prefix in prefixes):
+                return entry
+        return None
+
+    return {
+        "wake": picker(["wake", "scheduler:start"]),
+        "prepare": picker(["prepare"]),
+        "release": picker(["release"]),
+        "power": picker(["power:"]),
+        "schedulerEnd": picker(["scheduler:end"]),
+    }
+
+
+@APP.route("/api/reservations/timeline", methods=["GET"])
+def api_reservation_timeline():
+    if not DB_ENGINE:
+        return jsonify({"error": "Database not configured"}), 500
+    reservation_id = request.args.get("reservationId") or request.args.get("reservation_id")
+    if not reservation_id:
+        return jsonify({"error": "reservationId is required"}), 400
+    try:
+        data = build_reservation_timeline(reservation_id)
+    except LookupError:
+        return jsonify({"error": "Reservation not found"}), 404
+    except RuntimeError as exc:
+        logging.error("Timeline error: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+    return jsonify(data)
 
 
 def poll_all_hosts():
@@ -641,14 +838,261 @@ def poll_all_hosts():
             logging.error("Heartbeat poll failed for %s: %s", host.get("name"), exc)
 
 
+class ReservationOrchestrator:
+    def __init__(self, engine: Optional[Engine], registry: HostRegistry):
+        self.engine = engine
+        self.registry = registry
+        self.enabled = parse_bool(os.getenv("OPS_RESERVATION_AUTOMATION", False), False)
+        self.scan_interval = int(os.getenv("OPS_RESERVATION_SCAN_INTERVAL", "30"))
+        self.start_lead = int(os.getenv("OPS_RESERVATION_START_LEAD", "120"))
+        self.end_delay = int(os.getenv("OPS_RESERVATION_END_DELAY", "60"))
+        self.lookback = int(os.getenv("OPS_RESERVATION_LOOKBACK", "21600"))  # 6 hours
+        self.retry_cooldown = int(os.getenv("OPS_RESERVATION_RETRY_COOLDOWN", "60"))
+
+    def register(self, scheduler: BackgroundScheduler) -> int:
+        if not self.enabled:
+            logging.info("Reservation orchestrator disabled (OPS_RESERVATION_AUTOMATION=false)")
+            return 0
+        if not self.engine:
+            logging.warning("Reservation orchestrator disabled: MYSQL_DSN not configured")
+            return 0
+        scheduler.add_job(
+            self.scan_once,
+            "interval",
+            seconds=self.scan_interval,
+            next_run_time=datetime.utcnow(),
+            id="reservation-orchestrator",
+            replace_existing=True,
+        )
+        logging.info(
+            "Reservation orchestrator enabled (scan=%ss, lead=%ss, end_delay=%ss)",
+            self.scan_interval,
+            self.start_lead,
+            self.end_delay,
+        )
+        return 1
+
+    def scan_once(self):
+        if not self.enabled or not self.engine:
+            return
+        now = datetime.utcnow()
+        try:
+            with self.engine.begin() as conn:
+                start_rows = self._fetch_start_candidates(conn, now)
+                end_rows = self._fetch_end_candidates(conn, now)
+        except Exception as exc:
+            logging.error("Reservation orchestrator query failed: %s", exc)
+            return
+
+        for row in start_rows:
+            self._dispatch_start(row)
+        for row in end_rows:
+            self._dispatch_end(row)
+
+    def _fetch_start_candidates(self, conn: Connection, now: datetime):
+        window_upper = now + timedelta(seconds=self.start_lead)
+        window_lower = now - timedelta(seconds=self.lookback)
+        retry_cutoff = now - timedelta(seconds=self.retry_cooldown)
+        query = text(
+            """
+            SELECT transaction_hash, lab_id, start_time, end_time, status
+            FROM lab_reservations r
+            WHERE r.status = 'CONFIRMED'
+              AND r.start_time <= :window_upper
+              AND r.start_time >= :window_lower
+              AND NOT EXISTS (
+                  SELECT 1 FROM reservation_operations o
+                  WHERE o.reservation_id = r.transaction_hash
+                    AND o.action = 'scheduler:start'
+                    AND o.created_at >= :retry_cutoff
+              )
+            ORDER BY r.start_time ASC
+            """
+        )
+        result = conn.execute(
+            query,
+            {
+                "window_upper": window_upper,
+                "window_lower": window_lower,
+                "retry_cutoff": retry_cutoff,
+            },
+        )
+        return result.mappings().all()
+
+    def _fetch_end_candidates(self, conn: Connection, now: datetime):
+        ready_time = now - timedelta(seconds=self.end_delay)
+        window_lower = now - timedelta(seconds=self.lookback)
+        retry_cutoff = now - timedelta(seconds=self.retry_cooldown)
+        query = text(
+            """
+            SELECT transaction_hash, lab_id, start_time, end_time, status
+            FROM lab_reservations r
+            WHERE r.status IN ('CONFIRMED','ACTIVE')
+              AND r.end_time <= :ready_time
+              AND r.end_time >= :window_lower
+              AND NOT EXISTS (
+                  SELECT 1 FROM reservation_operations o
+                  WHERE o.reservation_id = r.transaction_hash
+                    AND o.action = 'scheduler:end'
+                    AND o.created_at >= :retry_cutoff
+              )
+            ORDER BY r.end_time ASC
+            """
+        )
+        result = conn.execute(
+            query,
+            {
+                "ready_time": ready_time,
+                "window_lower": window_lower,
+                "retry_cutoff": retry_cutoff,
+            },
+        )
+        return result.mappings().all()
+
+    def _dispatch_start(self, row: Dict[str, Any]):
+        reservation_id = row["transaction_hash"]
+        lab_id = row.get("lab_id")
+        host = self.registry.get_by_lab(lab_id)
+        host_name = (host or {}).get("name") or "unmapped"
+        if not host:
+            message = f"No host mapping for lab {lab_id}"
+            logging.warning("%s", message)
+            self._record_scheduler_op(reservation_id, lab_id, host_name, "start", False, message)
+            return
+
+        payload = {
+            "reservationId": reservation_id,
+            "host": host_name,
+            "labId": lab_id,
+        }
+        response, status_code = handle_reservation_start(payload)
+        success = bool(response.get("success")) and status_code == 200
+        message = None if success else response.get("error") or "Reservation start failed"
+        self._record_scheduler_op(
+            reservation_id,
+            lab_id,
+            host_name,
+            "start",
+            success,
+            message,
+            payload={"response": response, "status_code": status_code},
+            response_code=status_code,
+        )
+        if success:
+            self._update_status(reservation_id, row.get("status"), "ACTIVE")
+
+    def _dispatch_end(self, row: Dict[str, Any]):
+        reservation_id = row["transaction_hash"]
+        lab_id = row.get("lab_id")
+        host = self.registry.get_by_lab(lab_id)
+        host_name = (host or {}).get("name") or "unmapped"
+        if not host:
+            message = f"No host mapping for lab {lab_id}"
+            logging.warning("%s", message)
+            self._record_scheduler_op(reservation_id, lab_id, host_name, "end", False, message)
+            return
+
+        payload = {
+            "reservationId": reservation_id,
+            "host": host_name,
+            "labId": lab_id,
+        }
+        response, status_code = handle_reservation_end(payload)
+        success = bool(response.get("success")) and status_code == 200
+        message = None if success else response.get("error") or "Reservation end failed"
+        self._record_scheduler_op(
+            reservation_id,
+            lab_id,
+            host_name,
+            "end",
+            success,
+            message,
+            payload={"response": response, "status_code": status_code},
+            response_code=status_code,
+        )
+        if success:
+            self._update_status(reservation_id, row.get("status"), "COMPLETED")
+
+    def _record_scheduler_op(
+        self,
+        reservation_id: str,
+        lab_id: Optional[Any],
+        host_name: str,
+        action_suffix: str,
+        success: bool,
+        message: Optional[str] = None,
+        payload: Optional[Dict[str, Any]] = None,
+        response_code: Optional[int] = None,
+    ):
+        status = "completed" if success else "failed"
+        record_reservation_operation(
+            reservation_id,
+            str(lab_id) if lab_id is not None else None,
+            host_name,
+            f"scheduler:{action_suffix}",
+            status,
+            success,
+            response_code=response_code,
+            payload=payload,
+            message=message,
+        )
+
+    def _update_status(self, reservation_id: str, current_status: Optional[str], new_status: str):
+        if not self.engine or not current_status:
+            return
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE lab_reservations
+                        SET status=:new_status, updated_at=UTC_TIMESTAMP()
+                        WHERE transaction_hash=:reservation_id AND status=:current_status
+                        """
+                    ),
+                    {
+                        "reservation_id": reservation_id,
+                        "current_status": current_status,
+                        "new_status": new_status,
+                    },
+                )
+        except Exception as exc:
+            logging.error(
+                "Failed to update reservation %s status to %s: %s",
+                reservation_id,
+                new_status,
+                exc,
+            )
+
+
+RESERVATION_AUTOMATOR = ReservationOrchestrator(DB_ENGINE, HOSTS)
+
+
 def start_scheduler():
-    if not os.getenv("OPS_POLL_ENABLED", "false").lower() == "true":
-        return
-    interval = int(os.getenv("OPS_POLL_INTERVAL", "60"))
     scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(poll_all_hosts, "interval", seconds=interval, next_run_time=datetime.utcnow())
+    jobs = 0
+
+    if os.getenv("OPS_POLL_ENABLED", "false").lower() == "true":
+        interval = int(os.getenv("OPS_POLL_INTERVAL", "60"))
+        scheduler.add_job(
+            poll_all_hosts,
+            "interval",
+            seconds=interval,
+            next_run_time=datetime.utcnow(),
+            id="heartbeat-poller",
+            replace_existing=True,
+        )
+        jobs += 1
+        logging.info("Heartbeat poller enabled (interval %ss)", interval)
+
+    jobs += RESERVATION_AUTOMATOR.register(scheduler)
+
+    if jobs == 0:
+        logging.info("Scheduler not started (no jobs enabled)")
+        return
+
     scheduler.start()
-    logging.info("Scheduler started (interval %ss)", interval)
+    logging.info("Scheduler started with %s job(s)", jobs)
 
 
 def configure_logging():
