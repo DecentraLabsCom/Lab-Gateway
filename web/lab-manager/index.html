@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab Manager - DecentraLabs</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+</head>
+<body>
+    <div class="page">
+        <header class="lm-header">
+            <div class="brand">
+                <img src="../assets/images/LogoBannerDLabs.png" alt="DecentraLabs" class="brand-logo">
+                <div>
+                    <div class="brand-title">Lab Manager</div>
+                    <div class="brand-subtitle">Notifications & Operations</div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a class="ghost-btn" href="/"><i class="fas fa-arrow-left"></i> Back to Gateway</a>
+                <button class="ghost-btn" id="btnTestLoad"><i class="fas fa-rotate-right"></i> Reload Config</button>
+                <button class="primary-btn" id="saveConfigBtn"><i class="fas fa-save"></i> Save Settings</button>
+            </div>
+        </header>
+
+        <main class="lm-main">
+            <section class="grid two-columns">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Notifications Setup</h2>
+                            <p>Configure email + ICS invites for reservation lifecycle.</p>
+                        </div>
+                        <span class="pill" id="configStatus">Unsaved</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-grid">
+                            <label class="field inline-config">
+                                <span>Delivery</span>
+                                <div class="config-row">
+                                    <button class="ghost-btn" id="configureBtn"><i class="fas fa-sliders"></i> Configure</button>
+                                    <span class="pill soft small" id="driverSummary">NOOP</span>
+                                </div>
+                            </label>
+                            <label class="field action-field">
+                                <span>Test</span>
+                                <button class="ghost-btn" id="btnTestEmail"><i class="fas fa-paper-plane"></i> Send Test Email</button>
+                            </label>
+                            <label class="field">
+                                <span>From (email)</span>
+                                <input type="email" id="from" placeholder="notifications@yourdomain">
+                            </label>
+                            <label class="field">
+                                <span>From Name</span>
+                                <input type="text" id="fromName" placeholder="Lab Gateway">
+                            </label>
+                            <label class="field full">
+                                <span>Recipients (comma separated)</span>
+                                <input type="text" id="defaultTo" placeholder="ops@domain.com, alerts@domain.com">
+                            </label>
+                            <label class="field">
+                                <span>Timezone</span>
+                                <select id="timezone"></select>
+                            </label>
+                            <label class="field toggle-field toggle-right">
+                                <span>Enabled</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="enabled">
+                                    <span class="slider"></span>
+                                </label>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Lab Connections</h2>
+                            <p>Guacamole / remote access endpoints.</p>
+                        </div>
+                        <span class="pill soft">coming soon</span>
+                    </div>
+                    <div class="card-body list">
+                        <div class="item">
+                            <div class="item-title">Guacamole</div>
+                            <div class="item-meta">Synchronized via Gateway</div>
+                        </div>
+                        <div class="item">
+                            <div class="item-title">Additional integrations</div>
+                            <div class="item-meta">SSH/VNC/HTTP endpoints can be shown here.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="grid two-columns">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Upcoming Reservations</h2>
+                            <p>Auto-sync to calendar when approved.</p>
+                        </div>
+                        <span class="pill soft">coming soon</span>
+                    </div>
+                    <div class="card-body list fixed-height">
+                        <div class="empty">No data yet. This will list approved/pending reservations with start/end and lab.</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Activity & Logs</h2>
+                            <p>Keep track of notification attempts.</p>
+                        </div>
+                        <span class="pill soft">coming soon</span>
+                    </div>
+                    <div class="card-body list fixed-height">
+                        <div class="empty">In a next iteration this will display a feed of notifications sent/failed, with retry options.</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div class="modal" id="configModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-sliders"></i> Delivery Settings</h3>
+                <button class="ghost-btn icon-btn" id="closeModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Driver</span>
+                        <select id="driver">
+                            <option value="NOOP">Noop (disabled)</option>
+                            <option value="SMTP">SMTP</option>
+                            <option value="GRAPH">Graph (M365)</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="stack">
+                    <div class="subcard" id="smtpSection">
+                        <div class="subcard-header">
+                            <h3><i class="fas fa-envelope"></i> SMTP</h3>
+                            <div class="subcard-header-actions">
+                                <span class="muted-text">STARTTLS</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="smtpStartTls" checked>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-grid">
+                            <label class="field">
+                                <span>Host</span>
+                                <input type="text" id="smtpHost" placeholder="smtp.example.com">
+                            </label>
+                            <label class="field">
+                                <span>Port</span>
+                                <input type="number" id="smtpPort" placeholder="587">
+                            </label>
+                            <label class="field">
+                                <span>Username</span>
+                                <input type="text" id="smtpUser" placeholder="user">
+                            </label>
+                            <label class="field">
+                                <span>Password</span>
+                                <input type="password" id="smtpPass" placeholder="********">
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="subcard" id="graphSection">
+                        <div class="subcard-header">
+                            <h3><i class="fas fa-cloud"></i> Microsoft Graph</h3>
+                        </div>
+                        <div class="form-grid">
+                            <label class="field">
+                                <span>Tenant ID</span>
+                                <input type="text" id="graphTenant" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                            </label>
+                            <label class="field">
+                                <span>Client ID</span>
+                                <input type="text" id="graphClientId">
+                            </label>
+                            <label class="field">
+                                <span>Client Secret</span>
+                                <input type="password" id="graphClientSecret" placeholder="********">
+                            </label>
+                            <label class="field">
+                                <span>From (UPN/mailbox)</span>
+                                <input type="text" id="graphFrom" placeholder="notifications@org.onmicrosoft.com">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="cancelModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="../assets/js/lab-manager.js"></script>
+</body>
+</html>

@@ -13,6 +13,8 @@ a:hover {
     --primary-color: #00f5ff;
     --secondary-color: #ff006e;
     --accent-color: #8338ec;
+    --manager-color: #48f2a5;
+    --manager-accent: #1e90ff;
     --bg-primary: #0a0a0f;
     --bg-secondary: #1a1a2e;
     --bg-card: #1a1a2eb3;
@@ -329,6 +331,12 @@ body {
     box-shadow: 0 5px 15px var(--accent-bg-66);
 }
 
+.access-btn.manager {
+    background: linear-gradient(45deg, var(--manager-color), var(--manager-accent));
+    color: var(--bg-primary);
+    box-shadow: 0 5px 15px rgba(30, 144, 255, 0.35);
+}
+
 .access-btn:hover {
     transform: translateY(-3px);
     box-shadow: 0 10px 25px var(--primary-bg-99);
@@ -337,6 +345,12 @@ body {
 .access-btn.secondary:hover {
     transform: translateY(-3px);
     box-shadow: 0 10px 25px var(--accent-bg-99);
+}
+
+.access-btn.manager:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 25px rgba(30, 144, 255, 0.55);
+    filter: brightness(1.05);
 }
 
 .btn-icon {
