@@ -66,6 +66,8 @@ services:
         condition: service_healthy
       blockchain-services:
         condition: service_started
+      ops-worker:
+        condition: service_started
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f -L http://localhost:80/ -H 'Host: ${SERVER_NAME}' --connect-timeout 5 --insecure"]
       timeout: 10s
@@ -103,6 +105,8 @@ services:
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
       - ./mysql/002-create-admin-user.sql:/docker-entrypoint-initdb.d/002-create-admin-user.sql:ro
       - ./mysql/003-rdp-example.sql:/docker-entrypoint-initdb.d/003-rdp-example.sql:ro
+      - ./mysql/004-auth-service-schema.sql:/docker-entrypoint-initdb.d/004-auth-service-schema.sql:ro
+      - ./mysql/005-labstation-ops.sql:/docker-entrypoint-initdb.d/005-labstation-ops.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
       timeout: 20s
@@ -193,6 +197,46 @@ services:
     restart: always
     #ports:
     # - "4822:4822"
+    networks:
+      - guacnet
+
+  ops-worker:
+    build:
+      context: ./ops-worker
+      dockerfile: Dockerfile
+    environment:
+      - OPS_BIND=0.0.0.0
+      - OPS_PORT=8081
+      - OPS_CONFIG=/app/hosts.json
+      - OPS_POLL_ENABLED=true
+      - OPS_POLL_INTERVAL=60
+      - MYSQL_DSN=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+    volumes:
+      - ./ops-worker/hosts.json:/app/hosts.json:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.4'
+        reservations:
+          memory: 128M
+          cpus: '0.2'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=ops-worker"
+    restart: always
     networks:
       - guacnet
 

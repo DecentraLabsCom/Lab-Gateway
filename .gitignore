@@ -57,3 +57,5 @@ Thumbs.db
 
 # Development notes and planning (keep local only)
 dev/
+docs-lab-station/
+ops-worker/hosts.json

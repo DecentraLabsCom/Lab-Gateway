@@ -28,6 +28,28 @@
         </header>
 
         <main class="lm-main">
+            <section class="grid single-column">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Lab Station Ops</h2>
+                            <p>Poll heartbeat and trigger LabStation commands via /ops.</p>
+                        </div>
+                        <div class="actions inline-actions">
+                            <input type="text" id="hostInput" class="host-input" placeholder="lab-ws-01">
+                            <button class="ghost-btn" id="addHostBtn"><i class="fas fa-plus"></i> Add host</button>
+                            <button class="primary-btn" id="refreshHostsBtn"><i class="fas fa-rotate-right"></i> Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="hint" id="opsHint">Hosts are stored locally in your browser. Ensure ops-worker/hosts.json has matching entries and WinRM creds.</div>
+                        <div class="host-list" id="hostList">
+                            <div class="empty">Add a host to start polling heartbeat.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <section class="grid two-columns">
                 <div class="card">
                     <div class="card-header">

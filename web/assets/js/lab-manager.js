@@ -46,6 +46,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadConfig();
 
+    // Lab Station ops state
+    const hostInput = $('#hostInput');
+    const addHostBtn = $('#addHostBtn');
+    const refreshHostsBtn = $('#refreshHostsBtn');
+    const hostListEl = $('#hostList');
+    const hostState = {};
+    let hostNames = loadHosts();
+
+    if (addHostBtn && hostInput) {
+        addHostBtn.addEventListener('click', addHost);
+    }
+    if (refreshHostsBtn) {
+        refreshHostsBtn.addEventListener('click', refreshAllHosts);
+    }
+    if (hostListEl) {
+        hostListEl.addEventListener('click', handleHostActions);
+        renderHosts();
+    }
+
     function loadConfig() {
         setStatus('Loading...');
         fetch('/treasury/admin/notifications', { credentials: 'include' })
@@ -197,4 +216,178 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function $(sel) { return document.querySelector(sel); }
+
+    // ---- Lab Station ops helpers ----
+    function loadHosts() {
+        try {
+            const raw = localStorage.getItem('lab_hosts');
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('Cannot parse saved hosts', e);
+            return [];
+        }
+    }
+
+    function saveHosts() {
+        localStorage.setItem('lab_hosts', JSON.stringify(hostNames));
+    }
+
+    function addHost() {
+        const value = (hostInput.value || '').trim();
+        if (!value) return;
+        if (!hostNames.includes(value)) {
+            hostNames.push(value);
+            saveHosts();
+            renderHosts();
+            showToast(`Host ${value} added`, 'success');
+        }
+        hostInput.value = '';
+    }
+
+    function removeHost(name) {
+        hostNames = hostNames.filter(h => h !== name);
+        delete hostState[name];
+        saveHosts();
+        renderHosts();
+        showToast(`Host ${name} removed`, 'success');
+    }
+
+    function renderHosts() {
+        if (!hostListEl) return;
+        hostListEl.innerHTML = '';
+        if (!hostNames.length) {
+            hostListEl.innerHTML = '<div class="empty">Add a host to start polling heartbeat.</div>';
+            return;
+        }
+        hostNames.forEach(host => {
+            hostListEl.appendChild(buildHostRow(host));
+        });
+    }
+
+    function buildHostRow(host) {
+        const data = hostState[host] || {};
+        const heartbeat = data.heartbeat || {};
+        const summary = heartbeat.summary || {};
+        const status = heartbeat.status || {};
+        const operations = heartbeat.operations || {};
+        const ready = summary.ready;
+        const localSession = status.localSessionActive;
+        const localMode = status.localModeEnabled;
+        const lastForced = operations.lastForcedLogoff;
+        const lastPower = operations.lastPowerAction;
+        const updated = heartbeat.timestamp;
+
+        const row = document.createElement('div');
+        row.className = 'host-row';
+        row.dataset.host = host;
+        row.innerHTML = `
+            <div>
+                <div class="host-title">${host}</div>
+                <div class="host-meta">Updated: ${updated || 'n/a'}</div>
+                <div class="host-meta">Last forced logoff: ${(lastForced && lastForced.timestamp) || 'n/a'}</div>
+                <div class="host-meta">Last power: ${(lastPower && lastPower.mode) ? `${lastPower.mode} @ ${lastPower.timestamp}` : 'n/a'}</div>
+            </div>
+            <div class="host-meta">
+                <span class="pill ${ready === true ? 'good' : ready === false ? 'bad' : ''}">Ready: ${ready === undefined ? 'n/a' : ready}</span>
+                <span class="pill ${localSession ? 'warn' : 'soft'}">Local session: ${localSession ? 'yes' : 'no'}</span>
+                <span class="pill ${localMode ? 'warn' : 'soft'}">Local mode: ${localMode ? 'on' : 'off'}</span>
+            </div>
+            <div class="host-actions">
+                <button class="mini-btn" data-action="poll">Heartbeat</button>
+                <button class="mini-btn" data-action="wol">Wake</button>
+                <button class="mini-btn primary" data-action="prepare">Prepare</button>
+                <button class="mini-btn" data-action="release">Release</button>
+                <button class="mini-btn danger" data-action="shutdown">Shutdown</button>
+                <button class="mini-btn" data-action="remove">Remove</button>
+            </div>
+        `;
+        return row;
+    }
+
+    function handleHostActions(e) {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const host = btn.closest('.host-row')?.dataset.host;
+        if (!host) return;
+        const action = btn.dataset.action;
+        if (action === 'remove') {
+            removeHost(host);
+            return;
+        }
+        if (action === 'poll') {
+            pollHeartbeat(host);
+            return;
+        }
+        if (action === 'wol') {
+            triggerWol(host);
+            return;
+        }
+        if (action === 'prepare') {
+            triggerWinrm(host, 'prepare-session', ['--guard-grace=90']);
+            return;
+        }
+        if (action === 'release') {
+            triggerWinrm(host, 'release-session', ['--reboot']);
+            return;
+        }
+        if (action === 'shutdown') {
+            triggerWinrm(host, 'power', ['shutdown', '--delay=60', '--reason=Remote order']);
+        }
+    }
+
+    function refreshAllHosts() {
+        hostNames.forEach(pollHeartbeat);
+    }
+
+    async function pollHeartbeat(host) {
+        try {
+            const res = await fetch('/ops/api/heartbeat/poll', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            hostState[host] = data;
+            renderHosts();
+            showToast(`Heartbeat ${host} ok`, 'success');
+        } catch (err) {
+            console.error(err);
+            showToast(`Heartbeat failed for ${host}`, 'error');
+        }
+    }
+
+    async function triggerWol(host) {
+        try {
+            const res = await fetch('/ops/api/wol', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            showToast(`WoL ${host}: ${data.success ? 'sent' : 'failed'}`, data.success ? 'success' : 'error');
+        } catch (err) {
+            console.error(err);
+            showToast(`WoL failed for ${host}`, 'error');
+        }
+    }
+
+    async function triggerWinrm(host, command, args = []) {
+        try {
+            const res = await fetch('/ops/api/winrm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host, command, args })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const ok = data.exit_code === 0;
+            showToast(`${command} on ${host}: ${ok ? 'ok' : 'err'}`, ok ? 'success' : 'error');
+        } catch (err) {
+            console.error(err);
+            showToast(`${command} failed on ${host}`, 'error');
+        }
+    }
 });
