@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     $('#btnTestLoad').addEventListener('click', loadConfig);
     $('#saveConfigBtn').addEventListener('click', saveConfig);
-    $('#btnTestEmail').addEventListener('click', () => showToast('Test email not implemented yet', 'error'));
+    $('#btnTestEmail').addEventListener('click', sendTestEmail);
     driverEl.addEventListener('change', toggleSections);
     configureBtn.addEventListener('click', openModal);
     closeModalBtn.addEventListener('click', closeModal);
@@ -244,6 +244,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setStatus(text) {
         $('#configStatus').textContent = text;
+    }
+
+    function sendTestEmail() {
+        fetch('/treasury/admin/notifications/test', {
+            method: 'POST',
+            credentials: 'include'
+        })
+            .then(async res => {
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok || body.success === false) {
+                    const msg = body.error || `Test failed (HTTP ${res.status})`;
+                    throw new Error(msg);
+                }
+                showToast('Test email sent (check recipients)', 'success');
+            })
+            .catch(err => {
+                console.error(err);
+                showToast(err.message || 'Test email failed', 'error');
+            });
     }
 
     function showToast(msg, type = 'info') {
