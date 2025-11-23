@@ -54,20 +54,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostState = {};
     let hostNames = loadHosts();
     
-        // Reservation timeline elements
-        const timelineInput = $('#timelineReservationId');
-        const timelineBtn = $('#loadTimelineBtn');
-        const timelineResult = $('#timelineResult');
+    // Reservation timeline elements
+    const timelineInput = $('#timelineReservationId');
+    const timelineBtn = $('#loadTimelineBtn');
+    const timelineResult = $('#timelineResult');
+    const TIMELINE_DEFAULT_LIMIT = 100;
+    const timelineState = {
+        reservationId: null,
+        limit: TIMELINE_DEFAULT_LIMIT,
+        operations: [],
+        base: null,
+        pagination: null,
+        nextOffset: 0,
+        loading: false
+    };
     
-        if (timelineBtn && timelineInput && timelineResult) {
-            timelineBtn.addEventListener('click', fetchTimeline);
-            timelineInput.addEventListener('keydown', e => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    fetchTimeline();
-                }
-            });
-        }
+    if (timelineBtn && timelineInput && timelineResult) {
+        timelineBtn.addEventListener('click', fetchTimeline);
+        timelineInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                fetchTimeline();
+            }
+        });
+    }
 
     if (addHostBtn && hostInput) {
         addHostBtn.addEventListener('click', addHost);
@@ -405,33 +415,121 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`${command} failed on ${host}`, 'error');
         }
     }
-    
-        async function fetchTimeline() {
-            if (!timelineResult || !timelineInput) return;
-            const reservationId = (timelineInput.value || '').trim();
-            if (!reservationId) {
-                setTimelineMessage('Provide a reservation id.');
-                timelineInput.focus();
+
+    async function fetchTimeline() {
+        if (!timelineResult || !timelineInput) return;
+        const reservationId = (timelineInput.value || '').trim();
+        if (!reservationId) {
+            setTimelineMessage('Provide a reservation id.');
+            timelineInput.focus();
+            return;
+        }
+        resetTimelineState(reservationId);
+        await requestTimelinePage(0, false);
+    }
+
+    function resetTimelineState(reservationId) {
+        timelineState.reservationId = reservationId;
+        timelineState.operations = [];
+        timelineState.base = null;
+        timelineState.pagination = null;
+        timelineState.nextOffset = 0;
+        timelineState.limit = TIMELINE_DEFAULT_LIMIT;
+        timelineState.loading = false;
+    }
+
+    async function requestTimelinePage(offset, append) {
+        if (!timelineState.reservationId || timelineState.loading) return;
+        timelineState.loading = true;
+        if (!append) {
+            setTimelineMessage('Loading timeline...');
+        }
+        try {
+            const params = new URLSearchParams({
+                reservationId: timelineState.reservationId,
+                limit: String(timelineState.limit),
+                offset: String(offset)
+            });
+            const res = await fetch(`/ops/api/reservations/timeline?${params.toString()}`);
+            const body = await res.json();
+            if (!res.ok) {
+                const msg = body?.error || `Unable to load timeline (HTTP ${res.status}).`;
+                if (!append) {
+                    setTimelineMessage(msg);
+                }
+                showToast(msg, 'error');
                 return;
             }
-            setTimelineMessage('Loading timeline...');
-            try {
-                const res = await fetch(`/ops/api/reservations/timeline?reservationId=${encodeURIComponent(reservationId)}`);
-                const body = await res.json();
-                if (!res.ok) {
-                    const msg = body?.error || 'Unable to load timeline.';
-                    setTimelineMessage(msg);
-                    showToast(msg, 'error');
-                    return;
-                }
-                renderTimeline(body);
-                showToast('Timeline loaded', 'success');
-            } catch (err) {
-                console.error(err);
-                setTimelineMessage('Timeline request failed.');
-                showToast('Timeline request failed', 'error');
+            const pageOperations = Array.isArray(body.operations) ? body.operations : [];
+            if (!append || !timelineState.base) {
+                timelineState.operations = pageOperations;
+                timelineState.base = body;
+            } else {
+                timelineState.operations = timelineState.operations.concat(pageOperations);
+                timelineState.base = { ...timelineState.base, ...body };
             }
+            timelineState.pagination = normalizePagination(
+                body.pagination,
+                offset,
+                pageOperations.length,
+                timelineState.limit
+            );
+            timelineState.limit = timelineState.pagination.limit;
+            timelineState.nextOffset = timelineState.pagination.nextOffset;
+            renderTimelineState();
+            if (!append) {
+                showToast('Timeline loaded', 'success');
+            }
+        } catch (err) {
+            console.error(err);
+            if (!append) {
+                setTimelineMessage('Timeline request failed.');
+            }
+            showToast('Timeline request failed', 'error');
+        } finally {
+            timelineState.loading = false;
         }
+    }
+
+    function normalizePagination(pagination, offset, returned, limitFallback) {
+        const limit = Math.max(1, Number(pagination?.limit) || limitFallback || TIMELINE_DEFAULT_LIMIT);
+        const total = Number.isFinite(Number(pagination?.total)) ? Number(pagination.total) : offset + returned;
+        const nextOffset = Number.isFinite(Number(pagination?.nextOffset)) ? Number(pagination.nextOffset) : offset + returned;
+        const hasMore = typeof pagination?.hasMore === 'boolean' ? pagination.hasMore : total > nextOffset;
+        const page = Number.isFinite(Number(pagination?.page)) ? Number(pagination.page) : Math.floor(offset / limit) + 1;
+        const pageSize = Number.isFinite(Number(pagination?.pageSize)) ? Number(pagination.pageSize) : limit;
+        return {
+            limit,
+            offset,
+            returned,
+            total,
+            nextOffset,
+            hasMore,
+            page,
+            pageSize
+        };
+    }
+
+    async function loadMoreTimeline(buttonEl) {
+        if (!timelineState.pagination?.hasMore || timelineState.loading) {
+            return;
+        }
+        if (buttonEl) {
+            buttonEl.disabled = true;
+            buttonEl.textContent = 'Loading...';
+        }
+        await requestTimelinePage(timelineState.nextOffset, true);
+    }
+
+    function renderTimelineState() {
+        if (!timelineResult || !timelineState.base) return;
+        const payload = {
+            ...timelineState.base,
+            operations: [...timelineState.operations],
+            pagination: timelineState.pagination
+        };
+        renderTimeline(payload);
+    }
     
         function setTimelineMessage(message) {
             if (!timelineResult) return;
@@ -443,10 +541,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!timelineResult) return;
             const summary = buildTimelineSummary(data);
             const phases = buildTimelinePhases(data.phases || {});
-            const operations = buildTimelineOperations(data.operations || []);
+            const operations = buildTimelineOperations(data.operations || [], data.pagination);
             const heartbeat = buildTimelineHeartbeat(data.heartbeat, data.host);
             timelineResult.classList.remove('empty');
             timelineResult.innerHTML = summary + phases + operations + heartbeat;
+            const loadMoreBtn = timelineResult.querySelector('#timelineLoadMoreBtn');
+            if (loadMoreBtn) {
+                loadMoreBtn.addEventListener('click', () => loadMoreTimeline(loadMoreBtn));
+            }
         }
     
         function buildTimelineSummary(data) {
@@ -497,20 +599,38 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         }
     
-        function buildTimelineOperations(operations) {
-            if (!operations.length) {
-                return `
-                    <div class="timeline-steps">
-                        <h3>Operation Log</h3>
-                        <div class="timeline-step">No orchestration events captured yet.</div>
-                    </div>
-                `;
-            }
-            const steps = operations.map((op, idx) => renderTimelineStep(op, idx)).join('');
+        function buildTimelineOperations(operations, pagination) {
+            const steps = operations.length
+                ? operations.map((op, idx) => renderTimelineStep(op, idx)).join('')
+                : '<div class="timeline-step">No orchestration events captured yet.</div>';
+            const paginationControls = buildTimelinePagination(pagination);
             return `
                 <div class="timeline-steps">
                     <h3>Operation Log</h3>
                     ${steps}
+                    ${paginationControls}
+                </div>
+            `;
+        }
+
+        function buildTimelinePagination(pagination) {
+            if (!pagination) {
+                return '';
+            }
+            const returned = pagination.returned || 0;
+            const total = typeof pagination.total === 'number' ? pagination.total : returned;
+            const start = returned ? pagination.offset + 1 : pagination.offset;
+            const end = pagination.offset + returned;
+            const summary = total
+                ? `Showing ${start || 0}-${end} of ${total}`
+                : `Showing ${returned} entr${returned === 1 ? 'y' : 'ies'}`;
+            const button = pagination.hasMore
+                ? '<button id="timelineLoadMoreBtn" class="mini-btn primary">Load more</button>'
+                : '';
+            return `
+                <div class="timeline-pagination">
+                    <div class="meta">${htmlEscape(summary)}</div>
+                    ${button}
                 </div>
             `;
         }
@@ -618,12 +738,13 @@ document.addEventListener('DOMContentLoaded', () => {
     
         function htmlEscape(value) {
             const str = (value ?? '').toString();
-            return str.replace(/[&<>"']/g, ch => ({
+            return str.replace(/[&<>"'`]/g, ch => ({
                 '&': '&amp;',
                 '<': '&lt;',
                 '>': '&gt;',
                 '"': '&quot;',
-                "'": '&#39;'
+                "'": '&#39;',
+                '`': '&#96;'
             })[ch] || ch);
         }
 });

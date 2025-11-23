@@ -123,3 +123,4 @@ Tuning knobs:
 - OpenResty proxies `/ops/` to this service (see `openresty/lab_access.conf`).
 - Use a dedicated network-only account for WinRM (`SeDenyInteractiveLogonRight` on the host / lab station).
 - Keep secrets outside git; `hosts.json` is gitignored on purpose.
+- `/ops/` is gated by `OPS_SECRET` (env) and expects header `X-Ops-Token`.

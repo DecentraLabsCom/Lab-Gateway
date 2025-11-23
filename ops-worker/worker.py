@@ -23,6 +23,20 @@ APP = Flask(__name__)
 CONFIG_PATH = os.getenv("OPS_CONFIG", os.path.join(os.path.dirname(__file__), "hosts.json"))
 MYSQL_DSN = os.getenv("MYSQL_DSN")
 DEFAULT_LABSTATION_EXE = r"C:\LabStation\LabStation.exe"
+WINRM_READ_TIMEOUT = int(os.getenv("OPS_WINRM_READ_TIMEOUT", "30"))
+WINRM_OPERATION_TIMEOUT = int(os.getenv("OPS_WINRM_OPERATION_TIMEOUT", "20"))
+ALLOWED_WINRM_COMMANDS = {
+    cmd.strip()
+    for cmd in os.getenv(
+        "OPS_ALLOWED_COMMANDS",
+        "prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status",
+    ).split(",")
+    if cmd.strip()
+}
+
+TIMELINE_MAX_LIMIT = max(1, int(os.getenv("OPS_TIMELINE_MAX_OPS", "500")))
+TIMELINE_DEFAULT_LIMIT = max(1, min(int(os.getenv("OPS_TIMELINE_DEFAULT_LIMIT", "100")), TIMELINE_MAX_LIMIT))
+TIMELINE_PHASE_LOOKBACK = max(TIMELINE_MAX_LIMIT, int(os.getenv("OPS_TIMELINE_PHASE_LOOKBACK", "500")))
 
 
 def load_config() -> Dict[str, Any]:
@@ -30,7 +44,23 @@ def load_config() -> Dict[str, Any]:
         logging.warning("Config file %s not found, continuing with empty host list", CONFIG_PATH)
         return {"hosts": []}
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        raw = json.load(f)
+    # Resolve env-based secrets if they use the form "env:VAR_NAME"
+    for host in raw.get("hosts", []):
+        for key in ("winrm_user", "winrm_pass"):
+            val = host.get(key)
+            if isinstance(val, str) and val.startswith("env:"):
+                env_key = val.split(":", 1)[1]
+                env_val = os.getenv(env_key)
+                if not env_val:
+                    logging.warning(
+                        "Missing environment variable '%s' for host '%s' field '%s'",
+                        env_key,
+                        host.get("name", "<unknown>"),
+                        key,
+                    )
+                host[key] = env_val or ""
+    return raw
 
 
 class HostRegistry:
@@ -78,8 +108,8 @@ def to_utc(ts: str) -> Optional[datetime]:
 
 def wol_and_wait(mac: str, broadcast: Optional[str], port: int, ping_target: str,
                  attempts: int, wait_seconds: float) -> Tuple[bool, int]:
-    send_magic_packet(mac, ip_address=broadcast or "255.255.255.255", port=port)
     for attempt in range(1, attempts + 1):
+        send_magic_packet(mac, ip_address=broadcast or "255.255.255.255", port=port)
         time.sleep(wait_seconds)
         if host_is_up(ping_target, wait_seconds):
             return True, attempt
@@ -124,7 +154,13 @@ def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[li
 
     logging.info("Executing %s %s on %s via %s", exe, command, host.get("name"), endpoint)
     start = time.time()
-    session = winrm.Session(endpoint, auth=(user, password), transport=transport)
+    session = winrm.Session(
+        endpoint,
+        auth=(user, password),
+        transport=transport,
+        read_timeout_sec=WINRM_READ_TIMEOUT,
+        operation_timeout_sec=WINRM_OPERATION_TIMEOUT,
+    )
     result = session.run_cmd(exe, [command] + args)
     duration_ms = int((time.time() - start) * 1000)
 
@@ -156,7 +192,7 @@ def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], passw
 
 def persist_heartbeat(engine: Engine, host: Dict[str, Any], heartbeat: Dict[str, Any],
                       last_event: Optional[Dict[str, Any]]) -> None:
-    ts = to_utc(heartbeat.get("timestamp")) or datetime.utcnow().replace(tzinfo=timezone.utc)
+    ts = to_utc(heartbeat.get("timestamp")) or datetime.now(timezone.utc)
     ready = heartbeat.get("summary", {}).get("ready")
     status = heartbeat.get("status", {})
     operations = heartbeat.get("operations", {})
@@ -501,6 +537,8 @@ def api_winrm():
     args = payload.get("args") or []
     if not host_name or not command:
         return jsonify({"error": "host and command are required"}), 400
+    if command not in ALLOWED_WINRM_COMMANDS:
+        return jsonify({"error": f"command '{command}' not allowed"}), 400
     host = HOSTS.get(host_name)
     if not host:
         return jsonify({"error": f"host '{host_name}' not found in config"}), 404
@@ -662,7 +700,51 @@ def _to_iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.astimezone(timezone.utc).isoformat()
 
 
-def build_reservation_timeline(reservation_id: str) -> Dict[str, Any]:
+def _sanitize_limit(value: Optional[str]) -> int:
+    if value is None:
+        return TIMELINE_DEFAULT_LIMIT
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return TIMELINE_DEFAULT_LIMIT
+    return max(1, min(parsed, TIMELINE_MAX_LIMIT))
+
+
+def _sanitize_offset(value: Optional[str]) -> int:
+    if value is None:
+        return 0
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
+
+
+def _rows_to_operations(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    op_entries: List[Dict[str, Any]] = []
+    for op in rows:
+        payload = op.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                pass
+        op_entries.append(
+            {
+                "action": op.get("action"),
+                "status": op.get("status"),
+                "success": bool(op.get("success")),
+                "message": op.get("message"),
+                "payload": payload,
+                "responseCode": op.get("response_code"),
+                "durationMs": op.get("duration_ms"),
+                "createdAt": _to_iso(op.get("created_at")),
+            }
+        )
+    return op_entries
+
+
+def build_reservation_timeline(reservation_id: str, limit: int, offset: int) -> Dict[str, Any]:
     if not DB_ENGINE:
         raise RuntimeError("Database not configured")
 
@@ -686,6 +768,18 @@ def build_reservation_timeline(reservation_id: str) -> Dict[str, Any]:
         host = HOSTS.get_by_lab(lab_id)
         host_name = (host or {}).get("name")
 
+        # Get total count for pagination metadata
+        total_ops = conn.execute(
+            text(
+                """
+                SELECT COUNT(*) as total
+                FROM reservation_operations
+                WHERE reservation_id = :reservation_id
+                """
+            ),
+            {"reservation_id": reservation_id},
+        ).scalar()
+        
         operations = conn.execute(
             text(
                 """
@@ -694,37 +788,37 @@ def build_reservation_timeline(reservation_id: str) -> Dict[str, Any]:
                 FROM reservation_operations
                 WHERE reservation_id = :reservation_id
                 ORDER BY created_at ASC, id ASC
+                LIMIT :limit_value OFFSET :offset_value
                 """
             ),
-            {"reservation_id": reservation_id},
+            {
+                "reservation_id": reservation_id,
+                "limit_value": limit,
+                "offset_value": offset,
+            },
         ).mappings().all()
+        op_entries = _rows_to_operations(operations)
 
-        op_entries: List[Dict[str, Any]] = []
-        for op in operations:
-            payload = op.get("payload")
-            if isinstance(payload, str):
-                try:
-                    payload = json.loads(payload)
-                except json.JSONDecodeError:
-                    pass
-            op_entries.append(
-                {
-                    "action": op.get("action"),
-                    "status": op.get("status"),
-                    "success": bool(op.get("success")),
-                    "message": op.get("message"),
-                    "payload": payload,
-                    "responseCode": op.get("response_code"),
-                    "durationMs": op.get("duration_ms"),
-                    "createdAt": _to_iso(op.get("created_at")),
-                }
-            )
+        phase_rows = conn.execute(
+            text(
+                """
+                SELECT action, status, success, message, payload,
+                       response_code, duration_ms, created_at
+                FROM reservation_operations
+                WHERE reservation_id = :reservation_id
+                ORDER BY created_at DESC, id DESC
+                LIMIT :phase_limit
+                """
+            ),
+            {"reservation_id": reservation_id, "phase_limit": TIMELINE_PHASE_LOOKBACK},
+        ).mappings().all()
+        phase_entries = _rows_to_operations(list(reversed(phase_rows)))
 
         latest_heartbeat = None
         if host_name:
             latest_heartbeat = _fetch_latest_heartbeat(conn, host_name)
 
-        phases = _summarize_phases(op_entries)
+        phases = _summarize_phases(phase_entries)
 
         reservation_payload = {
             "reservationId": reservation.get("transaction_hash"),
@@ -737,6 +831,12 @@ def build_reservation_timeline(reservation_id: str) -> Dict[str, Any]:
             "updatedAt": _to_iso(reservation.get("updated_at")),
         }
 
+        returned_count = len(op_entries)
+        total_ops = total_ops or 0
+        next_offset = offset + returned_count
+        has_more = total_ops > next_offset
+        page = (offset // limit) + 1 if limit else 1
+
         return {
             "reservation": reservation_payload,
             "host": {
@@ -747,6 +847,16 @@ def build_reservation_timeline(reservation_id: str) -> Dict[str, Any]:
             "operations": op_entries,
             "phases": phases,
             "heartbeat": latest_heartbeat,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "page": page,
+                "pageSize": limit,
+                "returned": returned_count,
+                "total": total_ops,
+                "hasMore": has_more,
+                "nextOffset": next_offset,
+            },
         }
 
 
@@ -820,8 +930,10 @@ def api_reservation_timeline():
     reservation_id = request.args.get("reservationId") or request.args.get("reservation_id")
     if not reservation_id:
         return jsonify({"error": "reservationId is required"}), 400
+    limit = _sanitize_limit(request.args.get("limit"))
+    offset = _sanitize_offset(request.args.get("offset"))
     try:
-        data = build_reservation_timeline(reservation_id)
+        data = build_reservation_timeline(reservation_id, limit, offset)
     except LookupError:
         return jsonify({"error": "Reservation not found"}), 404
     except RuntimeError as exc:
@@ -861,7 +973,7 @@ class ReservationOrchestrator:
             self.scan_once,
             "interval",
             seconds=self.scan_interval,
-            next_run_time=datetime.utcnow(),
+            next_run_time=datetime.now(timezone.utc),
             id="reservation-orchestrator",
             replace_existing=True,
         )
@@ -876,7 +988,7 @@ class ReservationOrchestrator:
     def scan_once(self):
         if not self.enabled or not self.engine:
             return
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         try:
             with self.engine.begin() as conn:
                 start_rows = self._fetch_start_candidates(conn, now)
@@ -891,9 +1003,13 @@ class ReservationOrchestrator:
             self._dispatch_end(row)
 
     def _fetch_start_candidates(self, conn: Connection, now: datetime):
+        # Set lock wait timeout to prevent hanging on locked rows
+        conn.execute(text("SET SESSION innodb_lock_wait_timeout = 20"))
+        
         window_upper = now + timedelta(seconds=self.start_lead)
         window_lower = now - timedelta(seconds=self.lookback)
         retry_cutoff = now - timedelta(seconds=self.retry_cooldown)
+        max_batch = int(os.getenv("OPS_RESERVATION_MAX_BATCH", "200"))
         query = text(
             """
             SELECT transaction_hash, lab_id, start_time, end_time, status
@@ -908,6 +1024,8 @@ class ReservationOrchestrator:
                     AND o.created_at >= :retry_cutoff
               )
             ORDER BY r.start_time ASC
+            LIMIT :max_batch
+            FOR UPDATE SKIP LOCKED
             """
         )
         result = conn.execute(
@@ -916,14 +1034,19 @@ class ReservationOrchestrator:
                 "window_upper": window_upper,
                 "window_lower": window_lower,
                 "retry_cutoff": retry_cutoff,
+                "max_batch": max_batch,
             },
         )
         return result.mappings().all()
 
     def _fetch_end_candidates(self, conn: Connection, now: datetime):
+        # Set lock wait timeout to prevent hanging on locked rows
+        conn.execute(text("SET SESSION innodb_lock_wait_timeout = 20"))
+        
         ready_time = now - timedelta(seconds=self.end_delay)
         window_lower = now - timedelta(seconds=self.lookback)
         retry_cutoff = now - timedelta(seconds=self.retry_cooldown)
+        max_batch = int(os.getenv("OPS_RESERVATION_MAX_BATCH", "200"))
         query = text(
             """
             SELECT transaction_hash, lab_id, start_time, end_time, status
@@ -938,6 +1061,8 @@ class ReservationOrchestrator:
                     AND o.created_at >= :retry_cutoff
               )
             ORDER BY r.end_time ASC
+            LIMIT :max_batch
+            FOR UPDATE SKIP LOCKED
             """
         )
         result = conn.execute(
@@ -946,6 +1071,7 @@ class ReservationOrchestrator:
                 "ready_time": ready_time,
                 "window_lower": window_lower,
                 "retry_cutoff": retry_cutoff,
+                "max_batch": max_batch,
             },
         )
         return result.mappings().all()
@@ -1041,6 +1167,21 @@ class ReservationOrchestrator:
     def _update_status(self, reservation_id: str, current_status: Optional[str], new_status: str):
         if not self.engine or not current_status:
             return
+        allowed = {
+            ("CONFIRMED", "ACTIVE"),
+            ("CONFIRMED", "COMPLETED"),
+            ("ACTIVE", "COMPLETED"),
+            ("CONFIRMED", "CANCELLED"),
+            ("ACTIVE", "CANCELLED"),
+        }
+        if (current_status, new_status) not in allowed:
+            logging.debug(
+                "Skipping status transition %s -> %s for %s (not allowed)",
+                current_status,
+                new_status,
+                reservation_id,
+            )
+            return
         try:
             with self.engine.begin() as conn:
                 conn.execute(
@@ -1079,7 +1220,7 @@ def start_scheduler():
             poll_all_hosts,
             "interval",
             seconds=interval,
-            next_run_time=datetime.utcnow(),
+            next_run_time=datetime.now(timezone.utc),
             id="heartbeat-poller",
             replace_existing=True,
         )

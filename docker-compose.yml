@@ -8,10 +8,10 @@ services:
       - .env  # Main gateway configuration
       - ./blockchain-services/.env  # Blockchain-specific configuration (optional overrides)
     environment:
-      # Override only gateway-specific integrations
-      - DATABASE_URL=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}
-      - DATABASE_USER=${MYSQL_USER}
-      - DATABASE_PASSWORD=${MYSQL_PASSWORD}
+      # MySQL datasource for persistence (lab_reservations, auth_users)
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false
+      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD}
     volumes:
       - ./certs:/app/config/keys:ro
       - ./blockchain-data:/app/data
