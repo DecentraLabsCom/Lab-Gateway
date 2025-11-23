@@ -18,6 +18,7 @@ services:
       SERVER_NAME: lab.test
       HTTPS_PORT: "18443"
       GUAC_API_URL: http://guacamole:8080/guacamole/api
+      OPS_SECRET: test-ops-secret-123
     volumes:
       - ./certs:/etc/ssl/private
       - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
