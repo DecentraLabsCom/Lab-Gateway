@@ -18,6 +18,7 @@ services:
       SERVER_NAME: lab.test
       HTTPS_PORT: "18443"
       GUAC_API_URL: http://guacamole:8080/guacamole/api
+      OPS_SECRET: test-ops-secret-123
     volumes:
       - ./certs:/etc/ssl/private
       - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
@@ -30,14 +31,9 @@ services:
       guacamole:
         condition: service_started
       ops-worker:
-        condition: service_healthy
+        condition: service_started
+    command: sh -c "sleep 3 && /usr/local/openresty/bin/openresty -g 'daemon off;'"
 
   ops-worker:
     image: hashicorp/http-echo:0.2.3
     command: ["-listen=:8081", "-text=ops-worker-ok"]
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "8081"]
-      interval: 2s
-      timeout: 1s
-      retries: 10
-      start_period: 1s
