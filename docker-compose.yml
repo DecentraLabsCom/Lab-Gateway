@@ -61,6 +61,7 @@ services:
       - SERVER_NAME=${SERVER_NAME}
       - HTTPS_PORT=${HTTPS_PORT}
       - HTTP_PORT=${HTTP_PORT}
+      - OPS_SECRET=${OPS_SECRET}
     depends_on:
       guacamole:
         condition: service_healthy

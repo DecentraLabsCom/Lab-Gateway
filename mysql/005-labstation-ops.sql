@@ -59,20 +59,3 @@ CREATE TABLE IF NOT EXISTS reservation_operations (
     PRIMARY KEY (id),
     KEY idx_reservation_action (reservation_id, action)
 );
-
-CREATE TABLE IF NOT EXISTS reservation_operations (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    reservation_id VARCHAR(128) NOT NULL,
-    lab_id VARCHAR(128),
-    host VARCHAR(128) NOT NULL,
-    action VARCHAR(32) NOT NULL,
-    status VARCHAR(32) NOT NULL,
-    success BOOLEAN NOT NULL DEFAULT FALSE,
-    response_code INT NULL,
-    duration_ms INT NULL,
-    payload JSON,
-    message TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    KEY idx_reservation_action (reservation_id, action)
-);

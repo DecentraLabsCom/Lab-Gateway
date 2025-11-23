@@ -28,3 +28,8 @@ services:
       - "18443:443"
     depends_on:
       - guacamole
+      - ops-worker
+
+  ops-worker:
+    image: hashicorp/http-echo:0.2.3
+    command: ["-listen=:8081", "-text=ops-worker-ok"]

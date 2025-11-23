@@ -46,7 +46,8 @@ class HostRegistry:
                 lab_key = str(lab_id).strip().lower()
                 if not lab_key:
                     continue
-                self.lab_index[lab_key] = host
+                # Only first mapping wins; if multiple hosts share a lab_id, this will pick the first one.
+                self.lab_index.setdefault(lab_key, host)
 
     def get(self, name: str) -> Optional[Dict[str, Any]]:
         return self.hosts.get(name.lower()) if name else None

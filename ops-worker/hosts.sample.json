@@ -8,7 +8,7 @@
       "winrm_pass": "REPLACE_ME",
       "winrm_transport": "ntlm",
       "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
-      "events_path": "C\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl",
+      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl",
       "labs": ["1"]
     }
   ]

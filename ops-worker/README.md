@@ -10,7 +10,7 @@ This lightweight worker centralizes the operational tasks the Lab Gateway needs 
 
 - `worker.py`: Flask API exposing `/api/wol`, `/api/winrm`, `/api/heartbeat/poll`.
 - Scheduler (optional) runs inside the worker to poll heartbeats periodically when `OPS_POLL_ENABLED=true`.
-- MySQL persistence for host catalog and heartbeat snapshots (see `mysql/005-labstation-ops.sql`).
+- MySQL persistence for host catalog, heartbeat snapshots y operaciones de reserva (ver `mysql/005-labstation-ops.sql` y `mysql/004-auth-service-schema.sql`).
 
 ## Quick start (dev)
 
