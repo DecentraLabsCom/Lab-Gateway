@@ -36,7 +36,7 @@ services:
     image: hashicorp/http-echo:0.2.3
     command: ["-listen=:8081", "-text=ops-worker-ok"]
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/"]
+      test: ["CMD", "nc", "-z", "localhost", "8081"]
       interval: 2s
       timeout: 1s
       retries: 10
