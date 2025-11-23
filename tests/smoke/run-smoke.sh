@@ -50,7 +50,7 @@ if [ "$OPS_HEALTH" != "401" ] && [ "$OPS_HEALTH" != "503" ]; then
   exit 1
 fi
 
-OPS_OK=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -H "X-Ops-Token=test-ops-secret-123" https://lab.test:${PORT}/ops/health || true)
+OPS_OK=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -H "X-Ops-Token=test-ops-secret-123" -b "ops_token=test-ops-secret-123" https://lab.test:${PORT}/ops/health || true)
 if ! echo "$OPS_OK" | grep -q '"status":"ok"'; then
   echo "OPS health failed with token: $OPS_OK"
   exit 1
