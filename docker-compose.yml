@@ -70,7 +70,7 @@ services:
       ops-worker:
         condition: service_started
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f -L http://localhost:80/ -H 'Host: ${SERVER_NAME}' --connect-timeout 5 --insecure"]
+      test: ["CMD", "sh", "-c", "curl -f -k https://localhost:443/ -H 'Host: ${SERVER_NAME}' --connect-timeout 5"]
       timeout: 10s
       retries: 3
       interval: 30s
@@ -217,7 +217,7 @@ services:
       - OPS_RESERVATION_END_DELAY=60
       - MYSQL_DSN=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
     volumes:
-      - ./ops-worker/hosts.json:/app/hosts.json:ro
+      - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
     depends_on:
       mysql:
         condition: service_healthy

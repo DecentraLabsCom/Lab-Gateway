@@ -53,8 +53,8 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-    echo "Docker Compose is not installed."
+if ! docker compose version &> /dev/null; then
+    echo "Docker Compose V2 is not installed."
     echo "   Visit: https://docs.docker.com/compose/install/"
     exit 1
 fi
@@ -146,9 +146,9 @@ if [ "$domain" == "localhost" ]; then
     echo "Configuring for local development..."
     update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "localhost"
     update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "8443"
-    update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "8080"
+    update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "8081"
     echo "   * Server: https://localhost:8443"
-    echo "   * Using development ports (8443/8080)"
+    echo "   * Using development ports (8443/8081)"
 else
     echo "Configuring for production..."
     update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "$domain"
@@ -160,6 +160,11 @@ fi
 
 echo "To use different ports, edit HTTPS_PORT/HTTP_PORT in .env after setup"
 
+echo
+echo "Ops Worker configuration"
+echo "------------------------"
+echo "By default the stack mounts ops-worker/hosts.empty.json."
+echo "To use your own hosts file, set OPS_CONFIG_PATH=./ops-worker/hosts.json before running docker compose."
 echo
 echo "SSL Certificates"
 echo "================"
@@ -273,9 +278,9 @@ echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
 echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, RPC_URL, INSTITUTIONAL_WALLET_*)"
-echo "4. Run: docker compose up -d (or docker-compose up -d)"
+echo "4. Run: docker compose up -d"
 if [ "$domain" == "localhost" ]; then
-    echo "5. Access: https://localhost:8443"
+    echo "5. Access: https://localhost:8443 (HTTP: 8081)"
 else
     echo "5. Access: https://$domain"
 fi
@@ -290,7 +295,7 @@ if [[ "$start_services" =~ ^[Nn]$ ]] || [[ "$start_services" =~ ^[Nn][Oo]$ ]]; t
     echo
     echo "Next steps:"
 echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
-echo "2. Run: docker compose up -d (or docker-compose up -d)"
+echo "2. Run: docker compose up -d"
     echo "3. Access your services"
     echo
     echo "For more information, see README.md"
@@ -302,16 +307,10 @@ echo
 echo "Building and starting services..."
 echo "This may take several minutes on first run..."
 
-# Use appropriate docker-compose command
-compose_cmd=(docker-compose)
-if ! command -v docker-compose &> /dev/null; then
-    compose_cmd=(docker compose)
-fi
-
 set +e
-"${compose_cmd[@]}" down --remove-orphans
-"${compose_cmd[@]}" build --no-cache
-"${compose_cmd[@]}" up -d
+docker compose down --remove-orphans
+docker compose build --no-cache
+docker compose up -d
 compose_result=$?
 set -e
 
@@ -326,9 +325,8 @@ if [ $compose_result -eq 0 ]; then
     echo "   * Guacamole: /guacamole/ (guacadmin / guacadmin)"
     echo "   * Blockchain Services API: /auth"
     echo
-    compose_display="${compose_cmd[*]}"
-    echo "To check status: $compose_display ps"
-    echo "To view logs: $compose_display logs -f"
+    echo "To check status: docker compose ps"
+    echo "To view logs: docker compose logs -f"
     echo
     echo "Configuration:"
     echo "   Environment: .env"

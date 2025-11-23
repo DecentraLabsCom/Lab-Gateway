@@ -7,7 +7,7 @@ REM =================================================================
 
 set "ROOT_ENV_FILE=.env"
 set "BLOCKCHAIN_ENV_FILE=blockchain-services\.env"
-set "compose_cmd=docker-compose"
+set "compose_cmd=docker compose"
 
 echo DecentraLabs Gateway - Full Version Setup
 echo ==========================================
@@ -23,16 +23,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-docker-compose --version >nul 2>&1
+docker compose version >nul 2>&1
 if errorlevel 1 (
-    docker compose version >nul 2>&1
-    if errorlevel 1 (
-        echo Docker Compose is not installed.
-        echo    Visit: https://docs.docker.com/compose/install/
-        pause
-        exit /b 1
-    )
-    set "compose_cmd=docker compose"
+    echo Docker Compose V2 is not available.
+    echo    Visit: https://docs.docker.com/compose/install/
+    pause
+    exit /b 1
 )
 
 git --version >nul 2>&1
@@ -133,9 +129,9 @@ if /i "!domain!"=="localhost" (
     echo Configuring for local development...
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "localhost"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "8443"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "8080"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "8081"
     echo    * Server: https://localhost:8443
-    echo    * Using development ports (8443/8080)
+    echo    * Using development ports (8443/8081)
 ) else (
     echo Configuring for production...
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "!domain!"
@@ -146,6 +142,12 @@ if /i "!domain!"=="localhost" (
 )
 
 echo To use different ports, edit HTTPS_PORT/HTTP_PORT in .env after setup
+echo.
+
+echo Ops Worker configuration
+echo ------------------------
+echo The stack mounts ops-worker/hosts.empty.json by default.
+echo To use your own hosts file, set OPS_CONFIG_PATH=./ops-worker/hosts.json before running docker compose.
 echo.
 
 if not exist certs mkdir certs
@@ -278,7 +280,7 @@ echo 2. Ensure SSL certificates and RSA keys are present in certs\
 echo 3. Review blockchain settings in %ROOT_ENV_FILE% and %BLOCKCHAIN_ENV_FILE%
 echo 4. Run: %compose_cmd% up -d
 if /i "!domain!"=="localhost" (
-    echo 5. Access: https://localhost:8443
+    echo 5. Access: https://localhost:8443 (HTTP: 8081)
 ) else (
     echo 5. Access: https://!domain!
 )
