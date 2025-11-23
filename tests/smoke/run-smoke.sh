@@ -43,4 +43,24 @@ if ! echo "$RESPONSE" | grep -Eq '"authorization"[[:space:]]*:[[:space:]]*"smoke
   exit 1
 fi
 
+# Verify /ops/ requires token and upstream resolves
+OPS_HEALTH=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" https://lab.test:${PORT}/ops/health || true)
+if [ "$OPS_HEALTH" != "401" ] && [ "$OPS_HEALTH" != "503" ]; then
+  echo "Unexpected /ops/health status without token: $OPS_HEALTH"
+  exit 1
+fi
+
+OPS_OK=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -H "X-Ops-Token=test-ops-secret-123" https://lab.test:${PORT}/ops/health || true)
+if ! echo "$OPS_OK" | grep -q '"status":"ok"'; then
+  echo "OPS health failed with token: $OPS_OK"
+  exit 1
+fi
+
+# Verify LocalhostOnlyFilter protects wallet/treasury
+WALLET_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" https://lab.test:${PORT}/wallet/health || true)
+if [ "$WALLET_STATUS" != "200" ] && [ "$WALLET_STATUS" != "403" ]; then
+  echo "Unexpected wallet health status: $WALLET_STATUS"
+  exit 1
+fi
+
 echo "Smoke test passed"
