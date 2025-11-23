@@ -11,6 +11,7 @@ This lightweight worker centralizes the operational tasks the Lab Gateway needs 
 - `worker.py`: Flask API exposing `/api/wol`, `/api/winrm`, `/api/heartbeat/poll`.
 - Scheduler (optional) runs inside the worker to poll heartbeats periodically when `OPS_POLL_ENABLED=true`.
 - MySQL persistence for host catalog, heartbeat snapshots y operaciones de reserva (ver `mysql/005-labstation-ops.sql` y `mysql/004-auth-service-schema.sql`).
+- `/ops/` se protege conis protected with `OPS_SECRET` (env). OpenResty sets cookie `ops_token` when serving `/lab-manager/` and validates cookie or header `X-Ops-Token` before proxying.
 
 ## Quick start (dev)
 
@@ -37,8 +38,8 @@ python worker.py
       "name": "lab-ws-01",
       "address": "lab-ws-01",
       "mac": "00:11:22:33:44:55",
-      "winrm_user": "LABSTATION\\LabGatewaySvc",
-      "winrm_pass": "********",
+      "winrm_user": "env:WINRM_USER_LAB_WS_01",
+      "winrm_pass": "env:WINRM_PASS_LAB_WS_01",
       "winrm_transport": "ntlm",
       "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
       "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl"
@@ -84,6 +85,7 @@ Enable with `OPS_POLL_ENABLED=true` (env) and set `OPS_POLL_INTERVAL=60` (second
 - Iterate configured hosts in `hosts.json`.
 - Fetch heartbeat and latest session-guard event line.
 - Upsert host catalog + insert heartbeat snapshot.
+- If `OPS_RESERVATION_AUTOMATION=true`, it looks for reservations in `lab_reservations`, awakes/prepares/closes and persists `reservation_operations`.
 
 ## Reservation automation (optional)
 
@@ -123,4 +125,8 @@ Tuning knobs:
 - OpenResty proxies `/ops/` to this service (see `openresty/lab_access.conf`).
 - Use a dedicated network-only account for WinRM (`SeDenyInteractiveLogonRight` on the host / lab station).
 - Keep secrets outside git; `hosts.json` is gitignored on purpose.
-- `/ops/` is gated by `OPS_SECRET` (env) and expects header `X-Ops-Token`.
+- `/ops/` is gated by `OPS_SECRET` (env) and expects header `X-Ops-Token` or cookie `ops_token`.
+- WinRM allowlist: set `OPS_ALLOWED_COMMANDS` (comma-separated) to restrict `/api/winrm` (default: `prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status`).
+- WinRM timeouts: `OPS_WINRM_READ_TIMEOUT` and `OPS_WINRM_OPERATION_TIMEOUT` (seconds) configure the session.
+- Credentials: prefer `env:VAR` in `hosts.json` for `winrm_user`/`winrm_pass` and set those env vars in the container (avoid plaintext in JSON).
+- In OpenResty, the access to `/lab-manager/` y `/ops/` is limited to `127.0.0.1` and private networks within Docker (`172.16.0.0/12`). Adjust the range if you need to espose it further.

@@ -60,6 +60,8 @@ def load_config() -> Dict[str, Any]:
                         key,
                     )
                 host[key] = env_val or ""
+        if not host.get("winrm_user") or not host.get("winrm_pass"):
+            raise RuntimeError(f"Missing WinRM credentials for host {host.get('name', '<unknown>')}")
     return raw
 
 
