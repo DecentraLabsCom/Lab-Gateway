@@ -28,6 +28,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const graphFromEl = $('#graphFrom');
     const driverSummary = $('#driverSummary');
 
+    // Auth/health elements
+    const authStatusPill = $('#authStatusPill');
+    const authRefreshBtn = $('#authRefreshBtn');
+    const authVersionEl = $('#authVersion');
+    const authRpcEl = $('#authRpc');
+    const authMarketplaceEl = $('#authMarketplace');
+    const authPrivateKeyEl = $('#authPrivateKey');
+    const authNotesEl = $('#authNotes');
+
     // Modal controls
     const modal = $('#configModal');
     const configureBtn = $('#configureBtn');
@@ -43,8 +52,12 @@ document.addEventListener('DOMContentLoaded', () => {
     configureBtn.addEventListener('click', openModal);
     closeModalBtn.addEventListener('click', closeModal);
     cancelModalBtn.addEventListener('click', closeModal);
+    if (authRefreshBtn) {
+        authRefreshBtn.addEventListener('click', loadAuthHealth);
+    }
 
     loadConfig();
+    loadAuthHealth();
 
     // Lab Station ops state
     const hostInput = $('#hostInput');
@@ -736,15 +749,98 @@ document.addEventListener('DOMContentLoaded', () => {
             return 'n/a';
         }
     
-        function htmlEscape(value) {
-            const str = (value ?? '').toString();
-            return str.replace(/[&<>"'`]/g, ch => ({
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#39;',
-                '`': '&#96;'
-            })[ch] || ch);
+    function htmlEscape(value) {
+        const str = (value ?? '').toString();
+        return str.replace(/[&<>"'`]/g, ch => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+            '`': '&#96;'
+        })[ch] || ch);
+    }
+
+    // ---- Auth / blockchain-services health ----
+    async function loadAuthHealth() {
+        if (authStatusPill) {
+            authStatusPill.textContent = 'Loading...';
+            authStatusPill.className = 'pill soft';
         }
+        try {
+            const res = await fetch('/auth/health', { headers: { 'Accept': 'application/json' } });
+            const bodyText = await res.text();
+            let data = {};
+            try {
+                data = bodyText ? JSON.parse(bodyText) : {};
+            } catch (e) {
+                data = { parseError: e.message };
+            }
+            const status = data.status || (res.ok ? 'UNKNOWN' : `HTTP ${res.status}`);
+            const rpcUp = data.rpc_up;
+            const rpcClient = data.rpc_client_version;
+            const privateKey = data.private_key_present;
+            const marketplaceCached = data.marketplace_key_cached;
+            const marketplaceUrl = data.marketplace_key_url;
+            const notes = [];
+            if (data.parseError) notes.push(`Parse error: ${data.parseError}`);
+            if (!res.ok) notes.push(`HTTP ${res.status}`);
+            if (!marketplaceCached && marketplaceUrl) notes.push('Marketplace key missing');
+            if (data.error) notes.push(data.error);
+            renderAuthHealth({
+                status,
+                version: data.version,
+                rpcUp,
+                rpcClient,
+                privateKey,
+                marketplaceCached,
+                marketplaceUrl,
+                notes: notes.join(' · ') || '-'
+            });
+        } catch (err) {
+            console.error(err);
+            renderAuthHealth({
+                status: 'ERROR',
+                version: '-',
+                rpcUp: false,
+                rpcClient: '-',
+                privateKey: false,
+                marketplaceCached: false,
+                marketplaceUrl: '',
+                notes: err.message
+            });
+            showToast('Auth health check failed', 'error');
+        }
+    }
+
+    function renderAuthHealth(state) {
+        const cls = statusToClass(state.status);
+        if (authStatusPill) {
+            authStatusPill.textContent = state.status || 'unknown';
+            authStatusPill.className = `pill ${cls}`;
+        }
+        if (authVersionEl) authVersionEl.textContent = state.version || '-';
+        if (authRpcEl) authRpcEl.textContent = formatRpc(state.rpcUp, state.rpcClient);
+        if (authMarketplaceEl) authMarketplaceEl.textContent = formatMarketplace(state.marketplaceCached, state.marketplaceUrl);
+        if (authPrivateKeyEl) authPrivateKeyEl.textContent = state.privateKey ? 'present' : 'missing';
+        if (authNotesEl) authNotesEl.textContent = state.notes || '-';
+    }
+
+    function statusToClass(status) {
+        const val = (status || '').toString().toUpperCase();
+        if (val === 'UP' || val === 'HEALTHY') return 'good';
+        if (val === 'DEGRADED') return 'warn';
+        if (val.startsWith('HTTP')) return 'warn';
+        return 'bad';
+    }
+
+    function formatRpc(up, client) {
+        const state = up === undefined ? 'n/a' : up ? 'up' : 'down';
+        return `${state}${client ? ` (${client})` : ''}`;
+    }
+
+    function formatMarketplace(cached, url) {
+        const state = cached === undefined ? 'unknown' : cached ? 'cached' : 'missing';
+        return url ? `${state} · ${url}` : state;
+    }
 });

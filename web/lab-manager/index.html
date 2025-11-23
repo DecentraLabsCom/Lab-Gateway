@@ -32,6 +32,43 @@
                 <div class="card">
                     <div class="card-header">
                         <div>
+                            <h2>Auth / Blockchain Services</h2>
+                            <p>Estado de autenticaci&oacute;n y clave del marketplace.</p>
+                        </div>
+                        <div class="actions inline-actions">
+                            <span class="pill" id="authStatusPill">Loading...</span>
+                            <button class="ghost-btn" id="authRefreshBtn"><i class="fas fa-rotate-right"></i> Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body list">
+                        <div class="item">
+                            <div class="item-title">Version</div>
+                            <div class="item-meta" id="authVersion">-</div>
+                        </div>
+                        <div class="item">
+                            <div class="item-title">RPC</div>
+                            <div class="item-meta" id="authRpc">-</div>
+                        </div>
+                        <div class="item">
+                            <div class="item-title">Marketplace key</div>
+                            <div class="item-meta" id="authMarketplace">-</div>
+                        </div>
+                        <div class="item">
+                            <div class="item-title">Private key</div>
+                            <div class="item-meta" id="authPrivateKey">-</div>
+                        </div>
+                        <div class="item">
+                            <div class="item-title">Notes</div>
+                            <div class="item-meta" id="authNotes">-</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="grid single-column">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
                             <h2>Lab Station Ops</h2>
                             <p>Poll heartbeat and trigger LabStation commands via /ops.</p>
                         </div>

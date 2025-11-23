@@ -38,6 +38,10 @@ services:
         max-size: "20m"
         max-file: "5"
         labels: "service=blockchain-services"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: always
     networks:
       - guacnet
@@ -89,6 +93,12 @@ services:
         max-size: "10m"
         max-file: "5"
         labels: "service=openresty"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     restart: always
     networks:
       - guacnet
@@ -128,6 +138,8 @@ services:
         max-size: "10m"
         max-file: "3"
         labels: "service=mysql"
+    security_opt:
+      - no-new-privileges:true
     #ports:
     # - "3306:3306"
     restart: always
@@ -169,6 +181,10 @@ services:
         max-size: "20m"
         max-file: "5"
         labels: "service=guacamole"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     #ports:
     # - "8080:8080"
     networks:
@@ -195,6 +211,10 @@ services:
         max-size: "5m"
         max-file: "3"
         labels: "service=guacd"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: always
     #ports:
     # - "4822:4822"
@@ -241,6 +261,10 @@ services:
         max-size: "10m"
         max-file: "3"
         labels: "service=ops-worker"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: always
     networks:
       - guacnet

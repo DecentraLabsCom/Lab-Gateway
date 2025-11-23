@@ -125,9 +125,8 @@ ON DUPLICATE KEY UPDATE
   `chain_id` = VALUES(`chain_id`),
   `updated_at` = CURRENT_TIMESTAMP;
 
--- Create indexes for performance optimization
-CREATE INDEX IF NOT EXISTS `idx_auth_users_active` ON `auth_users` (`is_active`, `created_at`);
-CREATE INDEX IF NOT EXISTS `idx_jwt_tokens_active` ON `jwt_tokens` (`revoked`, `expires_at`);
-CREATE INDEX IF NOT EXISTS `idx_lab_reservations_active` ON `lab_reservations` (`status`, `start_time`, `end_time`);
-CREATE INDEX IF NOT EXISTS `idx_auth_sessions_active` ON `auth_sessions` (`is_active`, `expires_at`);
-CREATE INDEX IF NOT EXISTS `idx_auth_nonces_valid` ON `auth_nonces` (`used`, `expires_at`);
+CREATE INDEX `idx_auth_users_active` ON `auth_users` (`is_active`, `created_at`);
+CREATE INDEX `idx_jwt_tokens_active` ON `jwt_tokens` (`revoked`, `expires_at`);
+CREATE INDEX `idx_lab_reservations_active` ON `lab_reservations` (`status`, `start_time`, `end_time`);
+CREATE INDEX `idx_auth_sessions_active` ON `auth_sessions` (`is_active`, `expires_at`);
+CREATE INDEX `idx_auth_nonces_valid` ON `auth_nonces` (`used`, `expires_at`);
