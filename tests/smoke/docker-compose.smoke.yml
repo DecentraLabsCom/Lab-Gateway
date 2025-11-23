@@ -27,9 +27,17 @@ services:
     ports:
       - "18443:443"
     depends_on:
-      - guacamole
-      - ops-worker
+      guacamole:
+        condition: service_started
+      ops-worker:
+        condition: service_healthy
 
   ops-worker:
     image: hashicorp/http-echo:0.2.3
     command: ["-listen=:8081", "-text=ops-worker-ok"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+      start_period: 1s
