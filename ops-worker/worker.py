@@ -9,6 +9,7 @@ import os
 import subprocess
 import time
 from datetime import datetime, timezone, timedelta
+from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, jsonify, request
@@ -73,6 +74,7 @@ class HostRegistry:
             if "name" not in host or "address" not in host:
                 continue
             key = host["name"].lower()
+            host["quarantined"] = parse_bool(host.get("quarantined"), False)
             self.hosts[key] = host
             for lab_id in host.get("labs", []):
                 lab_key = str(lab_id).strip().lower()
@@ -87,12 +89,26 @@ class HostRegistry:
     def get_by_lab(self, lab_id: Optional[Any]) -> Optional[Dict[str, Any]]:
         if lab_id is None:
             return None
-        return self.lab_index.get(str(lab_id).strip().lower())
+        host = self.lab_index.get(str(lab_id).strip().lower())
+        if host and host.get("quarantined"):
+            return None
+        return host
 
     def all_hosts(self):
-        return list(self.hosts.values())
+        return [h for h in self.hosts.values() if not h.get("quarantined")]
+
+    def set_quarantine(self, name: str, quarantined: bool) -> bool:
+        host = self.get(name)
+        if not host:
+            return False
+        host["quarantined"] = bool(quarantined)
+        return True
+
+    def count(self) -> int:
+        return len(self.hosts)
 
 
+HOSTS_LOCK = RLock()
 HOSTS = HostRegistry(load_config())
 DB_ENGINE: Optional[Engine] = create_engine(MYSQL_DSN, pool_pre_ping=True) if MYSQL_DSN else None
 
@@ -944,6 +960,28 @@ def api_reservation_timeline():
     return jsonify(data)
 
 
+@APP.route("/api/hosts/reload", methods=["POST"])
+def api_hosts_reload():
+    count, error = reload_hosts()
+    if error:
+        return jsonify({"error": error}), 500
+    return jsonify({"reloaded": True, "hosts": count})
+
+
+@APP.route("/api/hosts/quarantine", methods=["POST"])
+def api_hosts_quarantine():
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("host") or payload.get("name")
+    quarantined = parse_bool(payload.get("quarantined"), True)
+    if not name:
+        return jsonify({"error": "host is required"}), 400
+    with HOSTS_LOCK:
+        ok = HOSTS.set_quarantine(name, quarantined)
+    if not ok:
+        return jsonify({"error": f"host {name} not found"}), 404
+    return jsonify({"host": name, "quarantined": quarantined})
+
+
 def poll_all_hosts():
     for host in HOSTS.all_hosts():
         try:
@@ -1210,6 +1248,22 @@ class ReservationOrchestrator:
 
 
 RESERVATION_AUTOMATOR = ReservationOrchestrator(DB_ENGINE, HOSTS)
+
+
+def reload_hosts() -> Tuple[int, Optional[str]]:
+    """Reload host catalog from CONFIG_PATH."""
+    global HOSTS
+    try:
+        cfg = load_config()
+        registry = HostRegistry(cfg)
+        with HOSTS_LOCK:
+            HOSTS = registry
+            RESERVATION_AUTOMATOR.registry = registry
+        logging.info("Reloaded hosts catalog (%s hosts)", registry.count())
+        return registry.count(), None
+    except Exception as exc:
+        logging.error("Failed to reload hosts: %s", exc)
+        return 0, str(exc)
 
 
 def start_scheduler():
