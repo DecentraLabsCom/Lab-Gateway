@@ -91,4 +91,9 @@ else
 fi
 
 echo "=== Starting OpenResty ==="
+
+# Export environment variables that nginx needs to access
+# These will be available as $env_* variables in nginx config
+export OPS_SECRET="${OPS_SECRET:-}"
+
 exec /usr/local/openresty/bin/openresty -g "daemon off;"
