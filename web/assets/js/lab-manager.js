@@ -787,7 +787,7 @@ document.addEventListener('DOMContentLoaded', () => {
             authStatusPill.className = 'pill soft';
         }
         try {
-            const res = await fetch('/auth/health', { headers: { 'Accept': 'application/json' } });
+            const res = await fetch('/health', { headers: { 'Accept': 'application/json' } });
             const bodyText = await res.text();
             let data = {};
             try {
