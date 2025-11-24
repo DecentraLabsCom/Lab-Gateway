@@ -105,17 +105,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (blockchain.ok === true) {
                     okItems.push('Blockchain services operative');
                 } else {
-                    missingItems.push({ text: `Blockchain services inoperative`, href: '/gateway/health' });
+                    missingItems.push({ text: `Blockchain services inoperative`, href: '/gateway-health/' });
                 }
 
                 if (labsOk) {
                     okItems.push('Labs access operative');
                 } else {
-                    missingItems.push({ text: `Labs access inoperative`, href: '/gateway/health' });
+                    missingItems.push({ text: `Labs access inoperative`, href: '/gateway-health/' });
                 }
 
                 if (ops.ok === false) {
-                    missingItems.push({ text: 'Ops worker inoperative', href: '/gateway/health' });
+                    missingItems.push({ text: 'Ops worker inoperative', href: '/gateway-health/' });
                 }
 
                 if (statusValue === 'UP') {
@@ -203,7 +203,7 @@ function createStatusModal() {
                 </div>
             </div>
             <div class="modal-actions">
-                <a class="primary-btn" href="/gateway/health" target="_blank" rel="noreferrer">More info</a>
+                <a class="primary-btn" href="/gateway-health/" target="_blank" rel="noreferrer">More info</a>
             </div>
         </div>
     `;

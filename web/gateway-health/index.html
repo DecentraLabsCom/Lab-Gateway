@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gateway Health - DecentraLabs</title>
+    <link rel="stylesheet" href="../assets/css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        .health-page { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .health-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .health-header h1 { font-family: 'Orbitron', monospace; color: var(--primary-color); }
+        .health-card { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+        .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+        .health-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
+        .health-row:last-child { border-bottom: none; }
+        .tag { padding: 4px 10px; border-radius: 8px; font-size: 0.85rem; }
+        .tag.ok { background: var(--success-bg); color: var(--success-color); border: 1px solid var(--success-color); }
+        .tag.bad { background: var(--secondary-bg); color: var(--secondary-color); border: 1px solid var(--secondary-color); }
+        .tag.warn { background: var(--warning-bg-1a); color: #ffa500; border: 1px solid #ffa500; }
+        .section-title { margin: 16px 0 8px; font-size: 1rem; color: var(--text-secondary); }
+        .keyval { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+        .key { color: var(--text-secondary); }
+        .val { text-align: right; }
+    </style>
+</head>
+<body>
+    <div class="stars"></div>
+    <div class="twinkling"></div>
+    <div class="health-page">
+        <div class="health-header">
+            <div>
+                <h1>Gateway Health</h1>
+                <p>Aggregated status: blockchain-services + Guacamole + gateway checks.</p>
+            </div>
+            <a class="ghost-btn" href="/">Back to Gateway</a>
+        </div>
+
+        <div class="health-card" id="summaryCard">
+            <div class="panel-header">
+                <h2>Overall</h2>
+                <div class="status-indicator checking">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Checking Status...</span>
+                </div>
+            </div>
+            <div class="health-grid" id="topGrid"></div>
+        </div>
+
+        <div class="health-card">
+            <div class="panel-header">
+                <h2>Services</h2>
+            </div>
+            <div class="health-grid" id="serviceGrid"></div>
+        </div>
+
+        <div class="health-card">
+            <div class="panel-header">
+                <h2>Infrastructure</h2>
+            </div>
+            <div id="infraSection"></div>
+        </div>
+    </div>
+
+    <script src="../assets/js/gateway-health.js"></script>
+</body>
+</html>
