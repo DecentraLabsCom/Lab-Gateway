@@ -212,6 +212,21 @@ else
 fi
 
 echo
+echo "Certbot (Let's Encrypt) - optional automation"
+echo "============================================"
+read -p "Domains for TLS (comma-separated, leave empty to skip ACME): " cb_domains
+cb_domains=$(echo "$cb_domains" | tr -d ' ')
+read -p "Email for ACME (leave empty to skip ACME): " cb_email
+cb_email=$(echo "$cb_email" | tr -d ' ')
+if [ -n "$cb_domains" ] && [ -n "$cb_email" ]; then
+    update_env_var "$ROOT_ENV_FILE" "CERTBOT_DOMAINS" "$cb_domains"
+    update_env_var "$ROOT_ENV_FILE" "CERTBOT_EMAIL" "$cb_email"
+    echo "Configured CERTBOT_DOMAINS and CERTBOT_EMAIL in .env"
+else
+    echo "Skipped certbot configuration (ACME). Self-signed certificates will be auto-rotated in-container every ~87 days."
+fi
+
+echo
 echo "Blockchain Services Configuration"
 echo "================================="
 

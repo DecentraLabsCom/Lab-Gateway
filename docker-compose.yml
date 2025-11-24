@@ -55,6 +55,7 @@ services:
       - "127.0.0.1:${HTTP_PORT}:80"
     volumes:
       - ./certs:/etc/ssl/private
+      - ./certbot/www:/var/www/certbot
       - ./openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
       - ./openresty/lua:/etc/openresty/lua:ro
@@ -102,6 +103,54 @@ services:
     restart: always
     networks:
       - guacnet
+
+  certbot:
+    image: certbot/certbot
+    profiles: ["certbot"]
+    entrypoint: ["sh", "-c", "certbot --version"]
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    # Usage example:
+    # docker compose run --rm --profile certbot certbot certonly --webroot -w /var/www/certbot -d your.domain --email you@example.com --agree-tos --no-eff-email
+
+  certbot-renew:
+    image: certbot/certbot
+    profiles: ["certbot"]
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "while true; do certbot renew --webroot -w /var/www/certbot --quiet || true; sleep 12h; done"]
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+
+  certbot-init:
+    image: certbot/certbot
+    profiles: ["certbot"]
+    restart: "no"
+    entrypoint: >
+      sh -c '
+      if [ -z "$CERTBOT_DOMAINS" ] || [ -z "$CERTBOT_EMAIL" ]; then
+        echo "CERTBOT_DOMAINS or CERTBOT_EMAIL not set; skipping initial cert issuance";
+        exit 0;
+      fi;
+      primary_domain=${CERTBOT_DOMAINS%%,*};
+      if [ -f "/etc/letsencrypt/live/$primary_domain/fullchain.pem" ]; then
+        echo "Certificate already present for $primary_domain; skipping issuance";
+        exit 0;
+      fi;
+      domains="";
+      for d in ${CERTBOT_DOMAINS//,/ }; do domains="$domains -d $d"; done;
+      staging="";
+      if [ "$CERTBOT_STAGING" = "1" ]; then staging="--staging"; fi;
+      certbot certonly --non-interactive --agree-tos $staging --webroot -w /var/www/certbot $domains -m "$CERTBOT_EMAIL"
+      '
+    environment:
+      - CERTBOT_DOMAINS=${CERTBOT_DOMAINS}
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL}
+      - CERTBOT_STAGING=${CERTBOT_STAGING:-0}
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
 
   mysql:
     image: mysql:8.0.41

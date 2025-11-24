@@ -200,6 +200,22 @@ if exist certs\private_key.pem (
     echo No private_key.pem in certs\; the container will create a new one at startup.
 )
 echo.
+echo Certbot (Let's Encrypt) - optional automation
+echo ============================================
+set "cb_domains="
+set /p "cb_domains=Domains for TLS (comma-separated, leave empty to skip ACME): "
+set "cb_domains=%cb_domains: =%"
+set "cb_email="
+set /p "cb_email=Email for ACME (leave empty to skip ACME): "
+set "cb_email=%cb_email: =%"
+if not "%cb_domains%"=="" if not "%cb_email%"=="" (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "CERTBOT_DOMAINS" "%cb_domains%"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "CERTBOT_EMAIL" "%cb_email%"
+    echo Configured CERTBOT_DOMAINS and CERTBOT_EMAIL in .env
+) else (
+    echo Skipped certbot configuration (ACME). Self-signed certificates will be auto-rotated in-container every ~87 days.
+)
+echo.
 
 echo Blockchain Services Configuration
 echo ==================================
