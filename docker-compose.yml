@@ -13,7 +13,7 @@ services:
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER}
       - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD}
     volumes:
-      - ./certs:/app/config/keys:ro
+      - ./certs:/app/config/keys
       - ./blockchain-data:/app/data
     depends_on:
       mysql:

@@ -204,22 +204,11 @@ fi
 echo
 echo "JWT Signing Keys"
 echo "================"
-if [ ! -f "certs/private_key.pem" ] || [ ! -f "certs/public_key.pem" ]; then
-    echo "Blockchain Services requires RSA keys in certs/private_key.pem and certs/public_key.pem"
-    if command -v openssl &> /dev/null; then
-        read -p "Generate RSA key pair for JWT signing now? (Y/n): " generate_keys
-        generate_keys=$(echo "$generate_keys" | tr -d ' ')
-        if [[ -z "$generate_keys" || "$generate_keys" =~ ^[Yy]$ ]]; then
-            openssl genrsa -out certs/private_key.pem 2048
-            openssl rsa -in certs/private_key.pem -pubout -out certs/public_key.pem
-            cp certs/public_key.pem certs/certificate.pem
-            echo "Generated RSA key pair for blockchain-services."
-        fi
-    else
-        echo "OpenSSL not found. Please add the RSA key pair manually."
-    fi
+echo "blockchain-services will generate the key if missing (volume ./certs)."
+if [ -f "certs/private_key.pem" ]; then
+    echo "private_key.pem already exists in certs/ (it will be reused)."
 else
-    echo "JWT signing key pair found"
+    echo "No private_key.pem in certs/; the container will create a new one at startup."
 fi
 
 echo

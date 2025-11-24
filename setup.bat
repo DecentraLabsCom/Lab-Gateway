@@ -193,31 +193,11 @@ echo.
 
 echo JWT Signing Keys
 echo =================
-if not exist certs\private_key.pem (
-    echo Blockchain Services requires certs\private_key.pem and certs\public_key.pem
-    if "!has_openssl!"=="1" (
-        set /p "generate_keys=Generate RSA key pair for JWT signing now? (Y/n): "
-        set "generate_keys=!generate_keys: =!"
-        if "!generate_keys!"=="" set "generate_keys=y"
-        if /i "!generate_keys!"=="y" (
-            openssl genrsa -out certs\private_key.pem 2048
-            if not errorlevel 1 (
-                openssl rsa -in certs\private_key.pem -pubout -out certs\public_key.pem
-                copy /Y certs\public_key.pem certs\certificate.pem >nul
-                echo Generated RSA key pair for blockchain-services.
-            ) else (
-                echo Failed to generate RSA key pair.
-            )
-        )
-    ) else (
-        echo Install OpenSSL or copy the RSA key pair manually.
-    )
+echo blockchain-services will generate keys at runtime if missing (volume ./certs).
+if exist certs\private_key.pem (
+    echo private_key.pem already exists in certs\ (it will be reused).
 ) else (
-    if not exist certs\public_key.pem (
-        echo private_key.pem found but public_key.pem is missing.
-    ) else (
-        echo JWT signing key pair found.
-    )
+    echo No private_key.pem in certs\; the container will create a new one at startup.
 )
 echo.
 
