@@ -55,52 +55,100 @@ document.addEventListener('DOMContentLoaded', function() {
             const statusIndicator = statusDot.closest('.status-indicator');
             if (statusIndicator.classList.contains('online')) {
                 statusDot.style.animation = 'pulse-dot-online 2s infinite';
+            } else if (statusIndicator.classList.contains('partial')) {
+                statusDot.style.animation = 'pulse-dot-partial 2s infinite';
+            } else if (statusIndicator.classList.contains('checking')) {
+                statusDot.style.animation = 'pulse-dot-checking 2s infinite';
             } else {
                 statusDot.style.animation = 'pulse-dot-offline 2s infinite';
             }
         }, 10000);
     }
 
-    // System status monitoring - checks both Guacamole and blockchain-services
+    // Status detail modal
+    const statusModal = createStatusModal();
+    let lastStatusDetails = { ok: [], missing: [], status: '' };
+
+    // System status monitoring - checks Guacamole and blockchain-services (incl. keys)
     function updateSystemStatus() {
         const statusIndicator = document.querySelector('.status-indicator');
+        if (!statusIndicator) return;
         const statusText = statusIndicator.querySelector('.status-text');
-        
-        // Check both services in parallel
-        Promise.all([
-            fetch('/guacamole/')
-                .then(response => ({ service: 'guacamole', ok: response.ok }))
-                .catch(() => ({ service: 'guacamole', ok: false })),
-            fetch('/health')
-                .then(response => response.ok ? response.json() : Promise.reject())
-                .then(data => ({ service: 'blockchain', ok: data.status === 'UP' || data.status === 'DEGRADED' }))
-                .catch(() => ({ service: 'blockchain', ok: false }))
-        ])
-        .then(results => {
-            const guacamoleOk = results[0].ok;
-            const blockchainOk = results[1].ok;
-            
-            if (guacamoleOk && blockchainOk) {
-                statusIndicator.className = 'status-indicator online';
-                statusText.textContent = 'System Online';
-            } else if (guacamoleOk || blockchainOk) {
-                statusIndicator.className = 'status-indicator online';
-                const availableServices = [];
-                if (guacamoleOk) availableServices.push('Labs');
-                if (blockchainOk) availableServices.push('Blockchain');
-                statusText.textContent = `Partial: ${availableServices.join(', ')}`;
-            } else {
-                statusIndicator.className = 'status-indicator offline';
-                statusText.textContent = 'System Unavailable';
-            }
-        })
-        .catch(() => {
-            statusIndicator.className = 'status-indicator offline';
-            statusText.textContent = 'Checking Status...';
-        });
-    }
+        if (!statusText) return;
 
-    // Check status every 30 seconds
+        statusIndicator.className = 'status-indicator checking';
+        statusText.textContent = 'Checking Status...';
+
+        fetch('/gateway/health')
+            .then(async response => {
+                const body = await response.text();
+                let data = {};
+                try {
+                    data = body ? JSON.parse(body) : {};
+                } catch (e) {
+                    data = { parseError: e.message };
+                }
+
+                const services = data.services || {};
+                const blockchain = services.blockchain || {};
+                const guacamole = services.guacamole || {};
+                const guacApi = services.guacamole_api || {};
+                const ops = services.ops || {};
+                const mysql = services.mysql || {};
+                const statusValue = (data.status || '').toString().toUpperCase();
+
+                const okItems = [];
+                const missingItems = [];
+
+                const labsOk = guacamole.ok === true && guacApi.ok === true && mysql.ok === true;
+
+                if (blockchain.ok === true) {
+                    okItems.push('Blockchain services operative');
+                } else {
+                    missingItems.push({ text: `Blockchain services inoperative`, href: '/gateway/health' });
+                }
+
+                if (labsOk) {
+                    okItems.push('Labs access operative');
+                } else {
+                    missingItems.push({ text: `Labs access inoperative`, href: '/gateway/health' });
+                }
+
+                if (ops.ok === false) {
+                    missingItems.push({ text: 'Ops worker inoperative', href: '/gateway/health' });
+                }
+
+                if (statusValue === 'UP') {
+                    statusIndicator.className = 'status-indicator online';
+                    statusText.textContent = 'System Online';
+                    statusIndicator.removeAttribute('title');
+                } else if (statusValue === 'PARTIAL') {
+                    statusIndicator.className = 'status-indicator partial';
+                    statusIndicator.setAttribute('title', 'Click for status details');
+                    statusText.textContent = 'Partial';
+                } else {
+                    statusIndicator.className = 'status-indicator offline';
+                    statusIndicator.setAttribute('title', 'Click for status details');
+                    statusText.textContent = 'System Unavailable';
+                }
+
+                lastStatusDetails = {
+                    status: statusText.textContent,
+                    ok: okItems,
+                    missing: missingItems
+                };
+            })
+            .catch(() => {
+                statusIndicator.className = 'status-indicator checking';
+                statusText.textContent = 'Checking Status...';
+                lastStatusDetails = {
+                    status: 'Checking Status...',
+                    ok: [],
+                    missing: ['Awaiting latest status']
+                };
+            });
+    }
+// Check status every 30 seconds
     updateSystemStatus();
     setInterval(updateSystemStatus, 30000);
 
@@ -119,9 +167,78 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add class to indicate JavaScript is loaded
     document.body.classList.add('js-loaded');
 
+    const statusIndicator = document.querySelector('.status-indicator');
+    if (statusIndicator) {
+        statusIndicator.addEventListener('click', () => {
+            const isPartial = statusIndicator.classList.contains('partial');
+            const isOffline = statusIndicator.classList.contains('offline');
+            if (isPartial || isOffline) {
+                openStatusModal(lastStatusDetails);
+            }
+        });
+    }
+
     console.log('🚀 DecentraLabs Gateway - System started');
     console.log('🔗 Developed by Nebulous Systems');
 });
+
+function createStatusModal() {
+    const modal = document.createElement('div');
+    modal.className = 'status-modal';
+    modal.innerHTML = `
+        <div class="backdrop"></div>
+        <div class="content">
+            <div class="header">
+                <h3>System status details</h3>
+                <button class="close-btn" type="button">&times;</button>
+            </div>
+            <div class="columns">
+                <div class="col ok">
+                    <h4>Working</h4>
+                    <ul class="ok-list"></ul>
+                </div>
+                <div class="col bad">
+                    <h4>Issues</h4>
+                    <ul class="bad-list"></ul>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <a class="primary-btn" href="/gateway/health" target="_blank" rel="noreferrer">More info</a>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = () => modal.classList.remove('show');
+    modal.querySelector('.backdrop').addEventListener('click', close);
+    modal.querySelector('.close-btn').addEventListener('click', close);
+    return modal;
+}
+
+function openStatusModal(details) {
+    const modal = document.querySelector('.status-modal');
+    if (!modal) return;
+    const okList = modal.querySelector('.ok-list');
+    const badList = modal.querySelector('.bad-list');
+    okList.innerHTML = '';
+    badList.innerHTML = '';
+
+    const okItems = Array.isArray(details.ok) && details.ok.length ? details.ok : ['No additional checks passed'];
+    const badItems = Array.isArray(details.missing) && details.missing.length ? details.missing : ['No outstanding issues'];
+
+    okItems.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = typeof item === 'object' && item !== null ? (item.text || '') : item;
+        okList.appendChild(li);
+    });
+    badItems.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = typeof item === 'object' && item !== null ? (item.text || '') : item;
+        badList.appendChild(li);
+    });
+
+    modal.classList.add('show');
+}
 
 // Function to show authentication service information
 function showAuthServiceInfo() {

@@ -31,11 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Auth/health elements
     const authStatusPill = $('#authStatusPill');
     const authRefreshBtn = $('#authRefreshBtn');
-    const authVersionEl = $('#authVersion');
     const authRpcEl = $('#authRpc');
     const authMarketplaceEl = $('#authMarketplace');
     const authPrivateKeyEl = $('#authPrivateKey');
-    const authNotesEl = $('#authNotes');
 
     // Modal controls
     const modal = $('#configModal');
@@ -787,66 +785,86 @@ document.addEventListener('DOMContentLoaded', () => {
             authStatusPill.className = 'pill soft';
         }
         try {
-            const res = await fetch('/health', { headers: { 'Accept': 'application/json' } });
-            const bodyText = await res.text();
-            let data = {};
-            try {
-                data = bodyText ? JSON.parse(bodyText) : {};
-            } catch (e) {
-                data = { parseError: e.message };
-            }
-            const status = data.status || (res.ok ? 'UNKNOWN' : `HTTP ${res.status}`);
-            const rpcUp = data.rpc_up;
-            const rpcClient = data.rpc_client_version;
-            const privateKey = data.private_key_present;
-            const marketplaceCached = data.marketplace_key_cached;
-            const marketplaceUrl = data.marketplace_key_url;
-            const notes = [];
-            if (data.parseError) notes.push(`Parse error: ${data.parseError}`);
-            if (!res.ok) notes.push(`HTTP ${res.status}`);
-            if (!marketplaceCached && marketplaceUrl) notes.push('Marketplace key missing');
-            if (data.error) notes.push(data.error);
+            const [blockchainResult, labsOk] = await Promise.all([
+                fetch('/health', { headers: { 'Accept': 'application/json' } })
+                    .then(async res => {
+                        const bodyText = await res.text();
+                        let data = {};
+                        try {
+                            data = bodyText ? JSON.parse(bodyText) : {};
+                        } catch (e) {
+                            data = { parseError: e.message };
+                        }
+                        const ok = res.ok && (data.status === 'UP' || data.status === 'DEGRADED');
+                        return { ok, res, data };
+                    })
+                    .catch(err => ({ ok: false, error: err.message, data: null })),
+                fetch('/guacamole/', { method: 'GET' })
+                    .then(res => res.ok)
+                    .catch(() => false)
+            ]);
+
+            const labsHealthy = labsOk === true;
+            const blockchainHealthy = blockchainResult.ok === true;
+            const overall = computeOverallStatus(labsHealthy, blockchainHealthy);
+
             renderAuthHealth({
-                status,
-                version: data.version,
-                rpcUp,
-                rpcClient,
-                privateKey,
-                marketplaceCached,
-                marketplaceUrl,
-                notes: notes.join(' · ') || '-'
+                statusText: overall.text,
+                pillClass: overall.className,
+                rpcUp: blockchainResult?.data?.rpc_up,
+                rpcClient: blockchainResult?.data?.rpc_client_version,
+                privateKey: blockchainResult?.data?.private_key_present,
+                marketplaceCached: blockchainResult?.data?.marketplace_key_cached,
+                marketplaceUrl: blockchainResult?.data?.marketplace_key_url
             });
         } catch (err) {
             console.error(err);
             renderAuthHealth({
-                status: 'ERROR',
-                version: '-',
+                statusText: 'System Unavailable',
+                pillClass: 'bad',
                 rpcUp: false,
                 rpcClient: '-',
                 privateKey: false,
                 marketplaceCached: false,
-                marketplaceUrl: '',
-                notes: err.message
+                marketplaceUrl: ''
             });
             showToast('Auth health check failed', 'error');
         }
     }
 
     function renderAuthHealth(state) {
-        const cls = statusToClass(state.status);
+        const cls = state.pillClass || statusToClass(state.statusText);
         if (authStatusPill) {
-            authStatusPill.textContent = state.status || 'unknown';
+            authStatusPill.textContent = state.statusText || 'Unknown';
             authStatusPill.className = `pill ${cls}`;
         }
-        if (authVersionEl) authVersionEl.textContent = state.version || '-';
         if (authRpcEl) authRpcEl.textContent = formatRpc(state.rpcUp, state.rpcClient);
         if (authMarketplaceEl) authMarketplaceEl.textContent = formatMarketplace(state.marketplaceCached, state.marketplaceUrl);
-        if (authPrivateKeyEl) authPrivateKeyEl.textContent = state.privateKey ? 'present' : 'missing';
-        if (authNotesEl) authNotesEl.textContent = state.notes || '-';
+        if (authPrivateKeyEl) authPrivateKeyEl.textContent = formatPrivateKey(state.privateKey);
+    }
+
+    function computeOverallStatus(labsOk, blockchainOk) {
+        const available = [];
+        const missing = [];
+        if (labsOk) available.push('Labs');
+        else missing.push('Labs');
+        if (blockchainOk) available.push('Blockchain');
+        else missing.push('Blockchain');
+
+        if (labsOk && blockchainOk) {
+            return { text: 'System Online', className: 'good' };
+        }
+        if (labsOk || blockchainOk) {
+            const missingText = missing.length ? ` (missing: ${missing.join(', ')})` : '';
+            return { text: `Partial: ${available.join(', ')}${missingText}`, className: 'warn' };
+        }
+        return { text: 'System Unavailable (missing: Labs, Blockchain)', className: 'bad' };
     }
 
     function statusToClass(status) {
         const val = (status || '').toString().toUpperCase();
+        if (val.startsWith('SYSTEM ONLINE')) return 'good';
+        if (val.startsWith('PARTIAL')) return 'warn';
         if (val === 'UP' || val === 'HEALTHY') return 'good';
         if (val === 'DEGRADED') return 'warn';
         if (val.startsWith('HTTP')) return 'warn';
@@ -860,6 +878,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function formatMarketplace(cached, url) {
         const state = cached === undefined ? 'unknown' : cached ? 'cached' : 'missing';
-        return url ? `${state} · ${url}` : state;
+        return url ? `${state} - ${url}` : state;
+    }
+
+    function formatPrivateKey(value) {
+        if (value === true) return 'present';
+        if (value === false) return 'missing';
+        return 'unknown';
     }
 });

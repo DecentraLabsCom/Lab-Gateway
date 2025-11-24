@@ -129,20 +129,20 @@ services:
     restart: "no"
     entrypoint: >
       sh -c '
-      if [ -z "$CERTBOT_DOMAINS" ] || [ -z "$CERTBOT_EMAIL" ]; then
+      if [ -z "$$CERTBOT_DOMAINS" ] || [ -z "$$CERTBOT_EMAIL" ]; then
         echo "CERTBOT_DOMAINS or CERTBOT_EMAIL not set; skipping initial cert issuance";
         exit 0;
       fi;
-      primary_domain=${CERTBOT_DOMAINS%%,*};
-      if [ -f "/etc/letsencrypt/live/$primary_domain/fullchain.pem" ]; then
-        echo "Certificate already present for $primary_domain; skipping issuance";
+      primary_domain=$${CERTBOT_DOMAINS%%,*};
+      if [ -f "/etc/letsencrypt/live/$$primary_domain/fullchain.pem" ]; then
+        echo "Certificate already present for $$primary_domain; skipping issuance";
         exit 0;
       fi;
       domains="";
-      for d in ${CERTBOT_DOMAINS//,/ }; do domains="$domains -d $d"; done;
+      for d in $${CERTBOT_DOMAINS//,/ }; do domains="$$domains -d $$d"; done;
       staging="";
-      if [ "$CERTBOT_STAGING" = "1" ]; then staging="--staging"; fi;
-      certbot certonly --non-interactive --agree-tos $staging --webroot -w /var/www/certbot $domains -m "$CERTBOT_EMAIL"
+      if [ "$$CERTBOT_STAGING" = "1" ]; then staging="--staging"; fi;
+      certbot certonly --non-interactive --agree-tos $$staging --webroot -w /var/www/certbot $$domains -m "$$CERTBOT_EMAIL"
       '
     environment:
       - CERTBOT_DOMAINS=${CERTBOT_DOMAINS}
