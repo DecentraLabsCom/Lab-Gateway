@@ -8,6 +8,7 @@ REM =================================================================
 set "ROOT_ENV_FILE=.env"
 set "BLOCKCHAIN_ENV_FILE=blockchain-services\.env"
 set "compose_cmd=docker compose"
+set "cf_enabled=0"
 
 echo DecentraLabs Gateway - Full Version Setup
 echo ==========================================
@@ -130,6 +131,8 @@ if /i "!domain!"=="localhost" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "localhost"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "8443"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "8081"
+    set "https_port=8443"
+    set "http_port=8081"
     echo    * Server: https://localhost:8443
     echo    * Using development ports (8443/8081)
 ) else (
@@ -137,11 +140,51 @@ if /i "!domain!"=="localhost" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "!domain!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "443"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "80"
+    set "https_port=443"
+    set "http_port=80"
     echo    * Server: https://!domain!
     echo    * Using standard ports (443/80)
 )
 
 echo To use different ports, edit HTTPS_PORT/HTTP_PORT in .env after setup
+echo.
+
+echo Remote Access (Cloudflare Tunnel)
+echo =================================
+set "enable_cf="
+set /p "enable_cf=Enable Cloudflare Tunnel to expose the gateway without opening inbound ports? (y/N): "
+set "enable_cf=!enable_cf: =!"
+if /i "!enable_cf!"=="y" set "cf_enabled=1"
+if /i "!enable_cf!"=="yes" set "cf_enabled=1"
+
+if "!cf_enabled!"=="1" (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ENABLE_CLOUDFLARE" "true"
+    set "cf_token="
+    set /p "cf_token=Cloudflare Tunnel token (leave empty to use a Quick Tunnel): "
+    set "cf_token=!cf_token: =!"
+    if not "!cf_token!"=="" (
+        call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_TOKEN" "!cf_token!"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_QUICK_TUNNEL" "false"
+    ) else (
+        call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_TOKEN" ""
+        call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_QUICK_TUNNEL" "true"
+    )
+    call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_SERVICE" "https://openresty:443"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_NO_TLS_VERIFY" "true"
+    if /i "!domain!"=="localhost" (
+        echo Cloudflare enabled: switching to standard ports (443/80) for a cleaner public URL.
+        call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "443"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "80"
+        set "https_port=443"
+        set "http_port=80"
+    )
+) else (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ENABLE_CLOUDFLARE" "false"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_QUICK_TUNNEL" "false"
+)
+if "!cf_enabled!"=="1" (
+    set "compose_cmd=%compose_cmd% --profile cloudflare"
+)
 echo.
 
 echo Ops Worker configuration
@@ -275,10 +318,13 @@ echo 1. Review and customize %ROOT_ENV_FILE% if needed
 echo 2. Ensure SSL certificates and RSA keys are present in certs\
 echo 3. Review blockchain settings in %ROOT_ENV_FILE% and %BLOCKCHAIN_ENV_FILE%
 echo 4. Run: %compose_cmd% up -d
+if "!cf_enabled!"=="1" (
+    echo 5. Cloudflare tunnel: check '%compose_cmd% logs cloudflared' for the public hostname (or your configured tunnel token domain).
+)
 if /i "!domain!"=="localhost" (
-    echo 5. Access: https://localhost:8443 (HTTP: 8081)
+    echo Access: https://localhost:!https_port! (HTTP: !http_port!)
 ) else (
-    echo 5. Access: https://!domain!
+    echo Access: https://!domain!
 )
 echo    * Guacamole: /guacamole/
 echo    * Blockchain Services API: /auth
@@ -308,12 +354,15 @@ goto docker_start_done
 echo.
 echo Services started successfully!
 if /i "!domain!"=="localhost" (
-    echo Access your lab at: https://localhost:8443
+    echo Access your lab at: https://localhost:!https_port!
 ) else (
     echo Access your lab at: https://!domain!
 )
 echo    * Guacamole: /guacamole/ (guacadmin / guacadmin)
 echo    * Blockchain Services API: /auth
+if "!cf_enabled!"=="1" (
+    echo    * Cloudflare tunnel logs (hostname): %compose_cmd% logs cloudflared
+)
 echo.
 echo To check status: %compose_cmd% ps
 echo To view logs: %compose_cmd% logs -f
@@ -335,6 +384,9 @@ echo Next steps:
 echo 1. Update blockchain contract and wallet values if needed.
 echo 2. Run: %compose_cmd% up -d
 echo 3. Access your services as listed above.
+if "!cf_enabled!"=="1" (
+    echo 4. Cloudflare tunnel hostname: %compose_cmd% logs cloudflared
+)
 echo.
 echo For more information, see README.md
 

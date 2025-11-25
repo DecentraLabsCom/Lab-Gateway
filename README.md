@@ -63,6 +63,7 @@ The setup scripts will automatically:
 - ✅ Generate database passwords and, if OpenSSL is available, offer to create self-signed TLS/JWT keys for localhost
 - ✅ Create the `blockchain-data/` directory for wallet persistence
 - ✅ Optionally start every container with `docker compose up -d`
+- ✅ Ask if you want to enable a Cloudflare Tunnel so the gateway is reachable without a public IP/DNS
 - ☑️ Remind you to create/import the institutional wallet later from the blockchain-services web console
 
 **Windows:**
@@ -136,6 +137,14 @@ AUTO_LOGOUT_ON_DISCONNECT=true
 
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.
+
+Optional Cloudflare Tunnel settings (filled automatically if you opt in during setup):
+
+```env
+ENABLE_CLOUDFLARE=true
+CLOUDFLARE_TUNNEL_TOKEN=your_cloudflare_tunnel_token_or_empty_for_quick_tunnel
+CLOUDFLARE_QUICK_TUNNEL=true
+```
 
 #### Blockchain Service Configuration (`blockchain-services/.env`)
 
@@ -345,6 +354,15 @@ Lab Gateway (Docker) ──> host.docker.internal ──> Local Labs
 - Valid SSL certificate (Let's Encrypt supported)
 - Firewall properly configured
 - Network monitoring tools
+
+## 🌐 Remote Access without Public IP (Cloudflare Tunnel)
+
+- Enable the Cloudflare Tunnel option during `setup.sh` / `setup.bat` to spin up the `cloudflared` sidecar (Compose profile `cloudflare`) and expose the gateway without opening inbound ports.
+- Works behind campus/corporate NAT as long as outbound HTTPS (443) is allowed; WebSockets for Guacamole are supported through the tunnel.
+- Token mode: paste a Cloudflare Tunnel token from your Zero Trust dashboard and Cloudflare will publish the hostname in your zone.
+- Quick Tunnel mode: leave the token empty and a random `*.cfargotunnel.com` hostname will appear in `docker compose --profile cloudflare logs cloudflared`.
+- The tunnel targets `https://openresty:443` inside the Docker network; `CLOUDFLARE_NO_TLS_VERIFY=true` lets it accept the bundled self-signed cert (set to `false` if you bring a trusted cert).
+- Start/stop with the profile when needed: `docker compose --profile cloudflare up -d` / `docker compose --profile cloudflare down`.
 
 ## 🔐 SSL/TLS Certificates
 

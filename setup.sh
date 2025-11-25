@@ -9,6 +9,8 @@ set -euo pipefail
 
 ROOT_ENV_FILE=".env"
 BLOCKCHAIN_ENV_FILE="blockchain-services/.env"
+compose_cmd="docker compose"
+cf_enabled=false
 
 echo "DecentraLabs Gateway - Full Version Setup"
 echo "=========================================="
@@ -161,6 +163,35 @@ fi
 echo "To use different ports, edit HTTPS_PORT/HTTP_PORT in .env after setup"
 
 echo
+echo "Remote Access (Cloudflare Tunnel)"
+echo "================================="
+read -p "Enable Cloudflare Tunnel to expose the gateway without opening inbound ports? (y/N): " enable_cf
+enable_cf=$(echo "$enable_cf" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
+    cf_enabled=true
+    update_env_var "$ROOT_ENV_FILE" "ENABLE_CLOUDFLARE" "true"
+    read -p "Cloudflare Tunnel token (leave empty to use a Quick Tunnel): " cf_token
+    cf_token=$(echo "$cf_token" | tr -d ' ')
+    if [ -n "$cf_token" ]; then
+        update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_TUNNEL_TOKEN" "$cf_token"
+        update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_QUICK_TUNNEL" "false"
+    else
+        update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_TUNNEL_TOKEN" ""
+        update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_QUICK_TUNNEL" "true"
+    fi
+    update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_TUNNEL_SERVICE" "https://openresty:443"
+    update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_NO_TLS_VERIFY" "true"
+    if [ "$domain" == "localhost" ]; then
+        echo "Cloudflare enabled: switching to standard ports (443/80) for a cleaner public URL."
+        update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "443"
+        update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "80"
+    fi
+else
+    update_env_var "$ROOT_ENV_FILE" "ENABLE_CLOUDFLARE" "false"
+    update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_QUICK_TUNNEL" "false"
+fi
+
+echo
 echo "Ops Worker configuration"
 echo "------------------------"
 echo "By default the stack mounts ops-worker/hosts.empty.json."
@@ -265,6 +296,10 @@ if [ -n "$marketplace_pk" ]; then
     update_env_in_all "MARKETPLACE_PUBLIC_KEY_URL" "$marketplace_pk"
 fi
 
+if [ "$cf_enabled" = true ]; then
+    compose_cmd="$compose_cmd --profile cloudflare"
+fi
+
 echo
 echo "Institutional Wallet Reminder"
 echo "-----------------------------"
@@ -282,11 +317,16 @@ echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
 echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, RPC_URL, INSTITUTIONAL_WALLET_*)"
-echo "4. Run: docker compose up -d"
+echo "4. Run: $compose_cmd up -d"
+if [ "$cf_enabled" = true ]; then
+    echo "5. Cloudflare tunnel: check '$compose_cmd logs cloudflared' for the public hostname (or your configured tunnel token domain)."
+fi
+https_port=$(get_env_default "HTTPS_PORT" "$ROOT_ENV_FILE")
+http_port=$(get_env_default "HTTP_PORT" "$ROOT_ENV_FILE")
 if [ "$domain" == "localhost" ]; then
-    echo "5. Access: https://localhost:8443 (HTTP: 8081)"
+    echo "Access: https://localhost:${https_port:-8443} (HTTP: ${http_port:-8081})"
 else
-    echo "5. Access: https://$domain"
+    echo "Access: https://$domain"
 fi
 echo "   * Guacamole: /guacamole/"
 echo "   * Blockchain Services API: /auth"
@@ -299,8 +339,11 @@ if [[ "$start_services" =~ ^[Nn]$ ]] || [[ "$start_services" =~ ^[Nn][Oo]$ ]]; t
     echo
     echo "Next steps:"
 echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
-echo "2. Run: docker compose up -d"
+echo "2. Run: $compose_cmd up -d"
     echo "3. Access your services"
+    if [ "$cf_enabled" = true ]; then
+        echo "4. Cloudflare tunnel hostname: $compose_cmd logs cloudflared"
+    fi
     echo
     echo "For more information, see README.md"
     echo "Setup complete!"
@@ -312,9 +355,9 @@ echo "Building and starting services..."
 echo "This may take several minutes on first run..."
 
 set +e
-docker compose down --remove-orphans
-docker compose build --no-cache
-docker compose up -d
+$compose_cmd down --remove-orphans
+$compose_cmd build --no-cache
+$compose_cmd up -d
 compose_result=$?
 set -e
 
@@ -322,15 +365,18 @@ if [ $compose_result -eq 0 ]; then
     echo
     echo "Services started successfully!"
     if [ "$domain" == "localhost" ]; then
-        echo "Access your lab at: https://localhost:8443"
+        echo "Access your lab at: https://localhost:${https_port:-8443}"
     else
         echo "Access your lab at: https://$domain"
     fi
     echo "   * Guacamole: /guacamole/ (guacadmin / guacadmin)"
     echo "   * Blockchain Services API: /auth"
+    if [ "$cf_enabled" = true ]; then
+        echo "   * Cloudflare tunnel logs (hostname): $compose_cmd logs cloudflared"
+    fi
     echo
-    echo "To check status: docker compose ps"
-    echo "To view logs: docker compose logs -f"
+    echo "To check status: $compose_cmd ps"
+    echo "To view logs: $compose_cmd logs -f"
     echo
     echo "Configuration:"
     echo "   Environment: .env"
