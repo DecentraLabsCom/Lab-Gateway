@@ -1,4 +1,4 @@
-FROM tomcat:9.0
+FROM tomcat:11.0
 
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
