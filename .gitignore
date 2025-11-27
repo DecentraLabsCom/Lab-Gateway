@@ -57,5 +57,9 @@ dev/
 docs-lab-station/
 ops-worker/hosts.json
 
+# Dev scripts and tools
+update-blockchain-services.sh
+update-blockchain-services.bat
+
 # Smart contracts
 contracts/
