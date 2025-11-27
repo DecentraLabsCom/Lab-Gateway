@@ -111,15 +111,29 @@ services:
       openresty:
         condition: service_healthy
     command:
-      - tunnel
-      - --no-autoupdate
-      - --protocol
-      - http2
-      - --url
-      - ${CLOUDFLARE_TUNNEL_SERVICE:-https://openresty:443}
-      - --no-tls-verify
+      - sh
+      - -c
+      - |
+        set -e
+        target="${CLOUDFLARE_TUNNEL_SERVICE:-https://openresty:443}"
+
+        # If we have real certs and a non-localhost hostname, trust TLS; otherwise allow self-signed.
+        have_real_cert=false
+        if [ -s /certs/fullchain.pem ] && [ -s /certs/privkey.pem ] && [ "${SERVER_NAME:-localhost}" != "localhost" ]; then
+          have_real_cert=true
+        fi
+
+        args="tunnel --no-autoupdate --protocol http2 --url ${target}"
+        if [ "$have_real_cert" != "true" ]; then
+          args="$args --no-tls-verify"
+        fi
+
+        exec cloudflared $args
     environment:
       - CLOUDFLARE_TUNNEL_SERVICE=${CLOUDFLARE_TUNNEL_SERVICE:-https://openresty:443}
+      - SERVER_NAME=${SERVER_NAME}
+    volumes:
+      - ./certs:/certs:ro
     restart: unless-stopped
     networks:
       - guacnet

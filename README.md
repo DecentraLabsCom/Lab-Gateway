@@ -143,7 +143,6 @@ Optional Cloudflare Tunnel settings (filled automatically if you opt in during s
 ```env
 ENABLE_CLOUDFLARE=true
 CLOUDFLARE_TUNNEL_TOKEN=your_cloudflare_tunnel_token_or_empty_for_quick_tunnel
-CLOUDFLARE_QUICK_TUNNEL=true
 ```
 
 #### Blockchain Service Configuration (`blockchain-services/.env`)
@@ -361,7 +360,6 @@ Lab Gateway (Docker) ──> host.docker.internal ──> Local Labs
 - Works behind campus/corporate NAT as long as outbound HTTPS (443) is allowed; WebSockets for Guacamole are supported through the tunnel.
 - Token mode: paste a Cloudflare Tunnel token from your Zero Trust dashboard and Cloudflare will publish the hostname in your zone.
 - Quick Tunnel mode: leave the token empty and a random `*.cfargotunnel.com` hostname will appear in `docker compose --profile cloudflare logs cloudflared`.
-- The tunnel targets `https://openresty:443` inside the Docker network; `CLOUDFLARE_NO_TLS_VERIFY=true` lets it accept the bundled self-signed cert (set to `false` if you bring a trusted cert).
 - Start/stop with the profile when needed: `docker compose --profile cloudflare up -d` / `docker compose --profile cloudflare down`.
 
 ## 🔐 SSL/TLS Certificates

@@ -174,13 +174,9 @@ if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
     cf_token=$(echo "$cf_token" | tr -d ' ')
     if [ -n "$cf_token" ]; then
         update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_TUNNEL_TOKEN" "$cf_token"
-        update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_QUICK_TUNNEL" "false"
     else
         update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_TUNNEL_TOKEN" ""
-        update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_QUICK_TUNNEL" "true"
     fi
-    update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_TUNNEL_SERVICE" "https://openresty:443"
-    update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_NO_TLS_VERIFY" "true"
     if [ "$domain" == "localhost" ]; then
         echo "Cloudflare enabled: switching to standard ports (443/80) for a cleaner public URL."
         update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "443"
@@ -188,7 +184,6 @@ if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
     fi
 else
     update_env_var "$ROOT_ENV_FILE" "ENABLE_CLOUDFLARE" "false"
-    update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_QUICK_TUNNEL" "false"
 fi
 
 echo
@@ -297,7 +292,14 @@ if [ -n "$marketplace_pk" ]; then
 fi
 
 if [ "$cf_enabled" = true ]; then
-    compose_cmd="$compose_cmd --profile cloudflare"
+    if [ -n "$cf_token" ]; then
+        cf_profile="cloudflare-token"
+        cf_service="cloudflared-token"
+    else
+        cf_profile="cloudflare"
+        cf_service="cloudflared"
+    fi
+    compose_cmd="$compose_cmd --profile $cf_profile"
 fi
 
 echo
@@ -319,7 +321,7 @@ echo "2. Ensure SSL certificates are in place"
 echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, RPC_URL, INSTITUTIONAL_WALLET_*)"
 echo "4. Run: $compose_cmd up -d"
 if [ "$cf_enabled" = true ]; then
-    echo "5. Cloudflare tunnel: check '$compose_cmd logs cloudflared' for the public hostname (or your configured tunnel token domain)."
+    echo "5. Cloudflare tunnel: check '$compose_cmd logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
 fi
 https_port=$(get_env_default "HTTPS_PORT" "$ROOT_ENV_FILE")
 http_port=$(get_env_default "HTTP_PORT" "$ROOT_ENV_FILE")
@@ -342,7 +344,7 @@ echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS
 echo "2. Run: $compose_cmd up -d"
     echo "3. Access your services"
     if [ "$cf_enabled" = true ]; then
-        echo "4. Cloudflare tunnel hostname: $compose_cmd logs cloudflared"
+        echo "4. Cloudflare tunnel hostname: $compose_cmd logs ${cf_service:-cloudflared}"
     fi
     echo
     echo "For more information, see README.md"
@@ -372,7 +374,7 @@ if [ $compose_result -eq 0 ]; then
     echo "   * Guacamole: /guacamole/ (guacadmin / guacadmin)"
     echo "   * Blockchain Services API: /auth"
     if [ "$cf_enabled" = true ]; then
-        echo "   * Cloudflare tunnel logs (hostname): $compose_cmd logs cloudflared"
+        echo "   * Cloudflare tunnel logs (hostname): $compose_cmd logs ${cf_service:-cloudflared}"
     fi
     echo
     echo "To check status: $compose_cmd ps"

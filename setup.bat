@@ -164,13 +164,9 @@ if "!cf_enabled!"=="1" (
     set "cf_token=!cf_token: =!"
     if not "!cf_token!"=="" (
         call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_TOKEN" "!cf_token!"
-        call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_QUICK_TUNNEL" "false"
     ) else (
         call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_TOKEN" ""
-        call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_QUICK_TUNNEL" "true"
     )
-    call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_SERVICE" "https://openresty:443"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_NO_TLS_VERIFY" "true"
     if /i "!domain!"=="localhost" (
         echo Cloudflare enabled: switching to standard ports (443/80) for a cleaner public URL.
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "443"
@@ -180,10 +176,16 @@ if "!cf_enabled!"=="1" (
     )
 ) else (
     call :UpdateEnv "%ROOT_ENV_FILE%" "ENABLE_CLOUDFLARE" "false"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_QUICK_TUNNEL" "false"
 )
 if "!cf_enabled!"=="1" (
-    set "compose_cmd=%compose_cmd% --profile cloudflare"
+    if not "!cf_token!"=="" (
+        set "cf_profile=cloudflare-token"
+        set "cf_service=cloudflared-token"
+    ) else (
+        set "cf_profile=cloudflare"
+        set "cf_service=cloudflared"
+    )
+    set "compose_cmd=%compose_cmd% --profile !cf_profile!"
 )
 echo.
 
@@ -319,7 +321,7 @@ echo 2. Ensure SSL certificates and RSA keys are present in certs\
 echo 3. Review blockchain settings in %ROOT_ENV_FILE% and %BLOCKCHAIN_ENV_FILE%
 echo 4. Run: %compose_cmd% up -d
 if "!cf_enabled!"=="1" (
-    echo 5. Cloudflare tunnel: check '%compose_cmd% logs cloudflared' for the public hostname (or your configured tunnel token domain).
+    echo 5. Cloudflare tunnel: check '%compose_cmd% logs !cf_service!' for the public hostname (or your configured tunnel token domain).
 )
 if /i "!domain!"=="localhost" (
     echo Access: https://localhost:!https_port! (HTTP: !http_port!)
@@ -358,12 +360,12 @@ if /i "!domain!"=="localhost" (
 ) else (
     echo Access your lab at: https://!domain!
 )
-echo    * Guacamole: /guacamole/ (guacadmin / guacadmin)
-echo    * Blockchain Services API: /auth
-if "!cf_enabled!"=="1" (
-    echo    * Cloudflare tunnel logs (hostname): %compose_cmd% logs cloudflared
-)
-echo.
+    echo    * Guacamole: /guacamole/ (guacadmin / guacadmin)
+    echo    * Blockchain Services API: /auth
+    if "!cf_enabled!"=="1" (
+        echo    * Cloudflare tunnel logs (hostname): %compose_cmd% logs !cf_service!
+    )
+    echo.
 echo To check status: %compose_cmd% ps
 echo To view logs: %compose_cmd% logs -f
 echo.
@@ -385,7 +387,7 @@ echo 1. Update blockchain contract and wallet values if needed.
 echo 2. Run: %compose_cmd% up -d
 echo 3. Access your services as listed above.
 if "!cf_enabled!"=="1" (
-    echo 4. Cloudflare tunnel hostname: %compose_cmd% logs cloudflared
+    echo 4. Cloudflare tunnel hostname: %compose_cmd% logs !cf_service!
 )
 echo.
 echo For more information, see README.md
