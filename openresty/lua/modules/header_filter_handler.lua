@@ -93,8 +93,20 @@ function _M.run(ngx_ctx, deps)
     local port_suffix = (https_port == "443") and "" or (":" .. https_port)
     local req_audience = "https://" .. config:get("server_name") .. port_suffix .. config:get("guac_uri")
     local audience = jwt_obj.payload.aud
-    if not audience or audience ~= req_audience then
-        ngx.log(ngx.WARN, "Header filter - Invalid audience claim: " .. tostring(audience) .. " (expected: " .. req_audience .. ")")
+
+    local function normalize_audience(url)
+        if not url or url == "" then
+            return url
+        end
+        return url:gsub("/+$", "")
+    end
+
+    local normalized_audience = normalize_audience(audience)
+    local normalized_req_audience = normalize_audience(req_audience)
+
+    if not normalized_audience or normalized_audience ~= normalized_req_audience then
+        ngx.log(ngx.WARN, "Header filter - Invalid audience claim: " .. tostring(audience) ..
+            " (expected: " .. req_audience .. ")")
         return
     end
 
