@@ -109,10 +109,6 @@ if "!mysql_password!"=="" (
 call :UpdateEnvBoth "MYSQL_ROOT_PASSWORD" "!mysql_root_password!"
 call :UpdateEnvBoth "MYSQL_PASSWORD" "!mysql_password!"
 
-echo Updating Guacamole configuration...
-powershell -NoLogo -Command ^
-    "& { (Get-Content 'guacamole/guacamole.properties') -replace 'mysql-password:.*', 'mysql-password: !mysql_password!' | Set-Content 'guacamole/guacamole.properties' -Encoding UTF8 }"
-
 echo.
 echo IMPORTANT: Save these passwords securely!
 echo    Root password: !mysql_root_password!

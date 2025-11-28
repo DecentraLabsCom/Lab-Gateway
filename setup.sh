@@ -124,10 +124,6 @@ fi
 update_env_in_all "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
 update_env_in_all "MYSQL_PASSWORD" "$mysql_password"
 
-# Update Guacamole properties file to match the configuration in .env
-echo "Updating Guacamole configuration..."
-sed -i "s/mysql-password:.*/mysql-password: $mysql_password/" guacamole/guacamole.properties
-
 echo
 echo "IMPORTANT: Save these passwords securely!"
 echo "   Root password: $mysql_root_password"

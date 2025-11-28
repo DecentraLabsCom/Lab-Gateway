@@ -71,7 +71,7 @@ services:
       guacamole:
         condition: service_healthy
       blockchain-services:
-        condition: service_started
+        condition: service_healthy  # Wait for keys to be generated
       ops-worker:
         condition: service_started
     healthcheck:

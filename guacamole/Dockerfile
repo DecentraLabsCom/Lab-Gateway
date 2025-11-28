@@ -9,12 +9,13 @@ ADD https://downloads.apache.org/guacamole/1.5.5/binary/guacamole-1.5.5.war /usr
 # Create Guacamole directories
 RUN mkdir -p /etc/guacamole/extensions /etc/guacamole/lib
 
-# Copy configuration (before symlink)
-COPY guacamole.properties /etc/guacamole/
-
 # Copy extensions and libraries
 COPY extensions/*.jar /etc/guacamole/extensions/
 COPY lib/*.jar /etc/guacamole/lib/
+
+# Copy entrypoint script (generates guacamole.properties at runtime)
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create symlink after everything is in place
 RUN ln -sf /etc/guacamole /usr/local/tomcat/.guacamole
@@ -26,3 +27,5 @@ RUN echo "=== Installed Extensions ===" && \
     ls -lh /etc/guacamole/lib/
 
 EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
