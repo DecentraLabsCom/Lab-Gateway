@@ -8,6 +8,8 @@ REM =================================================================
 set "ROOT_ENV_FILE=.env"
 set "BLOCKCHAIN_ENV_FILE=blockchain-services\.env"
 set "compose_cmd=docker compose"
+set "compose_files="
+set "compose_full="
 set "cf_enabled=0"
 
 echo DecentraLabs Gateway - Full Version Setup
@@ -117,6 +119,43 @@ echo    Root password: !mysql_root_password!
 echo    Database password: !mysql_password!
 echo.
 
+REM Guacamole Admin Credentials
+echo.
+echo Guacamole Admin Credentials
+echo ============================
+echo These are the credentials for the Guacamole web interface.
+echo Default is guacadmin/guacadmin - STRONGLY recommended to change in production!
+set "guac_admin_user="
+set "guac_admin_pass="
+set /p "guac_admin_user=Guacamole admin username [guacadmin]: "
+set /p "guac_admin_pass=Guacamole admin password [guacadmin]: "
+
+if "!guac_admin_user!"=="" set "guac_admin_user=guacadmin"
+if "!guac_admin_pass!"=="" (
+    set "guac_admin_pass=guacadmin"
+    echo WARNING: Using default password 'guacadmin'. Change this in production!
+)
+
+call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_USER" "!guac_admin_user!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_PASS" "!guac_admin_pass!"
+echo.
+
+REM OPS Worker Secret
+echo OPS Worker Secret
+echo ==================
+echo This secret authenticates the ops-worker for lab station operations.
+set "ops_secret="
+set /p "ops_secret=OPS secret (leave empty for auto-generated): "
+set "ops_secret=!ops_secret: =!"
+
+if "!ops_secret!"=="" (
+    set "ops_secret=ops_%RANDOM%%RANDOM%%RANDOM%"
+    echo Generated OPS secret: !ops_secret!
+)
+
+call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_SECRET" "!ops_secret!"
+echo.
+
 REM Domain Configuration
 echo Domain Configuration
 echo =====================
@@ -138,15 +177,47 @@ if /i "!domain!"=="localhost" (
 ) else (
     echo Configuring for production...
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "!domain!"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "443"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "80"
-    set "https_port=443"
-    set "http_port=80"
-    echo    * Server: https://!domain!
-    echo    * Using standard ports (443/80)
+    
+    echo.
+    echo Deployment Mode
+    echo ---------------
+    echo How is the gateway exposed to the internet?
+    echo   1^) Direct - Gateway has a public IP ^(ports bound directly^)
+    echo   2^) Router - Behind NAT/router with port forwarding ^(e.g., router:8043 -^> host:443^)
+    set /p "deploy_mode=Choose [1/2] (default: 1): "
+    set "deploy_mode=!deploy_mode: =!"
+    
+    if "!deploy_mode!"=="2" (
+        echo Router mode selected.
+        set /p "public_https=Public HTTPS port (the port clients use, e.g., 8043): "
+        set "public_https=!public_https: =!"
+        if "!public_https!"=="" set "public_https=443"
+        set /p "public_http=Public HTTP port (default: 80): "
+        set "public_http=!public_http: =!"
+        if "!public_http!"=="" set "public_http=80"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "!public_https!"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "!public_http!"
+        set "https_port=!public_https!"
+        set "http_port=!public_http!"
+        set "compose_files=-f docker-compose.yml -f docker-compose.router.yml"
+        echo    * Public URL: https://!domain!:!public_https!
+        echo    * Docker will bind to 0.0.0.0:443 and 0.0.0.0:80 ^(router override^)
+    ) else (
+        echo Direct mode selected.
+        set /p "direct_https=HTTPS port (default: 443): "
+        set "direct_https=!direct_https: =!"
+        if "!direct_https!"=="" set "direct_https=443"
+        set /p "direct_http=HTTP port (default: 80): "
+        set "direct_http=!direct_http: =!"
+        if "!direct_http!"=="" set "direct_http=80"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "!direct_https!"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "!direct_http!"
+        set "https_port=!direct_https!"
+        set "http_port=!direct_http!"
+        echo    * Server: https://!domain!:!direct_https!
+        echo    * Using ports ^(!direct_https!/!direct_http!^)
+    )
 )
-
-echo To use different ports, edit HTTPS_PORT/HTTP_PORT in .env after setup
 echo.
 
 echo Remote Access (Cloudflare Tunnel)
@@ -185,8 +256,10 @@ if "!cf_enabled!"=="1" (
         set "cf_profile=cloudflare"
         set "cf_service=cloudflared"
     )
-    set "compose_cmd=%compose_cmd% --profile !cf_profile!"
 )
+REM Build complete compose command: base + files + profile
+set "compose_full=%compose_cmd% !compose_files!"
+if "!cf_enabled!"=="1" set "compose_full=!compose_full! --profile !cf_profile!"
 echo.
 
 echo Ops Worker configuration
@@ -319,9 +392,9 @@ echo ==========
 echo 1. Review and customize %ROOT_ENV_FILE% if needed
 echo 2. Ensure SSL certificates and RSA keys are present in certs\
 echo 3. Review blockchain settings in %ROOT_ENV_FILE% and %BLOCKCHAIN_ENV_FILE%
-echo 4. Run: %compose_cmd% up -d
+echo 4. Run: !compose_full! up -d
 if "!cf_enabled!"=="1" (
-    echo 5. Cloudflare tunnel: check '%compose_cmd% logs !cf_service!' for the public hostname (or your configured tunnel token domain).
+    echo 5. Cloudflare tunnel: check '!compose_full! logs !cf_service!' for the public hostname ^(or your configured tunnel token domain^).
 )
 if /i "!domain!"=="localhost" (
     echo Access: https://localhost:!https_port! (HTTP: !http_port!)
@@ -340,11 +413,11 @@ echo.
 echo Building and starting services...
 echo This may take several minutes on first run...
 
-call %compose_cmd% down --remove-orphans
+call !compose_full! down --remove-orphans
 if errorlevel 1 goto compose_fail
-call %compose_cmd% build --no-cache
+call !compose_full! build --no-cache
 if errorlevel 1 goto compose_fail
-call %compose_cmd% up -d
+call !compose_full! up -d
 if errorlevel 1 goto compose_fail
 goto compose_success
 
@@ -360,14 +433,14 @@ if /i "!domain!"=="localhost" (
 ) else (
     echo Access your lab at: https://!domain!
 )
-    echo    * Guacamole: /guacamole/ (guacadmin / guacadmin)
+    echo    * Guacamole: /guacamole/ ^(!guac_admin_user! / !guac_admin_pass!^)
     echo    * Blockchain Services API: /auth
     if "!cf_enabled!"=="1" (
-        echo    * Cloudflare tunnel logs (hostname): %compose_cmd% logs !cf_service!
+        echo    * Cloudflare tunnel logs ^(hostname^): !compose_full! logs !cf_service!
     )
     echo.
-echo To check status: %compose_cmd% ps
-echo To view logs: %compose_cmd% logs -f
+echo To check status: !compose_full! ps
+echo To view logs: !compose_full! logs -f
 echo.
 echo Configuration:
 echo    Environment: %ROOT_ENV_FILE%
@@ -384,10 +457,10 @@ echo Configuration complete!
 echo.
 echo Next steps:
 echo 1. Update blockchain contract and wallet values if needed.
-echo 2. Run: %compose_cmd% up -d
+echo 2. Run: !compose_full! up -d
 echo 3. Access your services as listed above.
 if "!cf_enabled!"=="1" (
-    echo 4. Cloudflare tunnel hostname: %compose_cmd% logs !cf_service!
+    echo 4. Cloudflare tunnel hostname: !compose_full! logs !cf_service!
 )
 echo.
 echo For more information, see README.md

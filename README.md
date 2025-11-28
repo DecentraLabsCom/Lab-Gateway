@@ -7,8 +7,6 @@
 
 DecentraLabs Gateway provides a complete blockchain-based authentication system for laboratory access. It includes all components needed for a decentralized lab access solution with advanced features, wallet management, and institutional treasury operations.
 
-> **Alternative Version**: A lightweight [Lite Version](LITE-VERSION.md) is available in the `lite` branch for JWT-only authentication without blockchain features.
-
 ## 🏗️ Architecture
 
 ```
@@ -45,12 +43,11 @@ DecentraLabs Gateway provides a complete blockchain-based authentication system 
 - **Institutional Treasury**: Full treasury management with spending limits and period controls
 - **Health Monitoring**: Built-in health checks and metrics
 
-### ✅ Enhanced Gateway Features
-- **CORS Support**: Cross-origin resource sharing for web applications
-- **Rate Limiting**: Protection against abuse and DoS attacks
-- **Security Headers**: Comprehensive security header configuration
-- **Real-time Monitoring**: Detailed logging and error tracking
-- **Session Management**: Automatic session handling with tunnel monitoring
+### ✅ Lab Access & Management
+- **Apache Guacamole Integration**: Clientless RDP/VNC/SSH access through the browser
+- **Session Cookie Management**: JTI-based session validation with automatic expiration
+- **Header Propagation**: Authenticated username forwarded to Guacamole for auto-login
+- **Ops Worker**: Remote power management for lab stations (Wake-on-LAN, shutdown)
 
 ## 🚀 Quick Deployment
 
@@ -64,6 +61,8 @@ The setup scripts will automatically:
 - ✅ Create the `blockchain-data/` directory for wallet persistence
 - ✅ Optionally start every container with `docker compose up -d`
 - ✅ Ask if you want to enable a Cloudflare Tunnel so the gateway is reachable without a public IP/DNS
+- ✅ Configure Guacamole admin credentials
+- ✅ Generate OPS worker secret for lab power operations
 - ☑️ Remind you to create/import the institutional wallet later from the blockchain-services web console
 
 **Windows:**
@@ -96,7 +95,7 @@ If you prefer manual configuration:
    certs/
    ├── fullchain.pem      # SSL certificate chain
    ├── privkey.pem        # SSL private key
-   └── public_key.pem     # JWT public key (from marketplace/auth provider)
+   └── public_key.pem     # JWT public key (from auth provider)
    ```
 
 4. **Start the services:**
@@ -138,6 +137,19 @@ AUTO_LOGOUT_ON_DISCONNECT=true
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.
 
+##### Deployment modes: Direct vs Router forwarding
+
+- **Direct (default)**: Gateway has a public IP or you're testing locally.
+  ```bash
+  docker compose up -d
+  ```
+
+- **Behind a router/NAT**: External traffic arrives via port forwarding (e.g., router:8043 → host:443). Set `HTTPS_PORT` to the **public port** (e.g., 8043) and use the router override:
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.router.yml up -d
+  ```
+This binds to `0.0.0.0:443` and `0.0.0.0:80` so the router can reach the gateway.
+
 Optional Cloudflare Tunnel settings (filled automatically if you opt in during setup):
 
 ```env
@@ -164,29 +176,7 @@ ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 ```
 
-**Setup:**
-1. Copy templates: `cp .env.example .env && cp blockchain-services/.env.example blockchain-services/.env`
-2. Edit both `.env` files with your values
-3. See `blockchain-services/.env.example` for complete configuration options
-
-### 🔑 Required Files
-
-Place these files in the `certs/` directory:
-
-```
-certs/
-├── fullchain.pem      # SSL certificate chain
-├── privkey.pem        # SSL private key
-└── public_key.pem     # JWT public key (from marketplace/auth provider)
-```
-
-## 💾 Blockchain Wallet Persistence
-
-The `blockchain-services` container mounts `./blockchain-data` into `/app/data` to keep the encrypted institutional wallet (`wallets.json`) between restarts. Create this folder before running Docker, lock down permissions, and add it to your backup plan. It is already ignored by git so you won't accidentally commit secrets.
-
-> The setup scripts create this directory automatically. Make sure it is backed up and has restricted permissions in production.
-
-### Institutional Wallet Setup
+## Institutional Wallet Setup
 
 The institutional wallet is managed automatically by blockchain-services:
 
@@ -208,62 +198,6 @@ The institutional wallet is managed automatically by blockchain-services:
 
 The encrypted wallet and configuration files are stored in `blockchain-data/` which is mounted as a Docker volume and excluded from git.
 
-## 🔄 Blockchain-Services Submodule Management
-
-The gateway uses blockchain-services as a Git submodule. Here's how to manage it:
-
-### 📋 **When to Update the Submodule**
-
-**Update Strategy - By Feature (Recommended):**
-- ✅ After completing a new feature in blockchain-services
-- ✅ When preparing for integration testing
-- ✅ Before creating a release
-
-### 🛠️ **Update Commands**
-
-**Manual Update:**
-```bash
-# Update submodule to latest version
-git submodule update --remote blockchain-services
-
-# Commit the submodule update
-git add blockchain-services
-git commit -m "Update blockchain-services to latest version"
-git push
-```
-
-**Automated Update (Recommended):**
-```bash
-# Windows
-.\update-blockchain-services.bat "Integrate new blockchain features"
-
-# Linux/macOS
-./update-blockchain-services.sh "Integrate new blockchain features"
-```
-
-### 🔍 **Submodule Status**
-
-Check submodule status:
-```bash
-# View current submodule status
-git submodule status
-
-# View available updates
-git submodule summary
-
-# Initialize submodule (if empty)
-git submodule update --init --recursive
-```
-
-### 💡 **Development Workflow**
-
-1. **Develop in blockchain-services repository** (separate directory)
-2. **Test and commit changes** in blockchain-services
-3. **Push blockchain-services changes** to GitHub
-4. **Run update script** in Lab Gateway when ready to integrate
-5. **Test full system** with updated blockchain-services
-6. **Push Lab Gateway changes**
-
 ## 💻 System Requirements
 
 **Operating System:**
@@ -280,21 +214,6 @@ git submodule update --init --recursive
 **Software:**
 - **Docker Engine 20.10+** (Linux) or **Docker Desktop** (Windows/macOS)
 - **Docker Compose 2.0+** (included with Docker Desktop)
-- **Git** (for submodule management)
-- **OpenSSL** (for certificate management)
-
-## 🌐 Network Requirements
-- Linux (recommended) - Ubuntu 20.04+, Debian 11+, CentOS 8+
-- Unix-like systems (BSD, macOS) - supported
-- Windows - via WSL2 or Docker Desktop
-
-**Hardware (Minimum):**
-- 2 CPU cores
-- 4GB RAM
-- Network interface with internet connectivity
-
-**Software:**
-- **Docker Engine 20.10+** (Linux) or **Docker Desktop** (Windows/macOS)
 - **OpenSSL** (for certificate management)
 
 ### Network Requirements
@@ -333,27 +252,6 @@ Internet ──> [NIC with VLAN tagging] Lab Gateway ──> VLAN 10 / VLAN 20
 - ✅ Logical separation of public and lab traffic
 - ✅ Common in enterprise/datacenter environments
 
-#### Option D: Localhost/Docker (Development/Testing)
-```
-Lab Gateway (Docker) ──> host.docker.internal ──> Local Labs
-```
-- ✅ Labs running on the same machine
-- ✅ Labs in Docker containers
-- ✅ Ideal for development and testing
-
-**Required Network Connectivity:**
-- **Inbound**: HTTPS (443 or custom port), HTTP (80 for redirects)
-- **Outbound to Labs**: RDP (3389), VNC (5900-5910), SSH (22)
-- **Outbound to Blockchain**: RPC endpoints (443/8545)
-- **Outbound to Database**: MySQL (3306) - if external
-- **DNS Resolution**: For lab server names (or static hosts file)
-
-**Recommended for Production:**
-- Static public IP or Dynamic DNS
-- Valid SSL certificate (Let's Encrypt supported)
-- Firewall properly configured
-- Network monitoring tools
-
 ## 🌐 Remote Access without Public IP (Cloudflare Tunnel)
 
 - Enable the Cloudflare Tunnel option during `setup.sh` / `setup.bat` to spin up the `cloudflared` sidecar (Compose profile `cloudflare`) and expose the gateway without opening inbound ports.
@@ -372,8 +270,6 @@ Lab Gateway (Docker) ──> host.docker.internal ──> Local Labs
 - Valid SSL certificate from trusted CA
 - Let's Encrypt (free, automated renewal)
 - Commercial certificate providers
-- Wildcard certificates for multiple subdomains
-
 - Wildcard certificates for multiple subdomains
 
 ## 🛠️ Technology Stack
@@ -495,15 +391,6 @@ docker compose logs -f blockchain-services
 docker compose logs -f guacamole
 ```
 
-### Hot Reload
-
-The blockchain service supports rebuilding without recreating all containers:
-```bash
-# Rebuild only blockchain service
-docker compose build blockchain-services
-docker compose up -d blockchain-services
-```
-
 ## 🤝 Contributing
 
 1. **Fork** the project
@@ -515,7 +402,6 @@ docker compose up -d blockchain-services
 ## 📝 Documentation
 
 - **Main Documentation**: This README (for main branch - full version)
-- **Lite Version**: [LITE-VERSION.md](LITE-VERSION.md) - Simplified JWT-only version
 - **Logging**: [LOGGING.md](LOGGING.md) - Log configuration and management
 - **Guacamole Setup**: [configuring-lab-connections/guacamole-connections.md](configuring-lab-connections/guacamole-connections.md)
 - **Blockchain Services**: Check [blockchain-services/README.md](blockchain-services/README.md) for detailed API documentation

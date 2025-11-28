@@ -1,0 +1,12 @@
+# Override for router/NAT deployments
+# Usage: docker compose -f docker-compose.yml -f docker-compose.router.yml up -d
+#
+# Binds OpenResty to 0.0.0.0 on ports 443/80 so a router can forward
+# external traffic to the gateway host. Set HTTPS_PORT in .env to
+# the PUBLIC port clients use (e.g., 8043 if router:8043 → host:443).
+
+services:
+  openresty:
+    ports:
+      - "0.0.0.0:443:443"
+      - "0.0.0.0:80:80"

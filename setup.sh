@@ -10,6 +10,8 @@ set -euo pipefail
 ROOT_ENV_FILE=".env"
 BLOCKCHAIN_ENV_FILE="blockchain-services/.env"
 compose_cmd="docker compose"
+compose_files=""
+compose_profiles=""
 cf_enabled=false
 
 echo "DecentraLabs Gateway - Full Version Setup"
@@ -132,6 +134,45 @@ echo "   Root password: $mysql_root_password"
 echo "   Database password: $mysql_password"
 echo
 
+# Guacamole Admin Credentials
+echo
+echo "Guacamole Admin Credentials"
+echo "============================"
+echo "These are the credentials for the Guacamole web interface."
+echo "Default is guacadmin/guacadmin - STRONGLY recommended to change in production!"
+read -p "Guacamole admin username [guacadmin]: " guac_admin_user
+read -p "Guacamole admin password [guacadmin]: " guac_admin_pass
+
+guac_admin_user=$(echo "$guac_admin_user" | tr -d ' ')
+guac_admin_pass=$(echo "$guac_admin_pass" | tr -d ' ')
+
+if [ -z "$guac_admin_user" ]; then
+    guac_admin_user="guacadmin"
+fi
+if [ -z "$guac_admin_pass" ]; then
+    guac_admin_pass="guacadmin"
+    echo "WARNING: Using default password 'guacadmin'. Change this in production!"
+fi
+
+update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_USER" "$guac_admin_user"
+update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_PASS" "$guac_admin_pass"
+echo
+
+# OPS Worker Secret
+echo "OPS Worker Secret"
+echo "=================="
+echo "This secret authenticates the ops-worker for lab station operations."
+read -p "OPS secret (leave empty for auto-generated): " ops_secret
+ops_secret=$(echo "$ops_secret" | tr -d ' ')
+
+if [ -z "$ops_secret" ]; then
+    ops_secret="ops_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated OPS secret: $ops_secret"
+fi
+
+update_env_var "$ROOT_ENV_FILE" "OPS_SECRET" "$ops_secret"
+echo
+
 # Domain Configuration
 echo "Domain Configuration"
 echo "===================="
@@ -154,13 +195,52 @@ if [ "$domain" == "localhost" ]; then
 else
     echo "Configuring for production..."
     update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "$domain"
-    update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "443"
-    update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "80"
-    echo "   * Server: https://$domain"
-    echo "   * Using standard ports (443/80)"
+    
+    # Ask about deployment mode
+    echo
+    echo "Deployment Mode"
+    echo "---------------"
+    echo "How is the gateway exposed to the internet?"
+    echo "  1) Direct - Gateway has a public IP (ports bound directly)"
+    echo "  2) Router - Behind NAT/router with port forwarding (e.g., router:8043 → host:443)"
+    read -p "Choose [1/2] (default: 1): " deploy_mode
+    deploy_mode=$(echo "$deploy_mode" | tr -d ' ')
+    
+    if [ "$deploy_mode" == "2" ]; then
+        echo "Router mode selected."
+        read -p "Public HTTPS port (the port clients use; default: 443): " public_https
+        public_https=$(echo "$public_https" | tr -d ' ')
+        if [ -z "$public_https" ]; then
+            public_https="443"
+        fi
+        read -p "Public HTTP port (default: 80): " public_http
+        public_http=$(echo "$public_http" | tr -d ' ')
+        if [ -z "$public_http" ]; then
+            public_http="80"
+        fi
+        update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "$public_https"
+        update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "$public_http"
+        compose_files="-f docker-compose.yml -f docker-compose.router.yml"
+        echo "   * Public URL: https://$domain:$public_https"
+        echo "   * Docker will bind to 0.0.0.0:443 and 0.0.0.0:80 (router override)"
+    else
+        echo "Direct mode selected."
+        read -p "HTTPS port (default: 443): " direct_https
+        direct_https=$(echo "$direct_https" | tr -d ' ')
+        if [ -z "$direct_https" ]; then
+            direct_https="443"
+        fi
+        read -p "HTTP port (default: 80): " direct_http
+        direct_http=$(echo "$direct_http" | tr -d ' ')
+        if [ -z "$direct_http" ]; then
+            direct_http="80"
+        fi
+        update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "$direct_https"
+        update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "$direct_http"
+        echo "   * Server: https://$domain:$direct_https"
+        echo "   * Using ports ($direct_https/$direct_http)"
+    fi
 fi
-
-echo "To use different ports, edit HTTPS_PORT/HTTP_PORT in .env after setup"
 
 echo
 echo "Remote Access (Cloudflare Tunnel)"
@@ -299,7 +379,16 @@ if [ "$cf_enabled" = true ]; then
         cf_profile="cloudflare"
         cf_service="cloudflared"
     fi
-    compose_cmd="$compose_cmd --profile $cf_profile"
+    compose_profiles="--profile $cf_profile"
+fi
+
+# Build final compose command
+compose_full="$compose_cmd"
+if [ -n "$compose_files" ]; then
+    compose_full="$compose_full $compose_files"
+fi
+if [ -n "$compose_profiles" ]; then
+    compose_full="$compose_full $compose_profiles"
 fi
 
 echo
@@ -319,9 +408,9 @@ echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
 echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, RPC_URL, INSTITUTIONAL_WALLET_*)"
-echo "4. Run: $compose_cmd up -d"
+echo "4. Run: $compose_full up -d"
 if [ "$cf_enabled" = true ]; then
-    echo "5. Cloudflare tunnel: check '$compose_cmd logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
+    echo "5. Cloudflare tunnel: check '$compose_full logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
 fi
 https_port=$(get_env_default "HTTPS_PORT" "$ROOT_ENV_FILE")
 http_port=$(get_env_default "HTTP_PORT" "$ROOT_ENV_FILE")
@@ -341,10 +430,10 @@ if [[ "$start_services" =~ ^[Nn]$ ]] || [[ "$start_services" =~ ^[Nn][Oo]$ ]]; t
     echo
     echo "Next steps:"
 echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
-echo "2. Run: $compose_cmd up -d"
+echo "2. Run: $compose_full up -d"
     echo "3. Access your services"
     if [ "$cf_enabled" = true ]; then
-        echo "4. Cloudflare tunnel hostname: $compose_cmd logs ${cf_service:-cloudflared}"
+        echo "4. Cloudflare tunnel hostname: $compose_full logs ${cf_service:-cloudflared}"
     fi
     echo
     echo "For more information, see README.md"
@@ -357,9 +446,9 @@ echo "Building and starting services..."
 echo "This may take several minutes on first run..."
 
 set +e
-$compose_cmd down --remove-orphans
-$compose_cmd build --no-cache
-$compose_cmd up -d
+$compose_full down --remove-orphans
+$compose_full build --no-cache
+$compose_full up -d
 compose_result=$?
 set -e
 
@@ -371,14 +460,14 @@ if [ $compose_result -eq 0 ]; then
     else
         echo "Access your lab at: https://$domain"
     fi
-    echo "   * Guacamole: /guacamole/ (guacadmin / guacadmin)"
+    echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
     echo "   * Blockchain Services API: /auth"
     if [ "$cf_enabled" = true ]; then
-        echo "   * Cloudflare tunnel logs (hostname): $compose_cmd logs ${cf_service:-cloudflared}"
+        echo "   * Cloudflare tunnel logs (hostname): $compose_full logs ${cf_service:-cloudflared}"
     fi
     echo
-    echo "To check status: $compose_cmd ps"
-    echo "To view logs: $compose_cmd logs -f"
+    echo "To check status: $compose_full ps"
+    echo "To view logs: $compose_full logs -f"
     echo
     echo "Configuration:"
     echo "   Environment: .env"
