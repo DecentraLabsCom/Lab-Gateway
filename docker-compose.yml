@@ -206,6 +206,8 @@ services:
 
   mysql:
     image: mysql:8.0.41
+    entrypoint: ["/usr/local/bin/ensure-user-entrypoint.sh"]
+    command: ["mysqld"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -213,6 +215,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./mysql/ensure-user-entrypoint.sh:/usr/local/bin/ensure-user-entrypoint.sh:ro
       - ./mysql/000-ensure-user.sh:/docker-entrypoint-initdb.d/000-ensure-user.sh:ro
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
       - ./mysql/002-create-admin-user.sql:/docker-entrypoint-initdb.d/002-create-admin-user.sql:ro

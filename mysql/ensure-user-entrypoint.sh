@@ -9,6 +9,7 @@ if [[ ! -x "${ORIGINAL_ENTRYPOINT}" ]]; then
   exit 1
 fi
 
+# Start MySQL in background
 "${ORIGINAL_ENTRYPOINT}" "$@" &
 child_pid=$!
 
@@ -22,8 +23,24 @@ forward_signal() {
 trap 'forward_signal TERM' TERM
 trap 'forward_signal INT' INT
 
+# Wait for MySQL to be ready before running the ensure-user script
 if [[ -f "${ENSURE_SCRIPT}" ]]; then
-  bash "${ENSURE_SCRIPT}"
+  echo "Waiting for MySQL to be ready before ensuring user permissions..."
+  
+  # Wait up to 60 seconds for MySQL to be ready
+  for i in {1..60}; do
+    if mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
+      echo "MySQL is ready. Running ensure-user script..."
+      bash "${ENSURE_SCRIPT}"
+      break
+    fi
+    
+    if [[ $i -eq 60 ]]; then
+      echo "Warning: MySQL did not become ready in time. Ensure-user script not executed." >&2
+    fi
+    
+    sleep 1
+  done
 else
   echo "Warning: ensure script ${ENSURE_SCRIPT} not found" >&2
 fi
