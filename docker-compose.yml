@@ -23,7 +23,7 @@ services:
       guacamole:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f -L http://localhost:80/ -H 'Host: ${SERVER_NAME}' --connect-timeout 5 --insecure"]
+      test: ["CMD", "sh", "-c", "curl -s http://localhost:80/ > /dev/null"]
       timeout: 10s
       retries: 3
       interval: 30s
@@ -49,6 +49,7 @@ services:
   mysql:
     image: mysql:8.0.41
     entrypoint: ["/usr/local/bin/ensure-user-entrypoint.sh"]
+    command: ["mysqld"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
