@@ -267,40 +267,22 @@ echo.
 if not exist certs mkdir certs
 if not exist blockchain-data mkdir blockchain-data
 
-set "has_openssl=0"
-where openssl >nul 2>&1
-if not errorlevel 1 set "has_openssl=1"
-
 echo SSL Certificates
 echo ================
-if not exist certs\fullchain.pem (
-    echo SSL certificates not found!
-    echo   * certs\fullchain.pem (certificate)
-    echo   * certs\privkey.pem (private key)
-    if /i "!domain!"=="localhost" if "!has_openssl!"=="1" (
-        set /p "generate_cert=Generate a self-signed certificate for localhost now? (Y/n): "
-        set "generate_cert=!generate_cert: =!"
-        if "!generate_cert!"=="" set "generate_cert=y"
-        if /i "!generate_cert!"=="y" (
-            openssl req -x509 -nodes -newkey rsa:2048 ^
-                -keyout certs\privkey.pem ^
-                -out certs\fullchain.pem ^
-                -days 365 ^
-                -subj "/CN=localhost"
-            if errorlevel 1 (
-                echo Failed to generate self-signed certificate.
-            ) else (
-                echo Generated self-signed certificate for localhost.
-            )
-        )
+if exist certs\fullchain.pem (
+    if exist certs\privkey.pem (
+        echo SSL certificates found in certs\ - they will be used.
     ) else (
-        echo Provide valid certificates (Let's Encrypt, CA, or cloud provider).
+        echo Found certs\fullchain.pem but privkey.pem is missing.
     )
 ) else (
-    if not exist certs\privkey.pem (
-        echo Found certs\fullchain.pem but privkey.pem is missing.
-    ) else (
-        echo SSL certificates found.
+    echo No SSL certificates in certs\ - OpenResty will auto-generate self-signed certs at startup.
+    if /i not "!domain!"=="localhost" (
+        echo.
+        echo For production, consider adding valid certificates:
+        echo   * certs\fullchain.pem ^(certificate chain^)
+        echo   * certs\privkey.pem ^(private key^)
+        echo Sources: Let's Encrypt ^(certbot^), your CA, or cloud provider.
     )
 )
 echo.

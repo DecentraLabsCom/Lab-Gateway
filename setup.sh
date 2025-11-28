@@ -274,33 +274,17 @@ echo "================"
 mkdir -p certs
 mkdir -p blockchain-data
 
-if [ ! -f "certs/fullchain.pem" ] || [ ! -f "certs/privkey.pem" ]; then
-    echo "SSL certificates not found!"
-    echo
-    echo "You need to add SSL certificates to the 'certs' folder:"
-    echo "  * certs/fullchain.pem (certificate)"
-    echo "  * certs/privkey.pem (private key)"
-    if [ "$domain" == "localhost" ] && command -v openssl &> /dev/null; then
-        read -p "Generate a self-signed certificate for localhost now? (Y/n): " generate_cert
-        generate_cert=$(echo "$generate_cert" | tr -d ' ')
-        if [[ -z "$generate_cert" || "$generate_cert" =~ ^[Yy]$ ]]; then
-            openssl req -x509 -nodes -newkey rsa:2048 \
-                -keyout certs/privkey.pem \
-                -out certs/fullchain.pem \
-                -days 365 \
-                -subj "/CN=localhost"
-            echo "Generated self-signed certificate for localhost."
-        fi
-    fi
+if [ -f "certs/fullchain.pem" ] && [ -f "certs/privkey.pem" ]; then
+    echo "SSL certificates found in certs/ - they will be used."
+else
+    echo "No SSL certificates in certs/ - OpenResty will auto-generate self-signed certs at startup."
     if [ "$domain" != "localhost" ]; then
         echo
-        echo "You can get valid certificates from:"
-        echo "  * Let's Encrypt (certbot)"
-        echo "  * Your certificate authority"
-        echo "  * Cloud provider (AWS ACM, etc.)"
+        echo "For production, consider adding valid certificates:"
+        echo "  * certs/fullchain.pem (certificate chain)"
+        echo "  * certs/privkey.pem (private key)"
+        echo "Sources: Let's Encrypt (certbot), your CA, or cloud provider."
     fi
-else
-    echo "SSL certificates found"
 fi
 
 echo
