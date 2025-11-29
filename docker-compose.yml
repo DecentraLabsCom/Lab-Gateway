@@ -60,6 +60,9 @@ services:
       - ./openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
       - ./openresty/lua:/etc/openresty/lua:ro
       - ./web:/var/www/html:ro
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+      - /var/run:size=16M,mode=755
     environment:
       - GUAC_ADMIN_USER=${GUAC_ADMIN_USER}
       - GUAC_ADMIN_PASS=${GUAC_ADMIN_PASS}
@@ -134,6 +137,18 @@ services:
       - SERVER_NAME=${SERVER_NAME}
     volumes:
       - ./certs:/certs:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     networks:
       - guacnet
@@ -152,6 +167,18 @@ services:
       - ${CLOUDFLARE_TUNNEL_TOKEN}
     environment:
       - CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     networks:
       - guacnet
@@ -294,20 +321,22 @@ services:
     networks:
       - guacnet
   guacd:
-    image: guacamole/guacd
+    image: guacamole/guacd:1.5.5
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "4822"]
       timeout: 10s
       retries: 3
       interval: 30s
       start_period: 30s
+    tmpfs:
+      - /tmp:size=128M,mode=1777
     deploy:
       resources:
         limits:
-          memory: 128M
-          cpus: '0.3'
+          memory: 256M
+          cpus: '0.5'
         reservations:
-          memory: 64M
+          memory: 128M
           cpus: '0.2'
     logging:
       driver: "json-file"
@@ -342,6 +371,9 @@ services:
       - MYSQL_DSN=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
+    tmpfs:
+      - /tmp:size=32M,mode=1777
+    read_only: true
     depends_on:
       mysql:
         condition: service_healthy

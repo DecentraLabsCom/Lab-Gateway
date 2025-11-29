@@ -2,13 +2,15 @@
 
 ## Introduction
 
-* [DecentraLabs Gateway - Main Version](README.md)
-
-## Alternative Version
-
-* [Lite Version Guide](LITE-VERSION.md)
+* [DecentraLabs Gateway](README.md)
 
 ## Configuration
 
 * [Guacamole Connections](configuring-lab-connections/guacamole-connections.md)
 * [Logging Configuration](LOGGING.md)
+
+## Services
+
+* [Blockchain Services](blockchain-services/README.md)
+* [Ops Worker](ops-worker/README.md)
+* [Certbot Setup](certbot/README.md)

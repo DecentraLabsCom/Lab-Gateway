@@ -1,0 +1,67 @@
+services:
+  # Mock blockchain-services with rate limiting and auth endpoints
+  blockchain-services:
+    build:
+      context: ./mocks/blockchain-services
+      dockerfile: Dockerfile
+    environment:
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=30
+      - RATE_LIMIT_BURST=10
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  guacamole:
+    build:
+      context: ./mocks/guacamole
+      dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  openresty:
+    build:
+      context: ../../openresty
+      dockerfile: Dockerfile
+    environment:
+      GUAC_ADMIN_USER: admin
+      GUAC_ADMIN_PASS: secret
+      SERVER_NAME: localhost
+      HTTPS_PORT: "18443"
+      HTTP_PORT: "18080"
+      GUAC_API_URL: http://guacamole:8080/guacamole/api
+      AUTH_SERVICE_URL: http://blockchain-services:8080
+      OPS_API_URL: http://ops-worker:5001
+      OPS_SECRET: integration-test-secret
+    volumes:
+      - ./certs:/etc/ssl/private
+      - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
+      - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ../../openresty/lua:/etc/openresty/lua:ro
+      - ../../web:/var/www/html:ro
+    ports:
+      - "18443:443"
+      - "18080:80"
+    depends_on:
+      guacamole:
+        condition: service_healthy
+      blockchain-services:
+        condition: service_healthy
+      ops-worker:
+        condition: service_healthy
+    command: sh -c "sleep 2 && /usr/local/openresty/bin/openresty -g 'daemon off;'"
+
+  ops-worker:
+    build:
+      context: ./mocks/ops-worker
+      dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
