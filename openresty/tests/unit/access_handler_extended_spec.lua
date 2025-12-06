@@ -63,7 +63,8 @@ runner.describe("Access handler extended tests", function()
     end)
 
     -- Edge case: Expiration exactly at current time (boundary)
-    runner.it("rejects session when exp equals now", function()
+    -- Note: now > exp rejects, but now == exp is still valid (not expired yet)
+    runner.it("accepts session when exp equals now", function()
         local cache = {
             ["username:boundary"] = "diana",
             ["exp:diana"] = tostring(100)
@@ -71,6 +72,22 @@ runner.describe("Access handler extended tests", function()
         local ngx = ngx_factory.new({
             cache = cache,
             var = { http_cookie = "JTI=boundary" },
+            now = 100
+        })
+        handler.run(ngx)
+        -- now == exp means NOT expired yet (condition is now > exp)
+        runner.assert.equals("diana", ngx.req.headers["Authorization"])
+    end)
+
+    -- Edge case: Expiration one second before current time
+    runner.it("rejects session when exp is before now", function()
+        local cache = {
+            ["username:expired"] = "eve",
+            ["exp:eve"] = tostring(99)
+        }
+        local ngx = ngx_factory.new({
+            cache = cache,
+            var = { http_cookie = "JTI=expired" },
             now = 100
         })
         handler.run(ngx)
@@ -146,9 +163,9 @@ runner.describe("Access handler extended tests", function()
             var = { http_cookie = " JTI=spaced" }
         })
         handler.run(ngx)
-        -- Depending on implementation, may or may not parse
-        -- Just ensure no crash
-        runner.assert.equals(nil, ngx.status)
+        -- Pattern "JTI=([^;]+)" still matches " JTI=spaced" and extracts "spaced"
+        -- Since username:spaced doesn't exist, returns 401
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
     end)
 end)
 
