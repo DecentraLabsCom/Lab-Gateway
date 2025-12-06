@@ -50,7 +50,7 @@ local function new(opts)
         WARN = "WARN",
         ERR = "ERR",
         HTTP_UNAUTHORIZED = 401,
-        status = nil,
+        status = opts.status or nil,
         header = opts.header or {},
         var = opts.var or {},
         shared = {
