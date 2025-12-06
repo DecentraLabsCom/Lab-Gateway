@@ -1,3 +1,11 @@
+// Utility function to escape HTML and prevent XSS attacks
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const driverEl = $('#driver');
     const enabledEl = $('#enabled');
@@ -333,15 +341,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const lastPower = operations.lastPowerAction;
         const updated = heartbeat.timestamp;
 
+        // Escape all user-controlled data to prevent XSS
+        const safeHost = escapeHtml(host);
+        const safeUpdated = escapeHtml(updated) || 'n/a';
+        const safeLastForcedTs = escapeHtml(lastForced && lastForced.timestamp) || 'n/a';
+        const safeLastPowerMode = escapeHtml(lastPower && lastPower.mode);
+        const safeLastPowerTs = escapeHtml(lastPower && lastPower.timestamp);
+        const safeLastPower = safeLastPowerMode ? `${safeLastPowerMode} @ ${safeLastPowerTs}` : 'n/a';
+
         const row = document.createElement('div');
         row.className = 'host-row';
         row.dataset.host = host;
         row.innerHTML = `
             <div>
-                <div class="host-title">${host}</div>
-                <div class="host-meta">Updated: ${updated || 'n/a'}</div>
-                <div class="host-meta">Last forced logoff: ${(lastForced && lastForced.timestamp) || 'n/a'}</div>
-                <div class="host-meta">Last power: ${(lastPower && lastPower.mode) ? `${lastPower.mode} @ ${lastPower.timestamp}` : 'n/a'}</div>
+                <div class="host-title">${safeHost}</div>
+                <div class="host-meta">Updated: ${safeUpdated}</div>
+                <div class="host-meta">Last forced logoff: ${safeLastForcedTs}</div>
+                <div class="host-meta">Last power: ${safeLastPower}</div>
             </div>
             <div class="host-meta">
                 <span class="pill ${ready === true ? 'good' : ready === false ? 'bad' : ''}">Ready: ${ready === undefined ? 'n/a' : ready}</span>

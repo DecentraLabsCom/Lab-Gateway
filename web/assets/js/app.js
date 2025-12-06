@@ -65,8 +65,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 10000);
     }
 
-    // Status detail modal
-    const statusModal = createStatusModal();
+    // Status detail modal - creates and appends modal to DOM
+    createStatusModal();
     let lastStatusDetails = { ok: [], missing: [], status: '' };
 
     // System status monitoring - checks Guacamole and blockchain-services (incl. keys)
