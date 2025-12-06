@@ -1,10 +1,11 @@
-FROM tomcat:11.0
+# Guacamole 1.6.0 relies on javax.servlet, so keep it on Tomcat 9 (Jakarta/Servlet 4) with Java 11.
+FROM tomcat:9.0-jdk11-temurin
 
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Download Guacamole WAR
-ADD https://downloads.apache.org/guacamole/1.5.5/binary/guacamole-1.5.5.war /usr/local/tomcat/webapps/guacamole.war
+# Download Guacamole WAR 1.6.0
+ADD https://archive.apache.org/dist/guacamole/1.6.0/binary/guacamole-1.6.0.war /usr/local/tomcat/webapps/guacamole.war
 
 # Create Guacamole directories
 RUN mkdir -p /etc/guacamole/extensions /etc/guacamole/lib
