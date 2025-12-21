@@ -1,6 +1,32 @@
 local runner = require "tests.helpers.runner"
 local ngx_factory = require "tests.helpers.ngx_stub"
 
+local function resolve_internal_access_path()
+    local source = debug.getinfo(1, "S").source
+    if source:sub(1, 1) == "@" then
+        source = source:sub(2)
+    end
+    source = source:gsub("\\", "/")
+    local dir = source:match("^(.*)/[^/]+$") or "."
+
+    local candidates = {
+        dir .. "/../../lua/internal_access.lua",
+        dir .. "/../lua/internal_access.lua",
+        "openresty/lua/internal_access.lua",
+        "lua/internal_access.lua"
+    }
+
+    for _, path in ipairs(candidates) do
+        local file = io.open(path, "r")
+        if file then
+            file:close()
+            return path
+        end
+    end
+
+    error("Cannot locate internal_access.lua for tests")
+end
+
 local function with_env(env, fn)
     local original_getenv = os.getenv
     env = env or {}
@@ -41,7 +67,7 @@ local function run_internal_access(opts)
 
     _G.ngx = ngx
     with_env(env, function()
-        dofile("openresty/lua/internal_access.lua")
+        dofile(resolve_internal_access_path())
     end)
     _G.ngx = nil
 
