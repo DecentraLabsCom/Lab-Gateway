@@ -9,13 +9,41 @@
 
 local config = ngx.shared.config
 
--- Read config from environment variables or use default values
-local admin_user = os.getenv("GUAC_ADMIN_USER") or "guacadmin"
-local admin_pass = os.getenv("GUAC_ADMIN_PASS") or "guacadmin"
+local function require_env(name)
+    local value = os.getenv(name)
+    if not value or value == "" then
+        ngx.log(ngx.ERR, "Missing required env var: " .. name)
+        error("missing required env var: " .. name)
+    end
+    return value
+end
+
+local function refuse_default_secret(name, value, disallowed)
+    local normalized = tostring(value):lower()
+    for _, candidate in ipairs(disallowed or {}) do
+        if normalized == candidate then
+            ngx.log(ngx.ERR, "Refusing to start with default value for " .. name)
+            error("refusing default value for " .. name)
+        end
+    end
+end
+
+-- Read config from environment variables
+local admin_user = require_env("GUAC_ADMIN_USER")
+local admin_pass = require_env("GUAC_ADMIN_PASS")
 local server_name = os.getenv("SERVER_NAME") or "localhost"
 local https_port = os.getenv("HTTPS_PORT") or "443"
 local auto_logout = os.getenv("AUTO_LOGOUT_ON_DISCONNECT") or "false"
 local guac_api_url = os.getenv("GUAC_API_URL")
+
+refuse_default_secret("GUAC_ADMIN_PASS", admin_pass, { "guacadmin", "changeme", "change_me", "password", "test" })
+
+local ops_secret = os.getenv("OPS_SECRET")
+if not ops_secret or ops_secret == "" then
+    ngx.log(ngx.WARN, "OPS_SECRET not set; /ops endpoints will remain disabled")
+else
+    refuse_default_secret("OPS_SECRET", ops_secret, { "supersecretvalue", "changeme", "change_me", "password", "test" })
+end
 
 local function trim(value)
     if not value then

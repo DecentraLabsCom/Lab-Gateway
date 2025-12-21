@@ -135,9 +135,9 @@ echo
 echo "Guacamole Admin Credentials"
 echo "============================"
 echo "These are the credentials for the Guacamole web interface."
-echo "Default is guacadmin/guacadmin - STRONGLY recommended to change in production!"
+echo "A strong admin password is required."
 read -p "Guacamole admin username [guacadmin]: " guac_admin_user
-read -p "Guacamole admin password [guacadmin]: " guac_admin_pass
+read -p "Guacamole admin password (leave empty for auto-generated): " guac_admin_pass
 
 guac_admin_user=$(echo "$guac_admin_user" | tr -d ' ')
 guac_admin_pass=$(echo "$guac_admin_pass" | tr -d ' ')
@@ -146,8 +146,16 @@ if [ -z "$guac_admin_user" ]; then
     guac_admin_user="guacadmin"
 fi
 if [ -z "$guac_admin_pass" ]; then
-    guac_admin_pass="guacadmin"
-    echo "WARNING: Using default password 'guacadmin'. Change this in production!"
+    guac_admin_pass="Guac_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated Guacamole admin password: $guac_admin_pass"
+fi
+
+case "$(printf '%s' "$guac_admin_pass" | tr '[:upper:]' '[:lower:]')" in
+    guacadmin|changeme|change_me|password|test)
+        echo "Refusing to use insecure Guacamole admin password. Set a strong value." >&2
+        exit 1
+        ;;
+esac
 fi
 
 update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_USER" "$guac_admin_user"
@@ -165,6 +173,13 @@ if [ -z "$ops_secret" ]; then
     ops_secret="ops_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
     echo "Generated OPS secret: $ops_secret"
 fi
+
+case "$(printf '%s' "$ops_secret" | tr '[:upper:]' '[:lower:]')" in
+    supersecretvalue|changeme|change_me|password|test)
+        echo "Refusing to use insecure OPS secret. Set a strong value." >&2
+        exit 1
+        ;;
+esac
 
 update_env_var "$ROOT_ENV_FILE" "OPS_SECRET" "$ops_secret"
 echo
@@ -342,6 +357,7 @@ read -p "Allowed origins for CORS [${allowed_origins_default:-http://localhost:3
 allowed_origins=${allowed_origins:-$allowed_origins_default}
 if [ -n "$allowed_origins" ]; then
     update_env_in_all "ALLOWED_ORIGINS" "$allowed_origins"
+    update_env_var "$ROOT_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$allowed_origins"
 fi
 
 public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$ROOT_ENV_FILE")

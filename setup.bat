@@ -120,16 +120,37 @@ echo.
 echo Guacamole Admin Credentials
 echo ============================
 echo These are the credentials for the Guacamole web interface.
-echo Default is guacadmin/guacadmin - STRONGLY recommended to change in production!
+echo A strong admin password is required.
 set "guac_admin_user="
 set "guac_admin_pass="
 set /p "guac_admin_user=Guacamole admin username [guacadmin]: "
-set /p "guac_admin_pass=Guacamole admin password [guacadmin]: "
+set /p "guac_admin_pass=Guacamole admin password (leave empty for auto-generated): "
 
 if "!guac_admin_user!"=="" set "guac_admin_user=guacadmin"
 if "!guac_admin_pass!"=="" (
-    set "guac_admin_pass=guacadmin"
-    echo WARNING: Using default password 'guacadmin'. Change this in production!
+    set "guac_admin_pass=Guac_%RANDOM%_%TIME:~9%"
+    set "guac_admin_pass=!guac_admin_pass: =!"
+    echo Generated Guacamole admin password: !guac_admin_pass!
+)
+if /i "!guac_admin_pass!"=="guacadmin" (
+    echo Refusing to use insecure Guacamole admin password. Set a strong value.
+    exit /b 1
+)
+if /i "!guac_admin_pass!"=="changeme" (
+    echo Refusing to use insecure Guacamole admin password. Set a strong value.
+    exit /b 1
+)
+if /i "!guac_admin_pass!"=="change_me" (
+    echo Refusing to use insecure Guacamole admin password. Set a strong value.
+    exit /b 1
+)
+if /i "!guac_admin_pass!"=="password" (
+    echo Refusing to use insecure Guacamole admin password. Set a strong value.
+    exit /b 1
+)
+if /i "!guac_admin_pass!"=="test" (
+    echo Refusing to use insecure Guacamole admin password. Set a strong value.
+    exit /b 1
 )
 
 call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_USER" "!guac_admin_user!"
@@ -147,6 +168,26 @@ set "ops_secret=!ops_secret: =!"
 if "!ops_secret!"=="" (
     set "ops_secret=ops_%RANDOM%%RANDOM%%RANDOM%"
     echo Generated OPS secret: !ops_secret!
+)
+if /i "!ops_secret!"=="supersecretvalue" (
+    echo Refusing to use insecure OPS secret. Set a strong value.
+    exit /b 1
+)
+if /i "!ops_secret!"=="changeme" (
+    echo Refusing to use insecure OPS secret. Set a strong value.
+    exit /b 1
+)
+if /i "!ops_secret!"=="change_me" (
+    echo Refusing to use insecure OPS secret. Set a strong value.
+    exit /b 1
+)
+if /i "!ops_secret!"=="password" (
+    echo Refusing to use insecure OPS secret. Set a strong value.
+    exit /b 1
+)
+if /i "!ops_secret!"=="test" (
+    echo Refusing to use insecure OPS secret. Set a strong value.
+    exit /b 1
 )
 
 call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_SECRET" "!ops_secret!"
@@ -345,6 +386,7 @@ set /p "allowed_origins=Allowed origins for CORS [!origins_default!]: "
 if "!allowed_origins!"=="" set "allowed_origins=!origins_default!"
 if not "!allowed_origins!"=="" (
     call :UpdateEnvBoth "ALLOWED_ORIGINS" "!allowed_origins!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "CORS_ALLOWED_ORIGINS" "!allowed_origins!"
 )
 
 call :ReadEnvValue "%ROOT_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" mpk_default

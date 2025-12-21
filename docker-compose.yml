@@ -71,6 +71,7 @@ services:
       - HTTPS_PORT=${HTTPS_PORT}
       - HTTP_PORT=${HTTP_PORT}
       - OPS_SECRET=${OPS_SECRET}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
     depends_on:
       guacamole:
         condition: service_healthy
@@ -241,15 +242,15 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      GUAC_ADMIN_USER: ${GUAC_ADMIN_USER}
+      GUAC_ADMIN_PASS: ${GUAC_ADMIN_PASS}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/ensure-user-entrypoint.sh:/usr/local/bin/ensure-user-entrypoint.sh:ro
       - ./mysql/000-ensure-user.sh:/docker-entrypoint-initdb.d/000-ensure-user.sh:ro
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
-      - ./mysql/002-create-admin-user.sql:/docker-entrypoint-initdb.d/002-create-admin-user.sql:ro
-      - ./mysql/003-rdp-example.sql:/docker-entrypoint-initdb.d/003-rdp-example.sql:ro
-      - ./mysql/004-auth-service-schema.sql:/docker-entrypoint-initdb.d/004-auth-service-schema.sql:ro
-      - ./mysql/005-labstation-ops.sql:/docker-entrypoint-initdb.d/005-labstation-ops.sql:ro
+      - ./mysql/002-auth-service-schema.sql:/docker-entrypoint-initdb.d/002-auth-service-schema.sql:ro
+      - ./mysql/003-labstation-ops.sql:/docker-entrypoint-initdb.d/003-labstation-ops.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
       timeout: 20s

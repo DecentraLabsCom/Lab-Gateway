@@ -1,4 +1,4 @@
-# 🚀 DecentraLabs Gateway
+﻿# 🚀 DecentraLabs Gateway
 [![Gateway Tests](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/gateway-tests.yml/badge.svg)](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/gateway-tests.yml)
 [![Security Scan](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/security.yml/badge.svg)](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/security.yml)
 [![Release](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/release.yml/badge.svg)](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/release.yml)
@@ -132,7 +132,15 @@ MYSQL_PASSWORD=db_password
 GUAC_ADMIN_USER=guacadmin
 GUAC_ADMIN_PASS=secure_admin_password
 AUTO_LOGOUT_ON_DISCONNECT=true
+
+# OpenResty CORS allowlist (comma-separated, optional)
+CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
+
+# Ops Worker
+OPS_SECRET=your_ops_secret
 ```
+
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`).
 
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.
