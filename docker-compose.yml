@@ -258,8 +258,7 @@ services:
       - ./mysql/ensure-user-entrypoint.sh:/usr/local/bin/ensure-user-entrypoint.sh:ro
       - ./mysql/000-ensure-user.sh:/docker-entrypoint-initdb.d/000-ensure-user.sh:ro
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
-      - ./mysql/002-auth-service-schema.sql:/docker-entrypoint-initdb.d/002-auth-service-schema.sql:ro
-      - ./mysql/003-labstation-ops.sql:/docker-entrypoint-initdb.d/003-labstation-ops.sql:ro
+      - ./mysql/002-labstation-ops.sql:/docker-entrypoint-initdb.d/002-labstation-ops.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
       timeout: 20s

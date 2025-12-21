@@ -98,6 +98,9 @@ If you prefer manual configuration:
    └── public_key.pem     # JWT public key (from auth provider)
    ```
 
+   **Database schema:** When `blockchain-services` has a MySQL datasource configured, it runs Flyway
+   migrations on startup to create the auth, WebAuthn, and intents tables automatically.
+
 4. **Start the services:**
    ```bash
    docker compose up -d --build
@@ -148,7 +151,7 @@ SECURITY_ALLOW_PRIVATE_NETWORKS=true
 ADMIN_DASHBOARD_ALLOW_PRIVATE=true
 ```
 
-Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`). Set `SECURITY_INTERNAL_TOKEN` to secure blockchain-services internal endpoints exposed through OpenResty.
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`). Set `SECURITY_INTERNAL_TOKEN` to secure blockchain-services internal endpoints exposed through OpenResty.
 
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.
