@@ -125,11 +125,11 @@ SERVER_NAME=yourdomain.com
 HTTPS_PORT=443
 HTTP_PORT=80
 
-# Database Configuration
-MYSQL_ROOT_PASSWORD=secure_password
-MYSQL_DATABASE=guacamole_db
-MYSQL_USER=guacamole_user
-MYSQL_PASSWORD=db_password
+  # Database Configuration
+  MYSQL_ROOT_PASSWORD=secure_password
+  MYSQL_DATABASE=guacamole_db
+  MYSQL_USER=guacamole_user
+  MYSQL_PASSWORD=db_password
 
 # Guacamole
 GUAC_ADMIN_USER=guacadmin
@@ -152,6 +152,8 @@ ADMIN_DASHBOARD_ALLOW_PRIVATE=true
 ```
 
 Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`). Set `SECURITY_INTERNAL_TOKEN` to secure blockchain-services internal endpoints exposed through OpenResty.
+
+`blockchain-services` uses a dedicated schema named `blockchain_services` by default. If you want a different name, set `BLOCKCHAIN_MYSQL_DATABASE` in `.env`.
 
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.
@@ -318,9 +320,7 @@ lab-gateway/
 │   └── extensions/         # Guacamole extensions
 ├── 📁 mysql/               # DB scripts and schemas
 │   ├── 001-create-schema.sql
-│   ├── 002-create-admin-user.sql
-│   ├── 003-rdp-example.sql
-│   └── 004-auth-service-schema.sql
+│   ├── 002-lab-station-ops.sql
 ├── 📁 web/                 # Web frontend (optional)
 ├── 📁 blockchain-services/ # Blockchain auth & wallet service (Git submodule)
 ├── 📁 blockchain-data/     # Encrypted wallet persistence (not in git)

@@ -46,6 +46,15 @@ escaped_mysql_user="$(escape_sql "$MYSQL_USER")"
 escaped_mysql_password="$(escape_sql "$MYSQL_PASSWORD")"
 escaped_guac_admin_user="$(escape_sql "$GUAC_ADMIN_USER")"
 escaped_guac_admin_pass="$(escape_sql "$GUAC_ADMIN_PASS")"
+blockchain_db="${BLOCKCHAIN_MYSQL_DATABASE:-}"
+blockchain_sql=""
+if [ -n "$blockchain_db" ]; then
+    escaped_blockchain_db="$(escape_sql "$blockchain_db")"
+    blockchain_sql="
+    CREATE DATABASE IF NOT EXISTS \`${escaped_blockchain_db}\`;
+    GRANT ALL PRIVILEGES ON \`${escaped_blockchain_db}\`.* TO '${escaped_mysql_user}'@'%';
+    "
+fi
 
 echo "=== Ensuring MySQL user has proper remote access ==="
 
@@ -76,6 +85,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     
     -- Grant all privileges on the database
     GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${escaped_mysql_user}'@'%';
+${blockchain_sql}
     
     -- Ensure privileges are applied
     FLUSH PRIVILEGES;
@@ -86,12 +96,31 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     WHERE user = '${escaped_mysql_user}';
 EOSQL
 
-table_exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='guacamole_entity' LIMIT 1" || true)"
-if [ "$table_exists" != "1" ]; then
-    echo "Guacamole schema not ready; skipping admin sync."
-    echo "=== User configuration completed successfully ==="
-    exit 0
-fi
+waited=0
+max_wait=60
+while true; do
+    missing_tables=()
+    for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission; do
+        exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='${table}' LIMIT 1" || true)"
+        if [ "$exists" != "1" ]; then
+            missing_tables+=("$table")
+        fi
+    done
+
+    if [ "${#missing_tables[@]}" -eq 0 ]; then
+        break
+    fi
+
+    if [ "$waited" -ge "$max_wait" ]; then
+        echo "Guacamole schema not ready after ${max_wait}s (missing: ${missing_tables[*]}); skipping admin sync."
+        echo "=== User configuration completed successfully ==="
+        exit 0
+    fi
+
+    echo "Guacamole schema not ready (missing: ${missing_tables[*]}); waiting..."
+    sleep 2
+    waited=$((waited + 2))
+done
 
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     -- Ensure Guacamole admin user matches configured credentials
@@ -107,7 +136,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     INSERT INTO guacamole_user (entity_id, password_hash, password_salt, password_date)
     SELECT
         entity_id,
-        UNHEX(SHA2(CONCAT(@guac_admin_pass, @guac_salt), 256)),
+        UNHEX(SHA2(CONCAT(@guac_admin_pass, HEX(@guac_salt)), 256)),
         @guac_salt,
         NOW()
     FROM guacamole_entity WHERE name = @guac_admin_user

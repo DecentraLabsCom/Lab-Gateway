@@ -30,6 +30,32 @@ if [[ -f "${ENSURE_SCRIPT}" ]]; then
   # Wait up to 60 seconds for MySQL to be ready
   for i in {1..60}; do
     if mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
+      echo "MySQL is ready. Waiting for Guacamole schema..."
+      waited=0
+      max_wait=60
+      while true; do
+        missing_tables=()
+        for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission; do
+          exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='${table}' LIMIT 1" || true)"
+          if [[ "${exists}" != "1" ]]; then
+            missing_tables+=("${table}")
+          fi
+        done
+
+        if [[ "${#missing_tables[@]}" -eq 0 ]]; then
+          break
+        fi
+
+        if [[ "${waited}" -ge "${max_wait}" ]]; then
+          echo "Guacamole schema not ready after ${max_wait}s (missing: ${missing_tables[*]}). Running ensure-user anyway."
+          break
+        fi
+
+        echo "Guacamole schema not ready (missing: ${missing_tables[*]}); waiting..."
+        sleep 2
+        waited=$((waited + 2))
+      done
+
       echo "MySQL is ready. Running ensure-user script..."
       bash "${ENSURE_SCRIPT}"
       break

@@ -9,7 +9,7 @@ services:
       - ./blockchain-services/.env  # Blockchain-specific configuration (optional overrides)
     environment:
       # MySQL datasource for persistence (lab_reservations, auth_users)
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER}
       - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD}
       - SECURITY_INTERNAL_TOKEN=${SECURITY_INTERNAL_TOKEN}
@@ -30,7 +30,7 @@ services:
       timeout: 10s
       retries: 5
       interval: 30s
-      start_period: 60s
+      start_period: 120s
     deploy:
       resources:
         limits:
@@ -251,6 +251,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      BLOCKCHAIN_MYSQL_DATABASE: ${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       GUAC_ADMIN_USER: ${GUAC_ADMIN_USER}
       GUAC_ADMIN_PASS: ${GUAC_ADMIN_PASS}
     volumes:
