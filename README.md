@@ -138,9 +138,17 @@ CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
 
 # Ops Worker
 OPS_SECRET=your_ops_secret
+
+# Blockchain Services internal access
+SECURITY_INTERNAL_TOKEN=your_internal_token
+SECURITY_INTERNAL_TOKEN_HEADER=X-Internal-Token
+SECURITY_INTERNAL_TOKEN_COOKIE=internal_token
+SECURITY_INTERNAL_TOKEN_REQUIRED=true
+SECURITY_ALLOW_PRIVATE_NETWORKS=true
+ADMIN_DASHBOARD_ALLOW_PRIVATE=true
 ```
 
-Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`).
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`). Set `SECURITY_INTERNAL_TOKEN` to secure blockchain-services internal endpoints exposed through OpenResty.
 
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.

@@ -184,6 +184,26 @@ esac
 update_env_var "$ROOT_ENV_FILE" "OPS_SECRET" "$ops_secret"
 echo
 
+# Internal Token for blockchain-services
+echo "Blockchain Services Internal Token"
+echo "=================================="
+echo "This token protects /wallet, /treasury, and /wallet-dashboard behind OpenResty."
+read -p "Internal token (leave empty for auto-generated): " internal_token
+internal_token=$(echo "$internal_token" | tr -d ' ')
+
+if [ -z "$internal_token" ]; then
+    internal_token="int_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated internal token: $internal_token"
+fi
+
+update_env_in_all "SECURITY_INTERNAL_TOKEN" "$internal_token"
+update_env_in_all "SECURITY_INTERNAL_TOKEN_HEADER" "X-Internal-Token"
+update_env_in_all "SECURITY_INTERNAL_TOKEN_COOKIE" "internal_token"
+update_env_in_all "SECURITY_INTERNAL_TOKEN_REQUIRED" "true"
+update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+echo
+
 # Domain Configuration
 echo "Domain Configuration"
 echo "===================="

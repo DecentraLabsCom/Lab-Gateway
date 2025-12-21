@@ -193,6 +193,27 @@ if /i "!ops_secret!"=="test" (
 call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_SECRET" "!ops_secret!"
 echo.
 
+REM Blockchain Services Internal Token
+echo Blockchain Services Internal Token
+echo ==================================
+echo This token protects /wallet, /treasury, and /wallet-dashboard behind OpenResty.
+set "internal_token="
+set /p "internal_token=Internal token (leave empty for auto-generated): "
+set "internal_token=!internal_token: =!"
+
+if "!internal_token!"=="" (
+    set "internal_token=int_%RANDOM%%RANDOM%%RANDOM%"
+    echo Generated internal token: !internal_token!
+)
+
+call :UpdateEnvBoth "SECURITY_INTERNAL_TOKEN" "!internal_token!"
+call :UpdateEnvBoth "SECURITY_INTERNAL_TOKEN_HEADER" "X-Internal-Token"
+call :UpdateEnvBoth "SECURITY_INTERNAL_TOKEN_COOKIE" "internal_token"
+call :UpdateEnvBoth "SECURITY_INTERNAL_TOKEN_REQUIRED" "true"
+call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+echo.
+
 REM Domain Configuration
 echo Domain Configuration
 echo =====================
