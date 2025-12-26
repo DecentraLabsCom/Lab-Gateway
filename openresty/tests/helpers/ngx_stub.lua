@@ -50,9 +50,12 @@ local function new(opts)
         WARN = "WARN",
         ERR = "ERR",
         HTTP_UNAUTHORIZED = 401,
+        HTTP_SERVICE_UNAVAILABLE = 503,
+        HTTP_TOO_MANY_REQUESTS = 429,
         status = opts.status or nil,
         header = opts.header or {},
         var = opts.var or {},
+        http = opts.http or {},
         shared = {
             cache = opts.cache_dict or new_shared_dict(opts.cache or {}),
             config = opts.config_dict or new_shared_dict(opts.config or {})

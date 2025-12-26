@@ -4,7 +4,7 @@ Simulates the Apache Guacamole API endpoints.
 """
 
 import secrets
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 
 app = Flask(__name__)
 
@@ -42,11 +42,22 @@ def root():
     """Root endpoint."""
     return jsonify({"service": "guacamole-mock", "version": "1.5.5-test"})
 
+@app.route('/guacamole/', methods=['GET'])
+def guacamole_root():
+    """Root endpoint with Guacamole prefix."""
+    body = "<html><body>Guacamole mock</body></html>"
+    return Response(body, status=200, mimetype="text/html")
+
 
 @app.route('/api/session/data/mysql/connections', methods=['GET'])
 def list_connections():
     """List all connections."""
     return jsonify(connections)
+
+@app.route('/guacamole/api/session/data/mysql/connections', methods=['GET'])
+def list_connections_prefixed():
+    """List all connections (Guacamole prefix)."""
+    return list_connections()
 
 
 @app.route('/api/session/data/mysql/connections/<conn_id>', methods=['GET'])
@@ -55,6 +66,11 @@ def get_connection(conn_id):
     if conn_id in connections:
         return jsonify(connections[conn_id])
     return jsonify({"message": "Connection not found", "type": "NOT_FOUND"}), 404
+
+@app.route('/guacamole/api/session/data/mysql/connections/<conn_id>', methods=['GET'])
+def get_connection_prefixed(conn_id):
+    """Get specific connection details (Guacamole prefix)."""
+    return get_connection(conn_id)
 
 
 @app.route('/api/tokens', methods=['POST'])
@@ -76,6 +92,11 @@ def create_token():
     
     return jsonify({"message": "Invalid credentials", "type": "INVALID_CREDENTIALS"}), 403
 
+@app.route('/guacamole/api/tokens', methods=['POST'])
+def create_token_prefixed():
+    """Simulate Guacamole authentication token creation (Guacamole prefix)."""
+    return create_token()
+
 
 @app.route('/api/session', methods=['GET'])
 def get_session():
@@ -89,11 +110,21 @@ def get_session():
         })
     return jsonify({"message": "Unauthorized"}), 401
 
+@app.route('/guacamole/api/session', methods=['GET'])
+def get_session_prefixed():
+    """Get current session info (Guacamole prefix)."""
+    return get_session()
+
 
 @app.route('/api/session/data/mysql/activeConnections', methods=['GET'])
 def get_active_connections():
     """Get active connection sessions."""
     return jsonify(active_sessions)
+
+@app.route('/guacamole/api/session/data/mysql/activeConnections', methods=['GET'])
+def get_active_connections_prefixed():
+    """Get active connection sessions (Guacamole prefix)."""
+    return get_active_connections()
 
 
 @app.route('/api/session/data/mysql/connections/<conn_id>/activeSessions', methods=['GET'])
@@ -104,6 +135,11 @@ def get_connection_sessions(conn_id):
     
     conn_sessions = {k: v for k, v in active_sessions.items() if v.get("connectionIdentifier") == conn_id}
     return jsonify(conn_sessions)
+
+@app.route('/guacamole/api/session/data/mysql/connections/<conn_id>/activeSessions', methods=['GET'])
+def get_connection_sessions_prefixed(conn_id):
+    """Get active sessions for a specific connection (Guacamole prefix)."""
+    return get_connection_sessions(conn_id)
 
 
 @app.route('/api/ext/saml/callback', methods=['POST'])
@@ -116,6 +152,11 @@ def saml_callback():
         "dataSource": "mysql"
     })
 
+@app.route('/guacamole/api/ext/saml/callback', methods=['POST'])
+def saml_callback_prefixed():
+    """Mock SAML callback for JWT-based auth testing (Guacamole prefix)."""
+    return saml_callback()
+
 
 # Health check endpoint for Docker
 @app.route('/health', methods=['GET'])
@@ -125,6 +166,11 @@ def health():
         "status": "healthy",
         "service": "guacamole-mock"
     })
+
+@app.route('/guacamole/health', methods=['GET'])
+def health_prefixed():
+    """Health check endpoint (Guacamole prefix)."""
+    return health()
 
 
 if __name__ == '__main__':
