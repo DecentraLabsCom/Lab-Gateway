@@ -18,7 +18,8 @@ local specs = {
     "tests.unit.log_handler_extended_spec",
     "tests.unit.body_filter_handler_spec",
     "tests.unit.body_filter_handler_extended_spec",
-    "tests.unit.internal_access_spec"
+    "tests.unit.internal_access_spec",
+    "tests.unit.jwt_handler_spec"
 }
 
 for _, spec in ipairs(specs) do

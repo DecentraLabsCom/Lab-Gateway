@@ -75,9 +75,9 @@ try {
 
     # Output results
     $result | ForEach-Object {
-        if ($_ -match "FAIL|❌") {
+        if ($_ -match "FAIL") {
             Write-Host $_ -ForegroundColor Red
-        } elseif ($_ -match "passed|✓") {
+        } elseif ($_ -match "passed") {
             Write-Host $_ -ForegroundColor Green
         } else {
             Write-Host $_
@@ -86,9 +86,9 @@ try {
 
     Write-Host ""
     if ($exitCode -eq 0) {
-        Write-Host "All tests passed!" -ForegroundColor Green
+        Write-Host 'All tests passed!' -ForegroundColor Green
     } else {
-        Write-Host "Some tests failed!" -ForegroundColor Red
+        Write-Host 'Some tests failed!' -ForegroundColor Red
     }
 
     exit $exitCode
