@@ -137,12 +137,12 @@ services:
           have_real_cert=true
         fi
 
-        args="tunnel --no-autoupdate --protocol http2 --url ${target}"
-        if [ "$have_real_cert" != "true" ]; then
-          args="$args --no-tls-verify"
+        args="tunnel --no-autoupdate --protocol http2 --url $${target}"
+        if [ "$$have_real_cert" != "true" ]; then
+          args="$$args --no-tls-verify"
         fi
 
-        exec cloudflared $args
+        exec cloudflared $$args
     environment:
       - CLOUDFLARE_TUNNEL_SERVICE=${CLOUDFLARE_TUNNEL_SERVICE:-https://openresty:443}
       - SERVER_NAME=${SERVER_NAME}
@@ -244,7 +244,7 @@ services:
 
   mysql:
     image: mysql:8.0.41
-    entrypoint: ["/usr/local/bin/ensure-user-entrypoint.sh"]
+    entrypoint: ["/bin/bash", "/usr/local/bin/ensure-user-entrypoint.sh"]
     command: ["mysqld"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
