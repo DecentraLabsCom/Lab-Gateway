@@ -321,6 +321,15 @@ if [ -n "$host_uid" ] && [ -n "$host_gid" ]; then
     update_env_var "$ROOT_ENV_FILE" "HOST_UID" "$host_uid"
     update_env_var "$ROOT_ENV_FILE" "HOST_GID" "$host_gid"
     echo "Configured HOST_UID/HOST_GID to ${host_uid}:${host_gid}"
+
+    # Align permissions so containers can write to bind mounts without manual chmod.
+    if command -v chown >/dev/null 2>&1; then
+        if chown -R "${host_uid}:${host_gid}" certs blockchain-data 2>/dev/null; then
+            echo "Adjusted ownership of certs/ and blockchain-data/ to ${host_uid}:${host_gid}"
+        else
+            echo "Warning: Unable to change ownership of certs/ or blockchain-data/. Run chown manually if needed." >&2
+        fi
+    fi
 else
     echo "Warning: Unable to detect host UID/GID; using defaults."
 fi
