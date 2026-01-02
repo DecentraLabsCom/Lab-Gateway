@@ -90,7 +90,23 @@ If you prefer manual configuration:
 
 2. **Edit `.env` and `blockchain-services/.env`** with your configuration (see Configuration section below)
 
-3. **Add SSL certificates** to `certs/` folder:
+3. **Set host UID/GID for bind mounts (Linux/macOS)** so containers can write to `certs/` and `blockchain-data/`:
+   ```bash
+   # Choose the user that will own the folders
+   id -u
+   id -g
+   ```
+   Then set in `.env` (use `0`/`0` if you run everything as root):
+   ```env
+   HOST_UID=1000
+   HOST_GID=1000
+   ```
+   Ensure the folders are owned by that user:
+   ```bash
+   chown -R 1000:1000 certs blockchain-data
+   ```
+
+4. **Add SSL certificates** to `certs/` folder:
    ```
    certs/
    ├── fullchain.pem      # SSL certificate chain
@@ -101,7 +117,7 @@ If you prefer manual configuration:
    **Database schema:** When `blockchain-services` has a MySQL datasource configured, it runs Flyway
    migrations on startup to create the auth, WebAuthn, and intents tables automatically.
 
-4. **Start the services:**
+5. **Start the services:**
    ```bash
    docker compose up -d --build
    ```
@@ -125,11 +141,15 @@ SERVER_NAME=yourdomain.com
 HTTPS_PORT=443
 HTTP_PORT=80
 
-  # Database Configuration
-  MYSQL_ROOT_PASSWORD=secure_password
-  MYSQL_DATABASE=guacamole_db
-  MYSQL_USER=guacamole_user
-  MYSQL_PASSWORD=db_password
+# Host UID/GID for bind mounts (Linux/macOS)
+HOST_UID=1000
+HOST_GID=1000
+
+# Database Configuration
+MYSQL_ROOT_PASSWORD=secure_password
+MYSQL_DATABASE=guacamole_db
+MYSQL_USER=guacamole_user
+MYSQL_PASSWORD=db_password
 
 # Guacamole
 GUAC_ADMIN_USER=guacadmin
