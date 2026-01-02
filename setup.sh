@@ -156,7 +156,6 @@ case "$(printf '%s' "$guac_admin_pass" | tr '[:upper:]' '[:lower:]')" in
         exit 1
         ;;
 esac
-fi
 
 update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_USER" "$guac_admin_user"
 update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_PASS" "$guac_admin_pass"
