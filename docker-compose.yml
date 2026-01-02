@@ -4,6 +4,7 @@ services:
     build:
       context: ./blockchain-services
       dockerfile: Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     env_file:
       - .env  # Main gateway configuration
       - ./blockchain-services/.env  # Blockchain-specific configuration (optional overrides)

@@ -308,6 +308,23 @@ echo "================"
 mkdir -p certs
 mkdir -p blockchain-data
 
+echo
+echo "Host User Mapping"
+echo "================="
+host_user="${SUDO_USER:-}"
+if [ -z "$host_user" ]; then
+    host_user="$(id -un)"
+fi
+host_uid="$(id -u "$host_user" 2>/dev/null || echo "")"
+host_gid="$(id -g "$host_user" 2>/dev/null || echo "")"
+if [ -n "$host_uid" ] && [ -n "$host_gid" ]; then
+    update_env_var "$ROOT_ENV_FILE" "HOST_UID" "$host_uid"
+    update_env_var "$ROOT_ENV_FILE" "HOST_GID" "$host_gid"
+    echo "Configured HOST_UID/HOST_GID to ${host_uid}:${host_gid}"
+else
+    echo "Warning: Unable to detect host UID/GID; using defaults."
+fi
+
 if [ -f "certs/fullchain.pem" ] && [ -f "certs/privkey.pem" ]; then
     echo "SSL certificates found in certs/ - they will be used."
 else
