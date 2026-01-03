@@ -1,7 +1,10 @@
--- Internal access guard for wallet/treasury endpoints.
--- Enforces an internal token for non-local clients when configured.
+-- Strict internal access guard for treasury admin endpoints.
+-- Requires a valid internal token when configured; falls back to loopback/Docker only when missing.
 
 local token = os.getenv("SECURITY_INTERNAL_TOKEN") or ""
+
+local header_name = os.getenv("SECURITY_INTERNAL_TOKEN_HEADER") or "X-Internal-Token"
+local cookie_name = os.getenv("SECURITY_INTERNAL_TOKEN_COOKIE") or "internal_token"
 
 local function deny()
     ngx.status = ngx.HTTP_UNAUTHORIZED
@@ -37,9 +40,6 @@ if token == "" then
     return
 end
 
-local header_name = os.getenv("SECURITY_INTERNAL_TOKEN_HEADER") or "X-Internal-Token"
-local cookie_name = os.getenv("SECURITY_INTERNAL_TOKEN_COOKIE") or "internal_token"
-
 local headers = ngx.req.get_headers()
 local provided = headers[header_name]
 
@@ -48,37 +48,11 @@ if not provided or provided == "" then
     provided = ngx.var[cookie_var]
 end
 
-local function is_private(ip)
-    if not ip or ip == "" then
-        return false
-    end
-    if is_loopback_or_docker(ip) then
-        return true
-    end
-    if ip:match("^10%.") then
-        return true
-    end
-    if ip:match("^192%.168%.") then
-        return true
-    end
-    local octet = ip:match("^172%.(%d+)%.")
-    if octet then
-        local n = tonumber(octet)
-        if n and n >= 16 and n <= 31 then
-            return true
-        end
-    end
-    if ip:match("^169%.254%.") then
-        return true
-    end
-    return false
+if not provided or provided == "" then
+    return deny()
 end
 
-if provided and provided ~= "" then
-    if provided ~= token then
-        return deny()
-    end
-elseif not is_private(ngx.var.remote_addr or "") then
+if provided ~= token then
     return deny()
 end
 

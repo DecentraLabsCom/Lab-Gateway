@@ -168,6 +168,9 @@ AUTO_LOGOUT_ON_DISCONNECT=true
 # OpenResty CORS allowlist (comma-separated, optional)
 CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
 
+# Wallet/Treasury CORS allowlist (blockchain-services)
+WALLET_ALLOWED_ORIGINS=https://your-domain
+
 # Ops Worker
 OPS_SECRET=your_ops_secret
 
@@ -178,6 +181,12 @@ SECURITY_INTERNAL_TOKEN_COOKIE=internal_token
 SECURITY_INTERNAL_TOKEN_REQUIRED=true
 SECURITY_ALLOW_PRIVATE_NETWORKS=true
 ADMIN_DASHBOARD_ALLOW_PRIVATE=true
+
+# Treasury admin EIP-712 signature domain (optional overrides)
+TREASURY_ADMIN_DOMAIN_NAME=DecentraLabsTreasuryAdmin
+TREASURY_ADMIN_DOMAIN_VERSION=1
+TREASURY_ADMIN_DOMAIN_CHAIN_ID=11155111
+TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT=
 
 # Certbot / ACME (optional - for Let's Encrypt automation)
 CERTBOT_DOMAINS=yourdomain.com,www.yourdomain.com
@@ -239,9 +248,11 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 
 #### Access Controls (Important)
 
-- `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_INTERNAL_TOKEN` unless the request is coming from a private network. Provide it via `X-Internal-Token` or the `internal_token` cookie.
+- `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_INTERNAL_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. Provide it via `X-Internal-Token` or the `internal_token` cookie.
+- `/treasury/admin/**`: always requires `SECURITY_INTERNAL_TOKEN` (no private-network bypass). `/treasury/admin/execute` additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
 - For convenience, you can also visit `https://your-domain/wallet-dashboard?token=YOUR_TOKEN` (no trailing slash) once to set the `internal_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
 - `/lab-manager` and `/ops`: restricted to private networks by default. `/ops` also requires `OPS_SECRET` via `X-Ops-Token` or `ops_token` cookie.
+- If wallet actions return `JSON.parse` errors in the browser, ensure both `CORS_ALLOWED_ORIGINS` and `WALLET_ALLOWED_ORIGINS` include your gateway origin.
 
 ## Institutional Wallet Setup
 

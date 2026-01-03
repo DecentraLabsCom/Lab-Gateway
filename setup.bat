@@ -222,6 +222,31 @@ if exist "%BLOCKCHAIN_ENV_FILE%" (
 )
 echo.
 
+REM Treasury Admin EIP-712 Domain (optional overrides)
+echo Treasury Admin EIP-712 Domain (optional)
+echo ========================================
+echo Leave empty to keep the defaults from blockchain-services.
+echo Verifying contract will follow CONTRACT_ADDRESS.
+set "treasury_admin_domain_name="
+set /p "treasury_admin_domain_name=Domain name override: "
+set "treasury_admin_domain_name=!treasury_admin_domain_name: =!"
+if not "!treasury_admin_domain_name!"=="" (
+    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_NAME" "!treasury_admin_domain_name!"
+)
+set "treasury_admin_domain_version="
+set /p "treasury_admin_domain_version=Domain version override: "
+set "treasury_admin_domain_version=!treasury_admin_domain_version: =!"
+if not "!treasury_admin_domain_version!"=="" (
+    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_VERSION" "!treasury_admin_domain_version!"
+)
+set "treasury_admin_chain_id="
+set /p "treasury_admin_chain_id=Domain chain ID override: "
+set "treasury_admin_chain_id=!treasury_admin_chain_id: =!"
+if not "!treasury_admin_chain_id!"=="" (
+    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_CHAIN_ID" "!treasury_admin_chain_id!"
+)
+echo.
+
 REM Domain Configuration
 echo Domain Configuration
 echo =====================
@@ -342,6 +367,34 @@ if "!cf_enabled!"=="1" (
         set "cf_service=cloudflared"
     )
 )
+echo.
+echo Wallet Dashboard Origin
+echo =======================
+set "https_port_value="
+call :ReadEnvValue "%ROOT_ENV_FILE%" "HTTPS_PORT" https_port_value
+if "!https_port_value!"=="" (
+    if /i "!domain!"=="localhost" (
+        set "https_port_value=8443"
+    ) else (
+        set "https_port_value=443"
+    )
+)
+if /i "!domain!"=="localhost" (
+    if "!https_port_value!"=="443" (
+        set "wallet_origin=https://localhost"
+    ) else (
+        set "wallet_origin=https://localhost:!https_port_value!"
+    )
+) else (
+    if "!https_port_value!"=="443" (
+        set "wallet_origin=https://!domain!"
+    ) else (
+        set "wallet_origin=https://!domain!:!https_port_value!"
+    )
+)
+call :UpdateEnvBoth "WALLET_ALLOWED_ORIGINS" "!wallet_origin!"
+echo Configured WALLET_ALLOWED_ORIGINS to !wallet_origin!
+
 REM Build complete compose command: base + files + profile
 set "compose_full=%compose_cmd% !compose_files!"
 if "!cf_enabled!"=="1" set "compose_full=!compose_full! --profile !cf_profile!"
@@ -416,6 +469,7 @@ set /p "contract_address=Contract address [!contract_default!]: "
 if "!contract_address!"=="" set "contract_address=!contract_default!"
 if not "!contract_address!"=="" (
     call :UpdateEnvBoth "CONTRACT_ADDRESS" "!contract_address!"
+    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_address!"
 )
 
 call :ReadEnvValue "%ROOT_ENV_FILE%" "RPC_URL" rpc_default
@@ -475,6 +529,21 @@ if /i "!domain!"=="localhost" (
 ) else (
     echo Access: https://!domain!
 )
+set "token_host="
+if /i "!domain!"=="localhost" (
+    if "!https_port!"=="443" (
+        set "token_host=https://localhost"
+    ) else (
+        set "token_host=https://localhost:!https_port!"
+    )
+) else (
+    if "!https_port!"=="443" (
+        set "token_host=https://!domain!"
+    ) else (
+        set "token_host=https://!domain!:!https_port!"
+    )
+)
+echo    * Internal token cookie: !token_host!/wallet-dashboard?token=!internal_token!
 echo    * Guacamole: /guacamole/
 echo    * Blockchain Services API: /auth
 echo.
@@ -507,6 +576,21 @@ if /i "!domain!"=="localhost" (
 ) else (
     echo Access your lab at: https://!domain!
 )
+set "token_host="
+if /i "!domain!"=="localhost" (
+    if "!https_port!"=="443" (
+        set "token_host=https://localhost"
+    ) else (
+        set "token_host=https://localhost:!https_port!"
+    )
+) else (
+    if "!https_port!"=="443" (
+        set "token_host=https://!domain!"
+    ) else (
+        set "token_host=https://!domain!:!https_port!"
+    )
+)
+echo    * Internal token cookie: !token_host!/wallet-dashboard?token=!internal_token!
     echo    * Guacamole: /guacamole/ ^(!guac_admin_user! / !guac_admin_pass!^)
     echo    * Blockchain Services API: /auth
     if "!cf_enabled!"=="1" (

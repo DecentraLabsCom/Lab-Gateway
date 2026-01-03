@@ -211,6 +211,28 @@ if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
 fi
 echo
 
+# Treasury Admin EIP-712 Domain (optional overrides)
+echo "Treasury Admin EIP-712 Domain (optional)"
+echo "========================================"
+echo "Leave empty to keep the defaults from blockchain-services."
+echo "Verifying contract will follow CONTRACT_ADDRESS."
+read -p "Domain name override: " treasury_admin_domain_name
+treasury_admin_domain_name=$(echo "$treasury_admin_domain_name" | tr -d ' ')
+if [ -n "$treasury_admin_domain_name" ]; then
+    update_env_in_all "TREASURY_ADMIN_DOMAIN_NAME" "$treasury_admin_domain_name"
+fi
+read -p "Domain version override: " treasury_admin_domain_version
+treasury_admin_domain_version=$(echo "$treasury_admin_domain_version" | tr -d ' ')
+if [ -n "$treasury_admin_domain_version" ]; then
+    update_env_in_all "TREASURY_ADMIN_DOMAIN_VERSION" "$treasury_admin_domain_version"
+fi
+read -p "Domain chain ID override: " treasury_admin_chain_id
+treasury_admin_chain_id=$(echo "$treasury_admin_chain_id" | tr -d ' ')
+if [ -n "$treasury_admin_chain_id" ]; then
+    update_env_in_all "TREASURY_ADMIN_DOMAIN_CHAIN_ID" "$treasury_admin_chain_id"
+fi
+echo
+
 # Domain Configuration
 echo "Domain Configuration"
 echo "===================="
@@ -328,6 +350,32 @@ else
 fi
 
 echo
+echo "Wallet Dashboard Origin"
+echo "======================="
+https_port_value=$(get_env_default "HTTPS_PORT" "$ROOT_ENV_FILE")
+if [ "$domain" == "localhost" ]; then
+    if [ -z "$https_port_value" ]; then
+        https_port_value="8443"
+    fi
+    if [ "$https_port_value" == "443" ]; then
+        wallet_origin="https://localhost"
+    else
+        wallet_origin="https://localhost:${https_port_value}"
+    fi
+else
+    if [ -z "$https_port_value" ]; then
+        https_port_value="443"
+    fi
+    if [ "$https_port_value" == "443" ]; then
+        wallet_origin="https://${domain}"
+    else
+        wallet_origin="https://${domain}:${https_port_value}"
+    fi
+fi
+update_env_in_all "WALLET_ALLOWED_ORIGINS" "$wallet_origin"
+echo "Configured WALLET_ALLOWED_ORIGINS to ${wallet_origin}"
+
+echo
 echo "Ops Worker configuration"
 echo "------------------------"
 echo "By default the stack mounts ops-worker/hosts.empty.json."
@@ -420,6 +468,7 @@ read -p "Contract address [${contract_default:-0xYourDiamondContractAddress}]: "
 contract_address=${contract_address:-$contract_default}
 if [ -n "$contract_address" ]; then
     update_env_in_all "CONTRACT_ADDRESS" "$contract_address"
+    update_env_in_all "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_address"
 fi
 
 rpc_default=$(get_env_default "RPC_URL" "$ROOT_ENV_FILE")
@@ -506,6 +555,18 @@ if [ "$domain" == "localhost" ]; then
 else
     echo "Access: https://$domain"
 fi
+if [ "$domain" == "localhost" ]; then
+    token_host="https://localhost"
+    if [ "${https_port:-8443}" != "443" ]; then
+        token_host="${token_host}:${https_port:-8443}"
+    fi
+else
+    token_host="https://$domain"
+    if [ "${https_port:-443}" != "443" ]; then
+        token_host="${token_host}:${https_port}"
+    fi
+fi
+echo "   * Internal token cookie: ${token_host}/wallet-dashboard?token=${internal_token}"
 echo "   * Guacamole: /guacamole/"
 echo "   * Blockchain Services API: /auth"
 echo
@@ -542,13 +603,25 @@ set -e
 if [ $compose_result -eq 0 ]; then
     echo
     echo "Services started successfully!"
-    if [ "$domain" == "localhost" ]; then
-        echo "Access your lab at: https://localhost:${https_port:-8443}"
-    else
-        echo "Access your lab at: https://$domain"
+if [ "$domain" == "localhost" ]; then
+    echo "Access your lab at: https://localhost:${https_port:-8443}"
+else
+    echo "Access your lab at: https://$domain"
+fi
+if [ "$domain" == "localhost" ]; then
+    token_host="https://localhost"
+    if [ "${https_port:-8443}" != "443" ]; then
+        token_host="${token_host}:${https_port:-8443}"
     fi
-    echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
-    echo "   * Blockchain Services API: /auth"
+else
+    token_host="https://$domain"
+    if [ "${https_port:-443}" != "443" ]; then
+        token_host="${token_host}:${https_port}"
+    fi
+fi
+echo "   * Internal token cookie: ${token_host}/wallet-dashboard?token=${internal_token}"
+echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
+echo "   * Blockchain Services API: /auth"
     if [ "$cf_enabled" = true ]; then
         echo "   * Cloudflare tunnel logs (hostname): $compose_full logs ${cf_service:-cloudflared}"
     fi

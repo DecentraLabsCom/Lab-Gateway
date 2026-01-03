@@ -75,16 +75,27 @@ local function run_internal_access(opts)
 end
 
 runner.describe("Internal access guard", function()
-    runner.it("skips validation when no token configured", function()
-        local ngx = run_internal_access({
-            env = { SECURITY_INTERNAL_TOKEN = "" },
-            var = { remote_addr = "8.8.8.8" }
-        })
+runner.it("rejects public IPs when no token configured", function()
+    local ngx = run_internal_access({
+        env = { SECURITY_INTERNAL_TOKEN = "" },
+        var = { remote_addr = "8.8.8.8" }
+    })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals(nil, ngx._exit)
-        runner.assert.equals(nil, ngx.req.headers["X-Internal-Token"])
-    end)
+    runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+    runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
+    runner.assert.equals("text/plain", ngx.header["Content-Type"])
+end)
+
+runner.it("allows loopback when no token configured", function()
+    local ngx = run_internal_access({
+        env = { SECURITY_INTERNAL_TOKEN = "" },
+        var = { remote_addr = "127.0.0.1" }
+    })
+
+    runner.assert.equals(nil, ngx.status)
+    runner.assert.equals(nil, ngx._exit)
+    runner.assert.equals(nil, ngx.req.headers["X-Internal-Token"])
+end)
 
     runner.it("rejects when token is invalid", function()
         local ngx = run_internal_access({
