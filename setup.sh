@@ -202,6 +202,13 @@ update_env_in_all "SECURITY_INTERNAL_TOKEN_COOKIE" "internal_token"
 update_env_in_all "SECURITY_INTERNAL_TOKEN_REQUIRED" "true"
 update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_INTERNAL_TOKEN" "$internal_token"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_INTERNAL_TOKEN_HEADER" "X-Internal-Token"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_INTERNAL_TOKEN_COOKIE" "internal_token"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_INTERNAL_TOKEN_REQUIRED" "true"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+fi
 echo
 
 # Domain Configuration

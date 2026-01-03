@@ -213,6 +213,13 @@ call :UpdateEnvBoth "SECURITY_INTERNAL_TOKEN_COOKIE" "internal_token"
 call :UpdateEnvBoth "SECURITY_INTERNAL_TOKEN_REQUIRED" "true"
 call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+if exist "%BLOCKCHAIN_ENV_FILE%" (
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_INTERNAL_TOKEN" "!internal_token!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_INTERNAL_TOKEN_HEADER" "X-Internal-Token"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_INTERNAL_TOKEN_COOKIE" "internal_token"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_INTERNAL_TOKEN_REQUIRED" "true"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+)
 echo.
 
 REM Domain Configuration

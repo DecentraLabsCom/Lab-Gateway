@@ -89,6 +89,7 @@ If you prefer manual configuration:
    ```
 
 2. **Edit `.env` and `blockchain-services/.env`** with your configuration (see Configuration section below)
+   - Make sure you set `OPS_SECRET` and `SECURITY_INTERNAL_TOKEN` for production if needed. They protect `/ops`, `/lab-manager`, `/wallet`, `/treasury`, and `/wallet-dashboard` when accessed from public networks.
 
 3. **Set host UID/GID for bind mounts (Linux/macOS)** so containers can write to `certs/` and `blockchain-data/`:
    ```bash
@@ -177,6 +178,11 @@ SECURITY_INTERNAL_TOKEN_COOKIE=internal_token
 SECURITY_INTERNAL_TOKEN_REQUIRED=true
 SECURITY_ALLOW_PRIVATE_NETWORKS=true
 ADMIN_DASHBOARD_ALLOW_PRIVATE=true
+
+# Certbot / ACME (optional - for Let's Encrypt automation)
+CERTBOT_DOMAINS=yourdomain.com,www.yourdomain.com
+CERTBOT_EMAIL=you@example.com
+CERTBOT_STAGING=0
 ```
 
 Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`). Set `SECURITY_INTERNAL_TOKEN` to secure blockchain-services internal endpoints exposed through OpenResty.
@@ -218,6 +224,7 @@ CLOUDFLARE_TUNNEL_TOKEN=your_cloudflare_tunnel_token_or_empty_for_quick_tunnel
 CONTRACT_ADDRESS=0xYourSmartContractAddress
 
 # Network RPC URLs (with failover support)
+RPC_URL=https://1rpc.io/sepolia
 ETHEREUM_SEPOLIA_RPC_URL=https://rpc1.com,https://rpc2.com,https://rpc3.com
 
 # Institutional Wallet (for automated transactions)
@@ -229,6 +236,12 @@ WALLET_ENCRYPTION_SALT=RandomString32CharsOrMore
 ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 ```
+
+#### Access Controls (Important)
+
+- `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_INTERNAL_TOKEN` unless the request is coming from a private network. Provide it via `X-Internal-Token` or the `internal_token` cookie.
+- For convenience, you can also visit `https://your-domain/wallet-dashboard?token=YOUR_TOKEN` (no trailing slash) once to set the `internal_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
+- `/lab-manager` and `/ops`: restricted to private networks by default. `/ops` also requires `OPS_SECRET` via `X-Ops-Token` or `ops_token` cookie.
 
 ## Institutional Wallet Setup
 
