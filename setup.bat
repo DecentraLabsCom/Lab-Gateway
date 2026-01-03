@@ -11,6 +11,7 @@ set "compose_cmd=docker compose"
 set "compose_files="
 set "compose_full="
 set "cf_enabled=0"
+set "certbot_enabled=0"
 
 echo DecentraLabs Gateway - Full Version Setup
 echo ==========================================
@@ -228,6 +229,10 @@ if /i "!domain!"=="localhost" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "localhost"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "8443"
     call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "8081"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "127.0.0.1"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTPS_PORT" "8443"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTP_PORT" "8081"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "local"
     set "https_port=8443"
     set "http_port=8081"
     echo    * Server: https://localhost:8443
@@ -247,21 +252,32 @@ if /i "!domain!"=="localhost" (
     
     if "!deploy_mode!"=="2" (
         echo Router mode selected.
+        call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "router"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         set /p "public_https=Public HTTPS port (the port clients use, e.g., 8043): "
         set "public_https=!public_https: =!"
         if "!public_https!"=="" set "public_https=443"
+        set /p "local_https=Local HTTPS port to bind on this host (default: 443): "
+        set "local_https=!local_https: =!"
+        if "!local_https!"=="" set "local_https=443"
         set /p "public_http=Public HTTP port (default: 80): "
         set "public_http=!public_http: =!"
         if "!public_http!"=="" set "public_http=80"
+        set /p "local_http=Local HTTP port to bind on this host (default: 80): "
+        set "local_http=!local_http: =!"
+        if "!local_http!"=="" set "local_http=80"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "!public_https!"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "!public_http!"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTPS_PORT" "!local_https!"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTP_PORT" "!local_http!"
         set "https_port=!public_https!"
         set "http_port=!public_http!"
-        set "compose_files=-f docker-compose.yml -f docker-compose.router.yml"
         echo    * Public URL: https://!domain!:!public_https!
-        echo    * Docker will bind to 0.0.0.0:443 and 0.0.0.0:80 ^(router override^)
+        echo    * OpenResty will bind to 0.0.0.0:!local_https! and 0.0.0.0:!local_http!
     ) else (
         echo Direct mode selected.
+        call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "direct"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         set /p "direct_https=HTTPS port (default: 443): "
         set "direct_https=!direct_https: =!"
         if "!direct_https!"=="" set "direct_https=443"
@@ -270,6 +286,8 @@ if /i "!domain!"=="localhost" (
         if "!direct_http!"=="" set "direct_http=80"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "!direct_https!"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "!direct_http!"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTPS_PORT" "!direct_https!"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTP_PORT" "!direct_http!"
         set "https_port=!direct_https!"
         set "http_port=!direct_http!"
         echo    * Server: https://!domain!:!direct_https!
@@ -300,6 +318,8 @@ if "!cf_enabled!"=="1" (
         echo Cloudflare enabled: switching to standard ports (443/80) for a cleaner public URL.
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "443"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "80"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTPS_PORT" "443"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTP_PORT" "80"
         set "https_port=443"
         set "http_port=80"
     )
@@ -373,6 +393,12 @@ if not "%cb_domains%"=="" if not "%cb_email%"=="" (
 ) else (
     echo Skipped certbot configuration (ACME). Self-signed certificates will be auto-rotated in-container every ~87 days.
 )
+set "certbot_domains="
+set "certbot_email="
+call :ReadEnvValue "%ROOT_ENV_FILE%" "CERTBOT_DOMAINS" certbot_domains
+call :ReadEnvValue "%ROOT_ENV_FILE%" "CERTBOT_EMAIL" certbot_email
+if not "!certbot_domains!"=="" if not "!certbot_email!"=="" set "certbot_enabled=1"
+if "!certbot_enabled!"=="1" set "compose_full=!compose_full! --profile certbot"
 echo.
 
 echo Blockchain Services Configuration

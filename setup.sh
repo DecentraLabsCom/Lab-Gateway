@@ -13,6 +13,7 @@ compose_cmd="docker compose"
 compose_files=""
 compose_profiles=""
 cf_enabled=false
+certbot_enabled=false
 
 echo "DecentraLabs Gateway - Full Version Setup"
 echo "=========================================="
@@ -220,6 +221,10 @@ if [ "$domain" == "localhost" ]; then
     update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "localhost"
     update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "8443"
     update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "8081"
+    update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "127.0.0.1"
+    update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTPS_PORT" "8443"
+    update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "8081"
+    update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "local"
     echo "   * Server: https://localhost:8443"
     echo "   * Using development ports (8443/8081)"
 else
@@ -238,23 +243,38 @@ else
     
     if [ "$deploy_mode" == "2" ]; then
         echo "Router mode selected."
+        update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "router"
+        update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         read -p "Public HTTPS port (the port clients use; default: 443): " public_https
         public_https=$(echo "$public_https" | tr -d ' ')
         if [ -z "$public_https" ]; then
             public_https="443"
+        fi
+        read -p "Local HTTPS port to bind on this host (router forwards here; default: 443): " local_https
+        local_https=$(echo "$local_https" | tr -d ' ')
+        if [ -z "$local_https" ]; then
+            local_https="443"
         fi
         read -p "Public HTTP port (default: 80): " public_http
         public_http=$(echo "$public_http" | tr -d ' ')
         if [ -z "$public_http" ]; then
             public_http="80"
         fi
+        read -p "Local HTTP port to bind on this host (default: 80): " local_http
+        local_http=$(echo "$local_http" | tr -d ' ')
+        if [ -z "$local_http" ]; then
+            local_http="80"
+        fi
         update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "$public_https"
         update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "$public_http"
-        compose_files="-f docker-compose.yml -f docker-compose.router.yml"
+        update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTPS_PORT" "$local_https"
+        update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "$local_http"
         echo "   * Public URL: https://$domain:$public_https"
-        echo "   * Docker will bind to 0.0.0.0:443 and 0.0.0.0:80 (router override)"
+        echo "   * OpenResty will bind to 0.0.0.0 ($local_https/$local_http)"
     else
         echo "Direct mode selected."
+        update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "direct"
+        update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         read -p "HTTPS port (default: 443): " direct_https
         direct_https=$(echo "$direct_https" | tr -d ' ')
         if [ -z "$direct_https" ]; then
@@ -267,6 +287,8 @@ else
         fi
         update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "$direct_https"
         update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "$direct_http"
+        update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTPS_PORT" "$direct_https"
+        update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "$direct_http"
         echo "   * Server: https://$domain:$direct_https"
         echo "   * Using ports ($direct_https/$direct_http)"
     fi
@@ -291,6 +313,8 @@ if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
         echo "Cloudflare enabled: switching to standard ports (443/80) for a cleaner public URL."
         update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "443"
         update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "80"
+        update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTPS_PORT" "443"
+        update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "80"
     fi
 else
     update_env_var "$ROOT_ENV_FILE" "ENABLE_CLOUDFLARE" "false"
@@ -367,9 +391,17 @@ cb_email=$(echo "$cb_email" | tr -d ' ')
 if [ -n "$cb_domains" ] && [ -n "$cb_email" ]; then
     update_env_var "$ROOT_ENV_FILE" "CERTBOT_DOMAINS" "$cb_domains"
     update_env_var "$ROOT_ENV_FILE" "CERTBOT_EMAIL" "$cb_email"
+    certbot_enabled=true
     echo "Configured CERTBOT_DOMAINS and CERTBOT_EMAIL in .env"
 else
     echo "Skipped certbot configuration (ACME). Self-signed certificates will be auto-rotated in-container every ~87 days."
+fi
+if [ "$certbot_enabled" != true ]; then
+    certbot_domains=$(get_env_default "CERTBOT_DOMAINS" "$ROOT_ENV_FILE")
+    certbot_email=$(get_env_default "CERTBOT_EMAIL" "$ROOT_ENV_FILE")
+    if [ -n "$certbot_domains" ] && [ -n "$certbot_email" ]; then
+        certbot_enabled=true
+    fi
 fi
 
 echo
@@ -421,6 +453,13 @@ if [ "$cf_enabled" = true ]; then
         cf_service="cloudflared"
     fi
     compose_profiles="--profile $cf_profile"
+fi
+if [ "$certbot_enabled" = true ]; then
+    if [ -n "$compose_profiles" ]; then
+        compose_profiles="$compose_profiles --profile certbot"
+    else
+        compose_profiles="--profile certbot"
+    fi
 fi
 
 # Build final compose command

@@ -141,6 +141,14 @@ SERVER_NAME=yourdomain.com
 HTTPS_PORT=443
 HTTP_PORT=80
 
+# OpenResty bind address (127.0.0.1 for local-only, 0.0.0.0 for public)
+OPENRESTY_BIND_ADDRESS=0.0.0.0
+# OpenResty bind ports (local ports on the host)
+OPENRESTY_BIND_HTTPS_PORT=443
+OPENRESTY_BIND_HTTP_PORT=80
+# Deployment mode (informational)
+DEPLOY_MODE=direct
+
 # Host UID/GID for bind mounts (Linux/macOS)
 HOST_UID=1000
 HOST_GID=1000
@@ -181,15 +189,20 @@ environment. All authentication endpoints live under the fixed `/auth` base path
 ##### Deployment modes: Direct vs Router forwarding
 
 - **Direct (default)**: Gateway has a public IP or you're testing locally.
+  - Local-only access: `OPENRESTY_BIND_ADDRESS=127.0.0.1`
+  - Public access: `OPENRESTY_BIND_ADDRESS=0.0.0.0`
+  - If you change `HTTPS_PORT`/`HTTP_PORT`, also set `OPENRESTY_BIND_HTTPS_PORT`/`OPENRESTY_BIND_HTTP_PORT` to the same values.
   ```bash
   docker compose up -d
   ```
 
-- **Behind a router/NAT**: External traffic arrives via port forwarding (e.g., router:8043 → host:443). Set `HTTPS_PORT` to the **public port** (e.g., 8043) and use the router override:
+- **Behind a router/NAT**: External traffic arrives via port forwarding (e.g., router:8043 -> host:443).
+  Set `OPENRESTY_BIND_ADDRESS=0.0.0.0`.
+  - Public port (what clients use): `HTTPS_PORT=8043`
+  - Local bind port (what the host listens on): `OPENRESTY_BIND_HTTPS_PORT=443`
   ```bash
-  docker compose -f docker-compose.yml -f docker-compose.router.yml up -d
+  docker compose up -d
   ```
-This binds to `0.0.0.0:443` and `0.0.0.0:80` so the router can reach the gateway.
 
 Optional Cloudflare Tunnel settings (filled automatically if you opt in during setup):
 
