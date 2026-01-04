@@ -44,8 +44,9 @@ local function cert_days_remaining(path)
     if not f then return nil end
     local out = f:read("*a") or ""
     f:close()
-    local notAfter = out:match("notAfter=(.+)")
+    local notAfter = out:match("notAfter=([^\r\n]+)")
     if not notAfter then return nil end
+    notAfter = notAfter:match("^%s*(.-)%s*$")
     local ts = ngx.parse_http_time(notAfter)
     if not ts then
         local months = {
