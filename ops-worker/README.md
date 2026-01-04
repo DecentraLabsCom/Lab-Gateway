@@ -129,4 +129,4 @@ Tuning knobs:
 - WinRM allowlist: set `OPS_ALLOWED_COMMANDS` (comma-separated) to restrict `/api/winrm` (default: `prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status`).
 - WinRM timeouts: `OPS_WINRM_READ_TIMEOUT` and `OPS_WINRM_OPERATION_TIMEOUT` (seconds) configure the session.
 - Credentials: prefer `env:VAR` in `hosts.json` for `winrm_user`/`winrm_pass` and set those env vars in the container (avoid plaintext in JSON).
-- In OpenResty, the access to `/lab-manager/` y `/ops/` is limited to `127.0.0.1` and private networks within Docker (`172.16.0.0/12`). Adjust the range if you need to espose it further.
+- In OpenResty, `/lab-manager/` allows private networks by default and requires `LAB_MANAGER_INTERNAL_TOKEN` for non-private clients; `/ops/` remains limited to `127.0.0.1` and Docker private networks (`172.16.0.0/12`) and requires `OPS_SECRET`.

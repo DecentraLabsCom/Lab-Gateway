@@ -19,6 +19,7 @@ local specs = {
     "tests.unit.body_filter_handler_spec",
     "tests.unit.body_filter_handler_extended_spec",
     "tests.unit.internal_access_spec",
+    "tests.unit.lab_manager_access_spec",
     "tests.unit.jwt_handler_spec"
 }
 

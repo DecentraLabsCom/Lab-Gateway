@@ -89,7 +89,7 @@ If you prefer manual configuration:
    ```
 
 2. **Edit `.env` and `blockchain-services/.env`** with your configuration (see Configuration section below)
-   - Make sure you set `OPS_SECRET` and `SECURITY_INTERNAL_TOKEN` for production if needed. They protect `/ops`, `/lab-manager`, `/wallet`, `/treasury`, and `/wallet-dashboard` when accessed from public networks.
+   - Make sure you set `OPS_SECRET`, `SECURITY_INTERNAL_TOKEN`, and `LAB_MANAGER_INTERNAL_TOKEN` for production if needed. `OPS_SECRET` protects `/ops`, `SECURITY_INTERNAL_TOKEN` protects `/wallet`, `/treasury`, and `/wallet-dashboard`, and `LAB_MANAGER_INTERNAL_TOKEN` protects `/lab-manager` when accessed from public networks.
 
 3. **Set host UID/GID for bind mounts (Linux/macOS)** so containers can write to `certs/` and `blockchain-data/`:
    ```bash
@@ -173,6 +173,9 @@ WALLET_ALLOWED_ORIGINS=https://your-domain
 
 # Ops Worker
 OPS_SECRET=your_ops_secret
+LAB_MANAGER_INTERNAL_TOKEN=your_lab_manager_token
+LAB_MANAGER_INTERNAL_TOKEN_HEADER=X-Lab-Manager-Token
+LAB_MANAGER_INTERNAL_TOKEN_COOKIE=lab_manager_token
 
 # Blockchain Services internal access
 SECURITY_INTERNAL_TOKEN=your_internal_token
@@ -251,7 +254,9 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 - `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_INTERNAL_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. Provide it via `X-Internal-Token` or the `internal_token` cookie.
 - `/treasury/admin/**`: always requires `SECURITY_INTERNAL_TOKEN` (no private-network bypass). `/treasury/admin/execute` additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
 - For convenience, you can also visit `https://your-domain/wallet-dashboard?token=YOUR_TOKEN` (no trailing slash) once to set the `internal_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
-- `/lab-manager` and `/ops`: restricted to private networks by default. `/ops` also requires `OPS_SECRET` via `X-Ops-Token` or `ops_token` cookie.
+- `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_INTERNAL_TOKEN` for non-private clients. Provide it via `X-Lab-Manager-Token` or the `lab_manager_token` cookie.
+- For convenience, you can also visit `https://your-domain/lab-manager?token=YOUR_TOKEN` once to set the `lab_manager_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
+- `/ops`: restricted to private networks and also requires `OPS_SECRET` via `X-Ops-Token` or `ops_token` cookie.
 - If wallet actions return `JSON.parse` errors in the browser, ensure both `CORS_ALLOWED_ORIGINS` and `WALLET_ALLOWED_ORIGINS` include your gateway origin.
 
 ## Institutional Wallet Setup

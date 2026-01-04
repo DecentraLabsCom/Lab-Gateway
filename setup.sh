@@ -211,6 +211,23 @@ if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
 fi
 echo
 
+# Lab Manager Internal Token
+echo "Lab Manager Internal Token"
+echo "=========================="
+echo "This token protects /lab-manager when accessed outside private networks."
+read -p "Lab Manager token (leave empty for auto-generated): " lab_manager_token
+lab_manager_token=$(echo "$lab_manager_token" | tr -d ' ')
+
+if [ -z "$lab_manager_token" ]; then
+    lab_manager_token="lab_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated Lab Manager token: $lab_manager_token"
+fi
+
+update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_INTERNAL_TOKEN" "$lab_manager_token"
+update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_INTERNAL_TOKEN_HEADER" "X-Lab-Manager-Token"
+update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_INTERNAL_TOKEN_COOKIE" "lab_manager_token"
+echo
+
 # Treasury Admin EIP-712 Domain (optional overrides)
 echo "Treasury Admin EIP-712 Domain (optional)"
 echo "========================================"
@@ -567,6 +584,7 @@ else
     fi
 fi
 echo "   * Internal token cookie: ${token_host}/wallet-dashboard?token=${internal_token}"
+echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/"
 echo "   * Blockchain Services API: /auth"
 echo
@@ -620,6 +638,7 @@ else
     fi
 fi
 echo "   * Internal token cookie: ${token_host}/wallet-dashboard?token=${internal_token}"
+echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
 echo "   * Blockchain Services API: /auth"
     if [ "$cf_enabled" = true ]; then

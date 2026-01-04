@@ -222,6 +222,24 @@ if exist "%BLOCKCHAIN_ENV_FILE%" (
 )
 echo.
 
+REM Lab Manager Internal Token
+echo Lab Manager Internal Token
+echo ==========================
+echo This token protects /lab-manager when accessed outside private networks.
+set "lab_manager_token="
+set /p "lab_manager_token=Lab Manager token (leave empty for auto-generated): "
+set "lab_manager_token=!lab_manager_token: =!"
+
+if "!lab_manager_token!"=="" (
+    set "lab_manager_token=lab_%RANDOM%%RANDOM%%RANDOM%"
+    echo Generated Lab Manager token: !lab_manager_token!
+)
+
+call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_INTERNAL_TOKEN" "!lab_manager_token!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_INTERNAL_TOKEN_HEADER" "X-Lab-Manager-Token"
+call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_INTERNAL_TOKEN_COOKIE" "lab_manager_token"
+echo.
+
 REM Treasury Admin EIP-712 Domain (optional overrides)
 echo Treasury Admin EIP-712 Domain (optional)
 echo ========================================
@@ -544,6 +562,7 @@ if /i "!domain!"=="localhost" (
     )
 )
 echo    * Internal token cookie: !token_host!/wallet-dashboard?token=!internal_token!
+echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
 echo    * Guacamole: /guacamole/
 echo    * Blockchain Services API: /auth
 echo.
@@ -591,6 +610,7 @@ if /i "!domain!"=="localhost" (
     )
 )
 echo    * Internal token cookie: !token_host!/wallet-dashboard?token=!internal_token!
+echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
     echo    * Guacamole: /guacamole/ ^(!guac_admin_user! / !guac_admin_pass!^)
     echo    * Blockchain Services API: /auth
     if "!cf_enabled!"=="1" (
