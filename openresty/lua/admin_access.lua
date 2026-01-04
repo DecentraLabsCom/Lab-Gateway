@@ -6,10 +6,10 @@ local token = os.getenv("SECURITY_INTERNAL_TOKEN") or ""
 local header_name = os.getenv("SECURITY_INTERNAL_TOKEN_HEADER") or "X-Internal-Token"
 local cookie_name = os.getenv("SECURITY_INTERNAL_TOKEN_COOKIE") or "internal_token"
 
-local function deny()
+local function deny(message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
     ngx.header["Content-Type"] = "text/plain"
-    ngx.say("Unauthorized")
+    ngx.say(message or "Unauthorized")
     return ngx.exit(ngx.HTTP_UNAUTHORIZED)
 end
 
@@ -35,7 +35,7 @@ end
 
 if token == "" then
     if not is_loopback_or_docker(ngx.var.remote_addr or "") then
-        return deny()
+        return deny("Unauthorized: SECURITY_INTERNAL_TOKEN not set; access allowed only from 127.0.0.1 or 172.16.0.0/12.")
     end
     return
 end
@@ -49,11 +49,11 @@ if not provided or provided == "" then
 end
 
 if not provided or provided == "" then
-    return deny()
+    return deny("Unauthorized: internal token required. Provide " .. header_name .. " header or " .. cookie_name .. " cookie.")
 end
 
 if provided ~= token then
-    return deny()
+    return deny("Unauthorized: invalid internal token. Provide " .. header_name .. " header or " .. cookie_name .. " cookie.")
 end
 
 ngx.req.set_header(header_name, token)
