@@ -479,7 +479,7 @@ if [ -n "$rpc_url" ]; then
 fi
 
 sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$ROOT_ENV_FILE")
-read -p "Comma-separated Sepolia RPC URLs [${sepolia_default:-https://1rpc.io/sepolia,https://rpc.sepolia.org}]: " sepolia_rpc
+read -p "Comma-separated Sepolia RPC URLs [${sepolia_default:-https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app}]: " sepolia_rpc
 sepolia_rpc=${sepolia_rpc:-$sepolia_default}
 if [ -n "$sepolia_rpc" ]; then
     update_env_in_all "ETHEREUM_SEPOLIA_RPC_URL" "$sepolia_rpc"

@@ -22,6 +22,35 @@ escape_sql() {
     printf "%s" "$value"
 }
 
+ensure_schema() {
+    local schema="$1"
+    local has_any_table=""
+    local missing=()
+
+    has_any_table="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${schema}' LIMIT 1" || true)"
+    if [ -z "$has_any_table" ]; then
+        echo "Guacamole schema is empty; importing schema into ${schema}..."
+        mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${schema}" < /docker-entrypoint-initdb.d/001-create-schema.sql
+        return 0
+    fi
+
+    for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission; do
+        exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${schema}' AND table_name='${table}' LIMIT 1" || true)"
+        if [ "$exists" != "1" ]; then
+            missing+=("$table")
+        fi
+    done
+
+    if [ "${#missing[@]}" -ne 0 ]; then
+        echo "Guacamole schema is incomplete (missing: ${missing[*]})."
+        echo "Refusing to auto-import to avoid overwriting existing data."
+        echo "Run /docker-entrypoint-initdb.d/001-create-schema.sql manually if this is a fresh install."
+        return 1
+    fi
+
+    return 0
+}
+
 require_env "GUAC_ADMIN_USER"
 require_env "GUAC_ADMIN_PASS"
 
@@ -112,6 +141,19 @@ while true; do
     fi
 
     if [ "$waited" -ge "$max_wait" ]; then
+        echo "Guacamole schema not ready after ${max_wait}s (missing: ${missing_tables[*]}); attempting auto-import."
+        if ensure_schema "${MYSQL_DATABASE}"; then
+            missing_tables=()
+            for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission; do
+                exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='${table}' LIMIT 1" || true)"
+                if [ "$exists" != "1" ]; then
+                    missing_tables+=("$table")
+                fi
+            done
+            if [ "${#missing_tables[@]}" -eq 0 ]; then
+                break
+            fi
+        fi
         echo "Guacamole schema not ready after ${max_wait}s (missing: ${missing_tables[*]}); skipping admin sync."
         echo "=== User configuration completed successfully ==="
         exit 0

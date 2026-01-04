@@ -103,6 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ['DB', formatBool(d.database_up)],
                     ['Wallet configured', formatBool(d.wallet_configured)],
                     ['Treasury configured', formatBool(d.treasury_configured)],
+                    ['Provider registered', formatBool(d.provider_registered)],
                     ['Invite token', formatBool(d.invite_token_configured)],
                     ['Event listener', formatBool(d.event_listener_enabled)],
                     ['SAML validation', formatBool(d.saml_validation_ready)],

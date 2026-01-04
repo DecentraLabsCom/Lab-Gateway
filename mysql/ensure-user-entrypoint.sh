@@ -57,7 +57,11 @@ if [[ -f "${ENSURE_SCRIPT}" ]]; then
       done
 
       echo "MySQL is ready. Running ensure-user script..."
-      bash "${ENSURE_SCRIPT}"
+      if [[ -x "${ENSURE_SCRIPT}" ]]; then
+        "${ENSURE_SCRIPT}"
+      else
+        bash "${ENSURE_SCRIPT}"
+      fi
       break
     fi
     

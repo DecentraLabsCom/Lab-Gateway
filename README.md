@@ -234,7 +234,7 @@ CONTRACT_ADDRESS=0xYourSmartContractAddress
 
 # Network RPC URLs (with failover support)
 RPC_URL=https://1rpc.io/sepolia
-ETHEREUM_SEPOLIA_RPC_URL=https://rpc1.com,https://rpc2.com,https://rpc3.com
+ETHEREUM_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app
 
 # Institutional Wallet (for automated transactions)
 INSTITUTIONAL_WALLET_ADDRESS=0xYourWalletAddress

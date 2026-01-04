@@ -47,6 +47,30 @@ local function cert_days_remaining(path)
     local notAfter = out:match("notAfter=(.+)")
     if not notAfter then return nil end
     local ts = ngx.parse_http_time(notAfter)
+    if not ts then
+        local months = {
+            Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,
+            Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12
+        }
+        local mon, day, hour, min, sec, year = notAfter:match("^(%a+)%s+(%d+)%s+(%d+):(%d+):(%d+)%s+(%d+)%s+GMT$")
+        if mon and months[mon] then
+            local local_ts = os.time({
+                year = tonumber(year),
+                month = months[mon],
+                day = tonumber(day),
+                hour = tonumber(hour),
+                min = tonumber(min),
+                sec = tonumber(sec)
+            })
+            if local_ts then
+                local offset = os.difftime(
+                    os.time(os.date("*t", local_ts)),
+                    os.time(os.date("!*t", local_ts))
+                )
+                ts = local_ts - offset
+            end
+        end
+    end
     if not ts then return nil end
     local now = ngx.time()
     return math.floor((ts - now) / 86400)

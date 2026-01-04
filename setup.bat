@@ -481,7 +481,7 @@ if not "!rpc_url!"=="" (
 )
 
 call :ReadEnvValue "%ROOT_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
-if not defined sepolia_default set "sepolia_default=https://1rpc.io/sepolia,https://rpc.sepolia.org"
+if not defined sepolia_default set "sepolia_default=https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app"
 set /p "sepolia_rpc=Sepolia RPC URLs (comma separated) [!sepolia_default!]: "
 if "!sepolia_rpc!"=="" set "sepolia_rpc=!sepolia_default!"
 if not "!sepolia_rpc!"=="" (
