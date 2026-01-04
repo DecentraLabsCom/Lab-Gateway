@@ -67,16 +67,40 @@ if not provided or provided == "" then
     provided = ngx.var[cookie_var]
 end
 
+local function extract_token_from_args(args)
+    if not args or args == "" then
+        return nil
+    end
+    args = args:gsub("^%?", "")
+    local token_value = ("&" .. args):match("&token=([^&]+)")
+    if token_value and token_value ~= "" then
+        return token_value
+    end
+    return nil
+end
+
 if (not provided or provided == "") and is_lab_manager then
     local arg_token = ngx.var.arg_token
     if not arg_token or arg_token == "" then
-        local args = ngx.var.args or ""
-        if args ~= "" then
-            local token_value = ("&" .. args):match("&token=([^&]+)")
-            if token_value and token_value ~= "" then
-                arg_token = token_value
+        if ngx.req.get_uri_args then
+            local uri_args = ngx.req.get_uri_args()
+            local token_arg = uri_args and uri_args.token
+            if type(token_arg) == "table" then
+                token_arg = token_arg[1]
+            end
+            if token_arg and token_arg ~= "" then
+                arg_token = tostring(token_arg)
             end
         end
+    end
+    if not arg_token or arg_token == "" then
+        local args = ngx.var.args or ""
+        arg_token = extract_token_from_args(args)
+    end
+    if not arg_token or arg_token == "" then
+        local request_uri = ngx.var.request_uri or ""
+        local query = request_uri:match("%?(.*)$") or ""
+        arg_token = extract_token_from_args(query)
     end
     if arg_token and arg_token ~= "" then
         if ngx.unescape_uri then

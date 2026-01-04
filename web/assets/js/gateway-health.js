@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ['Invite token', boolTag(d.invite_token_configured)],
                 ['Event listener', boolTag(d.event_listener_enabled)],
                 ['SAML validation', boolTag(d.saml_validation_ready)],
-                ['JWT validation', textTag(d.jwt_validation)],
+                ['JWT validation', jwtTag(d.jwt_validation)],
                 ['Version', textTag(d.version)]
             ];
             fields.forEach(([k,v]) => {
@@ -196,6 +196,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const text = value && value !== '' ? value : 'Pending';
         const cls = value && value !== '' ? 'ok' : 'bad';
         return createTag(text, cls);
+    }
+
+    function jwtTag(value) {
+        if (value === true) return createTag('OK', 'ok');
+        if (value === false) return createTag('Issue', 'bad');
+        if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            if (normalized === 'ready' || normalized === 'ok') {
+                return createTag('OK', 'ok');
+            }
+            if (normalized !== '') {
+                return createTag('Issue', 'bad');
+            }
+        }
+        return createTag('Pending', 'bad');
     }
 
     function createTag(text, cls) {

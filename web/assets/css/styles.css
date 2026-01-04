@@ -424,6 +424,26 @@ body {
     justify-content: center;
 }
 
+.status-modal .primary-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: 22px;
+    border: 1px solid var(--primary-bg-66);
+    color: var(--primary-color);
+    background: var(--primary-bg-26);
+    font-weight: 600;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.status-modal .primary-btn:hover {
+    transform: translateY(-2px);
+    background: var(--primary-bg-66);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-primary-hover);
+}
+
 /* Opciones de acceso */
 .access-options {
     display: flex;
