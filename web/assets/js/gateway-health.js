@@ -73,57 +73,78 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderServices(services) {
         if (!serviceGrid) return;
         serviceGrid.innerHTML = '';
-        const svcList = [
-            { key: 'blockchain', label: 'Blockchain services' },
+        const blockchainVal = services.blockchain || {};
+        const blockchainCard = document.createElement('div');
+        blockchainCard.className = 'health-card service-column';
+        const blockchainOk = blockchainVal.ok === true;
+        const blockchainStatus = blockchainVal.status !== undefined ? blockchainVal.status : (blockchainOk ? 'OK' : 'unknown');
+        blockchainCard.innerHTML = `
+            <div class="health-row">
+                <strong>Blockchain services</strong>
+                <span class="tag ${blockchainOk ? 'ok' : 'bad'}">${blockchainOk ? 'OK' : `Issue (${blockchainStatus})`}</span>
+            </div>
+        `;
+        if (blockchainVal.details) {
+            const d = blockchainVal.details;
+            const grid = document.createElement('div');
+            grid.className = 'keyval';
+            const fields = [
+                ['RPC', formatBool(d.rpc_up)],
+                ['Marketplace key', formatBool(d.marketplace_key_cached)],
+                ['Private key', formatBool(d.private_key_present)],
+                ['DB', formatBool(d.database_up)],
+                ['Wallet configured', formatBool(d.wallet_configured)],
+                ['Treasury configured', formatBool(d.treasury_configured)],
+                ['Provider registered', formatBool(d.provider_registered)],
+                ['Invite token', formatBool(d.invite_token_configured)],
+                ['Event listener', formatBool(d.event_listener_enabled)],
+                ['SAML validation', formatBool(d.saml_validation_ready)],
+                ['JWT validation', d.jwt_validation || 'n/a'],
+                ['Version', d.version || 'n/a']
+            ];
+            fields.forEach(([k,v]) => {
+                const key = document.createElement('div');
+                key.className = 'key';
+                key.textContent = k;
+                const valEl = document.createElement('div');
+                valEl.className = 'val';
+                valEl.textContent = v;
+                grid.appendChild(key);
+                grid.appendChild(valEl);
+            });
+            blockchainCard.appendChild(grid);
+        }
+        serviceGrid.appendChild(blockchainCard);
+
+        const otherCard = document.createElement('div');
+        otherCard.className = 'health-card service-column';
+        const otherServices = [
             { key: 'guacamole', label: 'Guacamole' },
             { key: 'guacamole_api', label: 'Guacamole API' },
             { key: 'ops', label: 'Ops worker' },
             { key: 'mysql', label: 'MySQL (gateway reachability)' }
         ];
-        svcList.forEach(svc => {
+        const otherOk = otherServices.every(svc => (services[svc.key] || {}).ok === true);
+        const otherHeader = document.createElement('div');
+        otherHeader.className = 'health-row';
+        otherHeader.innerHTML = `
+            <strong>Gateway services</strong>
+            <span class="tag ${otherOk ? 'ok' : 'bad'}">${otherOk ? 'OK' : 'Issue'}</span>
+        `;
+        otherCard.appendChild(otherHeader);
+        otherServices.forEach(svc => {
             const val = services[svc.key] || {};
-            const card = document.createElement('div');
-            card.className = 'health-card';
             const ok = val.ok === true;
             const status = val.status !== undefined ? val.status : (ok ? 'OK' : 'unknown');
-            card.innerHTML = `
-                <div class="health-row">
-                    <strong>${svc.label}</strong>
-                    <span class="tag ${ok ? 'ok' : 'bad'}">${ok ? 'OK' : `Issue (${status})`}</span>
-                </div>
+            const row = document.createElement('div');
+            row.className = 'health-row';
+            row.innerHTML = `
+                <span>${svc.label}</span>
+                <span class="tag ${ok ? 'ok' : 'bad'}">${ok ? 'OK' : `Issue (${status})`}</span>
             `;
-            if (svc.key === 'blockchain' && val.details) {
-                const d = val.details;
-                const grid = document.createElement('div');
-                grid.className = 'keyval';
-                const fields = [
-                    ['RPC', formatBool(d.rpc_up)],
-                    ['Marketplace key', formatBool(d.marketplace_key_cached)],
-                    ['Private key', formatBool(d.private_key_present)],
-                    ['DB', formatBool(d.database_up)],
-                    ['Wallet configured', formatBool(d.wallet_configured)],
-                    ['Treasury configured', formatBool(d.treasury_configured)],
-                    ['Provider registered', formatBool(d.provider_registered)],
-                    ['Invite token', formatBool(d.invite_token_configured)],
-                    ['Event listener', formatBool(d.event_listener_enabled)],
-                    ['SAML validation', formatBool(d.saml_validation_ready)],
-                    ['JWT validation', d.jwt_validation || 'n/a'],
-                    ['Version', d.version || 'n/a']
-                ];
-                fields.forEach(([k,v]) => {
-                    const key = document.createElement('div');
-                    key.className = 'key';
-                    key.textContent = k;
-                    const valEl = document.createElement('div');
-                    valEl.className = 'val';
-                    valEl.textContent = v;
-                    grid.appendChild(key);
-                    grid.appendChild(valEl);
-                });
-                card.appendChild(grid);
-            }
-            serviceGrid.appendChild(card);
+            otherCard.appendChild(row);
         });
+        serviceGrid.appendChild(otherCard);
     }
 
     function renderInfra(infra) {

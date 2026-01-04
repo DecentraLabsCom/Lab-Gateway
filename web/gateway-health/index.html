@@ -14,6 +14,8 @@
         .health-header h1 { font-family: 'Orbitron', monospace; color: var(--primary-color); }
         .health-card { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
         .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+        .services-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+        .service-column { flex: 1 1 45%; min-width: 260px; }
         .health-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
         .health-row:last-child { border-bottom: none; }
         .tag { padding: 4px 10px; border-radius: 8px; font-size: 0.85rem; }
@@ -53,7 +55,7 @@
             <div class="panel-header">
                 <h2>Services</h2>
             </div>
-            <div class="health-grid" id="serviceGrid"></div>
+            <div class="services-grid" id="serviceGrid"></div>
         </div>
 
         <div class="health-card">
