@@ -39,9 +39,9 @@ end
 
 local header_name = os.getenv("SECURITY_INTERNAL_TOKEN_HEADER") or "X-Internal-Token"
 local cookie_name = os.getenv("SECURITY_INTERNAL_TOKEN_COOKIE") or "internal_token"
+local uri = ngx.var.uri or ""
 local function token_hint()
     local hint = "Provide " .. header_name .. " header or " .. cookie_name .. " cookie"
-    local uri = ngx.var.uri or ""
     if uri == "/wallet-dashboard" or uri:find("^/wallet-dashboard/") then
         hint = hint .. " (or ?token=...)"
     end
@@ -56,7 +56,7 @@ if not provided or provided == "" then
     provided = ngx.var[cookie_var]
 end
 
-if (not provided or provided == "") and (ngx.var.uri == "/wallet-dashboard" or ngx.var.uri:find("^/wallet-dashboard/")) then
+if (not provided or provided == "") and (uri == "/wallet-dashboard" or uri:find("^/wallet-dashboard/")) then
     local arg_token = ngx.var.arg_token
     if arg_token and arg_token ~= "" then
         provided = arg_token
