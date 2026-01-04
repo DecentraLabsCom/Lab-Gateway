@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
         topGrid.innerHTML = '';
         const items = [
             { label: 'Blockchain services', ok: data.services?.blockchain?.ok },
-            { label: 'Labs access', ok: data.services?.guacamole?.ok && data.services?.guacamole_api?.ok && data.services?.mysql?.ok },
+            { label: 'Labs access', ok: data.services?.guacamole?.ok && data.services?.guacamole_api?.ok && data.services?.guacd?.ok && data.services?.guacamole_schema?.ok && data.services?.mysql?.ok },
             { label: 'Ops worker', ok: data.services?.ops?.ok },
             { label: 'MySQL (gateway)', ok: data.services?.mysql?.ok },
             { label: 'Cert validity', ok: (data.infra?.cert?.days_remaining || 0) > 0 }
@@ -77,11 +77,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const blockchainCard = document.createElement('div');
         blockchainCard.className = 'health-card service-column';
         const blockchainOk = blockchainVal.ok === true;
-        const blockchainStatus = blockchainVal.status !== undefined ? blockchainVal.status : (blockchainOk ? 'OK' : 'unknown');
+        const blockchainTag = summaryTag(blockchainOk, blockchainVal.status);
         blockchainCard.innerHTML = `
             <div class="health-row">
                 <strong>Blockchain services</strong>
-                <span class="tag ${blockchainOk ? 'ok' : 'bad'}">${blockchainOk ? 'OK' : `Issue (${blockchainStatus})`}</span>
+                <span class="tag ${blockchainTag.cls}">${blockchainTag.text}</span>
             </div>
         `;
         if (blockchainVal.details) {
@@ -89,18 +89,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const grid = document.createElement('div');
             grid.className = 'keyval';
             const fields = [
-                ['RPC', formatBool(d.rpc_up)],
-                ['Marketplace key', formatBool(d.marketplace_key_cached)],
-                ['Private key', formatBool(d.private_key_present)],
-                ['DB', formatBool(d.database_up)],
-                ['Wallet configured', formatBool(d.wallet_configured)],
-                ['Treasury configured', formatBool(d.treasury_configured)],
-                ['Provider registered', formatBool(d.provider_registered)],
-                ['Invite token', formatBool(d.invite_token_configured)],
-                ['Event listener', formatBool(d.event_listener_enabled)],
-                ['SAML validation', formatBool(d.saml_validation_ready)],
-                ['JWT validation', d.jwt_validation || 'n/a'],
-                ['Version', d.version || 'n/a']
+                ['RPC', boolTag(d.rpc_up)],
+                ['Marketplace key', boolTag(d.marketplace_key_cached)],
+                ['Private key', boolTag(d.private_key_present)],
+                ['DB', boolTag(d.database_up)],
+                ['Wallet configured', boolTag(d.wallet_configured)],
+                ['Treasury configured', boolTag(d.treasury_configured)],
+                ['Provider registered', boolTag(d.provider_registered)],
+                ['Invite token', boolTag(d.invite_token_configured)],
+                ['Event listener', boolTag(d.event_listener_enabled)],
+                ['SAML validation', boolTag(d.saml_validation_ready)],
+                ['JWT validation', textTag(d.jwt_validation)],
+                ['Version', textTag(d.version)]
             ];
             fields.forEach(([k,v]) => {
                 const key = document.createElement('div');
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 key.textContent = k;
                 const valEl = document.createElement('div');
                 valEl.className = 'val';
-                valEl.textContent = v;
+                valEl.appendChild(v);
                 grid.appendChild(key);
                 grid.appendChild(valEl);
             });
@@ -121,15 +121,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const otherServices = [
             { key: 'guacamole', label: 'Guacamole' },
             { key: 'guacamole_api', label: 'Guacamole API' },
+            { key: 'guacd', label: 'Guacd' },
+            { key: 'guacamole_schema', label: 'Guacamole schema' },
             { key: 'ops', label: 'Ops worker' },
             { key: 'mysql', label: 'MySQL (gateway reachability)' }
         ];
         const otherOk = otherServices.every(svc => (services[svc.key] || {}).ok === true);
+        const otherPending = otherServices.some(svc => (services[svc.key] || {}).ok === undefined);
+        const otherTag = summaryTag(otherOk, otherPending ? undefined : 'issue');
         const otherHeader = document.createElement('div');
         otherHeader.className = 'health-row';
         otherHeader.innerHTML = `
             <strong>Gateway services</strong>
-            <span class="tag ${otherOk ? 'ok' : 'bad'}">${otherOk ? 'OK' : 'Issue'}</span>
+            <span class="tag ${otherTag.cls}">${otherTag.text}</span>
         `;
         otherCard.appendChild(otherHeader);
         otherServices.forEach(svc => {
@@ -180,5 +184,45 @@ document.addEventListener('DOMContentLoaded', () => {
         if (val === true) return 'yes';
         if (val === false) return 'no';
         return 'n/a';
+    }
+
+    function boolTag(value) {
+        if (value === true) return createTag('OK', 'ok');
+        if (value === false) return createTag('Issue', 'bad');
+        return createTag('Pending', 'bad');
+    }
+
+    function textTag(value) {
+        const text = value && value !== '' ? value : 'Pending';
+        const cls = value && value !== '' ? 'ok' : 'bad';
+        return createTag(text, cls);
+    }
+
+    function createTag(text, cls) {
+        const tag = document.createElement('span');
+        tag.className = `tag ${cls}`;
+        tag.textContent = text;
+        return tag;
+    }
+
+    function summaryTag(ok, status) {
+        if (ok) {
+            return { cls: 'ok', text: 'OK' };
+        }
+        if (status === undefined || status === null || status === '') {
+            return { cls: 'bad', text: 'Pending' };
+        }
+        if (typeof status === 'number') {
+            if (status >= 500) return { cls: 'bad', text: 'Error' };
+            if (status >= 400) return { cls: 'bad', text: 'Issue' };
+        }
+        const statusText = status.toString().toUpperCase();
+        if (statusText === 'DEGRADED' || statusText === 'PARTIAL') {
+            return { cls: 'bad', text: 'Issue' };
+        }
+        if (statusText === 'DOWN' || statusText === 'FAIL' || statusText === 'ERROR') {
+            return { cls: 'bad', text: 'Error' };
+        }
+        return { cls: 'bad', text: 'Issue' };
     }
 });

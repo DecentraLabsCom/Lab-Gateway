@@ -72,7 +72,7 @@ if (not provided or provided == "") and is_lab_manager then
     if not arg_token or arg_token == "" then
         local args = ngx.var.args or ""
         if args ~= "" then
-            local _, token_value = args:match("(^|&)token=([^&]+)")
+            local token_value = ("&" .. args):match("&token=([^&]+)")
             if token_value and token_value ~= "" then
                 arg_token = token_value
             end

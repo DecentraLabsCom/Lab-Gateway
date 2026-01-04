@@ -39,6 +39,54 @@ local function check_mysql()
     return true
 end
 
+local function check_guacd()
+    local sock = ngx.socket.tcp()
+    sock:settimeouts(100, 100, 100)
+    local ok, err = sock:connect("guacd", 4822)
+    if not ok then
+        return false, err
+    end
+    sock:close()
+    return true
+end
+
+local function check_guac_schema()
+    local ok, mysql = pcall(require, "resty.mysql")
+    if not ok then
+        return false, "mysql driver missing"
+    end
+    local user = os.getenv("MYSQL_USER") or ""
+    local password = os.getenv("MYSQL_PASSWORD") or ""
+    local database = os.getenv("MYSQL_DATABASE") or "guacamole_db"
+    if user == "" or password == "" then
+        return false, "mysql credentials missing"
+    end
+
+    local db, err = mysql:new()
+    if not db then
+        return false, err
+    end
+    db:set_timeout(200)
+
+    local ok_conn, err_conn = db:connect({
+        host = "mysql",
+        port = 3306,
+        database = database,
+        user = user,
+        password = password
+    })
+    if not ok_conn then
+        return false, err_conn
+    end
+
+    local res, err_query = db:query("SELECT 1 FROM guacamole_user LIMIT 1")
+    db:set_keepalive(10000, 10)
+    if not res then
+        return false, err_query
+    end
+    return true
+end
+
 local function cert_days_remaining(path)
     local f = io.popen("openssl x509 -enddate -noout -in " .. path .. " 2>/dev/null")
     if not f then return nil end
@@ -92,6 +140,8 @@ local guac = capture("/__health_guacamole")
 local guac_api = capture("/__health_guac_api")
 local ops = capture("/__health_ops")
 local mysql_ok, mysql_err = check_mysql()
+local guacd_ok, guacd_err = check_guacd()
+local guac_schema_ok, guac_schema_err = check_guac_schema()
 local guac_api_ok = guac_api.status and guac_api.status < 500
 
 local block_body = blockchain.body or {}
@@ -128,6 +178,8 @@ local result = {
         blockchain,
         { ok = guac.ok },
         { ok = guac_api_ok },
+        { ok = guacd_ok },
+        { ok = guac_schema_ok },
         { ok = ops.ok },
         { ok = mysql_ok }
     }),
@@ -144,6 +196,14 @@ local result = {
         guacamole_api = {
             ok = guac_api_ok,
             status = guac_api.status
+        },
+        guacd = {
+            ok = guacd_ok or false,
+            status = guacd_ok and "OK" or guacd_err
+        },
+        guacamole_schema = {
+            ok = guac_schema_ok or false,
+            status = guac_schema_ok and "ready" or guac_schema_err
         },
         ops = {
             ok = ops.ok,
