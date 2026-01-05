@@ -54,6 +54,21 @@ local uri = ngx.var.uri or ""
 local request_uri = ngx.var.request_uri or ""
 local is_tokenized_request = is_tokenized_path(uri) or is_tokenized_path(request_uri)
 
+local function get_arg_token()
+    local args = ngx.req.get_uri_args()
+    local token_arg = args and args.token
+    if not token_arg then
+        return nil
+    end
+    if type(token_arg) == "table" then
+        token_arg = token_arg[1]
+    end
+    if token_arg == "" then
+        return nil
+    end
+    return token_arg
+end
+
 local function token_hint()
     local hint = "Provide " .. header_name .. " header or " .. cookie_name .. " cookie"
     if is_tokenized_request then
@@ -71,16 +86,7 @@ if not provided or provided == "" then
 end
 
 if (not provided or provided == "") and is_tokenized_request then
-    local arg_token = ngx.var.arg_token
-    if not arg_token or arg_token == "" then
-        local args = ngx.var.args or ""
-        if args ~= "" then
-            local _, token_value = args:match("(^|&)token=([^&]+)")
-            if token_value and token_value ~= "" then
-                arg_token = token_value
-            end
-        end
-    end
+    local arg_token = get_arg_token()
     if arg_token and arg_token ~= "" then
         if ngx.unescape_uri then
             arg_token = ngx.unescape_uri(arg_token)
