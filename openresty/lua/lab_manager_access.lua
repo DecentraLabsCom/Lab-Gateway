@@ -44,7 +44,12 @@ local function is_lab_manager_path(value)
     if not value or value == "" then
         return false
     end
-    return value == "/lab-manager" or value:find("^/lab-manager/") ~= nil
+    local prefix = "/lab-manager"
+    if value:sub(1, #prefix) ~= prefix then
+        return false
+    end
+    local next_char = value:sub(#prefix + 1, #prefix + 1)
+    return next_char == "" or next_char == "/" or next_char == "?"
 end
 
 local uri = ngx.var.uri or ""
