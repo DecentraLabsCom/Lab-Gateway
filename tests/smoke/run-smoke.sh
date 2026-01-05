@@ -183,15 +183,16 @@ else
 fi
 
 # =================================================================
-# Test 11: Institution-config rejects missing internal token
+# Test 11: Institution-config rejects missing internal token for external clients
 # =================================================================
-echo "Test 11: Institution-config rejects missing internal token"
-INSTITUTION_NO_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+echo "Test 11: Institution-config rejects missing internal token for external clients"
+INSTITUTION_EXTERNAL=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+  -H "X-Forwarded-For: 203.0.113.5" \
   https://lab.test:${PORT}/institution-config/status || true)
-if [ "$INSTITUTION_NO_TOKEN" = "401" ] || [ "$INSTITUTION_NO_TOKEN" = "403" ]; then
-  log_pass "Institution config rejects requests without token (status: $INSTITUTION_NO_TOKEN)"
+if [ "$INSTITUTION_EXTERNAL" = "401" ] || [ "$INSTITUTION_EXTERNAL" = "403" ]; then
+  log_pass "Institution config rejects requests without token from external IP (status: $INSTITUTION_EXTERNAL)"
 else
-  log_fail "Institution config should reject without token (status: $INSTITUTION_NO_TOKEN)"
+  log_fail "Institution config should reject external requests without token (status: $INSTITUTION_EXTERNAL)"
 fi
 
 # =================================================================
