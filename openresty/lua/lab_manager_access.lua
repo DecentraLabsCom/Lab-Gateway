@@ -79,7 +79,7 @@ local function extract_token_from_args(args)
     return nil
 end
 
-if (not provided or provided == "") and is_lab_manager then
+if not provided or provided == "" then
     local arg_token = ngx.var.arg_token
     if not arg_token or arg_token == "" then
         if ngx.req.get_uri_args then
@@ -107,7 +107,9 @@ if (not provided or provided == "") and is_lab_manager then
             arg_token = ngx.unescape_uri(arg_token)
         end
         provided = arg_token
-        ngx.header["Set-Cookie"] = cookie_name .. "=" .. arg_token .. "; Path=/; HttpOnly; Secure; SameSite=Lax"
+        if is_lab_manager then
+            ngx.header["Set-Cookie"] = cookie_name .. "=" .. arg_token .. "; Path=/; HttpOnly; Secure; SameSite=Lax"
+        end
     end
 end
 
