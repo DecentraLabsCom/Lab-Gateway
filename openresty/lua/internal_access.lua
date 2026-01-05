@@ -30,8 +30,63 @@ local function is_loopback_or_docker(ip)
     return false
 end
 
+local function is_private(ip)
+    if not ip or ip == "" then
+        return false
+    end
+    if is_loopback_or_docker(ip) then
+        return true
+    end
+    if ip:match("^10%.") then
+        return true
+    end
+    if ip:match("^192%.168%.") then
+        return true
+    end
+    local octet = ip:match("^172%.(%d+)%.")
+    if octet then
+        local n = tonumber(octet)
+        if n and n >= 16 and n <= 31 then
+            return true
+        end
+    end
+    if ip:match("^169%.254%.") then
+        return true
+    end
+    return false
+end
+
+local function extract_first_ip(value)
+    if not value then
+        return nil
+    end
+    if type(value) == "table" then
+        value = value[1]
+    end
+    if not value or value == "" then
+        return nil
+    end
+    local ip = value:match("^%s*([^,\\s]+)")
+    if not ip or ip == "" then
+        return nil
+    end
+    return ip
+end
+
+local headers = ngx.req.get_headers()
+local remote_addr = ngx.var.remote_addr or ""
+local forwarded_ip = extract_first_ip(headers["X-Forwarded-For"])
+if not forwarded_ip then
+    forwarded_ip = extract_first_ip(headers["X-Real-IP"])
+end
+
+local client_ip = remote_addr
+if forwarded_ip and forwarded_ip ~= "" and is_private(remote_addr) and not is_private(forwarded_ip) then
+    client_ip = forwarded_ip
+end
+
 if token == "" then
-    if not is_loopback_or_docker(ngx.var.remote_addr or "") then
+    if not is_loopback_or_docker(client_ip) then
         return deny("Unauthorized: SECURITY_INTERNAL_TOKEN not set; access allowed only from 127.0.0.1 or 172.16.0.0/12.")
     end
     return
@@ -77,7 +132,6 @@ local function token_hint()
     return hint .. "."
 end
 
-local headers = ngx.req.get_headers()
 local provided = headers[header_name]
 
 if not provided or provided == "" then
@@ -96,37 +150,11 @@ if (not provided or provided == "") and is_tokenized_request then
     end
 end
 
-local function is_private(ip)
-    if not ip or ip == "" then
-        return false
-    end
-    if is_loopback_or_docker(ip) then
-        return true
-    end
-    if ip:match("^10%.") then
-        return true
-    end
-    if ip:match("^192%.168%.") then
-        return true
-    end
-    local octet = ip:match("^172%.(%d+)%.")
-    if octet then
-        local n = tonumber(octet)
-        if n and n >= 16 and n <= 31 then
-            return true
-        end
-    end
-    if ip:match("^169%.254%.") then
-        return true
-    end
-    return false
-end
-
 if provided and provided ~= "" then
     if provided ~= token then
         return deny("Unauthorized: invalid internal token. " .. token_hint())
     end
-elseif not is_private(ngx.var.remote_addr or "") then
+elseif not is_private(client_ip) then
     return deny("Unauthorized: internal token required. " .. token_hint())
 end
 
