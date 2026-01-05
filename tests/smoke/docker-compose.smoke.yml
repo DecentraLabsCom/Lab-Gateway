@@ -19,6 +19,8 @@ services:
       HTTPS_PORT: "18443"
       GUAC_API_URL: http://guacamole:8080/guacamole/api
       OPS_SECRET: test-ops-secret-123
+      SECURITY_INTERNAL_TOKEN: smoke-internal-token
+      SECURITY_ALLOW_PRIVATE_NETWORKS: "true"
     volumes:
       - ./certs:/etc/ssl/private
       - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro

@@ -43,6 +43,7 @@ echo -e "${YELLOW}Starting services...${NC}"
 docker compose -f "$COMPOSE_FILE" up --build -d
 
 PORT=18443
+INTERNAL_TOKEN="smoke-internal-token"
 
 ATTEMPTS=60
 until curl -sk --resolve lab.test:${PORT}:127.0.0.1 https://lab.test:${PORT}/ >/dev/null; do
@@ -179,6 +180,30 @@ if echo "$SESSION_RESPONSE" | grep -Eq '"authorization"'; then
   log_pass "Session persists across requests"
 else
   log_fail "Session not persistent: $SESSION_RESPONSE"
+fi
+
+# =================================================================
+# Test 11: Institution-config rejects missing internal token
+# =================================================================
+echo "Test 11: Institution-config rejects missing internal token"
+INSTITUTION_NO_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+  https://lab.test:${PORT}/institution-config/status || true)
+if [ "$INSTITUTION_NO_TOKEN" = "401" ] || [ "$INSTITUTION_NO_TOKEN" = "403" ]; then
+  log_pass "Institution config rejects requests without token (status: $INSTITUTION_NO_TOKEN)"
+else
+  log_fail "Institution config should reject without token (status: $INSTITUTION_NO_TOKEN)"
+fi
+
+# =================================================================
+# Test 12: Institution-config accepts valid token
+# =================================================================
+echo "Test 12: Institution-config accepts valid token"
+INSTITUTION_WITH_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+  "https://lab.test:${PORT}/institution-config/status?token=${INTERNAL_TOKEN}")
+if [ "$INSTITUTION_WITH_TOKEN" = "200" ]; then
+  log_pass "Institution config accepts valid token (status: $INSTITUTION_WITH_TOKEN)"
+else
+  log_fail "Institution config rejected valid token (status: $INSTITUTION_WITH_TOKEN)"
 fi
 
 # =================================================================
