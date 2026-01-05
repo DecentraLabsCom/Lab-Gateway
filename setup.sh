@@ -480,6 +480,17 @@ echo
 echo "Blockchain Services Configuration"
 echo "================================="
 
+echo
+echo "Provider Registration"
+echo "---------------------"
+read -p "Enable provider registration endpoints? (Y/n): " enable_provider_reg
+enable_provider_reg=$(echo "$enable_provider_reg" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+if [[ "$enable_provider_reg" =~ ^(n|no)$ ]]; then
+    update_env_in_all "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "false"
+else
+    update_env_in_all "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+fi
+
 contract_default=$(get_env_default "CONTRACT_ADDRESS" "$ROOT_ENV_FILE")
 read -p "Contract address [${contract_default:-0xYourDiamondContractAddress}]: " contract_address
 contract_address=${contract_address:-$contract_default}

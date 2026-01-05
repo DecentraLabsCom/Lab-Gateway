@@ -481,6 +481,19 @@ echo.
 
 echo Blockchain Services Configuration
 echo ==================================
+echo.
+echo Provider Registration
+echo ---------------------
+set "enable_provider_reg="
+set /p "enable_provider_reg=Enable provider registration endpoints? (Y/n): "
+set "enable_provider_reg=!enable_provider_reg: =!"
+if /i "!enable_provider_reg!"=="n" (
+    call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "false"
+) else if /i "!enable_provider_reg!"=="no" (
+    call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "false"
+) else (
+    call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+)
 call :ReadEnvValue "%ROOT_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
 if not defined contract_default set "contract_default=0xYourDiamondContractAddress"
 set /p "contract_address=Contract address [!contract_default!]: "
