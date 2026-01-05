@@ -40,20 +40,23 @@ end
 local header_name = os.getenv("SECURITY_INTERNAL_TOKEN_HEADER") or "X-Internal-Token"
 local cookie_name = os.getenv("SECURITY_INTERNAL_TOKEN_COOKIE") or "internal_token"
 
-local function is_wallet_dashboard_path(value)
+local function is_tokenized_path(value)
     if not value or value == "" then
         return false
     end
-    return value == "/wallet-dashboard" or value:find("^/wallet-dashboard/") ~= nil
+    if value == "/wallet-dashboard" or value:find("^/wallet-dashboard/") ~= nil then
+        return true
+    end
+    return value == "/institution-config" or value:find("^/institution-config/") ~= nil
 end
 
 local uri = ngx.var.uri or ""
 local request_uri = ngx.var.request_uri or ""
-local is_wallet_dashboard = is_wallet_dashboard_path(uri) or is_wallet_dashboard_path(request_uri)
+local is_tokenized_request = is_tokenized_path(uri) or is_tokenized_path(request_uri)
 
 local function token_hint()
     local hint = "Provide " .. header_name .. " header or " .. cookie_name .. " cookie"
-    if is_wallet_dashboard then
+    if is_tokenized_request then
         hint = hint .. " (or ?token=...)"
     end
     return hint .. "."
@@ -67,7 +70,7 @@ if not provided or provided == "" then
     provided = ngx.var[cookie_var]
 end
 
-if (not provided or provided == "") and is_wallet_dashboard then
+if (not provided or provided == "") and is_tokenized_request then
     local arg_token = ngx.var.arg_token
     if not arg_token or arg_token == "" then
         local args = ngx.var.args or ""
