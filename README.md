@@ -89,7 +89,7 @@ If you prefer manual configuration:
    ```
 
 2. **Edit `.env` and `blockchain-services/.env`** with your configuration (see Configuration section below)
-   - Make sure you set `OPS_SECRET`, `SECURITY_INTERNAL_TOKEN`, and `LAB_MANAGER_INTERNAL_TOKEN` for production if needed. `OPS_SECRET` protects `/ops`, `SECURITY_INTERNAL_TOKEN` protects `/wallet`, `/treasury`, and `/wallet-dashboard`, and `LAB_MANAGER_INTERNAL_TOKEN` protects `/lab-manager` when accessed from public networks.
+   - Make sure you set `OPS_SECRET`, `SECURITY_ACCESS_TOKEN`, and `LAB_MANAGER_TOKEN` for production if needed. `OPS_SECRET` protects `/ops`, `SECURITY_ACCESS_TOKEN` protects `/wallet`, `/treasury`, and `/wallet-dashboard`, and `LAB_MANAGER_TOKEN` protects `/lab-manager` when accessed from public networks.
 
 3. **Set host UID/GID for bind mounts (Linux/macOS)** so containers can write to `certs/` and `blockchain-data/`:
    ```bash
@@ -173,15 +173,15 @@ WALLET_ALLOWED_ORIGINS=https://your-domain
 
 # Ops Worker
 OPS_SECRET=your_ops_secret
-LAB_MANAGER_INTERNAL_TOKEN=your_lab_manager_token
-LAB_MANAGER_INTERNAL_TOKEN_HEADER=X-Lab-Manager-Token
-LAB_MANAGER_INTERNAL_TOKEN_COOKIE=lab_manager_token
+LAB_MANAGER_TOKEN=your_lab_manager_token
+LAB_MANAGER_TOKEN_HEADER=X-Lab-Manager-Token
+LAB_MANAGER_TOKEN_COOKIE=lab_manager_token
 
-# Blockchain Services internal access
-SECURITY_INTERNAL_TOKEN=your_internal_token
-SECURITY_INTERNAL_TOKEN_HEADER=X-Internal-Token
-SECURITY_INTERNAL_TOKEN_COOKIE=internal_token
-SECURITY_INTERNAL_TOKEN_REQUIRED=true
+# Blockchain Services remote access
+SECURITY_ACCESS_TOKEN=your_access_token
+SECURITY_ACCESS_TOKEN_HEADER=X-Access-Token
+SECURITY_ACCESS_TOKEN_COOKIE=access_token
+SECURITY_ACCESS_TOKEN_REQUIRED=true
 SECURITY_ALLOW_PRIVATE_NETWORKS=true
 ADMIN_DASHBOARD_ALLOW_PRIVATE=true
 
@@ -197,7 +197,7 @@ CERTBOT_EMAIL=you@example.com
 CERTBOT_STAGING=0
 ```
 
-Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`). Set `SECURITY_INTERNAL_TOKEN` to secure blockchain-services internal endpoints exposed through OpenResty.
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`). Set `SECURITY_ACCESS_TOKEN` to secure blockchain-services endpoints exposed through OpenResty for remote access.
 
 `blockchain-services` uses a dedicated schema named `blockchain_services` by default. If you want a different name, set `BLOCKCHAIN_MYSQL_DATABASE` in `.env`.
 
@@ -251,10 +251,10 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 
 #### Access Controls (Important)
 
-- `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_INTERNAL_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. Provide it via `X-Internal-Token` or the `internal_token` cookie.
-- `/treasury/admin/**`: always requires `SECURITY_INTERNAL_TOKEN` (no private-network bypass). `/treasury/admin/execute` additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
-- For convenience, you can also visit `https://your-domain/wallet-dashboard?token=YOUR_TOKEN` (no trailing slash) once to set the `internal_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
-- `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_INTERNAL_TOKEN` for non-private clients. Provide it via `X-Lab-Manager-Token` or the `lab_manager_token` cookie.
+- `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_ACCESS_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. Provide it via `X-Access-Token` header, `access_token` cookie, or `?token=...` query parameter.
+- `/treasury/admin/**`: always requires `SECURITY_ACCESS_TOKEN` (no private-network bypass). `/treasury/admin/execute` additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
+- For convenience, you can also visit `https://your-domain/wallet-dashboard?token=YOUR_TOKEN` once to set the `access_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
+- `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Provide it via `X-Lab-Manager-Token` or the `lab_manager_token` cookie.
 - For convenience, you can also visit `https://your-domain/lab-manager?token=YOUR_TOKEN` once to set the `lab_manager_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
 - `/ops`: restricted to private networks and also requires `OPS_SECRET` via `X-Ops-Token` or `ops_token` cookie.
 - If wallet actions return `JSON.parse` errors in the browser, ensure both `CORS_ALLOWED_ORIGINS` and `WALLET_ALLOWED_ORIGINS` include your gateway origin.

@@ -77,7 +77,7 @@ end
 runner.describe("Lab manager access guard", function()
     runner.it("rejects public IPs when no token configured", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_INTERNAL_TOKEN = "" },
+            env = { LAB_MANAGER_TOKEN = "" },
             var = { remote_addr = "8.8.8.8" }
         })
 
@@ -88,7 +88,7 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("allows loopback when no token configured", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_INTERNAL_TOKEN = "" },
+            env = { LAB_MANAGER_TOKEN = "" },
             var = { remote_addr = "127.0.0.1" }
         })
 
@@ -99,7 +99,7 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("rejects when token is invalid", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_INTERNAL_TOKEN = "secret-token" },
+            env = { LAB_MANAGER_TOKEN = "secret-token" },
             headers = { ["X-Lab-Manager-Token"] = "wrong-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -111,7 +111,7 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("allows private network without provided token", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_INTERNAL_TOKEN = "secret-token" },
+            env = { LAB_MANAGER_TOKEN = "secret-token" },
             var = { remote_addr = "172.17.0.2" }
         })
 
@@ -121,7 +121,7 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("allows valid token on public IP", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_INTERNAL_TOKEN = "secret-token" },
+            env = { LAB_MANAGER_TOKEN = "secret-token" },
             headers = { ["X-Lab-Manager-Token"] = "secret-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -132,7 +132,7 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("accepts token from cookie", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_INTERNAL_TOKEN = "secret-token" },
+            env = { LAB_MANAGER_TOKEN = "secret-token" },
             var = {
                 remote_addr = "8.8.8.8",
                 cookie_lab_manager_token = "secret-token"
@@ -145,7 +145,7 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("accepts token from query for lab-manager path", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_INTERNAL_TOKEN = "secret-token" },
+            env = { LAB_MANAGER_TOKEN = "secret-token" },
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/lab-manager/",

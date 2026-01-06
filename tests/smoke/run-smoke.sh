@@ -43,7 +43,7 @@ echo -e "${YELLOW}Starting services...${NC}"
 docker compose -f "$COMPOSE_FILE" up --build -d
 
 PORT=18443
-INTERNAL_TOKEN="smoke-internal-token"
+ACCESS_TOKEN="smoke-access-token"
 
 ATTEMPTS=60
 until curl -sk --resolve lab.test:${PORT}:127.0.0.1 https://lab.test:${PORT}/ >/dev/null; do
@@ -183,9 +183,9 @@ else
 fi
 
 # =================================================================
-# Test 11: Institution-config rejects missing internal token for external clients
+# Test 11: Institution-config rejects missing access token for external clients
 # =================================================================
-echo "Test 11: Institution-config rejects missing internal token for external clients"
+echo "Test 11: Institution-config rejects missing access token for external clients"
 INSTITUTION_EXTERNAL=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
   -H "X-Forwarded-For: 203.0.113.5" \
   https://lab.test:${PORT}/institution-config/status || true)
@@ -200,7 +200,7 @@ fi
 # =================================================================
 echo "Test 12: Institution-config accepts valid token"
 INSTITUTION_WITH_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
-  "https://lab.test:${PORT}/institution-config/status?token=${INTERNAL_TOKEN}")
+  "https://lab.test:${PORT}/institution-config/status?token=${ACCESS_TOKEN}")
 if [ "$INSTITUTION_WITH_TOKEN" = "200" ]; then
   log_pass "Institution config accepts valid token (status: $INSTITUTION_WITH_TOKEN)"
 else

@@ -184,36 +184,36 @@ esac
 update_env_var "$ROOT_ENV_FILE" "OPS_SECRET" "$ops_secret"
 echo
 
-# Internal Token for blockchain-services
-echo "Blockchain Services Internal Token"
-echo "=================================="
+# Access Token for blockchain-services
+echo "Blockchain Services Access Token"
+echo "================================="
 echo "This token protects /wallet, /treasury, and /wallet-dashboard behind OpenResty."
-read -p "Internal token (leave empty for auto-generated): " internal_token
-internal_token=$(echo "$internal_token" | tr -d ' ')
+read -p "Access token (leave empty for auto-generated): " access_token
+access_token=$(echo "$access_token" | tr -d ' ')
 
-if [ -z "$internal_token" ]; then
-    internal_token="int_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
-    echo "Generated internal token: $internal_token"
+if [ -z "$access_token" ]; then
+    access_token="acc_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated access token: $access_token"
 fi
 
-update_env_in_all "SECURITY_INTERNAL_TOKEN" "$internal_token"
-update_env_in_all "SECURITY_INTERNAL_TOKEN_HEADER" "X-Internal-Token"
-update_env_in_all "SECURITY_INTERNAL_TOKEN_COOKIE" "internal_token"
-update_env_in_all "SECURITY_INTERNAL_TOKEN_REQUIRED" "true"
+update_env_in_all "SECURITY_ACCESS_TOKEN" "$access_token"
+update_env_in_all "SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
+update_env_in_all "SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
+update_env_in_all "SECURITY_ACCESS_TOKEN_REQUIRED" "true"
 update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
 if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_INTERNAL_TOKEN" "$internal_token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_INTERNAL_TOKEN_HEADER" "X-Internal-Token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_INTERNAL_TOKEN_COOKIE" "internal_token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_INTERNAL_TOKEN_REQUIRED" "true"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN" "$access_token"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_REQUIRED" "true"
     update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 fi
 echo
 
-# Lab Manager Internal Token
-echo "Lab Manager Internal Token"
-echo "=========================="
+# Lab Manager Access Token
+echo "Lab Manager Access Token"
+echo "========================"
 echo "This token protects /lab-manager when accessed outside private networks."
 read -p "Lab Manager token (leave empty for auto-generated): " lab_manager_token
 lab_manager_token=$(echo "$lab_manager_token" | tr -d ' ')
@@ -223,9 +223,9 @@ if [ -z "$lab_manager_token" ]; then
     echo "Generated Lab Manager token: $lab_manager_token"
 fi
 
-update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_INTERNAL_TOKEN" "$lab_manager_token"
-update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_INTERNAL_TOKEN_HEADER" "X-Lab-Manager-Token"
-update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_INTERNAL_TOKEN_COOKIE" "lab_manager_token"
+update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN" "$lab_manager_token"
+update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN_HEADER" "X-Lab-Manager-Token"
+update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN_COOKIE" "lab_manager_token"
 echo
 
 # Treasury Admin EIP-712 Domain (optional overrides)
@@ -594,7 +594,7 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Internal token cookie: ${token_host}/wallet-dashboard?token=${internal_token}"
+echo "   * Access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
 echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/"
 echo "   * Blockchain Services API: /auth"
@@ -648,7 +648,7 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Internal token cookie: ${token_host}/wallet-dashboard?token=${internal_token}"
+echo "   * Access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
 echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
 echo "   * Blockchain Services API: /auth"

@@ -74,10 +74,10 @@ local function run_internal_access(opts)
     return ngx
 end
 
-runner.describe("Internal access guard", function()
+runner.describe("Access token guard", function()
 runner.it("rejects public IPs when no token configured", function()
     local ngx = run_internal_access({
-        env = { SECURITY_INTERNAL_TOKEN = "" },
+        env = { SECURITY_ACCESS_TOKEN = "" },
         var = { remote_addr = "8.8.8.8" }
     })
 
@@ -88,19 +88,19 @@ end)
 
 runner.it("allows loopback when no token configured", function()
     local ngx = run_internal_access({
-        env = { SECURITY_INTERNAL_TOKEN = "" },
+        env = { SECURITY_ACCESS_TOKEN = "" },
         var = { remote_addr = "127.0.0.1" }
     })
 
     runner.assert.equals(nil, ngx.status)
     runner.assert.equals(nil, ngx._exit)
-    runner.assert.equals(nil, ngx.req.headers["X-Internal-Token"])
+    runner.assert.equals(nil, ngx.req.headers["X-Access-Token"])
 end)
 
     runner.it("rejects when token is invalid", function()
         local ngx = run_internal_access({
-            env = { SECURITY_INTERNAL_TOKEN = "secret-token" },
-            headers = { ["X-Internal-Token"] = "wrong-token" },
+            env = { SECURITY_ACCESS_TOKEN = "secret-token" },
+            headers = { ["X-Access-Token"] = "wrong-token" },
             var = { remote_addr = "8.8.8.8" }
         })
 
@@ -111,36 +111,36 @@ end)
 
     runner.it("allows private network without provided token", function()
         local ngx = run_internal_access({
-            env = { SECURITY_INTERNAL_TOKEN = "secret-token" },
+            env = { SECURITY_ACCESS_TOKEN = "secret-token" },
             var = { remote_addr = "172.17.0.2" }
         })
 
         runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("secret-token", ngx.req.headers["X-Internal-Token"])
+        runner.assert.equals("secret-token", ngx.req.headers["X-Access-Token"])
     end)
 
     runner.it("allows valid token on public IP", function()
         local ngx = run_internal_access({
-            env = { SECURITY_INTERNAL_TOKEN = "secret-token" },
-            headers = { ["X-Internal-Token"] = "secret-token" },
+            env = { SECURITY_ACCESS_TOKEN = "secret-token" },
+            headers = { ["X-Access-Token"] = "secret-token" },
             var = { remote_addr = "8.8.8.8" }
         })
 
         runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("secret-token", ngx.req.headers["X-Internal-Token"])
+        runner.assert.equals("secret-token", ngx.req.headers["X-Access-Token"])
     end)
 
     runner.it("accepts token from cookie", function()
         local ngx = run_internal_access({
-            env = { SECURITY_INTERNAL_TOKEN = "secret-token" },
+            env = { SECURITY_ACCESS_TOKEN = "secret-token" },
             var = {
                 remote_addr = "8.8.8.8",
-                cookie_internal_token = "secret-token"
+                cookie_access_token = "secret-token"
             }
         })
 
         runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("secret-token", ngx.req.headers["X-Internal-Token"])
+        runner.assert.equals("secret-token", ngx.req.headers["X-Access-Token"])
     end)
 end)
 

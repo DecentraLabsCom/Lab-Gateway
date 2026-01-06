@@ -1,7 +1,7 @@
 -- Lab Manager access guard.
--- Enforces a dedicated internal token for non-local clients when configured.
+-- Enforces a dedicated access token for non-local clients when configured.
 
-local token = os.getenv("LAB_MANAGER_INTERNAL_TOKEN") or ""
+local token = os.getenv("LAB_MANAGER_TOKEN") or ""
 
 local function deny(message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
@@ -32,13 +32,13 @@ end
 
 if token == "" then
     if not is_loopback_or_docker(ngx.var.remote_addr or "") then
-        return deny("Unauthorized: LAB_MANAGER_INTERNAL_TOKEN not set; access allowed only from 127.0.0.1 or 172.16.0.0/12.")
+        return deny("Unauthorized: LAB_MANAGER_TOKEN not set; access allowed only from 127.0.0.1 or 172.16.0.0/12.")
     end
     return
 end
 
-local header_name = os.getenv("LAB_MANAGER_INTERNAL_TOKEN_HEADER") or "X-Lab-Manager-Token"
-local cookie_name = os.getenv("LAB_MANAGER_INTERNAL_TOKEN_COOKIE") or "lab_manager_token"
+local header_name = os.getenv("LAB_MANAGER_TOKEN_HEADER") or "X-Lab-Manager-Token"
+local cookie_name = os.getenv("LAB_MANAGER_TOKEN_COOKIE") or "lab_manager_token"
 
 local function is_lab_manager_path(value)
     if not value or value == "" then
