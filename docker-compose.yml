@@ -9,6 +9,9 @@ services:
       - .env  # Main gateway configuration
       - ./blockchain-services/.env  # Blockchain-specific configuration (optional overrides)
     environment:
+      # Server name for URL resolution (WebAuthn rpId, issuer URLs, etc.)
+      - SERVER_NAME=${SERVER_NAME}
+      - HTTPS_PORT=${HTTPS_PORT:-443}
       # MySQL datasource for persistence (lab_reservations, auth_users)
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER}
