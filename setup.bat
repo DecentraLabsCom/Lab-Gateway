@@ -520,7 +520,7 @@ if not "!sepolia_rpc!"=="" (
 )
 
 call :ReadEnvValue "%ROOT_ENV_FILE%" "ALLOWED_ORIGINS" origins_default
-if not defined origins_default set "origins_default=http://localhost:3000"
+if not defined origins_default set "origins_default=https://marketplace-decentralabs.vercel.app"
 set /p "allowed_origins=Allowed origins for CORS [!origins_default!]: "
 if "!allowed_origins!"=="" set "allowed_origins=!origins_default!"
 if not "!allowed_origins!"=="" (

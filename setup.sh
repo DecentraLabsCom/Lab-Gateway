@@ -514,8 +514,8 @@ if [ -n "$sepolia_rpc" ]; then
 fi
 
 allowed_origins_default=$(get_env_default "ALLOWED_ORIGINS" "$ROOT_ENV_FILE")
-read -p "Allowed origins for CORS [${allowed_origins_default:-http://localhost:3000}]: " allowed_origins
-allowed_origins=${allowed_origins:-$allowed_origins_default}
+read -p "Allowed origins for CORS [${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}]: " allowed_origins
+allowed_origins=${allowed_origins:-${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}}
 if [ -n "$allowed_origins" ]; then
     update_env_in_all "ALLOWED_ORIGINS" "$allowed_origins"
     update_env_var "$ROOT_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$allowed_origins"
