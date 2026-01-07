@@ -61,9 +61,7 @@
 
     // Wrap fetch to add token header
     const originalFetch = window.fetch;
-    window.fetch = function(...args) {
-        let [url, options = {}] = args;
-        
+    window.fetch = function(url, options = {}) {
         const config = getTokenConfigForPath(window.location.pathname);
         if (config) {
             const storedToken = localStorage.getItem(config.key);
@@ -84,7 +82,7 @@
             }
         }
         
-        return originalFetch(url, options);
+        return originalFetch.call(this, url, options);
     };
 
     console.log('[AuthToken] Fetch wrapper initialized');
