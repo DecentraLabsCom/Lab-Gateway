@@ -296,14 +296,35 @@
         });
     }
 
+    // Extract token from URL query parameter and store it
+    function extractTokenFromUrl() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tokenFromUrl = urlParams.get('token');
+        
+        if (tokenFromUrl) {
+            const config = getTokenConfigForPath(window.location.pathname);
+            if (config) {
+                // Store the token
+                localStorage.setItem(config.key, tokenFromUrl);
+                
+                // Remove token from URL for security (clean URL)
+                const url = new URL(window.location.href);
+                url.searchParams.delete('token');
+                window.history.replaceState({}, '', url.toString());
+            }
+        }
+    }
+
     // Initialize on page load
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
+            extractTokenFromUrl();
             createTokenModal();
             createAuthenticatedFetch();
             handleProtectedLinks();
         });
     } else {
+        extractTokenFromUrl();
         createTokenModal();
         createAuthenticatedFetch();
         handleProtectedLinks();
