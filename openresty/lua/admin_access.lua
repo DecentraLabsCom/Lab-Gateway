@@ -2,9 +2,12 @@
 -- Requires a valid access token when configured; falls back to loopback/Docker only when missing.
 
 local token = os.getenv("SECURITY_ACCESS_TOKEN") or ""
+local lab_manager_token = os.getenv("LAB_MANAGER_TOKEN") or ""
 
 local header_name = os.getenv("SECURITY_ACCESS_TOKEN_HEADER") or "X-Access-Token"
 local cookie_name = os.getenv("SECURITY_ACCESS_TOKEN_COOKIE") or "access_token"
+local lab_manager_header = os.getenv("LAB_MANAGER_TOKEN_HEADER") or "X-Lab-Manager-Token"
+local lab_manager_cookie = os.getenv("LAB_MANAGER_TOKEN_COOKIE") or "lab_manager_token"
 
 local function deny(message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
@@ -33,9 +36,9 @@ local function is_loopback_or_docker(ip)
     return false
 end
 
-if token == "" then
+if token == "" and lab_manager_token == "" then
     if not is_loopback_or_docker(ngx.var.remote_addr or "") then
-        return deny("Forbidden: Remote access is disabled. To enable external access, set SECURITY_ACCESS_TOKEN in your .env file and restart the service.")
+        return deny("Forbidden: Remote access is disabled. To enable external access, set SECURITY_ACCESS_TOKEN or LAB_MANAGER_TOKEN in your .env file and restart the service.")
     end
     return
 end
@@ -57,6 +60,17 @@ end
 
 local headers = ngx.req.get_headers()
 local provided = headers[header_name]
+
+-- Also check lab manager token header
+if not provided or provided == "" then
+    provided = headers[lab_manager_header]
+    if provided and provided ~= "" then
+        -- Switch to lab manager token validation
+        token = lab_manager_token
+        header_name = lab_manager_header
+        cookie_name = lab_manager_cookie
+    end
+end
 
 if not provided or provided == "" then
     local cookie_var = "cookie_" .. cookie_name

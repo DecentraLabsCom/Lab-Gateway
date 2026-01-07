@@ -13,11 +13,11 @@
         },
         '/wallet-dashboard': {
             key: 'dlabs_security_token',
-            header: 'X-Access-Token'
+            header: 'X-Internal-Token'
         },
         '/institution-config': {
             key: 'dlabs_security_token',
-            header: 'X-Access-Token'
+            header: 'X-Internal-Token'
         }
     };
 
