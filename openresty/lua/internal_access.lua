@@ -113,6 +113,10 @@ local request_uri = ngx.var.request_uri or ""
 local is_tokenized_request = is_tokenized_path(uri) or is_tokenized_path(request_uri)
 
 local function get_arg_token()
+    if not ngx or not ngx.req or type(ngx.req.get_uri_args) ~= "function" then
+        return nil
+    end
+
     local args = ngx.req.get_uri_args()
     local token_arg = args and args.token
     if not token_arg then
