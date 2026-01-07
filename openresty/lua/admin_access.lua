@@ -1,7 +1,8 @@
 -- Strict access guard for treasury admin endpoints.
 -- Requires a valid access token when configured; falls back to loopback/Docker only when missing.
 
-local token = os.getenv("SECURITY_ACCESS_TOKEN") or ""
+local security_token = os.getenv("SECURITY_ACCESS_TOKEN") or ""
+local token = security_token
 local lab_manager_token = os.getenv("LAB_MANAGER_TOKEN") or ""
 
 local header_name = os.getenv("SECURITY_ACCESS_TOKEN_HEADER") or "X-Access-Token"
@@ -98,4 +99,10 @@ if provided ~= token then
     return deny("Unauthorized: Invalid access token. Provide " .. header_name .. " header, " .. cookie_name .. " cookie, or ?token=... query parameter.")
 end
 
+-- Always forward the selected token header
 ngx.req.set_header(header_name, token)
+
+-- Additionally, forward the security token under X-Access-Token so downstream filters accept either
+if security_token and security_token ~= "" then
+    ngx.req.set_header("X-Access-Token", security_token)
+end
