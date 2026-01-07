@@ -198,8 +198,12 @@
 
     // Get token config for current path
     function getTokenConfigForPath(path) {
+        // Normalize path by removing trailing slash for comparison
+        const normalizedPath = path.endsWith('/') && path !== '/' ? path.slice(0, -1) : path;
+        
         for (const [prefix, config] of Object.entries(TOKEN_CONFIG)) {
-            if (path.startsWith(prefix)) {
+            const normalizedPrefix = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+            if (normalizedPath.startsWith(normalizedPrefix)) {
                 return config;
             }
         }
