@@ -99,10 +99,13 @@ local function is_tokenized_path(value)
     if not value or value == "" then
         return false
     end
-    if value == "/wallet-dashboard" or value:find("^/wallet-dashboard/") ~= nil then
+    if value:find("^/wallet-dashboard") ~= nil then
         return true
     end
-    return value == "/institution-config" or value:find("^/institution-config/") ~= nil
+    if value:find("^/institution-config") ~= nil then
+        return true
+    end
+    return false
 end
 
 local uri = ngx.var.uri or ""
