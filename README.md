@@ -251,11 +251,10 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 
 #### Access Controls (Important)
 
-- `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_ACCESS_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. Provide it via `X-Access-Token` header, `access_token` cookie, or `?token=...` query parameter.
+- `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_ACCESS_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. The token is provided automatically via the authentication modal on the gateway's homepage, which stores it locally and adds it as the `X-Access-Token` header on all requests.
 - `/treasury/admin/**`: always requires `SECURITY_ACCESS_TOKEN` (no private-network bypass). `/treasury/admin/execute` additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
-- For convenience, you can also visit `https://your-domain/wallet-dashboard?token=YOUR_TOKEN` once to set the `access_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
-- `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Provide it via `X-Lab-Manager-Token` or the `lab_manager_token` cookie.
-- For convenience, you can also visit `https://your-domain/lab-manager?token=YOUR_TOKEN` once to set the `lab_manager_token` cookie (HTTPS only; avoid sharing URLs because they include the token).
+- **Initial setup**: Click "Wallet & Treasury→" from the homepage, enter your `SECURITY_ACCESS_TOKEN` when prompted. The token will be stored in your browser and automatically included in all requests.
+- `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Click "Lab Manager→" from the homepage and enter your token when prompted.
 - `/ops`: restricted to private networks and also requires `OPS_SECRET` via `X-Ops-Token` or `ops_token` cookie.
 - If wallet actions return `JSON.parse` errors in the browser, ensure both `CORS_ALLOWED_ORIGINS` and `WALLET_ALLOWED_ORIGINS` include your gateway origin.
 
