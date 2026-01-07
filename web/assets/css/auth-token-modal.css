@@ -3,6 +3,7 @@
  */
 
 .auth-token-modal {
+    display: none;
     position: fixed;
     top: 0;
     left: 0;
@@ -14,6 +15,7 @@
 }
 
 .auth-token-modal.show {
+    display: block;
     opacity: 1;
 }
 
