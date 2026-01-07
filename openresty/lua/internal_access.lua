@@ -139,8 +139,8 @@ if not provided or provided == "" then
     provided = ngx.var[cookie_var]
 end
 
-if (not provided or provided == "") and is_tokenized_request then
-    local arg_token = get_arg_token()
+local arg_token = get_arg_token()
+if not provided or provided == "" then
     if arg_token and arg_token ~= "" then
         if ngx.unescape_uri then
             arg_token = ngx.unescape_uri(arg_token)
