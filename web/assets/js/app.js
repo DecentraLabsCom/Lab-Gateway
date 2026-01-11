@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (statusValue === 'UP') {
                     statusIndicator.className = 'status-indicator online';
                     statusText.textContent = 'System Online';
-                    statusIndicator.removeAttribute('title');
+                    statusIndicator.setAttribute('title', 'Click for status details');
                 } else if (statusValue === 'PARTIAL') {
                     statusIndicator.className = 'status-indicator partial';
                     statusIndicator.setAttribute('title', 'Click for status details');
@@ -170,9 +170,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusIndicator = document.querySelector('.status-indicator');
     if (statusIndicator) {
         statusIndicator.addEventListener('click', () => {
-            const isPartial = statusIndicator.classList.contains('partial');
-            const isOffline = statusIndicator.classList.contains('offline');
-            if (isPartial || isOffline) {
+            openStatusModal(lastStatusDetails);
+        });
+        statusIndicator.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
                 openStatusModal(lastStatusDetails);
             }
         });
