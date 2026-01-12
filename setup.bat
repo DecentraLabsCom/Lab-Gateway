@@ -503,14 +503,6 @@ if not "!contract_address!"=="" (
     call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_address!"
 )
 
-call :ReadEnvValue "%ROOT_ENV_FILE%" "RPC_URL" rpc_default
-if not defined rpc_default set "rpc_default=https://1rpc.io/sepolia"
-set /p "rpc_url=Fallback RPC URL [!rpc_default!]: "
-if "!rpc_url!"=="" set "rpc_url=!rpc_default!"
-if not "!rpc_url!"=="" (
-    call :UpdateEnvBoth "RPC_URL" "!rpc_url!"
-)
-
 call :ReadEnvValue "%ROOT_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
 if not defined sepolia_default set "sepolia_default=https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app"
 set /p "sepolia_rpc=Sepolia RPC URLs (comma separated) [!sepolia_default!]: "

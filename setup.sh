@@ -499,13 +499,6 @@ if [ -n "$contract_address" ]; then
     update_env_in_all "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_address"
 fi
 
-rpc_default=$(get_env_default "RPC_URL" "$ROOT_ENV_FILE")
-read -p "Fallback RPC URL [${rpc_default:-https://1rpc.io/sepolia}]: " rpc_url
-rpc_url=${rpc_url:-$rpc_default}
-if [ -n "$rpc_url" ]; then
-    update_env_in_all "RPC_URL" "$rpc_url"
-fi
-
 sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$ROOT_ENV_FILE")
 read -p "Comma-separated Sepolia RPC URLs [${sepolia_default:-https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app}]: " sepolia_rpc
 sepolia_rpc=${sepolia_rpc:-$sepolia_default}
@@ -571,7 +564,7 @@ echo "Next Steps"
 echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
-echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, RPC_URL, INSTITUTIONAL_WALLET_*)"
+echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, ETHEREUM_*_RPC_URL, INSTITUTIONAL_WALLET_*)"
 echo "4. Run: $compose_full up -d"
 if [ "$cf_enabled" = true ]; then
     echo "5. Cloudflare tunnel: check '$compose_full logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
