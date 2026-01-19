@@ -228,28 +228,6 @@ update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN_HEADER" "X-Lab-Manager-Token"
 update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN_COOKIE" "lab_manager_token"
 echo
 
-# Treasury Admin EIP-712 Domain (optional overrides)
-echo "Treasury Admin EIP-712 Domain (optional)"
-echo "========================================"
-echo "Leave empty to keep the defaults from blockchain-services."
-echo "Verifying contract will follow CONTRACT_ADDRESS."
-read -p "Domain name override: " treasury_admin_domain_name
-treasury_admin_domain_name=$(echo "$treasury_admin_domain_name" | tr -d ' ')
-if [ -n "$treasury_admin_domain_name" ]; then
-    update_env_in_all "TREASURY_ADMIN_DOMAIN_NAME" "$treasury_admin_domain_name"
-fi
-read -p "Domain version override: " treasury_admin_domain_version
-treasury_admin_domain_version=$(echo "$treasury_admin_domain_version" | tr -d ' ')
-if [ -n "$treasury_admin_domain_version" ]; then
-    update_env_in_all "TREASURY_ADMIN_DOMAIN_VERSION" "$treasury_admin_domain_version"
-fi
-read -p "Domain chain ID override: " treasury_admin_chain_id
-treasury_admin_chain_id=$(echo "$treasury_admin_chain_id" | tr -d ' ')
-if [ -n "$treasury_admin_chain_id" ]; then
-    update_env_in_all "TREASURY_ADMIN_DOMAIN_CHAIN_ID" "$treasury_admin_chain_id"
-fi
-echo
-
 # Domain Configuration
 echo "Domain Configuration"
 echo "===================="
@@ -481,22 +459,14 @@ echo "Blockchain Services Configuration"
 echo "================================="
 
 echo
-echo "Provider Registration"
-echo "---------------------"
-read -p "Enable provider registration endpoints? (Y/n): " enable_provider_reg
-enable_provider_reg=$(echo "$enable_provider_reg" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
-if [[ "$enable_provider_reg" =~ ^(n|no)$ ]]; then
-    update_env_in_all "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "false"
-else
-    update_env_in_all "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
-fi
+# Provider registration enabled by default (non-interactive).
+update_env_in_all "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 
-contract_default=$(get_env_default "CONTRACT_ADDRESS" "$ROOT_ENV_FILE")
-read -p "Contract address [${contract_default:-0xYourDiamondContractAddress}]: " contract_address
-contract_address=${contract_address:-$contract_default}
-if [ -n "$contract_address" ]; then
-    update_env_in_all "CONTRACT_ADDRESS" "$contract_address"
-    update_env_in_all "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_address"
+# Use CONTRACT_ADDRESS from blockchain-services/.env (no prompt)
+contract_default=$(get_env_default "CONTRACT_ADDRESS" "$BLOCKCHAIN_ENV_FILE")
+if [ -n "$contract_default" ]; then
+    update_env_in_all "CONTRACT_ADDRESS" "$contract_default"
+    update_env_in_all "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_default"
 fi
 
 sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$ROOT_ENV_FILE")

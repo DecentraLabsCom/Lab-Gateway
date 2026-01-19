@@ -240,30 +240,7 @@ call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_TOKEN_HEADER" "X-Lab-Manager-Toke
 call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_TOKEN_COOKIE" "lab_manager_token"
 echo.
 
-REM Treasury Admin EIP-712 Domain (optional overrides)
-echo Treasury Admin EIP-712 Domain (optional)
-echo ========================================
-echo Leave empty to keep the defaults from blockchain-services.
-echo Verifying contract will follow CONTRACT_ADDRESS.
-set "treasury_admin_domain_name="
-set /p "treasury_admin_domain_name=Domain name override: "
-set "treasury_admin_domain_name=!treasury_admin_domain_name: =!"
-if not "!treasury_admin_domain_name!"=="" (
-    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_NAME" "!treasury_admin_domain_name!"
-)
-set "treasury_admin_domain_version="
-set /p "treasury_admin_domain_version=Domain version override: "
-set "treasury_admin_domain_version=!treasury_admin_domain_version: =!"
-if not "!treasury_admin_domain_version!"=="" (
-    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_VERSION" "!treasury_admin_domain_version!"
-)
-set "treasury_admin_chain_id="
-set /p "treasury_admin_chain_id=Domain chain ID override: "
-set "treasury_admin_chain_id=!treasury_admin_chain_id: =!"
-if not "!treasury_admin_chain_id!"=="" (
-    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_CHAIN_ID" "!treasury_admin_chain_id!"
-)
-echo.
+
 
 REM Domain Configuration
 echo Domain Configuration
@@ -482,25 +459,12 @@ echo.
 echo Blockchain Services Configuration
 echo ==================================
 echo.
-echo Provider Registration
-echo ---------------------
-set "enable_provider_reg="
-set /p "enable_provider_reg=Enable provider registration endpoints? (Y/n): "
-set "enable_provider_reg=!enable_provider_reg: =!"
-if /i "!enable_provider_reg!"=="n" (
-    call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "false"
-) else if /i "!enable_provider_reg!"=="no" (
-    call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "false"
-) else (
-    call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
-)
-call :ReadEnvValue "%ROOT_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
-if not defined contract_default set "contract_default=0xYourDiamondContractAddress"
-set /p "contract_address=Contract address [!contract_default!]: "
-if "!contract_address!"=="" set "contract_address=!contract_default!"
-if not "!contract_address!"=="" (
-    call :UpdateEnvBoth "CONTRACT_ADDRESS" "!contract_address!"
-    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_address!"
+rem Provider registration enabled by default (non-interactive).
+call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
+if defined contract_default (
+    call :UpdateEnvBoth "CONTRACT_ADDRESS" "!contract_default!"
+    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_default!"
 )
 
 call :ReadEnvValue "%ROOT_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
