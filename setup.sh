@@ -459,8 +459,6 @@ echo "Blockchain Services Configuration"
 echo "================================="
 
 echo
-echo "Provider Registration"
-echo "---------------------"
 # Provider registration enabled by default (non-interactive).
 update_env_in_all "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 

@@ -459,8 +459,6 @@ echo.
 echo Blockchain Services Configuration
 echo ==================================
 echo.
-echo Provider Registration
-echo ---------------------
 rem Provider registration enabled by default (non-interactive).
 call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
