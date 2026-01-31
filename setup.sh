@@ -381,6 +381,8 @@ echo "================"
 
 mkdir -p certs
 mkdir -p blockchain-data
+chmod 700 certs 2>/dev/null || true
+chmod 700 blockchain-data 2>/dev/null || true
 
 echo
 echo "Host User Mapping"

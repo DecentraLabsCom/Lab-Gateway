@@ -403,6 +403,7 @@ echo.
 
 if not exist certs mkdir certs
 if not exist blockchain-data mkdir blockchain-data
+if not exist certs\.gitkeep type nul > certs\.gitkeep
 
 echo SSL Certificates
 echo ================

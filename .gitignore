@@ -7,6 +7,7 @@ secrets/ # Directory for secret files (in case we implement Docker Secrets)
 
 # Runtime certificate directory (generated at setup)
 certs/
+!certs/.gitkeep
 
 # Logs
 *.log
