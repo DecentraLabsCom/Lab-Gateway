@@ -1,5 +1,5 @@
 # Guacamole 1.6.0 relies on javax.servlet, so keep it on Tomcat 9 (Jakarta/Servlet 4) with Java 11.
-FROM tomcat:9.0-jdk11-temurin
+FROM tomcat:11.0-jdk11-temurin
 
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
