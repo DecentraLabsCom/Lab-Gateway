@@ -10,8 +10,8 @@ This lightweight worker centralizes the operational tasks the Lab Gateway needs 
 
 - `worker.py`: Flask API exposing `/api/wol`, `/api/winrm`, `/api/heartbeat/poll`.
 - Scheduler (optional) runs inside the worker to poll heartbeats periodically when `OPS_POLL_ENABLED=true`.
-- MySQL persistence for host catalog, heartbeat snapshots y operaciones de reserva (ver `mysql/005-labstation-ops.sql` y `mysql/004-auth-service-schema.sql`).
-- `/ops/` se protege conis protected with `OPS_SECRET` (env). OpenResty sets cookie `ops_token` when serving `/lab-manager/` and validates cookie or header `X-Ops-Token` before proxying.
+- MySQL persistence for host catalog, heartbeat snapshots, and reservation operations (see `mysql/001-create-schema.sql` and `mysql/002-labstation-ops.sql`).
+- `/ops/` is protected with `OPS_SECRET` (env). OpenResty sets cookie `ops_token` when serving `/lab-manager/` and validates cookie or header `X-Ops-Token` before proxying.
 
 ## Quick start (dev)
 
@@ -101,7 +101,7 @@ Enable with `OPS_POLL_ENABLED=true` (env) and set `OPS_POLL_INTERVAL=60` (second
    }
    ```
 
-2. `MYSQL_DSN` must point to the same database that contains the `lab_reservations` table (see `mysql/004-auth-service-schema.sql`).
+2. `MYSQL_DSN` must point to the same MySQL instance used by `blockchain-services` (where Flyway creates `lab_reservations`) and by the ops-worker tables from `mysql/001-create-schema.sql` + `mysql/002-labstation-ops.sql`.
 
 When enabled, the worker:
 

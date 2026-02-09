@@ -364,7 +364,7 @@ Internet ──> [NIC with VLAN tagging] Lab Gateway ──> VLAN 10 / VLAN 20
 
 ### Blockchain Integration
 
-* **Blockchain Services** (Spring Boot 3.x) - Authentication and wallet operations microservice
+* **Blockchain Services** (Spring Boot 4.x) - Authentication and wallet operations microservice
 * **Web3j** - Ethereum blockchain integration library
 * **JWT** - Generates authentication tokens with blockchain claims
 * **Smart Contract Events** - Real-time blockchain monitoring
@@ -381,7 +381,7 @@ lab-gateway/
 │   └── extensions/         # Guacamole extensions
 ├── 📁 mysql/               # DB scripts and schemas
 │   ├── 001-create-schema.sql
-│   ├── 002-lab-station-ops.sql
+│   ├── 002-labstation-ops.sql
 ├── 📁 web/                 # Web frontend (optional)
 ├── 📁 blockchain-services/ # Blockchain auth & wallet service (Git submodule)
 ├── 📁 blockchain-data/     # Encrypted wallet persistence (not in git)
