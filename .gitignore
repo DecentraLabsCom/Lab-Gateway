@@ -8,6 +8,9 @@ secrets/ # Directory for secret files (in case we implement Docker Secrets)
 # Runtime certificate directory (generated at setup)
 certs/
 !certs/.gitkeep
+!tests/integration/certs/
+tests/integration/certs/*.pem
+!tests/integration/certs/generate-certs.sh
 
 # Logs
 *.log
