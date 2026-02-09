@@ -263,7 +263,7 @@ if /i "!domain!"=="localhost" (
     set "https_port=8443"
     set "http_port=8081"
     echo    * Server: https://localhost:8443
-    echo    * Using development ports (8443/8081)
+    echo    * Using development ports ^(8443/8081^)
 ) else (
     echo Configuring for production...
     call :UpdateEnv "%ROOT_ENV_FILE%" "SERVER_NAME" "!domain!"
@@ -342,7 +342,7 @@ if "!cf_enabled!"=="1" (
         call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_TOKEN" ""
     )
     if /i "!domain!"=="localhost" (
-        echo Cloudflare enabled: switching to standard ports (443/80) for a cleaner public URL.
+        echo Cloudflare enabled: switching to standard ports ^(443/80^) for a cleaner public URL.
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "443"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "80"
         call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTPS_PORT" "443"
@@ -429,7 +429,7 @@ echo JWT Signing Keys
 echo =================
 echo blockchain-services will generate keys at runtime if missing (volume ./certs).
 if exist certs\private_key.pem (
-    echo private_key.pem already exists in certs\ (it will be reused).
+    echo private_key.pem already exists in certs\ ^(it will be reused^).
 ) else (
     echo No private_key.pem in certs\; the container will create a new one at startup.
 )
@@ -447,7 +447,7 @@ if not "%cb_domains%"=="" if not "%cb_email%"=="" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "CERTBOT_EMAIL" "%cb_email%"
     echo Configured CERTBOT_DOMAINS and CERTBOT_EMAIL in .env
 ) else (
-    echo Skipped certbot configuration (ACME). Self-signed certificates will be auto-rotated in-container every ~87 days.
+    echo Skipped certbot configuration ^(ACME^). Self-signed certificates will be auto-rotated in-container every ~87 days.
 )
 set "certbot_domains="
 set "certbot_email="
@@ -513,7 +513,7 @@ if "!cf_enabled!"=="1" (
     echo 5. Cloudflare tunnel: check '!compose_full! logs !cf_service!' for the public hostname ^(or your configured tunnel token domain^).
 )
 if /i "!domain!"=="localhost" (
-    echo Access: https://localhost:!https_port! (HTTP: !http_port!)
+    echo Access: https://localhost:!https_port! ^(HTTP: !http_port!^)
 ) else (
     echo Access: https://!domain!
 )
@@ -548,7 +548,17 @@ echo This may take several minutes on first run...
 call !compose_full! down --remove-orphans
 if errorlevel 1 goto compose_fail
 call !compose_full! build --no-cache
-if errorlevel 1 goto compose_fail
+if errorlevel 1 (
+    echo.
+    echo Initial docker build failed.
+    echo Attempting automatic BuildKit cache recovery and one retry...
+    docker builder prune -af
+    if errorlevel 1 echo Warning: docker builder prune failed. Retrying anyway...
+    docker buildx prune -af
+    if errorlevel 1 echo Warning: docker buildx prune failed. Retrying anyway...
+    call !compose_full! build --no-cache
+    if errorlevel 1 goto compose_fail
+)
 call !compose_full! up -d
 if errorlevel 1 goto compose_fail
 goto compose_success
@@ -630,25 +640,7 @@ exit /b
 set "env_file=%~1"
 set "env_key=%~2"
 set "env_value=%~3"
-powershell -NoLogo -Command ^
-    "& {
-        param($file,$key,$value)
-        if (-not (Test-Path $file)) { New-Item -Path $file -ItemType File -Force | Out-Null }
-        $content = Get-Content -Path $file
-        $pattern = '^' + [regex]::Escape($key) + '=.*$'
-        $replacement = \"$key=$value\"
-        $updated = $false
-        for ($i = 0; $i -lt $content.Count; $i++) {
-            if ($content[$i] -match $pattern) {
-                $content[$i] = $replacement
-                $updated = $true
-            }
-        }
-        if (-not $updated) {
-            $content += $replacement
-        }
-        $content | Set-Content -Path $file -Encoding UTF8
-    }" "%env_file%" "%env_key%" "%env_value%"
+powershell -NoLogo -NoProfile -Command "& { param($file,$key,$value); if (-not (Test-Path -LiteralPath $file)) { New-Item -Path $file -ItemType File -Force | Out-Null }; $content = @(); if (Test-Path -LiteralPath $file) { $content = @(Get-Content -LiteralPath $file) }; $pattern = '^' + [regex]::Escape($key) + '=.*$'; $replacement = $key + '=' + $value; $updated = $false; for ($i = 0; $i -lt $content.Count; $i++) { if ($content[$i] -match $pattern) { $content[$i] = $replacement; $updated = $true } }; if (-not $updated) { $content += $replacement }; Set-Content -LiteralPath $file -Value $content -Encoding Ascii }" "%env_file%" "%env_key%" "%env_value%"
 exit /b
 
 :ReadEnvValue
