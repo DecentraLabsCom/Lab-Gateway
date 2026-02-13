@@ -1,0 +1,50 @@
+name: Nix And Integration
+
+on:
+  push:
+    branches: ["main", "NixOS", "full", "lite"]
+  pull_request:
+    branches: ["main", "full", "lite"]
+
+permissions:
+  contents: read
+
+jobs:
+  nix-flake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+
+      - name: Show flake outputs
+        run: nix flake show --all-systems
+
+      - name: Build Nix helper package
+        run: nix build .#lab-gateway-docker
+
+      - name: Build deterministic ops-worker image
+        run: nix build .#lab-gateway-ops-worker-image
+
+      - name: Evaluate NixOS configurations
+        run: |
+          nix eval .#nixosConfigurations.gateway.config.system.build.toplevel.drvPath
+          nix eval .#nixosConfigurations.gateway-components.config.system.build.toplevel.drvPath
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Run integration suite
+        run: |
+          chmod +x tests/integration/run-integration.sh
+          chmod +x tests/integration/certs/generate-certs.sh
+          tests/integration/run-integration.sh

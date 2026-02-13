@@ -514,6 +514,7 @@ lab-gateway/
 ├── 📁 tests/
 │   ├── smoke/                   # End-to-end smoke tests
 │   └── integration/             # Integration tests with mocks
+├── 📁 docs/                     # MoU tracking, install guides, eduGAIN and pilot docs
 ├── 📁 certs/                    # Runtime certificates/keys (not in git)
 ├── 📁 blockchain-data/          # Runtime wallet/provider data (not in git)
 └── 📁 configuring-lab-connections/ # Guacamole connection setup docs
@@ -608,6 +609,11 @@ docker compose logs -f guacamole
 ## 📝 Documentation
 
 - **Main Documentation**: This README (for main branch - full version)
+- **MoU Deliverables Tracking**: [docs/MOU_DELIVERABLES.md](docs/MOU_DELIVERABLES.md)
+- **Installation Guides**: [docs/install/INSTALLATION_GUIDE_EN.md](docs/install/INSTALLATION_GUIDE_EN.md) and [docs/install/GUIA_INSTALACION_ES.md](docs/install/GUIA_INSTALACION_ES.md)
+- **eduGAIN Technical Guide**: [docs/edugain/EDUGAIN_INTEGRATION_EN.md](docs/edugain/EDUGAIN_INTEGRATION_EN.md) and [docs/edugain/INTEGRACION_EDUGAIN_ES.md](docs/edugain/INTEGRACION_EDUGAIN_ES.md)
+- **Provider Tutorials**: [docs/tutorials/PROVIDER_TUTORIAL_EN.md](docs/tutorials/PROVIDER_TUTORIAL_EN.md) and [docs/tutorials/TUTORIAL_PROVEEDOR_ES.md](docs/tutorials/TUTORIAL_PROVEEDOR_ES.md)
+- **Pilot Runbook and Templates**: [docs/pilots/PILOT_RUNBOOK.md](docs/pilots/PILOT_RUNBOOK.md)
 - **Logging**: [LOGGING.md](LOGGING.md) - Log configuration and management
 - **Guacamole Setup**: [configuring-lab-connections/guacamole-connections.md](configuring-lab-connections/guacamole-connections.md)
 - **Blockchain Services**: Check [blockchain-services/README.md](blockchain-services/README.md) for detailed API documentation
