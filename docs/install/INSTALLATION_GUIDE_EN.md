@@ -9,6 +9,7 @@ This guide consolidates installation options for DecentraLabs Gateway.
 3. Nix wrapper for compose (`nix run .#lab-gateway-docker`).
 4. NixOS compose-managed host (`#gateway`).
 5. NixOS componentized host (`#gateway-components`).
+6. Deterministic deployment bundle image (`.#lab-gateway-bundle-image`).
 
 ## 2. Prerequisites
 
@@ -108,3 +109,20 @@ Optional tests:
 - Missing cert files: add certs or use self-signed local fallback.
 - Permission issues on bind mounts: verify ownership for `certs/` and `blockchain-data/`.
 - Service not reachable: inspect `docker compose logs -f` or `journalctl -u docker-openresty -f` (NixOS componentized mode).
+
+## 11. Deterministic Bundle Image (Non-NixOS)
+
+Build:
+
+```bash
+nix build .#lab-gateway-bundle-image
+```
+
+Load and run with host Docker socket:
+
+```bash
+docker load < result
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  lab-gateway-bundle:nix up -d --build
+```

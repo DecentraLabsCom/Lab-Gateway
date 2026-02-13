@@ -9,6 +9,7 @@ Esta guia resume las modalidades de despliegue del DecentraLabs Gateway.
 3. Wrapper Nix para compose (`nix run .#lab-gateway-docker`).
 4. Host NixOS gestionado con compose (`#gateway`).
 5. Host NixOS por componentes OCI (`#gateway-components`).
+6. Imagen bundle determinista de despliegue (`.#lab-gateway-bundle-image`).
 
 ## 2. Requisitos previos
 
@@ -108,3 +109,20 @@ Pruebas opcionales:
 - Faltan certificados: agregar certs o usar fallback local autosignado.
 - Permisos en bind mounts: revisar propietario de `certs/` y `blockchain-data/`.
 - Servicio no accesible: revisar `docker compose logs -f` o `journalctl -u docker-openresty -f` (modo NixOS por componentes).
+
+## 11. Imagen Bundle Determinista (No-NixOS)
+
+Construir:
+
+```bash
+nix build .#lab-gateway-bundle-image
+```
+
+Cargar y ejecutar usando el socket Docker del host:
+
+```bash
+docker load < result
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  lab-gateway-bundle:nix up -d --build
+```

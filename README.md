@@ -103,8 +103,11 @@ This repository also includes a `flake.nix` with:
 
 - `packages.<system>.lab-gateway-docker`: helper CLI for the current Docker Compose stack
 - `packages.<system>.lab-gateway-ops-worker-image`: deterministic OCI image tarball built from Nix
+- `packages.<system>.lab-gateway-openresty-image`: deterministic OpenResty OCI image from Nix
+- `packages.<system>.lab-gateway-bundle-image`: deterministic deployment bundle image for non-NixOS hosts
 - `nixosModules.default`: NixOS module to manage the stack through systemd
 - `nixosModules.components`: componentized NixOS module (OCI containers, no compose)
+- `nixosModules.components-*`: per-component NixOS modules (mysql, guacd, guacamole, blockchain-services, ops-worker, openresty)
 - `nixosModules.gateway-host`: host defaults for a dedicated NixOS gateway machine
 - `nixosConfigurations.gateway`: complete host config ready for `nixos-rebuild`
 - `nixosConfigurations.gateway-components`: host config using the componentized module
@@ -190,9 +193,26 @@ sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway-components
 ```
 
 Notes:
-- OpenResty, Guacamole and blockchain-services images are built from local Dockerfiles by a systemd build step.
-- `ops-worker` image is produced deterministically by Nix (`packages.<system>.lab-gateway-ops-worker-image`).
+- OpenResty and ops-worker images are produced deterministically by Nix.
+- Guacamole and blockchain-services images are built from local Dockerfiles by a systemd build step.
 - Set `services.lab-gateway-components.opsMysqlDsn` if you want ops-worker reservation automation backed by MySQL.
+
+#### D) Deterministic deployment bundle image (non-NixOS)
+
+Build bundle image from flake:
+
+```bash
+nix build .#lab-gateway-bundle-image
+```
+
+Load and run (Docker socket bind required):
+
+```bash
+docker load < result
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  lab-gateway-bundle:nix up -d --build
+```
 
 ### Manual Deployment
 
@@ -498,7 +518,10 @@ lab-gateway/
 │   ├── lab-gateway-docker.nix   # Compose wrapper package
 │   ├── nixos-module.nix         # services.lab-gateway (compose-managed) module
 │   ├── nixos-components-module.nix # services.lab-gateway-components module
-│   ├── images/ops-worker-image.nix # Nix-built OCI image
+│   ├── components/              # Per-component NixOS modules
+│   ├── images/ops-worker-image.nix # Nix-built ops-worker OCI image
+│   ├── images/openresty-image.nix  # Nix-built OpenResty OCI image
+│   ├── images/gateway-bundle-image.nix # Deterministic deployment bundle image
 │   └── hosts/gateway.nix        # Host defaults for nixosConfigurations.gateway
 ├── 📁 blockchain-services/       # Blockchain auth/wallet service (submodule)
 ├── 📁 openresty/                # Reverse proxy (Nginx + Lua)

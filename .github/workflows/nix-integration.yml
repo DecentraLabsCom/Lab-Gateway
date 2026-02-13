@@ -30,6 +30,12 @@ jobs:
       - name: Build deterministic ops-worker image
         run: nix build .#lab-gateway-ops-worker-image
 
+      - name: Build deterministic OpenResty image
+        run: nix build .#lab-gateway-openresty-image
+
+      - name: Build deterministic deployment bundle image
+        run: nix build .#lab-gateway-bundle-image
+
       - name: Evaluate NixOS configurations
         run: |
           nix eval .#nixosConfigurations.gateway.config.system.build.toplevel.drvPath

@@ -14,8 +14,8 @@ This file tracks Annex I deliverables from the Vietsch MoU and maps each one to 
 
 | Deliverable | Status | Evidence in this repo | Remaining work |
 | --- | --- | --- | --- |
-| D1. NixOS configuration and modules for the gateway | IN-PROGRESS-IN-REPO | `flake.nix`, `nix/nixos-module.nix`, `nix/nixos-components-module.nix`, `nix/hosts/gateway.nix` | Increase component determinism for all images (OpenResty/Guacamole/blockchain-services) from Nix expressions. |
-| D2. Deterministic Docker image from same config | IN-PROGRESS-IN-REPO | `nix/images/ops-worker-image.nix`, `flake.nix` package `lab-gateway-ops-worker-image` | Extend deterministic image builds to all gateway components. |
+| D1. NixOS configuration and modules for the gateway | DONE-IN-REPO | `flake.nix`, `nix/nixos-module.nix`, `nix/nixos-components-module.nix`, per-component modules under `nix/components/`, `nix/hosts/gateway.nix` | Validate in target pilot environments and tune defaults per institution. |
+| D2. Deterministic Docker image from same config | DONE-IN-REPO | `nix/images/ops-worker-image.nix`, `nix/images/openresty-image.nix`, `nix/images/gateway-bundle-image.nix`, flake packages for deterministic OCI/bundle images | Add release publication workflow for image artifacts and signed provenance. |
 | D3. Installation and usage docs/tutorials (EN/ES) | DONE-IN-REPO | `README.md`, docs under `docs/install`, `docs/edugain`, `docs/tutorials` | Record and publish video tutorial externally. |
 | D4. Two pilots and feedback incorporation | EXTERNAL-ACTION-REQUIRED | Pilot runbook and templates under `docs/pilots` | Execute pilots in real institutions and commit resulting reports/findings. |
 | D5. Public release package (v1.0) with final artifacts | IN-PROGRESS-IN-REPO | Flake outputs, CI additions, docs pack | Tag/release process and artifact publication. |
@@ -24,9 +24,9 @@ This file tracks Annex I deliverables from the Vietsch MoU and maps each one to 
 
 ## Immediate Repository Backlog
 
-1. Create deterministic Nix-built images for OpenResty, Guacamole, and blockchain-services.
-2. Add CI checks that evaluate NixOS configurations and build all Nix image outputs.
-3. Add a release checklist and versioned release notes for v1.0.
+1. Add deterministic Nix-built images for Guacamole and blockchain-services (current module still supports Dockerfile builds for those components).
+2. Add release checklist and signed provenance for deterministic image artifacts.
+3. Finalize v1.0 release notes and publication process.
 
 ## External Backlog (Non-git execution)
 
