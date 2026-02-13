@@ -51,6 +51,25 @@ DecentraLabs Gateway provides a complete blockchain-based authentication system 
 
 ## 🚀 Quick Deployment
 
+### Choose an Installation Mode
+
+Use one of these modes depending on your target:
+
+1. **Setup Scripts (`setup.sh` / `setup.bat`)**  
+   Best for first-time installs. It prepares env files, secrets, and can start the full stack.
+
+2. **Manual Docker Compose**  
+   Best if you want full control over compose commands and deployment flow.
+
+3. **Nix Wrapper for Compose (`nix run .#lab-gateway-docker`)**  
+   Same runtime stack as Docker Compose; Nix only provides a packaged CLI wrapper.
+
+4. **NixOS Compose-managed Host (`nixos-rebuild --flake ...#gateway`)**  
+   Best for dedicated NixOS hosts where you want declarative system + service management.
+
+5. **NixOS Componentized Host (`nixos-rebuild --flake ...#gateway-components`)**  
+   Runs each service as an OCI container managed by NixOS modules (no `docker-compose up`).
+
 ### Using Setup Scripts (Recommended)
 
 The setup scripts will automatically:
@@ -77,6 +96,103 @@ chmod +x setup.sh
 ```
 
 That's it! The script will guide you through the setup and start all services automatically.
+
+### Nix / NixOS Deployment
+
+This repository also includes a `flake.nix` with:
+
+- `packages.<system>.lab-gateway-docker`: helper CLI for the current Docker Compose stack
+- `packages.<system>.lab-gateway-ops-worker-image`: deterministic OCI image tarball built from Nix
+- `nixosModules.default`: NixOS module to manage the stack through systemd
+- `nixosModules.components`: componentized NixOS module (OCI containers, no compose)
+- `nixosModules.gateway-host`: host defaults for a dedicated NixOS gateway machine
+- `nixosConfigurations.gateway`: complete host config ready for `nixos-rebuild`
+- `nixosConfigurations.gateway-components`: host config using the componentized module
+
+#### A) Nix wrapper for the existing Docker stack
+
+This mode still requires Docker Engine + Docker Compose on the host.
+It runs the same `docker-compose.yml` stack; it does not replace Compose with a different runtime.
+
+```bash
+nix run .#lab-gateway-docker -- --project-dir "$PWD" --env-file "$PWD/.env" up -d --build
+```
+
+#### B) NixOS host configuration (compose-managed)
+
+This mode is only for NixOS machines.
+
+Use the module directly (example):
+
+```nix
+{
+  inputs.lab-gateway.url = "path:/srv/lab-gateway";
+
+  outputs = { nixpkgs, lab-gateway, ... }: {
+    nixosConfigurations.gateway = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        lab-gateway.nixosModules.default
+        {
+          services.lab-gateway = {
+            enable = true;
+            projectDir = "/srv/lab-gateway";
+            envFile = "/srv/lab-gateway/.env";
+            # profiles = [ "cloudflare" ];
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+Then apply it:
+
+```bash
+sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway
+```
+
+Complete host flow (real machine):
+
+```bash
+# 1) Put this repo on the target NixOS host
+sudo mkdir -p /srv
+sudo git clone https://github.com/DecentraLabsCom/lite-lab-gateway.git /srv/lab-gateway
+cd /srv/lab-gateway
+
+# 2) Prepare env files
+sudo cp .env.example .env
+sudo cp blockchain-services/.env.example blockchain-services/.env
+
+# 3) Edit values (passwords, domain, tokens, RPC, contract address)
+sudo nano .env
+sudo nano blockchain-services/.env
+
+# 4) Apply the full NixOS configuration shipped by this flake
+sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway
+
+# 5) Validate the service
+systemctl status lab-gateway.service
+```
+
+`blockchain-services/.env` must still exist under `projectDir`, because `docker-compose.yml` references it directly.
+
+`nixosConfigurations.gateway` imports your existing `/etc/nixos/configuration.nix` and layers the gateway module on top, so host-specific settings (bootloader, users, disks, hardware) are preserved.
+Host-level values (hostname, timezone, firewall, profiles, SSH hardening) are installation-specific and should be overridden per environment.
+
+#### C) NixOS host configuration (componentized OCI containers)
+
+This mode avoids `docker compose up` and manages each component as a NixOS-defined OCI container.
+
+```bash
+sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway-components
+```
+
+Notes:
+- OpenResty, Guacamole and blockchain-services images are built from local Dockerfiles by a systemd build step.
+- `ops-worker` image is produced deterministically by Nix (`packages.<system>.lab-gateway-ops-worker-image`).
+- Set `services.lab-gateway-components.opsMysqlDsn` if you want ops-worker reservation automation backed by MySQL.
 
 ### Manual Deployment
 
@@ -373,27 +489,38 @@ Internet ──> [NIC with VLAN tagging] Lab Gateway ──> VLAN 10 / VLAN 20
 
 ```
 lab-gateway/
-├── 📁 openresty/           # Reverse proxy configuration
-│   ├── nginx.conf          # Main Nginx configuration
-│   ├── lab_access.conf     # Lab access routes
-│   └── lua/                # Lua modules for auth and session management
-├── 📁 guacamole/           # RDP/VNC/SSH client
-│   └── extensions/         # Guacamole extensions
-├── 📁 mysql/               # DB scripts and schemas
-│   ├── 001-create-schema.sql
-│   ├── 002-labstation-ops.sql
-├── 📁 web/                 # Web frontend (optional)
-├── 📁 blockchain-services/ # Blockchain auth & wallet service (Git submodule)
-├── 📁 blockchain-data/     # Encrypted wallet persistence (not in git)
-├── 📁 certs/               # SSL certificates (not in git)
-├── 📁 tests/               # Gateway tests (unit + smoke)
-│   ├── smoke/              # End-to-end smoke tests
-│   └── unit/               # Lua unit tests
-├── 📄 docker-compose.yml   # Service orchestration
-├── 📄 .env.example         # Configuration template
-├── 📄 setup.sh/.bat        # Installation scripts
-└── 📄 update-blockchain-services.sh/.bat  # Submodule update scripts
+├── 📄 flake.nix                 # Nix flake outputs (packages + NixOS config/module)
+├── 📄 docker-compose.yml        # Main service orchestration
+├── 📄 .env.example              # Gateway configuration template
+├── 📄 setup.sh / setup.bat      # Guided setup scripts
+├── 📄 selfsigned-refresh.sh     # Self-signed cert helper
+├── 📁 nix/
+│   ├── lab-gateway-docker.nix   # Compose wrapper package
+│   ├── nixos-module.nix         # services.lab-gateway (compose-managed) module
+│   ├── nixos-components-module.nix # services.lab-gateway-components module
+│   ├── images/ops-worker-image.nix # Nix-built OCI image
+│   └── hosts/gateway.nix        # Host defaults for nixosConfigurations.gateway
+├── 📁 blockchain-services/       # Blockchain auth/wallet service (submodule)
+├── 📁 openresty/                # Reverse proxy (Nginx + Lua)
+│   ├── nginx.conf
+│   ├── lab_access.conf
+│   ├── lua/
+│   └── tests/                   # Lua unit test runner/specs
+├── 📁 guacamole/                # Guacamole image customizations
+├── 📁 mysql/                    # DB bootstrap and schema scripts
+├── 📁 ops-worker/               # Lab station operations API worker
+├── 📁 web/                      # Static frontend assets/pages
+├── 📁 certbot/                  # ACME webroot/support files
+├── 📁 tests/
+│   ├── smoke/                   # End-to-end smoke tests
+│   └── integration/             # Integration tests with mocks
+├── 📁 certs/                    # Runtime certificates/keys (not in git)
+├── 📁 blockchain-data/          # Runtime wallet/provider data (not in git)
+└── 📁 configuring-lab-connections/ # Guacamole connection setup docs
 ```
+
+`certs/` and `blockchain-data/` are runtime directories and may not exist until first setup.
+`blockchain-services/` is a Git submodule and must be initialized/updated before running the stack.
 
 ## 🧪 Testing
 
