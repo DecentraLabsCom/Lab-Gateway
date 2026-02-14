@@ -14,6 +14,11 @@ compose_files=""
 compose_profiles=""
 cf_enabled=false
 certbot_enabled=false
+existing_mysql_root_password=""
+existing_mysql_password=""
+db_credentials_changed=false
+reset_mysql_volume=false
+mysql_volume_name=""
 
 echo "DecentraLabs Gateway - Full Version Setup"
 echo "=========================================="
@@ -37,8 +42,42 @@ get_env_default() {
     local value=""
     if [ -f "$file" ]; then
         value=$(grep -E "^${key}=" "$file" | head -n 1 | cut -d'=' -f2-)
+        value="${value%$'\r'}"
     fi
     echo "$value"
+}
+
+is_placeholder_secret() {
+    local raw="$1"
+    local lower
+    lower="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -d ' \r\n\t')"
+    case "$lower" in
+        ""|changeme|change_me|secure_password|db_password|your_password|password|test)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+detect_mysql_volume() {
+    local project_name="${COMPOSE_PROJECT_NAME:-}"
+    local volume_name=""
+
+    if [ -z "$project_name" ]; then
+        project_name="$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
+    fi
+
+    volume_name="$(docker volume ls -q \
+        --filter "label=com.docker.compose.project=${project_name}" \
+        --filter "label=com.docker.compose.volume=mysql_data" | head -n 1)"
+
+    if [ -z "$volume_name" ] && docker volume inspect "${project_name}_mysql_data" >/dev/null 2>&1; then
+        volume_name="${project_name}_mysql_data"
+    fi
+
+    echo "$volume_name"
 }
 
 update_env_in_all() {
@@ -77,6 +116,9 @@ git submodule update --init --recursive blockchain-services
 echo "blockchain-services submodule ready."
 echo
 
+existing_mysql_root_password="$(get_env_default "MYSQL_ROOT_PASSWORD" "$ROOT_ENV_FILE")"
+existing_mysql_password="$(get_env_default "MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
+
 # Check if .env already exists
 if [ -f "$ROOT_ENV_FILE" ]; then
     echo ".env file already exists!"
@@ -112,18 +154,47 @@ read -p "MySQL root password: " mysql_root_password
 read -p "Guacamole database password: " mysql_password
 
 if [ -z "$mysql_root_password" ]; then
-    mysql_root_password="R00t_P@ss_${RANDOM}_$(date +%s)"
-    echo "Generated root password: $mysql_root_password"
+    if [ -n "$existing_mysql_root_password" ] && ! is_placeholder_secret "$existing_mysql_root_password"; then
+        mysql_root_password="$existing_mysql_root_password"
+        echo "Reusing existing MySQL root password from .env"
+    else
+        mysql_root_password="R00t_P@ss_${RANDOM}_$(date +%s)"
+        echo "Generated root password: $mysql_root_password"
+    fi
 fi
 
 if [ -z "$mysql_password" ]; then
-    mysql_password="Gu@c_${RANDOM}_$(date +%s)"
-    echo "Generated database password: $mysql_password"
+    if [ -n "$existing_mysql_password" ] && ! is_placeholder_secret "$existing_mysql_password"; then
+        mysql_password="$existing_mysql_password"
+        echo "Reusing existing Guacamole DB password from .env"
+    else
+        mysql_password="Gu@c_${RANDOM}_$(date +%s)"
+        echo "Generated database password: $mysql_password"
+    fi
 fi
 
 # Update passwords in env files
 update_env_in_all "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
 update_env_in_all "MYSQL_PASSWORD" "$mysql_password"
+
+if [ "$mysql_root_password" != "$existing_mysql_root_password" ] || [ "$mysql_password" != "$existing_mysql_password" ]; then
+    db_credentials_changed=true
+fi
+
+mysql_volume_name="$(detect_mysql_volume)"
+if [ -n "$mysql_volume_name" ] && [ "$db_credentials_changed" = true ]; then
+    echo
+    echo "Detected existing MySQL volume: ${mysql_volume_name}"
+    echo "Database credentials changed in .env, so startup can fail with Access denied (1045)."
+    read -p "Reset MySQL volume now to apply new credentials? This removes MySQL data. (y/N): " reset_mysql_input
+    reset_mysql_input="$(echo "$reset_mysql_input" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
+    if [[ "$reset_mysql_input" =~ ^(y|yes)$ ]]; then
+        reset_mysql_volume=true
+        echo "MySQL volume will be reset before startup."
+    else
+        echo "Keeping existing MySQL volume. If startup fails, run: docker compose down -v"
+    fi
+fi
 
 echo
 echo "IMPORTANT: Save these passwords securely!"
@@ -559,7 +630,11 @@ echo "Building and starting services..."
 echo "This may take several minutes on first run..."
 
 set +e
-$compose_full down --remove-orphans
+if [ "$reset_mysql_volume" = true ]; then
+    $compose_full down --remove-orphans -v
+else
+    $compose_full down --remove-orphans
+fi
 $compose_full build --no-cache
 $compose_full up -d
 compose_result=$?
@@ -604,6 +679,9 @@ echo "   * Blockchain Services API: /auth"
     echo "Your blockchain-based authentication system is now running."
 else
     echo "Failed to start services. Check the error messages above."
+    if [ -n "$mysql_volume_name" ] && [ "$db_credentials_changed" = true ] && [ "$reset_mysql_volume" != true ]; then
+        echo "Hint: Existing MySQL volume uses old credentials. Run: $compose_full down -v"
+    fi
 fi
 
 echo
