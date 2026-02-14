@@ -162,59 +162,30 @@ update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_USER" "$guac_admin_user"
 update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_PASS" "$guac_admin_pass"
 echo
 
-# OPS Worker Secret
-echo "OPS Worker Secret"
-echo "=================="
-echo "This secret authenticates the ops-worker for lab station operations."
-read -p "OPS secret (leave empty for auto-generated): " ops_secret
-ops_secret=$(echo "$ops_secret" | tr -d ' ')
-
-if [ -z "$ops_secret" ]; then
-    ops_secret="ops_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
-    echo "Generated OPS secret: $ops_secret"
-fi
-
-case "$(printf '%s' "$ops_secret" | tr '[:upper:]' '[:lower:]')" in
-    supersecretvalue|changeme|change_me|password|test)
-        echo "Refusing to use insecure OPS secret. Set a strong value." >&2
-        exit 1
-        ;;
-esac
-
-update_env_var "$ROOT_ENV_FILE" "OPS_SECRET" "$ops_secret"
-echo
-
-# Access Token for blockchain-services
-echo "Blockchain Services Access Token"
-echo "================================="
-echo "This token protects /wallet, /treasury, and /wallet-dashboard behind OpenResty."
-read -p "Access token (leave empty for auto-generated): " access_token
+# Wallet/Treasury Access Token
+echo "Wallet/Treasury Access Token"
+echo "============================"
+echo "This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/admin/** behind OpenResty."
+read -p "Wallet/Treasury token (leave empty for auto-generated): " access_token
 access_token=$(echo "$access_token" | tr -d ' ')
 
 if [ -z "$access_token" ]; then
     access_token="acc_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
-    echo "Generated access token: $access_token"
+    echo "Generated Wallet/Treasury token: $access_token"
 fi
 
-update_env_in_all "SECURITY_ACCESS_TOKEN" "$access_token"
-update_env_in_all "SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
-update_env_in_all "SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
-update_env_in_all "SECURITY_ACCESS_TOKEN_REQUIRED" "true"
+update_env_in_all "TREASURY_TOKEN" "$access_token"
+update_env_in_all "TREASURY_TOKEN_HEADER" "X-Access-Token"
+update_env_in_all "TREASURY_TOKEN_COOKIE" "access_token"
+update_env_in_all "TREASURY_TOKEN_REQUIRED" "true"
 update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
-if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN" "$access_token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_REQUIRED" "true"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-fi
 echo
 
 # Lab Manager Access Token
 echo "Lab Manager Access Token"
 echo "========================"
-echo "This token protects /lab-manager when accessed outside private networks."
+echo "This token protects /lab-manager and /ops when accessed outside private networks."
 read -p "Lab Manager token (leave empty for auto-generated): " lab_manager_token
 lab_manager_token=$(echo "$lab_manager_token" | tr -d ' ')
 
@@ -559,7 +530,7 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
+echo "   * Wallet/Treasury token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
 echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/"
 echo "   * Blockchain Services API: /auth"
@@ -613,7 +584,7 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
+echo "   * Wallet/Treasury token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
 echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
 echo "   * Blockchain Services API: /auth"

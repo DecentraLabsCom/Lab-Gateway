@@ -37,7 +37,7 @@ services:
       GUAC_API_URL: http://guacamole:8080/guacamole/api
       AUTH_SERVICE_URL: http://blockchain-services:8080
       OPS_API_URL: http://ops-worker:5001
-      OPS_SECRET: integration-test-secret
+      LAB_MANAGER_TOKEN: integration-test-secret
       CORS_ALLOWED_ORIGINS: http://localhost:3000
     volumes:
       - ./certs:/etc/ssl/private

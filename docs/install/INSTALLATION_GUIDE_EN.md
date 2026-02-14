@@ -66,8 +66,9 @@ systemctl status lab-gateway.service
 ## 7. Post-install Validation
 
 ```bash
-curl -k https://127.0.0.1/health
-curl -k https://127.0.0.1/gateway/health
+HTTPS_BIND_PORT=443   # use 8443 if you selected localhost mode in setup.sh/setup.bat
+curl -k "https://127.0.0.1:${HTTPS_BIND_PORT}/health"
+curl -k "https://127.0.0.1:${HTTPS_BIND_PORT}/gateway/health"
 ```
 
 Optional tests:

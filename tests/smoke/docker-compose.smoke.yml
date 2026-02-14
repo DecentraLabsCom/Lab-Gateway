@@ -18,8 +18,8 @@ services:
       SERVER_NAME: lab.test
       HTTPS_PORT: "18443"
       GUAC_API_URL: http://guacamole:8080/guacamole/api
-      OPS_SECRET: test-ops-secret-123
-      SECURITY_ACCESS_TOKEN: smoke-access-token
+      LAB_MANAGER_TOKEN: test-ops-secret-123
+      TREASURY_TOKEN: smoke-access-token
       SECURITY_ALLOW_PRIVATE_NETWORKS: "true"
     volumes:
       - ./certs:/etc/ssl/private

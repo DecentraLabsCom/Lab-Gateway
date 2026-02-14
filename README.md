@@ -173,7 +173,9 @@ If you prefer manual configuration:
    ```
 
 2. **Edit `.env` and `blockchain-services/.env`** with your configuration (see Configuration section below)
-   - Make sure you set `OPS_SECRET`, `SECURITY_ACCESS_TOKEN`, and `LAB_MANAGER_TOKEN` for production if needed. `OPS_SECRET` protects `/ops`, `SECURITY_ACCESS_TOKEN` protects `/wallet`, `/treasury`, and `/wallet-dashboard`, and `LAB_MANAGER_TOKEN` protects `/lab-manager` when accessed from public networks.
+  - Configure the two gateway access tokens for production:
+    - `TREASURY_TOKEN`: protects wallet/treasury routes (`/wallet`, `/treasury`, `/wallet-dashboard`, `/treasury/admin/**`)
+    - `LAB_MANAGER_TOKEN`: protects `/lab-manager` and `/ops` from public networks
 
 3. **Set host UID/GID for bind mounts (Linux/macOS)** so containers can write to `certs/` and `blockchain-data/`:
    ```bash
@@ -196,8 +198,11 @@ If you prefer manual configuration:
    certs/
    ├── fullchain.pem      # SSL certificate chain
    ├── privkey.pem        # SSL private key
-   └── public_key.pem     # JWT public key (from auth provider)
+   └── public_key.pem     # JWT public key (optional if blockchain-services generates it)
    ```
+
+   `public_key.pem` is generated automatically by `blockchain-services` on first start
+   when missing. You only need to provide it manually if you use an external auth signer.
 
    **Database schema:** When `blockchain-services` has a MySQL datasource configured, it runs Flyway
    migrations on startup to create the auth, WebAuthn, and intents tables automatically.
@@ -255,17 +260,16 @@ CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
 # Wallet/Treasury CORS allowlist (blockchain-services)
 WALLET_ALLOWED_ORIGINS=https://your-domain
 
-# Ops Worker
-OPS_SECRET=your_ops_secret
+# Lab Manager + Ops Worker
 LAB_MANAGER_TOKEN=your_lab_manager_token
 LAB_MANAGER_TOKEN_HEADER=X-Lab-Manager-Token
 LAB_MANAGER_TOKEN_COOKIE=lab_manager_token
 
 # Blockchain Services remote access
-SECURITY_ACCESS_TOKEN=your_access_token
-SECURITY_ACCESS_TOKEN_HEADER=X-Access-Token
-SECURITY_ACCESS_TOKEN_COOKIE=access_token
-SECURITY_ACCESS_TOKEN_REQUIRED=true
+TREASURY_TOKEN=your_treasury_token
+TREASURY_TOKEN_HEADER=X-Access-Token
+TREASURY_TOKEN_COOKIE=access_token
+TREASURY_TOKEN_REQUIRED=true
 SECURITY_ALLOW_PRIVATE_NETWORKS=true
 ADMIN_DASHBOARD_ALLOW_PRIVATE=true
 
@@ -281,7 +285,7 @@ CERTBOT_EMAIL=you@example.com
 CERTBOT_STAGING=0
 ```
 
-Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `OPS_SECRET` (or leave it empty to disable `/ops`). Set `SECURITY_ACCESS_TOKEN` to secure blockchain-services endpoints exposed through OpenResty for remote access.
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` private-network-only). Set `TREASURY_TOKEN` to protect wallet/treasury endpoints exposed through OpenResty for remote access.
 
 `blockchain-services` uses a dedicated schema named `blockchain_services` by default. If you want a different name, set `BLOCKCHAIN_MYSQL_DATABASE` in `.env`.
 
@@ -335,11 +339,12 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 
 #### Access Controls (Important)
 
-- `/wallet-dashboard`, `/wallet`, `/treasury`: require `SECURITY_ACCESS_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. The token is provided automatically via the authentication modal on the gateway's homepage, which stores it locally and adds it as the `X-Access-Token` header on all requests.
-- `/treasury/admin/**`: always requires `SECURITY_ACCESS_TOKEN` (no private-network bypass). `/treasury/admin/execute` additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
-- **Initial setup**: Click "Wallet & Treasury→" from the homepage, enter your `SECURITY_ACCESS_TOKEN` when prompted. The token will be stored in your browser and automatically included in all requests.
+- `/wallet-dashboard`, `/wallet`, `/treasury`: require `TREASURY_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. The token is provided automatically via the authentication modal on the gateway's homepage, which stores it locally and adds it as the `X-Access-Token` header on all requests.
+- `/treasury/admin/**`: uses `TREASURY_TOKEN` only (header/cookie/query parameter). If `TREASURY_TOKEN` is unset, access is limited to loopback/Docker ranges.
+- `/treasury/admin/execute`: additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
+- **Initial setup**: Click "Wallet & Treasury→" from the homepage, enter your `TREASURY_TOKEN` when prompted. The token will be stored in your browser and automatically included in all requests.
 - `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Click "Lab Manager→" from the homepage and enter your token when prompted.
-- `/ops`: restricted to private networks and also requires `OPS_SECRET` via `X-Ops-Token` or `ops_token` cookie.
+- `/ops`: **network-restricted** to `127.0.0.1` and `172.16.0.0/12` only, plus requires `LAB_MANAGER_TOKEN`. Lab Manager UI works remotely, but ops features (WoL, WinRM, heartbeat) require access from the gateway server or institution network.
 - If wallet actions return `JSON.parse` errors in the browser, ensure both `CORS_ALLOWED_ORIGINS` and `WALLET_ALLOWED_ORIGINS` include your gateway origin.
 
 ## Institutional Wallet Setup
@@ -488,81 +493,6 @@ lab-gateway/
 `certs/` and `blockchain-data/` are runtime directories and may not exist until first setup.
 `blockchain-services/` is a Git submodule and must be initialized/updated before running the stack.
 
-## 🧪 Testing
-
-### Gateway Tests
-
-Unit tests cover the OpenResty gateway logic (Lua handlers and session guard). They run via the OpenResty container so you do not need a local Lua installation:
-
-```bash
-# Windows (PowerShell)
-docker run --rm -v "${PWD}:/workspace" -w /workspace openresty/openresty:alpine-fat luajit openresty/tests/run.lua
-
-# Linux/macOS
-docker run --rm -v "$(pwd):/workspace" -w /workspace openresty/openresty:alpine-fat luajit openresty/tests/run.lua
-```
-
-The command executes every spec under `openresty/tests/unit/` through a lightweight Lua test runner.
-
-### Smoke Tests
-
-For an end-to-end smoke check (OpenResty ↔ Guacamole proxy logic):
-
-```bash
-cd tests/smoke
-./run-smoke.sh
-```
-
-The script spins up a miniature docker-compose environment with mock services, validates that JWT cookies are issued, and ensures Guacamole receives the propagated `Authorization` header.
-
-### Coverage Reports
-
-To collect LuaCov coverage metrics:
-
-```bash
-# Windows (PowerShell)
-docker run --rm -v "${PWD}:/workspace" -w /workspace openresty/openresty:alpine-fat sh -c "luarocks install luacov >/dev/null && luajit -lluacov openresty/tests/run.lua && luacov"
-
-# Linux/macOS
-docker run --rm -v "$(pwd):/workspace" -w /workspace openresty/openresty:alpine-fat sh -c "luarocks install luacov >/dev/null && luajit -lluacov openresty/tests/run.lua && luacov"
-```
-
-Coverage data will be written to `luacov.report.out` and `luacov.stats.out`.
-
-## 🛠️ Development
-
-### Local Development Setup
-
-1. **Start services in development mode:**
-   ```bash
-   docker compose up -d
-   ```
-
-2. **Access services:**
-   - Blockchain Services: http://localhost:8080/wallet (or configured port)
-   - Guacamole: https://localhost:8443/guacamole
-   - MySQL: localhost:3306
-
-### Debugging
-
-Enable debug logging in `.env` or `blockchain-services/.env`:
-```env
-LOG_LEVEL_AUTH=DEBUG
-LOG_LEVEL_SECURITY=DEBUG
-LOG_LEVEL_WEB=DEBUG
-```
-
-View logs:
-```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f openresty
-docker compose logs -f blockchain-services
-docker compose logs -f guacamole
-```
-
 ## 🤝 Contributing
 
 1. **Fork** the project
@@ -570,23 +500,3 @@ docker compose logs -f guacamole
 3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
 4. **Push** to the branch (`git push origin feature/amazing-feature`)
 5. **Open** a Pull Request
-
-## 📝 Documentation
-
-- **Main Documentation**: This README (for main branch - full version)
-- **Installation Guides**: [docs/install/INSTALLATION_GUIDE_EN.md](docs/install/INSTALLATION_GUIDE_EN.md) and [docs/install/GUIA_INSTALACION_ES.md](docs/install/GUIA_INSTALACION_ES.md)
-- **eduGAIN Technical Guide**: [docs/edugain/EDUGAIN_INTEGRATION_EN.md](docs/edugain/EDUGAIN_INTEGRATION_EN.md) and [docs/edugain/INTEGRACION_EDUGAIN_ES.md](docs/edugain/INTEGRACION_EDUGAIN_ES.md)
-- **Provider Tutorials**: [docs/tutorials/PROVIDER_TUTORIAL_EN.md](docs/tutorials/PROVIDER_TUTORIAL_EN.md) and [docs/tutorials/TUTORIAL_PROVEEDOR_ES.md](docs/tutorials/TUTORIAL_PROVEEDOR_ES.md)
-- **Logging**: [LOGGING.md](LOGGING.md) - Log configuration and management
-- **Guacamole Setup**: [configuring-lab-connections/guacamole-connections.md](configuring-lab-connections/guacamole-connections.md)
-- **Blockchain Services**: Check [blockchain-services/README.md](blockchain-services/README.md) for detailed API documentation
-
-## 📞 Support
-
-* **Issues**: [GitHub Issues](https://github.com/DecentraLabsCom/lite-lab-gateway/issues)
-* **Logs**: Use `docker compose logs [service]` for troubleshooting
-* **Configuration**: Review `.env.example` and `blockchain-services/.env.example` for all options
-
----
-
-*DecentraLabs Gateway provides a complete, production-ready blockchain authentication system for decentralized laboratory access.*

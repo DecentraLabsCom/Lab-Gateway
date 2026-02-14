@@ -163,7 +163,7 @@ end
 local cert_days = cert_days_remaining("/etc/ssl/private/fullchain.pem")
 
 -- Env/config sanity
-local required_env = { "SERVER_NAME", "OPS_SECRET" }
+local required_env = { "SERVER_NAME", "LAB_MANAGER_TOKEN" }
 local env_ok = {}
 for _, k in ipairs(required_env) do
     env_ok[k] = (os.getenv(k) ~= nil and os.getenv(k) ~= "")

@@ -9,8 +9,7 @@
     // Token storage
     const TOKEN_STORAGE = {
         LAB_MANAGER: 'dlabs_lab_manager_token',
-        SECURITY: 'dlabs_security_token',
-        OPS: 'dlabs_ops_token'
+        TREASURY: 'dlabs_treasury_token'
     };
 
     // Token configuration based on path
@@ -19,29 +18,29 @@
             key: TOKEN_STORAGE.LAB_MANAGER,
             header: 'X-Lab-Manager-Token',
             cookie: 'lab_manager_token',
-            title: 'Lab Manager Access',
+            title: 'Lab Manager Access Token',
             description: 'This area requires a Lab Manager access token.'
         },
         '/wallet-dashboard': {
-            key: TOKEN_STORAGE.SECURITY,
+            key: TOKEN_STORAGE.TREASURY,
             header: 'X-Access-Token',
             cookie: 'access_token',
-            title: 'Security Access',
-            description: 'This area requires a security access token.'
+            title: 'Wallet/Treasury Access Token',
+            description: 'This area requires a Wallet/Treasury access token.'
         },
         '/institution-config': {
-            key: TOKEN_STORAGE.SECURITY,
+            key: TOKEN_STORAGE.TREASURY,
             header: 'X-Access-Token',
             cookie: 'access_token',
-            title: 'Security Access',
-            description: 'This area requires a security access token.'
+            title: 'Wallet/Treasury Access Token',
+            description: 'This area requires a Wallet/Treasury access token.'
         },
-        '/ops-api': {
-            key: TOKEN_STORAGE.OPS,
-            header: 'X-Ops-Token',
-            cookie: 'ops_token',
-            title: 'Ops API Access',
-            description: 'This area requires an Ops API access token.'
+        '/ops': {
+            key: TOKEN_STORAGE.LAB_MANAGER,
+            header: 'X-Lab-Manager-Token',
+            cookie: 'lab_manager_token',
+            title: 'Lab Manager Access Token',
+            description: 'This area requires a Lab Manager access token.'
         }
     };
 
@@ -210,6 +209,29 @@
         return null;
     }
 
+    function getRequestPath(url) {
+        try {
+            if (typeof url === 'string') {
+                return new URL(url, window.location.origin).pathname;
+            }
+            if (url && typeof url.url === 'string') {
+                return new URL(url.url, window.location.origin).pathname;
+            }
+        } catch (_) {
+            return window.location.pathname;
+        }
+        return window.location.pathname;
+    }
+
+    function setRequestHeader(options, name, value) {
+        options.headers = options.headers || {};
+        if (options.headers instanceof Headers) {
+            options.headers.set(name, value);
+            return;
+        }
+        options.headers[name] = value;
+    }
+
     // Enhanced fetch wrapper
     function createAuthenticatedFetch() {
         const originalFetch = window.fetch;
@@ -217,16 +239,14 @@
         window.fetch = function(...args) {
             let [url, options = {}] = args;
 
-            // Get current path
-            const currentPath = window.location.pathname;
-            const config = getTokenConfigForPath(currentPath);
+            const requestPath = getRequestPath(url);
+            const config = getTokenConfigForPath(requestPath) || getTokenConfigForPath(window.location.pathname);
 
             // Add stored token if available
             if (config) {
                 const storedToken = localStorage.getItem(config.key);
                 if (storedToken) {
-                    options.headers = options.headers || {};
-                    options.headers[config.header] = storedToken;
+                    setRequestHeader(options, config.header, storedToken);
                 }
             }
 
@@ -240,8 +260,7 @@
                             showTokenModal(config, (token) => {
                                 // Retry request with token
                                 const retryOptions = { ...options };
-                                retryOptions.headers = retryOptions.headers || {};
-                                retryOptions.headers[config.header] = token;
+                                setRequestHeader(retryOptions, config.header, token);
 
                                 originalFetch(url, retryOptions)
                                     .then(retryResponse => {

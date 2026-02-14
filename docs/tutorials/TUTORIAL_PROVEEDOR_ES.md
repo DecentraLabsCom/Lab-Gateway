@@ -6,7 +6,9 @@ Este tutorial explica como publicar y operar un laboratorio remoto con DecentraL
 
 - Gateway desplegado y saludable (`/health` y `/gateway/health`).
 - Acceso a credenciales admin de Guacamole.
-- Token valido para rutas protegidas (`SECURITY_ACCESS_TOKEN` y opcional `LAB_MANAGER_TOKEN`).
+- Tokens de acceso configurados por area:
+  - `TREASURY_TOKEN` para rutas de wallet/treasury.
+  - `LAB_MANAGER_TOKEN` para `/lab-manager` y `/ops`.
 - Inventario de hosts configurado en ops-worker si se requiere control remoto de energia/sesion.
 
 ## 2. Configurar conexiones Guacamole

@@ -64,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadConfig();
     loadAuthHealth();
+    checkOpsAvailability();
 
     // Lab Station ops state
     const hostInput = $('#hostInput');
@@ -418,6 +419,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ host })
             });
+            if (res.status === 403) {
+                showToast('Access denied: /ops restricted to private networks', 'error');
+                return;
+            }
+            if (res.status === 401) {
+                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             hostState[host] = data;
@@ -425,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Heartbeat ${host} ok`, 'success');
         } catch (err) {
             console.error(err);
-            showToast(`Heartbeat failed for ${host}`, 'error');
+            showToast(`Heartbeat failed for ${host}: ${err.message}`, 'error');
         }
     }
 
@@ -436,12 +445,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ host })
             });
+            if (res.status === 403) {
+                showToast('Access denied: /ops restricted to private networks', 'error');
+                return;
+            }
+            if (res.status === 401) {
+                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             showToast(`WoL ${host}: ${data.success ? 'sent' : 'failed'}`, data.success ? 'success' : 'error');
         } catch (err) {
             console.error(err);
-            showToast(`WoL failed for ${host}`, 'error');
+            showToast(`WoL failed for ${host}: ${err.message}`, 'error');
         }
     }
 
@@ -452,13 +469,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ host, command, args })
             });
+            if (res.status === 403) {
+                showToast('Access denied: /ops restricted to private networks', 'error');
+                return;
+            }
+            if (res.status === 401) {
+                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             const ok = data.exit_code === 0;
             showToast(`${command} on ${host}: ${ok ? 'ok' : 'err'}`, ok ? 'success' : 'error');
         } catch (err) {
             console.error(err);
-            showToast(`${command} failed on ${host}`, 'error');
+            showToast(`${command} failed on ${host}: ${err.message}`, 'error');
         }
     }
 
@@ -497,6 +522,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 offset: String(offset)
             });
             const res = await fetch(`/ops/api/reservations/timeline?${params.toString()}`);
+            if (res.status === 403) {
+                const msg = 'Access denied: /ops restricted to private networks';
+                if (!append) setTimelineMessage(msg);
+                showToast(msg, 'error');
+                return;
+            }
+            if (res.status === 401) {
+                const msg = 'Unauthorized: check LAB_MANAGER_TOKEN';
+                if (!append) setTimelineMessage(msg);
+                showToast(msg, 'error');
+                return;
+            }
             const body = await res.json();
             if (!res.ok) {
                 const msg = body?.error || `Unable to load timeline (HTTP ${res.status}).`;
@@ -902,4 +939,34 @@ document.addEventListener('DOMContentLoaded', () => {
         if (value === false) return 'missing';
         return 'unknown';
     }
-});
+    async function checkOpsAvailability() {
+        try {
+            const res = await fetch('/ops/health', { method: 'HEAD' });
+            if (res.status === 403) {
+                showOpsWarning();
+                return false;
+            }
+            return res.ok || res.status === 401; // 401 = token issue, not network
+        } catch {
+            return false;
+        }
+    }
+
+    function showOpsWarning() {
+        const opsHint = $('#opsHint');
+        if (opsHint) {
+            opsHint.innerHTML = `
+                <i class="fas fa-exclamation-triangle" style="color: #856404; margin-right: 8px;"></i>
+                <strong>Network restriction:</strong> Lab Station operations require access from the gateway server or private networks (127.0.0.1, 172.16.0.0/12).
+                Access /lab-manager from the institution network to enable these features.
+            `;
+            opsHint.style.backgroundColor = '#fff3cd';
+            opsHint.style.color = '#856404';
+            opsHint.style.padding = '12px';
+            opsHint.style.borderRadius = '4px';
+            opsHint.style.border = '1px solid #ffc107';
+        }
+        if (refreshHostsBtn) refreshHostsBtn.disabled = true;
+        if (addHostBtn) addHostBtn.disabled = true;
+        if (timelineBtn) timelineBtn.disabled = true;
+    }});

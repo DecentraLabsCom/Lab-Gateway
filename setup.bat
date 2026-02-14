@@ -158,74 +158,31 @@ call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_USER" "!guac_admin_user!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_PASS" "!guac_admin_pass!"
 echo.
 
-REM OPS Worker Secret
-echo OPS Worker Secret
-echo ==================
-echo This secret authenticates the ops-worker for lab station operations.
-set "ops_secret="
-set /p "ops_secret=OPS secret (leave empty for auto-generated): "
-set "ops_secret=!ops_secret: =!"
-
-if "!ops_secret!"=="" (
-    set "ops_secret=ops_%RANDOM%%RANDOM%%RANDOM%"
-    echo Generated OPS secret: !ops_secret!
-)
-if /i "!ops_secret!"=="supersecretvalue" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-if /i "!ops_secret!"=="changeme" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-if /i "!ops_secret!"=="change_me" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-if /i "!ops_secret!"=="password" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-if /i "!ops_secret!"=="test" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-
-call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_SECRET" "!ops_secret!"
-echo.
-
-REM Blockchain Services Access Token
-echo Blockchain Services Access Token
-echo =================================
-echo This token protects /wallet, /treasury, and /wallet-dashboard behind OpenResty.
+REM Wallet/Treasury Access Token
+echo Wallet/Treasury Access Token
+echo ============================
+echo This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/admin/** behind OpenResty.
 set "access_token="
-set /p "access_token=Access token (leave empty for auto-generated): "
+set /p "access_token=Wallet/Treasury token (leave empty for auto-generated): "
 set "access_token=!access_token: =!"
 
 if "!access_token!"=="" (
     set "access_token=acc_%RANDOM%%RANDOM%%RANDOM%"
-    echo Generated access token: !access_token!
+    echo Generated Wallet/Treasury token: !access_token!
 )
 
-call :UpdateEnvBoth "SECURITY_ACCESS_TOKEN" "!access_token!"
-call :UpdateEnvBoth "SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
-call :UpdateEnvBoth "SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
-call :UpdateEnvBoth "SECURITY_ACCESS_TOKEN_REQUIRED" "true"
+call :UpdateEnvBoth "TREASURY_TOKEN" "!access_token!"
+call :UpdateEnvBoth "TREASURY_TOKEN_HEADER" "X-Access-Token"
+call :UpdateEnvBoth "TREASURY_TOKEN_COOKIE" "access_token"
+call :UpdateEnvBoth "TREASURY_TOKEN_REQUIRED" "true"
 call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
-if exist "%BLOCKCHAIN_ENV_FILE%" (
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ACCESS_TOKEN" "!access_token!"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ACCESS_TOKEN_REQUIRED" "true"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-)
 echo.
 
 REM Lab Manager Access Token
 echo Lab Manager Access Token
 echo ========================
-echo This token protects /lab-manager when accessed outside private networks.
+echo This token protects /lab-manager and /ops when accessed outside private networks.
 set "lab_manager_token="
 set /p "lab_manager_token=Lab Manager token (leave empty for auto-generated): "
 set "lab_manager_token=!lab_manager_token: =!"
@@ -531,7 +488,7 @@ if /i "!domain!"=="localhost" (
         set "token_host=https://!domain!:!https_port!"
     )
 )
-echo    * Access token cookie: !token_host!/wallet-dashboard?token=!access_token!
+echo    * Wallet/Treasury token cookie: !token_host!/wallet-dashboard?token=!access_token!
 echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
 echo    * Guacamole: /guacamole/
 echo    * Blockchain Services API: /auth
@@ -589,7 +546,7 @@ if /i "!domain!"=="localhost" (
         set "token_host=https://!domain!:!https_port!"
     )
 )
-echo    * Access token cookie: !token_host!/wallet-dashboard?token=!access_token!
+echo    * Wallet/Treasury token cookie: !token_host!/wallet-dashboard?token=!access_token!
 echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
     echo    * Guacamole: /guacamole/ ^(!guac_admin_user! / !guac_admin_pass!^)
     echo    * Blockchain Services API: /auth

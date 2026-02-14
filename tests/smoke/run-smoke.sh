@@ -109,7 +109,7 @@ fi
 # Test 5: Ops endpoint accepts valid token
 # =================================================================
 echo "Test 5: Ops endpoint accepts valid token"
-OPS_OK=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -H "X-Ops-Token: test-ops-secret-123" -b "ops_token=test-ops-secret-123" https://lab.test:${PORT}/ops/health || true)
+OPS_OK=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -H "X-Lab-Manager-Token: test-ops-secret-123" -b "lab_manager_token=test-ops-secret-123" https://lab.test:${PORT}/ops/health || true)
 if echo "$OPS_OK" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' || [ "$OPS_OK" = "ops-worker-ok" ]; then
   log_pass "Ops endpoint accepts valid token"
 else

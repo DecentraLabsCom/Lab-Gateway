@@ -6,7 +6,9 @@ This tutorial explains how a lab provider can publish and operate a remote lab w
 
 - Gateway deployed and healthy (`/health` and `/gateway/health`).
 - Access to Guacamole admin credentials.
-- Valid token for protected routes (`SECURITY_ACCESS_TOKEN` and optional `LAB_MANAGER_TOKEN`).
+- Access tokens configured per area:
+  - `TREASURY_TOKEN` for wallet/treasury routes.
+  - `LAB_MANAGER_TOKEN` for `/lab-manager` and `/ops`.
 - Lab station host data configured for ops-worker if remote power/session control is required.
 
 ## 2. Configure Guacamole Connections

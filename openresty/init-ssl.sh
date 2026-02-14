@@ -208,7 +208,7 @@ fi
 echo "=== Starting OpenResty ==="
 
 # Export environment variables that nginx needs to access
-export OPS_SECRET="${OPS_SECRET:-}"
+export LAB_MANAGER_TOKEN="${LAB_MANAGER_TOKEN:-}"
 
 # Background watcher: reload OpenResty if cert/key change on disk
 watch_certs() {

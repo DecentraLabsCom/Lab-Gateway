@@ -12,12 +12,16 @@
             header: 'X-Lab-Manager-Token'
         },
         '/wallet-dashboard': {
-            key: 'dlabs_security_token',
+            key: 'dlabs_treasury_token',
             header: 'X-Access-Token'
         },
         '/institution-config': {
-            key: 'dlabs_security_token',
+            key: 'dlabs_treasury_token',
             header: 'X-Access-Token'
+        },
+        '/ops': {
+            key: 'dlabs_lab_manager_token',
+            header: 'X-Lab-Manager-Token'
         }
     };
 
@@ -30,6 +34,20 @@
             }
         }
         return null;
+    }
+
+    function getRequestPath(url) {
+        try {
+            if (typeof url === 'string') {
+                return new URL(url, window.location.origin).pathname;
+            }
+            if (url && typeof url.url === 'string') {
+                return new URL(url.url, window.location.origin).pathname;
+            }
+        } catch (_) {
+            return window.location.pathname;
+        }
+        return window.location.pathname;
     }
 
     // Extract token from URL SYNCHRONOUSLY on page load
@@ -62,7 +80,8 @@
     // Wrap fetch to add token header
     const originalFetch = window.fetch;
     window.fetch = function(url, options = {}) {
-        const config = getTokenConfigForPath(window.location.pathname);
+        const requestPath = getRequestPath(url);
+        const config = getTokenConfigForPath(requestPath) || getTokenConfigForPath(window.location.pathname);
         if (config) {
             const storedToken = localStorage.getItem(config.key);
             if (storedToken) {
