@@ -17,6 +17,6 @@
 
 ## Services
 
-* [Blockchain Services](blockchain-services/README.md)
+* [Blockchain Services](blockchain-services/SUMMARY.md)
 * [Ops Worker](ops-worker/README.md)
 * [Certbot Setup](certbot/README.md)
