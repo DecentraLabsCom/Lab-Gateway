@@ -15,13 +15,6 @@
 * [Lab Provider Tutorial (EN)](docs/tutorials/PROVIDER_TUTORIAL_EN.md)
 * [Tutorial Proveedor (ES)](docs/tutorials/TUTORIAL_PROVEEDOR_ES.md)
 
-## Project Delivery
-
-* [MoU Deliverables Status](docs/MOU_DELIVERABLES.md)
-* [Pilot Runbook](docs/pilots/PILOT_RUNBOOK.md)
-* [UNED Pilot Template](docs/pilots/UNED_PILOT_REPORT_TEMPLATE.md)
-* [Partner Pilot Template](docs/pilots/PARTNER_PILOT_REPORT_TEMPLATE.md)
-
 ## Services
 
 * [Blockchain Services](blockchain-services/README.md)
