@@ -356,7 +356,6 @@ if "!cf_enabled!"=="1" (
         set "https_port=443"
         set "http_port=80"
     )
-) else (
 )
 if "!cf_enabled!"=="1" (
     if not "!cf_token!"=="" (
