@@ -67,7 +67,7 @@ REM Check if .env already exists
 if exist "%ROOT_ENV_FILE%" (
     echo .env file already exists!
     set /p "overwrite=Do you want to overwrite it? (y/N): "
-    set "overwrite=!overwrite: =!"
+    if defined overwrite set "overwrite=!overwrite: =!"
     if /i "!overwrite!"=="y" (
         copy ".env.example" "%ROOT_ENV_FILE%" >nul
         echo Overwritten .env file from template
@@ -114,7 +114,7 @@ if "!mysql_root_password!"=="" (
 )
 if "!mysql_root_password!"=="" (
     set mysql_root_password=R00t_P@ss_%RANDOM%_%TIME:~9%
-    set mysql_root_password=!mysql_root_password: =!
+    if defined mysql_root_password set "mysql_root_password=!mysql_root_password: =!"
     echo Generated root password: !mysql_root_password!
 )
 
@@ -129,7 +129,7 @@ if "!mysql_password!"=="" (
 )
 if "!mysql_password!"=="" (
     set mysql_password=Gu@c_%RANDOM%_%TIME:~9%
-    set mysql_password=!mysql_password: =!
+    if defined mysql_password set "mysql_password=!mysql_password: =!"
     echo Generated database password: !mysql_password!
 )
 
@@ -147,7 +147,7 @@ if "!db_credentials_changed!"=="1" if defined mysql_volume_name (
     echo Detected existing MySQL volume: !mysql_volume_name!
     echo Database credentials changed in .env, so startup can fail with Access denied ^(1045^).
     set /p "reset_mysql_input=Reset MySQL volume now to apply new credentials? This removes MySQL data. (y/N): "
-    set "reset_mysql_input=!reset_mysql_input: =!"
+    if defined reset_mysql_input set "reset_mysql_input=!reset_mysql_input: =!"
     if /i "!reset_mysql_input!"=="y" (
         set "reset_mysql_volume=1"
         echo MySQL volume will be reset before startup.
@@ -179,7 +179,7 @@ set /p "guac_admin_pass=Guacamole admin password (leave empty for auto-generated
 if "!guac_admin_user!"=="" set "guac_admin_user=guacadmin"
 if "!guac_admin_pass!"=="" (
     set "guac_admin_pass=Guac_%RANDOM%_%TIME:~9%"
-    set "guac_admin_pass=!guac_admin_pass: =!"
+    if defined guac_admin_pass set "guac_admin_pass=!guac_admin_pass: =!"
     echo Generated Guacamole admin password: !guac_admin_pass!
 )
 if /i "!guac_admin_pass!"=="guacadmin" (
@@ -213,7 +213,7 @@ echo ============================
 echo This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/admin/** behind OpenResty.
 set "access_token="
 set /p "access_token=Wallet/Treasury token (leave empty for auto-generated): "
-set "access_token=!access_token: =!"
+if defined access_token set "access_token=!access_token: =!"
 if "!access_token!"=="=" set "access_token="
 if /i "!access_token!"=="CHANGE_ME" set "access_token="
 
@@ -236,7 +236,7 @@ echo ========================
 echo This token protects /lab-manager and /ops when accessed outside private networks.
 set "lab_manager_token="
 set /p "lab_manager_token=Lab Manager token (leave empty for auto-generated): "
-set "lab_manager_token=!lab_manager_token: =!"
+if defined lab_manager_token set "lab_manager_token=!lab_manager_token: =!"
 if "!lab_manager_token!"=="=" set "lab_manager_token="
 if /i "!lab_manager_token!"=="CHANGE_ME" set "lab_manager_token="
 
@@ -284,22 +284,22 @@ if /i "!domain!"=="localhost" (
     echo   1^) Direct - Gateway has a public IP ^(ports bound directly^)
     echo   2^) Router - Behind NAT/router with port forwarding ^(e.g., router:8043 -^> host:443^)
     set /p "deploy_mode=Choose [1/2] (default: 1): "
-    set "deploy_mode=!deploy_mode: =!"
+    if defined deploy_mode set "deploy_mode=!deploy_mode: =!"
     
     if "!deploy_mode!"=="2" (
         echo Router mode selected.
         call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         set /p "public_https=Public HTTPS port (the port clients use, e.g., 8043): "
-        set "public_https=!public_https: =!"
+        if defined public_https set "public_https=!public_https: =!"
         if "!public_https!"=="" set "public_https=443"
         set /p "local_https=Local HTTPS port to bind on this host (default: 443): "
-        set "local_https=!local_https: =!"
+        if defined local_https set "local_https=!local_https: =!"
         if "!local_https!"=="" set "local_https=443"
         set /p "public_http=Public HTTP port (default: 80): "
-        set "public_http=!public_http: =!"
+        if defined public_http set "public_http=!public_http: =!"
         if "!public_http!"=="" set "public_http=80"
         set /p "local_http=Local HTTP port to bind on this host (default: 80): "
-        set "local_http=!local_http: =!"
+        if defined local_http set "local_http=!local_http: =!"
         if "!local_http!"=="" set "local_http=80"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "!public_https!"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "!public_http!"
@@ -313,10 +313,10 @@ if /i "!domain!"=="localhost" (
         echo Direct mode selected.
         call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         set /p "direct_https=HTTPS port (default: 443): "
-        set "direct_https=!direct_https: =!"
+        if defined direct_https set "direct_https=!direct_https: =!"
         if "!direct_https!"=="" set "direct_https=443"
         set /p "direct_http=HTTP port (default: 80): "
-        set "direct_http=!direct_http: =!"
+        if defined direct_http set "direct_http=!direct_http: =!"
         if "!direct_http!"=="" set "direct_http=80"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "!direct_https!"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "!direct_http!"
@@ -334,14 +334,14 @@ echo Remote Access (Cloudflare Tunnel)
 echo =================================
 set "enable_cf="
 set /p "enable_cf=Enable Cloudflare Tunnel to expose the gateway without opening inbound ports? (y/N): "
-set "enable_cf=!enable_cf: =!"
+if defined enable_cf set "enable_cf=!enable_cf: =!"
 if /i "!enable_cf!"=="y" set "cf_enabled=1"
 if /i "!enable_cf!"=="yes" set "cf_enabled=1"
 
 if "!cf_enabled!"=="1" (
     set "cf_token="
     set /p "cf_token=Cloudflare Tunnel token (leave empty to use a Quick Tunnel): "
-    set "cf_token=!cf_token: =!"
+    if defined cf_token set "cf_token=!cf_token: =!"
     if not "!cf_token!"=="" (
         call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_TOKEN" "!cf_token!"
     ) else (
@@ -442,10 +442,10 @@ echo Certbot (Let's Encrypt) - optional automation
 echo ============================================
 set "cb_domains="
 set /p "cb_domains=Domains for TLS (comma-separated, leave empty to skip ACME): "
-set "cb_domains=%cb_domains: =%"
+if defined cb_domains set "cb_domains=!cb_domains: =!"
 set "cb_email="
 set /p "cb_email=Email for ACME (leave empty to skip ACME): "
-set "cb_email=%cb_email: =%"
+if defined cb_email set "cb_email=!cb_email: =!"
 if not "%cb_domains%"=="" if not "%cb_email%"=="" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "CERTBOT_DOMAINS" "%cb_domains%"
     call :UpdateEnv "%ROOT_ENV_FILE%" "CERTBOT_EMAIL" "%cb_email%"
