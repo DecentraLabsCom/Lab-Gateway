@@ -173,9 +173,10 @@ if [ -z "$mysql_password" ]; then
     fi
 fi
 
-# Update passwords in env files
-update_env_in_all "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
-update_env_in_all "MYSQL_PASSWORD" "$mysql_password"
+# Update passwords only in gateway env (.env). Standalone blockchain-services
+# uses BCHAIN_MYSQL_* keys in its own .env.
+update_env_var "$ROOT_ENV_FILE" "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
+update_env_var "$ROOT_ENV_FILE" "MYSQL_PASSWORD" "$mysql_password"
 
 if [ "$mysql_root_password" != "$existing_mysql_root_password" ] || [ "$mysql_password" != "$existing_mysql_password" ]; then
     db_credentials_changed=true
@@ -239,6 +240,11 @@ echo "============================"
 echo "This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/admin/** behind OpenResty."
 read -p "Wallet/Treasury token (leave empty for auto-generated): " access_token
 access_token=$(echo "$access_token" | tr -d ' ')
+case "$(printf '%s' "$access_token" | tr '[:upper:]' '[:lower:]')" in
+    ""|"="|changeme|change_me)
+        access_token=""
+        ;;
+esac
 
 if [ -z "$access_token" ]; then
     access_token="acc_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
@@ -259,6 +265,11 @@ echo "========================"
 echo "This token protects /lab-manager and /ops when accessed outside private networks."
 read -p "Lab Manager token (leave empty for auto-generated): " lab_manager_token
 lab_manager_token=$(echo "$lab_manager_token" | tr -d ' ')
+case "$(printf '%s' "$lab_manager_token" | tr '[:upper:]' '[:lower:]')" in
+    ""|"="|changeme|change_me)
+        lab_manager_token=""
+        ;;
+esac
 
 if [ -z "$lab_manager_token" ]; then
     lab_manager_token="lab_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
@@ -290,7 +301,6 @@ if [ "$domain" == "localhost" ]; then
     update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "127.0.0.1"
     update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTPS_PORT" "8443"
     update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "8081"
-    update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "local"
     echo "   * Server: https://localhost:8443"
     echo "   * Using development ports (8443/8081)"
 else
@@ -309,7 +319,6 @@ else
     
     if [ "$deploy_mode" == "2" ]; then
         echo "Router mode selected."
-        update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "router"
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         read -p "Public HTTPS port (the port clients use; default: 443): " public_https
         public_https=$(echo "$public_https" | tr -d ' ')
@@ -339,7 +348,6 @@ else
         echo "   * OpenResty will bind to 0.0.0.0 ($local_https/$local_http)"
     else
         echo "Direct mode selected."
-        update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "direct"
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         read -p "HTTPS port (default: 443): " direct_https
         direct_https=$(echo "$direct_https" | tr -d ' ')
@@ -367,7 +375,6 @@ read -p "Enable Cloudflare Tunnel to expose the gateway without opening inbound 
 enable_cf=$(echo "$enable_cf" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
 if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
     cf_enabled=true
-    update_env_var "$ROOT_ENV_FILE" "ENABLE_CLOUDFLARE" "true"
     read -p "Cloudflare Tunnel token (leave empty to use a Quick Tunnel): " cf_token
     cf_token=$(echo "$cf_token" | tr -d ' ')
     if [ -n "$cf_token" ]; then
@@ -383,7 +390,6 @@ if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "80"
     fi
 else
-    update_env_var "$ROOT_ENV_FILE" "ENABLE_CLOUDFLARE" "false"
 fi
 
 echo
@@ -409,7 +415,7 @@ else
         wallet_origin="https://${domain}:${https_port_value}"
     fi
 fi
-update_env_in_all "WALLET_ALLOWED_ORIGINS" "$wallet_origin"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "WALLET_ALLOWED_ORIGINS" "$wallet_origin"
 echo "Configured WALLET_ALLOWED_ORIGINS to ${wallet_origin}"
 
 echo
@@ -504,35 +510,35 @@ echo "================================="
 
 echo
 # Provider registration enabled by default (non-interactive).
-update_env_in_all "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 
 # Use CONTRACT_ADDRESS from blockchain-services/.env (no prompt)
 contract_default=$(get_env_default "CONTRACT_ADDRESS" "$BLOCKCHAIN_ENV_FILE")
 if [ -n "$contract_default" ]; then
-    update_env_in_all "CONTRACT_ADDRESS" "$contract_default"
-    update_env_in_all "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_default"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "CONTRACT_ADDRESS" "$contract_default"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_default"
 fi
 
-sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$ROOT_ENV_FILE")
+sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$BLOCKCHAIN_ENV_FILE")
 read -p "Comma-separated Sepolia RPC URLs [${sepolia_default:-https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app}]: " sepolia_rpc
 sepolia_rpc=${sepolia_rpc:-$sepolia_default}
 if [ -n "$sepolia_rpc" ]; then
-    update_env_in_all "ETHEREUM_SEPOLIA_RPC_URL" "$sepolia_rpc"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "ETHEREUM_SEPOLIA_RPC_URL" "$sepolia_rpc"
 fi
 
-allowed_origins_default=$(get_env_default "ALLOWED_ORIGINS" "$ROOT_ENV_FILE")
+allowed_origins_default=$(get_env_default "ALLOWED_ORIGINS" "$BLOCKCHAIN_ENV_FILE")
 read -p "Allowed origins for CORS [${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}]: " allowed_origins
 allowed_origins=${allowed_origins:-${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}}
 if [ -n "$allowed_origins" ]; then
-    update_env_in_all "ALLOWED_ORIGINS" "$allowed_origins"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "ALLOWED_ORIGINS" "$allowed_origins"
     update_env_var "$ROOT_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$allowed_origins"
 fi
 
-public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$ROOT_ENV_FILE")
+public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$BLOCKCHAIN_ENV_FILE")
 read -p "Marketplace public key URL [${public_key_url_default:-https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem}]: " marketplace_pk
 marketplace_pk=${marketplace_pk:-$public_key_url_default}
 if [ -n "$marketplace_pk" ]; then
-    update_env_in_all "MARKETPLACE_PUBLIC_KEY_URL" "$marketplace_pk"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "MARKETPLACE_PUBLIC_KEY_URL" "$marketplace_pk"
 fi
 
 if [ "$cf_enabled" = true ]; then
@@ -569,7 +575,6 @@ echo "This script does not create wallets automatically."
 echo "After the stack is running, create or import the institutional wallet"
 echo "using the blockchain-services web console (or the /wallet API) and then"
 echo "update INSTITUTIONAL_WALLET_ADDRESS / PASSWORD in:"
-echo "  - .env"
 echo "  - blockchain-services/.env"
 echo "Wallet data is stored in ./blockchain-data (already created)."
 
@@ -578,7 +583,7 @@ echo "Next Steps"
 echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
-echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, ETHEREUM_*_RPC_URL, INSTITUTIONAL_WALLET_*)"
+echo "3. Configure blockchain settings in blockchain-services/.env (CONTRACT_ADDRESS, ETHEREUM_*_RPC_URL, INSTITUTIONAL_WALLET_*)"
 echo "4. Run: $compose_full up -d"
 if [ "$cf_enabled" = true ]; then
     echo "5. Cloudflare tunnel: check '$compose_full logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
@@ -613,7 +618,7 @@ if [[ "$start_services" =~ ^[Nn]$ ]] || [[ "$start_services" =~ ^[Nn][Oo]$ ]]; t
     echo "Configuration complete!"
     echo
     echo "Next steps:"
-echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
+echo "1. Configure blockchain settings in blockchain-services/.env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
 echo "2. Run: $compose_full up -d"
     echo "3. Access your services"
     if [ "$cf_enabled" = true ]; then

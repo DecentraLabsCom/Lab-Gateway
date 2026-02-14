@@ -133,8 +133,8 @@ if "!mysql_password!"=="" (
     echo Generated database password: !mysql_password!
 )
 
-call :UpdateEnvBoth "MYSQL_ROOT_PASSWORD" "!mysql_root_password!"
-call :UpdateEnvBoth "MYSQL_PASSWORD" "!mysql_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "MYSQL_ROOT_PASSWORD" "!mysql_root_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "MYSQL_PASSWORD" "!mysql_password!"
 
 set "db_credentials_changed=0"
 if not "!mysql_root_password!"=="!existing_mysql_root_password!" set "db_credentials_changed=1"
@@ -214,6 +214,8 @@ echo This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/ad
 set "access_token="
 set /p "access_token=Wallet/Treasury token (leave empty for auto-generated): "
 set "access_token=!access_token: =!"
+if "!access_token!"=="=" set "access_token="
+if /i "!access_token!"=="CHANGE_ME" set "access_token="
 
 if "!access_token!"=="" (
     set "access_token=acc_%RANDOM%%RANDOM%%RANDOM%"
@@ -235,6 +237,8 @@ echo This token protects /lab-manager and /ops when accessed outside private net
 set "lab_manager_token="
 set /p "lab_manager_token=Lab Manager token (leave empty for auto-generated): "
 set "lab_manager_token=!lab_manager_token: =!"
+if "!lab_manager_token!"=="=" set "lab_manager_token="
+if /i "!lab_manager_token!"=="CHANGE_ME" set "lab_manager_token="
 
 if "!lab_manager_token!"=="" (
     set "lab_manager_token=lab_%RANDOM%%RANDOM%%RANDOM%"
@@ -265,7 +269,6 @@ if /i "!domain!"=="localhost" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "127.0.0.1"
     call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTPS_PORT" "8443"
     call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTP_PORT" "8081"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "local"
     set "https_port=8443"
     set "http_port=8081"
     echo    * Server: https://localhost:8443
@@ -285,7 +288,6 @@ if /i "!domain!"=="localhost" (
     
     if "!deploy_mode!"=="2" (
         echo Router mode selected.
-        call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "router"
         call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         set /p "public_https=Public HTTPS port (the port clients use, e.g., 8043): "
         set "public_https=!public_https: =!"
@@ -309,7 +311,6 @@ if /i "!domain!"=="localhost" (
         echo    * OpenResty will bind to 0.0.0.0:!local_https! and 0.0.0.0:!local_http!
     ) else (
         echo Direct mode selected.
-        call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "direct"
         call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         set /p "direct_https=HTTPS port (default: 443): "
         set "direct_https=!direct_https: =!"
@@ -338,7 +339,6 @@ if /i "!enable_cf!"=="y" set "cf_enabled=1"
 if /i "!enable_cf!"=="yes" set "cf_enabled=1"
 
 if "!cf_enabled!"=="1" (
-    call :UpdateEnv "%ROOT_ENV_FILE%" "ENABLE_CLOUDFLARE" "true"
     set "cf_token="
     set /p "cf_token=Cloudflare Tunnel token (leave empty to use a Quick Tunnel): "
     set "cf_token=!cf_token: =!"
@@ -357,7 +357,6 @@ if "!cf_enabled!"=="1" (
         set "http_port=80"
     )
 ) else (
-    call :UpdateEnv "%ROOT_ENV_FILE%" "ENABLE_CLOUDFLARE" "false"
 )
 if "!cf_enabled!"=="1" (
     if not "!cf_token!"=="" (
@@ -393,7 +392,7 @@ if /i "!domain!"=="localhost" (
         set "wallet_origin=https://!domain!:!https_port_value!"
     )
 )
-call :UpdateEnvBoth "WALLET_ALLOWED_ORIGINS" "!wallet_origin!"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "WALLET_ALLOWED_ORIGINS" "!wallet_origin!"
 echo Configured WALLET_ALLOWED_ORIGINS to !wallet_origin!
 
 REM Build complete compose command: base + files + profile
@@ -467,43 +466,43 @@ echo Blockchain Services Configuration
 echo ==================================
 echo.
 rem Provider registration enabled by default (non-interactive).
-call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
 if defined contract_default (
-    call :UpdateEnvBoth "CONTRACT_ADDRESS" "!contract_default!"
-    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_default!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" "!contract_default!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_default!"
 )
 
-call :ReadEnvValue "%ROOT_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
+call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
 if not defined sepolia_default set "sepolia_default=https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app"
 set /p "sepolia_rpc=Sepolia RPC URLs (comma separated) [!sepolia_default!]: "
 if "!sepolia_rpc!"=="" set "sepolia_rpc=!sepolia_default!"
 if not "!sepolia_rpc!"=="" (
-    call :UpdateEnvBoth "ETHEREUM_SEPOLIA_RPC_URL" "!sepolia_rpc!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" "!sepolia_rpc!"
 )
 
-call :ReadEnvValue "%ROOT_ENV_FILE%" "ALLOWED_ORIGINS" origins_default
+call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "ALLOWED_ORIGINS" origins_default
 if not defined origins_default set "origins_default=https://marketplace-decentralabs.vercel.app"
 set /p "allowed_origins=Allowed origins for CORS [!origins_default!]: "
 if "!allowed_origins!"=="" set "allowed_origins=!origins_default!"
 if not "!allowed_origins!"=="" (
-    call :UpdateEnvBoth "ALLOWED_ORIGINS" "!allowed_origins!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "ALLOWED_ORIGINS" "!allowed_origins!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "CORS_ALLOWED_ORIGINS" "!allowed_origins!"
 )
 
-call :ReadEnvValue "%ROOT_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" mpk_default
+call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" mpk_default
 if not defined mpk_default set "mpk_default=https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem"
 set /p "marketplace_pk=Marketplace public key URL [!mpk_default!]: "
 if "!marketplace_pk!"=="" set "marketplace_pk=!mpk_default!"
 if not "!marketplace_pk!"=="" (
-    call :UpdateEnvBoth "MARKETPLACE_PUBLIC_KEY_URL" "!marketplace_pk!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" "!marketplace_pk!"
 )
 
 echo.
 echo Institutional Wallet Reminder
 echo -----------------------------
 echo Wallet creation/import is handled inside the blockchain-services web console.
-echo After creating the wallet, update these variables in both %ROOT_ENV_FILE% and %BLOCKCHAIN_ENV_FILE%:
+echo After creating the wallet, update these variables in %BLOCKCHAIN_ENV_FILE%:
 echo    * INSTITUTIONAL_WALLET_ADDRESS
 echo    * INSTITUTIONAL_WALLET_PASSWORD
 echo Wallet data will be persisted in the blockchain-data\ directory.
@@ -513,7 +512,7 @@ echo Next Steps
 echo ==========
 echo 1. Review and customize %ROOT_ENV_FILE% if needed
 echo 2. Ensure SSL certificates and RSA keys are present in certs\
-echo 3. Review blockchain settings in %ROOT_ENV_FILE% and %BLOCKCHAIN_ENV_FILE%
+echo 3. Review blockchain contract/RPC/wallet settings in %BLOCKCHAIN_ENV_FILE%
 echo 4. Run: !compose_full! up -d
 if "!cf_enabled!"=="1" (
     echo 5. Cloudflare tunnel: check '!compose_full! logs !cf_service!' for the public hostname ^(or your configured tunnel token domain^).

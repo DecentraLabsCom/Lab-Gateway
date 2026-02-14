@@ -236,8 +236,6 @@ OPENRESTY_BIND_ADDRESS=0.0.0.0
 # OpenResty bind ports (local ports on the host)
 OPENRESTY_BIND_HTTPS_PORT=443
 OPENRESTY_BIND_HTTP_PORT=80
-# Deployment mode (informational)
-DEPLOY_MODE=direct
 
 # Host UID/GID for bind mounts (Linux/macOS)
 HOST_UID=1000
@@ -248,6 +246,7 @@ MYSQL_ROOT_PASSWORD=secure_password
 MYSQL_DATABASE=guacamole_db
 MYSQL_USER=guacamole_user
 MYSQL_PASSWORD=db_password
+BLOCKCHAIN_MYSQL_DATABASE=blockchain_services
 
 # Guacamole
 GUAC_ADMIN_USER=guacadmin
@@ -256,9 +255,6 @@ AUTO_LOGOUT_ON_DISCONNECT=true
 
 # OpenResty CORS allowlist (comma-separated, optional)
 CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
-
-# Wallet/Treasury CORS allowlist (blockchain-services)
-WALLET_ALLOWED_ORIGINS=https://your-domain
 
 # Lab Manager + Ops Worker
 LAB_MANAGER_TOKEN=your_lab_manager_token
@@ -272,12 +268,6 @@ TREASURY_TOKEN_COOKIE=access_token
 TREASURY_TOKEN_REQUIRED=true
 SECURITY_ALLOW_PRIVATE_NETWORKS=true
 ADMIN_DASHBOARD_ALLOW_PRIVATE=true
-
-# Treasury admin EIP-712 signature domain (optional overrides)
-TREASURY_ADMIN_DOMAIN_NAME=DecentraLabsTreasuryAdmin
-TREASURY_ADMIN_DOMAIN_VERSION=1
-TREASURY_ADMIN_DOMAIN_CHAIN_ID=11155111
-TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT=
 
 # Certbot / ACME (optional - for Let's Encrypt automation)
 CERTBOT_DOMAINS=yourdomain.com,www.yourdomain.com
@@ -313,15 +303,16 @@ environment. All authentication endpoints live under the fixed `/auth` base path
 Optional Cloudflare Tunnel settings (filled automatically if you opt in during setup):
 
 ```env
-ENABLE_CLOUDFLARE=true
 CLOUDFLARE_TUNNEL_TOKEN=your_cloudflare_tunnel_token_or_empty_for_quick_tunnel
 ```
+Runtime activation requires Compose profiles (`--profile cloudflare` or `--profile cloudflare-token`).
 
 #### Blockchain Service Configuration (`blockchain-services/.env`)
 
 ```env
 # Smart Contract
 CONTRACT_ADDRESS=0xYourSmartContractAddress
+TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT=0xYourSmartContractAddress
 
 # Network RPC URLs (with failover support)
 RPC_URL=https://1rpc.io/sepolia
@@ -332,7 +323,7 @@ INSTITUTIONAL_WALLET_ADDRESS=0xYourWalletAddress
 INSTITUTIONAL_WALLET_PASSWORD=YourSecurePassword
 
 # Security
-WALLET_ENCRYPTION_SALT=RandomString32CharsOrMore
+WALLET_ALLOWED_ORIGINS=https://gateway.example.com
 ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 ```
