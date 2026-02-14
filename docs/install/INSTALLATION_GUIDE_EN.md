@@ -1,15 +1,12 @@
 # Installation Guide (English)
 
-This guide consolidates installation options for DecentraLabs Gateway.
+This guide consolidates the supported installation options for DecentraLabs Gateway.
 
 ## 1. Choose a Deployment Mode
 
 1. Setup script: `setup.sh` / `setup.bat` (recommended first deployment).
 2. Docker Compose manual mode.
-3. Nix wrapper for compose (`nix run .#lab-gateway-docker`).
-4. NixOS compose-managed host (`#gateway`).
-5. NixOS componentized host (`#gateway-components`).
-6. Deterministic deployment bundle image (`.#lab-gateway-bundle-image`).
+3. NixOS compose-managed host (`#gateway`).
 
 ## 2. Prerequisites
 
@@ -21,8 +18,8 @@ This guide consolidates installation options for DecentraLabs Gateway.
 
 Optional:
 
-- Nix (for modes 3, 4, 5)
-- NixOS host (for modes 4, 5)
+- Nix (for mode 3)
+- NixOS host (for mode 3)
 
 ## 3. Common Initial Setup
 
@@ -59,37 +56,14 @@ docker compose ps
 docker compose logs -f openresty
 ```
 
-## 6. Mode C: Nix Wrapper for Compose
-
-```bash
-nix run .#lab-gateway-docker -- --project-dir "$PWD" --env-file "$PWD/.env" up -d --build
-```
-
-Stop:
-
-```bash
-nix run .#lab-gateway-docker -- --project-dir "$PWD" --env-file "$PWD/.env" down
-```
-
-## 7. Mode D: NixOS Compose-managed Host
+## 6. Mode C: NixOS Compose-managed Host
 
 ```bash
 sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway
 systemctl status lab-gateway.service
 ```
 
-## 8. Mode E: NixOS Componentized Host
-
-```bash
-sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway-components
-systemctl status docker-openresty.service
-```
-
-If reservation automation is needed in this mode, set:
-
-- `services.lab-gateway-components.opsMysqlDsn`
-
-## 9. Post-install Validation
+## 7. Post-install Validation
 
 ```bash
 curl -k https://127.0.0.1/health
@@ -103,26 +77,9 @@ Optional tests:
 ./tests/smoke/run-smoke.sh
 ```
 
-## 10. Troubleshooting
+## 8. Troubleshooting
 
 - Submodule not initialized: run `git submodule update --init --recursive`.
 - Missing cert files: add certs or use self-signed local fallback.
 - Permission issues on bind mounts: verify ownership for `certs/` and `blockchain-data/`.
-- Service not reachable: inspect `docker compose logs -f` or `journalctl -u docker-openresty -f` (NixOS componentized mode).
-
-## 11. Deterministic Bundle Image (Non-NixOS)
-
-Build:
-
-```bash
-nix build .#lab-gateway-bundle-image
-```
-
-Load and run with host Docker socket:
-
-```bash
-docker load < result
-docker run --rm -it \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  lab-gateway-bundle:nix up -d --build
-```
+- Service not reachable: inspect `docker compose logs -f` or `journalctl -u lab-gateway.service -f` (NixOS mode).

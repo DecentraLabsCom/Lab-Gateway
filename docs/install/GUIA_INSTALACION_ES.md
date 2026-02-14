@@ -1,15 +1,12 @@
 # Guia de Instalacion (Espanol)
 
-Esta guia resume las modalidades de despliegue del DecentraLabs Gateway.
+Esta guia resume las modalidades soportadas de despliegue del DecentraLabs Gateway.
 
 ## 1. Elegir modalidad
 
 1. Script de setup: `setup.sh` / `setup.bat` (recomendado en primera instalacion).
 2. Docker Compose manual.
-3. Wrapper Nix para compose (`nix run .#lab-gateway-docker`).
-4. Host NixOS gestionado con compose (`#gateway`).
-5. Host NixOS por componentes OCI (`#gateway-components`).
-6. Imagen bundle determinista de despliegue (`.#lab-gateway-bundle-image`).
+3. Host NixOS gestionado con compose (`#gateway`).
 
 ## 2. Requisitos previos
 
@@ -21,8 +18,8 @@ Esta guia resume las modalidades de despliegue del DecentraLabs Gateway.
 
 Opcional:
 
-- Nix (modos 3, 4 y 5)
-- Host NixOS (modos 4 y 5)
+- Nix (modo 3)
+- Host NixOS (modo 3)
 
 ## 3. Preparacion comun
 
@@ -59,37 +56,14 @@ docker compose ps
 docker compose logs -f openresty
 ```
 
-## 6. Modo C: Wrapper Nix para Compose
-
-```bash
-nix run .#lab-gateway-docker -- --project-dir "$PWD" --env-file "$PWD/.env" up -d --build
-```
-
-Parar:
-
-```bash
-nix run .#lab-gateway-docker -- --project-dir "$PWD" --env-file "$PWD/.env" down
-```
-
-## 7. Modo D: Host NixOS gestionado con compose
+## 6. Modo C: Host NixOS gestionado con compose
 
 ```bash
 sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway
 systemctl status lab-gateway.service
 ```
 
-## 8. Modo E: Host NixOS por componentes OCI
-
-```bash
-sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway-components
-systemctl status docker-openresty.service
-```
-
-Si necesitas automatizacion de reservas en este modo, define:
-
-- `services.lab-gateway-components.opsMysqlDsn`
-
-## 9. Validacion post-instalacion
+## 7. Validacion post-instalacion
 
 ```bash
 curl -k https://127.0.0.1/health
@@ -103,26 +77,9 @@ Pruebas opcionales:
 ./tests/smoke/run-smoke.sh
 ```
 
-## 10. Resolucion de problemas
+## 8. Resolucion de problemas
 
 - Submodulo no inicializado: ejecutar `git submodule update --init --recursive`.
 - Faltan certificados: agregar certs o usar fallback local autosignado.
 - Permisos en bind mounts: revisar propietario de `certs/` y `blockchain-data/`.
-- Servicio no accesible: revisar `docker compose logs -f` o `journalctl -u docker-openresty -f` (modo NixOS por componentes).
-
-## 11. Imagen Bundle Determinista (No-NixOS)
-
-Construir:
-
-```bash
-nix build .#lab-gateway-bundle-image
-```
-
-Cargar y ejecutar usando el socket Docker del host:
-
-```bash
-docker load < result
-docker run --rm -it \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  lab-gateway-bundle:nix up -d --build
-```
+- Servicio no accesible: revisar `docker compose logs -f` o `journalctl -u lab-gateway.service -f` (modo NixOS).
