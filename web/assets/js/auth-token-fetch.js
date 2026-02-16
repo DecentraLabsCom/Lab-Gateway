@@ -11,25 +11,68 @@
             key: 'dlabs_lab_manager_token',
             header: 'X-Lab-Manager-Token'
         },
+        '/ops': {
+            key: 'dlabs_lab_manager_token',
+            header: 'X-Lab-Manager-Token'
+        },
+        '/wallet': {
+            key: 'dlabs_treasury_token',
+            header: 'X-Access-Token'
+        },
+        '/treasury': {
+            key: 'dlabs_treasury_token',
+            header: 'X-Access-Token'
+        },
         '/wallet-dashboard': {
-            key: 'dlabs_security_token',
+            key: 'dlabs_treasury_token',
             header: 'X-Access-Token'
         },
         '/institution-config': {
-            key: 'dlabs_security_token',
+            key: 'dlabs_treasury_token',
             header: 'X-Access-Token'
         }
     };
 
+    function isUsableToken(value) {
+        if (typeof value !== 'string') {
+            return false;
+        }
+        const token = value.trim();
+        if (!token || token === '=') {
+            return false;
+        }
+        const lower = token.toLowerCase();
+        return lower !== 'change_me' && lower !== 'changeme';
+    }
+
     function getTokenConfigForPath(path) {
         const normalizedPath = path.endsWith('/') && path !== '/' ? path.slice(0, -1) : path;
+        let bestMatch = null;
+        let bestMatchLength = -1;
         for (const [prefix, config] of Object.entries(TOKEN_CONFIG)) {
             const normalizedPrefix = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
             if (normalizedPath.startsWith(normalizedPrefix)) {
-                return config;
+                if (normalizedPrefix.length > bestMatchLength) {
+                    bestMatch = config;
+                    bestMatchLength = normalizedPrefix.length;
+                }
             }
         }
-        return null;
+        return bestMatch;
+    }
+
+    function getRequestPath(url) {
+        try {
+            if (typeof url === 'string') {
+                return new URL(url, window.location.origin).pathname;
+            }
+            if (url && typeof url.url === 'string') {
+                return new URL(url.url, window.location.origin).pathname;
+            }
+        } catch (_) {
+            return window.location.pathname;
+        }
+        return window.location.pathname;
     }
 
     // Extract token from URL SYNCHRONOUSLY on page load
@@ -52,7 +95,7 @@
             const config = getTokenConfigForPath(window.location.pathname);
             if (config) {
                 const stored = localStorage.getItem(config.key);
-                console.log('[AuthToken] Token in localStorage:', stored ? 'YES' : 'NO');
+                console.log('[AuthToken] Token in localStorage:', isUsableToken(stored) ? 'YES' : 'NO');
             }
         }
     } catch (e) {
@@ -62,10 +105,11 @@
     // Wrap fetch to add token header
     const originalFetch = window.fetch;
     window.fetch = function(url, options = {}) {
-        const config = getTokenConfigForPath(window.location.pathname);
+        const requestPath = getRequestPath(url);
+        const config = getTokenConfigForPath(requestPath) || getTokenConfigForPath(window.location.pathname);
         if (config) {
             const storedToken = localStorage.getItem(config.key);
-            if (storedToken) {
+            if (isUsableToken(storedToken)) {
                 // Firefox compatibility: Handle both Headers instances and plain objects
                 if (!options.headers) {
                     options.headers = {};

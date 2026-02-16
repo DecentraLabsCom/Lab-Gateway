@@ -23,7 +23,7 @@ cat > "${OPENRESTY_DIR}/Dockerfile.test" << 'EOF'
 FROM openresty/openresty:alpine
 
 # Install luarocks and cjson
-RUN apk add --no-cache luarocks5.1 && \
+RUN apk add --no-cache luarocks5.1 lua5.1-dev gcc musl-dev && \
     luarocks-5.1 install lua-cjson
 
 WORKDIR /app
@@ -42,10 +42,10 @@ echo ""
 
 # Run tests in container
 docker run --rm \
-    -v "${OPENRESTY_DIR}:/app:ro" \
-    -w /app \
+    -v "$(dirname "$OPENRESTY_DIR"):/workspace:ro" \
+    -w /workspace \
     openresty-lua-tests \
-    luajit tests/run.lua
+    luajit openresty/tests/run.lua
 
 EXIT_CODE=$?
 

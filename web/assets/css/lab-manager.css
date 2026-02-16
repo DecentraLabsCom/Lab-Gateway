@@ -106,6 +106,35 @@ body {
 }
 .pill.soft { background: var(--pill-soft); }
 
+.pill.token-required-action {
+    cursor: pointer;
+    border-color: var(--warning);
+    color: var(--warning);
+    box-shadow: 0 0 0 0 rgba(246, 195, 68, 0.35);
+    animation: token-pill-pulse 2.2s ease-in-out infinite;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.pill.token-required-action:hover,
+.pill.token-required-action:focus-visible {
+    transform: translateY(-1px);
+    border-color: #ffd26c;
+    box-shadow: 0 0 0 4px rgba(246, 195, 68, 0.18);
+    outline: none;
+}
+
+@keyframes token-pill-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(246, 195, 68, 0.34);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(246, 195, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(246, 195, 68, 0);
+    }
+}
+
 .form-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

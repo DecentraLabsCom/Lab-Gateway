@@ -26,9 +26,11 @@ trap 'forward_signal INT' INT
 # Wait for MySQL to be ready before running the ensure-user script
 if [[ -f "${ENSURE_SCRIPT}" ]]; then
   echo "Waiting for MySQL to be ready before ensuring user permissions..."
-  
-  # Wait up to 60 seconds for MySQL to be ready
-  for i in {1..60}; do
+
+  max_wait="${MYSQL_ENSURE_USER_WAIT_SECONDS:-180}"
+
+  # Wait up to max_wait seconds for MySQL to be ready
+  for (( i=1; i<=max_wait; i++ )); do
     if mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
       echo "MySQL is ready. Waiting for Guacamole schema..."
       waited=0
@@ -65,8 +67,9 @@ if [[ -f "${ENSURE_SCRIPT}" ]]; then
       break
     fi
     
-    if [[ $i -eq 60 ]]; then
-      echo "Warning: MySQL did not become ready in time. Ensure-user script not executed." >&2
+    if [[ $i -eq $max_wait ]]; then
+      echo "Warning: MySQL did not become ready in ${max_wait}s. Ensure-user script not executed." >&2
+      echo "Hint: if mysql_data already exists, verify .env MYSQL_ROOT_PASSWORD matches the stored root password." >&2
     fi
     
     sleep 1

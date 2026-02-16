@@ -1,142 +1,68 @@
-# Logging Configuration
+# Logging Guide
 
-## 📋 Log Configuration Summary
+This project uses Docker `json-file` logging with per-service rotation in `docker-compose.yml`.
 
-| Service       | Max Size | Max Files | Total Storage | Description                     |
-| ------------- | -------- | --------- | ------------- | ------------------------------- |
-| **MySQL**     | 10MB     | 3         | \~30MB        | Database logs and queries       |
-| **Guacd**     | 5MB      | 3         | \~15MB        | Protocol daemon logs            |
-| **Guacamole** | 20MB     | 5         | \~100MB       | Application logs (most verbose) |
-| **OpenResty** | 10MB     | 5         | \~50MB        | Access logs and proxy logs      |
+## Rotation limits
 
-**Total Maximum Log Storage**: \~195MB
+| Service | max-size | max-file | Approx max |
+| --- | --- | --- | --- |
+| `blockchain-services` | `20m` | `5` | ~100 MB |
+| `openresty` | `10m` | `5` | ~50 MB |
+| `mysql` | `10m` | `3` | ~30 MB |
+| `guacamole` | `20m` | `5` | ~100 MB |
+| `guacd` | `5m` | `3` | ~15 MB |
+| `ops-worker` | `10m` | `3` | ~30 MB |
 
-## 🔍 Useful Logging Commands
+Estimated capped total (configured services): ~325 MB.
 
-### View Live Logs
-
-```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f openresty
-docker-compose logs -f guacamole
-docker-compose logs -f mysql
-docker-compose logs -f guacd
-
-# Last N lines
-docker-compose logs --tail=50 openresty
-```
-
-### Filter Logs by Time
+## Common commands
 
 ```bash
-# Since timestamp
-docker-compose logs mysql --since="2024-01-01T10:00:00"
+# All services (follow)
+docker compose logs -f
 
-# Last 10 minutes
-docker-compose logs guacamole --since="10m"
+# One service
+docker compose logs -f openresty
 
-# Last hour
-docker-compose logs --since="1h"
+# Last lines
+docker compose logs --tail=100 guacamole
+
+# Time window
+docker compose logs --since=10m
 ```
 
-### Search in Logs
+## Search examples
+
+PowerShell:
+
+```powershell
+docker compose logs | Select-String -Pattern "error|failed|exception" -CaseSensitive:$false
+docker compose logs openresty | Select-String -Pattern "jwt|token|auth" -CaseSensitive:$false
+```
+
+Bash:
 
 ```bash
-# PowerShell - Search for errors
-docker-compose logs | Select-String -Pattern "error|failed|exception" -CaseSensitive:$false
-
-# PowerShell - Search for specific patterns
-docker-compose logs openresty | Select-String -Pattern "JWT|auth|token"
-docker-compose logs mysql | Select-String -Pattern "connection|query"
+docker compose logs | grep -Ei "error|failed|exception"
+docker compose logs openresty | grep -Ei "jwt|token|auth"
 ```
 
-### Log File Locations
+## Export logs
 
-Log files are stored in Docker's default location:
+PowerShell:
 
-* **Windows**: `C:\ProgramData\docker\containers\<container-id>\<container-id>-json.log`
-* **Linux**: `/var/lib/docker/containers/<container-id>/<container-id>-json.log`
+```powershell
+docker compose logs > gateway-logs-$(Get-Date -Format "yyyy-MM-dd").log
+```
 
-### Export Logs
+Bash:
 
 ```bash
-# Export all logs to file
-docker-compose logs > gateway-logs-$(Get-Date -Format "yyyy-MM-dd").log
-
-# Export specific service logs
-docker-compose logs openresty > openresty-logs-$(Get-Date -Format "yyyy-MM-dd").log
+docker compose logs > gateway-logs-$(date +%F).log
 ```
 
-## ⚠️ Log Rotation
+## Notes
 
-The logging configuration automatically rotates logs when:
-
-* File size exceeds the `max-size` limit
-* Number of files exceeds `max-file` limit
-
-Oldest logs are automatically deleted to maintain storage limits.
-
-## 🔧 Advanced Logging Options
-
-### Enable Debug Logging (Development)
-
-Add to specific service in docker-compose.yml:
-
-```yaml
-environment:
-  - LOG_LEVEL=DEBUG
-```
-
-### Send Logs to External System
-
-For production, consider:
-
-* **Fluentd**: For centralized logging
-* **ELK Stack**: Elasticsearch, Logstash, Kibana
-* **Splunk**: Enterprise logging solution
-
-Example with Fluentd:
-
-```yaml
-logging:
-  driver: "fluentd"
-  options:
-    fluentd-address: "localhost:24224"
-    tag: "gateway.{{.Name}}"
-```
-
-## 🚨 Log Monitoring
-
-### Critical Patterns to Monitor
-
-* `ERROR`, `FATAL`, `CRITICAL`
-* `Authentication failed`
-* `Connection refused`
-* `Out of memory`
-* `Database connection lost`
-* `SSL/TLS errors`
-
-### Health Check via Logs
-
-```bash
-# Check for recent errors (last 5 minutes)
-docker-compose logs --since="5m" | Select-String -Pattern "error|failed|fatal" -CaseSensitive:$false
-```
-
-## 📈 Log Analysis
-
-### Common Log Queries
-
-```bash
-# Count error occurrences
-docker-compose logs | Select-String -Pattern "error" -CaseSensitive:$false | Measure-Object
-
-# Find authentication attempts
-docker-compose logs openresty | Select-String -Pattern "JWT|auth" -CaseSensitive:$false
-
-# Monitor MySQL performance
-docker-compose logs mysql | Select-String -Pattern "slow query|performance|timeout"
-```
+- Rotation deletes older files automatically after the limits above.
+- Host log file locations are Docker defaults (`/var/lib/docker/containers/...` on Linux).
+- For production centralization, use a logging driver (for example `fluentd`) in compose.

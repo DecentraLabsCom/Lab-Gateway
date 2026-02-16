@@ -7,6 +7,24 @@ function escapeHtml(str) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    const TREASURY_TOKEN_STORAGE_KEY = 'dlabs_treasury_token';
+
+    function isUsableToken(value) {
+        if (typeof value !== 'string') return false;
+        const token = value.trim();
+        if (!token || token === '=') return false;
+        const lower = token.toLowerCase();
+        return lower !== 'change_me' && lower !== 'changeme';
+    }
+
+    function hasTreasuryToken() {
+        try {
+            return isUsableToken(localStorage.getItem(TREASURY_TOKEN_STORAGE_KEY));
+        } catch (_) {
+            return false;
+        }
+    }
+
     const driverEl = $('#driver');
     const enabledEl = $('#enabled');
     const fromEl = $('#from');
@@ -35,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const graphClientSecretEl = $('#graphClientSecret');
     const graphFromEl = $('#graphFrom');
     const driverSummary = $('#driverSummary');
+    const configStatusEl = $('#configStatus');
 
     // Auth/health elements
     const authStatusPill = $('#authStatusPill');
@@ -55,7 +74,16 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#saveConfigBtn').addEventListener('click', saveConfig);
     $('#btnTestEmail').addEventListener('click', sendTestEmail);
     driverEl.addEventListener('change', toggleSections);
-    configureBtn.addEventListener('click', openModal);
+    configureBtn.addEventListener('click', () => {
+        if (!hasTreasuryToken()) {
+            promptTreasuryToken(() => {
+                loadConfig();
+                openModal();
+            });
+            return;
+        }
+        openModal();
+    });
     closeModalBtn.addEventListener('click', closeModal);
     cancelModalBtn.addEventListener('click', closeModal);
     if (authRefreshBtn) {
@@ -64,6 +92,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadConfig();
     loadAuthHealth();
+    checkOpsAvailability();
+    updateTreasuryStatusAction();
 
     // Lab Station ops state
     const hostInput = $('#hostInput');
@@ -110,7 +140,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function loadConfig() {
+        if (!hasTreasuryToken()) {
+            setStatus('Treasury token not configured');
+            updateTreasuryStatusAction();
+            return;
+        }
+
         setStatus('Loading...');
+        updateTreasuryStatusAction();
         fetch('/treasury/admin/notifications', { credentials: 'include' })
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -140,16 +177,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 toggleSections();
                 updateDriverSummary();
                 setStatus('Loaded');
+                updateTreasuryStatusAction();
                 showToast('Configuration loaded', 'success');
             })
             .catch(err => {
                 console.error(err);
                 setStatus('Error');
+                updateTreasuryStatusAction();
                 showToast('Cannot load config (check admin access)', 'error');
             });
     }
 
     function saveConfig() {
+        if (!hasTreasuryToken()) {
+            showToast('Wallet/Treasury token required for notifications', 'error');
+            return;
+        }
+
         const payload = {
             enabled: enabledEl.checked,
             driver: driverEl.value,
@@ -249,10 +293,71 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setStatus(text) {
-        $('#configStatus').textContent = text;
+        if (configStatusEl) {
+            configStatusEl.textContent = text;
+        }
+    }
+
+    function promptTreasuryToken(onSuccess) {
+        const handler = window.AuthTokenHandler;
+        if (!handler || typeof handler.showTokenModal !== 'function') {
+            showToast('Token modal unavailable on this page', 'error');
+            return;
+        }
+
+        let config = null;
+        if (typeof handler.getTokenConfigForPath === 'function') {
+            config = handler.getTokenConfigForPath('/treasury/admin/notifications');
+        }
+        if (!config) {
+            config = {
+                key: TREASURY_TOKEN_STORAGE_KEY,
+                header: 'X-Access-Token',
+                cookie: 'access_token',
+                title: 'Wallet/Treasury Access Token',
+                description: 'This area requires a Wallet/Treasury access token.'
+            };
+        }
+
+        handler.showTokenModal(config, () => {
+            if (typeof onSuccess === 'function') {
+                onSuccess();
+            }
+        });
+    }
+
+    function updateTreasuryStatusAction() {
+        if (!configStatusEl) {
+            return;
+        }
+        const needsToken = !hasTreasuryToken();
+        configStatusEl.classList.toggle('token-required-action', needsToken);
+        configStatusEl.title = needsToken ? 'Click to enter Wallet/Treasury token' : '';
+        configStatusEl.setAttribute('aria-disabled', needsToken ? 'false' : 'true');
+    }
+
+    if (configStatusEl) {
+        configStatusEl.setAttribute('role', 'button');
+        configStatusEl.tabIndex = 0;
+        configStatusEl.addEventListener('click', () => {
+            if (!hasTreasuryToken()) {
+                promptTreasuryToken(() => loadConfig());
+            }
+        });
+        configStatusEl.addEventListener('keydown', (e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && !hasTreasuryToken()) {
+                e.preventDefault();
+                promptTreasuryToken(() => loadConfig());
+            }
+        });
     }
 
     function sendTestEmail() {
+        if (!hasTreasuryToken()) {
+            showToast('Wallet/Treasury token required for notifications', 'error');
+            return;
+        }
+
         fetch('/treasury/admin/notifications/test', {
             method: 'POST',
             credentials: 'include'
@@ -418,6 +523,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ host })
             });
+            if (res.status === 403) {
+                showToast('Access denied: /ops restricted to private networks', 'error');
+                return;
+            }
+            if (res.status === 401) {
+                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             hostState[host] = data;
@@ -425,7 +538,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Heartbeat ${host} ok`, 'success');
         } catch (err) {
             console.error(err);
-            showToast(`Heartbeat failed for ${host}`, 'error');
+            showToast(`Heartbeat failed for ${host}: ${err.message}`, 'error');
         }
     }
 
@@ -436,12 +549,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ host })
             });
+            if (res.status === 403) {
+                showToast('Access denied: /ops restricted to private networks', 'error');
+                return;
+            }
+            if (res.status === 401) {
+                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             showToast(`WoL ${host}: ${data.success ? 'sent' : 'failed'}`, data.success ? 'success' : 'error');
         } catch (err) {
             console.error(err);
-            showToast(`WoL failed for ${host}`, 'error');
+            showToast(`WoL failed for ${host}: ${err.message}`, 'error');
         }
     }
 
@@ -452,13 +573,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ host, command, args })
             });
+            if (res.status === 403) {
+                showToast('Access denied: /ops restricted to private networks', 'error');
+                return;
+            }
+            if (res.status === 401) {
+                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             const ok = data.exit_code === 0;
             showToast(`${command} on ${host}: ${ok ? 'ok' : 'err'}`, ok ? 'success' : 'error');
         } catch (err) {
             console.error(err);
-            showToast(`${command} failed on ${host}`, 'error');
+            showToast(`${command} failed on ${host}: ${err.message}`, 'error');
         }
     }
 
@@ -497,6 +626,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 offset: String(offset)
             });
             const res = await fetch(`/ops/api/reservations/timeline?${params.toString()}`);
+            if (res.status === 403) {
+                const msg = 'Access denied: /ops restricted to private networks';
+                if (!append) setTimelineMessage(msg);
+                showToast(msg, 'error');
+                return;
+            }
+            if (res.status === 401) {
+                const msg = 'Unauthorized: check LAB_MANAGER_TOKEN';
+                if (!append) setTimelineMessage(msg);
+                showToast(msg, 'error');
+                return;
+            }
             const body = await res.json();
             if (!res.ok) {
                 const msg = body?.error || `Unable to load timeline (HTTP ${res.status}).`;
@@ -902,4 +1043,34 @@ document.addEventListener('DOMContentLoaded', () => {
         if (value === false) return 'missing';
         return 'unknown';
     }
-});
+    async function checkOpsAvailability() {
+        try {
+            const res = await fetch('/ops/health', { method: 'HEAD' });
+            if (res.status === 403) {
+                showOpsWarning();
+                return false;
+            }
+            return res.ok || res.status === 401; // 401 = token issue, not network
+        } catch {
+            return false;
+        }
+    }
+
+    function showOpsWarning() {
+        const opsHint = $('#opsHint');
+        if (opsHint) {
+            opsHint.innerHTML = `
+                <i class="fas fa-exclamation-triangle" style="color: #856404; margin-right: 8px;"></i>
+                <strong>Network restriction:</strong> Lab Station operations require access from the gateway server or private networks (127.0.0.1, 172.16.0.0/12).
+                Access /lab-manager from the institution network to enable these features.
+            `;
+            opsHint.style.backgroundColor = '#fff3cd';
+            opsHint.style.color = '#856404';
+            opsHint.style.padding = '12px';
+            opsHint.style.borderRadius = '4px';
+            opsHint.style.border = '1px solid #ffc107';
+        }
+        if (refreshHostsBtn) refreshHostsBtn.disabled = true;
+        if (addHostBtn) addHostBtn.disabled = true;
+        if (timelineBtn) timelineBtn.disabled = true;
+    }});

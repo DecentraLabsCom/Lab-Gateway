@@ -183,7 +183,7 @@ fi
 # Test 9: Ops endpoint accepts valid token
 # =================================================================
 echo "Test 9: Ops endpoint with valid token"
-OPS_WITH_TOKEN=$(curl -sk -H "X-Ops-Token: integration-test-secret" "${BASE_URL}/ops/health" || echo "error")
+OPS_WITH_TOKEN=$(curl -sk -H "X-Lab-Manager-Token: integration-test-secret" "${BASE_URL}/ops/health" || echo "error")
 if echo "$OPS_WITH_TOKEN" | grep -q "ok\|status"; then
   log_pass "Ops endpoint accepts valid token"
 else

@@ -12,6 +12,11 @@ set "compose_files="
 set "compose_full="
 set "cf_enabled=0"
 set "certbot_enabled=0"
+set "existing_mysql_root_password="
+set "existing_mysql_password="
+set "db_credentials_changed=0"
+set "reset_mysql_volume=0"
+set "mysql_volume_name="
 
 echo DecentraLabs Gateway - Full Version Setup
 echo ==========================================
@@ -55,11 +60,14 @@ if errorlevel 1 (
 echo blockchain-services submodule ready.
 echo.
 
+call :ReadEnvValue "%ROOT_ENV_FILE%" "MYSQL_ROOT_PASSWORD" existing_mysql_root_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "MYSQL_PASSWORD" existing_mysql_password
+
 REM Check if .env already exists
 if exist "%ROOT_ENV_FILE%" (
     echo .env file already exists!
     set /p "overwrite=Do you want to overwrite it? (y/N): "
-    set "overwrite=!overwrite: =!"
+    if defined overwrite set "overwrite=!overwrite: =!"
     if /i "!overwrite!"=="y" (
         copy ".env.example" "%ROOT_ENV_FILE%" >nul
         echo Overwritten .env file from template
@@ -96,19 +104,60 @@ set /p "mysql_root_password=MySQL root password: "
 set /p "mysql_password=Guacamole database password: "
 
 if "!mysql_root_password!"=="" (
+    if not "!existing_mysql_root_password!"=="" (
+        call :IsPlaceholderSecret "!existing_mysql_root_password!"
+        if errorlevel 1 (
+            set "mysql_root_password=!existing_mysql_root_password!"
+            echo Reusing existing MySQL root password from .env
+        )
+    )
+)
+if "!mysql_root_password!"=="" (
     set mysql_root_password=R00t_P@ss_%RANDOM%_%TIME:~9%
-    set mysql_root_password=!mysql_root_password: =!
+    if defined mysql_root_password set "mysql_root_password=!mysql_root_password: =!"
     echo Generated root password: !mysql_root_password!
 )
 
 if "!mysql_password!"=="" (
+    if not "!existing_mysql_password!"=="" (
+        call :IsPlaceholderSecret "!existing_mysql_password!"
+        if errorlevel 1 (
+            set "mysql_password=!existing_mysql_password!"
+            echo Reusing existing Guacamole DB password from .env
+        )
+    )
+)
+if "!mysql_password!"=="" (
     set mysql_password=Gu@c_%RANDOM%_%TIME:~9%
-    set mysql_password=!mysql_password: =!
+    if defined mysql_password set "mysql_password=!mysql_password: =!"
     echo Generated database password: !mysql_password!
 )
 
-call :UpdateEnvBoth "MYSQL_ROOT_PASSWORD" "!mysql_root_password!"
-call :UpdateEnvBoth "MYSQL_PASSWORD" "!mysql_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "MYSQL_ROOT_PASSWORD" "!mysql_root_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "MYSQL_PASSWORD" "!mysql_password!"
+
+set "db_credentials_changed=0"
+if not "!mysql_root_password!"=="!existing_mysql_root_password!" set "db_credentials_changed=1"
+if not "!mysql_password!"=="!existing_mysql_password!" set "db_credentials_changed=1"
+
+for /f %%V in ('powershell -NoLogo -NoProfile -Command "$p=$env:COMPOSE_PROJECT_NAME; if (-not $p) { $p=[IO.Path]::GetFileName((Get-Location).Path).ToLowerInvariant() -replace '[^a-z0-9]','' }; $vol=docker volume ls -q --filter \"label=com.docker.compose.project=$p\" --filter \"label=com.docker.compose.volume=mysql_data\" | Select-Object -First 1; if (-not $vol) { $fallback=($p + '_mysql_data'); docker volume inspect $fallback *> $null; if ($LASTEXITCODE -eq 0) { $vol=$fallback } }; if ($vol) { $vol }"') do set "mysql_volume_name=%%V"
+
+if "!db_credentials_changed!"=="1" if defined mysql_volume_name (
+    echo.
+    echo Detected existing MySQL volume: !mysql_volume_name!
+    echo Database credentials changed in .env, so startup can fail with Access denied ^(1045^).
+    set /p "reset_mysql_input=Reset MySQL volume now to apply new credentials? This removes MySQL data. (y/N): "
+    if defined reset_mysql_input set "reset_mysql_input=!reset_mysql_input: =!"
+    if /i "!reset_mysql_input!"=="y" (
+        set "reset_mysql_volume=1"
+        echo MySQL volume will be reset before startup.
+    ) else if /i "!reset_mysql_input!"=="yes" (
+        set "reset_mysql_volume=1"
+        echo MySQL volume will be reset before startup.
+    ) else (
+        echo Keeping existing MySQL volume. If startup fails, run: docker compose down -v
+    )
+)
 
 echo.
 echo IMPORTANT: Save these passwords securely!
@@ -130,7 +179,7 @@ set /p "guac_admin_pass=Guacamole admin password (leave empty for auto-generated
 if "!guac_admin_user!"=="" set "guac_admin_user=guacadmin"
 if "!guac_admin_pass!"=="" (
     set "guac_admin_pass=Guac_%RANDOM%_%TIME:~9%"
-    set "guac_admin_pass=!guac_admin_pass: =!"
+    if defined guac_admin_pass set "guac_admin_pass=!guac_admin_pass: =!"
     echo Generated Guacamole admin password: !guac_admin_pass!
 )
 if /i "!guac_admin_pass!"=="guacadmin" (
@@ -158,77 +207,38 @@ call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_USER" "!guac_admin_user!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_PASS" "!guac_admin_pass!"
 echo.
 
-REM OPS Worker Secret
-echo OPS Worker Secret
-echo ==================
-echo This secret authenticates the ops-worker for lab station operations.
-set "ops_secret="
-set /p "ops_secret=OPS secret (leave empty for auto-generated): "
-set "ops_secret=!ops_secret: =!"
-
-if "!ops_secret!"=="" (
-    set "ops_secret=ops_%RANDOM%%RANDOM%%RANDOM%"
-    echo Generated OPS secret: !ops_secret!
-)
-if /i "!ops_secret!"=="supersecretvalue" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-if /i "!ops_secret!"=="changeme" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-if /i "!ops_secret!"=="change_me" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-if /i "!ops_secret!"=="password" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-if /i "!ops_secret!"=="test" (
-    echo Refusing to use insecure OPS secret. Set a strong value.
-    exit /b 1
-)
-
-call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_SECRET" "!ops_secret!"
-echo.
-
-REM Blockchain Services Access Token
-echo Blockchain Services Access Token
-echo =================================
-echo This token protects /wallet, /treasury, and /wallet-dashboard behind OpenResty.
+REM Wallet/Treasury Access Token
+echo Wallet/Treasury Access Token
+echo ============================
+echo This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/admin/** behind OpenResty.
 set "access_token="
-set /p "access_token=Access token (leave empty for auto-generated): "
-set "access_token=!access_token: =!"
+set /p "access_token=Wallet/Treasury token (leave empty for auto-generated): "
+if defined access_token set "access_token=!access_token: =!"
+if "!access_token!"=="=" set "access_token="
+if /i "!access_token!"=="CHANGE_ME" set "access_token="
 
 if "!access_token!"=="" (
     set "access_token=acc_%RANDOM%%RANDOM%%RANDOM%"
-    echo Generated access token: !access_token!
+    echo Generated Wallet/Treasury token: !access_token!
 )
 
-call :UpdateEnvBoth "SECURITY_ACCESS_TOKEN" "!access_token!"
-call :UpdateEnvBoth "SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
-call :UpdateEnvBoth "SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
-call :UpdateEnvBoth "SECURITY_ACCESS_TOKEN_REQUIRED" "true"
+call :UpdateEnvBoth "TREASURY_TOKEN" "!access_token!"
+call :UpdateEnvBoth "TREASURY_TOKEN_HEADER" "X-Access-Token"
+call :UpdateEnvBoth "TREASURY_TOKEN_COOKIE" "access_token"
+call :UpdateEnvBoth "TREASURY_TOKEN_REQUIRED" "true"
 call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
-if exist "%BLOCKCHAIN_ENV_FILE%" (
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ACCESS_TOKEN" "!access_token!"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ACCESS_TOKEN_REQUIRED" "true"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BCHAIN_SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-)
 echo.
 
 REM Lab Manager Access Token
 echo Lab Manager Access Token
 echo ========================
-echo This token protects /lab-manager when accessed outside private networks.
+echo This token protects /lab-manager and /ops when accessed outside private networks.
 set "lab_manager_token="
 set /p "lab_manager_token=Lab Manager token (leave empty for auto-generated): "
-set "lab_manager_token=!lab_manager_token: =!"
+if defined lab_manager_token set "lab_manager_token=!lab_manager_token: =!"
+if "!lab_manager_token!"=="=" set "lab_manager_token="
+if /i "!lab_manager_token!"=="CHANGE_ME" set "lab_manager_token="
 
 if "!lab_manager_token!"=="" (
     set "lab_manager_token=lab_%RANDOM%%RANDOM%%RANDOM%"
@@ -259,7 +269,6 @@ if /i "!domain!"=="localhost" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "127.0.0.1"
     call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTPS_PORT" "8443"
     call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_HTTP_PORT" "8081"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "local"
     set "https_port=8443"
     set "http_port=8081"
     echo    * Server: https://localhost:8443
@@ -275,23 +284,22 @@ if /i "!domain!"=="localhost" (
     echo   1^) Direct - Gateway has a public IP ^(ports bound directly^)
     echo   2^) Router - Behind NAT/router with port forwarding ^(e.g., router:8043 -^> host:443^)
     set /p "deploy_mode=Choose [1/2] (default: 1): "
-    set "deploy_mode=!deploy_mode: =!"
+    if defined deploy_mode set "deploy_mode=!deploy_mode: =!"
     
     if "!deploy_mode!"=="2" (
         echo Router mode selected.
-        call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "router"
         call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         set /p "public_https=Public HTTPS port (the port clients use, e.g., 8043): "
-        set "public_https=!public_https: =!"
+        if defined public_https set "public_https=!public_https: =!"
         if "!public_https!"=="" set "public_https=443"
         set /p "local_https=Local HTTPS port to bind on this host (default: 443): "
-        set "local_https=!local_https: =!"
+        if defined local_https set "local_https=!local_https: =!"
         if "!local_https!"=="" set "local_https=443"
         set /p "public_http=Public HTTP port (default: 80): "
-        set "public_http=!public_http: =!"
+        if defined public_http set "public_http=!public_http: =!"
         if "!public_http!"=="" set "public_http=80"
         set /p "local_http=Local HTTP port to bind on this host (default: 80): "
-        set "local_http=!local_http: =!"
+        if defined local_http set "local_http=!local_http: =!"
         if "!local_http!"=="" set "local_http=80"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "!public_https!"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "!public_http!"
@@ -303,13 +311,12 @@ if /i "!domain!"=="localhost" (
         echo    * OpenResty will bind to 0.0.0.0:!local_https! and 0.0.0.0:!local_http!
     ) else (
         echo Direct mode selected.
-        call :UpdateEnv "%ROOT_ENV_FILE%" "DEPLOY_MODE" "direct"
         call :UpdateEnv "%ROOT_ENV_FILE%" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         set /p "direct_https=HTTPS port (default: 443): "
-        set "direct_https=!direct_https: =!"
+        if defined direct_https set "direct_https=!direct_https: =!"
         if "!direct_https!"=="" set "direct_https=443"
         set /p "direct_http=HTTP port (default: 80): "
-        set "direct_http=!direct_http: =!"
+        if defined direct_http set "direct_http=!direct_http: =!"
         if "!direct_http!"=="" set "direct_http=80"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTPS_PORT" "!direct_https!"
         call :UpdateEnv "%ROOT_ENV_FILE%" "HTTP_PORT" "!direct_http!"
@@ -323,19 +330,42 @@ if /i "!domain!"=="localhost" (
 )
 echo.
 
+echo JWT Issuer ^(Full/Lite^)
+echo ======================
+echo ISSUER controls which JWT issuer OpenResty accepts:
+echo   - Leave empty -^> Full mode ^(this gateway handles auth + access^).
+echo   - Set https://^<your-full-gateway-domain^>/auth -^> Lite mode ^(trust Full-issued JWTs^).
+echo   - In Lite mode, public key sync is automatic from https://^<issuer-origin^>/.well-known/public-key.pem.
+echo   - Lite mode disables local auth/treasury/intents endpoints.
+call :ReadEnvValue "%ROOT_ENV_FILE%" "ISSUER" current_issuer
+if defined current_issuer (
+    echo Current ISSUER in .env: !current_issuer!
+) else (
+    echo Current ISSUER in .env: ^(empty^)
+)
+set "issuer_value="
+set /p "issuer_value=ISSUER [empty->Full, https://full/auth->Lite]: "
+if defined issuer_value set "issuer_value=!issuer_value: =!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "ISSUER" "!issuer_value!"
+if "!issuer_value!"=="" (
+    echo    * ISSUER left empty ^(Full mode^).
+) else (
+    echo    * ISSUER set to: !issuer_value! ^(Lite mode^).
+)
+echo.
+
 echo Remote Access (Cloudflare Tunnel)
 echo =================================
 set "enable_cf="
 set /p "enable_cf=Enable Cloudflare Tunnel to expose the gateway without opening inbound ports? (y/N): "
-set "enable_cf=!enable_cf: =!"
+if defined enable_cf set "enable_cf=!enable_cf: =!"
 if /i "!enable_cf!"=="y" set "cf_enabled=1"
 if /i "!enable_cf!"=="yes" set "cf_enabled=1"
 
 if "!cf_enabled!"=="1" (
-    call :UpdateEnv "%ROOT_ENV_FILE%" "ENABLE_CLOUDFLARE" "true"
     set "cf_token="
     set /p "cf_token=Cloudflare Tunnel token (leave empty to use a Quick Tunnel): "
-    set "cf_token=!cf_token: =!"
+    if defined cf_token set "cf_token=!cf_token: =!"
     if not "!cf_token!"=="" (
         call :UpdateEnv "%ROOT_ENV_FILE%" "CLOUDFLARE_TUNNEL_TOKEN" "!cf_token!"
     ) else (
@@ -350,8 +380,6 @@ if "!cf_enabled!"=="1" (
         set "https_port=443"
         set "http_port=80"
     )
-) else (
-    call :UpdateEnv "%ROOT_ENV_FILE%" "ENABLE_CLOUDFLARE" "false"
 )
 if "!cf_enabled!"=="1" (
     if not "!cf_token!"=="" (
@@ -387,7 +415,7 @@ if /i "!domain!"=="localhost" (
         set "wallet_origin=https://!domain!:!https_port_value!"
     )
 )
-call :UpdateEnvBoth "WALLET_ALLOWED_ORIGINS" "!wallet_origin!"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "WALLET_ALLOWED_ORIGINS" "!wallet_origin!"
 echo Configured WALLET_ALLOWED_ORIGINS to !wallet_origin!
 
 REM Build complete compose command: base + files + profile
@@ -438,10 +466,10 @@ echo Certbot (Let's Encrypt) - optional automation
 echo ============================================
 set "cb_domains="
 set /p "cb_domains=Domains for TLS (comma-separated, leave empty to skip ACME): "
-set "cb_domains=%cb_domains: =%"
+if defined cb_domains set "cb_domains=!cb_domains: =!"
 set "cb_email="
 set /p "cb_email=Email for ACME (leave empty to skip ACME): "
-set "cb_email=%cb_email: =%"
+if defined cb_email set "cb_email=!cb_email: =!"
 if not "%cb_domains%"=="" if not "%cb_email%"=="" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "CERTBOT_DOMAINS" "%cb_domains%"
     call :UpdateEnv "%ROOT_ENV_FILE%" "CERTBOT_EMAIL" "%cb_email%"
@@ -461,43 +489,43 @@ echo Blockchain Services Configuration
 echo ==================================
 echo.
 rem Provider registration enabled by default (non-interactive).
-call :UpdateEnvBoth "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
 if defined contract_default (
-    call :UpdateEnvBoth "CONTRACT_ADDRESS" "!contract_default!"
-    call :UpdateEnvBoth "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_default!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" "!contract_default!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_default!"
 )
 
-call :ReadEnvValue "%ROOT_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
+call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
 if not defined sepolia_default set "sepolia_default=https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app"
 set /p "sepolia_rpc=Sepolia RPC URLs (comma separated) [!sepolia_default!]: "
 if "!sepolia_rpc!"=="" set "sepolia_rpc=!sepolia_default!"
 if not "!sepolia_rpc!"=="" (
-    call :UpdateEnvBoth "ETHEREUM_SEPOLIA_RPC_URL" "!sepolia_rpc!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" "!sepolia_rpc!"
 )
 
-call :ReadEnvValue "%ROOT_ENV_FILE%" "ALLOWED_ORIGINS" origins_default
+call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "ALLOWED_ORIGINS" origins_default
 if not defined origins_default set "origins_default=https://marketplace-decentralabs.vercel.app"
 set /p "allowed_origins=Allowed origins for CORS [!origins_default!]: "
 if "!allowed_origins!"=="" set "allowed_origins=!origins_default!"
 if not "!allowed_origins!"=="" (
-    call :UpdateEnvBoth "ALLOWED_ORIGINS" "!allowed_origins!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "ALLOWED_ORIGINS" "!allowed_origins!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "CORS_ALLOWED_ORIGINS" "!allowed_origins!"
 )
 
-call :ReadEnvValue "%ROOT_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" mpk_default
+call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" mpk_default
 if not defined mpk_default set "mpk_default=https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem"
 set /p "marketplace_pk=Marketplace public key URL [!mpk_default!]: "
 if "!marketplace_pk!"=="" set "marketplace_pk=!mpk_default!"
 if not "!marketplace_pk!"=="" (
-    call :UpdateEnvBoth "MARKETPLACE_PUBLIC_KEY_URL" "!marketplace_pk!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" "!marketplace_pk!"
 )
 
 echo.
 echo Institutional Wallet Reminder
 echo -----------------------------
 echo Wallet creation/import is handled inside the blockchain-services web console.
-echo After creating the wallet, update these variables in both %ROOT_ENV_FILE% and %BLOCKCHAIN_ENV_FILE%:
+echo After creating the wallet, update these variables in %BLOCKCHAIN_ENV_FILE%:
 echo    * INSTITUTIONAL_WALLET_ADDRESS
 echo    * INSTITUTIONAL_WALLET_PASSWORD
 echo Wallet data will be persisted in the blockchain-data\ directory.
@@ -507,7 +535,7 @@ echo Next Steps
 echo ==========
 echo 1. Review and customize %ROOT_ENV_FILE% if needed
 echo 2. Ensure SSL certificates and RSA keys are present in certs\
-echo 3. Review blockchain settings in %ROOT_ENV_FILE% and %BLOCKCHAIN_ENV_FILE%
+echo 3. Review blockchain contract/RPC/wallet settings in %BLOCKCHAIN_ENV_FILE%
 echo 4. Run: !compose_full! up -d
 if "!cf_enabled!"=="1" (
     echo 5. Cloudflare tunnel: check '!compose_full! logs !cf_service!' for the public hostname ^(or your configured tunnel token domain^).
@@ -531,7 +559,7 @@ if /i "!domain!"=="localhost" (
         set "token_host=https://!domain!:!https_port!"
     )
 )
-echo    * Access token cookie: !token_host!/wallet-dashboard?token=!access_token!
+echo    * Wallet/Treasury token cookie: !token_host!/wallet-dashboard?token=!access_token!
 echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
 echo    * Guacamole: /guacamole/
 echo    * Blockchain Services API: /auth
@@ -545,7 +573,11 @@ echo.
 echo Building and starting services...
 echo This may take several minutes on first run...
 
-call !compose_full! down --remove-orphans
+if "!reset_mysql_volume!"=="1" (
+    call !compose_full! down --remove-orphans -v
+) else (
+    call !compose_full! down --remove-orphans
+)
 if errorlevel 1 goto compose_fail
 call !compose_full! build --no-cache
 if errorlevel 1 (
@@ -565,6 +597,9 @@ goto compose_success
 
 :compose_fail
 echo Failed to start services. Check the error messages above.
+if "!db_credentials_changed!"=="1" if defined mysql_volume_name if "!reset_mysql_volume!"=="0" (
+    echo Hint: Existing MySQL volume likely has old credentials. Run: docker compose down -v
+)
 goto docker_start_done
 
 :compose_success
@@ -589,7 +624,7 @@ if /i "!domain!"=="localhost" (
         set "token_host=https://!domain!:!https_port!"
     )
 )
-echo    * Access token cookie: !token_host!/wallet-dashboard?token=!access_token!
+echo    * Wallet/Treasury token cookie: !token_host!/wallet-dashboard?token=!access_token!
 echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
     echo    * Guacamole: /guacamole/ ^(!guac_admin_user! / !guac_admin_pass!^)
     echo    * Blockchain Services API: /auth
@@ -603,7 +638,7 @@ echo.
 echo Configuration:
 echo    Environment: %ROOT_ENV_FILE%
 echo    Blockchain Services Config: %BLOCKCHAIN_ENV_FILE%
-echo    Certificates & Keys: certs\
+echo    Certificates ^& Keys: certs\
 echo    Wallet data directory: blockchain-data\
 echo.
 echo Full version deployment complete!
@@ -656,3 +691,15 @@ if exist "%read_file%" (
 :read_done
 if "%~3" NEQ "" set "%~3=%read_result%"
 exit /b
+
+:IsPlaceholderSecret
+set "secret_value=%~1"
+if /i "%secret_value%"=="" exit /b 0
+if /i "%secret_value%"=="CHANGE_ME" exit /b 0
+if /i "%secret_value%"=="CHANGEME" exit /b 0
+if /i "%secret_value%"=="SECURE_PASSWORD" exit /b 0
+if /i "%secret_value%"=="DB_PASSWORD" exit /b 0
+if /i "%secret_value%"=="YOUR_PASSWORD" exit /b 0
+if /i "%secret_value%"=="PASSWORD" exit /b 0
+if /i "%secret_value%"=="TEST" exit /b 0
+exit /b 1

@@ -1,13 +1,26 @@
--- Access guard for wallet/treasury endpoints.
--- Enforces an access token for non-local clients when configured.
+-- Access guard for treasury-facing endpoints.
+-- Enforces the treasury token for non-local clients when configured.
 
-local token = os.getenv("SECURITY_ACCESS_TOKEN") or ""
+local token = os.getenv("TREASURY_TOKEN") or ""
+local config = ngx.shared and ngx.shared.config
+local lite_mode = config and config:get("lite_mode")
 
 local function deny(message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
     ngx.header["Content-Type"] = "text/plain"
     ngx.say(message or "Unauthorized")
     return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+end
+
+local function deny_forbidden(message)
+    ngx.status = 403
+    ngx.header["Content-Type"] = "text/plain"
+    ngx.say(message or "Forbidden")
+    return ngx.exit(403)
+end
+
+if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
+    return deny_forbidden("Forbidden: wallet/treasury endpoints are disabled in Lite mode.")
 end
 
 local function is_loopback_or_docker(ip)
@@ -87,13 +100,13 @@ end
 
 if token == "" then
     if not is_loopback_or_docker(client_ip) then
-        return deny("Forbidden: Remote access is disabled. To enable external access, set SECURITY_ACCESS_TOKEN in your .env file and restart the service.")
+        return deny("Forbidden: Remote access is disabled. To enable external access, set TREASURY_TOKEN in your .env file and restart the service.")
     end
     return
 end
 
-local header_name = os.getenv("SECURITY_ACCESS_TOKEN_HEADER") or "X-Access-Token"
-local cookie_name = os.getenv("SECURITY_ACCESS_TOKEN_COOKIE") or "access_token"
+local header_name = os.getenv("TREASURY_TOKEN_HEADER") or "X-Access-Token"
+local cookie_name = os.getenv("TREASURY_TOKEN_COOKIE") or "access_token"
 
 local function is_tokenized_path(value)
     if not value or value == "" then
@@ -156,10 +169,10 @@ end
 
 if provided and provided ~= "" then
     if provided ~= token then
-        return deny("Unauthorized: Invalid access token. " .. token_hint())
+        return deny("Unauthorized: Invalid treasury token. " .. token_hint())
     end
 elseif not is_private(client_ip) then
-    return deny("Unauthorized: Access token required for remote access. " .. token_hint())
+    return deny("Unauthorized: Treasury token required for remote access. " .. token_hint())
 end
 
 ngx.req.set_header(header_name, token)

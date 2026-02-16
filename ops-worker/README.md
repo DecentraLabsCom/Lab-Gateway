@@ -1,35 +1,39 @@
 # Ops Worker for Lab Station Integration
 
-This lightweight worker centralizes the operational tasks the Lab Gateway needs to perform on Lab Station hosts:
+This service handles remote lab host operations for the gateway:
 
-- Send Wake-on-LAN and validate boot (ping with retries).
-- Execute `LabStation.exe` commands via WinRM (`prepare-session`, `release-session --reboot`, `session guard`, `power shutdown|hibernate`, `status-json`, `recovery reboot-if-needed`).
-- Poll `heartbeat.json` (and optionally `session-guard-events.jsonl`) and persist denormalized fields for the UI/alerts.
+- Wake-on-LAN and reachability checks.
+- Remote LabStation command execution over WinRM.
+- Heartbeat polling and persistence in MySQL.
+- Optional reservation automation (start/end orchestration).
 
-## Components
+## Main components
 
-- `worker.py`: Flask API exposing `/api/wol`, `/api/winrm`, `/api/heartbeat/poll`.
-- Scheduler (optional) runs inside the worker to poll heartbeats periodically when `OPS_POLL_ENABLED=true`.
-- MySQL persistence for host catalog, heartbeat snapshots, and reservation operations (see `mysql/001-create-schema.sql` and `mysql/002-labstation-ops.sql`).
-- `/ops/` is protected with `OPS_SECRET` (env). OpenResty sets cookie `ops_token` when serving `/lab-manager/` and validates cookie or header `X-Ops-Token` before proxying.
+- `worker.py`: Flask API and scheduler.
+- `hosts.json` (`OPS_CONFIG`): host inventory and credentials references.
+- MySQL tables from `mysql/001-create-schema.sql` and `mysql/002-labstation-ops.sql`.
 
 ## Quick start (dev)
 
 ```bash
 cd ops-worker
 python -m venv .venv
-. .venv/Scripts/activate  # or source .venv/bin/activate
+. .venv/Scripts/activate  # or: source .venv/bin/activate
 pip install -r requirements.txt
+
 export OPS_BIND=0.0.0.0
 export OPS_PORT=8081
 export OPS_CONFIG=hosts.json
-export MYSQL_DSN="mysql+pymysql://user:pass@mysql:3306/lab_gateway"
+export MYSQL_DSN="mysql+pymysql://user:pass@mysql:3306/guacamole_db"
 export OPS_POLL_ENABLED=true
 export OPS_POLL_INTERVAL=60
+
 python worker.py
 ```
 
-`hosts.json` (example, copy from `hosts.sample.json` and edit secrets):
+## hosts.json example
+
+Copy `hosts.sample.json` and replace credentials.
 
 ```json
 {
@@ -42,91 +46,55 @@ python worker.py
       "winrm_pass": "env:WINRM_PASS_LAB_WS_01",
       "winrm_transport": "ntlm",
       "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
-      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl"
+      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl",
+      "labs": ["1"]
     }
   ]
 }
 ```
 
-## Smoke tests (curl)
-
-```bash
-# Health
-curl -s http://localhost:8081/health
-
-# Wake-on-LAN + ping
-curl -s -XPOST http://localhost:8081/api/wol -H "Content-Type: application/json" -d '{"host":"lab-ws-01"}'
-
-# Heartbeat poll (persists to MySQL when configured)
-curl -s -XPOST http://localhost:8081/api/heartbeat/poll -H "Content-Type: application/json" -d '{"host":"lab-ws-01"}'
-
-# Run LabStation.exe prepare-session via WinRM
-curl -s -XPOST http://localhost:8081/api/winrm -H "Content-Type: application/json" -d '{"host":"lab-ws-01","command":"prepare-session","args":["--guard-grace=90"]}'
-```
-
 ## API (internal)
 
-- `POST /api/wol` → `{ host, mac?, broadcast?, port?, ping_target?, ping_timeout?, attempts? }`
-- `POST /api/winrm` → `{ host, command, args?, user?, password?, transport?, use_ssl?, port? }`
-  - Builds and runs `C:\LabStation\LabStation.exe <command> <args>` via PowerShell/WinRM.
-- `POST /api/heartbeat/poll` → `{ host }`
-  - Reads `heartbeat.json` via WinRM (`Get-Content -Raw`) and upserts into MySQL.
-- `POST /api/reservations/start` → `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
-  - Sends WoL + ping validation (unless `wake=false`), then runs `prepare-session` with configurable args. Each step logs into `reservation_operations`.
-- `POST /api/reservations/end` → `{ reservationId, host, labId?, release?, releaseArgs?, powerAction? }`
-  - Runs `release-session` (defaults to `--reboot`) and optional `power shutdown|hibernate` with args, logging outcomes per reservation.
-
-Responses include `duration_ms`, stdout/stderr, parsed JSON (when applicable), and DB persistence status.
+- `GET /health`
+- `POST /api/wol`
+  - Body: `{ host, mac?, broadcast?, port?, ping_target?, ping_timeout?, attempts? }`
+- `POST /api/winrm`
+  - Body: `{ host, command, args?, user?, password?, transport?, use_ssl?, port? }`
+  - Runs `C:\LabStation\LabStation.exe <command> <args>` via WinRM.
+- `POST /api/heartbeat/poll`
+  - Body: `{ host, include_events? }`
+- `POST /api/reservations/start`
+  - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
+- `POST /api/reservations/end`
+  - Body: `{ reservationId, host, labId?, release?, releaseArgs?, powerAction? }`
+- `GET /api/reservations/timeline?reservationId=...&limit=...&offset=...`
+- `POST /api/hosts/reload`
+- `POST /api/hosts/quarantine`
+  - Body: `{ host, quarantined }`
 
 ## Scheduler
 
-Enable with `OPS_POLL_ENABLED=true` (env) and set `OPS_POLL_INTERVAL=60` (seconds). The worker will:
+Enable with:
 
-- Iterate configured hosts in `hosts.json`.
-- Fetch heartbeat and latest session-guard event line.
-- Upsert host catalog + insert heartbeat snapshot.
-- If `OPS_RESERVATION_AUTOMATION=true`, it looks for reservations in `lab_reservations`, awakes/prepares/closes and persists `reservation_operations`.
+- `OPS_POLL_ENABLED=true`
+- `OPS_POLL_INTERVAL=60`
 
-## Reservation automation (optional)
+Reservation automation knobs:
 
-`OPS_RESERVATION_AUTOMATION=true` (default value) lets the worker wake/prepare/release Lab Stations around each booking automatically. Requirements:
-
-1. Every host entry in `hosts.json` must declare the blockchain lab IDs it can serve:
-
-   ```json
-   {
-     "name": "lab-ws-01",
-     "address": "lab-ws-01",
-     "labs": ["1", "chemistry-lab"]
-   }
-   ```
-
-2. `MYSQL_DSN` must point to the same MySQL instance used by `blockchain-services` (where Flyway creates `lab_reservations`) and by the ops-worker tables from `mysql/001-create-schema.sql` + `mysql/002-labstation-ops.sql`.
-
-When enabled, the worker:
-
-- Looks ahead `OPS_RESERVATION_START_LEAD` seconds (default 120) and triggers `/api/reservations/start` once for CONFIRMED reservations; successful runs mark the DB row as `ACTIVE`.
-- Waits `OPS_RESERVATION_END_DELAY` seconds (default 60) after the end time to invoke `/api/reservations/end`; successful runs mark the row as `COMPLETED`.
-- Writes summary rows to `reservation_operations` using `action = "scheduler:start" | "scheduler:end"` so you can audit or retry.
-
-Tuning knobs:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `OPS_RESERVATION_AUTOMATION` | `true` | Master toggle. |
-| `OPS_RESERVATION_SCAN_INTERVAL` | `30` | How often to scan MySQL (seconds). |
-| `OPS_RESERVATION_START_LEAD` | `120` | Seconds before `start_time` to prepare the host / lab station. |
-| `OPS_RESERVATION_END_DELAY` | `60` | Seconds after `end_time` to release/power actions. |
-| `OPS_RESERVATION_LOOKBACK` | `21600` | Maximum age (seconds) of reservations to consider when catching up. |
-| `OPS_RESERVATION_RETRY_COOLDOWN` | `60` | Minimum seconds between scheduler attempts for the same reservation. |
+- `OPS_RESERVATION_AUTOMATION` (compose default: `true`)
+- `OPS_RESERVATION_SCAN_INTERVAL` (default `30`)
+- `OPS_RESERVATION_START_LEAD` (default `120`)
+- `OPS_RESERVATION_END_DELAY` (default `60`)
+- `OPS_RESERVATION_LOOKBACK` (default `21600`)
+- `OPS_RESERVATION_RETRY_COOLDOWN` (default `60`)
 
 ## Deployment notes
 
-- OpenResty proxies `/ops/` to this service (see `openresty/lab_access.conf`).
-- Use a dedicated network-only account for WinRM (`SeDenyInteractiveLogonRight` on the host / lab station).
-- Keep secrets outside git; `hosts.json` is gitignored on purpose.
-- `/ops/` is gated by `OPS_SECRET` (env) and expects header `X-Ops-Token` or cookie `ops_token`.
-- WinRM allowlist: set `OPS_ALLOWED_COMMANDS` (comma-separated) to restrict `/api/winrm` (default: `prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status`).
-- WinRM timeouts: `OPS_WINRM_READ_TIMEOUT` and `OPS_WINRM_OPERATION_TIMEOUT` (seconds) configure the session.
-- Credentials: prefer `env:VAR` in `hosts.json` for `winrm_user`/`winrm_pass` and set those env vars in the container (avoid plaintext in JSON).
-- In OpenResty, `/lab-manager/` allows private networks by default and requires `LAB_MANAGER_TOKEN` for non-private clients; `/ops/` remains limited to `127.0.0.1` and Docker private networks (`172.16.0.0/12`) and requires `OPS_SECRET`.
+- OpenResty proxies `/ops/` to this service.
+- `/ops/` requires `LAB_MANAGER_TOKEN` via `X-Lab-Manager-Token` header or `lab_manager_token` cookie.
+- **Network restriction**: OpenResty allows `/ops/` only from `127.0.0.1` and `172.16.0.0/12` (enforced before token validation).
+  - Lab Manager UI (`/lab-manager`) works from any network with valid token.
+  - Lab Station operations (`/ops` API) require access from gateway server or private networks.
+  - When accessing Lab Manager remotely, ops features will show a network restriction warning.
+- Prefer `env:VAR_NAME` in `hosts.json` for WinRM credentials.
+- Keep `hosts.json` secrets out of git.

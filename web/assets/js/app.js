@@ -1,5 +1,33 @@
 // Effects and animations for the main page
 document.addEventListener('DOMContentLoaded', function() {
+    function applyGatewayMode() {
+        const walletButton = document.getElementById('wallet-treasury-btn');
+        if (!walletButton) {
+            return;
+        }
+
+        fetch('/gateway/mode', { cache: 'no-store' })
+            .then(response => {
+                if (!response.ok) {
+                    return null;
+                }
+                return response.json();
+            })
+            .then(modeInfo => {
+                if (!modeInfo) {
+                    return;
+                }
+                if (modeInfo.lite === true || modeInfo.mode === 'lite') {
+                    walletButton.remove();
+                    document.body.classList.add('gateway-lite-mode');
+                }
+            })
+            .catch(() => {
+                // Keep default UI if mode endpoint is unavailable.
+            });
+    }
+    
+    applyGatewayMode();
     
     // Entry animation for elements
     const observerOptions = {

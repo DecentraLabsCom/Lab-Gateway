@@ -14,6 +14,11 @@ compose_files=""
 compose_profiles=""
 cf_enabled=false
 certbot_enabled=false
+existing_mysql_root_password=""
+existing_mysql_password=""
+db_credentials_changed=false
+reset_mysql_volume=false
+mysql_volume_name=""
 
 echo "DecentraLabs Gateway - Full Version Setup"
 echo "=========================================="
@@ -37,8 +42,42 @@ get_env_default() {
     local value=""
     if [ -f "$file" ]; then
         value=$(grep -E "^${key}=" "$file" | head -n 1 | cut -d'=' -f2-)
+        value="${value%$'\r'}"
     fi
     echo "$value"
+}
+
+is_placeholder_secret() {
+    local raw="$1"
+    local lower
+    lower="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -d ' \r\n\t')"
+    case "$lower" in
+        ""|changeme|change_me|secure_password|db_password|your_password|password|test)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+detect_mysql_volume() {
+    local project_name="${COMPOSE_PROJECT_NAME:-}"
+    local volume_name=""
+
+    if [ -z "$project_name" ]; then
+        project_name="$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
+    fi
+
+    volume_name="$(docker volume ls -q \
+        --filter "label=com.docker.compose.project=${project_name}" \
+        --filter "label=com.docker.compose.volume=mysql_data" | head -n 1)"
+
+    if [ -z "$volume_name" ] && docker volume inspect "${project_name}_mysql_data" >/dev/null 2>&1; then
+        volume_name="${project_name}_mysql_data"
+    fi
+
+    echo "$volume_name"
 }
 
 update_env_in_all() {
@@ -77,6 +116,9 @@ git submodule update --init --recursive blockchain-services
 echo "blockchain-services submodule ready."
 echo
 
+existing_mysql_root_password="$(get_env_default "MYSQL_ROOT_PASSWORD" "$ROOT_ENV_FILE")"
+existing_mysql_password="$(get_env_default "MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
+
 # Check if .env already exists
 if [ -f "$ROOT_ENV_FILE" ]; then
     echo ".env file already exists!"
@@ -112,18 +154,48 @@ read -p "MySQL root password: " mysql_root_password
 read -p "Guacamole database password: " mysql_password
 
 if [ -z "$mysql_root_password" ]; then
-    mysql_root_password="R00t_P@ss_${RANDOM}_$(date +%s)"
-    echo "Generated root password: $mysql_root_password"
+    if [ -n "$existing_mysql_root_password" ] && ! is_placeholder_secret "$existing_mysql_root_password"; then
+        mysql_root_password="$existing_mysql_root_password"
+        echo "Reusing existing MySQL root password from .env"
+    else
+        mysql_root_password="R00t_P@ss_${RANDOM}_$(date +%s)"
+        echo "Generated root password: $mysql_root_password"
+    fi
 fi
 
 if [ -z "$mysql_password" ]; then
-    mysql_password="Gu@c_${RANDOM}_$(date +%s)"
-    echo "Generated database password: $mysql_password"
+    if [ -n "$existing_mysql_password" ] && ! is_placeholder_secret "$existing_mysql_password"; then
+        mysql_password="$existing_mysql_password"
+        echo "Reusing existing Guacamole DB password from .env"
+    else
+        mysql_password="Gu@c_${RANDOM}_$(date +%s)"
+        echo "Generated database password: $mysql_password"
+    fi
 fi
 
-# Update passwords in env files
-update_env_in_all "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
-update_env_in_all "MYSQL_PASSWORD" "$mysql_password"
+# Update passwords only in gateway env (.env). Standalone blockchain-services
+# uses BCHAIN_MYSQL_* keys in its own .env.
+update_env_var "$ROOT_ENV_FILE" "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
+update_env_var "$ROOT_ENV_FILE" "MYSQL_PASSWORD" "$mysql_password"
+
+if [ "$mysql_root_password" != "$existing_mysql_root_password" ] || [ "$mysql_password" != "$existing_mysql_password" ]; then
+    db_credentials_changed=true
+fi
+
+mysql_volume_name="$(detect_mysql_volume)"
+if [ -n "$mysql_volume_name" ] && [ "$db_credentials_changed" = true ]; then
+    echo
+    echo "Detected existing MySQL volume: ${mysql_volume_name}"
+    echo "Database credentials changed in .env, so startup can fail with Access denied (1045)."
+    read -p "Reset MySQL volume now to apply new credentials? This removes MySQL data. (y/N): " reset_mysql_input
+    reset_mysql_input="$(echo "$reset_mysql_input" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
+    if [[ "$reset_mysql_input" =~ ^(y|yes)$ ]]; then
+        reset_mysql_volume=true
+        echo "MySQL volume will be reset before startup."
+    else
+        echo "Keeping existing MySQL volume. If startup fails, run: docker compose down -v"
+    fi
+fi
 
 echo
 echo "IMPORTANT: Save these passwords securely!"
@@ -162,61 +234,42 @@ update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_USER" "$guac_admin_user"
 update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_PASS" "$guac_admin_pass"
 echo
 
-# OPS Worker Secret
-echo "OPS Worker Secret"
-echo "=================="
-echo "This secret authenticates the ops-worker for lab station operations."
-read -p "OPS secret (leave empty for auto-generated): " ops_secret
-ops_secret=$(echo "$ops_secret" | tr -d ' ')
-
-if [ -z "$ops_secret" ]; then
-    ops_secret="ops_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
-    echo "Generated OPS secret: $ops_secret"
-fi
-
-case "$(printf '%s' "$ops_secret" | tr '[:upper:]' '[:lower:]')" in
-    supersecretvalue|changeme|change_me|password|test)
-        echo "Refusing to use insecure OPS secret. Set a strong value." >&2
-        exit 1
+# Wallet/Treasury Access Token
+echo "Wallet/Treasury Access Token"
+echo "============================"
+echo "This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/admin/** behind OpenResty."
+read -p "Wallet/Treasury token (leave empty for auto-generated): " access_token
+access_token=$(echo "$access_token" | tr -d ' ')
+case "$(printf '%s' "$access_token" | tr '[:upper:]' '[:lower:]')" in
+    ""|"="|changeme|change_me)
+        access_token=""
         ;;
 esac
 
-update_env_var "$ROOT_ENV_FILE" "OPS_SECRET" "$ops_secret"
-echo
-
-# Access Token for blockchain-services
-echo "Blockchain Services Access Token"
-echo "================================="
-echo "This token protects /wallet, /treasury, and /wallet-dashboard behind OpenResty."
-read -p "Access token (leave empty for auto-generated): " access_token
-access_token=$(echo "$access_token" | tr -d ' ')
-
 if [ -z "$access_token" ]; then
     access_token="acc_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
-    echo "Generated access token: $access_token"
+    echo "Generated Wallet/Treasury token: $access_token"
 fi
 
-update_env_in_all "SECURITY_ACCESS_TOKEN" "$access_token"
-update_env_in_all "SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
-update_env_in_all "SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
-update_env_in_all "SECURITY_ACCESS_TOKEN_REQUIRED" "true"
+update_env_in_all "TREASURY_TOKEN" "$access_token"
+update_env_in_all "TREASURY_TOKEN_HEADER" "X-Access-Token"
+update_env_in_all "TREASURY_TOKEN_COOKIE" "access_token"
+update_env_in_all "TREASURY_TOKEN_REQUIRED" "true"
 update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
-if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN" "$access_token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_HEADER" "X-Access-Token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_COOKIE" "access_token"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ACCESS_TOKEN_REQUIRED" "true"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BCHAIN_SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-fi
 echo
 
 # Lab Manager Access Token
 echo "Lab Manager Access Token"
 echo "========================"
-echo "This token protects /lab-manager when accessed outside private networks."
+echo "This token protects /lab-manager and /ops when accessed outside private networks."
 read -p "Lab Manager token (leave empty for auto-generated): " lab_manager_token
 lab_manager_token=$(echo "$lab_manager_token" | tr -d ' ')
+case "$(printf '%s' "$lab_manager_token" | tr '[:upper:]' '[:lower:]')" in
+    ""|"="|changeme|change_me)
+        lab_manager_token=""
+        ;;
+esac
 
 if [ -z "$lab_manager_token" ]; then
     lab_manager_token="lab_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
@@ -248,7 +301,6 @@ if [ "$domain" == "localhost" ]; then
     update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "127.0.0.1"
     update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTPS_PORT" "8443"
     update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "8081"
-    update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "local"
     echo "   * Server: https://localhost:8443"
     echo "   * Using development ports (8443/8081)"
 else
@@ -267,7 +319,6 @@ else
     
     if [ "$deploy_mode" == "2" ]; then
         echo "Router mode selected."
-        update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "router"
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         read -p "Public HTTPS port (the port clients use; default: 443): " public_https
         public_https=$(echo "$public_https" | tr -d ' ')
@@ -297,7 +348,6 @@ else
         echo "   * OpenResty will bind to 0.0.0.0 ($local_https/$local_http)"
     else
         echo "Direct mode selected."
-        update_env_var "$ROOT_ENV_FILE" "DEPLOY_MODE" "direct"
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         read -p "HTTPS port (default: 443): " direct_https
         direct_https=$(echo "$direct_https" | tr -d ' ')
@@ -319,13 +369,36 @@ else
 fi
 
 echo
+echo "JWT Issuer (Full/Lite)"
+echo "======================"
+echo "ISSUER controls which JWT issuer OpenResty accepts:"
+echo "  - Leave empty -> Full mode (this gateway handles auth + access)."
+echo "  - Set https://<your-full-gateway-domain>/auth -> Lite mode (trust Full-issued JWTs)."
+echo "  - In Lite mode, public key sync is automatic from https://<issuer-origin>/.well-known/public-key.pem."
+echo "  - Lite mode disables local auth/treasury/intents endpoints."
+current_issuer="$(get_env_default "ISSUER" "$ROOT_ENV_FILE")"
+if [ -n "$current_issuer" ]; then
+    echo "Current ISSUER in .env: $current_issuer"
+else
+    echo "Current ISSUER in .env: (empty)"
+fi
+read -p "ISSUER [empty->Full, https://full/auth->Lite]: " issuer_value
+issuer_value=$(echo "$issuer_value" | tr -d ' ')
+update_env_var "$ROOT_ENV_FILE" "ISSUER" "$issuer_value"
+if [ -z "$issuer_value" ]; then
+    echo "   * ISSUER left empty (Full mode)."
+else
+    echo "   * ISSUER set to: $issuer_value (Lite mode)."
+fi
+echo
+
+echo
 echo "Remote Access (Cloudflare Tunnel)"
 echo "================================="
 read -p "Enable Cloudflare Tunnel to expose the gateway without opening inbound ports? (y/N): " enable_cf
 enable_cf=$(echo "$enable_cf" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
 if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
     cf_enabled=true
-    update_env_var "$ROOT_ENV_FILE" "ENABLE_CLOUDFLARE" "true"
     read -p "Cloudflare Tunnel token (leave empty to use a Quick Tunnel): " cf_token
     cf_token=$(echo "$cf_token" | tr -d ' ')
     if [ -n "$cf_token" ]; then
@@ -341,7 +414,6 @@ if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "80"
     fi
 else
-    update_env_var "$ROOT_ENV_FILE" "ENABLE_CLOUDFLARE" "false"
 fi
 
 echo
@@ -367,7 +439,7 @@ else
         wallet_origin="https://${domain}:${https_port_value}"
     fi
 fi
-update_env_in_all "WALLET_ALLOWED_ORIGINS" "$wallet_origin"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "WALLET_ALLOWED_ORIGINS" "$wallet_origin"
 echo "Configured WALLET_ALLOWED_ORIGINS to ${wallet_origin}"
 
 echo
@@ -462,35 +534,35 @@ echo "================================="
 
 echo
 # Provider registration enabled by default (non-interactive).
-update_env_in_all "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 
 # Use CONTRACT_ADDRESS from blockchain-services/.env (no prompt)
 contract_default=$(get_env_default "CONTRACT_ADDRESS" "$BLOCKCHAIN_ENV_FILE")
 if [ -n "$contract_default" ]; then
-    update_env_in_all "CONTRACT_ADDRESS" "$contract_default"
-    update_env_in_all "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_default"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "CONTRACT_ADDRESS" "$contract_default"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_default"
 fi
 
-sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$ROOT_ENV_FILE")
+sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$BLOCKCHAIN_ENV_FILE")
 read -p "Comma-separated Sepolia RPC URLs [${sepolia_default:-https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app}]: " sepolia_rpc
 sepolia_rpc=${sepolia_rpc:-$sepolia_default}
 if [ -n "$sepolia_rpc" ]; then
-    update_env_in_all "ETHEREUM_SEPOLIA_RPC_URL" "$sepolia_rpc"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "ETHEREUM_SEPOLIA_RPC_URL" "$sepolia_rpc"
 fi
 
-allowed_origins_default=$(get_env_default "ALLOWED_ORIGINS" "$ROOT_ENV_FILE")
+allowed_origins_default=$(get_env_default "ALLOWED_ORIGINS" "$BLOCKCHAIN_ENV_FILE")
 read -p "Allowed origins for CORS [${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}]: " allowed_origins
 allowed_origins=${allowed_origins:-${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}}
 if [ -n "$allowed_origins" ]; then
-    update_env_in_all "ALLOWED_ORIGINS" "$allowed_origins"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "ALLOWED_ORIGINS" "$allowed_origins"
     update_env_var "$ROOT_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$allowed_origins"
 fi
 
-public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$ROOT_ENV_FILE")
+public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$BLOCKCHAIN_ENV_FILE")
 read -p "Marketplace public key URL [${public_key_url_default:-https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem}]: " marketplace_pk
 marketplace_pk=${marketplace_pk:-$public_key_url_default}
 if [ -n "$marketplace_pk" ]; then
-    update_env_in_all "MARKETPLACE_PUBLIC_KEY_URL" "$marketplace_pk"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "MARKETPLACE_PUBLIC_KEY_URL" "$marketplace_pk"
 fi
 
 if [ "$cf_enabled" = true ]; then
@@ -527,7 +599,6 @@ echo "This script does not create wallets automatically."
 echo "After the stack is running, create or import the institutional wallet"
 echo "using the blockchain-services web console (or the /wallet API) and then"
 echo "update INSTITUTIONAL_WALLET_ADDRESS / PASSWORD in:"
-echo "  - .env"
 echo "  - blockchain-services/.env"
 echo "Wallet data is stored in ./blockchain-data (already created)."
 
@@ -536,7 +607,7 @@ echo "Next Steps"
 echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
-echo "3. Configure blockchain settings in .env (CONTRACT_ADDRESS, ETHEREUM_*_RPC_URL, INSTITUTIONAL_WALLET_*)"
+echo "3. Configure blockchain settings in blockchain-services/.env (CONTRACT_ADDRESS, ETHEREUM_*_RPC_URL, INSTITUTIONAL_WALLET_*)"
 echo "4. Run: $compose_full up -d"
 if [ "$cf_enabled" = true ]; then
     echo "5. Cloudflare tunnel: check '$compose_full logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
@@ -559,7 +630,7 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
+echo "   * Wallet/Treasury token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
 echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/"
 echo "   * Blockchain Services API: /auth"
@@ -571,7 +642,7 @@ if [[ "$start_services" =~ ^[Nn]$ ]] || [[ "$start_services" =~ ^[Nn][Oo]$ ]]; t
     echo "Configuration complete!"
     echo
     echo "Next steps:"
-echo "1. Configure blockchain settings in .env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
+echo "1. Configure blockchain settings in blockchain-services/.env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
 echo "2. Run: $compose_full up -d"
     echo "3. Access your services"
     if [ "$cf_enabled" = true ]; then
@@ -588,7 +659,11 @@ echo "Building and starting services..."
 echo "This may take several minutes on first run..."
 
 set +e
-$compose_full down --remove-orphans
+if [ "$reset_mysql_volume" = true ]; then
+    $compose_full down --remove-orphans -v
+else
+    $compose_full down --remove-orphans
+fi
 $compose_full build --no-cache
 $compose_full up -d
 compose_result=$?
@@ -613,7 +688,7 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
+echo "   * Wallet/Treasury token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
 echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
 echo "   * Blockchain Services API: /auth"
@@ -633,6 +708,9 @@ echo "   * Blockchain Services API: /auth"
     echo "Your blockchain-based authentication system is now running."
 else
     echo "Failed to start services. Check the error messages above."
+    if [ -n "$mysql_volume_name" ] && [ "$db_credentials_changed" = true ] && [ "$reset_mysql_volume" != true ]; then
+        echo "Hint: Existing MySQL volume uses old credentials. Run: $compose_full down -v"
+    fi
 fi
 
 echo

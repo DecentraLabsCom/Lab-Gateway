@@ -1,7 +1,7 @@
 local runner = require "tests.helpers.runner"
 local ngx_factory = require "tests.helpers.ngx_stub"
 
-local function resolve_internal_access_path()
+local function resolve_treasury_access_path()
     local source = debug.getinfo(1, "S").source
     if source:sub(1, 1) == "@" then
         source = source:sub(2)
@@ -10,10 +10,10 @@ local function resolve_internal_access_path()
     local dir = source:match("^(.*)/[^/]+$") or "."
 
     local candidates = {
-        dir .. "/../../lua/internal_access.lua",
-        dir .. "/../lua/internal_access.lua",
-        "openresty/lua/internal_access.lua",
-        "lua/internal_access.lua"
+        dir .. "/../../lua/treasury_access.lua",
+        dir .. "/../lua/treasury_access.lua",
+        "openresty/lua/treasury_access.lua",
+        "lua/treasury_access.lua"
     }
 
     for _, path in ipairs(candidates) do
@@ -24,7 +24,7 @@ local function resolve_internal_access_path()
         end
     end
 
-    error("Cannot locate internal_access.lua for tests")
+    error("Cannot locate treasury_access.lua for tests")
 end
 
 local function with_env(env, fn)
@@ -47,11 +47,12 @@ local function with_env(env, fn)
     return result
 end
 
-local function run_internal_access(opts)
+local function run_treasury_access(opts)
     local env = opts.env or {}
     local headers = opts.headers or {}
     local ngx = ngx_factory.new({
-        var = opts.var or {}
+        var = opts.var or {},
+        config = opts.config or {}
     })
 
     ngx.req.get_headers = function()
@@ -67,17 +68,29 @@ local function run_internal_access(opts)
 
     _G.ngx = ngx
     with_env(env, function()
-        dofile(resolve_internal_access_path())
+        dofile(resolve_treasury_access_path())
     end)
     _G.ngx = nil
 
     return ngx
 end
 
-runner.describe("Access token guard", function()
+runner.describe("Treasury token guard", function()
+runner.it("blocks all treasury access in lite mode", function()
+    local ngx = run_treasury_access({
+        env = { TREASURY_TOKEN = "secret-token" },
+        config = { lite_mode = 1 },
+        var = { remote_addr = "127.0.0.1" }
+    })
+
+    runner.assert.equals(403, ngx.status)
+    runner.assert.equals(403, ngx._exit)
+    runner.assert.equals("text/plain", ngx.header["Content-Type"])
+end)
+
 runner.it("rejects public IPs when no token configured", function()
-    local ngx = run_internal_access({
-        env = { SECURITY_ACCESS_TOKEN = "" },
+    local ngx = run_treasury_access({
+        env = { TREASURY_TOKEN = "" },
         var = { remote_addr = "8.8.8.8" }
     })
 
@@ -87,8 +100,8 @@ runner.it("rejects public IPs when no token configured", function()
 end)
 
 runner.it("allows loopback when no token configured", function()
-    local ngx = run_internal_access({
-        env = { SECURITY_ACCESS_TOKEN = "" },
+    local ngx = run_treasury_access({
+        env = { TREASURY_TOKEN = "" },
         var = { remote_addr = "127.0.0.1" }
     })
 
@@ -98,8 +111,8 @@ runner.it("allows loopback when no token configured", function()
 end)
 
     runner.it("rejects when token is invalid", function()
-        local ngx = run_internal_access({
-            env = { SECURITY_ACCESS_TOKEN = "secret-token" },
+        local ngx = run_treasury_access({
+            env = { TREASURY_TOKEN = "secret-token" },
             headers = { ["X-Access-Token"] = "wrong-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -110,8 +123,8 @@ end)
     end)
 
     runner.it("allows private network without provided token", function()
-        local ngx = run_internal_access({
-            env = { SECURITY_ACCESS_TOKEN = "secret-token" },
+        local ngx = run_treasury_access({
+            env = { TREASURY_TOKEN = "secret-token" },
             var = { remote_addr = "172.17.0.2" }
         })
 
@@ -120,8 +133,8 @@ end)
     end)
 
     runner.it("allows valid token on public IP", function()
-        local ngx = run_internal_access({
-            env = { SECURITY_ACCESS_TOKEN = "secret-token" },
+        local ngx = run_treasury_access({
+            env = { TREASURY_TOKEN = "secret-token" },
             headers = { ["X-Access-Token"] = "secret-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -131,8 +144,8 @@ end)
     end)
 
     runner.it("accepts token from cookie", function()
-        local ngx = run_internal_access({
-            env = { SECURITY_ACCESS_TOKEN = "secret-token" },
+        local ngx = run_treasury_access({
+            env = { TREASURY_TOKEN = "secret-token" },
             var = {
                 remote_addr = "8.8.8.8",
                 cookie_access_token = "secret-token"
