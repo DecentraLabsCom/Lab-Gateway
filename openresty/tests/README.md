@@ -36,12 +36,14 @@ Linux/macOS:
 
 ```bash
 ./openresty/tests/run-lua-tests.sh
+./openresty/tests/run-jwt-key-sync-integration.sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
 .\openresty\tests\run-lua-tests.ps1
+.\openresty\tests\run-jwt-key-sync-integration.ps1
 ```
 
 Direct run (if LuaJIT + lua-cjson are installed):
@@ -56,6 +58,7 @@ luajit openresty/tests/run.lua
 - JWT validation and JWKS fetch (`jwt_handler`)
 - Header/body filters for Guacamole auth flow
 - Session cleanup and revocation (`log_handler`, `session_guard`)
+- Lite-mode JWT key synchronization from `ISSUER` origin (`run-jwt-key-sync-integration.*`)
 
 ## Add a new spec
 

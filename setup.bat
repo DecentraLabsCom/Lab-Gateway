@@ -330,6 +330,30 @@ if /i "!domain!"=="localhost" (
 )
 echo.
 
+echo JWT Issuer ^(Full/Lite^)
+echo ======================
+echo ISSUER controls which JWT issuer OpenResty accepts:
+echo   - Leave empty -^> Full mode ^(this gateway handles auth + access^).
+echo   - Set https://^<your-full-gateway-domain^>/auth -^> Lite mode ^(trust Full-issued JWTs^).
+echo   - In Lite mode, public key sync is automatic from https://^<issuer-origin^>/.well-known/public-key.pem.
+echo   - Lite mode disables local auth/treasury/intents endpoints.
+call :ReadEnvValue "%ROOT_ENV_FILE%" "ISSUER" current_issuer
+if defined current_issuer (
+    echo Current ISSUER in .env: !current_issuer!
+) else (
+    echo Current ISSUER in .env: ^(empty^)
+)
+set "issuer_value="
+set /p "issuer_value=ISSUER [empty->Full, https://full/auth->Lite]: "
+if defined issuer_value set "issuer_value=!issuer_value: =!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "ISSUER" "!issuer_value!"
+if "!issuer_value!"=="" (
+    echo    * ISSUER left empty ^(Full mode^).
+) else (
+    echo    * ISSUER set to: !issuer_value! ^(Lite mode^).
+)
+echo.
+
 echo Remote Access (Cloudflare Tunnel)
 echo =================================
 set "enable_cf="

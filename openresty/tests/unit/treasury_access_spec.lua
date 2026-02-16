@@ -51,7 +51,8 @@ local function run_treasury_access(opts)
     local env = opts.env or {}
     local headers = opts.headers or {}
     local ngx = ngx_factory.new({
-        var = opts.var or {}
+        var = opts.var or {},
+        config = opts.config or {}
     })
 
     ngx.req.get_headers = function()
@@ -75,6 +76,18 @@ local function run_treasury_access(opts)
 end
 
 runner.describe("Treasury token guard", function()
+runner.it("blocks all treasury access in lite mode", function()
+    local ngx = run_treasury_access({
+        env = { TREASURY_TOKEN = "secret-token" },
+        config = { lite_mode = 1 },
+        var = { remote_addr = "127.0.0.1" }
+    })
+
+    runner.assert.equals(403, ngx.status)
+    runner.assert.equals(403, ngx._exit)
+    runner.assert.equals("text/plain", ngx.header["Content-Type"])
+end)
+
 runner.it("rejects public IPs when no token configured", function()
     local ngx = run_treasury_access({
         env = { TREASURY_TOKEN = "" },

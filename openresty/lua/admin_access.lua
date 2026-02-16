@@ -2,6 +2,8 @@
 -- Uses TREASURY_TOKEN only. If unset, allows loopback/Docker ranges only.
 
 local token = os.getenv("TREASURY_TOKEN") or ""
+local config = ngx.shared and ngx.shared.config
+local lite_mode = config and config:get("lite_mode")
 
 local header_name = os.getenv("TREASURY_TOKEN_HEADER") or "X-Access-Token"
 local cookie_name = os.getenv("TREASURY_TOKEN_COOKIE") or "access_token"
@@ -11,6 +13,17 @@ local function deny(message)
     ngx.header["Content-Type"] = "text/plain"
     ngx.say(message or "Unauthorized")
     return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+end
+
+local function deny_forbidden(message)
+    ngx.status = 403
+    ngx.header["Content-Type"] = "text/plain"
+    ngx.say(message or "Forbidden")
+    return ngx.exit(403)
+end
+
+if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
+    return deny_forbidden("Forbidden: treasury admin endpoints are disabled in Lite mode.")
 end
 
 local function is_loopback_or_docker(ip)

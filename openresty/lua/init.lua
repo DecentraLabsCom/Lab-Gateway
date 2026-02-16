@@ -67,11 +67,36 @@ local function build_default_issuer()
     return string.format("https://%s%s%s", name, port_segment, "/auth")
 end
 
+local function build_local_issuer()
+    local name = trim(server_name) or "localhost"
+    local port_segment = ""
+    if https_port and https_port ~= "" and https_port ~= "443" then
+        port_segment = ":" .. https_port
+    end
+    return string.format("https://%s%s%s", name, port_segment, "/auth")
+end
+
+local function normalize_issuer(value)
+    local normalized = trim(value)
+    if not normalized or normalized == "" then
+        return ""
+    end
+    normalized = normalized:gsub("/+$", "")
+    return normalized
+end
+
+local configured_issuer = trim(os.getenv("ISSUER"))
+local local_issuer = build_local_issuer()
 local issuer = build_default_issuer()
+local lite_mode = false
+if configured_issuer and configured_issuer ~= "" then
+    lite_mode = normalize_issuer(configured_issuer) ~= normalize_issuer(local_issuer)
+end
 
 config:set("server_name", server_name)
 config:set("guac_uri", "/guacamole")
 config:set("issuer", issuer)
+config:set("lite_mode", lite_mode and 1 or 0)
 config:set("admin_user", admin_user)
 config:set("admin_pass", admin_pass)
 config:set("https_port", https_port)
@@ -80,6 +105,12 @@ if guac_api_url and guac_api_url ~= "" then
     config:set("guac_api_url", guac_api_url)
 else
     config:set("guac_api_url", "http://127.0.0.1:8080/guacamole/api")
+end
+
+if lite_mode then
+    ngx.log(ngx.INFO, "Lite mode enabled: treasury/auth/intents endpoints are restricted on this gateway")
+else
+    ngx.log(ngx.INFO, "Full mode enabled")
 end
 
 -- Read the public key from a file

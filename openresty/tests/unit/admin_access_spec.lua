@@ -52,7 +52,8 @@ local function run_admin_access(opts)
     local headers = opts.headers or {}
     local uri_args = opts.uri_args or {}
     local ngx = ngx_factory.new({
-        var = opts.var or {}
+        var = opts.var or {},
+        config = opts.config or {}
     })
 
     ngx.req.get_headers = function()
@@ -79,6 +80,17 @@ local function run_admin_access(opts)
 end
 
 runner.describe("Treasury admin token guard", function()
+    runner.it("blocks treasury admin access in lite mode", function()
+        local ngx = run_admin_access({
+            env = { TREASURY_TOKEN = "treasury-token" },
+            config = { lite_mode = 1 },
+            var = { remote_addr = "127.0.0.1" }
+        })
+
+        runner.assert.equals(403, ngx.status)
+        runner.assert.equals(403, ngx._exit)
+    end)
+
     runner.it("rejects public IPs when TREASURY_TOKEN is not configured", function()
         local ngx = run_admin_access({
             env = { TREASURY_TOKEN = "" },

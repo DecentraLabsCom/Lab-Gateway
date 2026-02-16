@@ -18,6 +18,7 @@
 param()
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
@@ -39,37 +40,47 @@ $TestDockerfile = @"
 FROM openresty/openresty:alpine
 
 # Install luarocks and cjson
-RUN apk add --no-cache luarocks5.1 && \
+RUN apk add --no-cache luarocks5.1 lua5.1-dev gcc musl-dev && \
     luarocks-5.1 install lua-cjson
 
 WORKDIR /app
 "@
 
-$DockerfilePath = Join-Path $ProjectRoot "openresty" "Dockerfile.test"
+$DockerfilePath = Join-Path (Join-Path $ProjectRoot "openresty") "Dockerfile.test"
 $TestDockerfile | Out-File -FilePath $DockerfilePath -Encoding utf8 -NoNewline
 
 try {
     Write-Host "Building test container..." -ForegroundColor Yellow
     
-    docker build -t openresty-lua-tests -f $DockerfilePath (Join-Path $ProjectRoot "openresty") 2>&1 | ForEach-Object {
+    $openrestyRoot = Join-Path $ProjectRoot "openresty"
+    $buildCmd = "docker build -t openresty-lua-tests -f `"$DockerfilePath`" `"$openrestyRoot`""
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $buildOutput = cmd /c "$buildCmd 2>&1"
+    $ErrorActionPreference = $previousErrorAction
+    $buildOutput | ForEach-Object {
         if ($_ -match "error" -or $_ -match "Error") {
             Write-Host $_ -ForegroundColor Red
         } elseif ($VerbosePreference -eq "Continue") {
             Write-Host $_
         }
     }
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
 
     Write-Host "Running tests..." -ForegroundColor Yellow
     Write-Host ""
 
-    $openrestyPath = Join-Path $ProjectRoot "openresty"
-    
+    $repoPath = $ProjectRoot
+    $repoPathDocker = $repoPath -replace "\\", "/"
+
     # Run tests in container
-    $result = docker run --rm `
-        -v "${openrestyPath}:/app:ro" `
-        -w /app `
-        openresty-lua-tests `
-        luajit tests/run.lua 2>&1
+    $runCmd = "docker run --rm -v `"${repoPathDocker}:/workspace:ro`" -w /workspace openresty-lua-tests luajit openresty/tests/run.lua"
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $result = cmd /c "$runCmd 2>&1"
+    $ErrorActionPreference = $previousErrorAction
 
     $exitCode = $LASTEXITCODE
 

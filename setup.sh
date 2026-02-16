@@ -369,6 +369,30 @@ else
 fi
 
 echo
+echo "JWT Issuer (Full/Lite)"
+echo "======================"
+echo "ISSUER controls which JWT issuer OpenResty accepts:"
+echo "  - Leave empty -> Full mode (this gateway handles auth + access)."
+echo "  - Set https://<your-full-gateway-domain>/auth -> Lite mode (trust Full-issued JWTs)."
+echo "  - In Lite mode, public key sync is automatic from https://<issuer-origin>/.well-known/public-key.pem."
+echo "  - Lite mode disables local auth/treasury/intents endpoints."
+current_issuer="$(get_env_default "ISSUER" "$ROOT_ENV_FILE")"
+if [ -n "$current_issuer" ]; then
+    echo "Current ISSUER in .env: $current_issuer"
+else
+    echo "Current ISSUER in .env: (empty)"
+fi
+read -p "ISSUER [empty->Full, https://full/auth->Lite]: " issuer_value
+issuer_value=$(echo "$issuer_value" | tr -d ' ')
+update_env_var "$ROOT_ENV_FILE" "ISSUER" "$issuer_value"
+if [ -z "$issuer_value" ]; then
+    echo "   * ISSUER left empty (Full mode)."
+else
+    echo "   * ISSUER set to: $issuer_value (Lite mode)."
+fi
+echo
+
+echo
 echo "Remote Access (Cloudflare Tunnel)"
 echo "================================="
 read -p "Enable Cloudflare Tunnel to expose the gateway without opening inbound ports? (y/N): " enable_cf
