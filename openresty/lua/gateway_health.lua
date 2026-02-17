@@ -1,5 +1,97 @@
 local cjson = require "cjson.safe"
 local resolver = require "resty.dns.resolver"
+local ok_http, resty_http = pcall(require, "resty.http")
+
+local function trim(value)
+    if not value then
+        return ""
+    end
+    return (tostring(value):gsub("^%s*(.-)%s*$", "%1"))
+end
+
+local function normalize_issuer(value)
+    local normalized = trim(value)
+    if normalized == "" then
+        return ""
+    end
+    return normalized:gsub("/+$", "")
+end
+
+local function file_exists(path)
+    local f = io.open(path, "r")
+    if f then
+        f:close()
+        return true
+    end
+    return false
+end
+
+local function read_file(path)
+    local f = io.open(path, "r")
+    if not f then
+        return nil
+    end
+    local body = f:read("*a")
+    f:close()
+    return body
+end
+
+local function looks_like_public_key_pem(value)
+    if type(value) ~= "string" then
+        return false
+    end
+    return value:find("BEGIN PUBLIC KEY", 1, true) ~= nil
+        and value:find("END PUBLIC KEY", 1, true) ~= nil
+end
+
+local function parse_issuer_url(value)
+    local raw = trim(value)
+    if raw == "" then
+        return nil
+    end
+    local scheme, host, port = raw:match("^(https?)://([^/:]+):?(%d*)")
+    if not scheme or not host then
+        return nil
+    end
+    local port_num = tonumber(port)
+    if not port_num then
+        port_num = (scheme == "https") and 443 or 80
+    end
+    return {
+        scheme = scheme,
+        host = host,
+        port = port_num
+    }
+end
+
+local function issuer_origin(parsed)
+    if not parsed then
+        return nil
+    end
+    local default_port = parsed.scheme == "https" and 443 or 80
+    local suffix = ""
+    if parsed.port ~= default_port then
+        suffix = ":" .. tostring(parsed.port)
+    end
+    return string.format("%s://%s%s", parsed.scheme, parsed.host, suffix)
+end
+
+local function is_lite_mode()
+    local config = ngx.shared and ngx.shared.config
+    local value = config and config:get("lite_mode")
+    return value == 1 or value == true or value == "1"
+end
+
+local function build_local_issuer()
+    local config = ngx.shared and ngx.shared.config
+    local server_name = trim((config and config:get("server_name")) or os.getenv("SERVER_NAME") or "localhost")
+    local https_port = trim((config and config:get("https_port")) or os.getenv("HTTPS_PORT") or "443")
+    local port_segment = ""
+    if https_port ~= "" and https_port ~= "443" then
+        port_segment = ":" .. https_port
+    end
+    return string.format("https://%s%s/auth", server_name, port_segment)
+end
 
 local function capture(path)
     local res = ngx.location.capture(path)
@@ -135,6 +227,84 @@ local function overall_status(services)
     return "DOWN"
 end
 
+local function check_lite_issuer_trust(issuer)
+    local local_public_key = read_file("/etc/ssl/private/public_key.pem")
+    local local_public_key_ok = looks_like_public_key_pem(local_public_key)
+    local parsed = parse_issuer_url(issuer)
+    local details = {
+        issuer = issuer,
+        issuer_url_valid = parsed ~= nil,
+        local_public_key_present = file_exists("/etc/ssl/private/public_key.pem"),
+        local_public_key_valid = local_public_key_ok,
+        remote_public_key_ok = false,
+        remote_public_key_status = "not_checked",
+        issuer_host_dns_ok = false
+    }
+
+    if not parsed then
+        details.remote_public_key_status = "invalid issuer url"
+        details.ok = false
+        return details
+    end
+
+    local dns_ok, dns_err = check_dns(parsed.host)
+    details.issuer_host_dns_ok = dns_ok
+    if not dns_ok then
+        details.remote_public_key_status = dns_err or "issuer dns resolution failed"
+        details.ok = false
+        return details
+    end
+
+    if not ok_http then
+        details.remote_public_key_status = "resty.http unavailable"
+        details.ok = false
+        return details
+    end
+
+    local url = issuer_origin(parsed) .. "/.well-known/public-key.pem"
+    local httpc = resty_http.new()
+    httpc:set_timeout(2000)
+    local res, err = httpc:request_uri(url, { method = "GET", ssl_verify = false })
+    if not res then
+        details.remote_public_key_status = err or "issuer request failed"
+        details.ok = false
+        return details
+    end
+
+    if res.status >= 400 then
+        details.remote_public_key_status = "http " .. tostring(res.status)
+        details.ok = false
+        return details
+    end
+
+    details.remote_public_key_ok = looks_like_public_key_pem(res.body or "")
+    if details.remote_public_key_ok then
+        details.remote_public_key_status = "ok"
+    else
+        details.remote_public_key_status = "invalid public key payload"
+    end
+
+    details.ok = details.local_public_key_valid and details.remote_public_key_ok
+    return details
+end
+
+local lite_mode = is_lite_mode()
+local config = ngx.shared and ngx.shared.config
+local configured_issuer = trim((config and config:get("issuer")) or os.getenv("ISSUER") or "")
+local local_issuer = build_local_issuer()
+local external_issuer = normalize_issuer(configured_issuer) ~= normalize_issuer(local_issuer)
+
+local lite_auth = nil
+if lite_mode then
+    lite_auth = check_lite_issuer_trust(configured_issuer)
+    lite_auth.external_issuer = external_issuer
+    lite_auth.local_issuer = local_issuer
+    if not external_issuer then
+        lite_auth.ok = false
+        lite_auth.remote_public_key_status = "issuer points to local gateway; expected external Full issuer in Lite mode"
+    end
+end
+
 local blockchain = capture("/__health_blockchain")
 local guac = capture("/__health_guacamole")
 local guac_api = capture("/__health_guac_api")
@@ -155,11 +325,6 @@ for _, h in ipairs(dns_hosts) do
 end
 
 -- Certificate expiry (days)
-local function file_exists(path)
-    local f = io.open(path, "r")
-    if f then f:close() return true end
-    return false
-end
 local cert_days = cert_days_remaining("/etc/ssl/private/fullchain.pem")
 
 -- Env/config sanity
@@ -172,21 +337,31 @@ end
 -- Ops worker details (optional)
 local ops_body = ops.body or {}
 
+local status_checks = {
+    { ok = guac.ok },
+    { ok = guac_api_ok },
+    { ok = guacd_ok },
+    { ok = guac_schema_ok },
+    { ok = ops.ok },
+    { ok = mysql_ok }
+}
+
+if not lite_mode then
+    table.insert(status_checks, 1, blockchain)
+elseif lite_auth then
+    table.insert(status_checks, { ok = lite_auth.ok })
+end
+
 -- Build structured response
 local result = {
-    status = overall_status({
-        blockchain,
-        { ok = guac.ok },
-        { ok = guac_api_ok },
-        { ok = guacd_ok },
-        { ok = guac_schema_ok },
-        { ok = ops.ok },
-        { ok = mysql_ok }
-    }),
+    mode = lite_mode and "lite" or "full",
+    lite = lite_mode,
+    status = overall_status(status_checks),
     services = {
         blockchain = {
             ok = blockchain.ok,
             status = blockchain.status,
+            required = not lite_mode,
             details = block_body
         },
         guacamole = {
@@ -213,6 +388,18 @@ local result = {
         },
         mysql = {
             ok = mysql_ok or false
+        },
+        lite_auth = {
+            ok = lite_auth and lite_auth.ok or (not lite_mode),
+            issuer = lite_auth and lite_auth.issuer or configured_issuer,
+            local_issuer = lite_auth and lite_auth.local_issuer or local_issuer,
+            external_issuer = lite_auth and lite_auth.external_issuer or false,
+            issuer_url_valid = lite_auth and lite_auth.issuer_url_valid or false,
+            issuer_host_dns_ok = lite_auth and lite_auth.issuer_host_dns_ok or false,
+            local_public_key_present = lite_auth and lite_auth.local_public_key_present or file_exists("/etc/ssl/private/public_key.pem"),
+            local_public_key_valid = lite_auth and lite_auth.local_public_key_valid or false,
+            remote_public_key_ok = lite_auth and lite_auth.remote_public_key_ok or false,
+            remote_public_key_status = lite_auth and lite_auth.remote_public_key_status or "not_applicable"
         }
     },
     infra = {

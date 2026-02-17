@@ -1,11 +1,25 @@
 // Effects and animations for the main page
 document.addEventListener('DOMContentLoaded', function() {
-    function applyGatewayMode() {
+    let gatewayMode = 'full';
+
+    function setGatewayMode(modeInfo) {
         const walletButton = document.getElementById('wallet-treasury-btn');
-        if (!walletButton) {
+        const mode = (modeInfo && modeInfo.mode ? String(modeInfo.mode) : '').toLowerCase();
+        const lite = modeInfo && (modeInfo.lite === true || mode === 'lite');
+        gatewayMode = lite ? 'lite' : 'full';
+
+        if (lite) {
+            if (walletButton) {
+                walletButton.remove();
+            }
+            document.body.classList.add('gateway-lite-mode');
             return;
         }
 
+        document.body.classList.remove('gateway-lite-mode');
+    }
+
+    function applyGatewayMode() {
         fetch('/gateway/mode', { cache: 'no-store' })
             .then(response => {
                 if (!response.ok) {
@@ -17,13 +31,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!modeInfo) {
                     return;
                 }
-                if (modeInfo.lite === true || modeInfo.mode === 'lite') {
-                    walletButton.remove();
-                    document.body.classList.add('gateway-lite-mode');
-                }
+                setGatewayMode(modeInfo);
             })
             .catch(() => {
-                // Keep default UI if mode endpoint is unavailable.
+                // Fallback to aggregated health when /gateway/mode is unavailable.
+                fetch('/gateway/health', { cache: 'no-store' })
+                    .then(response => {
+                        if (!response.ok) {
+                            return null;
+                        }
+                        return response.json();
+                    })
+                    .then(healthInfo => {
+                        if (!healthInfo) {
+                            return;
+                        }
+                        setGatewayMode(healthInfo);
+                    })
+                    .catch(() => {
+                        // Keep default UI if both mode endpoints are unavailable.
+                    });
             });
     }
     
@@ -123,6 +150,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const guacApi = services.guacamole_api || {};
                 const ops = services.ops || {};
                 const mysql = services.mysql || {};
+                const liteAuth = services.lite_auth || {};
+                const mode = (data.mode || gatewayMode || 'full').toString().toLowerCase();
+                const liteMode = data.lite === true || mode === 'lite';
                 const statusValue = (data.status || '').toString().toUpperCase();
 
                 const okItems = [];
@@ -130,16 +160,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const labsOk = guacamole.ok === true && guacApi.ok === true && mysql.ok === true;
 
-                if (blockchain.ok === true) {
-                    okItems.push('Blockchain services operative');
+                if (liteMode) {
+                    setGatewayMode({ mode: 'lite', lite: true });
+                    if (liteAuth.ok === true) {
+                        okItems.push('Lite issuer/public key trust operative');
+                    } else {
+                        missingItems.push({ text: 'Lite issuer/public key trust failed', href: '/gateway-health/' });
+                    }
                 } else {
-                    missingItems.push({ text: `Blockchain services inoperative`, href: '/gateway-health/' });
+                    if (blockchain.ok === true) {
+                        okItems.push('Blockchain services operative');
+                    } else {
+                        missingItems.push({ text: 'Blockchain services inoperative', href: '/gateway-health/' });
+                    }
                 }
 
                 if (labsOk) {
                     okItems.push('Labs access operative');
                 } else {
-                    missingItems.push({ text: `Labs access inoperative`, href: '/gateway-health/' });
+                    missingItems.push({ text: 'Labs access inoperative', href: '/gateway-health/' });
                 }
 
                 if (ops.ok === false) {
