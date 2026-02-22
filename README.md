@@ -35,7 +35,7 @@ DecentraLabs Gateway provides a complete blockchain-based authentication system 
 - **Smart Contract Integration**: Validates users' lab reservations on-chain
 - **JWT Token Generation**: Issues secure access tokens for lab sessions (to be consumed by Guacamole)
 
-### ✅ Authentication Service (Spring Boot)
+### ✅ Blockchain Services (Spring Boot)
 - **RESTful API**: Comprehensive authentication endpoints
 - **Blockchain Integration**: Web3j for smart contract interaction
 - **JWT Management**: Token validation and generation
@@ -43,7 +43,7 @@ DecentraLabs Gateway provides a complete blockchain-based authentication system 
 - **Institutional Treasury**: Full treasury management with spending limits and period controls
 - **Health Monitoring**: Built-in health checks and metrics
 
-### ✅ Lab Access & Management
+### ✅ Lab Access & Management (OpenResty & Guacamole)
 - **Apache Guacamole Integration**: Clientless RDP/VNC/SSH access through the browser
 - **Session Cookie Management**: JTI-based session validation with automatic expiration
 - **Header Propagation**: Authenticated username forwarded to Guacamole for auto-login
