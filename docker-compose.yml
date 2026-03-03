@@ -429,9 +429,65 @@ services:
     networks:
       - guacnet
 
+  # FMU Runner - FMI Co-Simulation execution service
+  fmu-runner:
+    build:
+      context: ./fmu-runner
+      dockerfile: Dockerfile
+    environment:
+      - FMU_DATA_PATH=/app/fmu-data
+      - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
+      - HISTORY_DB_PATH=/app/data/history.db
+      - AUTH_JWKS_URL=http://blockchain-services:8080/.well-known/jwks.json
+      - AUTH_SESSION_TICKET_ISSUE_URL=${AUTH_SESSION_TICKET_ISSUE_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/issue}
+      - AUTH_SESSION_TICKET_REDEEM_URL=${AUTH_SESSION_TICKET_REDEEM_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/redeem}
+      - AUTH_SESSION_TICKET_INTERNAL_TOKEN=${AUTH_SESSION_TICKET_INTERNAL_TOKEN:-}
+      - MAX_SIMULATION_TIMEOUT=${FMU_MAX_SIMULATION_TIMEOUT:-300}
+      - MAX_CONCURRENT_PER_MODEL=${FMU_MAX_CONCURRENT_PER_MODEL:-10}
+      - PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE=${FMU_PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE:-20}
+      - WS_CREATE_RATE_LIMIT_PER_MINUTE=${FMU_WS_CREATE_RATE_LIMIT_PER_MINUTE:-30}
+      - FMU_PROXY_GATEWAY_WS_URL=${FMU_PROXY_GATEWAY_WS_URL:-}
+      - FMU_PROXY_SIGNING_KEY=${FMU_PROXY_SIGNING_KEY:-}
+    volumes:
+      - ./fmu-data:/app/fmu-data:ro
+      - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
+      - fmu-history:/app/data
+      - ./certs:/app/config/keys:ro
+    depends_on:
+      blockchain-services:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=fmu-runner"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: always
+    networks:
+      - guacnet
+
 networks:
   guacnet:
     driver: bridge
 
 volumes:
   mysql_data:
+  fmu-history:

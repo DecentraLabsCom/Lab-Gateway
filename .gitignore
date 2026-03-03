@@ -23,6 +23,7 @@ luacov.report.out
 # Database data (persistent volumes)
 mysql_data/
 blockchain-data/
+fmu-proxy-runtime/
 
 # Auth Service specific files
 auth-service/target/
@@ -40,6 +41,9 @@ target/
 # Temporary files
 *.tmp
 *.bak
+*.pyc
+__pycache__/
+.pytest_cache/
 
 # IDE files
 .idea/

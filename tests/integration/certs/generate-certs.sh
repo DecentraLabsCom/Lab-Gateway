@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEY_FILE="$SCRIPT_DIR/privkey.pem"
 CERT_FILE="$SCRIPT_DIR/fullchain.pem"
+PUB_FILE="$SCRIPT_DIR/public_key.pem"
 TMP_CONF="$(mktemp)"
 
 cleanup() {
@@ -41,9 +42,13 @@ openssl req \
   -out "$CERT_FILE" \
   -config "$TMP_CONF"
 
+openssl rsa -in "$KEY_FILE" -pubout -out "$PUB_FILE" >/dev/null 2>&1
+
 chmod 600 "$KEY_FILE" || true
 chmod 644 "$CERT_FILE" || true
+chmod 644 "$PUB_FILE" || true
 
 echo "Done:"
 echo "  - $KEY_FILE"
 echo "  - $CERT_FILE"
+echo "  - $PUB_FILE"
