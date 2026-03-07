@@ -454,9 +454,17 @@ echo "================"
 mkdir -p certs
 mkdir -p blockchain-data
 mkdir -p fmu-data
+mkdir -p fmu-proxy-runtime/binaries/linux64
+mkdir -p fmu-proxy-runtime/binaries/win64
+mkdir -p fmu-proxy-runtime/binaries/darwin64
 chmod 700 certs 2>/dev/null || true
 chmod 700 blockchain-data 2>/dev/null || true
 chmod 755 fmu-data 2>/dev/null || true
+chmod 755 fmu-proxy-runtime 2>/dev/null || true
+chmod 755 fmu-proxy-runtime/binaries 2>/dev/null || true
+chmod 755 fmu-proxy-runtime/binaries/linux64 2>/dev/null || true
+chmod 755 fmu-proxy-runtime/binaries/win64 2>/dev/null || true
+chmod 755 fmu-proxy-runtime/binaries/darwin64 2>/dev/null || true
 
 echo
 echo "Host User Mapping"
@@ -536,6 +544,7 @@ echo "================================="
 
 echo
 # Provider registration enabled by default (non-interactive).
+update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_ENABLED" "true"
 update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 
 # Use CONTRACT_ADDRESS from blockchain-services/.env (no prompt)
@@ -603,6 +612,7 @@ echo "using the blockchain-services web console (or the /wallet API) and then"
 echo "update INSTITUTIONAL_WALLET_ADDRESS / PASSWORD in:"
 echo "  - blockchain-services/.env"
 echo "Wallet data is stored in ./blockchain-data (already created)."
+echo "FMU proxy runtime binaries must be copied into ./fmu-proxy-runtime/binaries/{linux64,win64,darwin64} before proxy downloads will work."
 
 echo
 echo "Next Steps"

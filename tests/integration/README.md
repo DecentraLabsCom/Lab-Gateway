@@ -28,6 +28,33 @@ This suite validates OpenResty routing and security behavior against mock servic
 ./run-integration.sh
 ```
 
+## FMU live stack verification
+
+Use this when you want to validate the real `docker-compose.yml` stack instead of the mock integration stack.
+
+PowerShell:
+
+```powershell
+# Validates the live gateway stack already running on localhost:8443
+pwsh ./tests/integration/verify-fmu-live.ps1
+
+# Full verification once you have a real FMU booking JWT
+pwsh ./tests/integration/verify-fmu-live.ps1 `
+  -BearerToken "<booking-jwt>" `
+  -LabId "lab-1" `
+  -ReservationKey "reservation-1"
+```
+
+What it checks:
+
+- `docker compose` can reach the live stack
+- `https://127.0.0.1:8443/fmu/health` is `UP`
+- `fmuCount` is at least the expected value
+- proxy runtime binaries exist inside `fmu-runner`
+- `.fmu` files exist inside `fmu-data`
+- `/auth/fmu/session-ticket/issue` and `/redeem` are exposed
+- with `-BearerToken`, it also tests real `issue`, `redeem` and `proxy.fmu` download
+
 ## Files
 
 ```text

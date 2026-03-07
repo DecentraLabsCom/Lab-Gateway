@@ -23,7 +23,19 @@ luacov.report.out
 # Database data (persistent volumes)
 mysql_data/
 blockchain-data/
-fmu-proxy-runtime/
+fmu-proxy-runtime/*
+!fmu-proxy-runtime/README.md
+!fmu-proxy-runtime/binaries/
+fmu-proxy-runtime/binaries/*
+!fmu-proxy-runtime/binaries/linux64/
+!fmu-proxy-runtime/binaries/win64/
+!fmu-proxy-runtime/binaries/darwin64/
+fmu-proxy-runtime/binaries/linux64/*
+!fmu-proxy-runtime/binaries/linux64/.gitkeep
+fmu-proxy-runtime/binaries/win64/*
+!fmu-proxy-runtime/binaries/win64/.gitkeep
+fmu-proxy-runtime/binaries/darwin64/*
+!fmu-proxy-runtime/binaries/darwin64/.gitkeep
 
 # Auth Service specific files
 auth-service/target/

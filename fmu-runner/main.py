@@ -462,7 +462,7 @@ def _collect_runtime_files() -> list[tuple[Path, str]]:
         )
     files: list[tuple[Path, str]] = []
     for file_path in binaries_root.rglob("*"):
-        if file_path.is_file():
+        if file_path.is_file() and not file_path.name.startswith("."):
             rel = file_path.relative_to(runtime_root).as_posix()
             files.append((file_path, rel))
     if not files:

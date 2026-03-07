@@ -432,6 +432,11 @@ echo.
 if not exist certs mkdir certs
 if not exist blockchain-data mkdir blockchain-data
 if not exist fmu-data mkdir fmu-data
+if not exist fmu-proxy-runtime mkdir fmu-proxy-runtime
+if not exist fmu-proxy-runtime\binaries mkdir fmu-proxy-runtime\binaries
+if not exist fmu-proxy-runtime\binaries\linux64 mkdir fmu-proxy-runtime\binaries\linux64
+if not exist fmu-proxy-runtime\binaries\win64 mkdir fmu-proxy-runtime\binaries\win64
+if not exist fmu-proxy-runtime\binaries\darwin64 mkdir fmu-proxy-runtime\binaries\darwin64
 if not exist certs\.gitkeep type nul > certs\.gitkeep
 
 echo SSL Certificates
@@ -490,6 +495,7 @@ echo Blockchain Services Configuration
 echo ==================================
 echo.
 rem Provider registration enabled by default (non-interactive).
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_ENABLED" "true"
 call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
 if defined contract_default (
@@ -530,6 +536,7 @@ echo After creating the wallet, update these variables in %BLOCKCHAIN_ENV_FILE%:
 echo    * INSTITUTIONAL_WALLET_ADDRESS
 echo    * INSTITUTIONAL_WALLET_PASSWORD
 echo Wallet data will be persisted in the blockchain-data\ directory.
+echo FMU proxy runtime binaries must be copied into fmu-proxy-runtime\binaries\^{linux64^|win64^|darwin64^} before proxy downloads will work.
 echo.
 
 echo Next Steps
