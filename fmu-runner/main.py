@@ -28,7 +28,7 @@ except ImportError:
     posix_resource = None  # Not available on Windows
 from pathlib import Path
 from typing import Optional
-from concurrent.futures import ProcessPoolExecutor, Future
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, Future
 from collections import defaultdict, deque
 from threading import Lock
 from uuid import uuid4
@@ -42,7 +42,9 @@ from pydantic import BaseModel, Field
 from xml.etree import ElementTree as ET
 
 from auth import verify_jwt, verify_jwt_token
+from fmu_backend import LocalFmuBackend, StationFmuBackend
 from realtime_ws import RealtimeWsManager
+from station_ws_proxy import StationRealtimeWsProxyManager
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -72,6 +74,10 @@ AUTH_SESSION_TICKET_INTERNAL_TOKEN = os.getenv("AUTH_SESSION_TICKET_INTERNAL_TOK
 FMU_PROXY_RUNTIME_PATH = os.getenv("FMU_PROXY_RUNTIME_PATH", "/app/fmu-proxy-runtime")
 FMU_PROXY_GATEWAY_WS_URL = os.getenv("FMU_PROXY_GATEWAY_WS_URL", "")
 FMU_PROXY_SIGNING_KEY = os.getenv("FMU_PROXY_SIGNING_KEY", "")
+FMU_BACKEND_MODE = os.getenv("FMU_BACKEND_MODE", "local").strip().lower()
+FMU_STATION_BASE_URL = os.getenv("FMU_STATION_BASE_URL", "").strip()
+FMU_STATION_INTERNAL_TOKEN = os.getenv("FMU_STATION_INTERNAL_TOKEN", "").strip()
+FMU_STATION_REQUEST_TIMEOUT = float(os.getenv("FMU_STATION_REQUEST_TIMEOUT", "10"))
 PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE = int(os.getenv("PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE", "20"))
 WS_CREATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("WS_CREATE_RATE_LIMIT_PER_MINUTE", "30"))
 
@@ -147,10 +153,18 @@ def _release_slot(lab_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Process pool for sandboxed execution
+# Execution pool for simulations
 # ---------------------------------------------------------------------------
 
-_executor = ProcessPoolExecutor(max_workers=4)
+def _create_executor():
+    try:
+        return ProcessPoolExecutor(max_workers=4)
+    except (PermissionError, OSError) as exc:
+        logger.warning("ProcessPoolExecutor unavailable, falling back to ThreadPoolExecutor: %s", exc)
+        return ThreadPoolExecutor(max_workers=4)
+
+
+_executor = _create_executor()
 
 # ---------------------------------------------------------------------------
 # Running-simulation registry (for cancellation — #17)
@@ -353,14 +367,200 @@ def _normalize_xml_value(value) -> Optional[str]:
     return text if text else None
 
 
-def _build_proxy_model_description_xml(md) -> bytes:
-    model_name = _normalize_xml_value(getattr(md, "modelName", None)) or "DecentraLabsProxy"
-    guid = _normalize_xml_value(getattr(md, "guid", None)) or "{" + uuid4().hex + "}"
+def _model_metadata_from_model_description(md) -> dict:
+    supports_cs = bool(getattr(md, "coSimulation", None))
+    supports_me = bool(getattr(md, "modelExchange", None))
+    simulation_kind = "coSimulation" if supports_cs else ("modelExchange" if supports_me else "unknown")
+    simulation_type = "CoSimulation" if supports_cs else ("ModelExchange" if supports_me else "Unknown")
+
+    default_experiment = getattr(md, "defaultExperiment", None)
+    default_start = float(default_experiment.startTime) if default_experiment and default_experiment.startTime is not None else 0.0
+    default_stop = float(default_experiment.stopTime) if default_experiment and default_experiment.stopTime is not None else 1.0
+    default_step = float(default_experiment.stepSize) if default_experiment and default_experiment.stepSize is not None else 0.01
+
+    variables = []
+    for index, var in enumerate(getattr(md, "modelVariables", []), start=1):
+        entry = {
+            "name": var.name,
+            "causality": var.causality or "local",
+            "type": str(var.type),
+            "variability": getattr(var, "variability", None) or "continuous",
+            "valueReference": int(getattr(var, "valueReference", index)),
+        }
+        if hasattr(var, "unit") and var.unit:
+            entry["unit"] = var.unit
+        if hasattr(var, "start") and var.start is not None:
+            entry["start"] = var.start
+        if hasattr(var, "min") and var.min is not None:
+            entry["min"] = var.min
+        if hasattr(var, "max") and var.max is not None:
+            entry["max"] = var.max
+        variables.append(entry)
+
+    metadata = {
+        "modelName": _normalize_xml_value(getattr(md, "modelName", None)) or "DecentraLabsProxy",
+        "guid": _normalize_xml_value(getattr(md, "guid", None)),
+        "fmiVersion": md.fmiVersion,
+        "simulationKind": simulation_kind,
+        "simulationType": simulation_type,
+        "supportsCoSimulation": supports_cs,
+        "supportsModelExchange": supports_me,
+        "defaultStartTime": default_start,
+        "defaultStopTime": default_stop,
+        "defaultStepSize": default_step,
+        "modelVariables": variables,
+    }
+    return metadata
+
+
+def _public_model_metadata(metadata: dict) -> dict:
+    variables = []
+    for variable in metadata.get("modelVariables", []):
+        entry = {
+            "name": variable.get("name"),
+            "causality": variable.get("causality", "local"),
+            "type": variable.get("type", "Real"),
+            "variability": variable.get("variability", "continuous"),
+        }
+        for optional_key in ("unit", "start", "min", "max"):
+            if optional_key in variable:
+                entry[optional_key] = variable[optional_key]
+        variables.append(entry)
+
+    return {
+        "fmiVersion": metadata.get("fmiVersion", "2.0"),
+        "simulationKind": metadata.get("simulationKind", "unknown"),
+        "simulationType": metadata.get("simulationType", "Unknown"),
+        "supportsCoSimulation": bool(metadata.get("supportsCoSimulation")),
+        "supportsModelExchange": bool(metadata.get("supportsModelExchange")),
+        "defaultStartTime": float(metadata.get("defaultStartTime", 0.0)),
+        "defaultStopTime": float(metadata.get("defaultStopTime", 1.0)),
+        "defaultStepSize": float(metadata.get("defaultStepSize", 0.01)),
+        "modelVariables": variables,
+    }
+
+
+def _local_backend_health_payload() -> dict:
+    checks = {"fmuDataPath": False, "executor": False}
+    base = Path(FMU_DATA_PATH)
+    checks["fmuDataPath"] = base.is_dir()
+    fmu_count = sum(1 for _ in base.rglob("*.fmu")) if checks["fmuDataPath"] else 0
+    try:
+        checks["executor"] = not _executor._broken if hasattr(_executor, "_broken") else True
+    except Exception:
+        checks["executor"] = False
+    overall = all(checks.values())
+    return {
+        "status": "UP" if overall else "DEGRADED",
+        "checks": checks,
+        "fmuCount": fmu_count,
+        "backendMode": "local",
+    }
+
+
+def _load_local_model_metadata(fmu_filename: str) -> dict:
+    fmu_path = _resolve_fmu_path(fmu_filename)
+    try:
+        md = read_model_description(str(fmu_path))
+    except Exception as exc:
+        logger.error("Failed to read model description for %s: %s", fmu_filename, exc)
+        raise HTTPException(status_code=422, detail=f"Cannot parse FMU: {exc}") from exc
+    return _model_metadata_from_model_description(md)
+
+
+def _list_local_fmus_payload(claimed_file: str) -> dict:
+    resolved = _resolve_fmu_path(claimed_file)
+    base = Path(FMU_DATA_PATH).resolve()
+    if not _is_within_base(base, resolved):
+        return {"fmus": []}
+    rel = resolved.relative_to(base)
+    return {
+        "fmus": [{
+            "filename": resolved.name,
+            "path": str(rel),
+            "sizeBytes": resolved.stat().st_size,
+            "source": "provisioned",
+        }]
+    }
+
+
+def _build_fmu_backend():
+    if FMU_BACKEND_MODE == "station":
+        logger.info("FMU backend mode selected: station")
+        return StationFmuBackend(
+            base_url=FMU_STATION_BASE_URL,
+            internal_token=FMU_STATION_INTERNAL_TOKEN,
+            request_timeout=FMU_STATION_REQUEST_TIMEOUT,
+        )
+
+    if FMU_BACKEND_MODE != "local":
+        logger.warning("Unknown FMU_BACKEND_MODE=%s, falling back to local", FMU_BACKEND_MODE)
+
+    logger.info("FMU backend mode selected: local")
+    return LocalFmuBackend(
+        health_loader=_local_backend_health_payload,
+        model_metadata_loader=_load_local_model_metadata,
+        list_loader=_list_local_fmus_payload,
+    )
+
+
+def _get_station_backend() -> StationFmuBackend:
+    if isinstance(_fmu_backend, StationFmuBackend):
+        return _fmu_backend
+    raise HTTPException(status_code=500, detail="Active FMU backend is not station")
+
+
+def _simulation_request_payload(req: SimulationRequest) -> dict:
+    return {
+        "reservationKey": req.reservationKey,
+        "labId": req.labId,
+        "parameters": req.parameters,
+        "options": req.options,
+    }
+
+
+def _ensure_local_execution_backend(feature_name: str):
+    if _fmu_backend.supports_local_execution:
+        return
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            f"{feature_name} is not wired for FMU_BACKEND_MODE={_fmu_backend.mode}. "
+            "Use FMU_BACKEND_MODE=local for dev/test until the Station execution backend is implemented."
+        ),
+    )
+
+
+async def _stream_station_simulation(request: Request, req: SimulationRequest, claims: dict):
+    station_backend = _get_station_backend()
+    authorization = _extract_authorization_header(request)
+    client, response = await station_backend.open_authorized_simulation_stream(
+        claims=claims,
+        request_payload=_simulation_request_payload(req),
+        authorization=authorization,
+    )
+    media_type = response.headers.get("content-type") or "application/x-ndjson"
+
+    async def _forward_stream():
+        try:
+            async for chunk in response.aiter_bytes():
+                if chunk:
+                    yield chunk
+        finally:
+            await response.aclose()
+            await client.aclose()
+
+    return StreamingResponse(_forward_stream(), media_type=media_type)
+
+
+def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
+    model_name = _normalize_xml_value(model_metadata.get("modelName")) or "DecentraLabsProxy"
+    guid = _normalize_xml_value(model_metadata.get("guid")) or "{" + uuid4().hex + "}"
     declared_units = {
-        _normalize_xml_value(getattr(var, "unit", None))
-        for var in getattr(md, "modelVariables", [])
-        if str(getattr(var, "type", "Real") or "Real") == "Real"
-        and _normalize_xml_value(getattr(var, "unit", None))
+        _normalize_xml_value(var.get("unit"))
+        for var in model_metadata.get("modelVariables", [])
+        if str(var.get("type", "Real") or "Real") == "Real"
+        and _normalize_xml_value(var.get("unit"))
     }
 
     root = ET.Element(
@@ -398,29 +598,30 @@ def _build_proxy_model_description_xml(md) -> bytes:
         for unit_name in sorted(declared_units):
             ET.SubElement(unit_definitions, "Unit", {"name": unit_name})
 
-    default_experiment = getattr(md, "defaultExperiment", None)
-    if default_experiment is not None:
-        attrs = {}
-        if getattr(default_experiment, "startTime", None) is not None:
-            attrs["startTime"] = str(default_experiment.startTime)
-        if getattr(default_experiment, "stopTime", None) is not None:
-            attrs["stopTime"] = str(default_experiment.stopTime)
-        if getattr(default_experiment, "stepSize", None) is not None:
-            attrs["stepSize"] = str(default_experiment.stepSize)
-        if attrs:
-            ET.SubElement(root, "DefaultExperiment", attrs)
+    attrs = {}
+    if model_metadata.get("defaultStartTime") is not None:
+        attrs["startTime"] = str(model_metadata["defaultStartTime"])
+    if model_metadata.get("defaultStopTime") is not None:
+        attrs["stopTime"] = str(model_metadata["defaultStopTime"])
+    if model_metadata.get("defaultStepSize") is not None:
+        attrs["stepSize"] = str(model_metadata["defaultStepSize"])
+    if attrs:
+        ET.SubElement(root, "DefaultExperiment", attrs)
 
     model_variables = ET.SubElement(root, "ModelVariables")
     output_indexes = []
 
-    for index, var in enumerate(md.modelVariables, start=1):
-        var_type = str(getattr(var, "type", "Real") or "Real")
+    for index, var in enumerate(model_metadata.get("modelVariables", []), start=1):
+        var_type = str(var.get("type", "Real") or "Real")
+        value_reference = var.get("valueReference")
+        if value_reference is None:
+            value_reference = index
         scalar_attrs = {
-            "name": str(var.name),
-            "valueReference": str(getattr(var, "valueReference", index)),
+            "name": str(var.get("name") or f"var_{index}"),
+            "valueReference": str(value_reference),
         }
-        causality = _normalize_xml_value(getattr(var, "causality", None))
-        variability = _normalize_xml_value(getattr(var, "variability", None))
+        causality = _normalize_xml_value(var.get("causality"))
+        variability = _normalize_xml_value(var.get("variability"))
         if causality:
             scalar_attrs["causality"] = causality
         if variability:
@@ -428,11 +629,11 @@ def _build_proxy_model_description_xml(md) -> bytes:
 
         scalar = ET.SubElement(model_variables, "ScalarVariable", scalar_attrs)
         type_attrs = {}
-        unit = _normalize_xml_value(getattr(var, "unit", None))
+        unit = _normalize_xml_value(var.get("unit"))
         if unit and var_type == "Real":
             type_attrs["unit"] = unit
-        if getattr(var, "start", None) is not None:
-            type_attrs["start"] = str(var.start)
+        if var.get("start") is not None:
+            type_attrs["start"] = str(var["start"])
 
         if var_type in ("Integer", "Boolean", "String", "Enumeration"):
             ET.SubElement(scalar, var_type, type_attrs)
@@ -458,7 +659,7 @@ def _collect_runtime_files() -> list[tuple[Path, str]]:
     if not binaries_root.exists() or not binaries_root.is_dir():
         raise HTTPException(
             status_code=503,
-            detail="FMU proxy runtime binaries are not provisioned on Lab Station",
+            detail="FMU proxy runtime binaries are not provisioned on Lab Gateway",
         )
     files: list[tuple[Path, str]] = []
     for file_path in binaries_root.rglob("*"):
@@ -468,7 +669,7 @@ def _collect_runtime_files() -> list[tuple[Path, str]]:
     if not files:
         raise HTTPException(
             status_code=503,
-            detail="FMU proxy runtime binaries are not provisioned on Lab Station",
+            detail="FMU proxy runtime binaries are not provisioned on Lab Gateway",
         )
     return files
 
@@ -562,25 +763,67 @@ async def _redeem_session_ticket(
     return claims
 
 
-_realtime_manager = RealtimeWsManager(
-    logger=logger,
-    verify_jwt_token=verify_jwt_token,
-    enforce_fmu_claim=_enforce_fmu_claim,
-    resolve_fmu_path=_resolve_fmu_path,
-    get_claim_lab_id=_get_claim_lab_id,
-    normalize_lab_id=_normalize_lab_id,
-    coerce_epoch_seconds=_coerce_epoch_seconds,
-    acquire_slot=_acquire_slot,
-    release_slot=_release_slot,
-    redeem_session_ticket=_redeem_session_ticket,
-    ws_session_queue_size=WS_SESSION_QUEUE_SIZE,
-    ws_heartbeat_seconds=WS_HEARTBEAT_SECONDS,
-    ws_expiring_notice_seconds=WS_EXPIRING_NOTICE_SECONDS,
-    ws_attach_grace_seconds=WS_ATTACH_GRACE_SECONDS,
-    ws_cleanup_seconds=WS_CLEANUP_SECONDS,
-    internal_ws_token=INTERNAL_WS_TOKEN,
-    ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
-)
+_fmu_backend = _build_fmu_backend()
+
+
+class _UnsupportedRealtimeManager:
+    async def start(self):
+        return
+
+    async def stop(self):
+        return
+
+    async def handle_websocket(self, websocket: WebSocket, *, internal: bool):
+        await websocket.accept()
+        message = (
+            f"Realtime FMU sessions are not wired for FMU_BACKEND_MODE={_fmu_backend.mode}. "
+            "Use FMU_BACKEND_MODE=local for dev/test until the Station execution backend is implemented."
+        )
+        await websocket.send_json({
+            "type": "error",
+            "code": "NOT_IMPLEMENTED",
+            "message": message,
+            "retryable": False,
+        })
+        await websocket.close(code=1013)
+
+
+if _fmu_backend.supports_local_execution:
+    _realtime_manager = RealtimeWsManager(
+        logger=logger,
+        verify_jwt_token=verify_jwt_token,
+        enforce_fmu_claim=_enforce_fmu_claim,
+        resolve_fmu_path=_resolve_fmu_path,
+        get_claim_lab_id=_get_claim_lab_id,
+        normalize_lab_id=_normalize_lab_id,
+        coerce_epoch_seconds=_coerce_epoch_seconds,
+        acquire_slot=_acquire_slot,
+        release_slot=_release_slot,
+        redeem_session_ticket=_redeem_session_ticket,
+        ws_session_queue_size=WS_SESSION_QUEUE_SIZE,
+        ws_heartbeat_seconds=WS_HEARTBEAT_SECONDS,
+        ws_expiring_notice_seconds=WS_EXPIRING_NOTICE_SECONDS,
+        ws_attach_grace_seconds=WS_ATTACH_GRACE_SECONDS,
+        ws_cleanup_seconds=WS_CLEANUP_SECONDS,
+        internal_ws_token=INTERNAL_WS_TOKEN,
+        ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
+    )
+elif _fmu_backend.mode == "station":
+    _realtime_manager = StationRealtimeWsProxyManager(
+        logger=logger,
+        station_backend=_fmu_backend,
+        verify_jwt_token=verify_jwt_token,
+        enforce_fmu_claim=_enforce_fmu_claim,
+        get_claim_lab_id=_get_claim_lab_id,
+        normalize_lab_id=_normalize_lab_id,
+        coerce_epoch_seconds=_coerce_epoch_seconds,
+        redeem_session_ticket=_redeem_session_ticket,
+        ws_cleanup_seconds=WS_CLEANUP_SECONDS,
+        internal_ws_token=INTERNAL_WS_TOKEN,
+        ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
+    )
+else:
+    _realtime_manager = _UnsupportedRealtimeManager()
 
 
 def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_size: float,
@@ -635,22 +878,8 @@ def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_siz
 
 @app.get("/health")
 async def health():
-    """Deep health check (#21): verifies FMU_DATA_PATH exists and pool is alive."""
-    checks = {"fmuDataPath": False, "executor": False}
-    base = Path(FMU_DATA_PATH)
-    checks["fmuDataPath"] = base.is_dir()
-    fmu_count = sum(1 for _ in base.rglob("*.fmu")) if checks["fmuDataPath"] else 0
-    # Executor liveness — check it hasn't been shut down
-    try:
-        checks["executor"] = not _executor._broken if hasattr(_executor, "_broken") else True
-    except Exception:
-        checks["executor"] = False
-    overall = all(checks.values())
-    return {
-        "status": "UP" if overall else "DEGRADED",
-        "checks": checks,
-        "fmuCount": fmu_count,
-    }
+    """Backend-aware health check for the active FMU backend mode."""
+    return await _fmu_backend.health()
 
 
 @app.websocket("/api/v1/fmu/sessions")
@@ -696,7 +925,6 @@ async def download_proxy_fmu(
     fmu_filename = claims.get("accessKey") or claims.get("fmuFileName")
     if not fmu_filename:
         raise HTTPException(status_code=400, detail="Cannot determine FMU file name from token")
-    fmu_path = _resolve_fmu_path(str(fmu_filename))
 
     session_ticket, ticket_expiry = await _issue_session_ticket(
         authorization,
@@ -705,13 +933,11 @@ async def download_proxy_fmu(
         request_id=f"proxy_{uuid4().hex[:8]}",
     )
     gateway_ws_url = _derive_gateway_ws_url(claims)
-
-    try:
-        md = read_model_description(str(fmu_path))
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Cannot parse FMU model for proxy generation: {exc}") from exc
-
-    model_xml = _build_proxy_model_description_xml(md)
+    model_metadata = await _fmu_backend.get_authorized_model_metadata(
+        claims=claims,
+        requested_fmu_filename=str(fmu_filename),
+    )
+    model_xml = _build_proxy_model_description_xml(model_metadata)
     runtime_files = _collect_runtime_files()
 
     config_payload = {
@@ -767,63 +993,17 @@ async def describe(
 ):
     """Return model metadata parsed from the FMU's modelDescription.xml."""
     _enforce_fmu_claim(claims)
-    claimed_file = claims.get("accessKey") or claims.get("fmuFileName")
-    if claimed_file and claimed_file != fmuFileName:
-        raise HTTPException(status_code=403, detail="Token is not authorised for requested FMU file")
-
-    fmu_path = _resolve_fmu_path(fmuFileName)
-
-    try:
-        md = read_model_description(str(fmu_path))
-    except Exception as exc:
-        logger.error("Failed to read model description for %s: %s", fmuFileName, exc)
-        raise HTTPException(status_code=422, detail=f"Cannot parse FMU: {exc}") from exc
-
-    # Determine simulation type
-    sim_type = "CoSimulation" if md.coSimulation else ("ModelExchange" if md.modelExchange else "Unknown")
-    supports_cs = bool(md.coSimulation)
-    supports_me = bool(md.modelExchange)
-
-    # Extract default experiment values
-    de = md.defaultExperiment
-    default_start = float(de.startTime) if de and de.startTime is not None else 0.0
-    default_stop = float(de.stopTime) if de and de.stopTime is not None else 1.0
-    default_step = float(de.stepSize) if de and de.stepSize is not None else 0.01
-
-    # Model variables
-    variables = []
-    for var in md.modelVariables:
-        entry = {
-            "name": var.name,
-            "causality": var.causality or "local",
-            "type": var.type,
-            "variability": getattr(var, "variability", None) or "continuous",
-        }
-        if hasattr(var, "unit") and var.unit:
-            entry["unit"] = var.unit
-        if hasattr(var, "start") and var.start is not None:
-            entry["start"] = var.start
-        if hasattr(var, "min") and var.min is not None:
-            entry["min"] = var.min
-        if hasattr(var, "max") and var.max is not None:
-            entry["max"] = var.max
-        variables.append(entry)
-
-    return {
-        "fmiVersion": md.fmiVersion,
-        "simulationType": sim_type,
-        "supportsCoSimulation": supports_cs,
-        "supportsModelExchange": supports_me,
-        "defaultStartTime": default_start,
-        "defaultStopTime": default_stop,
-        "defaultStepSize": default_step,
-        "modelVariables": variables,
-    }
+    metadata = await _fmu_backend.get_authorized_model_metadata(
+        claims=claims,
+        requested_fmu_filename=fmuFileName,
+    )
+    return _public_model_metadata(metadata)
 
 
 @app.post("/api/v1/simulations/run")
 async def run_simulation(
     req: SimulationRequest,
+    request: Request,
     claims: dict = Depends(verify_jwt),
 ):
     """Execute an FMU simulation and return results.
@@ -832,6 +1012,13 @@ async def run_simulation(
     model description when ``options.fmiType`` is absent.
     """
     _enforce_fmu_claim(claims)
+    if _fmu_backend.mode == "station":
+        return await _get_station_backend().run_authorized_simulation(
+            claims=claims,
+            request_payload=_simulation_request_payload(req),
+            authorization=_extract_authorization_header(request),
+        )
+    _ensure_local_execution_backend("Simulation run endpoint")
 
     # Determine FMU filename from JWT claims or request
     fmu_filename = claims.get("accessKey") or claims.get("fmuFileName")
@@ -939,23 +1126,7 @@ async def run_simulation(
 async def list_fmus(claims: dict = Depends(verify_jwt)):
     """Return only the FMU file authorised by the caller token."""
     _enforce_fmu_claim(claims)
-    claimed_file = claims.get("accessKey") or claims.get("fmuFileName")
-    if not claimed_file:
-        raise HTTPException(status_code=403, detail="Token has no authorised FMU file")
-
-    resolved = _resolve_fmu_path(claimed_file)
-    base = Path(FMU_DATA_PATH).resolve()
-    if not _is_within_base(base, resolved):
-        return {"fmus": []}
-    rel = resolved.relative_to(base)
-    return {
-        "fmus": [{
-            "filename": resolved.name,
-            "path": str(rel),
-            "sizeBytes": resolved.stat().st_size,
-            "source": "provisioned",
-        }]
-    }
+    return await _fmu_backend.list_authorized_fmu(claims=claims)
 
 
 # ---------------------------------------------------------------------------
@@ -965,6 +1136,7 @@ async def list_fmus(claims: dict = Depends(verify_jwt)):
 @app.post("/api/v1/simulations/{sim_id}/cancel")
 async def cancel_simulation(sim_id: str, _claims: dict = Depends(verify_jwt)):
     """Attempt to cancel a running simulation by its ID."""
+    _ensure_local_execution_backend("Simulation cancel endpoint")
     with _running_lock:
         entry = _running_futures.get(sim_id)
     if entry is None:
@@ -1003,6 +1175,7 @@ async def _cleanup_temp_files():
 @app.post("/api/v1/simulations/stream")
 async def stream_simulation(
     req: SimulationRequest,
+    request: Request,
     claims: dict = Depends(verify_jwt),
 ):
     """Execute a simulation and stream results as newline-delimited JSON.
@@ -1015,6 +1188,9 @@ async def stream_simulation(
       - ``error``    — if something went wrong
     """
     _enforce_fmu_claim(claims)
+    if _fmu_backend.mode == "station":
+        return await _stream_station_simulation(request, req, claims)
+    _ensure_local_execution_backend("Simulation stream endpoint")
 
     fmu_filename = claims.get("accessKey") or claims.get("fmuFileName")
     claims_lab_id = _get_claim_lab_id(claims)
@@ -1133,6 +1309,7 @@ async def get_history(
 ):
     """Return paginated simulation history for the lab authorised in the token."""
     _enforce_fmu_claim(claims)
+    _ensure_local_execution_backend("Simulation history endpoint")
     claim_lab_id = _get_claim_lab_id(claims)
     if not claim_lab_id:
         raise HTTPException(status_code=403, detail="Token has no authorised labId")
@@ -1156,6 +1333,7 @@ async def get_history(
 async def get_simulation_result(sim_id: str, claims: dict = Depends(verify_jwt)):
     """Retrieve full simulation result by ID."""
     _enforce_fmu_claim(claims)
+    _ensure_local_execution_backend("Simulation result endpoint")
     claim_lab_id = _get_claim_lab_id(claims)
     if not claim_lab_id:
         raise HTTPException(status_code=403, detail="Token has no authorised labId")

@@ -5,28 +5,60 @@
 
 ## 🎯 Overview
 
-DecentraLabs Gateway provides a complete blockchain-based authentication system for laboratory access. It includes all components needed for a decentralized lab access solution with advanced features, wallet management, and institutional treasury operations.
+DecentraLabs Gateway provides a complete blockchain-based authentication system for laboratory access. It includes all components needed for a decentralized lab access solution with advanced features, wallet management, institutional treasury operations, and remote FMU access through generated `proxy.fmu` artifacts.
 
 ## 🏗️ Architecture
 
+```mermaid
+flowchart LR
+    User["User wallet / JWT / FMI tool"]
+    OpenResty["OpenResty"]
+    Blockchain["blockchain-services"]
+    Guacamole["Guacamole"]
+    FmuFacade["fmu-runner (public FMU facade)"]
+    Ops["ops-worker"]
+    Mysql[("MySQL")]
+    Contracts["Smart contracts"]
+    Station["Lab Station / Lab App Control"]
+
+    User --> OpenResty
+    OpenResty --> Blockchain
+    OpenResty --> Guacamole
+    OpenResty --> FmuFacade
+    OpenResty --> Ops
+    Blockchain --> Contracts
+    Blockchain --> Mysql
+    Guacamole --> Mysql
+    FmuFacade -. target internal backend .-> Station
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌───────────────────┐
-│   User Wallet   │    │  OpenResty      │    │Blockchain Services│
-│   or JWT        ├────┤  (Nginx + Lua)  ├────┤   (Spring Boot)   │
-└─────────────────┘    └─────────────────┘    └───────────────────┘
-                                │                        │
-                                │                        │
-                       ┌─────────────────┐    ┌─────────────────┐
-                       │   Guacamole     │    │   Blockchain    │
-                       │  (Lab Access)   │    │   (Smart        │
-                       └─────────────────┘    │   Contracts)    │
-                                │             └─────────────────┘
-                                │                        
-                       ┌─────────────────┐
-                       │     MySQL       │
-                       │   (Database)    │
-                       └─────────────────┘
+
+### FMU Remote Architecture
+
+```mermaid
+sequenceDiagram
+    participant Tool as FMI Tool
+    participant Proxy as proxy.fmu
+    participant Gateway as Lab Gateway
+    participant Auth as blockchain-services
+    participant Station as Lab Station
+    participant Model as real .fmu
+
+    Tool->>Proxy: FMI 2 calls
+    Proxy->>Gateway: WSS /fmu/api/v1/fmu/sessions
+    Gateway->>Auth: issue/redeem session ticket
+    Gateway->>Station: internal FMU describe/run/stream/session calls
+    Station->>Model: load / initialize / step / outputs
+    Station-->>Gateway: state and outputs
+    Gateway-->>Proxy: model.description / sim.state / sim.outputs
+    Proxy-->>Tool: FMI 2 responses
 ```
+
+FMU target model:
+
+- The real `.fmu` remains on Lab Station / Lab App Control.
+- The Gateway keeps the public REST/WSS surface, proxy generation, auth and ticketing.
+- The generated `proxy.fmu` contains interface metadata, runtime binaries and reservation-scoped config, never the real model.
+- This repository keeps a local FMU execution path in `fmu-runner` as a permanent dev/test mode. That local path is not the intended production topology.
 
 ## 🌟 Features
 
@@ -48,6 +80,12 @@ DecentraLabs Gateway provides a complete blockchain-based authentication system 
 - **Session Cookie Management**: JTI-based session validation with automatic expiration
 - **Header Propagation**: Authenticated username forwarded to Guacamole for auto-login
 - **Ops Worker**: Remote power management for lab stations (Wake-on-LAN, shutdown)
+
+### ✅ Remote FMU Access
+- **Generated `proxy.fmu` delivery**: Reservation-scoped download with signed metadata and one-shot session tickets
+- **Public WSS facade**: Stable `WSS /fmu/api/v1/fmu/sessions` contract for generated runtimes
+- **Station-based execution target**: Real FMUs are meant to live and execute on Lab Station, with Gateway acting as facade and router across internal REST/WSS channels
+- **Permanent dev/test backend**: Local FMU execution in `fmu-runner` remains available for development, smoke tests and automated tests
 
 ## 🚀 Quick Deployment
 

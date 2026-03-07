@@ -21,4 +21,8 @@ Expected contents are the real proxy runtime binaries for each target platform, 
 Notes:
 
 - `.gitkeep` files are intentionally ignored by `fmu-runner` and do not count as provisioned runtime files.
-- If the platform binaries are missing, `GET /api/v1/fmu/proxy/{labId}` will return `503 FMU proxy runtime binaries are not provisioned on Lab Station`.
+- If the platform binaries are missing, `GET /api/v1/fmu/proxy/{labId}` will return `503 FMU proxy runtime binaries are not provisioned on Lab Gateway`.
+- The native source scaffold and implementation plan now live in `../fmu-proxy-runtime-src/`.
+- `fmu-runner` should keep reading binaries from this directory only; build outputs from `../fmu-proxy-runtime-src/` are copied here as a separate step.
+- These binaries are generic per platform. The reservation-specific behavior comes from the generated `modelDescription.xml` and `resources/config.json`.
+- The runtime binaries connect to the Gateway public WSS facade; the real provider FMU remains on Lab Station.

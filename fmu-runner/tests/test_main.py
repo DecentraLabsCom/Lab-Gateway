@@ -12,6 +12,7 @@ import io
 import hashlib
 import hmac
 from collections import defaultdict, deque
+from xml.etree import ElementTree as ET
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
@@ -20,7 +21,14 @@ from fmpy import read_model_description
 
 # Patch auth before importing main so the import doesn't fail
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "accessKey": "test.fmu"}):
-    from main import app, _init_db, HISTORY_DB_PATH, _effective_timeout_seconds, MAX_SIMULATION_TIMEOUT
+    from main import (
+        app,
+        _init_db,
+        HISTORY_DB_PATH,
+        _effective_timeout_seconds,
+        MAX_SIMULATION_TIMEOUT,
+        _build_proxy_model_description_xml,
+    )
     from auth import verify_jwt as _original_verify_jwt
 
 
@@ -104,6 +112,33 @@ def test_describe_returns_model_metadata(mock_resolve, mock_read):
 def test_describe_requires_fmuFileName():
     response = client.get("/api/v1/simulations/describe")
     assert response.status_code == 422  # FastAPI validation error
+
+
+def test_proxy_model_description_preserves_zero_value_reference():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyDemo",
+        "guid": "{proxy-guid}",
+        "modelVariables": [
+            {
+                "name": "u",
+                "type": "Real",
+                "causality": "input",
+                "variability": "continuous",
+                "valueReference": 0,
+            },
+            {
+                "name": "y",
+                "type": "Real",
+                "causality": "output",
+                "variability": "continuous",
+                "valueReference": 2,
+            },
+        ],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    scalar_variables = root.findall("./ModelVariables/ScalarVariable")
+    assert scalar_variables[0].attrib["valueReference"] == "0"
 
 
 # ─── /api/v1/simulations/run ────────────────────────────────────────

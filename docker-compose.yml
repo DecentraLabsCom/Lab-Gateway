@@ -435,8 +435,12 @@ services:
       context: ./fmu-runner
       dockerfile: Dockerfile
     environment:
+      - FMU_BACKEND_MODE=${FMU_BACKEND_MODE:-local}
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
+      - FMU_STATION_BASE_URL=${FMU_STATION_BASE_URL:-}
+      - FMU_STATION_INTERNAL_TOKEN=${FMU_STATION_INTERNAL_TOKEN:-}
+      - FMU_STATION_REQUEST_TIMEOUT=${FMU_STATION_REQUEST_TIMEOUT:-10}
       - HISTORY_DB_PATH=/app/data/history.db
       - AUTH_JWKS_URL=http://blockchain-services:8080/.well-known/jwks.json
       - AUTH_SESSION_TICKET_ISSUE_URL=${AUTH_SESSION_TICKET_ISSUE_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/issue}
