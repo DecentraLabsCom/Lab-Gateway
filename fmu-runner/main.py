@@ -367,6 +367,79 @@ def _normalize_xml_value(value) -> Optional[str]:
     return text if text else None
 
 
+def _parse_fmi_major_version(value) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 2
+    try:
+        return int(text.split(".", 1)[0])
+    except ValueError:
+        return 2
+
+
+def _proxy_model_identifier(model_metadata: dict) -> str:
+    # Keep a stable identifier so the native runtime binary name stays generic.
+    return "decentralabs_proxy"
+
+
+def _normalize_proxy_fmi3_type(type_name: Optional[str]) -> str:
+    normalized = str(type_name or "").strip()
+    if normalized in {"Float32", "Float64", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64", "Boolean", "String"}:
+        return normalized
+    if normalized == "Enumeration":
+        return "Int32"
+    if normalized == "Integer":
+        return "Int32"
+    return "Float64"
+
+
+def _format_fmi_start_value(value) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(item) for item in value)
+    return str(value)
+
+
+def _collect_variable_dimensions(var) -> list[dict]:
+    dimensions = []
+    for dimension in getattr(var, "dimensions", []) or []:
+        entry = {}
+        if getattr(dimension, "start", None) is not None:
+            entry["start"] = int(dimension.start)
+        if getattr(dimension, "valueReference", None) is not None:
+            entry["valueReference"] = int(dimension.valueReference)
+        variable = getattr(dimension, "variable", None)
+        if variable is not None and getattr(variable, "name", None):
+            entry["variableName"] = variable.name
+        if entry:
+            dimensions.append(entry)
+    return dimensions
+
+
+def _validate_proxy_generation_supported(model_metadata: dict):
+    simulation_kind = str(model_metadata.get("simulationKind") or "coSimulation").lower()
+    if simulation_kind != "cosimulation":
+        raise HTTPException(status_code=422, detail="Generated proxy FMUs currently support only Co-Simulation models")
+
+    if _parse_fmi_major_version(model_metadata.get("fmiVersion")) < 3:
+        return
+
+    supported_types = {"Float32", "Float64", "Int32", "UInt64", "Boolean", "String"}
+    for variable in model_metadata.get("modelVariables", []):
+        if _normalize_proxy_fmi3_type(variable.get("type")) not in supported_types:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Generated FMI 3 proxy FMUs do not yet support variable type: {variable.get('type')}",
+            )
+        for dimension in variable.get("dimensions", []) or []:
+            if "start" not in dimension and "valueReference" not in dimension:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Generated FMI 3 proxy FMUs require dimension metadata for variable: {variable.get('name')}",
+                )
+
+
 def _model_metadata_from_model_description(md) -> dict:
     supports_cs = bool(getattr(md, "coSimulation", None))
     supports_me = bool(getattr(md, "modelExchange", None))
@@ -387,6 +460,8 @@ def _model_metadata_from_model_description(md) -> dict:
             "variability": getattr(var, "variability", None) or "continuous",
             "valueReference": int(getattr(var, "valueReference", index)),
         }
+        if hasattr(var, "initial") and var.initial:
+            entry["initial"] = var.initial
         if hasattr(var, "unit") and var.unit:
             entry["unit"] = var.unit
         if hasattr(var, "start") and var.start is not None:
@@ -395,11 +470,15 @@ def _model_metadata_from_model_description(md) -> dict:
             entry["min"] = var.min
         if hasattr(var, "max") and var.max is not None:
             entry["max"] = var.max
+        dimensions = _collect_variable_dimensions(var)
+        if dimensions:
+            entry["dimensions"] = dimensions
         variables.append(entry)
 
     metadata = {
         "modelName": _normalize_xml_value(getattr(md, "modelName", None)) or "DecentraLabsProxy",
         "guid": _normalize_xml_value(getattr(md, "guid", None)),
+        "instantiationToken": _normalize_xml_value(getattr(md, "instantiationToken", None)),
         "fmiVersion": md.fmiVersion,
         "simulationKind": simulation_kind,
         "simulationType": simulation_type,
@@ -422,12 +501,12 @@ def _public_model_metadata(metadata: dict) -> dict:
             "type": variable.get("type", "Real"),
             "variability": variable.get("variability", "continuous"),
         }
-        for optional_key in ("unit", "start", "min", "max"):
+        for optional_key in ("initial", "unit", "start", "min", "max", "dimensions"):
             if optional_key in variable:
                 entry[optional_key] = variable[optional_key]
         variables.append(entry)
 
-    return {
+    payload = {
         "fmiVersion": metadata.get("fmiVersion", "2.0"),
         "simulationKind": metadata.get("simulationKind", "unknown"),
         "simulationType": metadata.get("simulationType", "Unknown"),
@@ -438,6 +517,9 @@ def _public_model_metadata(metadata: dict) -> dict:
         "defaultStepSize": float(metadata.get("defaultStepSize", 0.01)),
         "modelVariables": variables,
     }
+    if metadata.get("instantiationToken"):
+        payload["instantiationToken"] = metadata["instantiationToken"]
+    return payload
 
 
 def _local_backend_health_payload() -> dict:
@@ -554,44 +636,65 @@ async def _stream_station_simulation(request: Request, req: SimulationRequest, c
 
 
 def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
+    _validate_proxy_generation_supported(model_metadata)
+
     model_name = _normalize_xml_value(model_metadata.get("modelName")) or "DecentraLabsProxy"
     guid = _normalize_xml_value(model_metadata.get("guid")) or "{" + uuid4().hex + "}"
+    instantiation_token = _normalize_xml_value(model_metadata.get("instantiationToken")) or guid
+    model_identifier = _proxy_model_identifier(model_metadata)
+    fmi_major_version = _parse_fmi_major_version(model_metadata.get("fmiVersion"))
     declared_units = {
         _normalize_xml_value(var.get("unit"))
         for var in model_metadata.get("modelVariables", [])
-        if str(var.get("type", "Real") or "Real") == "Real"
+        if str(var.get("type", "Real") or "Real") in {"Real", "Float32", "Float64"}
         and _normalize_xml_value(var.get("unit"))
     }
 
-    root = ET.Element(
-        "fmiModelDescription",
-        {
+    root_attributes = {
+        "modelName": model_name,
+        "generationTool": "DecentraLabs FMU Proxy Generator",
+        "generationDateAndTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    if fmi_major_version >= 3:
+        root_attributes["fmiVersion"] = "3.0"
+        root_attributes["instantiationToken"] = instantiation_token
+    else:
+        root_attributes.update({
             "fmiVersion": "2.0",
-            "modelName": model_name,
             "guid": guid,
-            "generationTool": "DecentraLabs FMU Proxy Generator",
-            "generationDateAndTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "variableNamingConvention": "flat",
             "numberOfEventIndicators": "0",
-        },
-    )
+        })
+    root = ET.Element("fmiModelDescription", root_attributes)
 
-    ET.SubElement(
-        root,
-        "CoSimulation",
-        {
-            "modelIdentifier": "decentralabs_proxy",
-            "canHandleVariableCommunicationStepSize": "true",
-            "canInterpolateInputs": "false",
-            "maxOutputDerivativeOrder": "0",
-            "canRunAsynchronuously": "false",
-            "canBeInstantiatedOnlyOncePerProcess": "false",
-            "canNotUseMemoryManagementFunctions": "true",
-            "canGetAndSetFMUstate": "false",
-            "canSerializeFMUstate": "false",
-            "providesDirectionalDerivative": "false",
-        },
-    )
+    if fmi_major_version >= 3:
+        ET.SubElement(
+            root,
+            "CoSimulation",
+            {
+                "modelIdentifier": model_identifier,
+                "canHandleVariableCommunicationStepSize": "true",
+                "canGetAndSetFMUState": "false",
+                "canSerializeFMUState": "false",
+            },
+        )
+    else:
+        ET.SubElement(
+            root,
+            "CoSimulation",
+            {
+                "modelIdentifier": model_identifier,
+                "canHandleVariableCommunicationStepSize": "true",
+                "canInterpolateInputs": "false",
+                "maxOutputDerivativeOrder": "0",
+                "canRunAsynchronuously": "false",
+                "canBeInstantiatedOnlyOncePerProcess": "false",
+                "canNotUseMemoryManagementFunctions": "true",
+                "canGetAndSetFMUstate": "false",
+                "canSerializeFMUstate": "false",
+                "providesDirectionalDerivative": "false",
+            },
+        )
 
     if declared_units:
         unit_definitions = ET.SubElement(root, "UnitDefinitions")
@@ -622,38 +725,59 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         }
         causality = _normalize_xml_value(var.get("causality"))
         variability = _normalize_xml_value(var.get("variability"))
+        initial = _normalize_xml_value(var.get("initial"))
         if causality:
             scalar_attrs["causality"] = causality
         if variability:
             scalar_attrs["variability"] = variability
+        if initial:
+            scalar_attrs["initial"] = initial
 
-        scalar = ET.SubElement(model_variables, "ScalarVariable", scalar_attrs)
         type_attrs = {}
         unit = _normalize_xml_value(var.get("unit"))
-        if unit and var_type == "Real":
+        normalized_fmi3_type = _normalize_proxy_fmi3_type(var_type)
+        if unit and (var_type == "Real" or normalized_fmi3_type in {"Float32", "Float64"}):
             type_attrs["unit"] = unit
-        if var.get("start") is not None:
-            type_attrs["start"] = str(var["start"])
+        start_value = _format_fmi_start_value(var.get("start"))
+        if start_value is not None and (initial or "").lower() != "calculated":
+            type_attrs["start"] = start_value
 
-        if var_type in ("Integer", "Boolean", "String", "Enumeration"):
-            ET.SubElement(scalar, var_type, type_attrs)
+        if fmi_major_version >= 3:
+            type_attrs.update(scalar_attrs)
+            typed_variable = ET.SubElement(model_variables, normalized_fmi3_type, type_attrs)
+            for dimension in var.get("dimensions", []) or []:
+                dimension_attrs = {}
+                if dimension.get("start") is not None:
+                    dimension_attrs["start"] = str(dimension["start"])
+                elif dimension.get("valueReference") is not None:
+                    dimension_attrs["valueReference"] = str(dimension["valueReference"])
+                if dimension_attrs:
+                    ET.SubElement(typed_variable, "Dimension", dimension_attrs)
         else:
-            ET.SubElement(scalar, "Real", type_attrs)
+            scalar = ET.SubElement(model_variables, "ScalarVariable", scalar_attrs)
+            if var_type in ("Integer", "Boolean", "String", "Enumeration"):
+                ET.SubElement(scalar, var_type, type_attrs)
+            else:
+                ET.SubElement(scalar, "Real", type_attrs)
 
         if (causality or "").lower() == "output":
-            output_indexes.append(index)
+            output_indexes.append((index, value_reference))
 
     model_structure = ET.SubElement(root, "ModelStructure")
     if output_indexes:
-        outputs = ET.SubElement(model_structure, "Outputs")
-        for idx in output_indexes:
-            ET.SubElement(outputs, "Unknown", {"index": str(idx)})
+        if fmi_major_version >= 3:
+            for _, value_reference in output_indexes:
+                ET.SubElement(model_structure, "Output", {"valueReference": str(value_reference)})
+        else:
+            outputs = ET.SubElement(model_structure, "Outputs")
+            for idx, _ in output_indexes:
+                ET.SubElement(outputs, "Unknown", {"index": str(idx)})
 
     xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     return xml_bytes
 
 
-def _collect_runtime_files() -> list[tuple[Path, str]]:
+def _collect_runtime_files(*, fmi_version: str, model_identifier: str) -> list[tuple[Path, str]]:
     runtime_root = Path(FMU_PROXY_RUNTIME_PATH).resolve()
     binaries_root = (runtime_root / "binaries").resolve()
     if not binaries_root.exists() or not binaries_root.is_dir():
@@ -662,9 +786,27 @@ def _collect_runtime_files() -> list[tuple[Path, str]]:
             detail="FMU proxy runtime binaries are not provisioned on Lab Gateway",
         )
     files: list[tuple[Path, str]] = []
+    fmi_major_version = _parse_fmi_major_version(fmi_version)
+    fmi3_platform_map = {
+        "win64": ("x86_64-windows", ".dll"),
+        "linux64": ("x86_64-linux", ".so"),
+        "darwin64": ("x86_64-darwin", ".dylib"),
+    }
     for file_path in binaries_root.rglob("*"):
         if file_path.is_file() and not file_path.name.startswith("."):
-            rel = file_path.relative_to(runtime_root).as_posix()
+            rel_path = file_path.relative_to(binaries_root)
+            if fmi_major_version >= 3:
+                parts = rel_path.parts
+                if not parts:
+                    continue
+                platform = fmi3_platform_map.get(parts[0])
+                if platform is None:
+                    continue
+                platform_dir, expected_suffix = platform
+                archive_name = f"binaries/{platform_dir}/{model_identifier}{expected_suffix}"
+            else:
+                archive_name = file_path.relative_to(runtime_root).as_posix()
+            rel = archive_name
             files.append((file_path, rel))
     if not files:
         raise HTTPException(
@@ -938,11 +1080,16 @@ async def download_proxy_fmu(
         requested_fmu_filename=str(fmu_filename),
     )
     model_xml = _build_proxy_model_description_xml(model_metadata)
-    runtime_files = _collect_runtime_files()
+    proxy_fmi_version = "3.0" if _parse_fmi_major_version(model_metadata.get("fmiVersion")) >= 3 else "2.0.3"
+    proxy_model_identifier = _proxy_model_identifier(model_metadata)
+    runtime_files = _collect_runtime_files(
+        fmi_version=proxy_fmi_version,
+        model_identifier=proxy_model_identifier,
+    )
 
     config_payload = {
         "protocolVersion": "1.0",
-        "fmiVersion": "2.0.3",
+        "fmiVersion": proxy_fmi_version,
         "gatewayWsUrl": gateway_ws_url,
         "labId": str(lab_id),
         "reservationKey": effective_reservation_key,

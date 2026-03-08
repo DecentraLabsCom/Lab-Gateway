@@ -71,6 +71,7 @@ class _RealtimeSession:
         self._model_description = None
         self._model_payload: Optional[dict] = None
         self._variables: dict[str, Any] = {}
+        self._variables_by_value_reference: dict[int, Any] = {}
         self._fmu = None
         self._unzipdir: Optional[str] = None
         self._last_expiry_notice = 0
@@ -189,29 +190,110 @@ class _RealtimeSession:
         self._model_description = md
         self._model_payload = self.manager.model_description_payload(md)
         self._variables = {var.name: var for var in md.modelVariables}
+        self._variables_by_value_reference = {int(var.valueReference): var for var in md.modelVariables}
+
+    @staticmethod
+    def _coerce_dimension_extent_value(value: Any) -> int:
+        if isinstance(value, (list, tuple)):
+            if len(value) != 1:
+                raise HTTPException(status_code=400, detail="Dimension extent must resolve to a single scalar value")
+            value = value[0]
+        try:
+            extent = int(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Invalid FMU dimension extent: {value}") from None
+        if extent < 0:
+            raise HTTPException(status_code=400, detail=f"Invalid negative FMU dimension extent: {extent}")
+        return extent
+
+    def _resolve_dimension_extent(self, dimension: Any) -> int:
+        if getattr(dimension, "start", None) is not None:
+            return self._coerce_dimension_extent_value(dimension.start)
+        if getattr(dimension, "valueReference", None) is not None:
+            referenced = self._variables_by_value_reference.get(int(dimension.valueReference))
+            if referenced is None:
+                raise HTTPException(status_code=400, detail="Dimension references an unknown FMU variable")
+            if getattr(referenced, "start", None) is not None:
+                return self._coerce_dimension_extent_value(referenced.start)
+            getter_name = f"get{referenced.type}"
+            getter = getattr(self._fmu, getter_name, None) if self._fmu is not None else None
+            if getter is not None:
+                values = getter([int(referenced.valueReference)])
+                if values:
+                    return self._coerce_dimension_extent_value(values[0])
+        if getattr(dimension, "variable", None) is not None and getattr(dimension.variable, "start", None) is not None:
+            return self._coerce_dimension_extent_value(dimension.variable.start)
+        raise HTTPException(status_code=400, detail="Unable to resolve FMU dimension extent")
+
+    def _variable_flat_size(self, variable: Any) -> int:
+        dimensions = getattr(variable, "dimensions", None) or []
+        if not dimensions:
+            return 1
+        size = 1
+        for dimension in dimensions:
+            size *= self._resolve_dimension_extent(dimension)
+        return size
+
+    @staticmethod
+    def _normalize_variable_type(variable: Any) -> str:
+        variable_type = str(variable.type)
+        if variable_type == "Enumeration":
+            return "Integer"
+        return variable_type
+
+    @staticmethod
+    def _normalize_scalar_value(variable_type: str, value: Any) -> Any:
+        if variable_type in ("Real", "Float32", "Float64"):
+            return float(value)
+        if variable_type in ("Integer", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64"):
+            return int(value)
+        if variable_type == "Boolean":
+            return bool(value)
+        if variable_type == "String":
+            return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+        raise HTTPException(status_code=400, detail=f"Realtime sessions do not support FMU variable type {variable_type}")
 
     def _set_values(self, values: dict[str, Any]):
         if not self._fmu:
             raise HTTPException(status_code=409, detail="Simulation is not initialized")
-        by_type: dict[str, list[tuple[int, Any]]] = defaultdict(list)
+        by_type: dict[str, dict[str, list[Any]]] = defaultdict(lambda: {"refs": [], "values": []})
         for name, value in values.items():
             variable = self._variables.get(name)
             if not variable:
                 continue
-            by_type[str(variable.type)].append((int(variable.valueReference), value))
+            variable_type = self._normalize_variable_type(variable)
+            variable_size = self._variable_flat_size(variable)
+            if variable_size > 1:
+                if not isinstance(value, (list, tuple)):
+                    raise HTTPException(status_code=400, detail=f"Array input '{name}' must be provided as a JSON array")
+                if len(value) != variable_size:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Array input '{name}' expects {variable_size} values but received {len(value)}",
+                    )
+                by_type[variable_type]["refs"].append(int(variable.valueReference))
+                by_type[variable_type]["values"].extend(list(value))
+            else:
+                by_type[variable_type]["refs"].append(int(variable.valueReference))
+                by_type[variable_type]["values"].append(value)
 
-        if by_type.get("Real"):
-            refs, vals = zip(*[(r, float(v)) for r, v in by_type["Real"]])
-            self._fmu.setReal(list(refs), list(vals))
-        if by_type.get("Integer"):
-            refs, vals = zip(*[(r, int(v)) for r, v in by_type["Integer"]])
-            self._fmu.setInteger(list(refs), list(vals))
-        if by_type.get("Boolean"):
-            refs, vals = zip(*[(r, bool(v)) for r, v in by_type["Boolean"]])
-            self._fmu.setBoolean(list(refs), list(vals))
-        if by_type.get("String"):
-            refs, vals = zip(*[(r, str(v)) for r, v in by_type["String"]])
-            self._fmu.setString(list(refs), list(vals))
+        for variable_type, payload in by_type.items():
+            refs = payload["refs"]
+            vals = payload["values"]
+            setter_name = f"set{variable_type}"
+            setter = getattr(self._fmu, setter_name, None)
+            if setter is None:
+                raise HTTPException(status_code=400, detail=f"Realtime sessions do not support FMU variable type {variable_type}")
+            if variable_type in ("Real", "Float32", "Float64"):
+                setter(list(refs), [float(v) for v in vals])
+            elif variable_type in ("Integer", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64"):
+                setter(list(refs), [int(v) for v in vals])
+            elif variable_type == "Boolean":
+                setter(list(refs), [bool(v) for v in vals])
+            elif variable_type == "String":
+                setter(list(refs), [str(v) for v in vals])
+            else:
+                raise HTTPException(status_code=400, detail=f"Realtime sessions do not support FMU variable type {variable_type}")
 
     def _get_values(self, variables: list[str]) -> dict[str, Any]:
         if not self._fmu:
@@ -222,31 +304,32 @@ class _RealtimeSession:
             if var is not None:
                 selected.append(var)
 
-        by_type: dict[str, list[tuple[str, int]]] = defaultdict(list)
+        by_type: dict[str, dict[str, Any]] = defaultdict(lambda: {"variables": [], "refs": [], "nValues": 0})
         for var in selected:
-            by_type[str(var.type)].append((var.name, int(var.valueReference)))
+            variable_type = self._normalize_variable_type(var)
+            by_type[variable_type]["variables"].append(var)
+            by_type[variable_type]["refs"].append(int(var.valueReference))
+            by_type[variable_type]["nValues"] += self._variable_flat_size(var)
 
         outputs: dict[str, Any] = {}
-        if by_type.get("Real"):
-            names, refs = zip(*by_type["Real"])
-            vals = self._fmu.getReal(list(refs))
-            for idx, name in enumerate(names):
-                outputs[name] = float(vals[idx])
-        if by_type.get("Integer"):
-            names, refs = zip(*by_type["Integer"])
-            vals = self._fmu.getInteger(list(refs))
-            for idx, name in enumerate(names):
-                outputs[name] = int(vals[idx])
-        if by_type.get("Boolean"):
-            names, refs = zip(*by_type["Boolean"])
-            vals = self._fmu.getBoolean(list(refs))
-            for idx, name in enumerate(names):
-                outputs[name] = bool(vals[idx])
-        if by_type.get("String"):
-            names, refs = zip(*by_type["String"])
-            vals = self._fmu.getString(list(refs))
-            for idx, name in enumerate(names):
-                outputs[name] = str(vals[idx])
+        for variable_type, payload in by_type.items():
+            typed_variables = payload["variables"]
+            refs = payload["refs"]
+            getter_name = f"get{variable_type}"
+            getter = getattr(self._fmu, getter_name, None)
+            if getter is None:
+                raise HTTPException(status_code=400, detail=f"Realtime sessions do not support FMU variable type {variable_type}")
+            if payload["nValues"] != len(refs):
+                vals = getter(list(refs), nValues=payload["nValues"])
+            else:
+                vals = getter(list(refs))
+            offset = 0
+            for variable in typed_variables:
+                value_count = self._variable_flat_size(variable)
+                raw_segment = vals[offset: offset + value_count]
+                offset += value_count
+                normalized_segment = [self._normalize_scalar_value(variable_type, value) for value in raw_segment]
+                outputs[variable.name] = normalized_segment[0] if value_count == 1 else normalized_segment
         return outputs
 
     def _default_output_variables(self) -> list[str]:
@@ -343,8 +426,12 @@ class _RealtimeSession:
         self._unzipdir = extract(str(self.fmu_path))
         self._fmu = instantiate_fmu(self._unzipdir, self._model_description, fmi_type="CoSimulation")
         self._fmu.instantiate()
-        self._fmu.setupExperiment(startTime=self.current_time, stopTime=self.stop_time)
-        self._fmu.enterInitializationMode()
+        fmi_major = str(getattr(self._model_description, "fmiVersion", "")).split(".", 1)[0]
+        if fmi_major == "3":
+            self._fmu.enterInitializationMode(startTime=self.current_time, stopTime=self.stop_time)
+        else:
+            self._fmu.setupExperiment(startTime=self.current_time, stopTime=self.stop_time)
+            self._fmu.enterInitializationMode()
         start_inputs = options.get("inputs")
         if isinstance(start_inputs, dict) and start_inputs:
             self._set_values(start_inputs)
@@ -589,6 +676,15 @@ class RealtimeWsManager:
                 entry["start"] = var.start
             if hasattr(var, "unit") and var.unit:
                 entry["unit"] = var.unit
+            if getattr(var, "dimensions", None):
+                entry["dimensions"] = [
+                    {
+                        **({"start": int(dim.start)} if getattr(dim, "start", None) is not None else {}),
+                        **({"valueReference": int(dim.valueReference)} if getattr(dim, "valueReference", None) is not None else {}),
+                        **({"variableName": dim.variable.name} if getattr(dim, "variable", None) is not None and getattr(dim.variable, "name", None) else {}),
+                    }
+                    for dim in var.dimensions
+                ]
             variables.append(entry)
         return {
             "fmiVersion": md.fmiVersion,

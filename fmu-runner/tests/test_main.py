@@ -89,6 +89,38 @@ class MockModelDescription:
     ]
 
 
+class MockFmi3ModelDescription:
+    fmiVersion = "3.0"
+    guid = "{fmi3-guid}"
+    instantiationToken = "{fmi3-guid}"
+    coSimulation = True
+    modelExchange = False
+
+    class defaultExperiment:
+        startTime = 0.0
+        stopTime = 5.0
+        stepSize = 0.1
+
+    class _Var:
+        def __init__(self, name, causality, type_, start=None, initial=None, dimensions=None, variability=None):
+            self.name = name
+            self.causality = causality
+            self.type = type_
+            self.start = start
+            self.initial = initial
+            self.unit = None
+            self.min = None
+            self.max = None
+            self.variability = variability or "continuous"
+            self.valueReference = 0 if name == "time" else 1
+            self.dimensions = dimensions or []
+
+    modelVariables = [
+        _Var("time", "independent", "Float64"),
+        _Var("counter", "output", "Int32", start=1, initial="exact", variability="discrete"),
+    ]
+
+
 @patch("main.read_model_description", return_value=MockModelDescription())
 @patch("main._resolve_fmu_path")
 def test_describe_returns_model_metadata(mock_resolve, mock_read):
@@ -139,6 +171,144 @@ def test_proxy_model_description_preserves_zero_value_reference():
     root = ET.fromstring(xml_bytes)
     scalar_variables = root.findall("./ModelVariables/ScalarVariable")
     assert scalar_variables[0].attrib["valueReference"] == "0"
+
+
+def test_proxy_model_description_preserves_initial_and_start_when_exact():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyDemo",
+        "guid": "{proxy-guid}",
+        "modelVariables": [
+            {
+                "name": "u",
+                "type": "Real",
+                "causality": "input",
+                "variability": "continuous",
+                "valueReference": 0,
+                "start": 1.5,
+                "initial": "exact",
+            },
+            {
+                "name": "y",
+                "type": "Real",
+                "causality": "output",
+                "variability": "continuous",
+                "valueReference": 2,
+                "start": 3.0,
+                "initial": "exact",
+            },
+            {
+                "name": "dy",
+                "type": "Real",
+                "causality": "local",
+                "variability": "continuous",
+                "valueReference": 3,
+                "start": 9.0,
+                "initial": "calculated",
+            },
+        ],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    scalar_variables = root.findall("./ModelVariables/ScalarVariable")
+    input_real = scalar_variables[0].find("./Real")
+    output_real = scalar_variables[1].find("./Real")
+    local_real = scalar_variables[2].find("./Real")
+
+    assert input_real is not None
+    assert input_real.attrib["start"] == "1.5"
+    assert scalar_variables[0].attrib["initial"] == "exact"
+    assert output_real is not None
+    assert output_real.attrib["start"] == "3.0"
+    assert scalar_variables[1].attrib["initial"] == "exact"
+    assert local_real is not None
+    assert "start" not in local_real.attrib
+    assert scalar_variables[2].attrib["initial"] == "calculated"
+
+
+def test_proxy_model_description_generates_fmi3_model_description():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyDemoFmi3",
+        "guid": "{proxy-guid}",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "modelVariables": [
+            {
+                "name": "time",
+                "type": "Float64",
+                "causality": "independent",
+                "variability": "continuous",
+                "valueReference": 0,
+            },
+            {
+                "name": "counter",
+                "type": "Int32",
+                "causality": "output",
+                "variability": "discrete",
+                "valueReference": 1,
+                "initial": "exact",
+                "start": 1,
+            },
+        ],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    assert root.attrib["fmiVersion"] == "3.0"
+    assert root.attrib["instantiationToken"] == "{proxy-guid}"
+    assert root.find("./CoSimulation").attrib["modelIdentifier"] == "decentralabs_proxy"
+    assert root.find("./ModelVariables/ScalarVariable") is None
+    assert root.find("./ModelVariables/Float64").attrib["name"] == "time"
+    assert root.find("./ModelVariables/Int32").attrib["name"] == "counter"
+    assert root.find("./ModelStructure/Output").attrib["valueReference"] == "1"
+
+
+def test_proxy_model_description_generates_fmi3_dimensioned_variables():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyArrayFmi3",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "modelVariables": [
+            {
+                "name": "m",
+                "type": "UInt64",
+                "causality": "structuralParameter",
+                "variability": "fixed",
+                "valueReference": 1,
+                "start": 3,
+            },
+            {
+                "name": "u",
+                "type": "Float64",
+                "causality": "input",
+                "variability": "continuous",
+                "valueReference": 9,
+                "start": [1, 2, 3],
+                "dimensions": [{"valueReference": 1}],
+            },
+            {
+                "name": "y",
+                "type": "Float64",
+                "causality": "output",
+                "variability": "continuous",
+                "valueReference": 10,
+                "dimensions": [{"valueReference": 1}],
+            },
+        ],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    m = root.find("./ModelVariables/UInt64")
+    u = root.find("./ModelVariables/Float64[@name='u']")
+    y = root.find("./ModelVariables/Float64[@name='y']")
+
+    assert m is not None
+    assert m.attrib["start"] == "3"
+    assert u is not None
+    assert u.attrib["start"] == "1 2 3"
+    assert u.find("./Dimension").attrib["valueReference"] == "1"
+    assert y is not None
+    assert y.find("./Dimension").attrib["valueReference"] == "1"
 
 
 # ─── /api/v1/simulations/run ────────────────────────────────────────
@@ -494,6 +664,51 @@ def test_proxy_fmu_is_loadable_by_python_fmi_tools(mock_resolve, mock_issue_tick
         assert md.fmiVersion == "2.0"
         assert md.coSimulation is not None
         assert any(var.name == "mass" for var in md.modelVariables)
+    finally:
+        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
+
+
+@patch("main.read_model_description", return_value=MockFmi3ModelDescription())
+@patch("main._issue_session_ticket", new_callable=AsyncMock)
+@patch("main._resolve_fmu_path")
+def test_proxy_download_generates_fmi3_archive_layout(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
+    mock_resolve.return_value = tmp_path / "test-fmi3.fmu"
+    mock_issue_ticket.return_value = ("st_ticket_3", 4102444800)
+
+    runtime_root = tmp_path / "runtime"
+    runtime_bin = runtime_root / "binaries" / "win64"
+    runtime_bin.mkdir(parents=True, exist_ok=True)
+    (runtime_bin / "decentralabs_proxy.dll").write_bytes(b"binary")
+    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
+
+    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
+        accessKey="test-fmi3.fmu",
+        resourceType="fmu",
+        labId="1",
+        reservationKey="0xabc",
+        aud="https://gateway.example/auth",
+    )
+    try:
+        response = client.get(
+            "/api/v1/fmu/proxy/1?reservationKey=0xabc",
+            headers={"Authorization": "Bearer booking-token"},
+        )
+        assert response.status_code == 200
+
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        names = set(archive.namelist())
+        assert "modelDescription.xml" in names
+        assert "resources/config.json" in names
+        assert "binaries/x86_64-windows/decentralabs_proxy.dll" in names
+
+        config = json.loads(archive.read("resources/config.json").decode("utf-8"))
+        assert config["fmiVersion"] == "3.0"
+
+        proxy_path = tmp_path / "proxy-fmi3.fmu"
+        proxy_path.write_bytes(response.content)
+        md = read_model_description(str(proxy_path))
+        assert md.fmiVersion == "3.0"
+        assert md.coSimulation is not None
     finally:
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 

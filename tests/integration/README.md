@@ -55,6 +55,20 @@ What it checks:
 - `/auth/fmu/session-ticket/issue` and `/redeem` are exposed
 - with `-BearerToken`, it also tests real `issue`, `redeem` and `proxy.fmu` download
 
+Helpers for local FMU proxy development:
+
+```powershell
+python .\tests\integration\new-fmu-dev-booking-token.py --access-key BouncingBall.fmu
+```
+
+Generates a dev FMU booking JWT signed with `Lab Gateway/certs/private_key.pem`.
+
+```powershell
+python .\tests\integration\simulate-proxy-fmu.py .\tests\integration\artifacts\fmu-proxy-lab-lab-1.fmu
+```
+
+Loads and simulates a downloaded `proxy.fmu` with `fmpy` on the Windows host to validate the native runtime.
+
 ## Files
 
 ```text

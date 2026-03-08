@@ -309,7 +309,7 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
             Remove-Item $ProxyOutputPath -Force
         }
 
-        $proxyUri = "$BaseUrl/fmu/api/v1/fmu/proxy/$LabId?reservationKey=$ReservationKey"
+        $proxyUri = "$BaseUrl/fmu/api/v1/fmu/proxy/${LabId}?reservationKey=$ReservationKey"
         $proxyResponse = Invoke-HttpJson -Uri $proxyUri -Headers $authHeaders -OutFile $ProxyOutputPath
         if ($proxyResponse.StatusCode -eq 200 -and (Test-Path $ProxyOutputPath)) {
             Log-Pass "Proxy FMU downloaded successfully to $ProxyOutputPath"

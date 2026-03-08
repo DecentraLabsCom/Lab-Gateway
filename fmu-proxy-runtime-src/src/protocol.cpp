@@ -14,6 +14,7 @@ const std::vector<std::string_view> kClientMessages = {
     kSimSetInputs,
     kSimStep,
     kSimGetOutputs,
+    kSimReset,
     kSessionTerminate,
 };
 
@@ -23,6 +24,7 @@ const std::vector<std::string_view> kServerMessages = {
     kModelDescription,
     kSimState,
     kSimOutputs,
+    kSimInputsUpdated,
     kSessionClosed,
     kError,
 };

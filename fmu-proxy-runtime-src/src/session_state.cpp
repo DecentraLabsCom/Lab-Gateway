@@ -3,9 +3,6 @@
 namespace decentralabs::proxy {
 
 bool CanTransition(const SessionState from, const SessionState to) {
-    if (from == SessionState::kError || from == SessionState::kTerminated) {
-        return false;
-    }
     if (from == to) {
         return true;
     }
@@ -28,8 +25,9 @@ bool CanTransition(const SessionState from, const SessionState to) {
         case SessionState::kPaused:
             return to == SessionState::kRunning || to == SessionState::kTerminated || to == SessionState::kError;
         case SessionState::kTerminated:
+            return to == SessionState::kInstantiated;
         case SessionState::kError:
-            return false;
+            return to == SessionState::kInstantiated;
     }
 
     return false;

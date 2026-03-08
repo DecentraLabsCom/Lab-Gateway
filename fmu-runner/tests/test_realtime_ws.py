@@ -47,6 +47,61 @@ def _mock_model_description():
     return _MD()
 
 
+def _mock_model_description_fmi3():
+    class _Var:
+        def __init__(self, name, vtype, causality="output", variability="continuous", start=None, unit=None):
+            self.name = name
+            self.type = vtype
+            self.causality = causality
+            self.variability = variability
+            self.start = start
+            self.unit = unit
+            self.valueReference = 1
+            self.dimensions = []
+
+    class _MD:
+        fmiVersion = "3.0"
+        coSimulation = True
+        modelExchange = False
+        modelVariables = [
+            _Var("u1", "Float64", causality="input", start=0.0, unit="V"),
+            _Var("y", "Float64", causality="output", unit="V"),
+        ]
+
+    return _MD()
+
+
+def _mock_model_description_fmi3_array():
+    class _Dimension:
+        def __init__(self, value_reference):
+            self.valueReference = value_reference
+            self.start = None
+            self.variable = None
+
+    class _Var:
+        def __init__(self, name, value_reference, vtype, causality="output", variability="continuous", start=None, dimensions=None):
+            self.name = name
+            self.type = vtype
+            self.causality = causality
+            self.variability = variability
+            self.start = start
+            self.unit = None
+            self.valueReference = value_reference
+            self.dimensions = dimensions or []
+
+    class _MD:
+        fmiVersion = "3.0"
+        coSimulation = True
+        modelExchange = False
+        modelVariables = [
+            _Var("m", 1, "UInt64", causality="structuralParameter", variability="fixed", start=3),
+            _Var("u", 9, "Float64", causality="input", dimensions=[_Dimension(1)]),
+            _Var("y", 10, "Float64", causality="output", dimensions=[_Dimension(1)]),
+        ]
+
+    return _MD()
+
+
 @pytest.fixture(autouse=True)
 def _patch_realtime_manager(monkeypatch):
     async def _fake_verify(_token: str):
@@ -137,3 +192,90 @@ def test_ws_create_is_rate_limited(monkeypatch):
         payload = ws.receive_json()
         assert payload["type"] == "error"
         assert payload["code"] == "RATE_LIMITED"
+
+
+@pytest.mark.asyncio
+async def test_initialize_fmi3_uses_enter_initialization_mode_without_setup_experiment(monkeypatch):
+    from realtime_ws import _RealtimeSession
+
+    class _MockFmu3:
+        def __init__(self):
+            self.calls = []
+
+        def instantiate(self):
+            self.calls.append(("instantiate",))
+
+        def enterInitializationMode(self, **kwargs):
+            self.calls.append(("enterInitializationMode", kwargs))
+
+        def exitInitializationMode(self):
+            self.calls.append(("exitInitializationMode",))
+
+        def terminate(self):
+            self.calls.append(("terminate",))
+
+        def freeInstance(self):
+            self.calls.append(("freeInstance",))
+
+    mock_fmu = _MockFmu3()
+    session = _RealtimeSession(_realtime_manager, "sess-test", _claims(), Path("/tmp/test.fmu"))
+
+    monkeypatch.setattr("realtime_ws.extract", lambda _path: "/tmp/unzip")
+    monkeypatch.setattr("realtime_ws.instantiate_fmu", lambda *_args, **_kwargs: mock_fmu)
+    monkeypatch.setattr("realtime_ws.read_model_description", lambda _path: _mock_model_description_fmi3())
+
+    await session.initialize({"startTime": 1.25, "stopTime": 3.5, "stepSize": 0.1})
+
+    assert ("instantiate",) in mock_fmu.calls
+    assert ("exitInitializationMode",) in mock_fmu.calls
+    assert ("enterInitializationMode", {"startTime": 1.25, "stopTime": 3.5}) in mock_fmu.calls
+    assert not any(call[0] == "setupExperiment" for call in mock_fmu.calls)
+
+
+@pytest.mark.asyncio
+async def test_initialize_fmi3_supports_dimensioned_float64_inputs_and_outputs(monkeypatch):
+    from realtime_ws import _RealtimeSession
+
+    class _MockFmu3Array:
+        def __init__(self):
+            self.calls = []
+
+        def instantiate(self):
+            self.calls.append(("instantiate",))
+
+        def enterInitializationMode(self, **kwargs):
+            self.calls.append(("enterInitializationMode", kwargs))
+
+        def exitInitializationMode(self):
+            self.calls.append(("exitInitializationMode",))
+
+        def terminate(self):
+            self.calls.append(("terminate",))
+
+        def freeInstance(self):
+            self.calls.append(("freeInstance",))
+
+        def getUInt64(self, refs):
+            self.calls.append(("getUInt64", tuple(refs)))
+            return [3]
+
+        def setFloat64(self, refs, values):
+            self.calls.append(("setFloat64", tuple(refs), tuple(values)))
+
+        def getFloat64(self, refs, nValues=None):
+            self.calls.append(("getFloat64", tuple(refs), nValues))
+            return [10.0, 20.0, 30.0]
+
+    mock_fmu = _MockFmu3Array()
+    session = _RealtimeSession(_realtime_manager, "sess-array", _claims(), Path("/tmp/test.fmu"))
+
+    monkeypatch.setattr("realtime_ws.extract", lambda _path: "/tmp/unzip")
+    monkeypatch.setattr("realtime_ws.instantiate_fmu", lambda *_args, **_kwargs: mock_fmu)
+    monkeypatch.setattr("realtime_ws.read_model_description", lambda _path: _mock_model_description_fmi3_array())
+
+    await session.initialize({"startTime": 0.0, "stopTime": 1.0, "stepSize": 0.1, "inputs": {"u": [1.0, 2.0, 3.0]}})
+    outputs = session._get_values(["y"])
+
+    assert ("setFloat64", (9,), (1.0, 2.0, 3.0)) in mock_fmu.calls
+    assert ("getFloat64", (10,), 3) in mock_fmu.calls
+    assert outputs["y"] == [10.0, 20.0, 30.0]

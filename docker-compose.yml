@@ -442,7 +442,7 @@ services:
       - FMU_STATION_INTERNAL_TOKEN=${FMU_STATION_INTERNAL_TOKEN:-}
       - FMU_STATION_REQUEST_TIMEOUT=${FMU_STATION_REQUEST_TIMEOUT:-10}
       - HISTORY_DB_PATH=/app/data/history.db
-      - AUTH_JWKS_URL=http://blockchain-services:8080/.well-known/jwks.json
+      - AUTH_JWKS_URL=http://blockchain-services:8080/auth/jwks
       - AUTH_SESSION_TICKET_ISSUE_URL=${AUTH_SESSION_TICKET_ISSUE_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/issue}
       - AUTH_SESSION_TICKET_REDEEM_URL=${AUTH_SESSION_TICKET_REDEEM_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/redeem}
       - AUTH_SESSION_TICKET_INTERNAL_TOKEN=${AUTH_SESSION_TICKET_INTERNAL_TOKEN:-}

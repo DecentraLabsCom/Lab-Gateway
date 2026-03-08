@@ -15,7 +15,7 @@ from fastapi import HTTPException, Request
 
 logger = logging.getLogger("fmu-runner.auth")
 
-AUTH_JWKS_URL = os.getenv("AUTH_JWKS_URL", "http://blockchain-services:8080/.well-known/jwks.json")
+AUTH_JWKS_URL = os.getenv("AUTH_JWKS_URL", "http://blockchain-services:8080/auth/jwks")
 JWT_ALGORITHMS = ["RS256", "ES256"]
 JWT_ISSUER = os.getenv("JWT_ISSUER", None)  # Optional issuer check
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", None)  # Optional audience check — set to gateway URL
