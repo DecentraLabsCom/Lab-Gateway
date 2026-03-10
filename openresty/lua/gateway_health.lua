@@ -194,19 +194,28 @@ local function cert_days_remaining(path)
             Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12
         }
         local mon, day, hour, min, sec, year = notAfter:match("^(%a+)%s+(%d+)%s+(%d+):(%d+):(%d+)%s+(%d+)%s+GMT$")
-        if mon and months[mon] then
+        local month_num = mon and months[mon] or nil
+        local year_num = year and tonumber(year) or nil
+        local day_num = day and tonumber(day) or nil
+        local hour_num = hour and tonumber(hour) or nil
+        local min_num = min and tonumber(min) or nil
+        local sec_num = sec and tonumber(sec) or nil
+
+        if month_num and year_num and day_num and hour_num and min_num and sec_num then
             local local_ts = os.time({
-                year = tonumber(year),
-                month = months[mon],
-                day = tonumber(day),
-                hour = tonumber(hour),
-                min = tonumber(min),
-                sec = tonumber(sec)
+                year = year_num,
+                month = month_num,
+                day = day_num,
+                hour = hour_num,
+                min = min_num,
+                sec = sec_num
             })
             if local_ts then
+                local local_date = os.date("*t", local_ts)
+                local utc_date = os.date("!*t", local_ts)
                 local offset = os.difftime(
-                    os.time(os.date("*t", local_ts)),
-                    os.time(os.date("!*t", local_ts))
+                    type(local_date) == "table" and os.time(local_date) or local_ts,
+                    type(utc_date) == "table" and os.time(utc_date) or local_ts
                 )
                 ts = local_ts - offset
             end
@@ -264,7 +273,7 @@ local function check_lite_issuer_trust(issuer)
     local url = issuer_origin(parsed) .. "/.well-known/public-key.pem"
     local httpc = resty_http.new()
     httpc:set_timeout(2000)
-    local res, err = httpc:request_uri(url, { method = "GET", ssl_verify = false })
+    local res, err = httpc:request_uri(url, { method = "GET", ssl_verify = true })
     if not res then
         details.remote_public_key_status = err or "issuer request failed"
         details.ok = false
