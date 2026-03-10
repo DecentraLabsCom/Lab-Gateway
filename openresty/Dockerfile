@@ -1,6 +1,6 @@
 # Pin to specific version for reproducibility and security
 # Check https://hub.docker.com/r/openresty/openresty/tags for updates
-FROM openresty/openresty:1.27.1.2-11-alpine-fat
+FROM openresty/openresty:1.29.2.1-0-alpine-fat
 
 # Use the default system tree
 ENV TREE=/usr/local
