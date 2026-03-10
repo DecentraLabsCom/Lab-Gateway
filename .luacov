@@ -1,7 +1,7 @@
 statsfile = "luacov.stats.out"
 reportfile = "luacov.report.out"
 include = {
-    "openresty/lua/modules/.*"
+    "openresty/lua/.*"
 }
 exclude = {
     "openresty/tests/.*"

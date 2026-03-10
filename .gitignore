@@ -60,6 +60,8 @@ target/
 *.pyc
 __pycache__/
 .pytest_cache/
+.coverage
+.coverage.*
 
 # IDE files
 .idea/

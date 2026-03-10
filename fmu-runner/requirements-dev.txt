@@ -1,4 +1,6 @@
 # Development/test dependencies — NOT installed in the production Docker image
 pytest>=8.3
+pytest-asyncio>=0.25
+pytest-cov>=6.0
 numpy>=2.0
 httpx>=0.28
