@@ -70,6 +70,7 @@ local function with_gateway_runtime(opts, fn)
         return env[name]
     end
 
+    ---@diagnostic disable-next-line: duplicate-set-field
     io.open = function(path, mode)
         local content = files[path]
         if content == nil then
@@ -84,6 +85,7 @@ local function with_gateway_runtime(opts, fn)
         }
     end
 
+    ---@diagnostic disable-next-line: duplicate-set-field
     io.popen = function(command)
         local output = opts.openssl_output
         if output == nil then
