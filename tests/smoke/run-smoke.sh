@@ -8,6 +8,7 @@ set -euo pipefail
 COMPOSE_FILE="tests/smoke/docker-compose.smoke.yml"
 COOKIE_FILE="tests/smoke/cookie.txt"
 JWT_FILE="tests/smoke/jwt.txt"
+INVALID_COOKIE_FILE="tests/smoke/invalid-cookie.txt"
 PASSED=0
 FAILED=0
 
@@ -20,6 +21,7 @@ NC='\033[0m'
 function cleanup {
   docker compose -f "$COMPOSE_FILE" down -v >/dev/null 2>&1 || true
   rm -f "$COOKIE_FILE"
+  rm -f "$INVALID_COOKIE_FILE"
 }
 
 function log_pass {
@@ -117,9 +119,22 @@ else
 fi
 
 # =================================================================
-# Test 6: Wallet endpoint protection
+# Test 6: Ops endpoint rejects invalid token
 # =================================================================
-echo "Test 6: Wallet endpoint protection"
+echo "Test 6: Ops endpoint rejects invalid token"
+OPS_BAD_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+  -H "X-Lab-Manager-Token: wrong-token" \
+  https://lab.test:${PORT}/ops/health || true)
+if [ "$OPS_BAD_TOKEN" = "401" ] || [ "$OPS_BAD_TOKEN" = "403" ]; then
+  log_pass "Ops endpoint rejects invalid token (status: $OPS_BAD_TOKEN)"
+else
+  log_fail "Ops endpoint should reject invalid token (status: $OPS_BAD_TOKEN)"
+fi
+
+# =================================================================
+# Test 7: Wallet endpoint protection
+# =================================================================
+echo "Test 7: Wallet endpoint protection"
 WALLET_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" https://lab.test:${PORT}/wallet/health || true)
 if [ "$WALLET_STATUS" = "200" ] || [ "$WALLET_STATUS" = "403" ]; then
   log_pass "Wallet endpoint access controlled (status: $WALLET_STATUS)"
@@ -128,9 +143,9 @@ else
 fi
 
 # =================================================================
-# Test 7: Security headers present
+# Test 8: Security headers present
 # =================================================================
-echo "Test 7: Security headers"
+echo "Test 8: Security headers"
 HEADERS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -I https://lab.test:${PORT}/ 2>&1)
 
 SECURITY_OK=true
@@ -148,9 +163,9 @@ else
 fi
 
 # =================================================================
-# Test 8: Guacamole proxy accessible
+# Test 9: Guacamole proxy accessible
 # =================================================================
-echo "Test 8: Guacamole proxy"
+echo "Test 9: Guacamole proxy"
 GUAC_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" https://lab.test:${PORT}/guacamole/)
 if [ "$GUAC_STATUS" = "200" ] || [ "$GUAC_STATUS" = "302" ]; then
   log_pass "Guacamole accessible through proxy (status: $GUAC_STATUS)"
@@ -159,22 +174,24 @@ else
 fi
 
 # =================================================================
-# Test 9: Invalid JWT rejected
+# Test 10: Invalid JWT rejected
 # =================================================================
-echo "Test 9: Invalid JWT rejected"
+echo "Test 10: Invalid JWT rejected"
 INVALID_JWT="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.invalid.signature"
-INVALID_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" "https://lab.test:${PORT}/guacamole/?jwt=${INVALID_JWT}")
-# Should still return 200 (login page) but not set cookie
-if [ "$INVALID_STATUS" = "200" ] || [ "$INVALID_STATUS" = "302" ]; then
-  log_pass "Invalid JWT handled gracefully (returns login page)"
+rm -f "$INVALID_COOKIE_FILE"
+INVALID_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$INVALID_COOKIE_FILE" -o /dev/null -w "%{http_code}" "https://lab.test:${PORT}/guacamole/?jwt=${INVALID_JWT}")
+if { [ "$INVALID_STATUS" = "200" ] || [ "$INVALID_STATUS" = "302" ]; } && ! grep -q "JTI" "$INVALID_COOKIE_FILE" 2>/dev/null; then
+  log_pass "Invalid JWT is handled gracefully without creating session cookies"
+elif [ "$INVALID_STATUS" = "200" ] || [ "$INVALID_STATUS" = "302" ]; then
+  log_fail "Invalid JWT should not create session cookies"
 else
   log_fail "Invalid JWT caused error (status: $INVALID_STATUS)"
 fi
 
 # =================================================================
-# Test 10: Cookie cleared on second request without JWT
+# Test 11: Cookie cleared on second request without JWT
 # =================================================================
-echo "Test 10: Session persistence"
+echo "Test 11: Session persistence"
 SESSION_RESPONSE=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -b "$COOKIE_FILE" https://lab.test:${PORT}/guacamole/api/echo)
 if echo "$SESSION_RESPONSE" | grep -Eq '"authorization"'; then
   log_pass "Session persists across requests"
@@ -183,9 +200,9 @@ else
 fi
 
 # =================================================================
-# Test 11: Institution-config rejects missing access token for external clients
+# Test 12: Institution-config rejects missing access token for external clients
 # =================================================================
-echo "Test 11: Institution-config rejects missing access token for external clients"
+echo "Test 12: Institution-config rejects missing access token for external clients"
 INSTITUTION_EXTERNAL=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
   -H "X-Forwarded-For: 203.0.113.5" \
   https://lab.test:${PORT}/institution-config/status || true)
@@ -196,9 +213,21 @@ else
 fi
 
 # =================================================================
-# Test 12: Institution-config accepts valid token
+# Test 13: Institution-config rejects invalid token
 # =================================================================
-echo "Test 12: Institution-config accepts valid token"
+echo "Test 13: Institution-config rejects invalid token"
+INSTITUTION_BAD_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+  "https://lab.test:${PORT}/institution-config/status?token=wrong-token")
+if [ "$INSTITUTION_BAD_TOKEN" = "401" ] || [ "$INSTITUTION_BAD_TOKEN" = "403" ]; then
+  log_pass "Institution config rejects invalid token (status: $INSTITUTION_BAD_TOKEN)"
+else
+  log_fail "Institution config should reject invalid token (status: $INSTITUTION_BAD_TOKEN)"
+fi
+
+# =================================================================
+# Test 14: Institution-config accepts valid token
+# =================================================================
+echo "Test 14: Institution-config accepts valid token"
 INSTITUTION_WITH_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
   "https://lab.test:${PORT}/institution-config/status?token=${ACCESS_TOKEN}")
 if [ "$INSTITUTION_WITH_TOKEN" = "200" ]; then

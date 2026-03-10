@@ -56,6 +56,19 @@ def json_response(handler, status, payload, headers=None):
     handler.wfile.write(body)
 
 
+def raw_response(handler, status, body, content_type="application/json", headers=None):
+    """Send raw response body without JSON encoding."""
+    body_bytes = body.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(body_bytes)))
+    if headers:
+        for key, value in headers.items():
+            handler.send_header(key, value)
+    handler.end_headers()
+    handler.wfile.write(body_bytes)
+
+
 # Mock JWKS response
 MOCK_JWKS = {
     "keys": [{
@@ -105,6 +118,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+
+        delay_ms = int(query.get("delay_ms", ["0"])[0] or "0")
+        if delay_ms > 0:
+            time.sleep(delay_ms / 1000)
         
         # Health check
         if parsed.path == "/health":
@@ -114,6 +132,16 @@ class Handler(BaseHTTPRequestHandler):
         # JWKS endpoint
         if parsed.path == "/auth/jwks":
             if not self.check_rate_limit_and_respond():
+                return
+            mode = query.get("mode", ["valid"])[0]
+            if mode == "invalid":
+                json_response(self, 200, {"invalid": True, "reason": "mock-invalid-jwks"})
+                return
+            if mode == "malformed":
+                raw_response(self, 200, "{not-json", "application/json")
+                return
+            if mode == "error":
+                json_response(self, 500, {"error": "mock-jwks-error"})
                 return
             json_response(self, 200, MOCK_JWKS)
             return

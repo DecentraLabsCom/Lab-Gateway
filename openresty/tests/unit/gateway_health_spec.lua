@@ -248,49 +248,59 @@ local function run_gateway_health(opts)
     return ngx
 end
 
+local function healthy_gateway_health_opts()
+    return {
+        config = {
+            lite_mode = 0,
+            issuer = "https://gateway.example/auth",
+            server_name = "gateway.example",
+            https_port = "443"
+        },
+        env = {
+            SERVER_NAME = "gateway.example",
+            LAB_MANAGER_TOKEN = "lab-token",
+            MYSQL_USER = "guac",
+            MYSQL_PASSWORD = "mysql-secret",
+            MYSQL_DATABASE = "guacamole_db"
+        },
+        files = {
+            ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nlocal\n-----END PUBLIC KEY-----",
+            ["/etc/ssl/private/fullchain.pem"] = "certificate",
+            ["/etc/ssl/private/privkey.pem"] = "private-key",
+            ["/var/www/html/index.html"] = "<html></html>"
+        },
+        captures = {
+            ["/__health_blockchain"] = { status = 200, body = { version = "1.2.3" } },
+            ["/__health_guacamole"] = { status = 200, body = {} },
+            ["/__health_guac_api"] = { status = 200, body = {} },
+            ["/__health_ops"] = { status = 200, body = { hosts = 3, polling_enabled = true } }
+        },
+        dns = {
+            ["blockchain-services"] = "10.0.0.2",
+            guacamole = "10.0.0.3",
+            ["ops-worker"] = "10.0.0.4",
+            mysql = "10.0.0.5",
+            ["gateway.example"] = "10.0.0.10"
+        },
+        http = {
+            ["https://gateway.example/.well-known/public-key.pem"] = {
+                status = 200,
+                body = "-----BEGIN PUBLIC KEY-----\nremote\n-----END PUBLIC KEY-----"
+            }
+        },
+        mysql = {
+            connect = true,
+            query = true
+        },
+        openssl_output = "notAfter=Jan 12 00:00:00 1970 GMT\n",
+        cert_expiry = 86400 * 42,
+        now = 0
+    }
+end
+
 runner.describe("OpenResty gateway_health.lua", function()
     runner.it("reports UP when the full gateway stack is healthy", function()
-        local ngx = run_gateway_health({
-            config = {
-                lite_mode = 0,
-                issuer = "https://gateway.example/auth",
-                server_name = "gateway.example",
-                https_port = "443"
-            },
-            env = {
-                SERVER_NAME = "gateway.example",
-                LAB_MANAGER_TOKEN = "lab-token",
-                MYSQL_USER = "guac",
-                MYSQL_PASSWORD = "mysql-secret",
-                MYSQL_DATABASE = "guacamole_db"
-            },
-            files = {
-                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nlocal\n-----END PUBLIC KEY-----",
-                ["/etc/ssl/private/fullchain.pem"] = "certificate",
-                ["/etc/ssl/private/privkey.pem"] = "private-key",
-                ["/var/www/html/index.html"] = "<html></html>"
-            },
-            captures = {
-                ["/__health_blockchain"] = { status = 200, body = { version = "1.2.3" } },
-                ["/__health_guacamole"] = { status = 200, body = {} },
-                ["/__health_guac_api"] = { status = 200, body = {} },
-                ["/__health_ops"] = { status = 200, body = { hosts = 3, polling_enabled = true } }
-            },
-            dns = {
-                ["blockchain-services"] = "10.0.0.2",
-                guacamole = "10.0.0.3",
-                ["ops-worker"] = "10.0.0.4",
-                mysql = "10.0.0.5"
-            },
-            http = {},
-            mysql = {
-                connect = true,
-                query = true
-            },
-            openssl_output = "notAfter=Jan 12 00:00:00 1970 GMT\n",
-            cert_expiry = 86400 * 42,
-            now = 0
-        })
+        local ngx = run_gateway_health(healthy_gateway_health_opts())
 
         local result = ngx._body
         runner.assert.equals("application/json", ngx.header["Content-Type"])
@@ -305,53 +315,12 @@ runner.describe("OpenResty gateway_health.lua", function()
     end)
 
     runner.it("marks lite auth as degraded when ISSUER points back to the local gateway", function()
-        local ngx = run_gateway_health({
-            config = {
-                lite_mode = 1,
-                issuer = "https://gateway.example/auth",
-                server_name = "gateway.example",
-                https_port = "443"
-            },
-            env = {
-                SERVER_NAME = "gateway.example",
-                LAB_MANAGER_TOKEN = "lab-token",
-                MYSQL_USER = "guac",
-                MYSQL_PASSWORD = "mysql-secret",
-                MYSQL_DATABASE = "guacamole_db"
-            },
-            files = {
-                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nlocal\n-----END PUBLIC KEY-----",
-                ["/etc/ssl/private/fullchain.pem"] = "certificate",
-                ["/etc/ssl/private/privkey.pem"] = "private-key",
-                ["/var/www/html/index.html"] = "<html></html>"
-            },
-            captures = {
-                ["/__health_blockchain"] = { status = 200, body = { version = "1.2.3" } },
-                ["/__health_guacamole"] = { status = 200, body = {} },
-                ["/__health_guac_api"] = { status = 200, body = {} },
-                ["/__health_ops"] = { status = 200, body = { hosts = 1, polling_enabled = true } }
-            },
-            dns = {
-                ["blockchain-services"] = "10.0.0.2",
-                guacamole = "10.0.0.3",
-                ["ops-worker"] = "10.0.0.4",
-                mysql = "10.0.0.5",
-                ["gateway.example"] = "10.0.0.10"
-            },
-            http = {
-                ["https://gateway.example/.well-known/public-key.pem"] = {
-                    status = 200,
-                    body = "-----BEGIN PUBLIC KEY-----\nremote\n-----END PUBLIC KEY-----"
-                }
-            },
-            mysql = {
-                connect = true,
-                query = true
-            },
-            openssl_output = "notAfter=Jan 12 00:00:00 1970 GMT\n",
-            cert_expiry = 86400 * 14,
-            now = 0
-        })
+        local opts = healthy_gateway_health_opts()
+        opts.config.lite_mode = 1
+        opts.captures["/__health_ops"] = { status = 200, body = { hosts = 1, polling_enabled = true } }
+        opts.cert_expiry = 86400 * 14
+
+        local ngx = run_gateway_health(opts)
 
         local result = ngx._body
         runner.assert.equals("lite", result.mode)
@@ -359,6 +328,92 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals(false, result.services.lite_auth.ok)
         runner.assert.equals(false, result.services.lite_auth.external_issuer)
         runner.assert.truthy(result.services.lite_auth.remote_public_key_status:find("expected external Full issuer", 1, true) ~= nil)
+    end)
+
+    runner.it("reports DOWN when upstreams and infrastructure checks fail", function()
+        local opts = healthy_gateway_health_opts()
+        opts.captures = {
+            ["/__health_guacamole"] = { status = 503, body = {} },
+            ["/__health_guac_api"] = { status = 504, body = {} }
+        }
+        opts.dns = {
+            ["blockchain-services"] = false,
+            guacamole = false,
+            ["ops-worker"] = false,
+            mysql = false
+        }
+        opts.tcp = {
+            ["mysql:3306"] = false,
+            ["guacd:4822"] = false
+        }
+        opts.mysql = {
+            connect = false,
+            connect_err = "mysql connect failed"
+        }
+
+        local ngx = run_gateway_health(opts)
+
+        local result = ngx._body
+        runner.assert.equals("DOWN", result.status)
+        runner.assert.equals(false, result.services.blockchain.ok)
+        runner.assert.equals(false, result.services.guacamole.ok)
+        runner.assert.equals(false, result.services.guacamole_api.ok)
+        runner.assert.equals("connection refused", result.services.guacd.status)
+        runner.assert.equals("mysql connect failed", result.services.guacamole_schema.status)
+        runner.assert.equals(false, result.infra.dns["blockchain-services"])
+        runner.assert.equals(false, result.infra.mysql_up)
+    end)
+
+    runner.it("marks lite auth as degraded when the issuer URL is invalid", function()
+        local opts = healthy_gateway_health_opts()
+        opts.config.lite_mode = 1
+        opts.config.issuer = "not-a-valid-url"
+
+        local ngx = run_gateway_health(opts)
+
+        local result = ngx._body
+        runner.assert.equals("lite", result.mode)
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(false, result.services.lite_auth.ok)
+        runner.assert.equals(false, result.services.lite_auth.issuer_url_valid)
+        runner.assert.equals("invalid issuer url", result.services.lite_auth.remote_public_key_status)
+    end)
+
+    runner.it("marks lite auth as degraded when the remote public key payload is malformed", function()
+        local opts = healthy_gateway_health_opts()
+        opts.config.lite_mode = 1
+        opts.config.issuer = "https://issuer.example/auth"
+        opts.dns["issuer.example"] = "10.0.0.11"
+        opts.http = {
+            ["https://issuer.example/.well-known/public-key.pem"] = {
+                status = 200,
+                body = "not a pem"
+            }
+        }
+
+        local ngx = run_gateway_health(opts)
+
+        local result = ngx._body
+        runner.assert.equals("lite", result.mode)
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(false, result.services.lite_auth.ok)
+        runner.assert.equals(true, result.services.lite_auth.issuer_url_valid)
+        runner.assert.equals(true, result.services.lite_auth.issuer_host_dns_ok)
+        runner.assert.equals(false, result.services.lite_auth.remote_public_key_ok)
+        runner.assert.equals("invalid public key payload", result.services.lite_auth.remote_public_key_status)
+    end)
+
+    runner.it("marks guacamole schema as degraded when mysql credentials are missing", function()
+        local opts = healthy_gateway_health_opts()
+        opts.env.MYSQL_PASSWORD = ""
+
+        local ngx = run_gateway_health(opts)
+
+        local result = ngx._body
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(false, result.services.guacamole_schema.ok)
+        runner.assert.equals("mysql credentials missing", result.services.guacamole_schema.status)
+        runner.assert.equals(true, result.services.mysql.ok)
     end)
 end)
 

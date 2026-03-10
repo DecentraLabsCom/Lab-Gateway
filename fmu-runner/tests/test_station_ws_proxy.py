@@ -1,8 +1,11 @@
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from fmu_backend import StationFmuBackend
 from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession
@@ -98,6 +101,12 @@ def _build_manager():
     )
 
 
+def _claims_with(**updates):
+    claims = _claims()
+    claims.update(updates)
+    return claims
+
+
 def test_station_ws_session_create_redeems_ticket_and_forwards_context(monkeypatch):
     manager = _build_manager()
     fake_station = _FakeStationConnection()
@@ -172,3 +181,173 @@ def test_station_ws_attach_forwards_when_session_owned(monkeypatch):
         assert payload["sessionId"] == "sess_station_1"
 
     assert fake_station.sent_messages[0]["gatewayContext"]["claims"]["accessKey"] == "test.fmu"
+
+
+def test_station_proxy_extract_ws_token_supports_query_and_cookie():
+    websocket_from_query = SimpleNamespace(headers={}, query_params={"token": "query-token"})
+    websocket_from_cookie = SimpleNamespace(headers={"cookie": "foo=bar; jti=cookie-token"}, query_params={})
+
+    assert StationRealtimeWsProxyManager.extract_ws_token(websocket_from_query) == "query-token"
+    assert StationRealtimeWsProxyManager.extract_ws_token(websocket_from_cookie) == "cookie-token"
+
+
+def test_station_proxy_extract_ws_token_requires_credentials():
+    websocket = SimpleNamespace(headers={}, query_params={})
+
+    with pytest.raises(HTTPException) as exc:
+        StationRealtimeWsProxyManager.extract_ws_token(websocket)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Missing authentication token"
+
+
+def test_station_proxy_rate_limit_discards_stale_hits(monkeypatch):
+    manager = _build_manager()
+    manager.ws_create_rate_limit_per_minute = 2
+    time_values = iter([100.0, 101.0, 161.0])
+
+    monkeypatch.setattr("station_ws_proxy.time.time", lambda: next(time_values))
+
+    assert manager._allow_session_create("sub:user-1") is True
+    assert manager._allow_session_create("sub:user-1") is True
+    assert manager._allow_session_create("sub:user-1") is True
+
+
+@pytest.mark.asyncio
+async def test_station_proxy_cleanup_loop_removes_expired_sessions(monkeypatch):
+    manager = _build_manager()
+    manager._sessions = {
+        "sess-expired": _GatewayStationSession(
+            session_id="sess-expired",
+            claims=_claims(),
+            lab_id="1",
+            access_key="test.fmu",
+            exp=10,
+        ),
+        "sess-active": _GatewayStationSession(
+            session_id="sess-active",
+            claims=_claims(),
+            lab_id="1",
+            access_key="test.fmu",
+            exp=4102444800,
+        ),
+    }
+
+    sleep_calls = {"count": 0}
+
+    async def _fake_sleep(_seconds):
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr("station_ws_proxy.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("station_ws_proxy.time.time", lambda: 30)
+
+    with pytest.raises(asyncio.CancelledError):
+        await manager._cleanup_loop()
+
+    assert list(manager._sessions.keys()) == ["sess-active"]
+
+
+def test_station_ws_session_create_requires_ticket_when_unauthenticated(monkeypatch):
+    manager = _build_manager()
+
+    async def _unauthorized(_token: str):
+        raise HTTPException(status_code=401, detail="missing token")
+
+    monkeypatch.setattr(manager, "verify_jwt_token", _unauthorized)
+    monkeypatch.setattr(main, "_realtime_manager", manager)
+
+    with client.websocket_connect("/api/v1/fmu/sessions") as ws:
+        ws.send_text(json.dumps({
+            "type": "session.create",
+            "requestId": "req-create",
+            "labId": "1",
+        }))
+        payload = ws.receive_json()
+        assert payload["type"] == "error"
+        assert payload["code"] == "UNAUTHORIZED"
+
+
+def test_station_ws_session_create_requires_redeem_handler_when_ticket_flow_enabled(monkeypatch):
+    manager = _build_manager()
+    manager.redeem_session_ticket = None
+
+    async def _unauthorized(_token: str):
+        raise HTTPException(status_code=401, detail="missing token")
+
+    monkeypatch.setattr(manager, "verify_jwt_token", _unauthorized)
+    monkeypatch.setattr(main, "_realtime_manager", manager)
+
+    with client.websocket_connect("/api/v1/fmu/sessions") as ws:
+        ws.send_text(json.dumps({
+            "type": "session.create",
+            "requestId": "req-create",
+            "labId": "1",
+            "sessionTicket": "st_valid",
+        }))
+        payload = ws.receive_json()
+        assert payload["type"] == "error"
+        assert payload["code"] == "INTERNAL_ERROR"
+
+
+def test_station_ws_attach_rejects_expired_session(monkeypatch):
+    manager = _build_manager()
+    manager._sessions["sess_station_1"] = _GatewayStationSession(
+        session_id="sess_station_1",
+        claims=_claims(),
+        lab_id="1",
+        access_key="test.fmu",
+        exp=1,
+    )
+    monkeypatch.setattr(main, "_realtime_manager", manager)
+    monkeypatch.setattr("station_ws_proxy.time.time", lambda: 100)
+
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        ws.send_text(json.dumps({
+            "type": "session.attach",
+            "requestId": "req-attach",
+            "sessionId": "sess_station_1",
+        }))
+        payload = ws.receive_json()
+        assert payload["type"] == "error"
+        assert payload["code"] == "SESSION_EXPIRED"
+
+    assert "sess_station_1" not in manager._sessions
+
+
+def test_station_ws_attach_rejects_session_ownership_mismatch(monkeypatch):
+    manager = _build_manager()
+    manager._sessions["sess_station_1"] = _GatewayStationSession(
+        session_id="sess_station_1",
+        claims=_claims(),
+        lab_id="1",
+        access_key="test.fmu",
+        exp=4102444800,
+    )
+
+    async def _verify_other(_token: str):
+        return _claims_with(sub="user-2")
+
+    monkeypatch.setattr(manager, "verify_jwt_token", _verify_other)
+    monkeypatch.setattr(main, "_realtime_manager", manager)
+
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        ws.send_text(json.dumps({
+            "type": "session.attach",
+            "requestId": "req-attach",
+            "sessionId": "sess_station_1",
+        }))
+        payload = ws.receive_json()
+        assert payload["type"] == "error"
+        assert payload["code"] == "FORBIDDEN"
+
+
+def test_station_ws_internal_endpoint_rejects_invalid_internal_token(monkeypatch):
+    manager = _build_manager()
+    monkeypatch.setattr(main, "_realtime_manager", manager)
+
+    with client.websocket_connect("/internal/fmu/sessions?token=test-token", headers={"X-Internal-Session-Token": "wrong-token"}) as ws:
+        payload = ws.receive_json()
+        assert payload["type"] == "error"
+        assert payload["code"] == "FORBIDDEN"

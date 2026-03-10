@@ -125,16 +125,23 @@ fi
 # =================================================================
 echo "Test 5: Rate limiting on auth endpoints"
 RATE_LIMITED=false
+RETRY_AFTER_OK=false
 for i in $(seq 1 20); do
-  STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "${BASE_URL}/auth/message")
+  RATE_HEADERS=$(curl -sk -D - -o /dev/null "${BASE_URL}/auth/message")
+  STATUS=$(printf '%s\n' "$RATE_HEADERS" | awk 'NR==1 {print $2}')
   if [ "$STATUS" = "429" ]; then
     RATE_LIMITED=true
+    if printf '%s\n' "$RATE_HEADERS" | grep -qi "^Retry-After: 60"; then
+      RETRY_AFTER_OK=true
+    fi
     break
   fi
 done
 
-if [ "$RATE_LIMITED" = true ]; then
-  log_pass "Rate limiting kicks in after burst"
+if [ "$RATE_LIMITED" = true ] && [ "$RETRY_AFTER_OK" = true ]; then
+  log_pass "Rate limiting kicks in after burst and returns Retry-After"
+elif [ "$RATE_LIMITED" = true ]; then
+  log_fail "Rate limiting triggered but Retry-After header was missing or unexpected"
 else
   log_fail "Rate limiting did not trigger after 20 requests (may need config adjustment)"
 fi
@@ -146,14 +153,14 @@ sleep 5
 # Test 6: CORS headers present on auth endpoints
 # =================================================================
 echo "Test 6: CORS headers"
-CORS_HEADERS=$(curl -sk -I -X OPTIONS "${BASE_URL}/auth/message" \
+CORS_HEADERS=$(curl -sk -D - -o /dev/null -X OPTIONS "${BASE_URL}/auth/message" \
   -H "Origin: http://localhost:3000" \
   -H "Access-Control-Request-Method: GET" 2>&1)
 
-if echo "$CORS_HEADERS" | grep -qi "access-control-allow"; then
-  log_pass "CORS headers present on auth endpoints"
+if echo "$CORS_HEADERS" | grep -qi "^Access-Control-Allow-Origin: http://localhost:3000"; then
+  log_pass "CORS echoes the allowed origin on auth endpoints"
 else
-  log_fail "CORS headers missing on auth endpoints"
+  log_fail "CORS did not echo the expected allowed origin"
 fi
 
 # =================================================================
@@ -180,9 +187,20 @@ else
 fi
 
 # =================================================================
-# Test 9: Ops endpoint accepts valid token
+# Test 9: Ops endpoint rejects invalid token
 # =================================================================
-echo "Test 9: Ops endpoint with valid token"
+echo "Test 9: Ops endpoint rejects invalid token"
+OPS_BAD_TOKEN=$(curl -sk -o /dev/null -w "%{http_code}" -H "X-Lab-Manager-Token: wrong-token" "${BASE_URL}/ops/health")
+if [ "$OPS_BAD_TOKEN" = "401" ] || [ "$OPS_BAD_TOKEN" = "403" ]; then
+  log_pass "Ops endpoint rejects invalid token"
+else
+  log_fail "Ops endpoint should reject invalid token, got: $OPS_BAD_TOKEN"
+fi
+
+# =================================================================
+# Test 10: Ops endpoint accepts valid token
+# =================================================================
+echo "Test 10: Ops endpoint with valid token"
 OPS_WITH_TOKEN=$(curl -sk -H "X-Lab-Manager-Token: integration-test-secret" "${BASE_URL}/ops/health" || echo "error")
 if echo "$OPS_WITH_TOKEN" | grep -q "ok\|status"; then
   log_pass "Ops endpoint accepts valid token"
@@ -191,9 +209,9 @@ else
 fi
 
 # =================================================================
-# Test 10: Static files served correctly
+# Test 11: Static files served correctly
 # =================================================================
-echo "Test 10: Static files"
+echo "Test 11: Static files"
 INDEX_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "${BASE_URL}/")
 if [ "$INDEX_STATUS" = "200" ]; then
   log_pass "Static files served correctly"
@@ -202,9 +220,9 @@ else
 fi
 
 # =================================================================
-# Test 11: HTTP to HTTPS redirect
+# Test 12: HTTP to HTTPS redirect
 # =================================================================
-echo "Test 11: HTTP to HTTPS redirect"
+echo "Test 12: HTTP to HTTPS redirect"
 HTTP_REDIRECT=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:18080/" 2>/dev/null || echo "000")
 if [ "$HTTP_REDIRECT" = "301" ] || [ "$HTTP_REDIRECT" = "302" ]; then
   log_pass "HTTP redirects to HTTPS"
@@ -213,9 +231,31 @@ else
 fi
 
 # =================================================================
-# Test 12: Security headers present
+# Test 13: JWKS malformed payload is surfaced by the gateway
 # =================================================================
-echo "Test 12: Security headers"
+echo "Test 13: JWKS malformed payload"
+JWKS_INVALID=$(curl -sk "${BASE_URL}/auth/jwks?mode=invalid" || echo "error")
+if echo "$JWKS_INVALID" | grep -q '"invalid"[[:space:]]*:[[:space:]]*true'; then
+  log_pass "Gateway surfaces invalid JWKS payload from upstream"
+else
+  log_fail "Gateway did not surface the expected invalid JWKS payload: $JWKS_INVALID"
+fi
+
+# =================================================================
+# Test 14: JWKS upstream 500 is propagated
+# =================================================================
+echo "Test 14: JWKS upstream 500"
+JWKS_ERROR_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "${BASE_URL}/auth/jwks?mode=error")
+if [ "$JWKS_ERROR_STATUS" = "500" ]; then
+  log_pass "Gateway propagates JWKS upstream 500"
+else
+  log_fail "Gateway should propagate JWKS upstream 500, got: $JWKS_ERROR_STATUS"
+fi
+
+# =================================================================
+# Test 15: Security headers present
+# =================================================================
+echo "Test 15: Security headers"
 SEC_HEADERS=$(curl -sk -I "${BASE_URL}/" 2>&1)
 SEC_PASS=true
 
@@ -238,6 +278,18 @@ if [ "$SEC_PASS" = true ]; then
   log_pass "Security headers present"
 else
   log_fail "Some security headers missing"
+fi
+
+# =================================================================
+# Test 16: Upstream unavailable returns gateway error
+# =================================================================
+echo "Test 16: Auth upstream unavailable"
+docker compose -f "$COMPOSE_FILE" stop blockchain-services >/dev/null
+UPSTREAM_DOWN_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "${BASE_URL}/auth/jwks" || echo "000")
+if [ "$UPSTREAM_DOWN_STATUS" = "502" ] || [ "$UPSTREAM_DOWN_STATUS" = "504" ]; then
+  log_pass "Gateway returns 502/504 when auth upstream is unavailable"
+else
+  log_fail "Gateway should return 502/504 when auth upstream is unavailable, got: $UPSTREAM_DOWN_STATUS"
 fi
 
 # =================================================================
