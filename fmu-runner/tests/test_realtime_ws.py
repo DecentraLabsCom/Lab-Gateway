@@ -490,6 +490,13 @@ def test_realtime_manager_extract_ws_token_supports_query_and_cookie():
     assert manager.extract_ws_token(from_cookie) == "cookie-token"
 
 
+def test_realtime_manager_extract_ws_token_supports_bearer_header():
+    manager = _build_manager()
+    websocket = SimpleNamespace(headers={"authorization": "Bearer bearer-token"}, query_params={})
+
+    assert manager.extract_ws_token(websocket) == "bearer-token"
+
+
 def test_realtime_manager_extract_ws_token_requires_credentials():
     manager = _build_manager()
     websocket = SimpleNamespace(headers={}, query_params={})
@@ -499,6 +506,43 @@ def test_realtime_manager_extract_ws_token_requires_credentials():
 
     assert exc.value.status_code == 401
     assert exc.value.detail == "Missing authentication token"
+
+
+def test_realtime_manager_cookie_parsing_rate_limit_and_error_payload(monkeypatch):
+    manager = _build_manager()
+    times = iter([100.0, 101.0, 161.0])
+
+    assert manager.parse_cookie_header("foo=bar; invalid; jwt=abc; spaced = value ") == {
+        "foo": "bar",
+        "jwt": "abc",
+        "spaced": "value",
+    }
+    assert manager._normalize_ticket_id(" st_1234567890abcdef ") == "1234567890"
+    assert manager._normalize_ticket_id("") is None
+    assert manager.error_payload(
+        code="FORBIDDEN",
+        message="denied",
+        request_id="req-1",
+        retryable=True,
+        session_id="sess-1",
+        details={"reason": "lab"},
+    ) == {
+        "type": "error",
+        "code": "FORBIDDEN",
+        "message": "denied",
+        "retryable": True,
+        "requestId": "req-1",
+        "sessionId": "sess-1",
+        "details": {"reason": "lab"},
+    }
+
+    monkeypatch.setattr("realtime_ws.time.time", lambda: next(times))
+    manager.ws_create_rate_limit_per_minute = 2
+    assert manager._allow_session_create("sub:user-1") is True
+    assert manager._allow_session_create("sub:user-1") is True
+    assert manager._allow_session_create("sub:user-1") is True
+    manager.ws_create_rate_limit_per_minute = 0
+    assert manager._allow_session_create("sub:user-1") is False
 
 
 def test_realtime_manager_model_description_payload_includes_dimensions():
@@ -1002,6 +1046,25 @@ def test_realtime_default_output_variables_falls_back_to_all_variables():
     assert session._default_output_variables() == ["u", "p"]
 
 
+def test_realtime_session_matches_claims_and_reservation_window(monkeypatch):
+    session = _build_session()
+
+    assert session.matches_claims(_claims()) is True
+    assert session.matches_claims(_claims_with(sub="other")) is False
+
+    monkeypatch.setattr("realtime_ws.time.time", lambda: 5)
+    session.nbf = 10
+    with pytest.raises(HTTPException) as not_active:
+        session.ensure_reservation_window()
+    assert not_active.value.status_code == 403
+
+    session.nbf = 0
+    session.exp = 5
+    with pytest.raises(HTTPException) as expired:
+        session.ensure_reservation_window()
+    assert expired.value.status_code == 401
+
+
 def test_realtime_shutdown_fmu_ignores_cleanup_errors(monkeypatch):
     session = _build_session()
 
@@ -1061,3 +1124,365 @@ async def test_realtime_step_once_validates_state_and_emits_progress(monkeypatch
     assert progress_events[0]["type"] == "sim.progress"
     assert session.current_time == 1.5
     assert outputs_called == [True]
+
+
+@pytest.mark.asyncio
+async def test_realtime_session_attach_and_detach_manage_tasks(monkeypatch):
+    session = _build_session()
+    previous_connection = _WsConnection(websocket=SimpleNamespace(send_json=lambda payload: None), queue_size=1)
+    previous_connection.sender_task = asyncio.create_task(asyncio.sleep(60))
+    session.connection = previous_connection
+    session._heartbeat_task = asyncio.create_task(asyncio.sleep(60))
+
+    sender_tasks = []
+    heartbeat_tasks = []
+    real_create_task = asyncio.create_task
+
+    def _fake_create_task(coro):
+        task = real_create_task(coro)
+        code = getattr(coro, "cr_code", None)
+        if code is not None and code.co_name == "_sender_loop":
+            sender_tasks.append(task)
+        else:
+            heartbeat_tasks.append(task)
+        return task
+
+    monkeypatch.setattr("realtime_ws.asyncio.create_task", _fake_create_task)
+
+    new_connection = _WsConnection(websocket=SimpleNamespace(send_json=lambda payload: None), queue_size=1)
+    await session.attach(new_connection)
+    await asyncio.sleep(0)
+
+    assert session.connection is new_connection
+    assert previous_connection.sender_task.cancelled() is True
+    assert sender_tasks[-1] is new_connection.sender_task
+    assert session._heartbeat_task is heartbeat_tasks[-1]
+
+    monkeypatch.setattr("realtime_ws.time.time", lambda: 100)
+    await session.detach()
+    await asyncio.sleep(0)
+
+    assert session.connection is None
+    assert session._heartbeat_task is None
+    assert new_connection.sender_task.cancelled() is True
+    assert session.attach_deadline == 100 + session.manager.ws_attach_grace_seconds
+
+    for task in sender_tasks + heartbeat_tasks:
+        if not task.done():
+            task.cancel()
+            await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_realtime_sender_loop_sends_payload_and_stops_on_error():
+    sent = []
+
+    class _WebSocket:
+        async def send_json(self, payload):
+            sent.append(payload)
+            raise RuntimeError("send failed")
+
+    session = _build_session()
+    connection = _WsConnection(websocket=_WebSocket(), queue_size=2)
+    await connection.queue.put({"type": "first"})
+
+    await session._sender_loop(connection)
+
+    assert sent == [{"type": "first"}]
+
+
+def test_realtime_session_dimension_helpers_cover_error_paths():
+    session = _build_session()
+
+    assert session._coerce_dimension_extent_value([3]) == 3
+    with pytest.raises(HTTPException) as scalar_only:
+        session._coerce_dimension_extent_value([1, 2])
+    assert scalar_only.value.status_code == 400
+
+    with pytest.raises(HTTPException) as invalid_extent:
+        session._coerce_dimension_extent_value("abc")
+    assert invalid_extent.value.status_code == 400
+
+    with pytest.raises(HTTPException) as negative_extent:
+        session._coerce_dimension_extent_value(-1)
+    assert negative_extent.value.status_code == 400
+
+    session._variables_by_value_reference = {}
+    with pytest.raises(HTTPException) as unknown_reference:
+        session._resolve_dimension_extent(SimpleNamespace(start=None, valueReference=99, variable=None))
+    assert unknown_reference.value.status_code == 400
+
+    session._variables_by_value_reference = {
+        1: SimpleNamespace(valueReference=1, type="UInt64", start=None),
+    }
+    session._fmu = SimpleNamespace(getUInt64=lambda refs: [4])
+    assert session._resolve_dimension_extent(SimpleNamespace(start=None, valueReference=1, variable=None)) == 4
+    assert session._resolve_dimension_extent(SimpleNamespace(start=None, valueReference=None, variable=SimpleNamespace(start=5))) == 5
+
+    with pytest.raises(HTTPException) as unresolved:
+        session._resolve_dimension_extent(SimpleNamespace(start=None, valueReference=None, variable=None))
+    assert unresolved.value.status_code == 400
+
+
+def test_realtime_session_normalize_scalar_value_and_model_loading(monkeypatch):
+    session = _build_session()
+    md = _mock_model_description()
+    calls = {"count": 0}
+
+    def _fake_read(_path):
+        calls["count"] += 1
+        return md
+
+    monkeypatch.setattr("realtime_ws.read_model_description", _fake_read)
+
+    assert session._normalize_variable_type(SimpleNamespace(type="Enumeration")) == "Integer"
+    assert session._normalize_scalar_value("Real", 1) == 1.0
+    assert session._normalize_scalar_value("Integer", 2.7) == 2
+    assert session._normalize_scalar_value("Boolean", 1) is True
+    assert session._normalize_scalar_value("String", b"abc") == "abc"
+    with pytest.raises(HTTPException) as unsupported:
+        session._normalize_scalar_value("Binary", b"abc")
+    assert unsupported.value.status_code == 400
+
+    session._ensure_model_loaded()
+    session._ensure_model_loaded()
+
+    assert calls["count"] == 1
+    assert session._model_description is md
+    assert "y" in session._variables
+    assert 1 in session._variables_by_value_reference
+
+
+def test_realtime_session_set_and_get_values_cover_type_errors():
+    session = _build_session()
+
+    with pytest.raises(HTTPException) as not_initialized:
+        session._set_values({"u": 1})
+    assert not_initialized.value.status_code == 409
+
+    with pytest.raises(HTTPException) as get_not_initialized:
+        session._get_values(["u"])
+    assert get_not_initialized.value.status_code == 409
+
+    class _MockFmu:
+        def __init__(self):
+            self.real_calls = []
+            self.bool_calls = []
+            self.string_calls = []
+
+        def setReal(self, refs, values):
+            self.real_calls.append((refs, values))
+
+        def setBoolean(self, refs, values):
+            self.bool_calls.append((refs, values))
+
+        def setString(self, refs, values):
+            self.string_calls.append((refs, values))
+
+        def getReal(self, refs):
+            return [3.5]
+
+        def getBoolean(self, refs):
+            return [1]
+
+        def getString(self, refs):
+            return [b"ok"]
+
+    session._fmu = _MockFmu()
+    session._variables = {
+        "real": SimpleNamespace(name="real", valueReference=1, type="Real", dimensions=[]),
+        "flag": SimpleNamespace(name="flag", valueReference=2, type="Boolean", dimensions=[]),
+        "text": SimpleNamespace(name="text", valueReference=3, type="String", dimensions=[]),
+    }
+
+    session._set_values({"real": 1, "flag": 1, "text": 9, "ignored": 4})
+    outputs = session._get_values(["real", "flag", "text", "missing"])
+
+    assert session._fmu.real_calls == [([1], [1.0])]
+    assert session._fmu.bool_calls == [([2], [True])]
+    assert session._fmu.string_calls == [([3], ["9"])]
+    assert outputs == {"real": 3.5, "flag": True, "text": "ok"}
+
+    session._variables["enum"] = SimpleNamespace(name="enum", valueReference=4, type="Enumeration", dimensions=[])
+    with pytest.raises(HTTPException) as unsupported_setter:
+        session._set_values({"enum": 2})
+    assert unsupported_setter.value.status_code == 400
+
+    session._variables = {"enum": SimpleNamespace(name="enum", valueReference=4, type="Enumeration", dimensions=[])}
+    with pytest.raises(HTTPException) as unsupported_getter:
+        session._get_values(["enum"])
+    assert unsupported_getter.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_realtime_session_start_pause_resume_reset_run_until_and_terminate(monkeypatch):
+    released = []
+    manager = _build_manager()
+    manager.release_slot = lambda lab_id: released.append(lab_id)
+    session = _build_session(manager=manager)
+    session._fmu = SimpleNamespace(
+        terminate=lambda: None,
+        freeInstance=lambda: None,
+    )
+    session.state = "initialized"
+    session.step_size = 0.5
+    session.stop_time = 2.0
+    session.lab_id = "1"
+
+    emitted = []
+    runner_tasks = []
+
+    async def _fake_emit_state():
+        emitted.append((session.state, session.current_time))
+
+    async def _fake_run_loop():
+        await asyncio.sleep(60)
+
+    async def _fake_initialize(options):
+        session.current_time = options["startTime"]
+        session.stop_time = options["stopTime"]
+        session.step_size = options["stepSize"]
+
+    async def _fake_step_once(delta_t, emit_outputs=False):
+        session.current_time += delta_t
+
+    monkeypatch.setattr(session, "_emit_state", _fake_emit_state)
+    monkeypatch.setattr(session, "_run_loop", _fake_run_loop)
+    monkeypatch.setattr(session, "initialize", _fake_initialize)
+    monkeypatch.setattr(session, "_step_once", _fake_step_once)
+
+    real_create_task = asyncio.create_task
+
+    def _fake_create_task(coro):
+        task = real_create_task(coro)
+        runner_tasks.append(task)
+        return task
+
+    monkeypatch.setattr("realtime_ws.asyncio.create_task", _fake_create_task)
+
+    await session.start()
+    assert session.state == "running"
+
+    await session.start()
+    assert len(runner_tasks) == 1
+
+    await session.pause()
+    await asyncio.sleep(0)
+    assert session.state == "paused"
+    assert runner_tasks[0].cancelled() is True
+
+    session.state = "stopped"
+    with pytest.raises(HTTPException) as invalid_resume:
+        await session.resume()
+    assert invalid_resume.value.status_code == 409
+
+    session.state = "initialized"
+    await session.resume()
+    assert session.state == "running"
+
+    session.current_time = 1.0
+    session.stop_time = 3.0
+    session.step_size = 0.25
+    session._model_description = object()
+    await session.reset()
+    assert session.current_time == 0.0
+
+    session.current_time = 0.0
+    session.step_size = 0.5
+    await session.run_until(1.1)
+    assert session.current_time == 1.1
+    await session.run_until(1.0)
+    assert session.current_time == 1.1
+
+    session.connection = _WsConnection(websocket=SimpleNamespace(send_json=lambda payload: None), queue_size=1)
+    session.connection.sender_task = asyncio.create_task(asyncio.sleep(60))
+    session._heartbeat_task = asyncio.create_task(asyncio.sleep(60))
+    event_payloads = []
+
+    async def _fake_enqueue(payload):
+        event_payloads.append(payload)
+
+    monkeypatch.setattr(session, "_enqueue_event", _fake_enqueue)
+    await session.terminate(reason="client_terminated")
+    await asyncio.sleep(0)
+
+    assert session.state == "stopped"
+    assert session.is_closed() is True
+    assert released == ["1"]
+    assert event_payloads[0]["type"] == "session.closed"
+
+    await session.terminate(reason="again")
+    assert released == ["1"]
+
+
+@pytest.mark.asyncio
+async def test_realtime_manager_start_and_stop_manage_cleanup_task():
+    manager = _build_manager()
+
+    class _Session:
+        def __init__(self, session_id):
+            self.session_id = session_id
+            self.terminated = []
+
+        async def terminate(self, reason):
+            self.terminated.append(reason)
+
+    session = _Session("sess-1")
+    manager._sessions = {session.session_id: session}
+
+    await manager.start()
+    first_task = manager._cleanup_task
+    assert first_task is not None
+
+    await manager.start()
+    assert manager._cleanup_task is first_task
+
+    await manager.stop()
+    await asyncio.sleep(0)
+
+    assert manager._cleanup_task is None
+    assert manager._sessions == {}
+    assert session.terminated == ["service_shutdown"]
+
+
+def test_ws_session_create_maps_ticket_redeem_failures(monkeypatch):
+    async def _unauthorized(_token: str):
+        raise HTTPException(status_code=401, detail="missing token")
+
+    async def _redeem(*, session_ticket: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
+        if session_ticket == "st_expired":
+            raise HTTPException(status_code=401, detail="invalid ticket")
+        if session_ticket == "st_forbidden":
+            raise HTTPException(status_code=403, detail={"message": "forbidden"})
+        raise HTTPException(status_code=500, detail={"error": "backend down"})
+
+    monkeypatch.setattr(_realtime_manager, "verify_jwt_token", _unauthorized)
+    monkeypatch.setattr(_realtime_manager, "redeem_session_ticket", _redeem)
+
+    with client.websocket_connect("/api/v1/fmu/sessions") as ws:
+        for request_id, ticket, expected_code in (
+            ("req-expired", "st_expired", "SESSION_TICKET_INVALID"),
+            ("req-forbidden", "st_forbidden", "FORBIDDEN"),
+            ("req-error", "st_error", "INTERNAL_ERROR"),
+        ):
+            ws.send_text(json.dumps({
+                "type": "session.create",
+                "requestId": request_id,
+                "labId": "1",
+                "sessionTicket": ticket,
+            }))
+            payload = ws.receive_json()
+            assert payload["type"] == "error"
+            assert payload["code"] == expected_code
+
+
+def test_ws_top_level_http_exception_maps_to_forbidden(monkeypatch):
+    async def _forbidden(_token: str):
+        raise HTTPException(status_code=403, detail="bad token")
+
+    monkeypatch.setattr(_realtime_manager, "verify_jwt_token", _forbidden)
+
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        payload = ws.receive_json()
+        assert payload["type"] == "error"
+        assert payload["code"] == "FORBIDDEN"

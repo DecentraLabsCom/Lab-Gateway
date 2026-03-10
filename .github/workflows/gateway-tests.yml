@@ -11,6 +11,10 @@ permissions:
   packages: read
   security-events: read
 
+env:
+  FMU_RUNNER_COVERAGE_MIN: "75"
+  REPO_COVERAGE_MIN: "85"
+
 jobs:
   python-unit-coverage:
     runs-on: ubuntu-latest
@@ -38,21 +42,50 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run FMU Runner tests with coverage gate
+        id: run_python_tests
+        continue-on-error: true
         working-directory: fmu-runner
         run: |
+          set -o pipefail
           python -m pytest tests \
             --cov=. \
             --cov-config=.coveragerc \
             --cov-report=term-missing \
             --cov-report=xml \
-            --cov-fail-under=60 \
-            -q
+            --junitxml=pytest-results.xml \
+            --cov-fail-under=${FMU_RUNNER_COVERAGE_MIN} \
+            -q | tee pytest.log
+
+      - name: Build Python suite summary
+        if: always()
+        run: |
+          python .github/scripts/test_summary.py suite \
+            --suite-id python-unit \
+            --suite-name "Python unit" \
+            --kind pytest \
+            --junit fmu-runner/pytest-results.xml \
+            --coverage-xml fmu-runner/coverage.xml \
+            --coverage-label "coverage.py" \
+            --exit-code ${{ steps.run_python_tests.outcome == 'success' && 0 || 1 }} \
+            --output .ci-summary/python-unit.json
 
       - name: Upload Python coverage artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fmu-runner-coverage
           path: fmu-runner/coverage.xml
+
+      - name: Upload Python summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-unit-summary
+          path: .ci-summary/python-unit.json
+
+      - name: Fail job if Python tests failed
+        if: steps.run_python_tests.outcome != 'success'
+        run: exit 1
 
   lua-unit-coverage:
     runs-on: ubuntu-latest
@@ -67,25 +100,134 @@ jobs:
           submodules: recursive
 
       - name: Run Lua unit tests with coverage
+        id: run_lua_tests
+        continue-on-error: true
         env:
           LUA_PATH: "/workspace/lua/?.lua;/workspace/lua/?/init.lua;;"
-        run: >
-          docker run --rm
-          -e LUA_PATH="${LUA_PATH}"
-          -v "${{ github.workspace }}/openresty:/workspace"
-          -w /workspace
-          openresty/openresty:alpine-fat sh -c
-          "luarocks install luacov >/dev/null &&
-           luajit -lluacov tests/run.lua &&
-           luacov"
+        run: |
+          set -o pipefail
+          mkdir -p .ci-logs
+          docker run --rm \
+            -e LUA_PATH="${LUA_PATH}" \
+            -v "${{ github.workspace }}/openresty:/workspace" \
+            -w /workspace \
+            openresty/openresty:alpine-fat sh -c \
+            "luarocks install luacov >/dev/null && \
+             luajit -lluacov tests/run.lua && \
+             luacov" | tee .ci-logs/lua-unit.log
+
+      - name: Build Lua suite summary
+        if: always()
+        run: |
+          python .github/scripts/test_summary.py suite \
+            --suite-id lua-unit \
+            --suite-name "Lua unit" \
+            --kind shell \
+            --log .ci-logs/lua-unit.log \
+            --coverage-report openresty/luacov.report.out \
+            --coverage-label "luacov" \
+            --exit-code ${{ steps.run_lua_tests.outcome == 'success' && 0 || 1 }} \
+            --output .ci-summary/lua-unit.json
 
       - name: Upload Lua coverage artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: openresty-luacov
           path: |
             openresty/luacov.report.out
             openresty/luacov.stats.out
+
+      - name: Upload Lua summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua-unit-summary
+          path: .ci-summary/lua-unit.json
+
+      - name: Fail job if Lua tests failed
+        if: steps.run_lua_tests.outcome != 'success'
+        run: exit 1
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Run integration suite
+        id: run_integration_tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p .ci-logs
+          chmod +x tests/integration/run-integration.sh
+          chmod +x tests/integration/certs/generate-certs.sh
+          tests/integration/run-integration.sh | tee .ci-logs/integration.log
+
+      - name: Build integration suite summary
+        if: always()
+        run: |
+          python .github/scripts/test_summary.py suite \
+            --suite-id integration \
+            --suite-name "Gateway integration" \
+            --kind shell \
+            --log .ci-logs/integration.log \
+            --exit-code ${{ steps.run_integration_tests.outcome == 'success' && 0 || 1 }} \
+            --output .ci-summary/integration.json
+
+      - name: Upload integration summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-summary
+          path: .ci-summary/integration.json
+
+      - name: Fail job if integration tests failed
+        if: steps.run_integration_tests.outcome != 'success'
+        run: exit 1
+
+  fmu-integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Run FMU integration suite
+        id: run_fmu_integration_tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p .ci-logs
+          chmod +x tests/integration/run-fmu-integration.sh
+          chmod +x tests/integration/certs/generate-certs.sh
+          tests/integration/run-fmu-integration.sh | tee .ci-logs/fmu-integration.log
+
+      - name: Build FMU integration suite summary
+        if: always()
+        run: |
+          python .github/scripts/test_summary.py suite \
+            --suite-id fmu-integration \
+            --suite-name "FMU integration" \
+            --kind shell \
+            --log .ci-logs/fmu-integration.log \
+            --exit-code ${{ steps.run_fmu_integration_tests.outcome == 'success' && 0 || 1 }} \
+            --output .ci-summary/fmu-integration.json
+
+      - name: Upload FMU integration summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fmu-integration-summary
+          path: .ci-summary/fmu-integration.json
+
+      - name: Fail job if FMU integration tests failed
+        if: steps.run_fmu_integration_tests.outcome != 'success'
+        run: exit 1
 
   smoke-tests:
     runs-on: ubuntu-latest
@@ -98,6 +240,69 @@ jobs:
           submodules: recursive
 
       - name: Run OpenResty smoke test
+        id: run_smoke_tests
+        continue-on-error: true
         run: |
+          set -o pipefail
+          mkdir -p .ci-logs
           chmod +x tests/smoke/run-smoke.sh
-          tests/smoke/run-smoke.sh
+          tests/smoke/run-smoke.sh | tee .ci-logs/smoke.log
+
+      - name: Build smoke suite summary
+        if: always()
+        run: |
+          python .github/scripts/test_summary.py suite \
+            --suite-id smoke \
+            --suite-name "Smoke" \
+            --kind shell \
+            --log .ci-logs/smoke.log \
+            --exit-code ${{ steps.run_smoke_tests.outcome == 'success' && 0 || 1 }} \
+            --output .ci-summary/smoke.json
+
+      - name: Upload smoke summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-summary
+          path: .ci-summary/smoke.json
+
+      - name: Fail job if smoke tests failed
+        if: steps.run_smoke_tests.outcome != 'success'
+        run: exit 1
+
+  test-summary:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - python-unit-coverage
+      - lua-unit-coverage
+      - integration-tests
+      - fmu-integration-tests
+      - smoke-tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Download suite summaries
+        uses: actions/download-artifact@v5
+        with:
+          pattern: "*-summary"
+          merge-multiple: true
+          path: .ci-summary
+
+      - name: Render consolidated summary
+        run: |
+          python .github/scripts/test_summary.py render --input-dir .ci-summary > .ci-summary/test-summary.md
+          cat .ci-summary/test-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce consolidated coverage baseline
+        run: |
+          python .github/scripts/test_summary.py gate \
+            --input-dir .ci-summary \
+            --suite-ids python-unit,lua-unit \
+            --min-coverage ${REPO_COVERAGE_MIN}

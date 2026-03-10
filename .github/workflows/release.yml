@@ -14,6 +14,8 @@ jobs:
 
     env:
       DIST_DIR: dist
+      FMU_RUNNER_COVERAGE_MIN: "75"
+      REPO_COVERAGE_MIN: "85"
 
     steps:
       - name: Checkout repository
@@ -47,7 +49,9 @@ jobs:
             --cov=. \
             --cov-config=.coveragerc \
             --cov-report=term-missing \
-            --cov-fail-under=60 \
+            --cov-report=xml \
+            --junitxml=pytest-results.xml \
+            --cov-fail-under=${FMU_RUNNER_COVERAGE_MIN} \
             -q
 
       - name: Run Lua unit tests with coverage
@@ -57,6 +61,30 @@ jobs:
           "luarocks install luacov >/dev/null &&
            luajit -lluacov openresty/tests/run.lua &&
            luacov"
+
+      - name: Enforce consolidated coverage baseline
+        run: |
+          mkdir -p .ci-summary
+          python .github/scripts/test_summary.py suite \
+            --suite-id python-unit \
+            --suite-name "Python unit" \
+            --kind pytest \
+            --junit fmu-runner/pytest-results.xml \
+            --coverage-xml fmu-runner/coverage.xml \
+            --coverage-label "coverage.py" \
+            --output .ci-summary/python-unit.json
+          python .github/scripts/test_summary.py suite \
+            --suite-id lua-unit \
+            --suite-name "Lua unit" \
+            --kind shell \
+            --log openresty/luacov.report.out \
+            --coverage-report openresty/luacov.report.out \
+            --coverage-label "luacov" \
+            --output .ci-summary/lua-unit.json
+          python .github/scripts/test_summary.py gate \
+            --input-dir .ci-summary \
+            --suite-ids python-unit,lua-unit \
+            --min-coverage ${REPO_COVERAGE_MIN}
 
       - name: Run gateway integration suite
         run: |
