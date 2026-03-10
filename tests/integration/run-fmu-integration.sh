@@ -10,6 +10,7 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.fmu-integration.yml"
 CERTS_DIR="$SCRIPT_DIR/certs"
 PASSED=0
 FAILED=0
+SESSION_TICKET=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -52,6 +53,26 @@ function wait_for_service {
     sleep 2
   done
   return 1
+}
+
+function json_extract {
+  local path=$1
+  python -c "import json, sys
+path = sys.argv[1].split('.')
+payload = json.load(sys.stdin)
+value = payload
+for segment in path:
+    if isinstance(value, dict):
+        value = value.get(segment)
+    else:
+        value = None
+        break
+if value is None:
+    print('')
+elif isinstance(value, bool):
+    print('true' if value else 'false')
+else:
+    print(value)" "$path"
 }
 
 echo "=================================================="
@@ -165,7 +186,71 @@ fi
 # Test 6: Concurrency limit — MAX_CONCURRENT_PER_MODEL = 2
 # Three simultaneous requests to the same labId; third should get 429
 # =================================================================
-echo "Test 6: Concurrency limit enforcement"
+echo "Test 6: FMU session ticket issue requires bearer token"
+ISSUE_NO_AUTH_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/auth/fmu/session-ticket/issue" \
+  -H "Content-Type: application/json" \
+  -d '{"labId":"lab-1","reservationKey":"res-123"}')
+if [ "$ISSUE_NO_AUTH_STATUS" = "401" ]; then
+  log_pass "Session ticket issue rejects missing bearer token"
+else
+  log_fail "Session ticket issue should reject missing bearer token, got: $ISSUE_NO_AUTH_STATUS"
+fi
+
+# =================================================================
+# Test 7: Session ticket redeem validates missing sessionTicket
+# =================================================================
+echo "Test 7: FMU session ticket redeem validates missing sessionTicket"
+REDEEM_NO_TICKET_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/auth/fmu/session-ticket/redeem" \
+  -H "Content-Type: application/json" \
+  -d '{}')
+if [ "$REDEEM_NO_TICKET_STATUS" = "400" ]; then
+  log_pass "Session ticket redeem rejects missing sessionTicket"
+else
+  log_fail "Session ticket redeem should reject missing sessionTicket, got: $REDEEM_NO_TICKET_STATUS"
+fi
+
+# =================================================================
+# Test 8: Session ticket issue/redeem happy path
+# =================================================================
+echo "Test 8: FMU session ticket issue/redeem happy path"
+ISSUE_RESPONSE=$(curl -sk -X POST "${BASE_URL}/auth/fmu/session-ticket/issue" \
+  -H "$AUTH_HEADER" \
+  -H "Content-Type: application/json" \
+  -d '{"labId":"lab-1","reservationKey":"res-123","accessKey":"test.fmu"}' || echo "error")
+SESSION_TICKET=$(printf '%s' "$ISSUE_RESPONSE" | json_extract "sessionTicket")
+ISSUE_EXPIRES_AT=$(printf '%s' "$ISSUE_RESPONSE" | json_extract "expiresAt")
+
+if [ -n "$SESSION_TICKET" ] && [ -n "$ISSUE_EXPIRES_AT" ]; then
+  log_pass "Session ticket issue returns sessionTicket and expiresAt"
+else
+  log_fail "Session ticket issue failed: $ISSUE_RESPONSE"
+fi
+
+REDEEM_RESPONSE=$(curl -sk -X POST "${BASE_URL}/auth/fmu/session-ticket/redeem" \
+  -H "Content-Type: application/json" \
+  -d "{\"sessionTicket\":\"${SESSION_TICKET}\",\"labId\":\"lab-1\",\"reservationKey\":\"res-123\"}" || echo "error")
+REDEEM_LAB_ID=$(printf '%s' "$REDEEM_RESPONSE" | json_extract "claims.labId")
+REDEEM_RESERVATION_KEY=$(printf '%s' "$REDEEM_RESPONSE" | json_extract "claims.reservationKey")
+REDEEM_ACCESS_KEY=$(printf '%s' "$REDEEM_RESPONSE" | json_extract "claims.accessKey")
+if [ "$REDEEM_LAB_ID" = "lab-1" ] && [ "$REDEEM_RESERVATION_KEY" = "res-123" ] && [ "$REDEEM_ACCESS_KEY" = "test.fmu" ]; then
+  log_pass "Session ticket redeem returns expected labId, reservationKey and accessKey"
+else
+  log_fail "Session ticket redeem failed: $REDEEM_RESPONSE"
+fi
+
+REDEEM_REUSE_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/auth/fmu/session-ticket/redeem" \
+  -H "Content-Type: application/json" \
+  -d "{\"sessionTicket\":\"${SESSION_TICKET}\"}")
+if [ "$REDEEM_REUSE_STATUS" = "401" ]; then
+  log_pass "Session ticket redeem enforces one-time use"
+else
+  log_fail "Session ticket redeem should reject reused tickets, got: $REDEEM_REUSE_STATUS"
+fi
+
+# =================================================================
+# Test 9: Concurrency limit enforcement
+# =================================================================
+echo "Test 9: Concurrency limit enforcement"
 # Reset state
 curl -sk "${BASE_URL}/fmu/_test/reset" >/dev/null 2>&1 || true
 
@@ -213,7 +298,7 @@ fi
 # =================================================================
 # Test 7: Timeout simulation
 # =================================================================
-echo "Test 7: Simulation timeout"
+echo "Test 10: Simulation timeout"
 TIMEOUT_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 15 -X POST \
   "${BASE_URL}/fmu/api/v1/simulations/run?simulateTimeout=2" \
   -H "$AUTH_HEADER" \
@@ -228,7 +313,7 @@ fi
 # =================================================================
 # Test 8: Request headers propagated correctly (X-Real-IP, X-Forwarded-For)
 # =================================================================
-echo "Test 8: Header propagation"
+echo "Test 11: Header propagation"
 curl -sk "${BASE_URL}/fmu/_test/reset" >/dev/null 2>&1 || true
 
 curl -sk -X POST "${BASE_URL}/fmu/api/v1/simulations/run" \
@@ -246,7 +331,7 @@ fi
 # =================================================================
 # Test 9: URI rewrite — /fmu/path → /path on upstream
 # =================================================================
-echo "Test 9: URI rewrite (/fmu/ prefix stripped)"
+echo "Test 12: URI rewrite (/fmu/ prefix stripped)"
 if echo "$LOG_RESPONSE" | grep -q '"/api/v1/simulations/run"'; then
   log_pass "URI correctly rewritten from /fmu/api/... to /api/..."
 else

@@ -20,6 +20,7 @@ rate_limit_buckets = defaultdict(lambda: {
     "tokens": RATE_LIMIT_BURST,
     "last_refill": time.time()
 })
+issued_session_tickets = {}
 
 
 def check_rate_limit(client_ip: str) -> bool:
@@ -182,6 +183,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+
+        delay_ms = int(query.get("delay_ms", ["0"])[0] or "0")
+        if delay_ms > 0:
+            time.sleep(delay_ms / 1000)
         
         # Wallet auth endpoints
         if parsed.path in ["/auth/wallet-auth", "/auth/wallet-auth2"]:
@@ -204,6 +210,82 @@ class Handler(BaseHTTPRequestHandler):
                 "token": "mock-saml-jwt-token",
                 "labUrl": "https://localhost:18444/guacamole/"
             })
+            return
+
+        if parsed.path == "/auth/fmu/session-ticket/issue":
+            auth_header = self.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                json_response(self, 401, {"code": "UNAUTHORIZED", "error": "Missing or invalid Bearer token"})
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(body_raw) if body_raw else {}
+            except json.JSONDecodeError:
+                json_response(self, 400, {"code": "INVALID_REQUEST", "error": "Invalid JSON body"})
+                return
+
+            lab_id = str(body.get("labId") or "").strip()
+            reservation_key = str(body.get("reservationKey") or "").strip()
+            access_key = str(body.get("accessKey") or "test.fmu").strip() or "test.fmu"
+            if not lab_id:
+                json_response(self, 400, {"code": "INVALID_REQUEST", "error": "Missing labId"})
+                return
+
+            session_ticket = f"st_{int(time.time() * 1000)}_{len(issued_session_tickets) + 1}"
+            expires_at = int(time.time()) + 300
+            issued_session_tickets[session_ticket] = {
+                "claims": {
+                    "sub": "integration-user",
+                    "labId": lab_id,
+                    "reservationKey": reservation_key,
+                    "resourceType": "fmu",
+                    "accessKey": access_key,
+                    "nbf": int(time.time()) - 1,
+                    "exp": expires_at,
+                },
+                "expiresAt": expires_at,
+            }
+            json_response(self, 200, {
+                "sessionTicket": session_ticket,
+                "expiresAt": expires_at,
+                "labId": lab_id,
+                "reservationKey": reservation_key,
+                "oneTimeUse": True,
+            })
+            return
+
+        if parsed.path == "/auth/fmu/session-ticket/redeem":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(body_raw) if body_raw else {}
+            except json.JSONDecodeError:
+                json_response(self, 400, {"code": "INVALID_REQUEST", "error": "Invalid JSON body"})
+                return
+
+            session_ticket = str(body.get("sessionTicket") or "").strip()
+            if not session_ticket:
+                json_response(self, 400, {"code": "SESSION_TICKET_INVALID", "error": "Missing sessionTicket"})
+                return
+
+            ticket = issued_session_tickets.pop(session_ticket, None)
+            if not ticket:
+                json_response(self, 401, {"code": "SESSION_TICKET_INVALID", "error": "Unknown or already redeemed sessionTicket"})
+                return
+
+            claims = dict(ticket["claims"])
+            req_lab_id = str(body.get("labId") or "").strip()
+            req_reservation_key = str(body.get("reservationKey") or "").strip()
+            if req_lab_id and req_lab_id != str(claims.get("labId") or ""):
+                json_response(self, 403, {"code": "FORBIDDEN", "error": "Requested labId does not match ticket claims"})
+                return
+            if req_reservation_key and req_reservation_key != str(claims.get("reservationKey") or ""):
+                json_response(self, 403, {"code": "FORBIDDEN", "error": "Requested reservationKey does not match ticket claims"})
+                return
+
+            json_response(self, 200, {"claims": claims, "expiresAt": ticket["expiresAt"]})
             return
         
         json_response(self, 404, {"error": "not found"})

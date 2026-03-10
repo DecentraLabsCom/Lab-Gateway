@@ -53,6 +53,13 @@ def _claims_with(**updates):
     return claims
 
 
+def _create_ws_session(ws, request_id="req-create", lab_id="1"):
+    ws.send_text(json.dumps({"type": "session.create", "requestId": request_id, "labId": lab_id}))
+    created = ws.receive_json()
+    assert created["type"] == "session.created"
+    return created
+
+
 def _mock_model_description():
     class _Var:
         def __init__(self, name, vtype, causality="output", variability="continuous", start=None, unit=None):
@@ -782,3 +789,275 @@ async def test_initialize_fmi3_supports_dimensioned_float64_inputs_and_outputs(m
     assert ("setFloat64", (9,), (1.0, 2.0, 3.0)) in mock_fmu.calls
     assert ("getFloat64", (10,), 3) in mock_fmu.calls
     assert outputs["y"] == [10.0, 20.0, 30.0]
+
+
+def test_ws_duplicate_session_create_request_reuses_local_cache():
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        created = _create_ws_session(ws, request_id="req-create")
+
+        ws.send_text(json.dumps({"type": "session.create", "requestId": "req-create", "labId": "1"}))
+        duplicate = ws.receive_json()
+
+        assert duplicate == created
+        assert len(_realtime_manager._sessions) == 1
+
+
+def test_ws_session_attach_requires_bearer_when_connection_is_unauthenticated(monkeypatch):
+    async def _unauthorized(_token: str):
+        raise HTTPException(status_code=401, detail="missing token")
+
+    monkeypatch.setattr(_realtime_manager, "verify_jwt_token", _unauthorized)
+
+    with client.websocket_connect("/api/v1/fmu/sessions") as ws:
+        ws.send_text(json.dumps({"type": "session.attach", "requestId": "req-attach", "sessionId": "sess-any"}))
+        payload = ws.receive_json()
+
+        assert payload["type"] == "error"
+        assert payload["code"] == "UNAUTHORIZED"
+
+
+def test_ws_session_attach_requires_session_id():
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        ws.send_text(json.dumps({"type": "session.attach", "requestId": "req-attach"}))
+        payload = ws.receive_json()
+
+        assert payload["type"] == "error"
+        assert payload["code"] == "INVALID_COMMAND"
+
+
+def test_ws_requires_existing_session_before_sim_commands():
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        ws.send_text(json.dumps({"type": "model.describe", "requestId": "req-model"}))
+        payload = ws.receive_json()
+
+        assert payload["type"] == "error"
+        assert payload["code"] == "FORBIDDEN"
+
+
+def test_ws_duplicate_command_request_reuses_session_cache():
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        created = _create_ws_session(ws)
+
+        ws.send_text(json.dumps({"type": "session.ping", "requestId": "req-ping", "sessionId": created["sessionId"]}))
+        first = ws.receive_json()
+        ws.send_text(json.dumps({"type": "session.ping", "requestId": "req-ping", "sessionId": created["sessionId"]}))
+        second = ws.receive_json()
+
+        assert first == second
+        assert first["type"] == "session.pong"
+
+
+def test_ws_command_flow_covers_sim_control_paths(monkeypatch):
+    seen_inputs = []
+
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        created = _create_ws_session(ws)
+        session = _realtime_manager._sessions[created["sessionId"]]
+
+        async def _fake_initialize(options):
+            session.state = "initialized"
+            session.current_time = float(options.get("startTime", 0.0))
+
+        async def _fake_start():
+            session.state = "running"
+
+        async def _fake_pause():
+            session.state = "paused"
+
+        async def _fake_resume():
+            session.state = "running"
+
+        async def _fake_reset():
+            session.state = "initialized"
+            session.current_time = 0.0
+
+        async def _fake_step_once(delta_t, emit_outputs=False):
+            session.current_time += delta_t
+
+        async def _fake_run_until(target_time):
+            session.current_time = target_time
+
+        async def _fake_terminate(reason="terminated"):
+            session.state = "stopped"
+            session._closed = True
+
+        monkeypatch.setattr(session, "initialize", _fake_initialize)
+        monkeypatch.setattr(session, "start", _fake_start)
+        monkeypatch.setattr(session, "pause", _fake_pause)
+        monkeypatch.setattr(session, "resume", _fake_resume)
+        monkeypatch.setattr(session, "reset", _fake_reset)
+        monkeypatch.setattr(session, "_step_once", _fake_step_once)
+        monkeypatch.setattr(session, "run_until", _fake_run_until)
+        monkeypatch.setattr(session, "terminate", _fake_terminate)
+        monkeypatch.setattr(session, "_sample_outputs", lambda: {"y": session.current_time})
+        monkeypatch.setattr(session, "_set_values", lambda values: seen_inputs.append(values))
+        monkeypatch.setattr(session, "_get_values", lambda variables: {name: 42.0 for name in variables})
+
+        ws.send_text(json.dumps({"type": "sim.initialize", "requestId": "req-init", "sessionId": created["sessionId"], "options": {"startTime": 1.5}}))
+        assert ws.receive_json()["state"] == "initialized"
+
+        ws.send_text(json.dumps({"type": "sim.start", "requestId": "req-start", "sessionId": created["sessionId"]}))
+        assert ws.receive_json()["state"] == "running"
+
+        ws.send_text(json.dumps({"type": "sim.pause", "requestId": "req-pause", "sessionId": created["sessionId"]}))
+        assert ws.receive_json()["state"] == "paused"
+
+        ws.send_text(json.dumps({"type": "sim.resume", "requestId": "req-resume", "sessionId": created["sessionId"]}))
+        assert ws.receive_json()["state"] == "running"
+
+        ws.send_text(json.dumps({"type": "sim.reset", "requestId": "req-reset", "sessionId": created["sessionId"]}))
+        reset_payload = ws.receive_json()
+        assert reset_payload["state"] == "initialized"
+        assert reset_payload["simTime"] == 0.0
+
+        ws.send_text(json.dumps({"type": "sim.step", "requestId": "req-step", "sessionId": created["sessionId"], "deltaT": 0.5}))
+        step_payload = ws.receive_json()
+        assert step_payload["type"] == "sim.outputs"
+        assert step_payload["simTime"] == 0.5
+        assert step_payload["values"] == {"y": 0.5}
+
+        ws.send_text(json.dumps({"type": "sim.runUntil", "requestId": "req-run-until", "sessionId": created["sessionId"], "time": 2.0}))
+        run_until_payload = ws.receive_json()
+        assert run_until_payload["simTime"] == 2.0
+        assert run_until_payload["values"] == {"y": 2.0}
+
+        ws.send_text(json.dumps({"type": "sim.setInputs", "requestId": "req-set-inputs", "sessionId": created["sessionId"], "values": {"u1": 1.25}}))
+        set_inputs_payload = ws.receive_json()
+        assert set_inputs_payload["type"] == "sim.inputs.updated"
+        assert seen_inputs == [{"u1": 1.25}]
+
+        ws.send_text(json.dumps({"type": "sim.getOutputs", "requestId": "req-get-outputs", "sessionId": created["sessionId"], "variables": ["y"]}))
+        get_outputs_payload = ws.receive_json()
+        assert get_outputs_payload["values"] == {"y": 42.0}
+
+        ws.send_text(json.dumps({"type": "sim.getState", "requestId": "req-get-state", "sessionId": created["sessionId"]}))
+        assert ws.receive_json()["type"] == "sim.state"
+
+        ws.send_text(json.dumps({
+            "type": "sim.subscribeOutputs",
+            "requestId": "req-subscribe",
+            "sessionId": created["sessionId"],
+            "variables": ["y"],
+            "periodMs": 50,
+            "maxBatchSize": 2,
+            "maxHz": 5,
+        }))
+        subscribe_payload = ws.receive_json()
+        assert subscribe_payload["type"] == "sim.subscribed"
+        assert subscribe_payload["periodMs"] == 50
+        assert subscribe_payload["maxBatchSize"] == 2
+        assert subscribe_payload["maxHz"] == 5.0
+
+        ws.send_text(json.dumps({"type": "sim.unsubscribeOutputs", "requestId": "req-unsubscribe", "sessionId": created["sessionId"]}))
+        assert ws.receive_json()["type"] == "sim.unsubscribed"
+
+        ws.send_text(json.dumps({"type": "session.terminate", "requestId": "req-terminate", "sessionId": created["sessionId"]}))
+        terminate_payload = ws.receive_json()
+        assert terminate_payload["type"] == "session.closed"
+        assert terminate_payload["reason"] == "client_terminated"
+
+
+def test_ws_command_http_exception_maps_to_reservation_not_active(monkeypatch):
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        created = _create_ws_session(ws)
+        session = _realtime_manager._sessions[created["sessionId"]]
+
+        async def _forbidden_resume():
+            raise HTTPException(status_code=403, detail="reservation not active")
+
+        monkeypatch.setattr(session, "resume", _forbidden_resume)
+
+        ws.send_text(json.dumps({"type": "sim.resume", "requestId": "req-resume", "sessionId": created["sessionId"]}))
+        payload = ws.receive_json()
+
+        assert payload["type"] == "error"
+        assert payload["code"] == "RESERVATION_NOT_ACTIVE"
+
+
+def test_ws_command_unexpected_exception_maps_to_internal_error(monkeypatch):
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        created = _create_ws_session(ws)
+        session = _realtime_manager._sessions[created["sessionId"]]
+
+        def _raise_runtime_error(_variables):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(session, "_default_output_variables", lambda: ["y"])
+        monkeypatch.setattr(session, "_get_values", _raise_runtime_error)
+
+        ws.send_text(json.dumps({"type": "sim.getOutputs", "requestId": "req-get-outputs", "sessionId": created["sessionId"]}))
+        payload = ws.receive_json()
+
+        assert payload["type"] == "error"
+        assert payload["code"] == "INTERNAL_ERROR"
+
+
+def test_realtime_default_output_variables_falls_back_to_all_variables():
+    session = _build_session()
+    session._variables = {
+        "u": SimpleNamespace(name="u", causality="input"),
+        "p": SimpleNamespace(name="p", causality="parameter"),
+    }
+
+    assert session._default_output_variables() == ["u", "p"]
+
+
+def test_realtime_shutdown_fmu_ignores_cleanup_errors(monkeypatch):
+    session = _build_session()
+
+    class _BrokenFmu:
+        def terminate(self):
+            raise RuntimeError("terminate failed")
+
+        def freeInstance(self):
+            raise RuntimeError("free failed")
+
+    session._fmu = _BrokenFmu()
+    session._unzipdir = "/tmp/test-session"
+    monkeypatch.setattr("realtime_ws.shutil.rmtree", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("rm failed")))
+
+    session._shutdown_fmu()
+
+    assert session._fmu is None
+    assert session._unzipdir is None
+
+
+@pytest.mark.asyncio
+async def test_realtime_step_once_validates_state_and_emits_progress(monkeypatch):
+    session = _build_session()
+
+    with pytest.raises(HTTPException) as not_initialized:
+        await session._step_once(0.1)
+    assert not_initialized.value.status_code == 409
+
+    class _MockFmu:
+        def __init__(self):
+            self.calls = []
+
+        def doStep(self, current_time, delta_t):
+            self.calls.append((current_time, delta_t))
+
+    progress_events = []
+    outputs_called = []
+    session._fmu = _MockFmu()
+    session.current_time = 1.0
+
+    async def _fake_enqueue(payload):
+        progress_events.append(payload)
+
+    async def _fake_emit_outputs_if_needed():
+        outputs_called.append(True)
+
+    monkeypatch.setattr(session, "_enqueue_event", _fake_enqueue)
+    monkeypatch.setattr(session, "_emit_outputs_if_needed", _fake_emit_outputs_if_needed)
+
+    with pytest.raises(HTTPException) as bad_delta:
+        await session._step_once(0)
+    assert bad_delta.value.status_code == 400
+
+    await session._step_once(0.5)
+
+    assert session._fmu.calls == [(1.0, 0.5)]
+    assert progress_events[0]["type"] == "sim.progress"
+    assert session.current_time == 1.5
+    assert outputs_called == [True]
