@@ -275,6 +275,64 @@ def test_proxy_model_description_preserves_initial_and_start_when_exact():
     assert scalar_variables[2].attrib["initial"] == "calculated"
 
 
+def test_proxy_model_description_preserves_fmi2_enumeration_declared_type_definitions():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyEnumDemo",
+        "guid": "{proxy-guid}",
+        "fmiVersion": "2.0",
+        "modelVariables": [
+            {
+                "name": "Enumeration_input",
+                "type": "Enumeration",
+                "causality": "input",
+                "variability": "discrete",
+                "valueReference": 33,
+                "start": 1,
+                "declaredType": {
+                    "name": "Option",
+                    "type": "Enumeration",
+                    "items": [
+                        {"name": "Option 1", "value": "1", "description": "First option"},
+                        {"name": "Option 2", "value": "2", "description": "Second option"},
+                    ],
+                },
+            },
+            {
+                "name": "Enumeration_output",
+                "type": "Enumeration",
+                "causality": "output",
+                "variability": "discrete",
+                "valueReference": 34,
+                "initial": "calculated",
+                "declaredType": {
+                    "name": "Option",
+                    "type": "Enumeration",
+                    "items": [
+                        {"name": "Option 1", "value": "1", "description": "First option"},
+                        {"name": "Option 2", "value": "2", "description": "Second option"},
+                    ],
+                },
+            },
+        ],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    type_definition = root.find("./TypeDefinitions/SimpleType[@name='Option']/Enumeration")
+    enumeration_input = root.find("./ModelVariables/ScalarVariable[@name='Enumeration_input']/Enumeration")
+    enumeration_output = root.find("./ModelVariables/ScalarVariable[@name='Enumeration_output']/Enumeration")
+
+    assert type_definition is not None
+    items = type_definition.findall("./Item")
+    assert len(items) == 2
+    assert items[0].attrib["name"] == "Option 1"
+    assert items[0].attrib["value"] == "1"
+    assert enumeration_input is not None
+    assert enumeration_input.attrib["declaredType"] == "Option"
+    assert enumeration_input.attrib["start"] == "1"
+    assert enumeration_output is not None
+    assert enumeration_output.attrib["declaredType"] == "Option"
+
+
 def test_proxy_model_description_generates_fmi3_model_description():
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "ProxyDemoFmi3",

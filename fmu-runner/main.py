@@ -408,6 +408,19 @@ def _format_fmi_start_value(value) -> Optional[str]:
     return str(value)
 
 
+def _collect_declared_type_definitions(model_metadata: dict) -> dict[str, dict]:
+    definitions: dict[str, dict] = {}
+    for variable in model_metadata.get("modelVariables", []):
+        declared_type = variable.get("declaredType")
+        if not isinstance(declared_type, dict):
+            continue
+        type_name = _normalize_xml_value(declared_type.get("name"))
+        if not type_name:
+            continue
+        definitions.setdefault(type_name, declared_type)
+    return definitions
+
+
 def _normalize_metadata_value(value, variable_type: Optional[str] = None):
     if isinstance(value, (bytes, bytearray)):
         return base64.b64encode(bytes(value)).decode("ascii")
@@ -510,6 +523,26 @@ def _model_metadata_from_model_description(md) -> dict:
             entry["min"] = var.min
         if hasattr(var, "max") and var.max is not None:
             entry["max"] = var.max
+        declared_type = getattr(var, "declaredType", None)
+        if declared_type is not None and getattr(declared_type, "name", None):
+            declared_type_entry = {
+                "name": declared_type.name,
+                "type": str(getattr(declared_type, "type", None) or var.type),
+            }
+            if getattr(declared_type, "description", None):
+                declared_type_entry["description"] = declared_type.description
+            items = []
+            for item in getattr(declared_type, "items", []) or []:
+                item_entry = {
+                    "name": str(getattr(item, "name", "") or ""),
+                    "value": str(getattr(item, "value", "") or ""),
+                }
+                if getattr(item, "description", None):
+                    item_entry["description"] = item.description
+                items.append(item_entry)
+            if items:
+                declared_type_entry["items"] = items
+            entry["declaredType"] = declared_type_entry
         dimensions = _collect_variable_dimensions(var)
         if dimensions:
             entry["dimensions"] = dimensions
@@ -741,6 +774,30 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         for unit_name in sorted(declared_units):
             ET.SubElement(unit_definitions, "Unit", {"name": unit_name})
 
+    if fmi_major_version < 3:
+        declared_type_definitions = _collect_declared_type_definitions(model_metadata)
+        if declared_type_definitions:
+            type_definitions = ET.SubElement(root, "TypeDefinitions")
+            for type_name in sorted(declared_type_definitions):
+                declared_type = declared_type_definitions[type_name]
+                simple_type_attrs = {"name": type_name}
+                description = _normalize_xml_value(declared_type.get("description"))
+                if description:
+                    simple_type_attrs["description"] = description
+                simple_type = ET.SubElement(type_definitions, "SimpleType", simple_type_attrs)
+                type_tag = str(declared_type.get("type") or "Enumeration")
+                typed_definition = ET.SubElement(simple_type, type_tag)
+                if type_tag == "Enumeration":
+                    for item in declared_type.get("items", []) or []:
+                        item_attrs = {
+                            "name": str(item.get("name") or ""),
+                            "value": str(item.get("value") or ""),
+                        }
+                        item_description = _normalize_xml_value(item.get("description"))
+                        if item_description:
+                            item_attrs["description"] = item_description
+                        ET.SubElement(typed_definition, "Item", item_attrs)
+
     attrs = {}
     if model_metadata.get("defaultStartTime") is not None:
         attrs["startTime"] = str(model_metadata["defaultStartTime"])
@@ -781,6 +838,9 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         start_value = _format_fmi_start_value(var.get("start"))
         if start_value is not None and (initial or "").lower() != "calculated":
             type_attrs["start"] = start_value
+        declared_type_name = _normalize_xml_value((var.get("declaredType") or {}).get("name"))
+        if declared_type_name and fmi_major_version < 3:
+            type_attrs["declaredType"] = declared_type_name
 
         if fmi_major_version >= 3:
             type_attrs.update(scalar_attrs)
