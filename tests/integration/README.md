@@ -70,6 +70,29 @@ python .\tests\integration\simulate-proxy-fmu.py .\tests\integration\artifacts\f
 
 Loads and simulates a downloaded `proxy.fmu` with `fmpy` on the Windows host to validate the native runtime.
 
+OpenModelica / OMSimulator validation:
+
+```powershell
+pwsh .\tests\integration\verify-openmodelica-omsimulator.ps1
+```
+
+What it checks:
+
+- downloads fresh `proxy.fmu` artifacts for `Feedthrough.fmu`
+- runs a composite OMSimulator model with:
+  - one local `Feedthrough.fmu`
+  - one remote `proxy.fmu`
+  - a real connection from the local output to the remote input
+- exports the composed model to an `.ssp` archive
+- runs a second stepwise OMSimulator session using `oms_stepUntil(...)` and `oms_setReal(...)`
+- verifies that the remote proxy output follows host-side input changes
+
+Notes:
+
+- this is the relevant OpenModelica compatibility path for the proxy today, not `omc importFMU(...)`
+- the exported `.ssp` can be opened from OMEdit as a composite/OMSimulator model
+- the embedded `proxy.fmu` remains reservation-bound and time-limited, so regenerate it when the ticket expires
+
 ## Files
 
 ```text
