@@ -836,8 +836,16 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         if unit and (var_type == "Real" or normalized_fmi3_type in {"Float32", "Float64"}):
             type_attrs["unit"] = unit
         start_value = _format_fmi_start_value(var.get("start"))
+        # FMI 3: Binary and String use <Start value="..."/> child elements,
+        # Clock has no start at all.  Other types use a start attribute.
+        _fmi3_start_child_types = {"Binary", "String"}
         if start_value is not None and (initial or "").lower() != "calculated":
-            type_attrs["start"] = start_value
+            if fmi_major_version >= 3 and normalized_fmi3_type in _fmi3_start_child_types:
+                pass  # handled after element creation below
+            elif fmi_major_version >= 3 and normalized_fmi3_type == "Clock":
+                pass  # Clock has no start in FMI 3 schema
+            else:
+                type_attrs["start"] = start_value
         declared_type_name = _normalize_xml_value((var.get("declaredType") or {}).get("name"))
         if declared_type_name and fmi_major_version < 3:
             type_attrs["declaredType"] = declared_type_name
@@ -845,6 +853,14 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         if fmi_major_version >= 3:
             type_attrs.update(scalar_attrs)
             typed_variable = ET.SubElement(model_variables, normalized_fmi3_type, type_attrs)
+            # Binary/String: emit <Start value="..."/> child element(s)
+            if start_value is not None and (initial or "").lower() != "calculated":
+                if normalized_fmi3_type == "Binary":
+                    raw = var.get("start")
+                    hex_value = bytes(raw).hex() if isinstance(raw, (bytes, bytearray)) else start_value
+                    ET.SubElement(typed_variable, "Start", {"value": hex_value})
+                elif normalized_fmi3_type == "String":
+                    ET.SubElement(typed_variable, "Start", {"value": start_value})
             for dimension in var.get("dimensions", []) or []:
                 dimension_attrs = {}
                 if dimension.get("start") is not None:

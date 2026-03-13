@@ -446,8 +446,13 @@ def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
     })
 
     root = ET.fromstring(xml_bytes)
-    assert root.find("./ModelVariables/Binary").attrib["start"] == "AQI="
-    assert root.find("./ModelVariables/Clock").attrib["start"] == "true"
+    binary_el = root.find("./ModelVariables/Binary")
+    assert "start" not in binary_el.attrib
+    start_el = binary_el.find("Start")
+    assert start_el is not None
+    assert start_el.attrib["value"] == "0102"
+    clock_el = root.find("./ModelVariables/Clock")
+    assert "start" not in clock_el.attrib
 
 
 def test_validate_proxy_generation_supports_extended_fmi3_integer_types():
