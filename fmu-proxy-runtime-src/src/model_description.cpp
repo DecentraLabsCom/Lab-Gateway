@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -75,7 +76,115 @@ std::optional<double> OptionalDouble(const std::map<std::string, std::string>& a
     }
 }
 
-std::optional<ScalarValue> ParseScalarValue(const ScalarType type, const std::string& text) {
+std::optional<BinaryValue> DecodeBase64(const std::string& text) {
+    static const int8_t kTable[256] = {
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-2,-1,-1,
+        -1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
+        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
+    };
+
+    std::string compact;
+    compact.reserve(text.size());
+    for (const unsigned char ch : text) {
+        if (!std::isspace(ch)) {
+            compact.push_back(static_cast<char>(ch));
+        }
+    }
+    if (compact.empty()) {
+        return BinaryValue{};
+    }
+    if (compact.size() % 4 != 0) {
+        return std::nullopt;
+    }
+
+    BinaryValue output;
+    output.reserve((compact.size() / 4) * 3);
+    for (std::size_t index = 0; index < compact.size(); index += 4) {
+        const int8_t a = kTable[static_cast<unsigned char>(compact[index])];
+        const int8_t b = kTable[static_cast<unsigned char>(compact[index + 1])];
+        const int8_t c = compact[index + 2] == '=' ? -2 : kTable[static_cast<unsigned char>(compact[index + 2])];
+        const int8_t d = compact[index + 3] == '=' ? -2 : kTable[static_cast<unsigned char>(compact[index + 3])];
+        if (a < 0 || b < 0 || c == -1 || d == -1) {
+            return std::nullopt;
+        }
+
+        const std::uint32_t triple =
+            (static_cast<std::uint32_t>(a) << 18U) |
+            (static_cast<std::uint32_t>(b) << 12U) |
+            (static_cast<std::uint32_t>(c < 0 ? 0 : c) << 6U) |
+            static_cast<std::uint32_t>(d < 0 ? 0 : d);
+        output.push_back(static_cast<std::uint8_t>((triple >> 16U) & 0xFFU));
+        if (c != -2) {
+            output.push_back(static_cast<std::uint8_t>((triple >> 8U) & 0xFFU));
+        }
+        if (d != -2) {
+            output.push_back(static_cast<std::uint8_t>(triple & 0xFFU));
+        }
+    }
+    return output;
+}
+
+struct IntegerBounds {
+    std::int64_t min = std::numeric_limits<std::int64_t>::min();
+    std::uint64_t max = std::numeric_limits<std::uint64_t>::max();
+    bool unsigned_only = false;
+};
+
+IntegerBounds BoundsForDeclaredType(const std::string_view declared_type) {
+    if (declared_type == "Int8") {
+        return {std::numeric_limits<std::int8_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int8_t>::max()), false};
+    }
+    if (declared_type == "UInt8") {
+        return {0, std::numeric_limits<std::uint8_t>::max(), true};
+    }
+    if (declared_type == "Int16") {
+        return {std::numeric_limits<std::int16_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int16_t>::max()), false};
+    }
+    if (declared_type == "UInt16") {
+        return {0, std::numeric_limits<std::uint16_t>::max(), true};
+    }
+    if (declared_type == "Int32" || declared_type == "Integer" || declared_type == "Enumeration") {
+        return {std::numeric_limits<std::int32_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()), false};
+    }
+    if (declared_type == "UInt32") {
+        return {0, std::numeric_limits<std::uint32_t>::max(), true};
+    }
+    if (declared_type == "UInt64") {
+        return {0, std::numeric_limits<std::uint64_t>::max(), true};
+    }
+    return {};
+}
+
+std::optional<ScalarValue> ParseIntegerToken(const std::string_view declared_type, const std::string& text) {
+    const auto bounds = BoundsForDeclaredType(declared_type);
+    try {
+        if (bounds.unsigned_only) {
+            const auto parsed = std::stoull(text);
+            if (parsed > bounds.max) {
+                return std::nullopt;
+            }
+            return ScalarValue(static_cast<std::uint64_t>(parsed));
+        }
+
+        const auto parsed = std::stoll(text);
+        if (parsed < bounds.min) {
+            return std::nullopt;
+        }
+        if (parsed >= 0 && static_cast<std::uint64_t>(parsed) > bounds.max) {
+            return std::nullopt;
+        }
+        return ScalarValue(static_cast<std::int64_t>(parsed));
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::optional<ScalarValue> ParseScalarValue(const std::string_view declared_type, const ScalarType type, const std::string& text) {
     if (text.empty()) {
         return std::nullopt;
     }
@@ -85,11 +194,23 @@ std::optional<ScalarValue> ParseScalarValue(const ScalarType type, const std::st
                 return ScalarValue(std::stod(text));
             case ScalarType::kInteger:
             case ScalarType::kEnumeration:
-                return ScalarValue(static_cast<std::int32_t>(std::stoi(text)));
+                if (const auto parsed = ParseIntegerToken(declared_type, text)) {
+                    return *parsed;
+                }
+                return std::nullopt;
             case ScalarType::kBoolean:
                 return ScalarValue(text == "true" || text == "1");
             case ScalarType::kString:
                 return ScalarValue(text);
+            case ScalarType::kBinary: {
+                const auto decoded = DecodeBase64(text);
+                if (!decoded.has_value()) {
+                    return std::nullopt;
+                }
+                return ScalarValue(*decoded);
+            }
+            case ScalarType::kClock:
+                return ScalarValue(text == "true" || text == "1");
         }
     } catch (...) {
         return std::nullopt;
@@ -107,7 +228,7 @@ std::vector<std::string> SplitWhitespaceTokens(const std::string& text) {
     return tokens;
 }
 
-std::optional<ScalarValue> ParseArrayValue(const ScalarType type, const std::string& text) {
+std::optional<ScalarValue> ParseArrayValue(const std::string_view declared_type, const ScalarType type, const std::string& text) {
     const auto tokens = SplitWhitespaceTokens(text);
     if (tokens.empty()) {
         return std::nullopt;
@@ -124,10 +245,30 @@ std::optional<ScalarValue> ParseArrayValue(const ScalarType type, const std::str
             }
             case ScalarType::kInteger:
             case ScalarType::kEnumeration: {
+                const auto bounds = BoundsForDeclaredType(declared_type);
+                if (bounds.unsigned_only) {
+                    UnsignedIntegerArray values;
+                    values.reserve(tokens.size());
+                    for (const auto& token : tokens) {
+                        const auto parsed = ParseIntegerToken(declared_type, token);
+                        const auto* integer = parsed ? std::get_if<std::uint64_t>(&*parsed) : nullptr;
+                        if (integer == nullptr) {
+                            return std::nullopt;
+                        }
+                        values.push_back(*integer);
+                    }
+                    return ScalarValue(std::move(values));
+                }
+
                 IntegerArray values;
                 values.reserve(tokens.size());
                 for (const auto& token : tokens) {
-                    values.push_back(static_cast<std::int32_t>(std::stoi(token)));
+                    const auto parsed = ParseIntegerToken(declared_type, token);
+                    const auto* integer = parsed ? std::get_if<std::int64_t>(&*parsed) : nullptr;
+                    if (integer == nullptr) {
+                        return std::nullopt;
+                    }
+                    values.push_back(*integer);
                 }
                 return ScalarValue(std::move(values));
             }
@@ -141,6 +282,26 @@ std::optional<ScalarValue> ParseArrayValue(const ScalarType type, const std::str
             }
             case ScalarType::kString:
                 return ScalarValue(StringArray(tokens.begin(), tokens.end()));
+            case ScalarType::kBinary: {
+                BinaryArray values;
+                values.reserve(tokens.size());
+                for (const auto& token : tokens) {
+                    const auto decoded = DecodeBase64(token);
+                    if (!decoded.has_value()) {
+                        return std::nullopt;
+                    }
+                    values.push_back(*decoded);
+                }
+                return ScalarValue(std::move(values));
+            }
+            case ScalarType::kClock: {
+                BooleanArray values;
+                values.reserve(tokens.size());
+                for (const auto& token : tokens) {
+                    values.push_back(token == "true" || token == "1");
+                }
+                return ScalarValue(std::move(values));
+            }
         }
     } catch (...) {
         return std::nullopt;
@@ -159,6 +320,12 @@ ScalarType ParseScalarType(const std::string_view tag_name) {
     }
     if (tag_name == "String") {
         return ScalarType::kString;
+    }
+    if (tag_name == "Binary") {
+        return ScalarType::kBinary;
+    }
+    if (tag_name == "Clock") {
+        return ScalarType::kClock;
     }
     if (tag_name == "Enumeration") {
         return ScalarType::kEnumeration;
@@ -200,7 +367,7 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
             info.unit = it->second;
         }
         if (auto it = attributes.find("start"); it != attributes.end()) {
-            info.start_value = ParseScalarValue(info.type, it->second);
+            info.start_value = ParseScalarValue(info.declared_type, info.type, it->second);
         }
         const std::regex dimension_pattern(R"tag(<Dimension\b([^>]*)/?>)tag");
         for (std::sregex_iterator it(block.begin(), block.end(), dimension_pattern), end; it != end; ++it) {
@@ -216,7 +383,7 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
         }
         if (!info.dimensions.empty()) {
             if (auto it = attributes.find("start"); it != attributes.end()) {
-                info.start_value = ParseArrayValue(info.type, it->second);
+                info.start_value = ParseArrayValue(info.declared_type, info.type, it->second);
             }
         }
         *output = std::move(info);
@@ -244,7 +411,7 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
         info.variability = it->second;
     }
 
-    const char* type_names[] = {"Real", "Integer", "Boolean", "String", "Enumeration"};
+    const char* type_names[] = {"Real", "Integer", "Boolean", "String", "Enumeration", "Binary", "Clock"};
     for (const char* type_name : type_names) {
         const std::string needle = std::string("<") + type_name;
         const std::size_t type_start = block.find(needle);
@@ -262,7 +429,7 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
             info.unit = unit_it->second;
         }
         if (auto start_it = type_attributes.find("start"); start_it != type_attributes.end()) {
-            info.start_value = ParseScalarValue(info.type, start_it->second);
+            info.start_value = ParseScalarValue(info.declared_type, info.type, start_it->second);
         }
         *output = std::move(info);
         return true;
@@ -302,6 +469,10 @@ const char* ToString(const ScalarType type) {
             return "String";
         case ScalarType::kEnumeration:
             return "Enumeration";
+        case ScalarType::kBinary:
+            return "Binary";
+        case ScalarType::kClock:
+            return "Clock";
     }
     return "Real";
 }
@@ -328,10 +499,10 @@ ValueResult<ModelDescription> ParseModelDescriptionXml(const std::string& xml) {
     if (auto it = root_attributes.find("modelName"); it != root_attributes.end()) {
         model.model_name = it->second;
     }
-    if (auto it = root_attributes.find("guid"); it != root_attributes.end()) {
-        model.guid = it->second;
-    } else if (auto it = root_attributes.find("instantiationToken"); it != root_attributes.end()) {
-        model.guid = it->second;
+    if (auto guid_it = root_attributes.find("guid"); guid_it != root_attributes.end()) {
+        model.guid = guid_it->second;
+    } else if (auto token_it = root_attributes.find("instantiationToken"); token_it != root_attributes.end()) {
+        model.guid = token_it->second;
     }
 
     model.supports_co_simulation = xml.find("<CoSimulation") != std::string::npos;

@@ -162,6 +162,102 @@ function Parse-JsonOrNull([string]$Text) {
     }
 }
 
+function Normalize-DescribeStartValue($Value) {
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [System.Array]) {
+        return (($Value | ForEach-Object { Normalize-DescribeStartValue $_ }) -join " ")
+    }
+    if ($Value -is [bool]) {
+        return $Value.ToString().ToLowerInvariant()
+    }
+    return [string]$Value
+}
+
+function Normalize-VariableType([string]$TypeName, [string]$FmiVersion) {
+    if ($FmiVersion -like "3*" -and $TypeName -eq "Integer") {
+        return "Int32"
+    }
+    return $TypeName
+}
+
+function Get-ProxyModelDescriptionSnapshot([string]$ProxyPath) {
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ProxyPath)
+    try {
+        $entry = $archive.GetEntry("modelDescription.xml")
+        if ($null -eq $entry) {
+            throw "modelDescription.xml is missing from proxy artifact"
+        }
+        $reader = New-Object System.IO.StreamReader($entry.Open())
+        try {
+            [xml]$xml = $reader.ReadToEnd()
+        } finally {
+            $reader.Dispose()
+        }
+    } finally {
+        $archive.Dispose()
+    }
+
+    $root = $xml.fmiModelDescription
+    $variables = @{}
+    foreach ($node in $root.ModelVariables.ChildNodes) {
+        if ($node.NodeType -ne [System.Xml.XmlNodeType]::Element) {
+            continue
+        }
+        $typeName = $node.LocalName
+        $startValue = $null
+        if ($node.LocalName -eq "ScalarVariable") {
+            $typedChild = @($node.ChildNodes | Where-Object { $_ -is [System.Xml.XmlElement] })[0]
+            if ($null -eq $typedChild) {
+                continue
+            }
+            $typeName = $typedChild.LocalName
+            if ($typedChild.Attributes["start"]) {
+                $startValue = $typedChild.Attributes["start"].Value
+            }
+        } else {
+            if ($node.Attributes["start"]) {
+                $startValue = $node.Attributes["start"].Value
+            }
+        }
+        $dimensions = @()
+        foreach ($dimension in $node.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element -and $_.Name -eq "Dimension" }) {
+            $parts = @()
+            foreach ($attrName in @("start", "valueReference", "variableName")) {
+                if ($dimension.Attributes[$attrName]) {
+                    $parts += "$attrName=$($dimension.Attributes[$attrName].Value)"
+                }
+            }
+            $dimensions += ($parts -join ";")
+        }
+        $variables[$node.Attributes["name"].Value] = [ordered]@{
+            name = $node.Attributes["name"].Value
+            type = Normalize-VariableType $typeName $root.fmiVersion
+            causality = if ($node.Attributes["causality"]) { $node.Attributes["causality"].Value } else { "local" }
+            variability = if ($node.Attributes["variability"]) { $node.Attributes["variability"].Value } else { "continuous" }
+            initial = if ($node.Attributes["initial"]) { $node.Attributes["initial"].Value } else { $null }
+            start = $startValue
+            dimensions = $dimensions
+        }
+    }
+
+    return [pscustomobject]@{
+        FmiVersion = [string]$root.fmiVersion
+        Variables = $variables
+    }
+}
+
+function Get-HashtableValue($Hashtable, [string]$Key) {
+    if ($null -eq $Hashtable) {
+        return $null
+    }
+    if ($Hashtable.Contains($Key)) {
+        return $Hashtable[$Key]
+    }
+    return $null
+}
+
 function Assert-ComposeExecSuccess([string[]]$ComposeArgs, [string]$SuccessMessage, [string]$FailureMessage) {
     $result = Invoke-ComposeCapture -ComposeArgs $ComposeArgs
     if ($result.ExitCode -eq 0) {
@@ -242,6 +338,22 @@ if ($null -ne $fmuFiles) {
         } else {
             Log-Fail "No .fmu files found in /app/fmu-data"
         }
+    }
+}
+
+if ($fmuList -and $fmuList.Count -gt 0) {
+    $expiryScript = Join-Path $ScriptDir "verify-fmu-session-expiry.ps1"
+    if (Test-Path $expiryScript) {
+        $shellPath = (Get-Process -Id $PID).Path
+        $expiryAccessKey = [System.IO.Path]::GetFileName($fmuList[0])
+        $expiryOutput = & $shellPath -NoProfile -ExecutionPolicy Bypass -File $expiryScript -Port $Port -LabId $LabId -AccessKey $expiryAccessKey 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Log-Pass "Forced expiry closes attached realtime sessions with reason=expired"
+        } else {
+            Log-Fail ("Forced expiry verification failed`n" + ($expiryOutput -join "`n"))
+        }
+    } else {
+        Log-Skip "Forced expiry verification helper is missing"
     }
 }
 
@@ -334,6 +446,74 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
                     Log-Pass "Downloaded proxy FMU contains runtime binaries"
                 } else {
                     Log-Fail "Downloaded proxy FMU does not contain runtime binaries"
+                }
+
+                $authorizedAccessKey = [string]$redeemClaims.accessKey
+                if ([string]::IsNullOrWhiteSpace($authorizedAccessKey)) {
+                    Log-Skip "Describe parity check skipped because redeem claims do not include accessKey"
+                } else {
+                    $describeUri = "$BaseUrl/fmu/api/v1/simulations/describe?fmuFileName=$([Uri]::EscapeDataString($authorizedAccessKey))"
+                    $describeResponse = Invoke-HttpJson -Uri $describeUri -Headers $authHeaders
+                    $describeJson = Parse-JsonOrNull $describeResponse.Body
+                    if ($describeResponse.StatusCode -ne 200 -or $null -eq $describeJson) {
+                        Log-Fail "Describe parity check failed to load /api/v1/simulations/describe: status=$($describeResponse.StatusCode) body=$($describeResponse.Body)"
+                    } else {
+                        $proxySnapshot = Get-ProxyModelDescriptionSnapshot -ProxyPath $ProxyOutputPath
+                        $describeVariables = @{}
+                        foreach ($variable in $describeJson.modelVariables) {
+                            $dimensions = @()
+                            foreach ($dimension in @($variable.dimensions)) {
+                                $parts = @()
+                                foreach ($attrName in @("start", "valueReference", "variableName")) {
+                                    $dimensionValue = $dimension.$attrName
+                                    if ($null -ne $dimensionValue -and [string]$dimensionValue -ne "") {
+                                        $parts += "$attrName=$dimensionValue"
+                                    }
+                                }
+                                $dimensions += ($parts -join ";")
+                            }
+                            $describeVariables[[string]$variable.name] = [ordered]@{
+                                name = [string]$variable.name
+                                type = Normalize-VariableType ([string]$variable.type) ([string]$describeJson.fmiVersion)
+                                causality = [string]$variable.causality
+                                variability = [string]$variable.variability
+                                initial = if ($null -ne $variable.initial) { [string]$variable.initial } else { $null }
+                                start = Normalize-DescribeStartValue $variable.start
+                                dimensions = $dimensions
+                            }
+                        }
+
+                        $parityErrors = New-Object System.Collections.Generic.List[string]
+                        if ([string]$describeJson.fmiVersion -ne $proxySnapshot.FmiVersion) {
+                            $parityErrors.Add("fmiVersion mismatch: describe=$($describeJson.fmiVersion) proxy=$($proxySnapshot.FmiVersion)")
+                        }
+                        $describeNames = @($describeVariables.Keys | Sort-Object)
+                        $proxyNames = @($proxySnapshot.Variables.Keys | Sort-Object)
+                        if (($describeNames -join ",") -ne ($proxyNames -join ",")) {
+                            $parityErrors.Add("variable set mismatch")
+                        } else {
+                            foreach ($name in $describeNames) {
+                                $describeVariable = $describeVariables[$name]
+                                $proxyVariable = $proxySnapshot.Variables[$name]
+                                foreach ($field in @("type", "causality", "variability", "initial", "start")) {
+                                    $describeValue = Get-HashtableValue $describeVariable $field
+                                    $proxyValue = Get-HashtableValue $proxyVariable $field
+                                    if ($describeValue -ne $proxyValue) {
+                                        $parityErrors.Add("variable '$name' mismatch on ${field}: describe='$($describeVariable[$field])' proxy='$($proxyVariable[$field])'")
+                                    }
+                                }
+                                if ((($describeVariable["dimensions"] | Sort-Object) -join ",") -ne (($proxyVariable["dimensions"] | Sort-Object) -join ",")) {
+                                    $parityErrors.Add("variable '$name' mismatch on dimensions")
+                                }
+                            }
+                        }
+
+                        if ($parityErrors.Count -eq 0) {
+                            Log-Pass "Describe payload matches the generated proxy modelDescription.xml"
+                        } else {
+                            Log-Fail ("Describe/modelDescription parity failed`n" + ($parityErrors -join "`n"))
+                        }
+                    }
                 }
             } catch {
                 Log-Fail "Downloaded proxy FMU could not be inspected as a ZIP archive: $($_.Exception.Message)"

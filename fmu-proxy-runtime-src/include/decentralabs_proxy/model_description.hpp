@@ -17,13 +17,30 @@ enum class ScalarType {
     kBoolean,
     kString,
     kEnumeration,
+    kBinary,
+    kClock,
 };
 
 using RealArray = std::vector<double>;
-using IntegerArray = std::vector<std::int32_t>;
+using IntegerArray = std::vector<std::int64_t>;
+using UnsignedIntegerArray = std::vector<std::uint64_t>;
 using BooleanArray = std::vector<bool>;
 using StringArray = std::vector<std::string>;
-using ScalarValue = std::variant<double, std::int32_t, bool, std::string, RealArray, IntegerArray, BooleanArray, StringArray>;
+using BinaryValue = std::vector<std::uint8_t>;
+using BinaryArray = std::vector<BinaryValue>;
+using ScalarValue = std::variant<
+    double,
+    std::int64_t,
+    std::uint64_t,
+    bool,
+    std::string,
+    RealArray,
+    IntegerArray,
+    UnsignedIntegerArray,
+    BooleanArray,
+    StringArray,
+    BinaryValue,
+    BinaryArray>;
 
 struct DimensionInfo {
     std::optional<std::uint32_t> value_reference;

@@ -10,9 +10,45 @@ namespace decentralabs::proxy {
 namespace {
 
 JsonValue ToJsonValuePrimitive(double value) { return JsonValue(value); }
-JsonValue ToJsonValuePrimitive(std::int32_t value) { return JsonValue(static_cast<int>(value)); }
+JsonValue ToJsonValuePrimitive(std::int64_t value) { return JsonValue(std::to_string(value)); }
+JsonValue ToJsonValuePrimitive(std::uint64_t value) { return JsonValue(std::to_string(value)); }
 JsonValue ToJsonValuePrimitive(bool value) { return JsonValue(value); }
 JsonValue ToJsonValuePrimitive(const std::string& value) { return JsonValue(value); }
+
+std::string Base64Encode(const BinaryValue& data) {
+    static constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded;
+    encoded.reserve(((data.size() + 2) / 3) * 4);
+    std::size_t index = 0;
+    while (index + 3 <= data.size()) {
+        const std::uint32_t chunk =
+            (static_cast<std::uint32_t>(data[index]) << 16U) |
+            (static_cast<std::uint32_t>(data[index + 1]) << 8U) |
+            static_cast<std::uint32_t>(data[index + 2]);
+        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
+        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
+        encoded.push_back(kAlphabet[(chunk >> 6U) & 0x3FU]);
+        encoded.push_back(kAlphabet[chunk & 0x3FU]);
+        index += 3;
+    }
+    const std::size_t remaining = data.size() - index;
+    if (remaining == 1U) {
+        const std::uint32_t chunk = static_cast<std::uint32_t>(data[index]) << 16U;
+        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
+        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
+        encoded.push_back('=');
+        encoded.push_back('=');
+    } else if (remaining == 2U) {
+        const std::uint32_t chunk =
+            (static_cast<std::uint32_t>(data[index]) << 16U) |
+            (static_cast<std::uint32_t>(data[index + 1]) << 8U);
+        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
+        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
+        encoded.push_back(kAlphabet[(chunk >> 6U) & 0x3FU]);
+        encoded.push_back('=');
+    }
+    return encoded;
+}
 
 template <typename T>
 JsonValue ToJsonValueArray(const std::vector<T>& values) {
@@ -30,8 +66,18 @@ JsonValue ToJsonValue(const ScalarValue& value) {
             using ValueType = std::decay_t<decltype(typed)>;
             if constexpr (std::is_same_v<ValueType, RealArray> ||
                           std::is_same_v<ValueType, IntegerArray> ||
+                          std::is_same_v<ValueType, UnsignedIntegerArray> ||
                           std::is_same_v<ValueType, StringArray>) {
                 return ToJsonValueArray(typed);
+            } else if constexpr (std::is_same_v<ValueType, BinaryValue>) {
+                return JsonValue(Base64Encode(typed));
+            } else if constexpr (std::is_same_v<ValueType, BinaryArray>) {
+                JsonArray items;
+                items.reserve(typed.size());
+                for (const auto& item : typed) {
+                    items.emplace_back(JsonValue(Base64Encode(item)));
+                }
+                return JsonValue(std::move(items));
             } else if constexpr (std::is_same_v<ValueType, BooleanArray>) {
                 JsonArray items;
                 items.reserve(typed.size());

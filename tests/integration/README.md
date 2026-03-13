@@ -52,8 +52,9 @@ What it checks:
 - `fmuCount` is at least the expected value
 - proxy runtime binaries exist inside `fmu-runner`
 - `.fmu` files exist inside `fmu-data`
+- forced expiry closes an attached realtime session with `reason=expired`
 - `/auth/fmu/session-ticket/issue` and `/redeem` are exposed
-- with `-BearerToken`, it also tests real `issue`, `redeem` and `proxy.fmu` download
+- with `-BearerToken`, it also tests real `issue`, `redeem`, `proxy.fmu` download and parity between `describe` and generated `modelDescription.xml`
 
 Helpers for local FMU proxy development:
 

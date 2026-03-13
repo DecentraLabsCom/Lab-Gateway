@@ -31,6 +31,8 @@ typedef uint64_t fmi3UInt64;
 typedef int fmi3Boolean;
 typedef const char* fmi3String;
 typedef uint8_t fmi3Byte;
+typedef const fmi3Byte* fmi3Binary;
+typedef fmi3Boolean fmi3Clock;
 
 enum {
     fmi3False = 0,
@@ -123,11 +125,41 @@ FMI3_Export fmi3Status fmi3GetInt32(
     size_t nValueReferences,
     fmi3Int32 values[],
     size_t nValues);
+FMI3_Export fmi3Status fmi3GetInt8(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3Int8 values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3GetInt16(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3Int16 values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3GetInt64(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3Int64 values[],
+    size_t nValues);
 FMI3_Export fmi3Status fmi3GetUInt32(
     fmi3Instance instance,
     const fmi3ValueReference valueReferences[],
     size_t nValueReferences,
     fmi3UInt32 values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3GetUInt8(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3UInt8 values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3GetUInt16(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3UInt16 values[],
     size_t nValues);
 FMI3_Export fmi3Status fmi3GetUInt64(
     fmi3Instance instance,
@@ -147,6 +179,18 @@ FMI3_Export fmi3Status fmi3GetString(
     size_t nValueReferences,
     fmi3String values[],
     size_t nValues);
+FMI3_Export fmi3Status fmi3GetBinary(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    size_t valueSizes[],
+    fmi3Binary values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3GetClock(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3Clock values[]);
 
 FMI3_Export fmi3Status fmi3SetFloat32(
     fmi3Instance instance,
@@ -166,11 +210,41 @@ FMI3_Export fmi3Status fmi3SetInt32(
     size_t nValueReferences,
     const fmi3Int32 values[],
     size_t nValues);
+FMI3_Export fmi3Status fmi3SetInt8(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3Int8 values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3SetInt16(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3Int16 values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3SetInt64(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3Int64 values[],
+    size_t nValues);
 FMI3_Export fmi3Status fmi3SetUInt32(
     fmi3Instance instance,
     const fmi3ValueReference valueReferences[],
     size_t nValueReferences,
     const fmi3UInt32 values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3SetUInt8(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3UInt8 values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3SetUInt16(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3UInt16 values[],
     size_t nValues);
 FMI3_Export fmi3Status fmi3SetUInt64(
     fmi3Instance instance,
@@ -190,6 +264,18 @@ FMI3_Export fmi3Status fmi3SetString(
     size_t nValueReferences,
     const fmi3String values[],
     size_t nValues);
+FMI3_Export fmi3Status fmi3SetBinary(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const size_t valueSizes[],
+    const fmi3Binary values[],
+    size_t nValues);
+FMI3_Export fmi3Status fmi3SetClock(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3Clock values[]);
 
 FMI3_Export fmi3Status fmi3DoStep(
     fmi3Instance instance,

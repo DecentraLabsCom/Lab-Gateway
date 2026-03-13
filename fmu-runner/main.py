@@ -7,6 +7,7 @@ Endpoints:
   GET  /health                      — Health check
 """
 
+import base64
 import os
 import time
 import json
@@ -384,21 +385,39 @@ def _proxy_model_identifier(model_metadata: dict) -> str:
 
 def _normalize_proxy_fmi3_type(type_name: Optional[str]) -> str:
     normalized = str(type_name or "").strip()
-    if normalized in {"Float32", "Float64", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64", "Boolean", "String"}:
+    if normalized in {"Float32", "Float64", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64", "Boolean", "String", "Binary", "Clock"}:
         return normalized
     if normalized == "Enumeration":
         return "Int32"
     if normalized == "Integer":
         return "Int32"
+    if normalized:
+        return normalized
     return "Float64"
 
 
 def _format_fmi_start_value(value) -> Optional[str]:
     if value is None:
         return None
+    if isinstance(value, (bytes, bytearray)):
+        return base64.b64encode(bytes(value)).decode("ascii")
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, (list, tuple)):
-        return " ".join(str(item) for item in value)
+        return " ".join(_format_fmi_start_value(item) or "" for item in value)
     return str(value)
+
+
+def _normalize_metadata_value(value, variable_type: Optional[str] = None):
+    if isinstance(value, (bytes, bytearray)):
+        return base64.b64encode(bytes(value)).decode("ascii")
+    if variable_type in {"Int64", "UInt64"}:
+        if isinstance(value, (list, tuple)):
+            return [str(int(item)) for item in value]
+        return str(int(value))
+    if isinstance(value, (list, tuple)):
+        return [_normalize_metadata_value(item, variable_type=variable_type) for item in value]
+    return value
 
 
 def _collect_variable_dimensions(var) -> list[dict]:
@@ -425,12 +444,33 @@ def _validate_proxy_generation_supported(model_metadata: dict):
     if _parse_fmi_major_version(model_metadata.get("fmiVersion")) < 3:
         return
 
-    supported_types = {"Float32", "Float64", "Int32", "UInt64", "Boolean", "String"}
+    supported_types = {
+        "Float32",
+        "Float64",
+        "Int8",
+        "UInt8",
+        "Int16",
+        "UInt16",
+        "Int32",
+        "UInt32",
+        "Int64",
+        "UInt64",
+        "Boolean",
+        "String",
+        "Binary",
+        "Clock",
+    }
     for variable in model_metadata.get("modelVariables", []):
-        if _normalize_proxy_fmi3_type(variable.get("type")) not in supported_types:
+        normalized_type = _normalize_proxy_fmi3_type(variable.get("type"))
+        if normalized_type not in supported_types:
             raise HTTPException(
                 status_code=422,
                 detail=f"Generated FMI 3 proxy FMUs do not yet support variable type: {variable.get('type')}",
+            )
+        if normalized_type == "Clock" and (variable.get("dimensions") or []):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Generated FMI 3 proxy FMUs do not yet support dimensioned Clock variables: {variable.get('name')}",
             )
         for dimension in variable.get("dimensions", []) or []:
             if "start" not in dimension and "valueReference" not in dimension:
@@ -465,7 +505,7 @@ def _model_metadata_from_model_description(md) -> dict:
         if hasattr(var, "unit") and var.unit:
             entry["unit"] = var.unit
         if hasattr(var, "start") and var.start is not None:
-            entry["start"] = var.start
+            entry["start"] = _normalize_metadata_value(var.start, variable_type=str(var.type))
         if hasattr(var, "min") and var.min is not None:
             entry["min"] = var.min
         if hasattr(var, "max") and var.max is not None:

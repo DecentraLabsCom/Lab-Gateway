@@ -28,6 +28,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _effective_timeout_seconds,
         MAX_SIMULATION_TIMEOUT,
         _build_proxy_model_description_xml,
+        _validate_proxy_generation_supported,
     )
     from auth import verify_jwt as _original_verify_jwt
 
@@ -121,6 +122,38 @@ class MockFmi3ModelDescription:
     ]
 
 
+class MockFmi3WideIntegerDescription:
+    fmiVersion = "3.0"
+    guid = "{fmi3-wide-guid}"
+    instantiationToken = "{fmi3-wide-guid}"
+    coSimulation = True
+    modelExchange = False
+
+    class defaultExperiment:
+        startTime = 0.0
+        stopTime = 2.0
+        stepSize = 0.1
+
+    class _Var:
+        def __init__(self, name, causality, type_, start=None):
+            self.name = name
+            self.causality = causality
+            self.type = type_
+            self.start = start
+            self.initial = "exact"
+            self.unit = None
+            self.min = None
+            self.max = None
+            self.variability = "discrete"
+            self.valueReference = 1 if name == "wideSigned" else 2
+            self.dimensions = []
+
+    modelVariables = [
+        _Var("wideSigned", "parameter", "Int64", start=-9223372036854775808),
+        _Var("wideUnsigned", "parameter", "UInt64", start=18446744073709551615),
+    ]
+
+
 @patch("main.read_model_description", return_value=MockModelDescription())
 @patch("main._resolve_fmu_path")
 def test_describe_returns_model_metadata(mock_resolve, mock_read):
@@ -139,6 +172,23 @@ def test_describe_returns_model_metadata(mock_resolve, mock_read):
     assert len(data["modelVariables"]) == 2
     assert data["modelVariables"][0]["name"] == "mass"
     assert data["modelVariables"][0]["causality"] == "input"
+
+
+@patch("main.read_model_description", return_value=MockFmi3WideIntegerDescription())
+@patch("main._resolve_fmu_path")
+def test_describe_preserves_exact_fmi3_int64_and_uint64_starts(mock_resolve, mock_read):
+    mock_resolve.return_value = "/fake/path/wide.fmu"
+    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(accessKey="wide.fmu", resourceType="fmu")
+    try:
+        response = client.get("/api/v1/simulations/describe?fmuFileName=wide.fmu")
+        assert response.status_code == 200
+
+        data = response.json()
+        variables = {item["name"]: item for item in data["modelVariables"]}
+        assert variables["wideSigned"]["start"] == "-9223372036854775808"
+        assert variables["wideUnsigned"]["start"] == "18446744073709551615"
+    finally:
+        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
 def test_describe_requires_fmuFileName():
@@ -309,6 +359,88 @@ def test_proxy_model_description_generates_fmi3_dimensioned_variables():
     assert u.find("./Dimension").attrib["valueReference"] == "1"
     assert y is not None
     assert y.find("./Dimension").attrib["valueReference"] == "1"
+
+
+def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyFmi3BinaryClock",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "modelVariables": [
+            {
+                "name": "blob",
+                "type": "Binary",
+                "causality": "input",
+                "variability": "discrete",
+                "valueReference": 11,
+                "start": b"\x01\x02",
+            },
+            {
+                "name": "tick",
+                "type": "Clock",
+                "causality": "output",
+                "variability": "discrete",
+                "valueReference": 12,
+                "start": True,
+            },
+        ],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    assert root.find("./ModelVariables/Binary").attrib["start"] == "AQI="
+    assert root.find("./ModelVariables/Clock").attrib["start"] == "true"
+
+
+def test_validate_proxy_generation_supports_extended_fmi3_integer_types():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "modelVariables": [
+            {"name": "i8", "type": "Int8", "valueReference": 1},
+            {"name": "u8", "type": "UInt8", "valueReference": 2},
+            {"name": "i16", "type": "Int16", "valueReference": 3},
+            {"name": "u16", "type": "UInt16", "valueReference": 4},
+            {"name": "u32", "type": "UInt32", "valueReference": 5},
+            {"name": "i64", "type": "Int64", "valueReference": 6},
+            {"name": "u64", "type": "UInt64", "valueReference": 7},
+        ],
+    }
+
+    _validate_proxy_generation_supported(metadata)
+
+
+def test_validate_proxy_generation_supports_fmi3_binary_and_clock_types():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "modelVariables": [
+            {"name": "blob", "type": "Binary", "valueReference": 1},
+            {"name": "tick", "type": "Clock", "valueReference": 2},
+        ],
+    }
+
+    _validate_proxy_generation_supported(metadata)
+
+
+def test_validate_proxy_generation_rejects_dimensioned_clock_for_fmi3_proxy():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "modelVariables": [
+            {
+                "name": "tick",
+                "type": "Clock",
+                "valueReference": 1,
+                "dimensions": [{"start": 2}],
+            },
+        ],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        _validate_proxy_generation_supported(metadata)
+    assert exc.value.status_code == 422
+    assert "Clock" in exc.value.detail
 
 
 # ─── /api/v1/simulations/run ────────────────────────────────────────
@@ -709,6 +841,72 @@ def test_proxy_download_generates_fmi3_archive_layout(mock_resolve, mock_issue_t
         md = read_model_description(str(proxy_path))
         assert md.fmiVersion == "3.0"
         assert md.coSimulation is not None
+    finally:
+        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
+
+
+@patch("main.read_model_description", return_value=MockFmi3ModelDescription())
+@patch("main._issue_session_ticket", new_callable=AsyncMock)
+@patch("main._resolve_fmu_path")
+def test_proxy_model_description_matches_public_describe_payload(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
+    mock_resolve.return_value = tmp_path / "test-fmi3.fmu"
+    mock_issue_ticket.return_value = ("st_ticket_3", 4102444800)
+
+    runtime_root = tmp_path / "runtime"
+    runtime_bin = runtime_root / "binaries" / "win64"
+    runtime_bin.mkdir(parents=True, exist_ok=True)
+    (runtime_bin / "decentralabs_proxy.dll").write_bytes(b"binary")
+    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
+
+    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
+        accessKey="test-fmi3.fmu",
+        resourceType="fmu",
+        labId="1",
+        reservationKey="0xabc",
+        aud="https://gateway.example/auth",
+    )
+    try:
+        describe_response = client.get("/api/v1/simulations/describe?fmuFileName=test-fmi3.fmu")
+        assert describe_response.status_code == 200
+        describe_payload = describe_response.json()
+
+        proxy_response = client.get(
+            "/api/v1/fmu/proxy/1?reservationKey=0xabc",
+            headers={"Authorization": "Bearer booking-token"},
+        )
+        assert proxy_response.status_code == 200
+
+        archive = zipfile.ZipFile(io.BytesIO(proxy_response.content))
+        root = ET.fromstring(archive.read("modelDescription.xml"))
+        variables = []
+        for child in root.findall("./ModelVariables/*"):
+            variables.append({
+                "name": child.attrib["name"],
+                "type": child.tag,
+                "causality": child.attrib.get("causality", "local"),
+                "variability": child.attrib.get("variability", "continuous"),
+                **({"initial": child.attrib["initial"]} if "initial" in child.attrib else {}),
+                **({"start": child.attrib["start"]} if "start" in child.attrib else {}),
+            })
+
+        described_variables = {
+            item["name"]: {
+                "name": item["name"],
+                "type": "Int32" if item["type"] == "Integer" else item["type"],
+                "causality": item["causality"],
+                "variability": item["variability"],
+                **({"initial": item["initial"]} if "initial" in item else {}),
+                **({"start": str(item["start"])} if "start" in item else {}),
+            }
+            for item in describe_payload["modelVariables"]
+        }
+        xml_variables = {item["name"]: item for item in variables}
+
+        assert describe_payload["fmiVersion"] == root.attrib["fmiVersion"]
+        assert describe_payload["simulationKind"] == "coSimulation"
+        assert set(described_variables.keys()) == set(xml_variables.keys())
+        for name, variable in described_variables.items():
+            assert xml_variables[name] == variable
     finally:
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 

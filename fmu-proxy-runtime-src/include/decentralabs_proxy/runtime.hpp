@@ -35,14 +35,21 @@ public:
 
     OperationResult SetReal(const std::uint32_t* value_references, std::size_t count, const double* values, std::size_t value_count = 0);
     OperationResult SetInteger(const std::uint32_t* value_references, std::size_t count, const std::int32_t* values, std::size_t value_count = 0);
+    OperationResult SetSignedInteger(const std::uint32_t* value_references, std::size_t count, const std::int64_t* values, std::size_t value_count = 0);
+    OperationResult SetUnsignedInteger(const std::uint32_t* value_references, std::size_t count, const std::uint64_t* values, std::size_t value_count = 0);
     OperationResult SetBoolean(const std::uint32_t* value_references, std::size_t count, const bool* values, std::size_t value_count = 0);
     OperationResult SetString(const std::uint32_t* value_references, std::size_t count, const char* const* values, std::size_t value_count = 0);
+    OperationResult SetBinary(const std::uint32_t* value_references, std::size_t count, const std::size_t* value_sizes, const std::uint8_t* const* values, std::size_t value_count = 0);
+    OperationResult SetClock(const std::uint32_t* value_references, std::size_t count, const bool* values);
 
     OperationResult GetReal(const std::uint32_t* value_references, std::size_t count, double* values, std::size_t value_count = 0) const;
     OperationResult GetInteger(const std::uint32_t* value_references, std::size_t count, std::int32_t* values, std::size_t value_count = 0) const;
+    OperationResult GetSignedInteger(const std::uint32_t* value_references, std::size_t count, std::int64_t* values, std::size_t value_count = 0) const;
     OperationResult GetUnsignedInteger(const std::uint32_t* value_references, std::size_t count, std::uint64_t* values, std::size_t value_count = 0) const;
     OperationResult GetBoolean(const std::uint32_t* value_references, std::size_t count, bool* values, std::size_t value_count = 0) const;
     OperationResult GetString(const std::uint32_t* value_references, std::size_t count, const char** values, std::size_t value_count = 0);
+    OperationResult GetBinary(const std::uint32_t* value_references, std::size_t count, std::size_t* value_sizes, const std::uint8_t** values, std::size_t value_count = 0);
+    OperationResult GetClock(const std::uint32_t* value_references, std::size_t count, bool* values) const;
     std::size_t ExpectedValueCount(const std::uint32_t* value_references, std::size_t count) const;
 
     const RuntimeConfig& Config() const;

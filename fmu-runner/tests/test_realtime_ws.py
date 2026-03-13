@@ -579,6 +579,40 @@ def test_realtime_manager_model_description_payload_includes_dimensions():
     assert payload["variables"][0]["dimensions"] == [{"start": 4, "valueReference": 7, "variableName": "dimensionVar"}]
 
 
+def test_realtime_manager_model_description_payload_preserves_wide_integer_starts_as_strings():
+    manager = _build_manager()
+    md = SimpleNamespace(
+        fmiVersion="3.0",
+        coSimulation=True,
+        modelExchange=False,
+        modelVariables=[
+            SimpleNamespace(
+                name="wideSigned",
+                type="Int64",
+                causality="parameter",
+                variability="discrete",
+                start=-9223372036854775808,
+                unit=None,
+                dimensions=[],
+            ),
+            SimpleNamespace(
+                name="wideUnsigned",
+                type="UInt64",
+                causality="parameter",
+                variability="discrete",
+                start=18446744073709551615,
+                unit=None,
+                dimensions=[],
+            ),
+        ],
+    )
+
+    payload = manager.model_description_payload(md)
+
+    assert payload["variables"][0]["start"] == "-9223372036854775808"
+    assert payload["variables"][1]["start"] == "18446744073709551615"
+
+
 def test_realtime_session_cache_evicts_old_entries():
     session = _build_session()
 
@@ -1238,11 +1272,12 @@ def test_realtime_session_normalize_scalar_value_and_model_loading(monkeypatch):
     assert session._normalize_variable_type(SimpleNamespace(type="Enumeration")) == "Integer"
     assert session._normalize_scalar_value("Real", 1) == 1.0
     assert session._normalize_scalar_value("Integer", 2.7) == 2
+    assert session._normalize_scalar_value("Int64", 9223372036854775807) == "9223372036854775807"
+    assert session._normalize_scalar_value("UInt64", 18446744073709551615) == "18446744073709551615"
     assert session._normalize_scalar_value("Boolean", 1) is True
     assert session._normalize_scalar_value("String", b"abc") == "abc"
-    with pytest.raises(HTTPException) as unsupported:
-        session._normalize_scalar_value("Binary", b"abc")
-    assert unsupported.value.status_code == 400
+    assert session._normalize_scalar_value("Binary", b"abc") == "YWJj"
+    assert session._normalize_scalar_value("Clock", 1) is True
 
     session._ensure_model_loaded()
     session._ensure_model_loaded()
@@ -1269,6 +1304,8 @@ def test_realtime_session_set_and_get_values_cover_type_errors():
             self.real_calls = []
             self.bool_calls = []
             self.string_calls = []
+            self.binary_calls = []
+            self.clock_calls = []
 
         def setReal(self, refs, values):
             self.real_calls.append((refs, values))
@@ -1279,6 +1316,12 @@ def test_realtime_session_set_and_get_values_cover_type_errors():
         def setString(self, refs, values):
             self.string_calls.append((refs, values))
 
+        def setBinary(self, refs, values):
+            self.binary_calls.append((refs, values))
+
+        def setClock(self, refs, values):
+            self.clock_calls.append((refs, values))
+
         def getReal(self, refs):
             return [3.5]
 
@@ -1288,20 +1331,30 @@ def test_realtime_session_set_and_get_values_cover_type_errors():
         def getString(self, refs):
             return [b"ok"]
 
+        def getBinary(self, refs):
+            return [b"\x01\x02"]
+
+        def getClock(self, refs):
+            return [1]
+
     session._fmu = _MockFmu()
     session._variables = {
         "real": SimpleNamespace(name="real", valueReference=1, type="Real", dimensions=[]),
         "flag": SimpleNamespace(name="flag", valueReference=2, type="Boolean", dimensions=[]),
         "text": SimpleNamespace(name="text", valueReference=3, type="String", dimensions=[]),
+        "blob": SimpleNamespace(name="blob", valueReference=4, type="Binary", dimensions=[]),
+        "tick": SimpleNamespace(name="tick", valueReference=5, type="Clock", dimensions=[]),
     }
 
-    session._set_values({"real": 1, "flag": 1, "text": 9, "ignored": 4})
-    outputs = session._get_values(["real", "flag", "text", "missing"])
+    session._set_values({"real": 1, "flag": 1, "text": 9, "blob": "AQI=", "tick": 1, "ignored": 4})
+    outputs = session._get_values(["real", "flag", "text", "blob", "tick", "missing"])
 
     assert session._fmu.real_calls == [([1], [1.0])]
     assert session._fmu.bool_calls == [([2], [True])]
     assert session._fmu.string_calls == [([3], ["9"])]
-    assert outputs == {"real": 3.5, "flag": True, "text": "ok"}
+    assert session._fmu.binary_calls == [([4], [b"\x01\x02"])]
+    assert session._fmu.clock_calls == [([5], [True])]
+    assert outputs == {"real": 3.5, "flag": True, "text": "ok", "blob": "AQI=", "tick": True}
 
     session._variables["enum"] = SimpleNamespace(name="enum", valueReference=4, type="Enumeration", dimensions=[])
     with pytest.raises(HTTPException) as unsupported_setter:
@@ -1312,6 +1365,94 @@ def test_realtime_session_set_and_get_values_cover_type_errors():
     with pytest.raises(HTTPException) as unsupported_getter:
         session._get_values(["enum"])
     assert unsupported_getter.value.status_code == 400
+
+
+def test_realtime_session_set_and_get_values_support_extended_fmi3_integer_widths():
+    session = _build_session()
+
+    class _MockFmu:
+        def __init__(self):
+            self.calls = []
+
+        def setInt8(self, refs, values):
+            self.calls.append(("setInt8", refs, values))
+
+        def setUInt16(self, refs, values):
+            self.calls.append(("setUInt16", refs, values))
+
+        def setInt64(self, refs, values):
+            self.calls.append(("setInt64", refs, values))
+
+        def setUInt64(self, refs, values):
+            self.calls.append(("setUInt64", refs, values))
+
+        def getInt8(self, refs):
+            self.calls.append(("getInt8", refs))
+            return [-5]
+
+        def getUInt16(self, refs):
+            self.calls.append(("getUInt16", refs))
+            return [512]
+
+        def getInt64(self, refs):
+            self.calls.append(("getInt64", refs))
+            return [1234567890123]
+
+        def getUInt64(self, refs):
+            self.calls.append(("getUInt64", refs))
+            return [18446744073709551615]
+
+    session._fmu = _MockFmu()
+    session._variables = {
+        "smallSigned": SimpleNamespace(name="smallSigned", valueReference=1, type="Int8", dimensions=[]),
+        "smallUnsigned": SimpleNamespace(name="smallUnsigned", valueReference=2, type="UInt16", dimensions=[]),
+        "wideSigned": SimpleNamespace(name="wideSigned", valueReference=3, type="Int64", dimensions=[]),
+        "wideUnsigned": SimpleNamespace(name="wideUnsigned", valueReference=4, type="UInt64", dimensions=[]),
+    }
+
+    session._set_values({
+        "smallSigned": -4,
+        "smallUnsigned": 500,
+        "wideSigned": "-9223372036854775808",
+        "wideUnsigned": "18446744073709551615",
+    })
+    outputs = session._get_values(["smallSigned", "smallUnsigned", "wideSigned", "wideUnsigned"])
+
+    assert session._fmu.calls[:4] == [
+        ("setInt8", [1], [-4]),
+        ("setUInt16", [2], [500]),
+        ("setInt64", [3], [-9223372036854775808]),
+        ("setUInt64", [4], [18446744073709551615]),
+    ]
+    assert outputs == {
+        "smallSigned": -5,
+        "smallUnsigned": 512,
+        "wideSigned": "1234567890123",
+        "wideUnsigned": "18446744073709551615",
+    }
+
+
+@pytest.mark.asyncio
+async def test_realtime_session_terminate_notifies_attached_client_on_expiry():
+    sent = []
+
+    class _WebSocket:
+        async def send_json(self, payload):
+            sent.append(payload)
+
+    session = _build_session()
+    session.connection = _WsConnection(websocket=_WebSocket(), queue_size=1)
+    session.connection.sender_task = asyncio.create_task(asyncio.sleep(60))
+    session._heartbeat_task = asyncio.create_task(asyncio.sleep(60))
+
+    await session.terminate(reason="expired")
+    await asyncio.sleep(0)
+
+    assert sent == [{
+        "type": "session.closed",
+        "sessionId": session.session_id,
+        "reason": "expired",
+    }]
 
 
 @pytest.mark.asyncio

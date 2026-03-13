@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import secrets
 import shutil
@@ -245,12 +246,18 @@ class _RealtimeSession:
     def _normalize_scalar_value(variable_type: str, value: Any) -> Any:
         if variable_type in ("Real", "Float32", "Float64"):
             return float(value)
-        if variable_type in ("Integer", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64"):
+        if variable_type in ("Int64", "UInt64"):
+            return str(int(value))
+        if variable_type in ("Integer", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32"):
             return int(value)
         if variable_type == "Boolean":
             return bool(value)
         if variable_type == "String":
             return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+        if variable_type == "Binary":
+            return base64.b64encode(bytes(value)).decode("ascii")
+        if variable_type == "Clock":
+            return bool(value)
         raise HTTPException(status_code=400, detail=f"Realtime sessions do not support FMU variable type {variable_type}")
 
     def _set_values(self, values: dict[str, Any]):
@@ -292,6 +299,19 @@ class _RealtimeSession:
                 setter(list(refs), [bool(v) for v in vals])
             elif variable_type == "String":
                 setter(list(refs), [str(v) for v in vals])
+            elif variable_type == "Binary":
+                try:
+                    setter(
+                        list(refs),
+                        [
+                            value if isinstance(value, (bytes, bytearray)) else base64.b64decode(str(value), validate=True)
+                            for value in vals
+                        ],
+                    )
+                except Exception as exc:
+                    raise HTTPException(status_code=400, detail=f"Binary inputs must be base64 strings: {exc}") from exc
+            elif variable_type == "Clock":
+                setter(list(refs), [bool(v) for v in vals])
             else:
                 raise HTTPException(status_code=400, detail=f"Realtime sessions do not support FMU variable type {variable_type}")
 
@@ -503,19 +523,27 @@ class _RealtimeSession:
     async def terminate(self, reason: str = "terminated"):
         if self._closed:
             return
+        close_payload = {
+            "type": "session.closed",
+            "sessionId": self.session_id,
+            "reason": reason,
+        }
         if self._runner_task and not self._runner_task.done():
             self._runner_task.cancel()
         self._runner_task = None
+        if self.connection is not None and reason != "client_terminated":
+            try:
+                async with self.connection.send_lock:
+                    await self.connection.websocket.send_json(close_payload)
+            except Exception:
+                pass
         await self.detach()
         self._shutdown_fmu()
         self.state = "stopped"
         self._closed = True
         self.manager.release_slot(self.lab_id)
-        await self._enqueue_event({
-            "type": "session.closed",
-            "sessionId": self.session_id,
-            "reason": reason,
-        })
+        if reason == "client_terminated":
+            await self._enqueue_event(close_payload)
 
     async def _run_loop(self):
         try:
@@ -663,17 +691,29 @@ class RealtimeWsManager:
 
     @staticmethod
     def model_description_payload(md) -> dict:
+        def _normalize_start_value(variable_type: str, value: Any) -> Any:
+            if variable_type in ("Int64", "UInt64"):
+                if isinstance(value, (list, tuple)):
+                    return [str(int(item)) for item in value]
+                return str(int(value))
+            if isinstance(value, (bytes, bytearray)):
+                return base64.b64encode(bytes(value)).decode("ascii")
+            if isinstance(value, (list, tuple)):
+                return [_normalize_start_value(variable_type, item) for item in value]
+            return value
+
         simulation_kind = "coSimulation" if md.coSimulation else ("modelExchange" if md.modelExchange else "unknown")
         variables = []
         for var in md.modelVariables:
+            variable_type = str(var.type)
             entry = {
                 "name": var.name,
-                "type": str(var.type),
+                "type": variable_type,
                 "causality": var.causality or "local",
                 "variability": getattr(var, "variability", None) or "continuous",
             }
             if hasattr(var, "start") and var.start is not None:
-                entry["start"] = var.start
+                entry["start"] = _normalize_start_value(variable_type, var.start)
             if hasattr(var, "unit") and var.unit:
                 entry["unit"] = var.unit
             if getattr(var, "dimensions", None):

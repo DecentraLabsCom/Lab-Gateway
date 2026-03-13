@@ -7,6 +7,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #if defined(_WIN32)
@@ -446,6 +447,405 @@ private:
 }  // namespace
 #endif
 
+#if defined(__linux__) && defined(DECENTRALABS_PROXY_USE_LIBCURL_WSS)
+namespace {
+
+struct ParsedGatewayUrl {
+    std::string scheme;
+    std::string host;
+    std::string path;
+    std::uint16_t port = 0;
+    bool secure = false;
+    bool allow_insecure_tls = false;
+};
+
+std::string ToLowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool IsLoopbackHost(const std::string& host) {
+    const std::string normalized = ToLowerCopy(host);
+    return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1" || normalized == "[::1]";
+}
+
+ValueResult<ParsedGatewayUrl> ParseGatewayUrl(const std::string& url) {
+    const std::size_t scheme_end = url.find("://");
+    if (scheme_end == std::string::npos) {
+        return ValueResult<ParsedGatewayUrl>::Failure(
+            "TRANSPORT_URL_INVALID",
+            "Gateway URL is missing a scheme");
+    }
+
+    ParsedGatewayUrl parsed;
+    parsed.scheme = ToLowerCopy(url.substr(0, scheme_end));
+    if (parsed.scheme == "wss") {
+        parsed.secure = true;
+        parsed.port = 443;
+    } else if (parsed.scheme == "ws") {
+        parsed.secure = false;
+        parsed.port = 80;
+    } else {
+        return ValueResult<ParsedGatewayUrl>::Failure(
+            "TRANSPORT_URL_INVALID",
+            "Gateway URL must use ws:// or wss://");
+    }
+
+    const std::string_view remainder(url.data() + scheme_end + 3, url.size() - scheme_end - 3);
+    const std::size_t path_start = remainder.find('/');
+    const std::string authority = path_start == std::string::npos
+        ? std::string(remainder)
+        : std::string(remainder.substr(0, path_start));
+    parsed.path = path_start == std::string::npos
+        ? "/"
+        : std::string(remainder.substr(path_start));
+
+    const std::size_t fragment = parsed.path.find('#');
+    if (fragment != std::string::npos) {
+        parsed.path.erase(fragment);
+    }
+    if (authority.empty()) {
+        return ValueResult<ParsedGatewayUrl>::Failure(
+            "TRANSPORT_URL_INVALID",
+            "Gateway URL is missing a host");
+    }
+
+    if (!authority.empty() && authority.front() == '[') {
+        const std::size_t closing_bracket = authority.find(']');
+        if (closing_bracket == std::string::npos) {
+            return ValueResult<ParsedGatewayUrl>::Failure(
+                "TRANSPORT_URL_INVALID",
+                "Gateway URL contains an invalid IPv6 host");
+        }
+        parsed.host = authority.substr(1, closing_bracket - 1);
+        if (closing_bracket + 1 < authority.size()) {
+            if (authority[closing_bracket + 1] != ':') {
+                return ValueResult<ParsedGatewayUrl>::Failure(
+                    "TRANSPORT_URL_INVALID",
+                    "Gateway URL contains an invalid host/port separator");
+            }
+            const std::string port_text = authority.substr(closing_bracket + 2);
+            if (port_text.empty()) {
+                return ValueResult<ParsedGatewayUrl>::Failure(
+                    "TRANSPORT_URL_INVALID",
+                    "Gateway URL port is empty");
+            }
+            try {
+                const auto port_value = std::stoul(port_text);
+                if (port_value > std::numeric_limits<std::uint16_t>::max()) {
+                    throw std::out_of_range("port");
+                }
+                parsed.port = static_cast<std::uint16_t>(port_value);
+            } catch (const std::exception&) {
+                return ValueResult<ParsedGatewayUrl>::Failure(
+                    "TRANSPORT_URL_INVALID",
+                    "Gateway URL contains an invalid port");
+            }
+        }
+    } else {
+        const std::size_t colon = authority.rfind(':');
+        if (colon != std::string::npos && authority.find(':') == colon) {
+            parsed.host = authority.substr(0, colon);
+            const std::string port_text = authority.substr(colon + 1);
+            if (parsed.host.empty() || port_text.empty()) {
+                return ValueResult<ParsedGatewayUrl>::Failure(
+                    "TRANSPORT_URL_INVALID",
+                    "Gateway URL contains an invalid host or port");
+            }
+            try {
+                const auto port_value = std::stoul(port_text);
+                if (port_value > std::numeric_limits<std::uint16_t>::max()) {
+                    throw std::out_of_range("port");
+                }
+                parsed.port = static_cast<std::uint16_t>(port_value);
+            } catch (const std::exception&) {
+                return ValueResult<ParsedGatewayUrl>::Failure(
+                    "TRANSPORT_URL_INVALID",
+                    "Gateway URL contains an invalid port");
+            }
+        } else {
+            parsed.host = authority;
+        }
+    }
+
+    if (parsed.host.empty()) {
+        return ValueResult<ParsedGatewayUrl>::Failure(
+            "TRANSPORT_URL_INVALID",
+            "Gateway URL host is empty");
+    }
+
+    parsed.allow_insecure_tls = parsed.secure && IsLoopbackHost(parsed.host);
+    return ValueResult<ParsedGatewayUrl>::Success(std::move(parsed));
+}
+
+std::string TrimTrailingWhitespace(std::string value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+        value.pop_back();
+    }
+    return value;
+}
+
+std::string FormatCurlError(const CURLcode error_code, const char* error_buffer) {
+    std::string message;
+    if (error_buffer != nullptr && *error_buffer != '\0') {
+        message = error_buffer;
+    } else {
+        message = curl_easy_strerror(error_code);
+    }
+    message = TrimTrailingWhitespace(message);
+    if (message.empty()) {
+        message = "libcurl error " + std::to_string(static_cast<int>(error_code));
+    } else {
+        message += " (" + std::to_string(static_cast<int>(error_code)) + ")";
+    }
+    return message;
+}
+
+class CurlGlobalInit final {
+public:
+    CurlGlobalInit() {
+        code_ = curl_global_init(CURL_GLOBAL_DEFAULT);
+    }
+
+    ~CurlGlobalInit() {
+        if (code_ == CURLE_OK) {
+            curl_global_cleanup();
+        }
+    }
+
+    CURLcode code() const { return code_; }
+
+private:
+    CURLcode code_ = CURLE_FAILED_INIT;
+};
+
+CurlGlobalInit& GetCurlGlobalInit() {
+    static CurlGlobalInit init;
+    return init;
+}
+
+class LibCurlWssTransport final : public GatewayTransport {
+public:
+    OperationResult Connect(const std::string& url) override {
+        Close();
+
+        const auto parsed = ParseGatewayUrl(url);
+        if (!parsed) {
+            return parsed.status;
+        }
+
+        if (GetCurlGlobalInit().code() != CURLE_OK) {
+            return OperationResult::Failure(
+                "TRANSPORT_CONNECT_FAILED",
+                "Failed to initialize libcurl websocket transport");
+        }
+
+        curl_ = curl_easy_init();
+        if (curl_ == nullptr) {
+            return OperationResult::Failure(
+                "TRANSPORT_CONNECT_FAILED",
+                "Failed to create libcurl websocket handle");
+        }
+
+        std::fill(std::begin(error_buffer_), std::end(error_buffer_), '\0');
+        curl_easy_setopt(curl_, CURLOPT_ERRORBUFFER, error_buffer_.data());
+        curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl_, CURLOPT_CONNECT_ONLY, 2L);
+        curl_easy_setopt(curl_, CURLOPT_HTTP_VERSION, static_cast<long>(CURL_HTTP_VERSION_1_1));
+        curl_easy_setopt(curl_, CURLOPT_TIMEOUT_MS, 15000L);
+        curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
+
+        if (parsed.value.allow_insecure_tls) {
+            curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 0L);
+            curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 0L);
+        }
+
+        const CURLcode result = curl_easy_perform(curl_);
+        if (result != CURLE_OK) {
+            const std::string message = "Failed to establish libcurl websocket connection: " + FormatCurlError(result, error_buffer_.data());
+            Close();
+            return OperationResult::Failure("TRANSPORT_CONNECT_FAILED", message);
+        }
+
+        url_ = url;
+        connected_ = true;
+        return OperationResult::Success();
+    }
+
+    OperationResult SendText(const std::string& payload) override {
+        if (!connected_ || curl_ == nullptr) {
+            return OperationResult::Failure(
+                "TRANSPORT_NOT_CONNECTED",
+                "Gateway transport is not connected");
+        }
+
+        std::size_t offset = 0;
+        while (offset < payload.size()) {
+            size_t sent = 0;
+            const CURLcode result = curl_ws_send(
+                curl_,
+                payload.data() + offset,
+                payload.size() - offset,
+                &sent,
+                0,
+                CURLWS_TEXT);
+            if (result == CURLE_AGAIN) {
+                const auto wait_status = WaitForSocket(/*write=*/true);
+                if (!wait_status) {
+                    connected_ = false;
+                    Close();
+                    return wait_status;
+                }
+                continue;
+            }
+            if (result != CURLE_OK) {
+                connected_ = false;
+                const std::string message = "Failed to send websocket message: " + FormatCurlError(result, error_buffer_.data());
+                Close();
+                return OperationResult::Failure("TRANSPORT_SEND_FAILED", message);
+            }
+            offset += sent;
+        }
+        return OperationResult::Success();
+    }
+
+    ValueResult<std::string> ReceiveText() override {
+        if (!connected_ || curl_ == nullptr) {
+            return ValueResult<std::string>::Failure(
+                "TRANSPORT_NOT_CONNECTED",
+                "Gateway transport is not connected");
+        }
+
+        std::string payload;
+        std::array<char, 4096> buffer{};
+        for (;;) {
+            size_t received = 0;
+            struct curl_ws_frame* frame = nullptr;
+            const CURLcode result = curl_ws_recv(
+                curl_,
+                buffer.data(),
+                buffer.size(),
+                &received,
+                &frame);
+
+            if (result == CURLE_AGAIN) {
+                const auto wait_status = WaitForSocket(/*write=*/false);
+                if (!wait_status) {
+                    connected_ = false;
+                    Close();
+                    return ValueResult<std::string>::Failure(wait_status.code, wait_status.message);
+                }
+                continue;
+            }
+
+            if (result == CURLE_GOT_NOTHING) {
+                connected_ = false;
+                Close();
+                return ValueResult<std::string>::Failure(
+                    "TRANSPORT_CLOSED",
+                    "Gateway closed websocket");
+            }
+
+            if (result != CURLE_OK) {
+                connected_ = false;
+                const std::string message = "Failed to receive websocket message: " + FormatCurlError(result, error_buffer_.data());
+                Close();
+                return ValueResult<std::string>::Failure("TRANSPORT_RECEIVE_FAILED", message);
+            }
+
+            if (frame == nullptr) {
+                return ValueResult<std::string>::Failure(
+                    "TRANSPORT_PROTOCOL_ERROR",
+                    "libcurl websocket receive returned no frame metadata");
+            }
+
+            if ((frame->flags & CURLWS_CLOSE) != 0) {
+                connected_ = false;
+                Close();
+                return ValueResult<std::string>::Failure(
+                    "TRANSPORT_CLOSED",
+                    "Gateway closed websocket");
+            }
+
+            if ((frame->flags & CURLWS_BINARY) != 0 || ((frame->flags & CURLWS_TEXT) == 0 && received > 0)) {
+                return ValueResult<std::string>::Failure(
+                    "TRANSPORT_PROTOCOL_ERROR",
+                    "Gateway websocket returned a non-text frame");
+            }
+
+            payload.append(buffer.data(), received);
+            if (frame->bytesleft == 0 && (frame->flags & CURLWS_CONT) == 0) {
+                return ValueResult<std::string>::Success(std::move(payload));
+            }
+        }
+    }
+
+    void Close() override {
+        connected_ = false;
+        if (curl_ != nullptr) {
+            curl_easy_cleanup(curl_);
+            curl_ = nullptr;
+        }
+        url_.clear();
+        std::fill(std::begin(error_buffer_), std::end(error_buffer_), '\0');
+    }
+
+    bool IsConnected() const override {
+        return connected_;
+    }
+
+private:
+    OperationResult WaitForSocket(const bool write) {
+        curl_socket_t socket_fd = CURL_SOCKET_BAD;
+        const CURLcode info_result = curl_easy_getinfo(curl_, CURLINFO_ACTIVESOCKET, &socket_fd);
+        if (info_result != CURLE_OK || socket_fd == CURL_SOCKET_BAD) {
+            return OperationResult::Failure(
+                "TRANSPORT_WAIT_FAILED",
+                "Failed to obtain active websocket socket from libcurl");
+        }
+
+        fd_set read_set;
+        fd_set write_set;
+        FD_ZERO(&read_set);
+        FD_ZERO(&write_set);
+        if (write) {
+            FD_SET(socket_fd, &write_set);
+        } else {
+            FD_SET(socket_fd, &read_set);
+        }
+
+        timeval timeout{};
+        timeout.tv_sec = 15;
+        timeout.tv_usec = 0;
+        const int ready = select(socket_fd + 1, &read_set, &write_set, nullptr, &timeout);
+        if (ready > 0) {
+            return OperationResult::Success();
+        }
+        if (ready == 0) {
+            return OperationResult::Failure(
+                "TRANSPORT_WAIT_TIMEOUT",
+                "Timed out waiting for the websocket socket to become ready");
+        }
+        return OperationResult::Failure(
+            "TRANSPORT_WAIT_FAILED",
+            "Failed while waiting for the websocket socket to become ready");
+    }
+
+    CURL* curl_ = nullptr;
+    std::array<char, CURL_ERROR_SIZE> error_buffer_{};
+    std::string url_;
+    bool connected_ = false;
+};
+
+}  // namespace
+#endif
+
+#if defined(__linux__) || defined(__APPLE__)
+std::unique_ptr<GatewayTransport> CreatePosixGatewayTransport();
+#endif
+
 OperationResult StubWssTransport::Connect(const std::string& url) {
     url_ = url;
     connected_ = false;
@@ -519,6 +919,8 @@ bool ScriptedTransport::IsConnected() const {
 std::unique_ptr<GatewayTransport> CreateDefaultGatewayTransport() {
 #if defined(_WIN32)
     return std::make_unique<WinHttpWssTransport>();
+#elif defined(__linux__) || defined(__APPLE__)
+    return CreatePosixGatewayTransport();
 #else
     return std::make_unique<StubWssTransport>();
 #endif

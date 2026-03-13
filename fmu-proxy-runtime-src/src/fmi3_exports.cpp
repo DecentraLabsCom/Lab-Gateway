@@ -1,7 +1,9 @@
 #include "fmi3/fmi3Functions.h"
 
+#include <limits>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "decentralabs_proxy/runtime.hpp"
@@ -68,6 +70,99 @@ bool ValidateValueCounts(Fmi3Instance* instance,
     }
     Log(instance, fmi3Error, "logStatusError", "FMI 3 value buffer length does not match referenced scalar/array variables");
     return false;
+}
+
+template <typename FmiInteger>
+fmi3Status GetSignedIntegerValues(Fmi3Instance* instance,
+                                  const fmi3ValueReference valueReferences[],
+                                  const size_t nValueReferences,
+                                  FmiInteger values[],
+                                  const size_t nValues) {
+    if (instance == nullptr || values == nullptr) {
+        return fmi3Fatal;
+    }
+    if (!ValidateValueCounts(instance, valueReferences, nValueReferences, nValues)) {
+        return fmi3Error;
+    }
+    std::vector<std::int64_t> temp(nValues);
+    const auto status = instance->runtime.GetSignedInteger(valueReferences, nValueReferences, temp.data(), nValues);
+    if (!status) {
+        return ToFmiStatus(instance, status);
+    }
+    for (size_t index = 0; index < nValues; ++index) {
+        if (temp[index] < static_cast<std::int64_t>(std::numeric_limits<FmiInteger>::min()) ||
+            temp[index] > static_cast<std::int64_t>(std::numeric_limits<FmiInteger>::max())) {
+            Log(instance, fmi3Error, "logStatusError", "Cached integer value does not fit the requested FMI 3 integer width");
+            return fmi3Error;
+        }
+        values[index] = static_cast<FmiInteger>(temp[index]);
+    }
+    return fmi3OK;
+}
+
+template <typename FmiInteger>
+fmi3Status GetUnsignedIntegerValues(Fmi3Instance* instance,
+                                    const fmi3ValueReference valueReferences[],
+                                    const size_t nValueReferences,
+                                    FmiInteger values[],
+                                    const size_t nValues) {
+    if (instance == nullptr || values == nullptr) {
+        return fmi3Fatal;
+    }
+    if (!ValidateValueCounts(instance, valueReferences, nValueReferences, nValues)) {
+        return fmi3Error;
+    }
+    std::vector<std::uint64_t> temp(nValues);
+    const auto status = instance->runtime.GetUnsignedInteger(valueReferences, nValueReferences, temp.data(), nValues);
+    if (!status) {
+        return ToFmiStatus(instance, status);
+    }
+    for (size_t index = 0; index < nValues; ++index) {
+        if (temp[index] > static_cast<std::uint64_t>(std::numeric_limits<FmiInteger>::max())) {
+            Log(instance, fmi3Error, "logStatusError", "Cached unsigned integer value does not fit the requested FMI 3 integer width");
+            return fmi3Error;
+        }
+        values[index] = static_cast<FmiInteger>(temp[index]);
+    }
+    return fmi3OK;
+}
+
+template <typename FmiInteger>
+fmi3Status SetSignedIntegerValues(Fmi3Instance* instance,
+                                  const fmi3ValueReference valueReferences[],
+                                  const size_t nValueReferences,
+                                  const FmiInteger values[],
+                                  const size_t nValues) {
+    if (instance == nullptr || values == nullptr) {
+        return fmi3Fatal;
+    }
+    if (!ValidateValueCounts(instance, valueReferences, nValueReferences, nValues)) {
+        return fmi3Error;
+    }
+    std::vector<std::int64_t> temp(nValues);
+    for (size_t index = 0; index < nValues; ++index) {
+        temp[index] = static_cast<std::int64_t>(values[index]);
+    }
+    return ToFmiStatus(instance, instance->runtime.SetSignedInteger(valueReferences, nValueReferences, temp.data(), nValues));
+}
+
+template <typename FmiInteger>
+fmi3Status SetUnsignedIntegerValues(Fmi3Instance* instance,
+                                    const fmi3ValueReference valueReferences[],
+                                    const size_t nValueReferences,
+                                    const FmiInteger values[],
+                                    const size_t nValues) {
+    if (instance == nullptr || values == nullptr) {
+        return fmi3Fatal;
+    }
+    if (!ValidateValueCounts(instance, valueReferences, nValueReferences, nValues)) {
+        return fmi3Error;
+    }
+    std::vector<std::uint64_t> temp(nValues);
+    for (size_t index = 0; index < nValues; ++index) {
+        temp[index] = static_cast<std::uint64_t>(values[index]);
+    }
+    return ToFmiStatus(instance, instance->runtime.SetUnsignedInteger(valueReferences, nValueReferences, temp.data(), nValues));
 }
 
 }  // namespace
@@ -264,6 +359,33 @@ fmi3Status fmi3GetInt32(
     return ToFmiStatus(impl, impl->runtime.GetInteger(valueReferences, nValueReferences, values, nValues));
 }
 
+fmi3Status fmi3GetInt8(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3Int8 values[],
+    size_t nValues) {
+    return GetSignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
+}
+
+fmi3Status fmi3GetInt16(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3Int16 values[],
+    size_t nValues) {
+    return GetSignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
+}
+
+fmi3Status fmi3GetInt64(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3Int64 values[],
+    size_t nValues) {
+    return GetSignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
+}
+
 fmi3Status fmi3GetUInt32(
     fmi3Instance instance,
     const fmi3ValueReference valueReferences[],
@@ -286,6 +408,24 @@ fmi3Status fmi3GetUInt32(
         values[index] = static_cast<fmi3UInt32>(temp[index]);
     }
     return fmi3OK;
+}
+
+fmi3Status fmi3GetUInt8(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3UInt8 values[],
+    size_t nValues) {
+    return GetUnsignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
+}
+
+fmi3Status fmi3GetUInt16(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3UInt16 values[],
+    size_t nValues) {
+    return GetUnsignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
 }
 
 fmi3Status fmi3GetUInt64(
@@ -352,6 +492,43 @@ fmi3Status fmi3GetString(
     return fmi3OK;
 }
 
+fmi3Status fmi3GetBinary(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    size_t valueSizes[],
+    fmi3Binary values[],
+    size_t nValues) {
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr || valueSizes == nullptr || values == nullptr) {
+        return fmi3Fatal;
+    }
+    if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
+        return fmi3Error;
+    }
+    return ToFmiStatus(impl, impl->runtime.GetBinary(valueReferences, nValueReferences, valueSizes, values, nValues));
+}
+
+fmi3Status fmi3GetClock(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    fmi3Clock values[]) {
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr || values == nullptr) {
+        return fmi3Fatal;
+    }
+    std::unique_ptr<bool[]> buffer(new bool[nValueReferences]);
+    const auto status = impl->runtime.GetClock(valueReferences, nValueReferences, buffer.get());
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
+    for (size_t index = 0; index < nValueReferences; ++index) {
+        values[index] = buffer[index] ? fmi3True : fmi3False;
+    }
+    return fmi3OK;
+}
+
 fmi3Status fmi3SetFloat32(
     fmi3Instance instance,
     const fmi3ValueReference valueReferences[],
@@ -404,6 +581,33 @@ fmi3Status fmi3SetInt32(
     return ToFmiStatus(impl, impl->runtime.SetInteger(valueReferences, nValueReferences, values, nValues));
 }
 
+fmi3Status fmi3SetInt8(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3Int8 values[],
+    size_t nValues) {
+    return SetSignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
+}
+
+fmi3Status fmi3SetInt16(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3Int16 values[],
+    size_t nValues) {
+    return SetSignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
+}
+
+fmi3Status fmi3SetInt64(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3Int64 values[],
+    size_t nValues) {
+    return SetSignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
+}
+
 fmi3Status fmi3SetUInt32(
     fmi3Instance instance,
     const fmi3ValueReference valueReferences[],
@@ -417,11 +621,7 @@ fmi3Status fmi3SetUInt32(
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
         return fmi3Error;
     }
-    std::vector<std::int32_t> temp(nValues);
-    for (size_t index = 0; index < nValues; ++index) {
-        temp[index] = static_cast<std::int32_t>(values[index]);
-    }
-    return ToFmiStatus(impl, impl->runtime.SetInteger(valueReferences, nValueReferences, temp.data(), nValues));
+    return SetUnsignedIntegerValues(impl, valueReferences, nValueReferences, values, nValues);
 }
 
 fmi3Status fmi3SetUInt64(
@@ -437,11 +637,25 @@ fmi3Status fmi3SetUInt64(
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
         return fmi3Error;
     }
-    std::vector<std::int32_t> temp(nValues);
-    for (size_t index = 0; index < nValues; ++index) {
-        temp[index] = static_cast<std::int32_t>(values[index]);
-    }
-    return ToFmiStatus(impl, impl->runtime.SetInteger(valueReferences, nValueReferences, temp.data(), nValues));
+    return SetUnsignedIntegerValues(impl, valueReferences, nValueReferences, values, nValues);
+}
+
+fmi3Status fmi3SetUInt8(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3UInt8 values[],
+    size_t nValues) {
+    return SetUnsignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
+}
+
+fmi3Status fmi3SetUInt16(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3UInt16 values[],
+    size_t nValues) {
+    return SetUnsignedIntegerValues(AsInstance(instance), valueReferences, nValueReferences, values, nValues);
 }
 
 fmi3Status fmi3SetBoolean(
@@ -478,6 +692,39 @@ fmi3Status fmi3SetString(
         return fmi3Error;
     }
     return ToFmiStatus(impl, impl->runtime.SetString(valueReferences, nValueReferences, values, nValues));
+}
+
+fmi3Status fmi3SetBinary(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const size_t valueSizes[],
+    const fmi3Binary values[],
+    size_t nValues) {
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr || valueSizes == nullptr || values == nullptr) {
+        return fmi3Fatal;
+    }
+    if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
+        return fmi3Error;
+    }
+    return ToFmiStatus(impl, impl->runtime.SetBinary(valueReferences, nValueReferences, valueSizes, values, nValues));
+}
+
+fmi3Status fmi3SetClock(
+    fmi3Instance instance,
+    const fmi3ValueReference valueReferences[],
+    size_t nValueReferences,
+    const fmi3Clock values[]) {
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr || values == nullptr) {
+        return fmi3Fatal;
+    }
+    std::unique_ptr<bool[]> buffer(new bool[nValueReferences]);
+    for (size_t index = 0; index < nValueReferences; ++index) {
+        buffer[index] = values[index] != fmi3False;
+    }
+    return ToFmiStatus(impl, impl->runtime.SetClock(valueReferences, nValueReferences, buffer.get()));
 }
 
 fmi3Status fmi3DoStep(
@@ -605,14 +852,9 @@ FMI3_Export fmi3Status fmi3EnterContinuousTimeMode(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3EnterStepMode(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3EvaluateDiscreteStates(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3ExitConfigurationMode(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3GetBinary(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3GetClock(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetContinuousStateDerivatives(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetContinuousStates(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetEventIndicators(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3GetInt8(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3GetInt16(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3GetInt64(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetIntervalDecimal(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetIntervalFraction(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetNominalsOfContinuousStates(...) { return fmi3Error; }
@@ -622,22 +864,13 @@ FMI3_Export fmi3Status fmi3GetNumberOfVariableDependencies(...) { return fmi3Err
 FMI3_Export fmi3Status fmi3GetOutputDerivatives(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetShiftDecimal(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetShiftFraction(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3GetUInt8(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3GetUInt16(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetVariableDependencies(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3SetBinary(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3SetClock(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetContinuousStates(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3SetInt8(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3SetInt16(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3SetInt64(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetIntervalDecimal(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetIntervalFraction(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetShiftDecimal(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetShiftFraction(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetTime(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3SetUInt8(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3SetUInt16(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3UpdateDiscreteStates(...) { return fmi3Error; }
 
 }  // extern "C"
