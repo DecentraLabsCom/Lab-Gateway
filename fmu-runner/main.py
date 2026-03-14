@@ -1134,6 +1134,47 @@ def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_siz
 
 # ----- routes -----
 
+
+# ── AAS Admin ────────────────────────────────────────────────────────
+# Protected by OpenResty lab_manager_access.lua — no JWT needed here.
+
+@app.post("/aas-admin/fmu/{access_key}/sync")
+async def aas_sync_fmu(access_key: str, request: Request):
+    """
+    Sync (create or update) the AAS shell and SimulationModels submodel
+    for the given FMU access key.  This is the admin trigger called from
+    lab-manager — it does NOT require a booking JWT.
+    """
+    from aas_generator import sync_fmu_to_basyx
+
+    # Load FMU metadata locally (same path as describe, but without JWT)
+    fmu_path = _resolve_fmu_path(access_key)
+    try:
+        md = read_model_description(str(fmu_path))
+    except Exception as exc:
+        logger.error("AAS sync: cannot read FMU %s: %s", access_key, exc)
+        raise HTTPException(status_code=422, detail=f"Cannot read FMU model description: {exc}") from exc
+
+    metadata = _model_metadata_from_model_description(md)
+
+    # Derive lab_id: OpenResty forwards the request as-is, and the
+    # access_key is the natural local identifier.  For the AAS ID we use
+    # access_key as the lab-level identifier (the lab-manager knows the
+    # actual labId and can pass it as a query param for stable identity).
+    lab_id = request.query_params.get("labId", access_key)
+
+    result = await sync_fmu_to_basyx(
+        lab_id=lab_id,
+        access_key=access_key,
+        metadata=metadata,
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=result["error"])
+
+    return result
+
+
 @app.get("/health")
 async def health():
     """Backend-aware health check for the active FMU backend mode."""

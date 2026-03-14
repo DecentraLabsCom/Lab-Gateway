@@ -452,6 +452,7 @@ services:
       - WS_CREATE_RATE_LIMIT_PER_MINUTE=${FMU_WS_CREATE_RATE_LIMIT_PER_MINUTE:-30}
       - FMU_PROXY_GATEWAY_WS_URL=${FMU_PROXY_GATEWAY_WS_URL:-}
       - FMU_PROXY_SIGNING_KEY=${FMU_PROXY_SIGNING_KEY:-}
+      - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ./fmu-data:/app/fmu-data:ro
       - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
@@ -480,6 +481,42 @@ services:
         max-size: "20m"
         max-file: "5"
         labels: "service=fmu-runner"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: always
+    networks:
+      - guacnet
+
+  # BaSyx AAS Server - Asset Administration Shell registry & repository
+  # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_access.lua)
+  basyx-aas-server:
+    image: eclipsebasyx/aas-environment:2.0.0-milestone-04
+    environment:
+      - BASYX_AASREPOSITORY_FEATURE_MQTT_ENABLED=false
+      - BASYX_BACKEND=InMemory
+      - SERVER_PORT=8081
+    healthcheck:
+      test: ["CMD", "sh", "-c", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/shells) && [ $$code -eq 200 ]"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=basyx-aas-server"
     security_opt:
       - no-new-privileges:true
     cap_drop:
