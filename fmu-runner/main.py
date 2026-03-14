@@ -1166,10 +1166,21 @@ async def aas_sync_fmu(access_key: str, request: Request):
         upload = form.get("file") or form.get("aasx")
         if upload is not None:
             aasx_bytes = await upload.read()
+        # Optional AAS metadata fields
+        extra_info: dict = {}
+        for field in ("description", "license", "documentationUrl", "contactEmail"):
+            val = str(form.get(field) or request.query_params.get(field, "")).strip()
+            if val:
+                extra_info[field] = val
     else:
         raw_lab_id = request.query_params.get("labId")
         if raw_lab_id:
             lab_id = raw_lab_id
+        extra_info = {}
+        for field in ("description", "license", "documentationUrl", "contactEmail"):
+            val = request.query_params.get(field, "").strip()
+            if val:
+                extra_info[field] = val
 
     metadata: dict = {}
     if not aasx_bytes:
@@ -1187,6 +1198,7 @@ async def aas_sync_fmu(access_key: str, request: Request):
         access_key=access_key,
         metadata=metadata,
         aasx_bytes=aasx_bytes,
+        extra_info=extra_info or None,
     )
 
     if "error" in result:

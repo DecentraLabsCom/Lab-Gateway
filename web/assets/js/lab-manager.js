@@ -109,13 +109,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const fmuSyncLabIdEl = $('#fmuSyncLabId');
     const fmuSyncFileEl = $('#fmuSyncFile');
     const fmuSyncResultEl = $('#fmuSyncResult');
+    const fmuSyncDescriptionEl = $('#fmuSyncDescription');
+    const fmuSyncLicenseEl = $('#fmuSyncLicense');
+    const fmuSyncDocsUrlEl = $('#fmuSyncDocsUrl');
+    const fmuSyncContactEmailEl = $('#fmuSyncContactEmail');
 
     if (fmuSyncBtn) {
         fmuSyncBtn.addEventListener('click', () => {
             const accessKey = (fmuSyncKeyEl && fmuSyncKeyEl.value || '').trim();
             const labId = (fmuSyncLabIdEl && fmuSyncLabIdEl.value || '').trim();
             const file = fmuSyncFileEl && fmuSyncFileEl.files && fmuSyncFileEl.files[0];
-            syncAasFmu(accessKey, labId, file || null);
+            const description = (fmuSyncDescriptionEl && fmuSyncDescriptionEl.value || '').trim();
+            const license = (fmuSyncLicenseEl && fmuSyncLicenseEl.value || '').trim();
+            const docsUrl = (fmuSyncDocsUrlEl && fmuSyncDocsUrlEl.value || '').trim();
+            const contactEmail = (fmuSyncContactEmailEl && fmuSyncContactEmailEl.value || '').trim();
+            syncAasFmu(accessKey, labId, file || null, { description, license, docsUrl, contactEmail });
         });
     }
     
@@ -611,7 +619,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function syncAasFmu(accessKey, labId, aasxFile) {
+    async function syncAasFmu(accessKey, labId, aasxFile, extraInfo = {}) {
         if (!accessKey) {
             showToast('Enter a FMU access key', 'error');
             return;
@@ -625,10 +633,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const form = new FormData();
                 form.append('file', aasxFile);
                 if (labId) form.append('labId', labId);
+                if (extraInfo.description) form.append('description', extraInfo.description);
+                if (extraInfo.license) form.append('license', extraInfo.license);
+                if (extraInfo.docsUrl) form.append('documentationUrl', extraInfo.docsUrl);
+                if (extraInfo.contactEmail) form.append('contactEmail', extraInfo.contactEmail);
                 res = await fetch(url, { method: 'POST', body: form });
             } else {
-                const params = labId ? `?labId=${encodeURIComponent(labId)}` : '';
-                res = await fetch(url + params, { method: 'POST' });
+                const params = new URLSearchParams();
+                if (labId) params.set('labId', labId);
+                if (extraInfo.description) params.set('description', extraInfo.description);
+                if (extraInfo.license) params.set('license', extraInfo.license);
+                if (extraInfo.docsUrl) params.set('documentationUrl', extraInfo.docsUrl);
+                if (extraInfo.contactEmail) params.set('contactEmail', extraInfo.contactEmail);
+                const qs = params.toString() ? `?${params.toString()}` : '';
+                res = await fetch(url + qs, { method: 'POST' });
             }
             if (res.status === 403) {
                 showToast('Access denied: /aas-admin restricted to private networks', 'error');

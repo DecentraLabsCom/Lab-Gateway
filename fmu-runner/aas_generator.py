@@ -113,8 +113,12 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
     return ports
 
 
-def build_simulation_submodel(lab_id: str, access_key: str, metadata: dict) -> dict:
-    """Build the IDTA 02006 SimulationModels submodel JSON for BaSyx V2."""
+def build_simulation_submodel(lab_id: str, access_key: str, metadata: dict, extra_info: Optional[dict] = None) -> dict:
+    """Build the IDTA 02006 SimulationModels submodel JSON for BaSyx V2.
+
+    *extra_info* may contain any of the following optional provider-supplied keys:
+    ``license`` (SPDX or free text), ``documentationUrl``, ``contactEmail``.
+    """
     submodel_id = _submodel_id_for_fmu(lab_id)
 
     sim_model_elements = [
@@ -129,6 +133,19 @@ def build_simulation_submodel(lab_id: str, access_key: str, metadata: dict) -> d
         {"idShort": "AccessKey", "modelType": "Property", "valueType": "xs:string", "value": access_key},
         {"idShort": "SyncTimestamp", "modelType": "Property", "valueType": "xs:dateTime", "value": datetime.now(timezone.utc).isoformat()},
     ]
+
+    # Optional provider-supplied metadata
+    if extra_info:
+        for idshort, key in (
+            ("License", "license"),
+            ("DocumentationUrl", "documentationUrl"),
+            ("ContactEmail", "contactEmail"),
+        ):
+            value = extra_info.get(key, "").strip()
+            if value:
+                sim_model_elements.append(
+                    {"idShort": idshort, "modelType": "Property", "valueType": "xs:string", "value": value}
+                )
 
     ports = build_simulation_ports(metadata.get("modelVariables", []))
     if ports:
@@ -161,8 +178,12 @@ def build_simulation_submodel(lab_id: str, access_key: str, metadata: dict) -> d
     return submodel
 
 
-def build_aas_shell(lab_id: str, access_key: str, metadata: dict) -> dict:
-    """Build the AAS shell JSON for BaSyx V2."""
+def build_aas_shell(lab_id: str, access_key: str, metadata: dict, extra_info: Optional[dict] = None) -> dict:
+    """Build the AAS shell JSON for BaSyx V2.
+
+    *extra_info* may contain ``description`` (str) for a human-readable
+    description of the asset, surfaced as the AAS shell ``description`` field.
+    """
     aas_id = _aas_id_for_lab(lab_id)
     submodel_id = _submodel_id_for_fmu(lab_id)
 
@@ -182,6 +203,11 @@ def build_aas_shell(lab_id: str, access_key: str, metadata: dict) -> dict:
             }
         ],
     }
+
+    description = (extra_info or {}).get("description", "").strip()
+    if description:
+        shell["description"] = [{"language": "en", "text": description}]
+
     return shell
 
 
@@ -246,6 +272,7 @@ async def sync_fmu_to_basyx(
     access_key: str,
     metadata: dict,
     aasx_bytes: Optional[bytes] = None,
+    extra_info: Optional[dict] = None,
 ) -> dict:
     """
     Create or update the AAS shell and SimulationModels submodel in BaSyx.
@@ -334,8 +361,8 @@ async def sync_fmu_to_basyx(
                 # ── Metadata path: auto-generate shell + submodel from FMU ──
                 aas_id_encoded = _encode_id(aas_id)
                 submodel_id_encoded = _encode_id(submodel_id)
-                shell_payload = build_aas_shell(lab_id, access_key, metadata)
-                submodel_payload = build_simulation_submodel(lab_id, access_key, metadata)
+                shell_payload = build_aas_shell(lab_id, access_key, metadata, extra_info)
+                submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info)
 
                 # --- Submodel: PUT (create or replace) ---
                 sm_resp = await client.put(

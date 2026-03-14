@@ -194,6 +194,60 @@ class TestBuildAasShell:
         assert shell["idShort"] == "DecentraLabs_Lab_7"
 
 
+class TestExtraInfoFields:
+    """Tests for optional extra_info fields in build_* functions and sync endpoint."""
+
+    # -- build_simulation_submodel extra_info --
+
+    def test_submodel_extra_info_license(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"license": "MIT"})
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "License" in props
+        assert props["License"]["value"] == "MIT"
+
+    def test_submodel_extra_info_documentation_url(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"documentationUrl": "https://example.com"})
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "DocumentationUrl" in props
+        assert props["DocumentationUrl"]["value"] == "https://example.com"
+
+    def test_submodel_extra_info_contact_email(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"contactEmail": "lab@example.com"})
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "ContactEmail" in props
+        assert props["ContactEmail"]["value"] == "lab@example.com"
+
+    def test_submodel_extra_info_empty_fields_not_included(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"license": "", "documentationUrl": "  "})
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "License" not in props
+        assert "DocumentationUrl" not in props
+
+    def test_submodel_extra_info_none_is_noop(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, None)
+        # No extra properties should be present
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "License" not in props
+        assert "DocumentationUrl" not in props
+        assert "ContactEmail" not in props
+
+    # -- build_aas_shell extra_info --
+
+    def test_shell_description_added(self):
+        shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA, {"description": "My FMU model"})
+        assert "description" in shell
+        assert shell["description"][0]["language"] == "en"
+        assert shell["description"][0]["text"] == "My FMU model"
+
+    def test_shell_description_empty_not_added(self):
+        shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA, {"description": "  "})
+        assert "description" not in shell
+
+    def test_shell_extra_info_none_no_description(self):
+        shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA, None)
+        assert "description" not in shell
+
+
 # ── Endpoint integration tests ───────────────────────────────────────
 
 from fastapi.testclient import TestClient
@@ -307,6 +361,28 @@ class TestAasSyncEndpoint:
         resp = client.post("/aas-admin/fmu/test.fmu/sync")
         assert resp.status_code == 502
         assert "submodel creation failed" in resp.json()["detail"]
+
+    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    @patch("main.read_model_description")
+    @patch("main._resolve_fmu_path")
+    def test_sync_extra_info_passed_via_query(self, mock_resolve, mock_read_md, mock_sync):
+        mock_resolve.return_value = "/fake/path/test.fmu"
+        mock_read_md.return_value = self._mock_model_description()
+        mock_sync.return_value = {"aasId": "urn:decentralabs:lab:1", "created": True}
+
+        client = TestClient(_get_app())
+        resp = client.post(
+            "/aas-admin/fmu/test.fmu/sync?license=MIT&documentationUrl=https%3A%2F%2Fdocs.example.com&contactEmail=lab%40example.com&description=My+FMU"
+        )
+        assert resp.status_code == 200
+        mock_sync.assert_called_once()
+        call_kwargs = mock_sync.call_args
+        extra = call_kwargs.kwargs.get("extra_info") or (call_kwargs[1].get("extra_info") if len(call_kwargs) > 1 else None)
+        assert extra is not None
+        assert extra.get("license") == "MIT"
+        assert extra.get("documentationUrl") == "https://docs.example.com"
+        assert extra.get("contactEmail") == "lab@example.com"
+        assert extra.get("description") == "My FMU"
 
 
 # ── sync_fmu_to_basyx unit tests (disabled / unreachable) ────────────
