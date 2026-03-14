@@ -18,6 +18,7 @@ from sqlalchemy.engine import Engine, Connection
 from wakeonlan import send_magic_packet
 import winrm
 from apscheduler.schedulers.background import BackgroundScheduler
+import aas_generator
 
 APP = Flask(__name__)
 
@@ -505,6 +506,18 @@ def poll_heartbeat(host: Dict[str, Any], include_events: bool = False) -> Dict[s
             persist_heartbeat(DB_ENGINE, host, heartbeat, last_event)
         except Exception as exc:
             logging.error("DB persistence failed for %s: %s", host.get("name"), exc)
+    # Auto-sync AAS TechnicalData on heartbeat (best-effort, never blocks the poll)
+    for lab_id in host.get("labs", []):
+        try:
+            sync_result = aas_generator.sync_lab_to_basyx(str(lab_id), host, heartbeat)
+            if sync_result.get("disabled"):
+                break  # AAS not configured on this gateway — skip remaining labs silently
+            if sync_result.get("error"):
+                logging.warning("AAS auto-sync failed for lab %s: %s", lab_id, sync_result["error"])
+            else:
+                logging.debug("AAS auto-synced for lab %s", lab_id)
+        except Exception as exc:
+            logging.warning("AAS auto-sync exception for lab %s: %s", lab_id, exc)
     return {"heartbeat": heartbeat, "last_event": last_event}
 
 
@@ -980,6 +993,58 @@ def api_hosts_quarantine():
     if not ok:
         return jsonify({"error": f"host {name} not found"}), 404
     return jsonify({"host": name, "quarantined": quarantined})
+
+
+@APP.route("/aas-admin/lab/<lab_id>/sync", methods=["POST"])
+def api_aas_sync_lab(lab_id: str):
+    """
+    Sync (create or update) the AAS shell and submodels for a physical lab resource.
+
+    This endpoint is protected at the OpenResty layer via lab_manager_access.lua
+    and is only available on Full Gateway instances (--profile aas).
+
+    Optional JSON body:
+      { "includeHeartbeat": true }  — polls fresh heartbeat before syncing (default: false)
+
+    The host is resolved from the lab_id via the HOSTS registry.
+    If the lab_id is not mapped, returns 404.
+    """
+    host = HOSTS.get_by_lab(lab_id)
+    if not host:
+        # Try without quarantine filter (quarantined labs can still have their AAS updated)
+        host = HOSTS.lab_index.get(str(lab_id).strip().lower()) if hasattr(HOSTS, "lab_index") else None
+    if not host:
+        return jsonify({"error": f"No host mapping found for labId '{lab_id}'"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    include_heartbeat = parse_bool(payload.get("includeHeartbeat", False), False)
+
+    heartbeat_data: Optional[Dict[str, Any]] = None
+    if include_heartbeat:
+        try:
+            poll_result = poll_heartbeat(host, include_events=False)
+            heartbeat_data = poll_result.get("heartbeat")
+        except Exception as exc:
+            logging.warning("AAS sync: could not poll heartbeat for lab %s: %s", lab_id, exc)
+    elif DB_ENGINE:
+        # Use latest persisted heartbeat from DB if available
+        try:
+            with DB_ENGINE.begin() as conn:
+                heartbeat_data_row = _fetch_latest_heartbeat(conn, host.get("name", ""))
+                if heartbeat_data_row and heartbeat_data_row.get("raw"):
+                    heartbeat_data = heartbeat_data_row["raw"]
+        except Exception as exc:
+            logging.warning("AAS sync: could not load heartbeat from DB for lab %s: %s", lab_id, exc)
+
+    result = aas_generator.sync_lab_to_basyx(str(lab_id), host, heartbeat_data)
+
+    if result.get("disabled"):
+        return jsonify(result), 200
+
+    if result.get("error"):
+        return jsonify({"detail": result["error"], **result}), 502
+
+    return jsonify(result), 200
 
 
 def poll_all_hosts():
