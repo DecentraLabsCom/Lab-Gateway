@@ -498,8 +498,14 @@ services:
     profiles: ["aas"]
     environment:
       - BASYX_AASREPOSITORY_FEATURE_MQTT_ENABLED=false
-      - BASYX_BACKEND=InMemory
+      - BASYX_BACKEND=MongoDB
+      - SPRING_DATA_MONGODB_URI=mongodb://basyx-mongo:27017/basyx
       - SERVER_PORT=8081
+    depends_on:
+      basyx-mongo:
+        condition: service_healthy
+    volumes:
+      - basyx_aas_data:/data
     healthcheck:
       test: ["CMD", "sh", "-c", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/shells) && [ $$code -eq 200 ]"]
       interval: 30s
@@ -528,6 +534,35 @@ services:
     networks:
       - guacnet
 
+  # MongoDB backend for BaSyx AAS Server — persists shells/submodels across restarts.
+  # Only used when the 'aas' profile is active.
+  basyx-mongo:
+    image: mongo:7
+    profiles: ["aas"]
+    command: mongod --quiet --logpath /dev/null
+    volumes:
+      - basyx_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: always
+    networks:
+      - guacnet
+
 networks:
   guacnet:
     driver: bridge
@@ -535,3 +570,5 @@ networks:
 volumes:
   mysql_data:
   fmu-history:
+  basyx_mongo_data:
+  basyx_aas_data:
