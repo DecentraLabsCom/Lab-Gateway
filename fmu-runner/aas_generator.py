@@ -18,7 +18,9 @@ import httpx
 
 logger = logging.getLogger("fmu-runner.aas")
 
-BASYX_AAS_URL = os.getenv("BASYX_AAS_URL", "http://basyx-aas-server:8081")
+# Empty default: if not configured (e.g. Lite mode gateways without --profile aas),
+# sync_fmu_to_basyx returns a disabled result instead of attempting a connection.
+BASYX_AAS_URL = os.getenv("BASYX_AAS_URL", "")
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
 
 _SEMANTIC_ID_IDTA_02006 = "https://admin-shell.io/idta/SimulationModels/SimulationModels/1/0"
@@ -203,66 +205,77 @@ async def sync_fmu_to_basyx(
 
     result = {"aasId": aas_id, "submodelId": submodel_id, "created": False, "updated": False}
 
-    async with httpx.AsyncClient(base_url=BASYX_AAS_URL, timeout=15.0) as client:
-        # --- Submodel: PUT (create or replace) ---
-        sm_resp = await client.put(
-            f"/submodels/{submodel_id_encoded}",
-            json=submodel_payload,
-            headers={"Content-Type": "application/json"},
-        )
-        if sm_resp.status_code == 201:
-            result["created"] = True
-            logger.info("Created submodel %s for lab %s", submodel_id, lab_id)
-        elif sm_resp.status_code in (200, 204):
-            result["updated"] = True
-            logger.info("Updated submodel %s for lab %s", submodel_id, lab_id)
-        else:
-            # Try POST if PUT-to-create isn't supported
-            if sm_resp.status_code == 404:
-                sm_post = await client.post(
-                    "/submodels",
-                    json=submodel_payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                if sm_post.status_code in (200, 201):
-                    result["created"] = True
-                    logger.info("Created submodel %s via POST for lab %s", submodel_id, lab_id)
-                else:
-                    logger.error("Failed to create submodel %s: %s %s", submodel_id, sm_post.status_code, sm_post.text[:500])
-                    result["error"] = f"submodel creation failed: {sm_post.status_code}"
-                    return result
-            else:
-                logger.error("Failed to PUT submodel %s: %s %s", submodel_id, sm_resp.status_code, sm_resp.text[:500])
-                result["error"] = f"submodel sync failed: {sm_resp.status_code}"
-                return result
+    if not BASYX_AAS_URL:
+        logger.info("BASYX_AAS_URL not configured — AAS sync disabled (Lite or non-AAS gateway).")
+        result["disabled"] = True
+        return result
 
-        # --- Shell: PUT (create or replace) ---
-        shell_resp = await client.put(
-            f"/shells/{aas_id_encoded}",
-            json=shell_payload,
-            headers={"Content-Type": "application/json"},
-        )
-        if shell_resp.status_code == 201:
-            logger.info("Created AAS shell %s for lab %s", aas_id, lab_id)
-        elif shell_resp.status_code in (200, 204):
-            logger.info("Updated AAS shell %s for lab %s", aas_id, lab_id)
-        else:
-            if shell_resp.status_code == 404:
-                shell_post = await client.post(
-                    "/shells",
-                    json=shell_payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                if shell_post.status_code in (200, 201):
-                    logger.info("Created AAS shell %s via POST for lab %s", aas_id, lab_id)
-                else:
-                    logger.error("Failed to create shell %s: %s %s", aas_id, shell_post.status_code, shell_post.text[:500])
-                    result["error"] = f"shell creation failed: {shell_post.status_code}"
-                    return result
+    try:
+        async with httpx.AsyncClient(base_url=BASYX_AAS_URL, timeout=15.0) as client:
+            # --- Submodel: PUT (create or replace) ---
+            sm_resp = await client.put(
+                f"/submodels/{submodel_id_encoded}",
+                json=submodel_payload,
+                headers={"Content-Type": "application/json"},
+            )
+            if sm_resp.status_code == 201:
+                result["created"] = True
+                logger.info("Created submodel %s for lab %s", submodel_id, lab_id)
+            elif sm_resp.status_code in (200, 204):
+                result["updated"] = True
+                logger.info("Updated submodel %s for lab %s", submodel_id, lab_id)
             else:
-                logger.error("Failed to PUT shell %s: %s %s", aas_id, shell_resp.status_code, shell_resp.text[:500])
-                result["error"] = f"shell sync failed: {shell_resp.status_code}"
-                return result
+                # Try POST if PUT-to-create isn't supported
+                if sm_resp.status_code == 404:
+                    sm_post = await client.post(
+                        "/submodels",
+                        json=submodel_payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    if sm_post.status_code in (200, 201):
+                        result["created"] = True
+                        logger.info("Created submodel %s via POST for lab %s", submodel_id, lab_id)
+                    else:
+                        logger.error("Failed to create submodel %s: %s %s", submodel_id, sm_post.status_code, sm_post.text[:500])
+                        result["error"] = f"submodel creation failed: {sm_post.status_code}"
+                        return result
+                else:
+                    logger.error("Failed to PUT submodel %s: %s %s", submodel_id, sm_resp.status_code, sm_resp.text[:500])
+                    result["error"] = f"submodel sync failed: {sm_resp.status_code}"
+                    return result
+
+            # --- Shell: PUT (create or replace) ---
+            shell_resp = await client.put(
+                f"/shells/{aas_id_encoded}",
+                json=shell_payload,
+                headers={"Content-Type": "application/json"},
+            )
+            if shell_resp.status_code == 201:
+                logger.info("Created AAS shell %s for lab %s", aas_id, lab_id)
+            elif shell_resp.status_code in (200, 204):
+                logger.info("Updated AAS shell %s for lab %s", aas_id, lab_id)
+            else:
+                if shell_resp.status_code == 404:
+                    shell_post = await client.post(
+                        "/shells",
+                        json=shell_payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    if shell_post.status_code in (200, 201):
+                        logger.info("Created AAS shell %s via POST for lab %s", aas_id, lab_id)
+                    else:
+                        logger.error("Failed to create shell %s: %s %s", aas_id, shell_post.status_code, shell_post.text[:500])
+                        result["error"] = f"shell creation failed: {shell_post.status_code}"
+                        return result
+                else:
+                    logger.error("Failed to PUT shell %s: %s %s", aas_id, shell_resp.status_code, shell_resp.text[:500])
+                    result["error"] = f"shell sync failed: {shell_resp.status_code}"
+                    return result
+
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.warning("BaSyx unreachable at %s: %s", BASYX_AAS_URL, exc)
+        result["error"] = f"BaSyx unreachable: {exc}"
+        return result
 
     result["synced"] = True
     return result

@@ -491,8 +491,11 @@ services:
 
   # BaSyx AAS Server - Asset Administration Shell registry & repository
   # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_access.lua)
+  # Only available in Full Gateway instances (one per institution).
+  # Start with: docker compose --profile aas up  (or COMPOSE_PROFILES=aas)
   basyx-aas-server:
     image: eclipsebasyx/aas-environment:2.0.0-milestone-04
+    profiles: ["aas"]
     environment:
       - BASYX_AASREPOSITORY_FEATURE_MQTT_ENABLED=false
       - BASYX_BACKEND=InMemory

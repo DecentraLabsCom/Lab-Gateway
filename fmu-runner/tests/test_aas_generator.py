@@ -307,3 +307,40 @@ class TestAasSyncEndpoint:
         resp = client.post("/aas-admin/fmu/test.fmu/sync")
         assert resp.status_code == 502
         assert "submodel creation failed" in resp.json()["detail"]
+
+
+# ── sync_fmu_to_basyx unit tests (disabled / unreachable) ────────────
+
+import pytest
+import httpx
+import aas_generator as _aas_mod
+
+
+class TestSyncFmuToBasyxDegradation:
+    """Tests for graceful degradation when BaSyx is not available."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_when_no_url(self):
+        """If BASYX_AAS_URL is empty, sync returns disabled=True without hitting network."""
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = ""
+        try:
+            result = await _aas_mod.sync_fmu_to_basyx("42", "motor.fmu", SAMPLE_METADATA)
+            assert result.get("disabled") is True
+            assert result.get("synced") is None
+            assert "error" not in result
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    async def test_error_when_basyx_unreachable(self):
+        """If BaSyx host is unreachable, sync returns an error dict instead of raising."""
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "http://127.0.0.1:19999"  # nothing listening here
+        try:
+            result = await _aas_mod.sync_fmu_to_basyx("42", "motor.fmu", SAMPLE_METADATA)
+            assert "error" in result
+            assert "BaSyx unreachable" in result["error"]
+            assert result.get("synced") is None
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
