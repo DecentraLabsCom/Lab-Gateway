@@ -1144,29 +1144,49 @@ async def aas_sync_fmu(access_key: str, request: Request):
     Sync (create or update) the AAS shell and SimulationModels submodel
     for the given FMU access key.  This is the admin trigger called from
     lab-manager — it does NOT require a booking JWT.
+
+    Accepts two request styles:
+    * Plain POST (no body / query params only) — auto-generates shell +
+      submodel from the FMU's model description.
+    * Multipart/form-data with an optional ``file`` field (.aasx) — parses
+      the package and uploads the contained shells / submodels to BaSyx.
+      ``labId`` may also be supplied as a form field.
     """
     from aas_generator import sync_fmu_to_basyx
 
-    # Load FMU metadata locally (same path as describe, but without JWT)
-    fmu_path = _resolve_fmu_path(access_key)
-    try:
-        md = read_model_description(str(fmu_path))
-    except Exception as exc:
-        logger.error("AAS sync: cannot read FMU %s: %s", access_key, exc)
-        raise HTTPException(status_code=422, detail=f"Cannot read FMU model description: {exc}") from exc
+    aasx_bytes: Optional[bytes] = None
+    lab_id: str = access_key  # default; may be overridden below
 
-    metadata = _model_metadata_from_model_description(md)
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        raw_lab_id = form.get("labId") or request.query_params.get("labId")
+        if raw_lab_id:
+            lab_id = str(raw_lab_id)
+        upload = form.get("file") or form.get("aasx")
+        if upload is not None:
+            aasx_bytes = await upload.read()
+    else:
+        raw_lab_id = request.query_params.get("labId")
+        if raw_lab_id:
+            lab_id = raw_lab_id
 
-    # Derive lab_id: OpenResty forwards the request as-is, and the
-    # access_key is the natural local identifier.  For the AAS ID we use
-    # access_key as the lab-level identifier (the lab-manager knows the
-    # actual labId and can pass it as a query param for stable identity).
-    lab_id = request.query_params.get("labId", access_key)
+    metadata: dict = {}
+    if not aasx_bytes:
+        # Need FMU metadata for the auto-generation path
+        fmu_path = _resolve_fmu_path(access_key)
+        try:
+            md = read_model_description(str(fmu_path))
+        except Exception as exc:
+            logger.error("AAS sync: cannot read FMU %s: %s", access_key, exc)
+            raise HTTPException(status_code=422, detail=f"Cannot read FMU model description: {exc}") from exc
+        metadata = _model_metadata_from_model_description(md)
 
     result = await sync_fmu_to_basyx(
         lab_id=lab_id,
         access_key=access_key,
         metadata=metadata,
+        aasx_bytes=aasx_bytes,
     )
 
     if "error" in result:

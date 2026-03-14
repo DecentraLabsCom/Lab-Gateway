@@ -102,6 +102,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostListEl = $('#hostList');
     const hostState = {};
     let hostNames = loadHosts();
+
+    // FMU AAS sync elements
+    const fmuSyncBtn = $('#fmuSyncBtn');
+    const fmuSyncKeyEl = $('#fmuSyncKey');
+    const fmuSyncLabIdEl = $('#fmuSyncLabId');
+    const fmuSyncFileEl = $('#fmuSyncFile');
+    const fmuSyncResultEl = $('#fmuSyncResult');
+
+    if (fmuSyncBtn) {
+        fmuSyncBtn.addEventListener('click', () => {
+            const accessKey = (fmuSyncKeyEl && fmuSyncKeyEl.value || '').trim();
+            const labId = (fmuSyncLabIdEl && fmuSyncLabIdEl.value || '').trim();
+            const file = fmuSyncFileEl && fmuSyncFileEl.files && fmuSyncFileEl.files[0];
+            syncAasFmu(accessKey, labId, file || null);
+        });
+    }
     
     // Reservation timeline elements
     const timelineInput = $('#timelineReservationId');
@@ -592,6 +608,58 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.error(err);
             showToast(`${command} failed on ${host}: ${err.message}`, 'error');
+        }
+    }
+
+    async function syncAasFmu(accessKey, labId, aasxFile) {
+        if (!accessKey) {
+            showToast('Enter a FMU access key', 'error');
+            return;
+        }
+        if (fmuSyncBtn) fmuSyncBtn.disabled = true;
+        if (fmuSyncResultEl) fmuSyncResultEl.textContent = '';
+        try {
+            let res;
+            const url = `/aas-admin/fmu/${encodeURIComponent(accessKey)}/sync`;
+            if (aasxFile) {
+                const form = new FormData();
+                form.append('file', aasxFile);
+                if (labId) form.append('labId', labId);
+                res = await fetch(url, { method: 'POST', body: form });
+            } else {
+                const params = labId ? `?labId=${encodeURIComponent(labId)}` : '';
+                res = await fetch(url + params, { method: 'POST' });
+            }
+            if (res.status === 403) {
+                showToast('Access denied: /aas-admin restricted to private networks', 'error');
+                return;
+            }
+            if (res.status === 401) {
+                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                return;
+            }
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `HTTP ${res.status}`);
+            }
+            const data = await res.json();
+            if (fmuSyncResultEl) {
+                const msg = data.aasxUpload
+                    ? `Synced ${(data.uploadedAasIds || []).length} shell(s) + ${(data.uploadedSubmodelIds || []).length} submodel(s) from AASX`
+                    : `AAS shell synced — ${data.created ? 'created' : 'updated'}`;
+                fmuSyncResultEl.textContent = msg;
+                fmuSyncResultEl.style.color = 'var(--color-success, #1a7f4b)';
+            }
+            showToast(`FMU AAS sync: ${accessKey} ok`, 'success');
+        } catch (err) {
+            console.error(err);
+            if (fmuSyncResultEl) {
+                fmuSyncResultEl.textContent = err.message;
+                fmuSyncResultEl.style.color = 'var(--color-error, #c0392b)';
+            }
+            showToast(`FMU AAS sync failed: ${err.message}`, 'error');
+        } finally {
+            if (fmuSyncBtn) fmuSyncBtn.disabled = false;
         }
     }
 

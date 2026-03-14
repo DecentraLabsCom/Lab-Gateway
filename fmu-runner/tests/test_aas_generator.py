@@ -344,3 +344,219 @@ class TestSyncFmuToBasyxDegradation:
             assert result.get("synced") is None
         finally:
             _aas_mod.BASYX_AAS_URL = original
+
+
+# ── _parse_aasx unit tests ──────────────────────────────────────────
+
+import io
+import json
+import zipfile
+
+import aas_generator as _aas_mod
+
+
+def _make_aasx(shells=None, submodels=None, concept_descs=None, bad_zip=False) -> bytes:
+    """Build a minimal in-memory AASX package for testing."""
+    if bad_zip:
+        return b"not a zip"
+
+    env = {}
+    if shells is not None:
+        env["assetAdministrationShells"] = shells
+    if submodels is not None:
+        env["submodels"] = submodels
+    if concept_descs is not None:
+        env["conceptDescriptions"] = concept_descs
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        # Write _rels/.rels pointing to the origin part
+        rels_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Type="http://admin-shell.io/aasx/relationships/aasx-origin"'
+            ' Target="/aasx/data.json" Id="r1"/>'
+            "</Relationships>"
+        )
+        zf.writestr("_rels/.rels", rels_xml)
+        zf.writestr("aasx/data.json", json.dumps(env))
+    return buf.getvalue()
+
+
+class TestParseAasx:
+    """Unit tests for the _parse_aasx() helper."""
+
+    def test_parse_shells_and_submodels(self):
+        shell = {"id": "urn:test:shell:1", "idShort": "testShell"}
+        submodel = {"id": "urn:test:sm:1", "idShort": "testSm"}
+        pkg = _make_aasx(shells=[shell], submodels=[submodel])
+        result = _aas_mod._parse_aasx(pkg)
+        assert result["shells"] == [shell]
+        assert result["submodels"] == [submodel]
+
+    def test_parse_empty_package(self):
+        pkg = _make_aasx(shells=[], submodels=[])
+        result = _aas_mod._parse_aasx(pkg)
+        assert result["shells"] == []
+        assert result["submodels"] == []
+
+    def test_bad_zip_returns_empty(self):
+        result = _aas_mod._parse_aasx(b"not a zip")
+        assert result["shells"] == []
+        assert result["submodels"] == []
+
+    def test_fallback_scan_without_rels(self):
+        """If _rels/.rels is absent, should still find JSON via filesystem scan."""
+        env = {"assetAdministrationShells": [{"id": "urn:scan:1"}], "submodels": []}
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("aasx/data.json", json.dumps(env))
+        result = _aas_mod._parse_aasx(buf.getvalue())
+        assert result["shells"] == [{"id": "urn:scan:1"}]
+
+
+class TestSyncFmuToBasyxAasx:
+    """Tests for the aasx_bytes path in sync_fmu_to_basyx()."""
+
+    @pytest.mark.asyncio
+    async def test_aasx_disabled_when_no_url(self):
+        """aasx_bytes path still returns disabled when BASYX_AAS_URL is empty."""
+        pkg = _make_aasx(shells=[{"id": "urn:s:1"}], submodels=[{"id": "urn:sm:1"}])
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = ""
+        try:
+            result = await _aas_mod.sync_fmu_to_basyx("42", "x.fmu", {}, aasx_bytes=pkg)
+            assert result.get("disabled") is True
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    async def test_aasx_parse_empty_returns_error(self):
+        """Empty AASX (no shells, no submodels) returns an error without uploading anything."""
+        pkg = _make_aasx(shells=[], submodels=[])
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "http://basyx-test:8081"
+        try:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+
+            mock_client = AsyncMock()
+            mock_client.put = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _aas_mod.sync_fmu_to_basyx("42", "x.fmu", {}, aasx_bytes=pkg)
+
+            # Should return an error without calling PUT/POST
+            assert "error" in result
+            assert "no shells or submodels" in result["error"]
+            mock_client.put.assert_not_called()
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    async def test_aasx_upload_success(self):
+        """Happy path: shells + submodels from AASX are PUT to BaSyx successfully."""
+        shell = {"id": "urn:test:shell:1", "idShort": "s1"}
+        submodel = {"id": "urn:test:sm:1", "idShort": "sm1"}
+        pkg = _make_aasx(shells=[shell], submodels=[submodel])
+
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "http://basyx-test:8081"
+        try:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 201
+
+            mock_client = AsyncMock()
+            mock_client.put = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _aas_mod.sync_fmu_to_basyx("42", "x.fmu", {}, aasx_bytes=pkg)
+
+            assert result.get("aasxUpload") is True
+            assert result.get("synced") is True
+            assert result["uploadedAasIds"] == ["urn:test:shell:1"]
+            assert result["uploadedSubmodelIds"] == ["urn:test:sm:1"]
+            assert result["created"] is True
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    async def test_aasx_upload_uses_aasx_ids_not_lab_ids(self):
+        """The returned aasId/submodelId should come from the AASX, not lab_id computation."""
+        shell = {"id": "urn:custom:shell:xyz"}
+        submodel = {"id": "urn:custom:sm:xyz"}
+        pkg = _make_aasx(shells=[shell], submodels=[submodel])
+
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "http://basyx-test:8081"
+        try:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+
+            mock_client = AsyncMock()
+            mock_client.put = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _aas_mod.sync_fmu_to_basyx("lab42", "x.fmu", {}, aasx_bytes=pkg)
+
+            assert result["aasId"] == "urn:custom:shell:xyz"
+            assert result["submodelId"] == "urn:custom:sm:xyz"
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+
+class TestAasSyncEndpointMultipart:
+    """Test POST /aas-admin/fmu/{accessKey}/sync with multipart AASX upload."""
+
+    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    def test_sync_with_aasx_file(self, mock_sync):
+        pkg = _make_aasx(shells=[{"id": "urn:s:1"}], submodels=[{"id": "urn:sm:1"}])
+        mock_sync.return_value = {
+            "aasId": "urn:s:1",
+            "submodelId": "urn:sm:1",
+            "created": True,
+            "aasxUpload": True,
+            "uploadedAasIds": ["urn:s:1"],
+            "uploadedSubmodelIds": ["urn:sm:1"],
+            "synced": True,
+        }
+
+        from fastapi.testclient import TestClient
+        client = TestClient(_get_app())
+        resp = client.post(
+            "/aas-admin/fmu/test.fmu/sync",
+            files={"file": ("package.aasx", pkg, "application/octet-stream")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["aasxUpload"] is True
+        # sync_fmu_to_basyx should have been called with aasx_bytes, NOT read_model_description
+        call_kwargs = mock_sync.call_args.kwargs
+        assert call_kwargs.get("aasx_bytes") is not None
+
+    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    def test_sync_with_aasx_and_lab_id_form_field(self, mock_sync):
+        pkg = _make_aasx(shells=[{"id": "urn:s:99"}], submodels=[])
+        mock_sync.return_value = {
+            "aasId": "urn:s:99", "submodelId": "urn:sm:99",
+            "created": True, "aasxUpload": True,
+            "uploadedAasIds": ["urn:s:99"], "uploadedSubmodelIds": [],
+            "synced": True,
+        }
+
+        from fastapi.testclient import TestClient
+        client = TestClient(_get_app())
+        resp = client.post(
+            "/aas-admin/fmu/motor.fmu/sync",
+            data={"labId": "99"},
+            files={"file": ("p.aasx", pkg, "application/octet-stream")},
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_sync.call_args.kwargs
+        assert call_kwargs.get("lab_id") == "99"
