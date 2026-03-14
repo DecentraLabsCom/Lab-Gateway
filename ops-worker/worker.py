@@ -981,6 +981,38 @@ def api_hosts_reload():
     return jsonify({"reloaded": True, "hosts": count})
 
 
+@APP.route("/api/aas-sync", methods=["POST"])
+def api_aas_sync():
+    """
+    Sync AAS shells for all labs mapped to the given host.
+
+    This is a convenience wrapper over /aas-admin/lab/<lab_id>/sync for the
+    lab-manager UI, which knows hosts by name but not individual lab IDs.
+    Protected at OpenResty via LAB_MANAGER_TOKEN (same as /ops/api/*).
+
+    Request body: { "host": "<host-name>" }
+    Response: { "host": "...", "labs": [{ "labId": "1", "synced": true, ... }] }
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    host_name = payload.get("host")
+    if not host_name:
+        return jsonify({"error": "host is required"}), 400
+    host = HOSTS.get(host_name)
+    if not host:
+        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
+    labs = host.get("labs", [])
+    if not labs:
+        return jsonify({"host": host_name, "labs": [], "message": "No labs mapped to this host"}), 200
+    results = []
+    for lab_id in labs:
+        try:
+            result = aas_generator.sync_lab_to_basyx(str(lab_id), host)
+            results.append({"labId": str(lab_id), **result})
+        except Exception as exc:  # pylint: disable=broad-except
+            results.append({"labId": str(lab_id), "error": str(exc)})
+    return jsonify({"host": host_name, "labs": results}), 200
+
+
 @APP.route("/api/hosts/quarantine", methods=["POST"])
 def api_hosts_quarantine():
     payload = request.get_json(silent=True) or {}
