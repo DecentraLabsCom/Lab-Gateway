@@ -14,6 +14,7 @@ compose_files=""
 compose_profiles=""
 cf_enabled=false
 certbot_enabled=false
+aas_bundled=false
 existing_mysql_root_password=""
 existing_mysql_password=""
 db_credentials_changed=false
@@ -393,6 +394,46 @@ fi
 echo
 
 echo
+echo "AAS Support (Asset Administration Shell)"
+echo "========================================="
+if [ -n "$issuer_value" ]; then
+    echo "Lite Gateway detected — AAS is only available on Full Gateway instances. Skipping."
+    update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
+else
+    echo "AAS enables publishing Digital Twin descriptions (IDTA 02006) for FMUs and physical labs."
+    echo "  1) Bundled BaSyx  — Deploy the included BaSyx AAS Server container (recommended)"
+    echo "  2) External server — Connect to an existing AAS server (BaSyx, NOVAAS, etc.)"
+    echo "  3) None           — Skip AAS support"
+    read -p "AAS server [1/2/3] (default: 1): " aas_option
+    aas_option=$(echo "$aas_option" | tr -d ' ')
+    case "$aas_option" in
+        2)
+            echo "External AAS server selected."
+            read -p "External AAS API base URL (e.g. http://192.168.1.10:8081 or https://my-aas.example.com): " external_aas_url
+            external_aas_url=$(echo "$external_aas_url" | tr -d ' ')
+            if [ -z "$external_aas_url" ]; then
+                echo "No URL provided. AAS support disabled."
+                update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
+            else
+                echo "   * External AAS server: $external_aas_url"
+                echo "   * Bundled basyx-aas-server / basyx-mongo containers will NOT be started."
+                update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" "$external_aas_url"
+            fi
+            ;;
+        3)
+            echo "AAS support disabled."
+            update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
+            ;;
+        *)
+            echo "Bundled BaSyx selected."
+            update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
+            aas_bundled=true
+            ;;
+    esac
+fi
+echo
+
+echo
 echo "Remote Access (Cloudflare Tunnel)"
 echo "================================="
 read -p "Enable Cloudflare Tunnel to expose the gateway without opening inbound ports? (y/N): " enable_cf
@@ -591,6 +632,13 @@ if [ "$certbot_enabled" = true ]; then
         compose_profiles="$compose_profiles --profile certbot"
     else
         compose_profiles="--profile certbot"
+    fi
+fi
+if [ "$aas_bundled" = true ]; then
+    if [ -n "$compose_profiles" ]; then
+        compose_profiles="$compose_profiles --profile aas"
+    else
+        compose_profiles="--profile aas"
     fi
 fi
 

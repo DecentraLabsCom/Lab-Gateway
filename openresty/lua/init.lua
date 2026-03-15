@@ -107,6 +107,14 @@ else
     config:set("guac_api_url", "http://127.0.0.1:8080/guacamole/api")
 end
 
+-- AAS server base URL for /aas/* proxy.
+-- Empty → use bundled BaSyx (http://basyx-aas-server:8081) when --profile aas is active.
+-- Non-empty → proxy to the configured external AAS server URL.
+local basyx_aas_raw = trim(os.getenv("BASYX_AAS_URL")) or ""
+local basyx_aas_url = (basyx_aas_raw ~= "") and basyx_aas_raw or "http://basyx-aas-server:8081"
+basyx_aas_url = basyx_aas_url:gsub("/+$", "")  -- strip trailing slash
+config:set("basyx_aas_url", basyx_aas_url)
+
 if lite_mode then
     ngx.log(ngx.INFO, "Lite mode enabled: treasury/auth/intents endpoints are restricted on this gateway")
 else

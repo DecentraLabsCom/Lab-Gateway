@@ -12,6 +12,8 @@ set "compose_files="
 set "compose_full="
 set "cf_enabled=0"
 set "certbot_enabled=0"
+set "aas_enabled=0"
+set "external_aas_url="
 set "existing_mysql_root_password="
 set "existing_mysql_password="
 set "db_credentials_changed=0"
@@ -354,6 +356,41 @@ if "!issuer_value!"=="" (
 )
 echo.
 
+echo AAS Support ^(Asset Administration Shell^)
+echo ==========================================
+if not "!issuer_value!"=="" (
+    echo Lite Gateway detected - AAS is only available on Full Gateway instances. Skipping.
+    call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
+) else (
+    echo AAS enables publishing Digital Twin descriptions ^(IDTA 02006^) for FMUs and physical labs.
+    echo   1^) Bundled BaSyx  - Deploy the included BaSyx AAS Server container ^(recommended^)
+    echo   2^) External server - Connect to an existing AAS server ^(BaSyx, NOVAAS, etc.^)
+    echo   3^) None           - Skip AAS support
+    set /p "aas_option=AAS server [1/2/3] (default: 1): "
+    if defined aas_option set "aas_option=!aas_option: =!"
+    if "!aas_option!"=="2" (
+        echo External AAS server selected.
+        set /p "external_aas_url=External AAS API base URL ^(e.g. http://192.168.1.10:8081 or https://my-aas.example.com^): "
+        if defined external_aas_url set "external_aas_url=!external_aas_url: =!"
+        if "!external_aas_url!"=="" (
+            echo No URL provided. AAS support disabled.
+            call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
+        ) else (
+            echo    * External AAS server: !external_aas_url!
+            echo    * Bundled basyx-aas-server / basyx-mongo containers will NOT be started.
+            call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" "!external_aas_url!"
+        )
+    ) else if "!aas_option!"=="3" (
+        echo AAS support disabled.
+        call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
+    ) else (
+        echo Bundled BaSyx selected.
+        call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
+        set "aas_enabled=1"
+    )
+)
+echo.
+
 echo Remote Access (Cloudflare Tunnel)
 echo =================================
 set "enable_cf="
@@ -489,6 +526,7 @@ call :ReadEnvValue "%ROOT_ENV_FILE%" "CERTBOT_DOMAINS" certbot_domains
 call :ReadEnvValue "%ROOT_ENV_FILE%" "CERTBOT_EMAIL" certbot_email
 if not "!certbot_domains!"=="" if not "!certbot_email!"=="" set "certbot_enabled=1"
 if "!certbot_enabled!"=="1" set "compose_full=!compose_full! --profile certbot"
+if "!aas_enabled!"=="1" set "compose_full=!compose_full! --profile aas"
 echo.
 
 echo Blockchain Services Configuration
