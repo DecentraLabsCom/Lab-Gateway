@@ -129,6 +129,44 @@
                 </div>
             </section>
 
+            <section class="grid single-column">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Link Existing AAS</h2>
+                            <p>Map an FMU access key to an AAS shell already managed in your BaSyx or external AAS server.</p>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="hint" id="aasLinkHint">
+                            When a link is active, Marketplace requests for the conventional
+                            <code>urn:decentralabs:lab:{labId}</code> shell are transparently
+                            redirected to the linked external AAS ID — no Marketplace changes needed.
+                        </div>
+                        <div class="form-grid" style="margin-top: 0.75rem;">
+                            <label class="field">
+                                <span>Access Key</span>
+                                <input type="text" id="aasLinkKey" placeholder="fmu-access-key">
+                            </label>
+                            <label class="field">
+                                <span>Lab ID <span class="muted-text">(numeric on-chain ID — same as in FMU Sync)</span></span>
+                                <input type="text" id="aasLinkLabId" placeholder="42">
+                            </label>
+                            <label class="field full">
+                                <span>External AAS ID <span class="muted-text">(the shell ID in your external/self-hosted server)</span></span>
+                                <input type="text" id="aasLinkAasId" placeholder="urn:example:aas:my-simulation-model">
+                            </label>
+                        </div>
+                        <div class="actions inline-actions" style="margin-top: 1rem;">
+                            <button class="primary-btn" id="aasLinkSaveBtn"><i class="fas fa-link"></i> Save Link</button>
+                            <button class="ghost-btn" id="aasLinkCheckBtn"><i class="fas fa-search"></i> Check</button>
+                            <button class="danger-btn" id="aasLinkDeleteBtn"><i class="fas fa-unlink"></i> Remove Link</button>
+                        </div>
+                        <div id="aasLinkResult" style="margin-top: 0.75rem;"></div>
+                    </div>
+                </div>
+            </section>
+
             <section class="grid two-columns">
                 <div class="card">
                     <div class="card-header">

@@ -840,3 +840,216 @@ class TestAasSyncEndpointMultipart:
         assert resp.status_code == 200
         call_kwargs = mock_sync.call_args.kwargs
         assert call_kwargs.get("lab_id") == "99"
+
+
+# ── AAS Link CRUD endpoint tests ─────────────────────────────────────
+
+
+class TestAasLinkEndpoints:
+    """Tests for POST/GET/DELETE /aas-admin/fmu/{accessKey}/aas-link
+    and GET /aas-admin/resolve-aas-id."""
+
+    def _client(self):
+        return TestClient(_get_app())
+
+    # ── POST: create link ────────────────────────────────────────────
+
+    def test_create_link_success(self, tmp_path):
+        """POST with valid aasId saves a JSON file and returns it."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.post(
+                "/aas-admin/fmu/motor.fmu/aas-link",
+                json={"aasId": "urn:example:aas:motor-v2"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["linked"] is True
+        assert data["aasId"] == "urn:example:aas:motor-v2"
+        assert data["accessKey"] == "motor.fmu"
+
+    def test_create_link_with_lab_id(self, tmp_path):
+        """POST with labId writes both accessKey and labId-indexed files."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.post(
+                "/aas-admin/fmu/motor.fmu/aas-link",
+                json={"aasId": "urn:example:aas:motor-v2", "labId": "42"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["labId"] == "42"
+        # Both files should exist
+        assert (tmp_path / "motor.fmu.aas-link.json").is_file()
+        assert (tmp_path / "42.aas-link.json").is_file()
+
+    def test_create_link_persists_file(self, tmp_path):
+        """POST writes a .aas-link.json file with the correct content."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            client.post(
+                "/aas-admin/fmu/test.fmu/aas-link",
+                json={"aasId": "urn:example:aas:test", "submodelIds": ["urn:example:sm:1"]},
+            )
+        link_file = tmp_path / "test.fmu.aas-link.json"
+        assert link_file.is_file()
+        import json as _json
+        saved = _json.loads(link_file.read_text())
+        assert saved["aasId"] == "urn:example:aas:test"
+        assert saved["submodelIds"] == ["urn:example:sm:1"]
+
+    def test_create_link_missing_aas_id(self, tmp_path):
+        """POST without aasId returns 400."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.post("/aas-admin/fmu/test.fmu/aas-link", json={})
+        assert resp.status_code == 400
+
+    def test_create_link_invalid_json(self, tmp_path):
+        """POST with non-JSON body returns 400."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.post(
+                "/aas-admin/fmu/test.fmu/aas-link",
+                content=b"not json",
+                headers={"Content-Type": "application/json"},
+            )
+        assert resp.status_code == 400
+
+    # ── GET: read link ────────────────────────────────────────────────
+
+    def test_get_link_exists(self, tmp_path):
+        """GET returns the stored link."""
+        import json as _json
+        link_file = tmp_path / "motor.fmu.aas-link.json"
+        link_file.write_text(_json.dumps({"aasId": "urn:example:aas:motor-v2"}))
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.get("/aas-admin/fmu/motor.fmu/aas-link")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["aasId"] == "urn:example:aas:motor-v2"
+        assert data["accessKey"] == "motor.fmu"
+
+    def test_get_link_not_found(self, tmp_path):
+        """GET returns 404 when no link is configured."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.get("/aas-admin/fmu/nonexistent.fmu/aas-link")
+        assert resp.status_code == 404
+
+    # ── DELETE: remove link ───────────────────────────────────────────
+
+    def test_delete_link_success(self, tmp_path):
+        """DELETE removes the link file and returns unlinked:True."""
+        import json as _json
+        link_file = tmp_path / "test.fmu.aas-link.json"
+        link_file.write_text(_json.dumps({"aasId": "urn:example:aas:test"}))
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.delete("/aas-admin/fmu/test.fmu/aas-link")
+        assert resp.status_code == 200
+        assert resp.json()["unlinked"] is True
+        assert not link_file.exists()
+
+    def test_delete_link_also_removes_lab_id_file(self, tmp_path):
+        """DELETE cleans up the labId-indexed file when it was written by POST."""
+        import json as _json
+        link_content = {"aasId": "urn:example:aas:motor", "labId": "99"}
+        (tmp_path / "motor.fmu.aas-link.json").write_text(_json.dumps(link_content))
+        (tmp_path / "99.aas-link.json").write_text(_json.dumps(link_content))
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.delete("/aas-admin/fmu/motor.fmu/aas-link")
+        assert resp.status_code == 200
+        assert not (tmp_path / "motor.fmu.aas-link.json").exists()
+        assert not (tmp_path / "99.aas-link.json").exists()
+
+    def test_delete_link_not_found(self, tmp_path):
+        """DELETE returns 404 when no link exists."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.delete("/aas-admin/fmu/ghost.fmu/aas-link")
+        assert resp.status_code == 404
+
+    # ── GET /aas-admin/resolve-aas-id ────────────────────────────────
+
+    def test_resolve_returns_override(self, tmp_path):
+        """resolve-aas-id returns override:True when a labId-indexed link exists."""
+        import json as _json
+        # Simulate what POST writes when labId="42" and accessKey="motor.fmu"
+        link_file = tmp_path / "42.aas-link.json"
+        link_file.write_text(_json.dumps({"aasId": "urn:external:aas:motor-model", "labId": "42"}))
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.get(
+                "/aas-admin/resolve-aas-id",
+                params={"shellId": "urn:decentralabs:lab:42"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["override"] is True
+        assert data["targetId"] == "urn:external:aas:motor-model"
+
+    def test_resolve_no_override(self, tmp_path):
+        """resolve-aas-id returns override:False when no link exists."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.get(
+                "/aas-admin/resolve-aas-id",
+                params={"shellId": "urn:decentralabs:lab:99"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["override"] is False
+        assert data["targetId"] == "urn:decentralabs:lab:99"
+
+    def test_resolve_non_conventional_id(self, tmp_path):
+        """resolve-aas-id passes through non-conventional IDs unchanged."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.get(
+                "/aas-admin/resolve-aas-id",
+                params={"shellId": "urn:some-other-vendor:asset:xyz"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["override"] is False
+        assert data["targetId"] == "urn:some-other-vendor:asset:xyz"
+
+    def test_resolve_lab_id_with_fmu_fallback(self, tmp_path):
+        """resolve-aas-id tries labKey.fmu when labKey alone has no link (accessKey-only case)."""
+        import json as _json
+        # Provider created link without labId — stored only as motor.fmu.aas-link.json
+        link_file = tmp_path / "motor.fmu.aas-link.json"
+        link_file.write_text(_json.dumps({"aasId": "urn:external:motor"}))
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            # Shell ID was built without labId override: urn:decentralabs:lab:motor.fmu
+            resp = client.get(
+                "/aas-admin/resolve-aas-id",
+                params={"shellId": "urn:decentralabs:lab:motor.fmu"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["override"] is True
+        assert data["targetId"] == "urn:external:motor"
+
+    def test_create_and_resolve_roundtrip(self, tmp_path):
+        """Create a link with labId then resolve by the conventional shell ID."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            # Provider syncs with labId=7; stores link with labId=7
+            client.post(
+                "/aas-admin/fmu/turbine.fmu/aas-link",
+                json={"aasId": "urn:provider:aas:turbine-v3", "labId": "7"},
+            )
+            # Marketplace queries urn:decentralabs:lab:7 (numeric labId)
+            resp = client.get(
+                "/aas-admin/resolve-aas-id",
+                params={"shellId": "urn:decentralabs:lab:7"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["override"] is True
+        assert data["targetId"] == "urn:provider:aas:turbine-v3"

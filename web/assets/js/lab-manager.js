@@ -196,6 +196,106 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // AAS Link elements
+    const aasLinkKeyEl = $('#aasLinkKey');
+    const aasLinkLabIdEl = $('#aasLinkLabId');
+    const aasLinkAasIdEl = $('#aasLinkAasId');
+    const aasLinkSaveBtn = $('#aasLinkSaveBtn');
+    const aasLinkCheckBtn = $('#aasLinkCheckBtn');
+    const aasLinkDeleteBtn = $('#aasLinkDeleteBtn');
+    const aasLinkResultEl = $('#aasLinkResult');
+
+    function _aasLinkShowResult(msg, isError) {
+        if (!aasLinkResultEl) return;
+        aasLinkResultEl.textContent = msg;
+        aasLinkResultEl.style.color = isError
+            ? 'var(--color-error, #c0392b)'
+            : 'var(--color-success, #1a7f4b)';
+    }
+
+    if (aasLinkSaveBtn) {
+        aasLinkSaveBtn.addEventListener('click', async () => {
+            const accessKey = (aasLinkKeyEl && aasLinkKeyEl.value || '').trim();
+            const labId = (aasLinkLabIdEl && aasLinkLabIdEl.value || '').trim();
+            const aasId = (aasLinkAasIdEl && aasLinkAasIdEl.value || '').trim();
+            if (!accessKey) { showToast('Enter an access key', 'error'); return; }
+            if (!aasId) { showToast('Enter an external AAS ID', 'error'); return; }
+            aasLinkSaveBtn.disabled = true;
+            try {
+                const body = { aasId };
+                if (labId) body.labId = labId;
+                const res = await fetch(`/aas-admin/fmu/${encodeURIComponent(accessKey)}/aas-link`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    throw new Error(body.detail || `HTTP ${res.status}`);
+                }
+                const data = await res.json();
+                _aasLinkShowResult(`Linked: ${data.aasId}`, false);
+                showToast(`AAS link saved for ${accessKey}`, 'success');
+            } catch (err) {
+                _aasLinkShowResult(err.message, true);
+                showToast(`AAS link failed: ${err.message}`, 'error');
+            } finally {
+                aasLinkSaveBtn.disabled = false;
+            }
+        });
+    }
+
+    if (aasLinkCheckBtn) {
+        aasLinkCheckBtn.addEventListener('click', async () => {
+            const accessKey = (aasLinkKeyEl && aasLinkKeyEl.value || '').trim();
+            if (!accessKey) { showToast('Enter an access key', 'error'); return; }
+            aasLinkCheckBtn.disabled = true;
+            try {
+                const res = await fetch(`/aas-admin/fmu/${encodeURIComponent(accessKey)}/aas-link`);
+                if (res.status === 404) {
+                    _aasLinkShowResult('No link configured for this access key.', false);
+                    if (aasLinkAasIdEl) aasLinkAasIdEl.value = '';
+                    return;
+                }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                _aasLinkShowResult(`Current link: ${data.aasId}`, false);
+                if (aasLinkAasIdEl) aasLinkAasIdEl.value = data.aasId || '';
+                if (aasLinkLabIdEl) aasLinkLabIdEl.value = data.labId || '';
+            } catch (err) {
+                _aasLinkShowResult(err.message, true);
+            } finally {
+                aasLinkCheckBtn.disabled = false;
+            }
+        });
+    }
+
+    if (aasLinkDeleteBtn) {
+        aasLinkDeleteBtn.addEventListener('click', async () => {
+            const accessKey = (aasLinkKeyEl && aasLinkKeyEl.value || '').trim();
+            if (!accessKey) { showToast('Enter an access key', 'error'); return; }
+            aasLinkDeleteBtn.disabled = true;
+            try {
+                const res = await fetch(`/aas-admin/fmu/${encodeURIComponent(accessKey)}/aas-link`, {
+                    method: 'DELETE',
+                });
+                if (res.status === 404) {
+                    _aasLinkShowResult('No link configured for this access key.', false);
+                    return;
+                }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                _aasLinkShowResult('Link removed.', false);
+                if (aasLinkAasIdEl) aasLinkAasIdEl.value = '';
+                showToast(`AAS link removed for ${accessKey}`, 'success');
+            } catch (err) {
+                _aasLinkShowResult(err.message, true);
+                showToast(`Remove link failed: ${err.message}`, 'error');
+            } finally {
+                aasLinkDeleteBtn.disabled = false;
+            }
+        });
+    }
+
     // Reservation timeline elements
     const timelineInput = $('#timelineReservationId');
     const timelineBtn = $('#loadTimelineBtn');
