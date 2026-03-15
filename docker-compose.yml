@@ -394,6 +394,7 @@ services:
       - OPS_RESERVATION_START_LEAD=120
       - OPS_RESERVATION_END_DELAY=60
       - MYSQL_DSN=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+      - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
     tmpfs:
