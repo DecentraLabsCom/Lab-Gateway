@@ -113,6 +113,75 @@ document.addEventListener('DOMContentLoaded', () => {
     const fmuSyncLicenseEl = $('#fmuSyncLicense');
     const fmuSyncDocsUrlEl = $('#fmuSyncDocsUrl');
     const fmuSyncContactEmailEl = $('#fmuSyncContactEmail');
+    const fmuSyncDescriptionHintEl = $('#fmuSyncDescriptionHint');
+    const fmuSyncLicenseHintEl = $('#fmuSyncLicenseHint');
+
+    // Track which fields were auto-filled from the FMU so we don't clobber
+    // manual edits and can restore editability when the key changes.
+    const fmuAutoFilled = { description: false, license: false };
+
+    function _setFmuFieldFromHint(inputEl, hintEl, value) {
+        if (!inputEl) return;
+        inputEl.value = value;
+        inputEl.readOnly = true;
+        inputEl.style.opacity = '0.7';
+        inputEl.style.cursor = 'default';
+        if (hintEl) { hintEl.textContent = '\u2139\ufe0f From FMU'; hintEl.style.display = 'inline'; }
+    }
+
+    function _clearFmuFieldHint(inputEl, hintEl) {
+        if (!inputEl) return;
+        inputEl.readOnly = false;
+        inputEl.style.opacity = '';
+        inputEl.style.cursor = '';
+        if (hintEl) { hintEl.textContent = ''; hintEl.style.display = 'none'; }
+    }
+
+    function _clearAllFmuHints() {
+        if (fmuAutoFilled.description) {
+            _clearFmuFieldHint(fmuSyncDescriptionEl, fmuSyncDescriptionHintEl);
+            if (fmuSyncDescriptionEl) fmuSyncDescriptionEl.value = '';
+            fmuAutoFilled.description = false;
+        }
+        if (fmuAutoFilled.license) {
+            _clearFmuFieldHint(fmuSyncLicenseEl, fmuSyncLicenseHintEl);
+            if (fmuSyncLicenseEl) fmuSyncLicenseEl.value = '';
+            fmuAutoFilled.license = false;
+        }
+    }
+
+    async function _fetchFmuHints(accessKey) {
+        if (!accessKey) { _clearAllFmuHints(); return; }
+        try {
+            const res = await fetch(`/aas-admin/fmu/${encodeURIComponent(accessKey)}/hints`);
+            if (!res.ok) { _clearAllFmuHints(); return; }
+            const hints = await res.json();
+            // description
+            if (hints.description && fmuSyncDescriptionEl && !fmuSyncDescriptionEl.value.trim()) {
+                _setFmuFieldFromHint(fmuSyncDescriptionEl, fmuSyncDescriptionHintEl, hints.description);
+                fmuAutoFilled.description = true;
+            }
+            // license
+            if (hints.license && fmuSyncLicenseEl && !fmuSyncLicenseEl.value.trim()) {
+                _setFmuFieldFromHint(fmuSyncLicenseEl, fmuSyncLicenseHintEl, hints.license);
+                fmuAutoFilled.license = true;
+            }
+        } catch (_) {
+            // hints are best-effort, ignore errors
+        }
+    }
+
+    if (fmuSyncKeyEl) {
+        fmuSyncKeyEl.addEventListener('blur', () => {
+            const key = fmuSyncKeyEl.value.trim();
+            if (!key) { _clearAllFmuHints(); return; }
+            _fetchFmuHints(key);
+        });
+        fmuSyncKeyEl.addEventListener('input', () => {
+            // User is editing the key — clear any previous auto-filled locks
+            _clearAllFmuHints();
+        });
+    }
 
     if (fmuSyncBtn) {
         fmuSyncBtn.addEventListener('click', () => {

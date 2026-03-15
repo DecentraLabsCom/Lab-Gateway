@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import re
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -38,6 +39,21 @@ def _aas_id_for_lab(lab_id: str) -> str:
 
 def _submodel_id_for_fmu(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:simulationModels"
+
+
+def _unit_submodel_id_for_lab(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:unitDefinitions"
+
+
+_IDSHORT_UNSAFE_RE = re.compile(r"[^a-zA-Z0-9]+")
+
+
+def _sanitize_idshort(name: str) -> str:
+    """Convert an arbitrary string (e.g. a unit name) into a valid AAS idShort."""
+    sanitized = _IDSHORT_UNSAFE_RE.sub("_", name).strip("_") or "Unit"
+    if sanitized[0].isdigit():
+        sanitized = "u" + sanitized
+    return sanitized
 
 
 def _encode_id(raw_id: str) -> str:
@@ -94,7 +110,7 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
             },
             "modelType": "SubmodelElementCollection",
             "value": [
-                {"idShort": "PortDirection", "modelType": "Property", "valueType": "xs:string", "value": _causality_to_port_type(causality)},
+                {"idShort": "PortCausality", "modelType": "Property", "valueType": "xs:string", "value": _causality_to_port_type(causality)},
                 {"idShort": "PortDataType", "modelType": "Property", "valueType": "xs:string", "value": _fmi_type_to_idta(var.get("type", "Real"))},
                 {"idShort": "PortVariability", "modelType": "Property", "valueType": "xs:string", "value": var.get("variability", "continuous")},
             ],
@@ -108,20 +124,57 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
             port_element["value"].append(
                 {"idShort": "DefaultValue", "modelType": "Property", "valueType": "xs:string", "value": str(var["start"])}
             )
+        if var.get("quantity"):
+            port_element["value"].append(
+                {"idShort": "QuantityKind", "modelType": "Property", "valueType": "xs:string", "value": var["quantity"]}
+            )
+        if var.get("displayUnit"):
+            port_element["value"].append(
+                {"idShort": "DisplayUnit", "modelType": "Property", "valueType": "xs:string", "value": var["displayUnit"]}
+            )
+        if var.get("nominal") is not None:
+            port_element["value"].append(
+                {"idShort": "NominalValue", "modelType": "Property", "valueType": "xs:string", "value": str(var["nominal"])}
+            )
+        if var.get("description"):
+            port_element["value"].append(
+                {"idShort": "PortDescription", "modelType": "Property", "valueType": "xs:string", "value": var["description"]}
+            )
 
         ports.append(port_element)
     return ports
 
 
-def build_simulation_submodel(lab_id: str, access_key: str, metadata: dict, extra_info: Optional[dict] = None) -> dict:
+def build_simulation_submodel(
+    lab_id: str,
+    access_key: str,
+    metadata: dict,
+    extra_info: Optional[dict] = None,
+    *,
+    fmu_path: Optional[Path] = None,
+) -> dict:
     """Build the IDTA 02006 SimulationModels submodel JSON for BaSyx V2.
 
     *extra_info* may contain any of the following optional provider-supplied keys:
-    ``license`` (SPDX or free text), ``documentationUrl``, ``contactEmail``.
+    ``description`` (shown as ``Summary``), ``license`` (SPDX or free text),
+    ``documentationUrl``, ``contactEmail``.
+
+    *fmu_path* is the filesystem path to the ``.fmu`` binary; when supplied a
+    SHA-256 digest is computed and embedded in the ``ModelFile`` element.
     """
     submodel_id = _submodel_id_for_fmu(lab_id)
 
-    sim_model_elements = [
+    # Summary (MultiLanguageProperty per IDTA 02006) — extra_info takes precedence over FMU
+    _description = (extra_info or {}).get("description", "").strip() or metadata.get("description", "").strip()
+    sim_model_elements: list[dict] = []
+    if _description:
+        sim_model_elements.append({
+            "idShort": "Summary",
+            "modelType": "MultiLanguageProperty",
+            "value": [{"language": "en", "text": _description}],
+        })
+
+    sim_model_elements += [
         {"idShort": "ModelName", "modelType": "Property", "valueType": "xs:string", "value": metadata.get("modelName", "Unknown")},
         {"idShort": "FmiVersion", "modelType": "Property", "valueType": "xs:string", "value": metadata.get("fmiVersion", "2.0")},
         {"idShort": "SimulationType", "modelType": "Property", "valueType": "xs:string", "value": metadata.get("simulationType", "Unknown")},
@@ -134,7 +187,85 @@ def build_simulation_submodel(lab_id: str, access_key: str, metadata: dict, extr
         {"idShort": "SyncTimestamp", "modelType": "Property", "valueType": "xs:dateTime", "value": datetime.now(timezone.utc).isoformat()},
     ]
 
-    # Optional provider-supplied metadata
+    # ModelFile (File element per IDTA 02006) — best-effort SHA-256 when fmu_path is available
+    _fmu_sha256 = ""
+    if fmu_path is not None:
+        try:
+            _fmu_sha256 = hashlib.sha256(Path(fmu_path).read_bytes()).hexdigest()
+        except OSError:
+            pass
+    _model_file: dict = {
+        "idShort": "ModelFile",
+        "modelType": "File",
+        "contentType": "application/octet-stream",
+        "value": f"/fmu-data/{access_key}",
+    }
+    if _fmu_sha256:
+        _model_file["extensions"] = [{"name": "sha256", "valueType": "xs:string", "value": _fmu_sha256}]
+    sim_model_elements.append(_model_file)
+
+    # FMU-embedded fields passed through transparently (no form input needed)
+    for idshort, key in (
+        ("Author", "author"),
+        ("Version", "version"),
+    ):
+        value = metadata.get(key, "").strip()
+        if value:
+            sim_model_elements.append(
+                {"idShort": idshort, "modelType": "Property", "valueType": "xs:string", "value": value}
+            )
+    # SimulationToolSupport — IDTA 02006 SMC structure replacing flat GenerationTool property
+    _gen_tool = metadata.get("generationTool", "").strip()
+    if _gen_tool:
+        sim_model_elements.append({
+            "idShort": "SimulationToolSupport",
+            "modelType": "SubmodelElementCollection",
+            "value": [
+                {
+                    "idShort": "SimulationTool_0",
+                    "modelType": "SubmodelElementCollection",
+                    "value": [
+                        {"idShort": "SimulationToolName", "modelType": "Property", "valueType": "xs:string", "value": _gen_tool},
+                        {"idShort": "SupportedFMIVersion", "modelType": "Property", "valueType": "xs:string", "value": metadata.get("fmiVersion", "")},
+                    ],
+                }
+            ],
+        })
+    tolerance = metadata.get("defaultTolerance")
+    if tolerance is not None:
+        sim_model_elements.append(
+            {"idShort": "Tolerance", "modelType": "Property", "valueType": "xs:double", "value": str(tolerance)}
+        )
+
+    # CoSimulation/ModelExchange capability flags (machine-readable, no user input needed)
+    capabilities = metadata.get("capabilities", {})
+    if capabilities:
+        cap_elements = []
+        for idshort, key in (
+            ("CanGetAndSetFMUstate", "canGetAndSetFMUstate"),
+            ("CanSerializeFMUstate", "canSerializeFMUstate"),
+            ("CanHandleVariableCommunicationStepSize", "canHandleVariableCommunicationStepSize"),
+            ("ProvidesDirectionalDerivative", "providesDirectionalDerivative"),
+            ("ProvidesAdjointDerivatives", "providesAdjointDerivatives"),
+        ):
+            val = capabilities.get(key)
+            if val is not None:
+                cap_elements.append(
+                    {"idShort": idshort, "modelType": "Property", "valueType": "xs:boolean", "value": str(val).lower()}
+                )
+        fixed_step = capabilities.get("fixedInternalStepSize")
+        if fixed_step is not None:
+            cap_elements.append(
+                {"idShort": "FixedInternalStepSize", "modelType": "Property", "valueType": "xs:double", "value": str(fixed_step)}
+            )
+        if cap_elements:
+            sim_model_elements.append({
+                "idShort": "Capabilities",
+                "modelType": "SubmodelElementCollection",
+                "value": cap_elements,
+            })
+
+    # Provider-supplied metadata (may be auto-filled from FMU or entered manually)
     if extra_info:
         for idshort, key in (
             ("License", "license"),
@@ -178,14 +309,109 @@ def build_simulation_submodel(lab_id: str, access_key: str, metadata: dict, extr
     return submodel
 
 
-def build_aas_shell(lab_id: str, access_key: str, metadata: dict, extra_info: Optional[dict] = None) -> dict:
+def build_unit_definitions_submodel(lab_id: str, unit_defs: list) -> dict:
+    """Build a UnitDefinitions submodel from FMU unit definitions.
+
+    Each unit in *unit_defs* becomes a ``SubmodelElementCollection`` whose
+    ``idShort`` is sanitized from the unit name.  Optional ``baseUnit`` and
+    ``displayUnits`` keys are rendered as nested collections with their SI
+    exponent properties and conversion factors.
+    """
+    elements: list[dict] = []
+    seen_idshorts: set[str] = set()
+    for unit in unit_defs:
+        base_idshort = _sanitize_idshort(unit["name"])
+        idshort = base_idshort
+        idx = 1
+        while idshort in seen_idshorts:
+            idshort = f"{base_idshort}_{idx}"
+            idx += 1
+        seen_idshorts.add(idshort)
+
+        unit_props: list[dict] = [
+            {"idShort": "Name", "modelType": "Property", "valueType": "xs:string", "value": unit["name"]},
+        ]
+
+        if "baseUnit" in unit:
+            bu = unit["baseUnit"]
+            bu_elements: list[dict] = []
+            for exp in ("kg", "m", "s", "A", "K", "mol", "cd", "rad"):
+                if exp in bu:
+                    bu_elements.append(
+                        {"idShort": exp, "modelType": "Property", "valueType": "xs:int", "value": str(bu[exp])}
+                    )
+            if "factor" in bu:
+                bu_elements.append(
+                    {"idShort": "Factor", "modelType": "Property", "valueType": "xs:double", "value": str(bu["factor"])}
+                )
+            if "offset" in bu:
+                bu_elements.append(
+                    {"idShort": "Offset", "modelType": "Property", "valueType": "xs:double", "value": str(bu["offset"])}
+                )
+            if bu_elements:
+                unit_props.append(
+                    {"idShort": "BaseUnit", "modelType": "SubmodelElementCollection", "value": bu_elements}
+                )
+
+        if "displayUnits" in unit:
+            du_elements: list[dict] = []
+            seen_du: set[str] = set()
+            for du in unit["displayUnits"]:
+                du_idshort = _sanitize_idshort(du["name"])
+                di = 1
+                while du_idshort in seen_du:
+                    du_idshort = f"{_sanitize_idshort(du['name'])}_{di}"
+                    di += 1
+                seen_du.add(du_idshort)
+                du_props: list[dict] = [
+                    {"idShort": "Name", "modelType": "Property", "valueType": "xs:string", "value": du["name"]},
+                ]
+                if "factor" in du:
+                    du_props.append(
+                        {"idShort": "Factor", "modelType": "Property", "valueType": "xs:double", "value": str(du["factor"])}
+                    )
+                if "offset" in du:
+                    du_props.append(
+                        {"idShort": "Offset", "modelType": "Property", "valueType": "xs:double", "value": str(du["offset"])}
+                    )
+                du_elements.append(
+                    {"idShort": du_idshort, "modelType": "SubmodelElementCollection", "value": du_props}
+                )
+            if du_elements:
+                unit_props.append(
+                    {"idShort": "DisplayUnits", "modelType": "SubmodelElementCollection", "value": du_elements}
+                )
+
+        elements.append({"idShort": idshort, "modelType": "SubmodelElementCollection", "value": unit_props})
+
+    return {
+        "id": _unit_submodel_id_for_lab(lab_id),
+        "idShort": "UnitDefinitions",
+        "semanticId": {
+            "type": "ExternalReference",
+            "keys": [{"type": "GlobalReference", "value": "https://decentralabs.io/aas/UnitDefinitions/1/0"}],
+        },
+        "modelType": "Submodel",
+        "submodelElements": elements,
+    }
+
+
+def build_aas_shell(
+    lab_id: str,
+    access_key: str,
+    metadata: dict,
+    extra_info: Optional[dict] = None,
+    extra_submodel_ids: list = (),
+) -> dict:
     """Build the AAS shell JSON for BaSyx V2.
 
     *extra_info* may contain ``description`` (str) for a human-readable
     description of the asset, surfaced as the AAS shell ``description`` field.
+    *extra_submodel_ids* lists the IDs of additional submodels (e.g.
+    UnitDefinitions) that should appear in the shell's submodel references.
     """
     aas_id = _aas_id_for_lab(lab_id)
-    submodel_id = _submodel_id_for_fmu(lab_id)
+    all_sm_ids = [_submodel_id_for_fmu(lab_id), *extra_submodel_ids]
 
     shell = {
         "id": aas_id,
@@ -197,10 +423,8 @@ def build_aas_shell(lab_id: str, access_key: str, metadata: dict, extra_info: Op
             "assetType": "FMU",
         },
         "submodels": [
-            {
-                "type": "ModelReference",
-                "keys": [{"type": "Submodel", "value": submodel_id}],
-            }
+            {"type": "ModelReference", "keys": [{"type": "Submodel", "value": sm_id}]}
+            for sm_id in all_sm_ids
         ],
     }
 
@@ -273,6 +497,8 @@ async def sync_fmu_to_basyx(
     metadata: dict,
     aasx_bytes: Optional[bytes] = None,
     extra_info: Optional[dict] = None,
+    fmu_path: Optional[Path] = None,
+    unit_definitions: list = (),
 ) -> dict:
     """
     Create or update the AAS shell and SimulationModels submodel in BaSyx.
@@ -361,8 +587,17 @@ async def sync_fmu_to_basyx(
                 # ── Metadata path: auto-generate shell + submodel from FMU ──
                 aas_id_encoded = _encode_id(aas_id)
                 submodel_id_encoded = _encode_id(submodel_id)
-                shell_payload = build_aas_shell(lab_id, access_key, metadata, extra_info)
-                submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info)
+
+                # Build unit definitions submodel first (its ID is needed for the shell)
+                _unit_sm_id: Optional[str] = None
+                _unit_sm_payload: Optional[dict] = None
+                if unit_definitions:
+                    _unit_sm_id = _unit_submodel_id_for_lab(lab_id)
+                    _unit_sm_payload = build_unit_definitions_submodel(lab_id, list(unit_definitions))
+                _extra_sm_ids: list = [_unit_sm_id] if _unit_sm_id else []
+
+                shell_payload = build_aas_shell(lab_id, access_key, metadata, extra_info, extra_submodel_ids=_extra_sm_ids)
+                submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info, fmu_path=fmu_path)
 
                 # --- Submodel: PUT (create or replace) ---
                 sm_resp = await client.put(
@@ -395,6 +630,34 @@ async def sync_fmu_to_basyx(
                         logger.error("Failed to PUT submodel %s: %s %s", submodel_id, sm_resp.status_code, sm_resp.text[:500])
                         result["error"] = f"submodel sync failed: {sm_resp.status_code}"
                         return result
+
+                # --- UnitDefinitions submodel: PUT when FMU declares physical units ---
+                if _unit_sm_payload and _unit_sm_id:
+                    _usm_enc = _encode_id(_unit_sm_id)
+                    _usm_resp = await client.put(
+                        f"/submodels/{_usm_enc}",
+                        json=_unit_sm_payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    if _usm_resp.status_code in (200, 201, 204):
+                        logger.info("UnitDefinitions submodel synced for lab %s", lab_id)
+                    elif _usm_resp.status_code == 404:
+                        _usm_post = await client.post(
+                            "/submodels", json=_unit_sm_payload,
+                            headers={"Content-Type": "application/json"},
+                        )
+                        if _usm_post.status_code in (200, 201):
+                            logger.info("UnitDefinitions submodel created via POST for lab %s", lab_id)
+                        else:
+                            logger.warning(
+                                "Failed to create UnitDefinitions submodel for lab %s: %s",
+                                lab_id, _usm_post.status_code,
+                            )
+                    else:
+                        logger.warning(
+                            "Failed to PUT UnitDefinitions submodel for lab %s: %s",
+                            lab_id, _usm_resp.status_code,
+                        )
 
                 # --- Shell: PUT (create or replace) ---
                 shell_resp = await client.put(

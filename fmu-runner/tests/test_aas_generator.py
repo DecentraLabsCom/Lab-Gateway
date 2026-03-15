@@ -13,11 +13,14 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from aas_generator import (
     _aas_id_for_lab,
     _submodel_id_for_fmu,
+    _unit_submodel_id_for_lab,
     _encode_id,
     _fmi_type_to_idta,
     _causality_to_port_type,
+    _sanitize_idshort,
     build_simulation_ports,
     build_simulation_submodel,
+    build_unit_definitions_submodel,
     build_aas_shell,
 )
 
@@ -28,6 +31,9 @@ class TestAasIdGeneration:
 
     def test_submodel_id_format(self):
         assert _submodel_id_for_fmu("42") == "urn:decentralabs:lab:42:sm:simulationModels"
+
+    def test_unit_submodel_id_format(self):
+        assert _unit_submodel_id_for_lab("42") == "urn:decentralabs:lab:42:sm:unitDefinitions"
 
     def test_encode_id_roundtrip(self):
         raw = "urn:decentralabs:lab:42"
@@ -86,7 +92,7 @@ class TestBuildSimulationPorts:
         assert port["idShort"] == "force"
         assert port["modelType"] == "SubmodelElementCollection"
         values = {el["idShort"]: el for el in port["value"]}
-        assert values["PortDirection"]["value"] == "Input"
+        assert values["PortCausality"]["value"] == "Input"
         assert values["PortDataType"]["value"] == "Real"
         assert "Unit" in values
         assert values["Unit"]["value"] == "N"
@@ -99,10 +105,30 @@ class TestBuildSimulationPorts:
         ports = build_simulation_ports(variables)
         port = ports[0]
         values = {el["idShort"]: el for el in port["value"]}
-        assert values["PortDirection"]["value"] == "Output"
+        assert values["PortCausality"]["value"] == "Output"
         assert values["PortDataType"]["value"] == "Real"
         assert "Unit" not in values
         assert "DefaultValue" not in values
+
+    def test_port_description_field(self):
+        variables = [
+            {"name": "force", "causality": "input", "type": "Real", "description": "Applied force"},
+        ]
+        ports = build_simulation_ports(variables)
+        values = {el["idShort"]: el for el in ports[0]["value"]}
+        assert "PortDescription" in values
+        assert values["PortDescription"]["value"] == "Applied force"
+        assert "Description" not in values  # old non-conformant idShort must not exist
+
+    def test_quantity_kind_field(self):
+        variables = [
+            {"name": "mass", "causality": "input", "type": "Real", "quantity": "Mass"},
+        ]
+        ports = build_simulation_ports(variables)
+        values = {el["idShort"]: el for el in ports[0]["value"]}
+        assert "QuantityKind" in values
+        assert values["QuantityKind"]["value"] == "Mass"
+        assert "Quantity" not in values  # old non-conformant idShort must not exist
 
 
 SAMPLE_METADATA = {
@@ -173,6 +199,172 @@ class TestBuildSimulationSubmodel:
         props = {el["idShort"]: el for el in sim_model["value"]}
         assert "Ports" not in props
 
+    def test_summary_from_extra_info_description(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"description": "My lab model"})
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "Summary" in props
+        assert props["Summary"]["modelType"] == "MultiLanguageProperty"
+        assert props["Summary"]["value"][0]["language"] == "en"
+        assert props["Summary"]["value"][0]["text"] == "My lab model"
+
+    def test_summary_from_metadata_description_fallback(self):
+        metadata_with_desc = {**SAMPLE_METADATA, "description": "FMU description"}
+        sm = build_simulation_submodel("42", "test.fmu", metadata_with_desc)
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "Summary" in props
+        assert props["Summary"]["value"][0]["text"] == "FMU description"
+
+    def test_summary_extra_info_overrides_metadata(self):
+        metadata_with_desc = {**SAMPLE_METADATA, "description": "FMU description"}
+        sm = build_simulation_submodel("42", "test.fmu", metadata_with_desc, {"description": "Provider override"})
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert props["Summary"]["value"][0]["text"] == "Provider override"
+
+    def test_no_summary_when_no_description(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "Summary" not in props
+
+    def test_model_file_always_present(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "ModelFile" in props
+        assert props["ModelFile"]["modelType"] == "File"
+        assert props["ModelFile"]["contentType"] == "application/octet-stream"
+        assert props["ModelFile"]["value"] == "/fmu-data/test.fmu"
+        assert "extensions" not in props["ModelFile"]  # no hash without fmu_path
+
+    def test_model_file_with_sha256(self, tmp_path):
+        import hashlib
+        fmu = tmp_path / "test.fmu"
+        fmu.write_bytes(b"fake-fmu-content")
+        expected_sha = hashlib.sha256(b"fake-fmu-content").hexdigest()
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, fmu_path=fmu)
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "ModelFile" in props
+        sha_ext = next((e for e in props["ModelFile"].get("extensions", []) if e["name"] == "sha256"), None)
+        assert sha_ext is not None
+        assert sha_ext["value"] == expected_sha
+
+    def test_simulation_tool_support_structure(self):
+        metadata = {**SAMPLE_METADATA, "generationTool": "Modelica v4.1", "fmiVersion": "3.0"}
+        sm = build_simulation_submodel("42", "test.fmu", metadata)
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "GenerationTool" not in props  # flat property must not exist
+        assert "SimulationToolSupport" in props
+        sts = props["SimulationToolSupport"]
+        assert sts["modelType"] == "SubmodelElementCollection"
+        tool_0 = {el["idShort"]: el for el in sts["value"]}["SimulationTool_0"]
+        tool_props = {el["idShort"]: el for el in tool_0["value"]}
+        assert tool_props["SimulationToolName"]["value"] == "Modelica v4.1"
+        assert tool_props["SupportedFMIVersion"]["value"] == "3.0"
+
+    def test_no_simulation_tool_support_when_no_gen_tool(self):
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "SimulationToolSupport" not in props
+        assert "GenerationTool" not in props
+
+    def test_tolerance_idshort(self):
+        metadata = {**SAMPLE_METADATA, "defaultTolerance": 1e-4}
+        sm = build_simulation_submodel("42", "test.fmu", metadata)
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "Tolerance" in props
+        assert props["Tolerance"]["value"] == "0.0001"
+        assert "DefaultTolerance" not in props  # old non-conformant idShort must not exist
+
+
+SAMPLE_UNIT_DEFS = [
+    {"name": "rad/s"},
+    {
+        "name": "N\u00b7m",
+        "baseUnit": {"m": 2, "kg": 1, "s": -2},
+        "displayUnits": [{"name": "kN\u00b7m", "factor": 1000.0}],
+    },
+]
+
+
+class TestSanitizeIdShort:
+    @pytest.mark.parametrize("name,expected", [
+        ("m/s", "m_s"),
+        ("N\u00b7m", "N_m"),
+        ("rad/s", "rad_s"),
+        ("1/s", "u1_s"),
+        ("myUnit", "myUnit"),
+        ("", "Unit"),
+    ])
+    def test_sanitize_common_cases(self, name, expected):
+        assert _sanitize_idshort(name) == expected
+
+
+class TestBuildUnitDefinitionsSubmodel:
+    def test_submodel_structure(self):
+        sm = build_unit_definitions_submodel("42", SAMPLE_UNIT_DEFS)
+        assert sm["id"] == "urn:decentralabs:lab:42:sm:unitDefinitions"
+        assert sm["idShort"] == "UnitDefinitions"
+        assert sm["modelType"] == "Submodel"
+        assert len(sm["submodelElements"]) == 2
+
+    def test_unit_idshort_sanitized(self):
+        sm = build_unit_definitions_submodel("42", [{"name": "rad/s"}])
+        elem = sm["submodelElements"][0]
+        assert elem["idShort"] == "rad_s"
+        assert elem["modelType"] == "SubmodelElementCollection"
+        props = {el["idShort"]: el for el in elem["value"]}
+        assert props["Name"]["value"] == "rad/s"
+
+    def test_base_unit_exponents(self):
+        sm = build_unit_definitions_submodel("42", [{"name": "N", "baseUnit": {"kg": 1, "m": 1, "s": -2}}])
+        elem = sm["submodelElements"][0]
+        props = {el["idShort"]: el for el in elem["value"]}
+        assert "BaseUnit" in props
+        bu_props = {el["idShort"]: el for el in props["BaseUnit"]["value"]}
+        assert bu_props["kg"]["value"] == "1"
+        assert bu_props["m"]["value"] == "1"
+        assert bu_props["s"]["value"] == "-2"
+        assert "Factor" not in bu_props
+        assert "Offset" not in bu_props
+
+    def test_base_unit_factor(self):
+        sm = build_unit_definitions_submodel("42", [{"name": "km", "baseUnit": {"m": 1, "factor": 1000.0}}])
+        elem = sm["submodelElements"][0]
+        props = {el["idShort"]: el for el in elem["value"]}
+        bu_props = {el["idShort"]: el for el in props["BaseUnit"]["value"]}
+        assert bu_props["Factor"]["value"] == "1000.0"
+        assert "Offset" not in bu_props
+
+    def test_display_units(self):
+        sm = build_unit_definitions_submodel("42", [{
+            "name": "N",
+            "displayUnits": [{"name": "kN", "factor": 1000.0}, {"name": "mN", "factor": 0.001}],
+        }])
+        elem = sm["submodelElements"][0]
+        props = {el["idShort"]: el for el in elem["value"]}
+        assert "DisplayUnits" in props
+        du_ids = {el["idShort"] for el in props["DisplayUnits"]["value"]}
+        assert "kN" in du_ids
+        assert "mN" in du_ids
+        du_by_id = {el["idShort"]: el for el in props["DisplayUnits"]["value"]}
+        du_kN_props = {el["idShort"]: el for el in du_by_id["kN"]["value"]}
+        assert du_kN_props["Name"]["value"] == "kN"
+        assert du_kN_props["Factor"]["value"] == "1000.0"
+
+    def test_no_base_unit_when_absent(self):
+        sm = build_unit_definitions_submodel("42", [{"name": "count"}])
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "BaseUnit" not in props
+        assert "DisplayUnits" not in props
+
+    def test_duplicate_unit_names_get_unique_idshorts(self):
+        # Two units whose sanitized names collide (e.g. "m/s" and "m_s")
+        sm = build_unit_definitions_submodel("42", [{"name": "m/s"}, {"name": "m_s"}])
+        ids = [el["idShort"] for el in sm["submodelElements"]]
+        assert len(ids) == len(set(ids))  # all unique
+
+    def test_empty_unit_defs_produces_empty_submodel(self):
+        sm = build_unit_definitions_submodel("42", [])
+        assert sm["submodelElements"] == []
+
 
 class TestBuildAasShell:
     def test_shell_structure(self):
@@ -188,6 +380,18 @@ class TestBuildAasShell:
         refs = shell["submodels"]
         assert len(refs) == 1
         assert refs[0]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:simulationModels"
+
+    def test_shell_extra_submodel_ids(self):
+        extra = ["urn:decentralabs:lab:42:sm:unitDefinitions"]
+        shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA, extra_submodel_ids=extra)
+        ref_values = [r["keys"][0]["value"] for r in shell["submodels"]]
+        assert "urn:decentralabs:lab:42:sm:simulationModels" in ref_values
+        assert "urn:decentralabs:lab:42:sm:unitDefinitions" in ref_values
+        assert len(shell["submodels"]) == 2
+
+    def test_shell_no_extra_submodels_by_default(self):
+        shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
+        assert len(shell["submodels"]) == 1
 
     def test_shell_idshort_format(self):
         shell = build_aas_shell("7", "motor.fmu", SAMPLE_METADATA)

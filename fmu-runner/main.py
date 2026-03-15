@@ -523,6 +523,14 @@ def _model_metadata_from_model_description(md) -> dict:
             entry["min"] = var.min
         if hasattr(var, "max") and var.max is not None:
             entry["max"] = var.max
+        if hasattr(var, "description") and var.description:
+            entry["description"] = var.description
+        if hasattr(var, "quantity") and var.quantity:
+            entry["quantity"] = var.quantity
+        if hasattr(var, "displayUnit") and var.displayUnit:
+            entry["displayUnit"] = var.displayUnit
+        if hasattr(var, "nominal") and var.nominal is not None:
+            entry["nominal"] = var.nominal
         declared_type = getattr(var, "declaredType", None)
         if declared_type is not None and getattr(declared_type, "name", None):
             declared_type_entry = {
@@ -548,6 +556,57 @@ def _model_metadata_from_model_description(md) -> dict:
             entry["dimensions"] = dimensions
         variables.append(entry)
 
+    # Capabilities from the primary interface (CoSimulation preferred over ModelExchange)
+    _iface = getattr(md, "coSimulation", None) or getattr(md, "modelExchange", None)
+    capabilities: dict = {}
+    if _iface:
+        for _attr in (
+            "canGetAndSetFMUstate",
+            "canSerializeFMUstate",
+            "canHandleVariableCommunicationStepSize",
+            "providesDirectionalDerivative",
+            "providesAdjointDerivatives",
+        ):
+            val = getattr(_iface, _attr, None)
+            if val is not None:
+                capabilities[_attr] = bool(val)
+        fixed = getattr(_iface, "fixedInternalStepSize", None)
+        if fixed is not None:
+            capabilities["fixedInternalStepSize"] = float(fixed)
+
+    # Unit definitions (physical units used by model variables)
+    unit_defs: list = []
+    for unit in getattr(md, "unitDefinitions", []) or []:
+        u: dict = {"name": unit.name}
+        base_unit = getattr(unit, "baseUnit", None)
+        if base_unit is not None:
+            base: dict = {}
+            for exp in ("kg", "m", "s", "A", "K", "mol", "cd", "rad"):
+                val = int(getattr(base_unit, exp, 0) or 0)
+                if val != 0:
+                    base[exp] = val
+            factor = getattr(base_unit, "factor", None)
+            if factor is not None and float(factor) != 1.0:
+                base["factor"] = float(factor)
+            offset = getattr(base_unit, "offset", None)
+            if offset is not None and float(offset) != 0.0:
+                base["offset"] = float(offset)
+            if base:
+                u["baseUnit"] = base
+        display_units: list = []
+        for du in getattr(unit, "displayUnits", []) or []:
+            d: dict = {"name": du.name}
+            f = getattr(du, "factor", None)
+            if f is not None and float(f) != 1.0:
+                d["factor"] = float(f)
+            o = getattr(du, "offset", None)
+            if o is not None and float(o) != 0.0:
+                d["offset"] = float(o)
+            display_units.append(d)
+        if display_units:
+            u["displayUnits"] = display_units
+        unit_defs.append(u)
+
     metadata = {
         "modelName": _normalize_xml_value(getattr(md, "modelName", None)) or "DecentraLabsProxy",
         "guid": _normalize_xml_value(getattr(md, "guid", None)),
@@ -560,7 +619,16 @@ def _model_metadata_from_model_description(md) -> dict:
         "defaultStartTime": default_start,
         "defaultStopTime": default_stop,
         "defaultStepSize": default_step,
+        "defaultTolerance": float(default_experiment.tolerance) if default_experiment and default_experiment.tolerance is not None else None,
         "modelVariables": variables,
+        # FMU-embedded descriptive metadata (populated when declared in modelDescription.xml)
+        "description": _normalize_xml_value(getattr(md, "description", None)) or "",
+        "author": _normalize_xml_value(getattr(md, "author", None)) or "",
+        "version": _normalize_xml_value(getattr(md, "version", None)) or "",
+        "license": _normalize_xml_value(getattr(md, "license", None)) or "",
+        "generationTool": _normalize_xml_value(getattr(md, "generationTool", None)) or "",
+        "capabilities": capabilities,
+        "unitDefinitions": unit_defs,
     }
     return metadata
 
@@ -1183,6 +1251,7 @@ async def aas_sync_fmu(access_key: str, request: Request):
                 extra_info[field] = val
 
     metadata: dict = {}
+    fmu_path: Optional[Path] = None  # set in the metadata (non-AASX) path below
     if not aasx_bytes:
         # Need FMU metadata for the auto-generation path
         fmu_path = _resolve_fmu_path(access_key)
@@ -1193,18 +1262,56 @@ async def aas_sync_fmu(access_key: str, request: Request):
             raise HTTPException(status_code=422, detail=f"Cannot read FMU model description: {exc}") from exc
         metadata = _model_metadata_from_model_description(md)
 
+        # Use FMU-embedded description/license as fallback when the provider
+        # has not filled them in the form (user-supplied values take precedence).
+        auto_fallback = {k: metadata.get(k, "") for k in ("description", "license") if metadata.get(k, "")}
+        merged_extra_info = {**auto_fallback, **(extra_info or {})}
+        merged_extra_info = {k: v for k, v in merged_extra_info.items() if v}
+    else:
+        merged_extra_info = {k: v for k, v in (extra_info or {}).items() if v}
+
     result = await sync_fmu_to_basyx(
         lab_id=lab_id,
         access_key=access_key,
         metadata=metadata,
         aasx_bytes=aasx_bytes,
-        extra_info=extra_info or None,
+        extra_info=merged_extra_info or None,
+        fmu_path=fmu_path,
+        unit_definitions=metadata.get("unitDefinitions", []),
     )
 
     if "error" in result:
         raise HTTPException(status_code=502, detail=result["error"])
 
     return result
+
+
+@app.get("/aas-admin/fmu/{access_key}/hints")
+async def aas_hints_fmu(access_key: str):
+    """
+    Return FMU-embedded metadata hints for pre-filling the AAS sync form.
+
+    Reads modelDescription.xml and returns any of: description, license,
+    author, version, generationTool — only the fields that are non-empty.
+    Protected by OpenResty lab_manager_access.lua (same as /lab-manager/).
+    """
+    fmu_path = _resolve_fmu_path(access_key)
+    try:
+        md = read_model_description(str(fmu_path))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Cannot read FMU model description: {exc}") from exc
+    hints: dict = {}
+    for field_name, attr in (
+        ("description", "description"),
+        ("license", "license"),
+        ("author", "author"),
+        ("version", "version"),
+        ("generationTool", "generationTool"),
+    ):
+        val = _normalize_xml_value(getattr(md, attr, None))
+        if val:
+            hints[field_name] = val
+    return hints
 
 
 @app.get("/health")
