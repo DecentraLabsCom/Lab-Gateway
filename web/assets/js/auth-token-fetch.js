@@ -16,19 +16,19 @@
             header: 'X-Lab-Manager-Token'
         },
         '/wallet': {
-            key: 'dlabs_treasury_token',
+            key: 'dlabs_billing_token',
             header: 'X-Access-Token'
         },
-        '/treasury': {
-            key: 'dlabs_treasury_token',
+        '/billing': {
+            key: 'dlabs_billing_token',
             header: 'X-Access-Token'
         },
         '/wallet-dashboard': {
-            key: 'dlabs_treasury_token',
+            key: 'dlabs_billing_token',
             header: 'X-Access-Token'
         },
         '/institution-config': {
-            key: 'dlabs_treasury_token',
+            key: 'dlabs_billing_token',
             header: 'X-Access-Token'
         }
     };

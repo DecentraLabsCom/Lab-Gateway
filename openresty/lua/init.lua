@@ -116,7 +116,7 @@ basyx_aas_url = basyx_aas_url:gsub("/+$", "")  -- strip trailing slash
 config:set("basyx_aas_url", basyx_aas_url)
 
 if lite_mode then
-    ngx.log(ngx.INFO, "Lite mode enabled: treasury/auth/intents endpoints are restricted on this gateway")
+    ngx.log(ngx.INFO, "Lite mode enabled: billing/auth/intents endpoints are restricted on this gateway")
 else
     ngx.log(ngx.INFO, "Full mode enabled")
 end

@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let gatewayMode = 'full';
 
     function setGatewayMode(modeInfo) {
-        const walletButton = document.getElementById('wallet-treasury-btn');
+        const walletButton = document.getElementById('wallet-billing-btn');
         const mode = (modeInfo && modeInfo.mode ? String(modeInfo.mode) : '').toLowerCase();
         const lite = modeInfo && (modeInfo.lite === true || mode === 'lite');
         gatewayMode = lite ? 'lite' : 'full';

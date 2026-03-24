@@ -235,11 +235,11 @@ update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_USER" "$guac_admin_user"
 update_env_var "$ROOT_ENV_FILE" "GUAC_ADMIN_PASS" "$guac_admin_pass"
 echo
 
-# Wallet/Treasury Access Token
-echo "Wallet/Treasury Access Token"
+# Admin Access Token
+echo "Admin Access Token"
 echo "============================"
-echo "This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/admin/** behind OpenResty."
-read -p "Wallet/Treasury token (leave empty for auto-generated): " access_token
+echo "This token protects /wallet, /billing, /wallet-dashboard, and /billing/admin/** behind OpenResty."
+read -p "Admin access token (leave empty for auto-generated): " access_token
 access_token=$(echo "$access_token" | tr -d ' ')
 case "$(printf '%s' "$access_token" | tr '[:upper:]' '[:lower:]')" in
     ""|"="|changeme|change_me)
@@ -249,13 +249,13 @@ esac
 
 if [ -z "$access_token" ]; then
     access_token="acc_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM})"
-    echo "Generated Wallet/Treasury token: $access_token"
+    echo "Generated admin access token: $access_token"
 fi
 
-update_env_in_all "TREASURY_TOKEN" "$access_token"
-update_env_in_all "TREASURY_TOKEN_HEADER" "X-Access-Token"
-update_env_in_all "TREASURY_TOKEN_COOKIE" "access_token"
-update_env_in_all "TREASURY_TOKEN_REQUIRED" "true"
+update_env_in_all "ADMIN_ACCESS_TOKEN" "$access_token"
+update_env_in_all "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
+update_env_in_all "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
+update_env_in_all "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
 update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
 echo
@@ -376,7 +376,7 @@ echo "ISSUER controls which JWT issuer OpenResty accepts:"
 echo "  - Leave empty -> Full mode (this gateway handles auth + access)."
 echo "  - Set https://<your-full-gateway-domain>/auth -> Lite mode (trust Full-issued JWTs)."
 echo "  - In Lite mode, public key sync is automatic from https://<issuer-origin>/.well-known/public-key.pem."
-echo "  - Lite mode disables local auth/treasury/intents endpoints."
+echo "  - Lite mode disables local auth/billing/intents endpoints."
 current_issuer="$(get_env_default "ISSUER" "$ROOT_ENV_FILE")"
 if [ -n "$current_issuer" ]; then
     echo "Current ISSUER in .env: $current_issuer"
@@ -592,7 +592,7 @@ update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" 
 contract_default=$(get_env_default "CONTRACT_ADDRESS" "$BLOCKCHAIN_ENV_FILE")
 if [ -n "$contract_default" ]; then
     update_env_var "$BLOCKCHAIN_ENV_FILE" "CONTRACT_ADDRESS" "$contract_default"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_default"
+    update_env_var "$BLOCKCHAIN_ENV_FILE" "BILLING_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_default"
 fi
 
 sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$BLOCKCHAIN_ENV_FILE")
@@ -690,7 +690,7 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Wallet/Treasury token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
+echo "   * Admin access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
 echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/"
 echo "   * Blockchain Services API: /auth"
@@ -748,7 +748,7 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Wallet/Treasury token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
+echo "   * Admin access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
 echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
 echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
 echo "   * Blockchain Services API: /auth"

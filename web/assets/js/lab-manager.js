@@ -7,7 +7,7 @@ function escapeHtml(str) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const TREASURY_TOKEN_STORAGE_KEY = 'dlabs_treasury_token';
+    const BILLING_TOKEN_STORAGE_KEY = 'dlabs_billing_token';
 
     function isUsableToken(value) {
         if (typeof value !== 'string') return false;
@@ -17,9 +17,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return lower !== 'change_me' && lower !== 'changeme';
     }
 
-    function hasTreasuryToken() {
+    function hasBillingToken() {
         try {
-            return isUsableToken(localStorage.getItem(TREASURY_TOKEN_STORAGE_KEY));
+            return isUsableToken(localStorage.getItem(BILLING_TOKEN_STORAGE_KEY));
         } catch (_) {
             return false;
         }
@@ -75,8 +75,8 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#btnTestEmail').addEventListener('click', sendTestEmail);
     driverEl.addEventListener('change', toggleSections);
     configureBtn.addEventListener('click', () => {
-        if (!hasTreasuryToken()) {
-            promptTreasuryToken(() => {
+        if (!hasBillingToken()) {
+            promptBillingToken(() => {
                 loadConfig();
                 openModal();
             });
@@ -93,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadConfig();
     loadAuthHealth();
     checkOpsAvailability();
-    updateTreasuryStatusAction();
+    updateBillingStatusAction();
 
     // Lab Station ops state
     const hostInput = $('#hostInput');
@@ -333,15 +333,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function loadConfig() {
-        if (!hasTreasuryToken()) {
-            setStatus('Treasury token not configured');
-            updateTreasuryStatusAction();
+        if (!hasBillingToken()) {
+            setStatus('Admin access token not configured');
+            updateBillingStatusAction();
             return;
         }
 
         setStatus('Loading...');
-        updateTreasuryStatusAction();
-        fetch('/treasury/admin/notifications', { credentials: 'include' })
+        updateBillingStatusAction();
+        fetch('/billing/admin/notifications', { credentials: 'include' })
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
@@ -370,20 +370,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 toggleSections();
                 updateDriverSummary();
                 setStatus('Loaded');
-                updateTreasuryStatusAction();
+                updateBillingStatusAction();
                 showToast('Configuration loaded', 'success');
             })
             .catch(err => {
                 console.error(err);
                 setStatus('Error');
-                updateTreasuryStatusAction();
+                updateBillingStatusAction();
                 showToast('Cannot load config (check admin access)', 'error');
             });
     }
 
     function saveConfig() {
-        if (!hasTreasuryToken()) {
-            showToast('Wallet/Treasury token required for notifications', 'error');
+        if (!hasBillingToken()) {
+            showToast('Admin access token required for notifications', 'error');
             return;
         }
 
@@ -409,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        fetch('/treasury/admin/notifications', {
+        fetch('/billing/admin/notifications', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -491,7 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function promptTreasuryToken(onSuccess) {
+    function promptBillingToken(onSuccess) {
         const handler = window.AuthTokenHandler;
         if (!handler || typeof handler.showTokenModal !== 'function') {
             showToast('Token modal unavailable on this page', 'error');
@@ -500,15 +500,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let config = null;
         if (typeof handler.getTokenConfigForPath === 'function') {
-            config = handler.getTokenConfigForPath('/treasury/admin/notifications');
+            config = handler.getTokenConfigForPath('/billing/admin/notifications');
         }
         if (!config) {
             config = {
-                key: TREASURY_TOKEN_STORAGE_KEY,
+                key: BILLING_TOKEN_STORAGE_KEY,
                 header: 'X-Access-Token',
                 cookie: 'access_token',
-                title: 'Wallet/Treasury Access Token',
-                description: 'This area requires a Wallet/Treasury access token.'
+                title: 'Wallet & Billing Access Token',
+                description: 'This area requires a Wallet & Billing access token.'
             };
         }
 
@@ -519,13 +519,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function updateTreasuryStatusAction() {
+    function updateBillingStatusAction() {
         if (!configStatusEl) {
             return;
         }
-        const needsToken = !hasTreasuryToken();
+        const needsToken = !hasBillingToken();
         configStatusEl.classList.toggle('token-required-action', needsToken);
-        configStatusEl.title = needsToken ? 'Click to enter Wallet/Treasury token' : '';
+        configStatusEl.title = needsToken ? 'Click to enter Wallet & Billing token' : '';
         configStatusEl.setAttribute('aria-disabled', needsToken ? 'false' : 'true');
     }
 
@@ -533,25 +533,25 @@ document.addEventListener('DOMContentLoaded', () => {
         configStatusEl.setAttribute('role', 'button');
         configStatusEl.tabIndex = 0;
         configStatusEl.addEventListener('click', () => {
-            if (!hasTreasuryToken()) {
-                promptTreasuryToken(() => loadConfig());
+            if (!hasBillingToken()) {
+                promptBillingToken(() => loadConfig());
             }
         });
         configStatusEl.addEventListener('keydown', (e) => {
-            if ((e.key === 'Enter' || e.key === ' ') && !hasTreasuryToken()) {
+            if ((e.key === 'Enter' || e.key === ' ') && !hasBillingToken()) {
                 e.preventDefault();
-                promptTreasuryToken(() => loadConfig());
+                promptBillingToken(() => loadConfig());
             }
         });
     }
 
     function sendTestEmail() {
-        if (!hasTreasuryToken()) {
-            showToast('Wallet/Treasury token required for notifications', 'error');
+        if (!hasBillingToken()) {
+            showToast('Admin access token required for notifications', 'error');
             return;
         }
 
-        fetch('/treasury/admin/notifications/test', {
+        fetch('/billing/admin/notifications/test', {
             method: 'POST',
             credentials: 'include'
         })

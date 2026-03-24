@@ -1,12 +1,12 @@
--- Strict access guard for treasury admin endpoints.
--- Uses TREASURY_TOKEN only. If unset, allows loopback/Docker ranges only.
+-- Strict access guard for billing admin endpoints.
+-- Uses ADMIN_ACCESS_TOKEN (with TREASURY_TOKEN fallback). If unset, allows loopback/Docker ranges only.
 
-local token = os.getenv("TREASURY_TOKEN") or ""
+local token = os.getenv("ADMIN_ACCESS_TOKEN") or os.getenv("TREASURY_TOKEN") or ""
 local config = ngx.shared and ngx.shared.config
 local lite_mode = config and config:get("lite_mode")
 
-local header_name = os.getenv("TREASURY_TOKEN_HEADER") or "X-Access-Token"
-local cookie_name = os.getenv("TREASURY_TOKEN_COOKIE") or "access_token"
+local header_name = os.getenv("ADMIN_ACCESS_TOKEN_HEADER") or os.getenv("TREASURY_TOKEN_HEADER") or "X-Access-Token"
+local cookie_name = os.getenv("ADMIN_ACCESS_TOKEN_COOKIE") or os.getenv("TREASURY_TOKEN_COOKIE") or "access_token"
 
 local function deny(message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
@@ -23,7 +23,7 @@ local function deny_forbidden(message)
 end
 
 if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
-    return deny_forbidden("Forbidden: treasury admin endpoints are disabled in Lite mode.")
+    return deny_forbidden("Forbidden: billing admin endpoints are disabled in Lite mode.")
 end
 
 local function is_loopback_or_docker(ip)
@@ -48,7 +48,7 @@ end
 
 if token == "" then
     if not is_loopback_or_docker(ngx.var.remote_addr or "") then
-        return deny("Forbidden: Remote treasury admin access is disabled. Set TREASURY_TOKEN in your .env file and restart the service.")
+        return deny("Forbidden: Remote billing admin access is disabled. Set ADMIN_ACCESS_TOKEN in your .env file and restart the service.")
     end
     return
 end
@@ -90,11 +90,11 @@ if not provided or provided == "" then
 end
 
 if not provided or provided == "" then
-    return deny("Unauthorized: Treasury token required. Provide " .. header_name .. " header, " .. cookie_name .. " cookie, or ?token=... query parameter.")
+    return deny("Unauthorized: Access token required. Provide " .. header_name .. " header, " .. cookie_name .. " cookie, or ?token=... query parameter.")
 end
 
 if provided ~= token then
-    return deny("Unauthorized: Invalid treasury token. Provide " .. header_name .. " header, " .. cookie_name .. " cookie, or ?token=... query parameter.")
+    return deny("Unauthorized: Invalid access token. Provide " .. header_name .. " header, " .. cookie_name .. " cookie, or ?token=... query parameter.")
 end
 
 -- Always forward the selected token header

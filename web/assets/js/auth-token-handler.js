@@ -9,7 +9,7 @@
     // Token storage
     const TOKEN_STORAGE = {
         LAB_MANAGER: 'dlabs_lab_manager_token',
-        TREASURY: 'dlabs_treasury_token'
+        BILLING: 'dlabs_billing_token'
     };
 
     // Token configuration based on path
@@ -29,32 +29,32 @@
             description: 'This area requires a Lab Manager access token.'
         },
         '/wallet': {
-            key: TOKEN_STORAGE.TREASURY,
+            key: TOKEN_STORAGE.BILLING,
             header: 'X-Access-Token',
             cookie: 'access_token',
-            title: 'Wallet/Treasury Access Token',
-            description: 'This area requires a Wallet/Treasury access token.'
+            title: 'Wallet & Billing Access Token',
+            description: 'This area requires a Wallet & Billing access token.'
         },
-        '/treasury': {
-            key: TOKEN_STORAGE.TREASURY,
+        '/billing': {
+            key: TOKEN_STORAGE.BILLING,
             header: 'X-Access-Token',
             cookie: 'access_token',
-            title: 'Wallet/Treasury Access Token',
-            description: 'This area requires a Wallet/Treasury access token.'
+            title: 'Wallet & Billing Access Token',
+            description: 'This area requires a Wallet & Billing access token.'
         },
         '/wallet-dashboard': {
-            key: TOKEN_STORAGE.TREASURY,
+            key: TOKEN_STORAGE.BILLING,
             header: 'X-Access-Token',
             cookie: 'access_token',
-            title: 'Wallet/Treasury Access Token',
-            description: 'This area requires a Wallet/Treasury access token.'
+            title: 'Wallet & Billing Access Token',
+            description: 'This area requires a Wallet & Billing access token.'
         },
         '/institution-config': {
-            key: TOKEN_STORAGE.TREASURY,
+            key: TOKEN_STORAGE.BILLING,
             header: 'X-Access-Token',
             cookie: 'access_token',
-            title: 'Wallet/Treasury Access Token',
-            description: 'This area requires a Wallet/Treasury access token.'
+            title: 'Wallet & Billing Access Token',
+            description: 'This area requires a Wallet & Billing access token.'
         }
     };
 

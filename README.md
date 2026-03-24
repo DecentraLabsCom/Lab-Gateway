@@ -5,7 +5,7 @@
 
 ## 🎯 Overview
 
-DecentraLabs Gateway provides a complete blockchain-based authentication system for laboratory access. It includes all components needed for a decentralized lab access solution with advanced features, wallet management, institutional treasury operations, and remote FMU access through generated `proxy.fmu` artifacts.
+DecentraLabs Gateway provides a complete blockchain-based authentication system for laboratory access. It includes all components needed for a decentralized lab access solution with advanced features, wallet management, billing and service-credit operations, and remote FMU access through generated `proxy.fmu` artifacts.
 
 ## 🏗️ Architecture
 
@@ -72,7 +72,7 @@ FMU target model:
 - **Blockchain Integration**: Web3j for smart contract interaction
 - **JWT Management**: Token validation and generation
 - **Wallet Operations**: Create, import, and manage Ethereum wallets
-- **Institutional Treasury**: Full treasury management with spending limits and period controls
+- **Service-Credit Billing**: Managed credit issuance with spending limits and period controls
 - **Health Monitoring**: Built-in health checks and metrics
 
 ### ✅ Lab Access & Management (OpenResty & Guacamole)

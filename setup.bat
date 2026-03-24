@@ -209,25 +209,25 @@ call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_USER" "!guac_admin_user!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "GUAC_ADMIN_PASS" "!guac_admin_pass!"
 echo.
 
-REM Wallet/Treasury Access Token
-echo Wallet/Treasury Access Token
+REM Admin Access Token
+echo Admin Access Token
 echo ============================
-echo This token protects /wallet, /treasury, /wallet-dashboard, and /treasury/admin/** behind OpenResty.
+echo This token protects /wallet, /billing, /wallet-dashboard, and /billing/admin/** behind OpenResty.
 set "access_token="
-set /p "access_token=Wallet/Treasury token (leave empty for auto-generated): "
+set /p "access_token=Admin access token (leave empty for auto-generated): "
 if defined access_token set "access_token=!access_token: =!"
 if "!access_token!"=="=" set "access_token="
 if /i "!access_token!"=="CHANGE_ME" set "access_token="
 
 if "!access_token!"=="" (
     set "access_token=acc_%RANDOM%%RANDOM%%RANDOM%"
-    echo Generated Wallet/Treasury token: !access_token!
+    echo Generated admin access token: !access_token!
 )
 
-call :UpdateEnvBoth "TREASURY_TOKEN" "!access_token!"
-call :UpdateEnvBoth "TREASURY_TOKEN_HEADER" "X-Access-Token"
-call :UpdateEnvBoth "TREASURY_TOKEN_COOKIE" "access_token"
-call :UpdateEnvBoth "TREASURY_TOKEN_REQUIRED" "true"
+call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN" "!access_token!"
+call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
+call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
+call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
 call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
 call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
 echo.
@@ -338,7 +338,7 @@ echo ISSUER controls which JWT issuer OpenResty accepts:
 echo   - Leave empty -^> Full mode ^(this gateway handles auth + access^).
 echo   - Set https://^<your-full-gateway-domain^>/auth -^> Lite mode ^(trust Full-issued JWTs^).
 echo   - In Lite mode, public key sync is automatic from https://^<issuer-origin^>/.well-known/public-key.pem.
-echo   - Lite mode disables local auth/treasury/intents endpoints.
+echo   - Lite mode disables local auth/billing/intents endpoints.
 call :ReadEnvValue "%ROOT_ENV_FILE%" "ISSUER" current_issuer
 if defined current_issuer (
     echo Current ISSUER in .env: !current_issuer!
@@ -538,7 +538,7 @@ call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_REGISTRATION_ENABLED
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
 if defined contract_default (
     call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" "!contract_default!"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_default!"
+    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BILLING_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_default!"
 )
 
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
@@ -605,7 +605,7 @@ if /i "!domain!"=="localhost" (
         set "token_host=https://!domain!:!https_port!"
     )
 )
-echo    * Wallet/Treasury token cookie: !token_host!/wallet-dashboard?token=!access_token!
+echo    * Admin access token cookie: !token_host!/wallet-dashboard?token=!access_token!
 echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
 echo    * Guacamole: /guacamole/
 echo    * Blockchain Services API: /auth
@@ -670,7 +670,7 @@ if /i "!domain!"=="localhost" (
         set "token_host=https://!domain!:!https_port!"
     )
 )
-echo    * Wallet/Treasury token cookie: !token_host!/wallet-dashboard?token=!access_token!
+echo    * Admin access token cookie: !token_host!/wallet-dashboard?token=!access_token!
 echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
     echo    * Guacamole: /guacamole/ ^(!guac_admin_user! / !guac_admin_pass!^)
     echo    * Blockchain Services API: /auth
