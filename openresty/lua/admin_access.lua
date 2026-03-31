@@ -1,12 +1,12 @@
 -- Strict access guard for billing admin endpoints.
--- Uses ADMIN_ACCESS_TOKEN (with TREASURY_TOKEN fallback). If unset, allows loopback/Docker ranges only.
+-- Uses ADMIN_ACCESS_TOKEN. If unset, allows loopback/Docker ranges only.
 
-local token = os.getenv("ADMIN_ACCESS_TOKEN") or os.getenv("TREASURY_TOKEN") or ""
+local token = os.getenv("ADMIN_ACCESS_TOKEN") or ""
 local config = ngx.shared and ngx.shared.config
 local lite_mode = config and config:get("lite_mode")
 
-local header_name = os.getenv("ADMIN_ACCESS_TOKEN_HEADER") or os.getenv("TREASURY_TOKEN_HEADER") or "X-Access-Token"
-local cookie_name = os.getenv("ADMIN_ACCESS_TOKEN_COOKIE") or os.getenv("TREASURY_TOKEN_COOKIE") or "access_token"
+local header_name = os.getenv("ADMIN_ACCESS_TOKEN_HEADER") or "X-Access-Token"
+local cookie_name = os.getenv("ADMIN_ACCESS_TOKEN_COOKIE") or "access_token"
 
 local function deny(message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
