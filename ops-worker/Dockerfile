@@ -14,5 +14,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY worker.py /app/worker.py
+COPY aas_generator.py /app/aas_generator.py
 
 CMD ["python", "worker.py"]
