@@ -1,7 +1,7 @@
 -- Access guard for billing/wallet-facing endpoints.
 -- Enforces the access token for non-local clients when configured.
 
-local token = os.getenv("ADMIN_ACCESS_TOKEN") or os.getenv("TREASURY_TOKEN") or ""
+local token = os.getenv("ADMIN_ACCESS_TOKEN") or ""
 local config = ngx.shared and ngx.shared.config
 local lite_mode = config and config:get("lite_mode")
 
