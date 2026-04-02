@@ -324,6 +324,9 @@ local guac_schema_ok, guac_schema_err = check_guac_schema()
 local guac_api_ok = guac_api.status and guac_api.status < 500
 
 local block_body = blockchain.body or {}
+if block_body.billing_configured == nil and block_body.treasury_configured ~= nil then
+    block_body.billing_configured = block_body.treasury_configured
+end
 
 -- DNS checks
 local dns_hosts = { "blockchain-services", "guacamole", "ops-worker", "mysql" }

@@ -272,7 +272,13 @@ local function healthy_gateway_health_opts()
             ["/var/www/html/index.html"] = "<html></html>"
         },
         captures = {
-            ["/__health_blockchain"] = { status = 200, body = { version = "1.2.3" } },
+            ["/__health_blockchain"] = {
+                status = 200,
+                body = {
+                    version = "1.2.3",
+                    treasury_configured = true
+                }
+            },
             ["/__health_guacamole"] = { status = 200, body = {} },
             ["/__health_guac_api"] = { status = 200, body = {} },
             ["/__health_ops"] = { status = 200, body = { hosts = 3, polling_enabled = true } }
@@ -309,6 +315,7 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals("full", result.mode)
         runner.assert.equals("UP", result.status)
         runner.assert.equals(true, result.services.blockchain.ok)
+        runner.assert.equals(true, result.services.blockchain.details.billing_configured)
         runner.assert.equals(true, result.services.guacamole.ok)
         runner.assert.equals(true, result.services.mysql.ok)
         runner.assert.equals(42, result.infra.cert.days_remaining)

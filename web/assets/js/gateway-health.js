@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ['Private key', boolTag(d.private_key_present)],
                 ['DB', boolTag(d.database_up)],
                 ['Wallet configured', boolTag(d.wallet_configured)],
-                ['Billing configured', boolTag(d.billing_configured)],
+                ['Billing configured', boolTag(d.billing_configured ?? d.treasury_configured)],
                 ['Provider registered', boolTag(d.provider_registered)],
                 ['Invite token', boolTag(d.invite_token_configured)],
                 ['Event listener', boolTag(d.event_listener_enabled)],
