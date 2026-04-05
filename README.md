@@ -212,7 +212,7 @@ If you prefer manual configuration:
 
 2. **Edit `.env` and `blockchain-services/.env`** with your configuration (see Configuration section below)
   - Configure the two gateway access tokens for production:
-    - `TREASURY_TOKEN`: protects wallet/treasury routes (`/wallet`, `/treasury`, `/wallet-dashboard`, `/treasury/admin/**`)
+    - `ADMIN_ACCESS_TOKEN`: protects wallet/billing routes (`/wallet`, `/treasury`, `/wallet-dashboard`, `/treasury/admin/**`)
     - `LAB_MANAGER_TOKEN`: protects `/lab-manager` and `/ops` from public networks
 
 3. **Set host UID/GID for bind mounts (Linux/macOS)** so containers can write to `certs/` and `blockchain-data/`:
@@ -300,10 +300,10 @@ LAB_MANAGER_TOKEN_HEADER=X-Lab-Manager-Token
 LAB_MANAGER_TOKEN_COOKIE=lab_manager_token
 
 # Blockchain Services remote access
-TREASURY_TOKEN=your_treasury_token
-TREASURY_TOKEN_HEADER=X-Access-Token
-TREASURY_TOKEN_COOKIE=access_token
-TREASURY_TOKEN_REQUIRED=true
+ADMIN_ACCESS_TOKEN=your_admin_access_token
+ADMIN_ACCESS_TOKEN_HEADER=X-Access-Token
+ADMIN_ACCESS_TOKEN_COOKIE=access_token
+ADMIN_ACCESS_TOKEN_REQUIRED=true
 SECURITY_ALLOW_PRIVATE_NETWORKS=true
 ADMIN_DASHBOARD_ALLOW_PRIVATE=true
 
@@ -313,7 +313,7 @@ CERTBOT_EMAIL=you@example.com
 CERTBOT_STAGING=0
 ```
 
-Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` private-network-only). Set `TREASURY_TOKEN` to protect wallet/treasury endpoints exposed through OpenResty for remote access.
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` private-network-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/treasury endpoints exposed through OpenResty for remote access.
 
 `blockchain-services` uses a dedicated schema named `blockchain_services` by default. If you want a different name, set `BLOCKCHAIN_MYSQL_DATABASE` in `.env`.
 
@@ -353,7 +353,7 @@ CONTRACT_ADDRESS=0xYourSmartContractAddress
 TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT=0xYourSmartContractAddress
 
 # Network RPC URLs (with failover support)
-RPC_URL=https://1rpc.io/sepolia
+ETHEREUM_MAINNET_RPC_URL=https://eth.public-rpc.com
 ETHEREUM_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://ethereum-sepolia-public.nodies.app
 
 # Institutional Wallet (for automated transactions)
@@ -361,20 +361,19 @@ INSTITUTIONAL_WALLET_ADDRESS=0xYourWalletAddress
 INSTITUTIONAL_WALLET_PASSWORD=YourSecurePassword
 
 # Security
-WALLET_ALLOWED_ORIGINS=https://gateway.example.com
 ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 ```
 
 #### Access Controls (Important)
 
-- `/wallet-dashboard`, `/wallet`, `/treasury`: require `TREASURY_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. The token is provided automatically via the authentication modal on the gateway's homepage, which stores it locally and adds it as the `X-Access-Token` header on all requests.
-- `/treasury/admin/**`: uses `TREASURY_TOKEN` only (header/cookie/query parameter). If `TREASURY_TOKEN` is unset, access is limited to loopback/Docker ranges.
+- `/wallet-dashboard`, `/wallet`, `/treasury`: require `ADMIN_ACCESS_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. The token is provided automatically via the authentication modal on the gateway's homepage, which stores it locally and adds it as the `X-Access-Token` header on all requests.
+- `/treasury/admin/**`: uses `ADMIN_ACCESS_TOKEN` only (header/cookie/query parameter). If the token is unset, access is limited to loopback/Docker ranges.
 - `/treasury/admin/execute`: additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
-- **Initial setup**: Click "Wallet & Treasury→" from the homepage, enter your `TREASURY_TOKEN` when prompted. The token will be stored in your browser and automatically included in all requests.
+- **Initial setup**: Click "Wallet & Treasury→" from the homepage, enter your `ADMIN_ACCESS_TOKEN` when prompted. The token will be stored in your browser and automatically included in all requests.
 - `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Click "Lab Manager→" from the homepage and enter your token when prompted.
 - `/ops`: **network-restricted** to `127.0.0.1` and `172.16.0.0/12` only, plus requires `LAB_MANAGER_TOKEN`. Lab Manager UI works remotely, but ops features (WoL, WinRM, heartbeat) require access from the gateway server or institution network.
-- If wallet actions return `JSON.parse` errors in the browser, ensure both `CORS_ALLOWED_ORIGINS` and `WALLET_ALLOWED_ORIGINS` include your gateway origin.
+- If wallet actions return `JSON.parse` errors in the browser, ensure `CORS_ALLOWED_ORIGINS` includes your gateway origin.
 
 ## Institutional Wallet Setup
 

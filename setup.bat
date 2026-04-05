@@ -427,34 +427,6 @@ if "!cf_enabled!"=="1" (
         set "cf_service=cloudflared"
     )
 )
-echo.
-echo Wallet Dashboard Origin
-echo =======================
-set "https_port_value="
-call :ReadEnvValue "%ROOT_ENV_FILE%" "HTTPS_PORT" https_port_value
-if "!https_port_value!"=="" (
-    if /i "!domain!"=="localhost" (
-        set "https_port_value=8443"
-    ) else (
-        set "https_port_value=443"
-    )
-)
-if /i "!domain!"=="localhost" (
-    if "!https_port_value!"=="443" (
-        set "wallet_origin=https://localhost"
-    ) else (
-        set "wallet_origin=https://localhost:!https_port_value!"
-    )
-) else (
-    if "!https_port_value!"=="443" (
-        set "wallet_origin=https://!domain!"
-    ) else (
-        set "wallet_origin=https://!domain!:!https_port_value!"
-    )
-)
-call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "WALLET_ALLOWED_ORIGINS" "!wallet_origin!"
-echo Configured WALLET_ALLOWED_ORIGINS to !wallet_origin!
-
 REM Build complete compose command: base + files + profile
 set "compose_full=%compose_cmd% !compose_files!"
 if "!cf_enabled!"=="1" set "compose_full=!compose_full! --profile !cf_profile!"

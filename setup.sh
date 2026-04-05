@@ -458,32 +458,6 @@ else
 fi
 
 echo
-echo "Wallet Dashboard Origin"
-echo "======================="
-https_port_value=$(get_env_default "HTTPS_PORT" "$ROOT_ENV_FILE")
-if [ "$domain" == "localhost" ]; then
-    if [ -z "$https_port_value" ]; then
-        https_port_value="8443"
-    fi
-    if [ "$https_port_value" == "443" ]; then
-        wallet_origin="https://localhost"
-    else
-        wallet_origin="https://localhost:${https_port_value}"
-    fi
-else
-    if [ -z "$https_port_value" ]; then
-        https_port_value="443"
-    fi
-    if [ "$https_port_value" == "443" ]; then
-        wallet_origin="https://${domain}"
-    else
-        wallet_origin="https://${domain}:${https_port_value}"
-    fi
-fi
-update_env_var "$BLOCKCHAIN_ENV_FILE" "WALLET_ALLOWED_ORIGINS" "$wallet_origin"
-echo "Configured WALLET_ALLOWED_ORIGINS to ${wallet_origin}"
-
-echo
 echo "Ops Worker configuration"
 echo "------------------------"
 echo "By default the stack mounts ops-worker/hosts.empty.json."
