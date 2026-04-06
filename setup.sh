@@ -566,7 +566,6 @@ update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" 
 contract_default=$(get_env_default "CONTRACT_ADDRESS" "$BLOCKCHAIN_ENV_FILE")
 if [ -n "$contract_default" ]; then
     update_env_var "$BLOCKCHAIN_ENV_FILE" "CONTRACT_ADDRESS" "$contract_default"
-    update_env_var "$BLOCKCHAIN_ENV_FILE" "BILLING_ADMIN_DOMAIN_VERIFYING_CONTRACT" "$contract_default"
 fi
 
 sepolia_default=$(get_env_default "ETHEREUM_SEPOLIA_RPC_URL" "$BLOCKCHAIN_ENV_FILE")
@@ -581,7 +580,6 @@ read -p "Allowed origins for CORS [${allowed_origins_default:-https://marketplac
 allowed_origins=${allowed_origins:-${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}}
 if [ -n "$allowed_origins" ]; then
     update_env_var "$BLOCKCHAIN_ENV_FILE" "ALLOWED_ORIGINS" "$allowed_origins"
-    update_env_var "$ROOT_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$allowed_origins"
 fi
 
 public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$BLOCKCHAIN_ENV_FILE")

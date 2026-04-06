@@ -510,7 +510,6 @@ call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_REGISTRATION_ENABLED
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
 if defined contract_default (
     call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" "!contract_default!"
-    call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BILLING_ADMIN_DOMAIN_VERIFYING_CONTRACT" "!contract_default!"
 )
 
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" sepolia_default
@@ -527,7 +526,6 @@ set /p "allowed_origins=Allowed origins for CORS [!origins_default!]: "
 if "!allowed_origins!"=="" set "allowed_origins=!origins_default!"
 if not "!allowed_origins!"=="" (
     call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "ALLOWED_ORIGINS" "!allowed_origins!"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "CORS_ALLOWED_ORIGINS" "!allowed_origins!"
 )
 
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" mpk_default
