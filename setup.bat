@@ -228,8 +228,30 @@ call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN" "!access_token!"
 call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
 call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
 call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
-call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+call :UpdateEnvBoth "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
+echo.
+echo Wallet Dashboard Access Scope
+echo =============================
+echo Choose how /wallet-dashboard and wallet/billing admin routes are exposed:
+echo   1^) Localhost only ^(recommended^)
+echo   2^) Private networks + admin access token
+set "dashboard_access_scope="
+set /p "dashboard_access_scope=Choose [1/2] (default: 1): "
+if defined dashboard_access_scope set "dashboard_access_scope=!dashboard_access_scope: =!"
+if "!dashboard_access_scope!"=="2" (
+    call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+    call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+    set "admin_allowed_cidrs="
+    set /p "admin_allowed_cidrs=Allowed private CIDRs (comma-separated, leave empty for any private range): "
+    if defined admin_allowed_cidrs set "admin_allowed_cidrs=!admin_allowed_cidrs: =!"
+    call :UpdateEnvBoth "ADMIN_ALLOWED_CIDRS" "!admin_allowed_cidrs!"
+    echo Configured wallet dashboard access for private networks protected by ADMIN_ACCESS_TOKEN.
+) else (
+    call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
+    call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
+    call :UpdateEnvBoth "ADMIN_ALLOWED_CIDRS" ""
+    echo Configured wallet dashboard access for localhost only.
+)
 echo.
 
 REM Lab Manager Access Token

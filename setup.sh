@@ -256,8 +256,30 @@ update_env_in_all "ADMIN_ACCESS_TOKEN" "$access_token"
 update_env_in_all "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
 update_env_in_all "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
 update_env_in_all "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
-update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+update_env_in_all "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
+
+echo
+echo "Wallet Dashboard Access Scope"
+echo "============================="
+echo "Choose how /wallet-dashboard and wallet/billing admin routes are exposed:"
+echo "  1) Localhost only (recommended)"
+echo "  2) Private networks + admin access token"
+read -p "Choose [1/2] (default: 1): " dashboard_access_scope
+dashboard_access_scope=$(echo "$dashboard_access_scope" | tr -d ' ')
+
+if [ "$dashboard_access_scope" == "2" ]; then
+    update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+    update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+    read -p "Allowed private CIDRs (comma-separated, leave empty for any private range): " admin_allowed_cidrs
+    admin_allowed_cidrs=$(echo "$admin_allowed_cidrs" | sed 's/[[:space:]]//g')
+    update_env_in_all "ADMIN_ALLOWED_CIDRS" "$admin_allowed_cidrs"
+    echo "Configured wallet dashboard access for private networks protected by ADMIN_ACCESS_TOKEN."
+else
+    update_env_in_all "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
+    update_env_in_all "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
+    update_env_in_all "ADMIN_ALLOWED_CIDRS" ""
+    echo "Configured wallet dashboard access for localhost only."
+fi
 echo
 
 # Lab Manager Access Token

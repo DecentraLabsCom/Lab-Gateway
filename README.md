@@ -7,6 +7,10 @@
 
 DecentraLabs Gateway provides a complete blockchain-based authentication system for laboratory access. It includes all components needed for a decentralized lab access solution with advanced features, wallet management, billing and service-credit operations, and remote FMU access through generated `proxy.fmu` artifacts.
 
+This repository corresponds to the `provider+consumer` deployment mode. In that mode, the institution can publish labs, expose authentication endpoints, and also fund reservation/access costs for its own users.
+
+If you need only a funding and cost-management backend for your own users, without publishing labs or exposing provider auth endpoints, use `blockchain-services` in standalone `consumer-only` mode instead.
+
 ## 🏗️ Architecture
 
 ```mermaid
@@ -304,8 +308,10 @@ ADMIN_ACCESS_TOKEN=your_admin_access_token
 ADMIN_ACCESS_TOKEN_HEADER=X-Access-Token
 ADMIN_ACCESS_TOKEN_COOKIE=access_token
 ADMIN_ACCESS_TOKEN_REQUIRED=true
-SECURITY_ALLOW_PRIVATE_NETWORKS=true
-ADMIN_DASHBOARD_ALLOW_PRIVATE=true
+ADMIN_DASHBOARD_LOCAL_ONLY=true
+ADMIN_ALLOWED_CIDRS=
+SECURITY_ALLOW_PRIVATE_NETWORKS=false
+ADMIN_DASHBOARD_ALLOW_PRIVATE=false
 
 # Certbot / ACME (optional - for Let's Encrypt automation)
 CERTBOT_DOMAINS=yourdomain.com,www.yourdomain.com
@@ -370,6 +376,12 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 - `/treasury/admin/**`: uses `ADMIN_ACCESS_TOKEN` only (header/cookie/query parameter). If the token is unset, access is limited to loopback/Docker ranges.
 - `/treasury/admin/execute`: additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
 - **Initial setup**: Click "Wallet & Treasury→" from the homepage, enter your `ADMIN_ACCESS_TOKEN` when prompted. The token will be stored in your browser and automatically included in all requests.
+- Strict localhost-only mode for the wallet dashboard and related wallet/billing routes:
+  `ADMIN_DASHBOARD_LOCAL_ONLY=true`, `ADMIN_DASHBOARD_ALLOW_PRIVATE=false`, `SECURITY_ALLOW_PRIVATE_NETWORKS=false`
+- Private-network mode for those routes:
+  `ADMIN_DASHBOARD_LOCAL_ONLY=true`, `ADMIN_DASHBOARD_ALLOW_PRIVATE=true`, `SECURITY_ALLOW_PRIVATE_NETWORKS=true`, and keep `ADMIN_ACCESS_TOKEN_REQUIRED=true`
+- To limit private-network mode to specific subnets, set `ADMIN_ALLOWED_CIDRS`:
+  `ADMIN_ALLOWED_CIDRS=10.20.0.0/16,192.168.50.0/24`
 - `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Click "Lab Manager→" from the homepage and enter your token when prompted.
 - `/ops`: **network-restricted** to `127.0.0.1` and `172.16.0.0/12` only, plus requires `LAB_MANAGER_TOKEN`. Lab Manager UI works remotely, but ops features (WoL, WinRM, heartbeat) require access from the gateway server or institution network.
 - If wallet actions return `JSON.parse` errors in the browser, ensure `CORS_ALLOWED_ORIGINS` includes your gateway origin.
