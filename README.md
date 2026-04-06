@@ -350,7 +350,6 @@ Runtime activation requires Compose profiles (`--profile cloudflare` or `--profi
 ```env
 # Smart Contract
 CONTRACT_ADDRESS=0xYourSmartContractAddress
-TREASURY_ADMIN_DOMAIN_VERIFYING_CONTRACT=0xYourSmartContractAddress
 
 # Network RPC URLs (with failover support)
 ETHEREUM_MAINNET_RPC_URL=https://eth.public-rpc.com
