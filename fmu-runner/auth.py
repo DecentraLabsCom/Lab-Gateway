@@ -1,13 +1,19 @@
 """
 JWT verification for FMU Runner.
 
-Validates tokens against the Blockchain-Services JWKS endpoint.
+In Full Gateway mode, booking JWTs are validated against the local
+blockchain-services JWKS endpoint.
+
+In Lite Gateway mode, the gateway trusts JWTs issued by an external Full
+Gateway configured through ISSUER. FMU validation must therefore use that
+issuer and its JWKS endpoint instead of the local blockchain-services one.
 """
 
 import os
 import logging
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import jwt
 import httpx
@@ -15,9 +21,42 @@ from fastapi import HTTPException, Request
 
 logger = logging.getLogger("fmu-runner.auth")
 
-AUTH_JWKS_URL = os.getenv("AUTH_JWKS_URL", "http://blockchain-services:8080/auth/jwks")
+def _normalize_issuer(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.strip().rstrip("/")
+    return normalized or None
+
+
+def _build_jwks_url_from_issuer(issuer: str) -> str:
+    parsed = urlparse(issuer)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError(f"Invalid issuer URL: {issuer}")
+    return f"{parsed.scheme}://{parsed.netloc}/auth/jwks"
+
+
+def _resolve_auth_jwks_url() -> str:
+    explicit = os.getenv("AUTH_JWKS_URL")
+    if explicit and explicit.strip():
+        return explicit.strip()
+
+    issuer = _normalize_issuer(os.getenv("ISSUER"))
+    if issuer:
+        return _build_jwks_url_from_issuer(issuer)
+
+    return "http://blockchain-services:8080/auth/jwks"
+
+
+def _resolve_jwt_issuer() -> Optional[str]:
+    explicit = _normalize_issuer(os.getenv("JWT_ISSUER"))
+    if explicit:
+        return explicit
+    return _normalize_issuer(os.getenv("ISSUER"))
+
+
+AUTH_JWKS_URL = _resolve_auth_jwks_url()
 JWT_ALGORITHMS = ["RS256", "ES256"]
-JWT_ISSUER = os.getenv("JWT_ISSUER", None)  # Optional issuer check
+JWT_ISSUER = _resolve_jwt_issuer()  # Optional issuer check
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", None)  # Optional audience check — set to gateway URL
 JWKS_CACHE_TTL = int(os.getenv("JWKS_CACHE_TTL", "300"))  # seconds
 

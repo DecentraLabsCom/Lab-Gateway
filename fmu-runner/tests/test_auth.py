@@ -21,6 +21,41 @@ def _reset_auth_state(monkeypatch):
     monkeypatch.setattr(auth, "JWKS_CACHE_TTL", 300)
 
 
+def test_resolve_auth_jwks_url_prefers_explicit_env(monkeypatch):
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://custom.example/jwks")
+    monkeypatch.setenv("ISSUER", "https://issuer.example/auth")
+
+    assert auth._resolve_auth_jwks_url() == "https://custom.example/jwks"
+
+
+def test_resolve_auth_jwks_url_derives_from_issuer(monkeypatch):
+    monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
+    monkeypatch.setenv("ISSUER", "https://issuer.example/auth/")
+
+    assert auth._resolve_auth_jwks_url() == "https://issuer.example/auth/jwks"
+
+
+def test_resolve_auth_jwks_url_falls_back_to_local_blockchain_service(monkeypatch):
+    monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
+    monkeypatch.delenv("ISSUER", raising=False)
+
+    assert auth._resolve_auth_jwks_url() == "http://blockchain-services:8080/auth/jwks"
+
+
+def test_resolve_jwt_issuer_prefers_explicit_override(monkeypatch):
+    monkeypatch.setenv("JWT_ISSUER", "https://jwt-issuer.example/auth")
+    monkeypatch.setenv("ISSUER", "https://issuer.example/auth")
+
+    assert auth._resolve_jwt_issuer() == "https://jwt-issuer.example/auth"
+
+
+def test_resolve_jwt_issuer_uses_issuer_when_present(monkeypatch):
+    monkeypatch.delenv("JWT_ISSUER", raising=False)
+    monkeypatch.setenv("ISSUER", "https://issuer.example/auth/")
+
+    assert auth._resolve_jwt_issuer() == "https://issuer.example/auth"
+
+
 @pytest.fixture
 def signing_material():
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)

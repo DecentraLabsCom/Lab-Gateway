@@ -218,6 +218,11 @@ If you prefer manual configuration:
   - Configure the two gateway access tokens for production:
     - `ADMIN_ACCESS_TOKEN`: protects wallet/billing routes (`/wallet`, `/treasury`, `/wallet-dashboard`, `/treasury/admin/**`)
     - `LAB_MANAGER_TOKEN`: protects `/lab-manager` and `/ops` from public networks
+  - For this repository's normal `provider+consumer` deployment, also set these in `blockchain-services/.env`:
+    ```env
+    FEATURES_PROVIDERS_ENABLED=true
+    FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
+    ```
 
 3. **Set host UID/GID for bind mounts (Linux/macOS)** so containers can write to `certs/` and `blockchain-data/`:
    ```bash
@@ -325,6 +330,13 @@ Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid
 
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.
+
+##### Gateway mode: Full vs Lite
+
+- **Full mode**: leave `ISSUER` empty.
+  This gateway exposes its own auth endpoints and validates its own locally generated JWT signing keys.
+- **Lite mode**: set `ISSUER=https://<full-gateway-or-external-issuer>/auth`.
+  This gateway no longer acts as the JWT issuer. Instead, it trusts JWTs issued elsewhere and synchronizes the remote public key automatically.
 
 ##### Deployment modes: Direct vs Router forwarding
 

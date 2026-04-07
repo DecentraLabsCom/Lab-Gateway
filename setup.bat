@@ -360,7 +360,7 @@ echo ISSUER controls which JWT issuer OpenResty accepts:
 echo   - Leave empty -^> Full mode ^(this gateway handles auth + access^).
 echo   - Set https://^<your-full-gateway-domain^>/auth -^> Lite mode ^(trust Full-issued JWTs^).
 echo   - In Lite mode, public key sync is automatic from https://^<issuer-origin^>/.well-known/public-key.pem.
-echo   - Lite mode disables local auth/billing/intents endpoints.
+echo   - Lite mode disables local auth/billing/intents endpoints, but keeps lab/FMU access using those external JWTs.
 call :ReadEnvValue "%ROOT_ENV_FILE%" "ISSUER" current_issuer
 if defined current_issuer (
     echo Current ISSUER in .env: !current_issuer!

@@ -398,7 +398,7 @@ echo "ISSUER controls which JWT issuer OpenResty accepts:"
 echo "  - Leave empty -> Full mode (this gateway handles auth + access)."
 echo "  - Set https://<your-full-gateway-domain>/auth -> Lite mode (trust Full-issued JWTs)."
 echo "  - In Lite mode, public key sync is automatic from https://<issuer-origin>/.well-known/public-key.pem."
-echo "  - Lite mode disables local auth/billing/intents endpoints."
+echo "  - Lite mode disables local auth/billing/intents endpoints, but keeps lab/FMU access using those external JWTs."
 current_issuer="$(get_env_default "ISSUER" "$ROOT_ENV_FILE")"
 if [ -n "$current_issuer" ]; then
     echo "Current ISSUER in .env: $current_issuer"

@@ -323,9 +323,9 @@ function showAuthServiceInfo() {
                 <div class="auth-info">
                     <div class="auth-status">
                         <span class="status-icon">⚠️</span>
-                        <span class="status-message">Not Available in Lite Version</span>
+                        <span class="status-message">Lite mode uses an external issuer</span>
                     </div>
-                    <p>The advanced authentication service is only available in the <strong>Full Version</strong> of DecentraLabs Gateway.</p>
+                    <p>In <strong>Lite</strong> mode this gateway trusts JWTs issued by an external <strong>Full Gateway</strong> or compatible issuer instead of exposing its own provider authentication endpoints.</p>
                     
                     <div class="comparison-table">
                         <div class="comparison-row header">
@@ -349,8 +349,8 @@ function showAuthServiceInfo() {
                             <div class="full-version">✅</div>
                         </div>
                         <div class="comparison-row">
-                            <div class="feature-name">Blockchain Integration</div>
-                            <div class="lite-version">❌</div>
+                            <div class="feature-name">Blockchain-backed access</div>
+                            <div class="lite-version">✅</div>
                             <div class="full-version">✅</div>
                         </div>
                     </div>
@@ -361,7 +361,7 @@ function showAuthServiceInfo() {
                             <span class="btn-text">Download Full Version</span>
                             <span class="btn-arrow">↗</span>
                         </a>
-                        <p class="auth-note">The Full Version includes a complete authentication and authorization microservice, JWT token handling, and blockchain integration capabilities.</p>
+                        <p class="auth-note">The Full Version exposes the local provider auth surface. Lite keeps lab access and FMU access, but trusts an external issuer for JWT validation.</p>
                     </div>
                 </div>
             </div>
@@ -404,13 +404,13 @@ function showVersionInfo() {
                 <div class="version-info-modal">
                     <div class="version-card lite">
                         <h3>🚀 Lite Version</h3>
-                        <p>Currently running the <strong>Lite</strong> version with core laboratory access functionality.</p>
+                        <p>Currently running the <strong>Lite</strong> gateway mode, delegating JWT issuance to an external Full Gateway or compatible issuer.</p>
                         <ul>
                             <li>✅ Direct lab access via Guacamole</li>
                             <li>✅ Basic authentication</li>
                             <li>✅ Encrypted connections</li>
-                            <li>❌ Authentication & authorization service</li>
-                            <li>❌ Blockchain integration</li>
+                            <li>❌ Local provider auth endpoints</li>
+                            <li>✅ JWT-based lab and FMU access via external issuer</li>
                         </ul>
                     </div>
                     
@@ -422,7 +422,7 @@ function showVersionInfo() {
                             <span class="btn-text">Download Full Version</span>
                             <span class="btn-arrow">↗</span>
                         </a>
-                        <p class="upgrade-note">Includes distributed authentication service and blockchain integration.</p>
+                        <p class="upgrade-note">Includes the local provider authentication surface, OIDC/JWKS endpoints, and the full provider publication stack.</p>
                     </div>
                 </div>
             </div>
