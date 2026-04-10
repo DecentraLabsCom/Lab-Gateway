@@ -621,7 +621,8 @@ def _model_metadata_from_model_description(md) -> dict:
         "defaultStartTime": default_start,
         "defaultStopTime": default_stop,
         "defaultStepSize": default_step,
-        "defaultTolerance": float(default_experiment.tolerance) if default_experiment and default_experiment.tolerance is not None else None,
+        "defaultTolerance": float(getattr(default_experiment, "tolerance", None))
+        if default_experiment and getattr(default_experiment, "tolerance", None) is not None else None,
         "modelVariables": variables,
         # FMU-embedded descriptive metadata (populated when declared in modelDescription.xml)
         "description": _normalize_xml_value(getattr(md, "description", None)) or "",
@@ -1206,7 +1207,7 @@ def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_siz
 
 
 # ── AAS Admin ────────────────────────────────────────────────────────
-# Protected by OpenResty lab_manager_access.lua — no JWT needed here.
+# Protected by OpenResty lab_manager_admin_access.lua — no JWT needed here.
 
 @app.post("/aas-admin/fmu/{access_key}/sync")
 async def aas_sync_fmu(access_key: str, request: Request):
@@ -1295,7 +1296,7 @@ async def aas_hints_fmu(access_key: str):
 
     Reads modelDescription.xml and returns any of: description, license,
     author, version, generationTool — only the fields that are non-empty.
-    Protected by OpenResty lab_manager_access.lua (same as /lab-manager/).
+    Protected by OpenResty lab_manager_admin_access.lua.
     """
     fmu_path = _resolve_fmu_path(access_key)
     try:

@@ -1032,7 +1032,7 @@ def api_aas_sync_lab(lab_id: str):
     """
     Sync (create or update) the AAS shell and submodels for a physical lab resource.
 
-    This endpoint is protected at the OpenResty layer via lab_manager_access.lua
+    This endpoint is protected at the OpenResty layer via lab_manager_admin_access.lua
     and is only available on Full Gateway instances (--profile aas).
 
     Optional JSON body:

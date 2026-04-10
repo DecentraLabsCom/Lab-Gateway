@@ -216,7 +216,7 @@ If you prefer manual configuration:
 
 2. **Edit `.env` and `blockchain-services/.env`** with your configuration (see Configuration section below)
   - Configure the two gateway access tokens for production:
-    - `ADMIN_ACCESS_TOKEN`: protects wallet/billing routes (`/wallet`, `/treasury`, `/wallet-dashboard`, `/treasury/admin/**`)
+    - `ADMIN_ACCESS_TOKEN`: protects wallet/billing routes (`/wallet`, `/billing`, `/wallet-dashboard`, `/billing/admin/**`)
     - `LAB_MANAGER_TOKEN`: protects `/lab-manager` and `/ops` from public networks
   - For this repository's normal `provider+consumer` deployment, also set these in `blockchain-services/.env`:
     ```env
@@ -324,7 +324,7 @@ CERTBOT_EMAIL=you@example.com
 CERTBOT_STAGING=0
 ```
 
-Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` private-network-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/treasury endpoints exposed through OpenResty for remote access.
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` private-network-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/billing endpoints exposed through OpenResty for remote access.
 
 `blockchain-services` uses a dedicated schema named `blockchain_services` by default. If you want a different name, set `BLOCKCHAIN_MYSQL_DATABASE` in `.env`.
 
@@ -384,9 +384,9 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
 
 #### Access Controls (Important)
 
-- `/wallet-dashboard`, `/wallet`, `/treasury`: require `ADMIN_ACCESS_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks. The token is provided automatically via the authentication modal on the gateway's homepage, which stores it locally and adds it as the `X-Access-Token` header on all requests.
-- `/treasury/admin/**`: uses `ADMIN_ACCESS_TOKEN` only (header/cookie/query parameter). If the token is unset, access is limited to loopback/Docker ranges.
-- `/treasury/admin/execute`: additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
+- `/wallet-dashboard`, `/wallet`, `/billing`: require `ADMIN_ACCESS_TOKEN` for non-private clients. If the token is unset, access is limited to loopback/Docker networks.
+- `/billing/admin/**`: uses `ADMIN_ACCESS_TOKEN` only (header/cookie). If the token is unset, access is limited to loopback/Docker ranges.
+- `/billing/admin/execute`: additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
 - **Initial setup**: Click "Wallet & Treasury→" from the homepage, enter your `ADMIN_ACCESS_TOKEN` when prompted. The token will be stored in your browser and automatically included in all requests.
 - Strict localhost-only mode for the wallet dashboard and related wallet/billing routes:
   `ADMIN_DASHBOARD_LOCAL_ONLY=true`, `ADMIN_DASHBOARD_ALLOW_PRIVATE=false`, `SECURITY_ALLOW_PRIVATE_NETWORKS=false`
@@ -394,8 +394,9 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
   `ADMIN_DASHBOARD_LOCAL_ONLY=true`, `ADMIN_DASHBOARD_ALLOW_PRIVATE=true`, `SECURITY_ALLOW_PRIVATE_NETWORKS=true`, and keep `ADMIN_ACCESS_TOKEN_REQUIRED=true`
 - To limit private-network mode to specific subnets, set `ADMIN_ALLOWED_CIDRS`:
   `ADMIN_ALLOWED_CIDRS=10.20.0.0/16,192.168.50.0/24`
-- `/lab-manager`: allows private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Click "Lab Manager→" from the homepage and enter your token when prompted.
-- `/ops`: **network-restricted** to `127.0.0.1` and `172.16.0.0/12` only, plus requires `LAB_MANAGER_TOKEN`. Lab Manager UI works remotely, but ops features (WoL, WinRM, heartbeat) require access from the gateway server or institution network.
+- `/lab-manager`: allows loopback and RFC1918 private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Click "Lab Manager→" from the homepage and enter your token when prompted. The bootstrap `?token=...` is stripped from the browser URL after the cookie is set.
+- `/ops`: **network-restricted** to loopback plus RFC1918 private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), and also requires `LAB_MANAGER_TOKEN`.
+- `/aas-admin/**`: always requires `LAB_MANAGER_TOKEN` via header/cookie, even from private networks. This keeps AAS write operations aligned with explicit admin auth instead of LAN-only trust.
 - If wallet actions return `JSON.parse` errors in the browser, ensure `CORS_ALLOWED_ORIGINS` includes your gateway origin.
 
 ## Institutional Wallet Setup

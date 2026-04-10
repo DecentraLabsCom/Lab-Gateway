@@ -16,4 +16,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping \
 COPY worker.py /app/worker.py
 COPY aas_generator.py /app/aas_generator.py
 
-CMD ["python", "worker.py"]
+CMD ["sh", "-c", "waitress-serve --host=${OPS_BIND:-0.0.0.0} --port=${OPS_PORT:-8081} worker:APP"]

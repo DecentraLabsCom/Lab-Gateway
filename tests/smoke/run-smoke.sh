@@ -9,6 +9,7 @@ COMPOSE_FILE="tests/smoke/docker-compose.smoke.yml"
 COOKIE_FILE="tests/smoke/cookie.txt"
 JWT_FILE="tests/smoke/jwt.txt"
 INVALID_COOKIE_FILE="tests/smoke/invalid-cookie.txt"
+INSTITUTION_COOKIE_FILE="tests/smoke/institution-cookie.txt"
 PASSED=0
 FAILED=0
 
@@ -22,6 +23,7 @@ function cleanup {
   docker compose -f "$COMPOSE_FILE" down -v >/dev/null 2>&1 || true
   rm -f "$COOKIE_FILE"
   rm -f "$INVALID_COOKIE_FILE"
+  rm -f "$INSTITUTION_COOKIE_FILE"
 }
 
 function log_pass {
@@ -228,12 +230,81 @@ fi
 # Test 14: Institution-config accepts valid token
 # =================================================================
 echo "Test 14: Institution-config accepts valid token"
-INSTITUTION_WITH_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+rm -f "$INSTITUTION_COOKIE_FILE"
+INSTITUTION_WITH_TOKEN=$(curl -skL --resolve lab.test:${PORT}:127.0.0.1 \
+  -c "$INSTITUTION_COOKIE_FILE" -b "$INSTITUTION_COOKIE_FILE" \
+  -o /dev/null -w "%{http_code}" \
   "https://lab.test:${PORT}/institution-config/status?token=${ACCESS_TOKEN}")
 if [ "$INSTITUTION_WITH_TOKEN" = "200" ]; then
   log_pass "Institution config accepts valid token (status: $INSTITUTION_WITH_TOKEN)"
 else
   log_fail "Institution config rejected valid token (status: $INSTITUTION_WITH_TOKEN)"
+fi
+
+# =================================================================
+# Test 15: Institution-config bootstrap at exact path strips token and sets cookie
+# =================================================================
+echo "Test 15: Institution-config bootstrap redirect"
+INSTITUTION_BOOTSTRAP_HEADERS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -D - -o /dev/null \
+  "https://lab.test:${PORT}/institution-config?token=${ACCESS_TOKEN}&section=providers")
+if echo "$INSTITUTION_BOOTSTRAP_HEADERS" | grep -Eq "^HTTP/.* 302" \
+  && echo "$INSTITUTION_BOOTSTRAP_HEADERS" | grep -Eqi "^location: /institution-config/\\?section=providers" \
+  && echo "$INSTITUTION_BOOTSTRAP_HEADERS" | grep -qi "^set-cookie: access_token=${ACCESS_TOKEN};"; then
+  log_pass "Institution-config exact path bootstraps cookie and strips token"
+else
+  log_fail "Institution-config bootstrap redirect/cookie mismatch: $INSTITUTION_BOOTSTRAP_HEADERS"
+fi
+
+# =================================================================
+# Test 16: Lab-manager rejects external client forwarded through private proxy without token
+# =================================================================
+echo "Test 16: Lab-manager rejects forwarded external client without token"
+LAB_MANAGER_EXTERNAL=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+  -H "X-Forwarded-For: 203.0.113.5" \
+  https://lab.test:${PORT}/lab-manager/ || true)
+if [ "$LAB_MANAGER_EXTERNAL" = "401" ]; then
+  log_pass "Lab-manager rejects forwarded external client without token"
+else
+  log_fail "Lab-manager should reject forwarded external client (status: $LAB_MANAGER_EXTERNAL)"
+fi
+
+# =================================================================
+# Test 17: Lab-manager bootstrap strips token and preserves other params
+# =================================================================
+echo "Test 17: Lab-manager bootstrap redirect"
+LAB_MANAGER_BOOTSTRAP_HEADERS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -D - -o /dev/null \
+  "https://lab.test:${PORT}/lab-manager?token=test-ops-secret-123&tab=stations")
+if echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -Eq "^HTTP/.* 302" \
+  && echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -Eqi "^location: /lab-manager/\\?tab=stations" \
+  && echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -qi "^set-cookie: lab_manager_token=test-ops-secret-123;"; then
+  log_pass "Lab-manager exact path bootstraps cookie and strips token"
+else
+  log_fail "Lab-manager bootstrap redirect/cookie mismatch: $LAB_MANAGER_BOOTSTRAP_HEADERS"
+fi
+
+# =================================================================
+# Test 18: AAS admin requires token even on local/private requests
+# =================================================================
+echo "Test 18: AAS admin requires token even on local/private requests"
+AAS_ADMIN_NO_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+  -X POST https://lab.test:${PORT}/aas-admin/fmu/test.fmu/sync || true)
+if [ "$AAS_ADMIN_NO_TOKEN" = "401" ] || [ "$AAS_ADMIN_NO_TOKEN" = "503" ]; then
+  log_pass "AAS admin rejects local/private request without token (status: $AAS_ADMIN_NO_TOKEN)"
+else
+  log_fail "AAS admin should reject local/private request without token (status: $AAS_ADMIN_NO_TOKEN)"
+fi
+
+# =================================================================
+# Test 19: AAS admin accepts valid lab manager token
+# =================================================================
+echo "Test 19: AAS admin accepts valid lab manager token"
+AAS_ADMIN_WITH_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
+  -X POST -H "X-Lab-Manager-Token: test-ops-secret-123" \
+  https://lab.test:${PORT}/aas-admin/fmu/test.fmu/sync || true)
+if [ "$AAS_ADMIN_WITH_TOKEN" = "200" ]; then
+  log_pass "AAS admin accepts valid lab manager token"
+else
+  log_fail "AAS admin should accept valid lab manager token (status: $AAS_ADMIN_WITH_TOKEN)"
 fi
 
 # =================================================================

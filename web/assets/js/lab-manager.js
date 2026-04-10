@@ -818,7 +818,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 res = await fetch(url + qs, { method: 'POST' });
             }
             if (res.status === 403) {
-                showToast('Access denied: /aas-admin restricted to private networks', 'error');
+                showToast('AAS admin unavailable in Lite mode or blocked by gateway policy', 'error');
                 return;
             }
             if (res.status === 401) {

@@ -10,10 +10,10 @@ local function resolve_treasury_access_path()
     local dir = source:match("^(.*)/[^/]+$") or "."
 
     local candidates = {
-        dir .. "/../../lua/treasury_access.lua",
-        dir .. "/../lua/treasury_access.lua",
-        "openresty/lua/treasury_access.lua",
-        "lua/treasury_access.lua"
+        dir .. "/../../lua/billing_access.lua",
+        dir .. "/../lua/billing_access.lua",
+        "openresty/lua/billing_access.lua",
+        "lua/billing_access.lua"
     }
 
     for _, path in ipairs(candidates) do
@@ -24,7 +24,7 @@ local function resolve_treasury_access_path()
         end
     end
 
-    error("Cannot locate treasury_access.lua for tests")
+    error("Cannot locate billing_access.lua for tests")
 end
 
 local function with_env(env, fn)
@@ -50,6 +50,7 @@ end
 local function run_treasury_access(opts)
     local env = opts.env or {}
     local headers = opts.headers or {}
+    local uri_args = opts.uri_args or {}
     local ngx = ngx_factory.new({
         var = opts.var or {},
         config = opts.config or {}
@@ -58,11 +59,19 @@ local function run_treasury_access(opts)
     ngx.req.get_headers = function()
         return headers
     end
+    ngx.req.get_uri_args = function()
+        return uri_args
+    end
     ngx.say = function(message)
         ngx._body = message
     end
     ngx.exit = function(code)
         ngx._exit = code
+        return code
+    end
+    ngx.redirect = function(target, code)
+        ngx._redirect_target = target
+        ngx._redirect_code = code
         return code
     end
 
@@ -78,7 +87,7 @@ end
 runner.describe("Treasury token guard", function()
 runner.it("blocks all treasury access in lite mode", function()
     local ngx = run_treasury_access({
-        env = { TREASURY_TOKEN = "secret-token" },
+        env = { ADMIN_ACCESS_TOKEN = "secret-token" },
         config = { lite_mode = 1 },
         var = { remote_addr = "127.0.0.1" }
     })
@@ -90,7 +99,7 @@ end)
 
 runner.it("rejects public IPs when no token configured", function()
     local ngx = run_treasury_access({
-        env = { TREASURY_TOKEN = "" },
+        env = { ADMIN_ACCESS_TOKEN = "" },
         var = { remote_addr = "8.8.8.8" }
     })
 
@@ -101,7 +110,7 @@ end)
 
 runner.it("allows loopback when no token configured", function()
     local ngx = run_treasury_access({
-        env = { TREASURY_TOKEN = "" },
+        env = { ADMIN_ACCESS_TOKEN = "" },
         var = { remote_addr = "127.0.0.1" }
     })
 
@@ -112,7 +121,7 @@ end)
 
     runner.it("rejects when token is invalid", function()
         local ngx = run_treasury_access({
-            env = { TREASURY_TOKEN = "secret-token" },
+            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
             headers = { ["X-Access-Token"] = "wrong-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -124,7 +133,7 @@ end)
 
     runner.it("allows private network without provided token", function()
         local ngx = run_treasury_access({
-            env = { TREASURY_TOKEN = "secret-token" },
+            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
             var = { remote_addr = "172.17.0.2" }
         })
 
@@ -134,7 +143,7 @@ end)
 
     runner.it("allows valid token on public IP", function()
         local ngx = run_treasury_access({
-            env = { TREASURY_TOKEN = "secret-token" },
+            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
             headers = { ["X-Access-Token"] = "secret-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -145,7 +154,7 @@ end)
 
     runner.it("accepts token from cookie", function()
         local ngx = run_treasury_access({
-            env = { TREASURY_TOKEN = "secret-token" },
+            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
             var = {
                 remote_addr = "8.8.8.8",
                 cookie_access_token = "secret-token"
@@ -154,6 +163,54 @@ end)
 
         runner.assert.equals(nil, ngx.status)
         runner.assert.equals("secret-token", ngx.req.headers["X-Access-Token"])
+    end)
+
+    runner.it("accepts bootstrap query on tokenized dashboard paths and redirects cleanly", function()
+        local ngx = run_treasury_access({
+            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+            var = {
+                remote_addr = "8.8.8.8",
+                uri = "/wallet-dashboard/",
+                args = "token=secret-token"
+            },
+            uri_args = { token = "secret-token" }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("access_token=secret-token; Path=/; HttpOnly; Secure; SameSite=Lax", ngx.header["Set-Cookie"])
+        runner.assert.equals("/wallet-dashboard/", ngx._redirect_target)
+        runner.assert.equals(302, ngx._redirect_code)
+    end)
+
+    runner.it("preserves non-token query args when redirecting institution-config bootstrap", function()
+        local ngx = run_treasury_access({
+            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+            var = {
+                remote_addr = "8.8.8.8",
+                uri = "/institution-config/",
+                args = "token=secret-token&section=providers"
+            },
+            uri_args = {
+                token = "secret-token",
+                section = "providers"
+            }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("access_token=secret-token; Path=/; HttpOnly; Secure; SameSite=Lax", ngx.header["Set-Cookie"])
+        runner.assert.equals("/institution-config/?section=providers", ngx._redirect_target)
+        runner.assert.equals(302, ngx._redirect_code)
+    end)
+
+    runner.it("rejects external clients forwarded through private proxies without token", function()
+        local ngx = run_treasury_access({
+            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+            headers = { ["X-Forwarded-For"] = "203.0.113.5" },
+            var = { remote_addr = "172.18.0.10" }
+        })
+
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
     end)
 end)
 

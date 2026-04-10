@@ -46,29 +46,68 @@ local function is_loopback_or_docker(ip)
     return false
 end
 
+local function is_private(ip)
+    if not ip or ip == "" then
+        return false
+    end
+    if is_loopback_or_docker(ip) then
+        return true
+    end
+    if ip:match("^10%.") then
+        return true
+    end
+    if ip:match("^192%.168%.") then
+        return true
+    end
+    local octet = ip:match("^172%.(%d+)%.")
+    if octet then
+        local n = tonumber(octet)
+        if n and n >= 16 and n <= 31 then
+            return true
+        end
+    end
+    if ip:match("^169%.254%.") then
+        return true
+    end
+    return false
+end
+
+local function extract_first_ip(value)
+    if not value then
+        return nil
+    end
+    if type(value) == "table" then
+        value = value[1]
+    end
+    if not value or value == "" then
+        return nil
+    end
+    local ip = value:match("^%s*([^,%s]+)")
+    if not ip or ip == "" then
+        return nil
+    end
+    return ip
+end
+
+local headers = ngx.req.get_headers()
+local remote_addr = ngx.var.remote_addr or ""
+local forwarded_ip = extract_first_ip(headers["X-Forwarded-For"])
+if not forwarded_ip then
+    forwarded_ip = extract_first_ip(headers["X-Real-IP"])
+end
+
+local client_ip = remote_addr
+if forwarded_ip and forwarded_ip ~= "" and is_private(remote_addr) and not is_private(forwarded_ip) then
+    client_ip = forwarded_ip
+end
+
 if token == "" then
-    if not is_loopback_or_docker(ngx.var.remote_addr or "") then
+    if not is_loopback_or_docker(client_ip) then
         return deny("Forbidden: Remote billing admin access is disabled. Set ADMIN_ACCESS_TOKEN in your .env file and restart the service.")
     end
     return
 end
 
-local function get_arg_token()
-    local args = ngx.req.get_uri_args()
-    local token_arg = args and args.token
-    if not token_arg then
-        return nil
-    end
-    if type(token_arg) == "table" then
-        token_arg = token_arg[1]
-    end
-    if token_arg == "" then
-        return nil
-    end
-    return token_arg
-end
-
-local headers = ngx.req.get_headers()
 local provided = headers[header_name]
 
 if not provided or provided == "" then
@@ -76,25 +115,12 @@ if not provided or provided == "" then
     provided = ngx.var[cookie_var]
 end
 
--- Also check ?token=... query parameter
 if not provided or provided == "" then
-    local arg_token = get_arg_token()
-    if arg_token and arg_token ~= "" then
-        if ngx.unescape_uri then
-            arg_token = ngx.unescape_uri(arg_token)
-        end
-        provided = arg_token
-        -- Set cookie for subsequent requests
-        ngx.header["Set-Cookie"] = cookie_name .. "=" .. arg_token .. "; Path=/; HttpOnly; Secure; SameSite=Lax"
-    end
-end
-
-if not provided or provided == "" then
-    return deny("Unauthorized: Access token required. Provide " .. header_name .. " header, " .. cookie_name .. " cookie, or ?token=... query parameter.")
+    return deny("Unauthorized: Access token required. Provide " .. header_name .. " header or " .. cookie_name .. " cookie.")
 end
 
 if provided ~= token then
-    return deny("Unauthorized: Invalid access token. Provide " .. header_name .. " header, " .. cookie_name .. " cookie, or ?token=... query parameter.")
+    return deny("Unauthorized: Invalid access token. Provide " .. header_name .. " header or " .. cookie_name .. " cookie.")
 end
 
 -- Always forward the selected token header

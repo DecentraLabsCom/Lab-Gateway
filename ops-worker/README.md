@@ -11,7 +11,7 @@ This service handles remote lab host operations for the gateway:
 
 - `worker.py`: Flask API and scheduler.
 - `hosts.json` (`OPS_CONFIG`): host inventory and credentials references.
-- MySQL tables from `mysql/001-create-schema.sql` and `mysql/002-labstation-ops.sql`.
+- MySQL tables from `mysql/002-labstation-ops.sql`, stored in the `BLOCKCHAIN_MYSQL_DATABASE` schema alongside `lab_reservations`.
 
 ## Quick start (dev)
 
@@ -24,7 +24,7 @@ pip install -r requirements.txt
 export OPS_BIND=0.0.0.0
 export OPS_PORT=8081
 export OPS_CONFIG=hosts.json
-export MYSQL_DSN="mysql+pymysql://user:pass@mysql:3306/guacamole_db"
+export MYSQL_DSN="mysql+pymysql://user:pass@mysql:3306/blockchain_services"
 export OPS_POLL_ENABLED=true
 export OPS_POLL_INTERVAL=60
 
@@ -92,9 +92,10 @@ Reservation automation knobs:
 
 - OpenResty proxies `/ops/` to this service.
 - `/ops/` requires `LAB_MANAGER_TOKEN` via `X-Lab-Manager-Token` header or `lab_manager_token` cookie.
-- **Network restriction**: OpenResty allows `/ops/` only from `127.0.0.1` and `172.16.0.0/12` (enforced before token validation).
+- **Network restriction**: OpenResty allows `/ops/` only from loopback and RFC1918 private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) before token validation.
   - Lab Manager UI (`/lab-manager`) works from any network with valid token.
   - Lab Station operations (`/ops` API) require access from gateway server or private networks.
   - When accessing Lab Manager remotely, ops features will show a network restriction warning.
+- Container runtime uses `waitress` instead of the Flask development server.
 - Prefer `env:VAR_NAME` in `hosts.json` for WinRM credentials.
 - Keep `hosts.json` secrets out of git.

@@ -393,7 +393,7 @@ services:
       - OPS_RESERVATION_SCAN_INTERVAL=30
       - OPS_RESERVATION_START_LEAD=120
       - OPS_RESERVATION_END_DELAY=60
-      - MYSQL_DSN=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+      - MYSQL_DSN=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
@@ -493,7 +493,7 @@ services:
       - guacnet
 
   # BaSyx AAS Server - Asset Administration Shell registry & repository
-  # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_access.lua)
+  # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_admin_access.lua)
   # Only available in Full Gateway instances (one per institution).
   # Start with: docker compose --profile aas up  (or COMPOSE_PROFILES=aas)
   basyx-aas-server:

@@ -164,6 +164,11 @@ while true; do
     waited=$((waited + 2))
 done
 
+if [ -n "${blockchain_db}" ]; then
+    echo "Ensuring ops-worker tables in ${blockchain_db}..."
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${blockchain_db}" < /docker-entrypoint-initdb.d/002-labstation-ops.sql
+fi
+
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     -- Ensure Guacamole admin user matches configured credentials
     USE \`${MYSQL_DATABASE}\`;

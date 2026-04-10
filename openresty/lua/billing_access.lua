@@ -112,11 +112,13 @@ local function is_tokenized_path(value)
     if not value or value == "" then
         return false
     end
-    if value:find("^/wallet-dashboard") ~= nil then
-        return true
-    end
-    if value:find("^/institution-config") ~= nil then
-        return true
+    for _, prefix in ipairs({ "/wallet-dashboard", "/institution-config" }) do
+        if value:sub(1, #prefix) == prefix then
+            local next_char = value:sub(#prefix + 1, #prefix + 1)
+            if next_char == "" or next_char == "/" or next_char == "?" then
+                return true
+            end
+        end
     end
     return false
 end
@@ -124,6 +126,41 @@ end
 local uri = ngx.var.uri or ""
 local request_uri = ngx.var.request_uri or ""
 local is_tokenized_request = is_tokenized_path(uri) or is_tokenized_path(request_uri)
+
+local function build_query_without_token()
+    if not ngx or not ngx.req or type(ngx.req.get_uri_args) ~= "function" then
+        return nil
+    end
+
+    local args = ngx.req.get_uri_args() or {}
+    args.token = nil
+    if next(args) == nil then
+        return nil
+    end
+    if ngx.encode_args then
+        return ngx.encode_args(args)
+    end
+    local parts = {}
+    for key, value in pairs(args) do
+        if type(value) == "table" then
+            for _, item in ipairs(value) do
+                parts[#parts + 1] = tostring(key) .. "=" .. tostring(item)
+            end
+        else
+            parts[#parts + 1] = tostring(key) .. "=" .. tostring(value)
+        end
+    end
+    return table.concat(parts, "&")
+end
+
+local function redirect_without_token()
+    local target = uri ~= "" and uri or "/wallet-dashboard/"
+    local query = build_query_without_token()
+    if query and query ~= "" then
+        target = target .. "?" .. query
+    end
+    return ngx.redirect(target, 302)
+end
 
 local function get_arg_token()
     if not ngx or not ngx.req or type(ngx.req.get_uri_args) ~= "function" then
@@ -158,18 +195,23 @@ end
 
 local arg_token = get_arg_token()
 if not provided or provided == "" then
-    if arg_token and arg_token ~= "" then
+    if is_tokenized_request and arg_token and arg_token ~= "" then
         if ngx.unescape_uri then
             arg_token = ngx.unescape_uri(arg_token)
         end
         provided = arg_token
-        ngx.header["Set-Cookie"] = cookie_name .. "=" .. arg_token .. "; Path=/; HttpOnly; Secure; SameSite=Lax"
+        ngx.ctx = ngx.ctx or {}
+        ngx.ctx.billing_query_token = true
     end
 end
 
 if provided and provided ~= "" then
     if provided ~= token then
         return deny("Unauthorized: Invalid access token. " .. token_hint())
+    end
+    if is_tokenized_request and ngx.ctx and ngx.ctx.billing_query_token then
+        ngx.header["Set-Cookie"] = cookie_name .. "=" .. provided .. "; Path=/; HttpOnly; Secure; SameSite=Lax"
+        return redirect_without_token()
     end
 elseif not is_private(client_ip) then
     return deny("Unauthorized: Access token required for remote access. " .. token_hint())
