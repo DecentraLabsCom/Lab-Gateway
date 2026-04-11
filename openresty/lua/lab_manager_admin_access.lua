@@ -12,6 +12,21 @@ local function deny(status, message)
     return ngx.exit(status)
 end
 
+-- Constant-time string comparison to mitigate timing side-channels on token checks.
+local function constant_time_eq(a, b)
+    if type(a) ~= "string" or type(b) ~= "string" then
+        return false
+    end
+    if #a ~= #b then
+        return false
+    end
+    local result = 0
+    for i = 1, #a do
+        result = bit.bor(result, bit.bxor(string.byte(a, i), string.byte(b, i)))
+    end
+    return result == 0
+end
+
 if token == "" then
     return deny(ngx.HTTP_SERVICE_UNAVAILABLE, "Service unavailable: LAB_MANAGER_TOKEN is not configured.")
 end
@@ -28,7 +43,7 @@ if not provided or provided == "" then
     return deny(ngx.HTTP_UNAUTHORIZED, "Unauthorized: lab manager token required.")
 end
 
-if provided ~= token then
+if not constant_time_eq(provided, token) then
     return deny(ngx.HTTP_UNAUTHORIZED, "Unauthorized: invalid lab manager token.")
 end
 

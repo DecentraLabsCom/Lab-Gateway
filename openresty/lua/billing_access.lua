@@ -19,6 +19,21 @@ local function deny_forbidden(message)
     return ngx.exit(403)
 end
 
+-- Constant-time string comparison to mitigate timing side-channels on token checks.
+local function constant_time_eq(a, b)
+    if type(a) ~= "string" or type(b) ~= "string" then
+        return false
+    end
+    if #a ~= #b then
+        return false
+    end
+    local result = 0
+    for i = 1, #a do
+        result = bit.bor(result, bit.bxor(string.byte(a, i), string.byte(b, i)))
+    end
+    return result == 0
+end
+
 if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
     return deny_forbidden("Forbidden: wallet/billing endpoints are disabled in Lite mode.")
 end
@@ -86,6 +101,12 @@ local function extract_first_ip(value)
     return ip
 end
 
+-- When ADMIN_TRUST_FORWARDED_IP=false the gateway is the public edge and
+-- XFF headers could be spoofed by clients.  Only trust them when explicitly
+-- enabled (consistent with admin_access.lua and lab_manager_access.lua).
+local trust_xff = os.getenv("ADMIN_TRUST_FORWARDED_IP")
+local xff_trusted = trust_xff ~= "false" and trust_xff ~= "0"
+
 local headers = ngx.req.get_headers()
 local remote_addr = ngx.var.remote_addr or ""
 local forwarded_ip = extract_first_ip(headers["X-Forwarded-For"])
@@ -94,7 +115,7 @@ if not forwarded_ip then
 end
 
 local client_ip = remote_addr
-if forwarded_ip and forwarded_ip ~= "" and is_private(remote_addr) and not is_private(forwarded_ip) then
+if xff_trusted and forwarded_ip and forwarded_ip ~= "" and is_private(remote_addr) and not is_private(forwarded_ip) then
     client_ip = forwarded_ip
 end
 
@@ -206,7 +227,7 @@ if not provided or provided == "" then
 end
 
 if provided and provided ~= "" then
-    if provided ~= token then
+    if not constant_time_eq(provided, token) then
         return deny("Unauthorized: Invalid access token. " .. token_hint())
     end
     if is_tokenized_request and ngx.ctx and ngx.ctx.billing_query_token then

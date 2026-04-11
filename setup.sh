@@ -159,7 +159,7 @@ if [ -z "$mysql_root_password" ]; then
         mysql_root_password="$existing_mysql_root_password"
         echo "Reusing existing MySQL root password from .env"
     else
-        mysql_root_password="R00t_P@ss_${RANDOM}_$(date +%s)"
+        mysql_root_password="R00t_$(openssl rand -hex 16 2>/dev/null || echo P@ss_${RANDOM}_$(date +%s))"
         echo "Generated root password: $mysql_root_password"
     fi
 fi
@@ -169,7 +169,7 @@ if [ -z "$mysql_password" ]; then
         mysql_password="$existing_mysql_password"
         echo "Reusing existing Guacamole DB password from .env"
     else
-        mysql_password="Gu@c_${RANDOM}_$(date +%s)"
+        mysql_password="Gu@c_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
         echo "Generated database password: $mysql_password"
     fi
 fi

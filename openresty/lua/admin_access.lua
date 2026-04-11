@@ -22,6 +22,21 @@ local function deny_forbidden(message)
     return ngx.exit(403)
 end
 
+-- Constant-time string comparison to mitigate timing side-channels on token checks.
+local function constant_time_eq(a, b)
+    if type(a) ~= "string" or type(b) ~= "string" then
+        return false
+    end
+    if #a ~= #b then
+        return false
+    end
+    local result = 0
+    for i = 1, #a do
+        result = bit.bor(result, bit.bxor(string.byte(a, i), string.byte(b, i)))
+    end
+    return result == 0
+end
+
 if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
     return deny_forbidden("Forbidden: billing admin endpoints are disabled in Lite mode.")
 end
@@ -128,7 +143,7 @@ if not provided or provided == "" then
     return deny("Unauthorized: Access token required. Provide " .. header_name .. " header or " .. cookie_name .. " cookie.")
 end
 
-if provided ~= token then
+if not constant_time_eq(provided, token) then
     return deny("Unauthorized: Invalid access token. Provide " .. header_name .. " header or " .. cookie_name .. " cookie.")
 end
 

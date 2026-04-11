@@ -19,7 +19,6 @@ set "existing_mysql_password="
 set "db_credentials_changed=0"
 set "reset_mysql_volume=0"
 set "mysql_volume_name="
-
 echo DecentraLabs Gateway - Full Version Setup
 echo ==========================================
 echo.
@@ -55,7 +54,7 @@ echo.
 echo Ensuring blockchain-services submodule is present...
 git submodule update --init --recursive blockchain-services
 if errorlevel 1 (
-    echo Failed to initialize blockchain-services. Please check your Git setup.
+    echo Failed to initialize blockchain-services submodule.
     pause
     exit /b 1
 )
@@ -64,7 +63,6 @@ echo.
 
 call :ReadEnvValue "%ROOT_ENV_FILE%" "MYSQL_ROOT_PASSWORD" existing_mysql_root_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "MYSQL_PASSWORD" existing_mysql_password
-
 REM Check if .env already exists
 if exist "%ROOT_ENV_FILE%" (
     echo .env file already exists!
@@ -115,7 +113,9 @@ if "!mysql_root_password!"=="" (
     )
 )
 if "!mysql_root_password!"=="" (
-    set mysql_root_password=R00t_P@ss_%RANDOM%_%TIME:~9%
+    call :GenerateHex 16 generated_hex
+    if not defined generated_hex set "generated_hex=P@ss_%RANDOM%_%TIME:~9%"
+    set "mysql_root_password=R00t_!generated_hex!"
     if defined mysql_root_password set "mysql_root_password=!mysql_root_password: =!"
     echo Generated root password: !mysql_root_password!
 )
@@ -130,7 +130,9 @@ if "!mysql_password!"=="" (
     )
 )
 if "!mysql_password!"=="" (
-    set mysql_password=Gu@c_%RANDOM%_%TIME:~9%
+    call :GenerateHex 16 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%_%TIME:~9%"
+    set "mysql_password=Gu@c_!generated_hex!"
     if defined mysql_password set "mysql_password=!mysql_password: =!"
     echo Generated database password: !mysql_password!
 )
@@ -180,7 +182,9 @@ set /p "guac_admin_pass=Guacamole admin password (leave empty for auto-generated
 
 if "!guac_admin_user!"=="" set "guac_admin_user=guacadmin"
 if "!guac_admin_pass!"=="" (
-    set "guac_admin_pass=Guac_%RANDOM%_%TIME:~9%"
+    call :GenerateHex 16 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%_%TIME:~9%"
+    set "guac_admin_pass=Guac_!generated_hex!"
     if defined guac_admin_pass set "guac_admin_pass=!guac_admin_pass: =!"
     echo Generated Guacamole admin password: !guac_admin_pass!
 )
@@ -220,7 +224,9 @@ if "!access_token!"=="=" set "access_token="
 if /i "!access_token!"=="CHANGE_ME" set "access_token="
 
 if "!access_token!"=="" (
-    set "access_token=acc_%RANDOM%%RANDOM%%RANDOM%"
+    call :GenerateHex 16 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%%RANDOM%%RANDOM%"
+    set "access_token=acc_!generated_hex!"
     echo Generated admin access token: !access_token!
 )
 
@@ -265,7 +271,9 @@ if "!lab_manager_token!"=="=" set "lab_manager_token="
 if /i "!lab_manager_token!"=="CHANGE_ME" set "lab_manager_token="
 
 if "!lab_manager_token!"=="" (
-    set "lab_manager_token=lab_%RANDOM%%RANDOM%%RANDOM%"
+    call :GenerateHex 16 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%%RANDOM%%RANDOM%"
+    set "lab_manager_token=lab_!generated_hex!"
     echo Generated Lab Manager token: !lab_manager_token!
 )
 
@@ -728,6 +736,14 @@ if exist "%read_file%" (
 )
 :read_done
 if "%~3" NEQ "" set "%~3=%read_result%"
+exit /b
+
+:GenerateHex
+setlocal
+set "_bytes=%~1"
+if "%_bytes%"=="" set "_bytes=16"
+for /f %%H in ('powershell -NoLogo -NoProfile -Command "$bytes = New-Object byte[](%_bytes%); [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes); [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()"') do set "_hex=%%H"
+endlocal & set "%~2=%_hex%"
 exit /b
 
 :IsPlaceholderSecret

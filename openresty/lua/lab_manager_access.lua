@@ -10,6 +10,21 @@ local function deny(message)
     return ngx.exit(ngx.HTTP_UNAUTHORIZED)
 end
 
+-- Constant-time string comparison to mitigate timing side-channels on token checks.
+local function constant_time_eq(a, b)
+    if type(a) ~= "string" or type(b) ~= "string" then
+        return false
+    end
+    if #a ~= #b then
+        return false
+    end
+    local result = 0
+    for i = 1, #a do
+        result = bit.bor(result, bit.bxor(string.byte(a, i), string.byte(b, i)))
+    end
+    return result == 0
+end
+
 local function is_loopback_or_docker(ip)
     if not ip or ip == "" then
         return false
@@ -222,7 +237,7 @@ if not provided or provided == "" then
 end
 
 if provided and provided ~= "" then
-    if provided ~= token then
+    if not constant_time_eq(provided, token) then
         return deny("Unauthorized: invalid lab manager token. " .. token_hint())
     end
     if is_lab_manager and ngx.ctx and ngx.ctx.lab_manager_query_token then
