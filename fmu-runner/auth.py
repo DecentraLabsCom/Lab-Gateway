@@ -21,6 +21,28 @@ from fastapi import HTTPException, Request
 
 logger = logging.getLogger("fmu-runner.auth")
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "0:0:0:0:0:0:0:1"}
+
+
+def _is_loopback_or_private_host(host: str) -> bool:
+    """Return True for loopback or RFC1918/reserved hosts (port stripped)."""
+    host_only = host.split(":")[0].lower()
+    if host_only in _LOOPBACK_HOSTS or host_only.startswith("127."):
+        return True
+    parts = host_only.split(".")
+    if len(parts) == 4:
+        try:
+            first, second = int(parts[0]), int(parts[1])
+            if first == 10:
+                return True
+            if first == 172 and 16 <= second <= 31:
+                return True
+            if first == 192 and second == 168:
+                return True
+        except ValueError:
+            pass
+    return False
+
 def _normalize_issuer(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -29,10 +51,23 @@ def _normalize_issuer(value: Optional[str]) -> Optional[str]:
 
 
 def _build_jwks_url_from_issuer(issuer: str) -> str:
+    """Derive the JWKS URL from an issuer string.
+
+    The JWKS endpoint is always at <issuer>/jwks, preserving any path prefix so
+    non-root issuers (e.g. https://host/tenants/acme/auth) resolve correctly.
+    HTTPS is required for non-loopback/private hosts to prevent key substitution
+    attacks when fetching signing public keys over an untrusted network.
+    """
     parsed = urlparse(issuer)
     if not parsed.scheme or not parsed.netloc:
         raise ValueError(f"Invalid issuer URL: {issuer}")
-    return f"{parsed.scheme}://{parsed.netloc}/auth/jwks"
+    if parsed.scheme != "https" and not _is_loopback_or_private_host(parsed.netloc):
+        raise ValueError(
+            f"Insecure issuer scheme '{parsed.scheme}': JWKS public keys must be "
+            f"fetched over HTTPS for non-loopback hosts. Got: {issuer}"
+        )
+    # Use issuer as the base so any path prefix is preserved (#2).
+    return issuer.rstrip("/") + "/jwks"
 
 
 def _resolve_auth_jwks_url() -> str:

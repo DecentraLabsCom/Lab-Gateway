@@ -35,11 +35,33 @@ def test_resolve_auth_jwks_url_derives_from_issuer(monkeypatch):
     assert auth._resolve_auth_jwks_url() == "https://issuer.example/auth/jwks"
 
 
+def test_resolve_auth_jwks_url_preserves_non_root_issuer_path(monkeypatch):
+    monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
+    monkeypatch.setenv("ISSUER", "https://sso.example.com/tenants/acme/auth")
+
+    assert auth._resolve_auth_jwks_url() == "https://sso.example.com/tenants/acme/auth/jwks"
+
+
 def test_resolve_auth_jwks_url_falls_back_to_local_blockchain_service(monkeypatch):
     monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
     monkeypatch.delenv("ISSUER", raising=False)
 
     assert auth._resolve_auth_jwks_url() == "http://blockchain-services:8080/auth/jwks"
+
+
+def test_build_jwks_url_rejects_http_for_public_host():
+    with pytest.raises(ValueError, match="HTTPS"):
+        auth._build_jwks_url_from_issuer("http://issuer.example/auth")
+
+
+def test_build_jwks_url_allows_http_for_localhost():
+    url = auth._build_jwks_url_from_issuer("http://localhost:8080/auth")
+    assert url == "http://localhost:8080/auth/jwks"
+
+
+def test_build_jwks_url_allows_http_for_private_ip():
+    url = auth._build_jwks_url_from_issuer("http://192.168.1.10/auth")
+    assert url == "http://192.168.1.10/auth/jwks"
 
 
 def test_resolve_jwt_issuer_prefers_explicit_override(monkeypatch):

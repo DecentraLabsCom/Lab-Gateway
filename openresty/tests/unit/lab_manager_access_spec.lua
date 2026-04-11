@@ -235,6 +235,18 @@ runner.describe("Lab manager access guard", function()
         runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
         runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
     end)
+
+    runner.it("ignores XFF when ADMIN_TRUST_FORWARDED_IP=false", function()
+        local ngx = run_lab_manager_access({
+            env = { LAB_MANAGER_TOKEN = "", ADMIN_TRUST_FORWARDED_IP = "false" },
+            headers = { ["X-Forwarded-For"] = "203.0.113.5" },
+            var = { remote_addr = "10.20.30.40" }
+        })
+
+        -- remote_addr is private; XFF should be ignored → allow (no token required when empty)
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals(nil, ngx._exit)
+    end)
 end)
 
 return runner

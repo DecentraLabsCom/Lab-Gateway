@@ -75,9 +75,18 @@ end
 
 local headers = ngx.req.get_headers()
 local remote_addr = ngx.var.remote_addr or ""
-local forwarded_ip = extract_first_ip(headers["X-Forwarded-For"])
-if not forwarded_ip then
-    forwarded_ip = extract_first_ip(headers["X-Real-IP"])
+
+-- When ADMIN_TRUST_FORWARDED_IP=false the gateway is the public edge and
+-- XFF headers MUST NOT be trusted for access-control decisions.
+local trust_xff = os.getenv("ADMIN_TRUST_FORWARDED_IP")
+trust_xff = (trust_xff == nil or trust_xff == "" or trust_xff ~= "false")
+
+local forwarded_ip = nil
+if trust_xff then
+    forwarded_ip = extract_first_ip(headers["X-Forwarded-For"])
+    if not forwarded_ip then
+        forwarded_ip = extract_first_ip(headers["X-Real-IP"])
+    end
 end
 
 local client_ip = remote_addr
