@@ -35,6 +35,7 @@ local server_name = os.getenv("SERVER_NAME") or "localhost"
 local https_port = os.getenv("HTTPS_PORT") or "443"
 local auto_logout = os.getenv("AUTO_LOGOUT_ON_DISCONNECT") or "false"
 local guac_api_url = os.getenv("GUAC_API_URL")
+local default_guac_api_url = "http://guacamole:8080/guacamole/api"
 
 refuse_default_secret("GUAC_ADMIN_PASS", admin_pass, { "guacadmin", "changeme", "change_me", "password", "test" })
 
@@ -104,7 +105,7 @@ config:set("auto_logout_on_disconnect", auto_logout:lower() == "true")
 if guac_api_url and guac_api_url ~= "" then
     config:set("guac_api_url", guac_api_url)
 else
-    config:set("guac_api_url", "http://127.0.0.1:8080/guacamole/api")
+    config:set("guac_api_url", default_guac_api_url)
 end
 
 -- AAS server base URL for /aas/* proxy.

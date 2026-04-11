@@ -2,6 +2,11 @@ local cjson = require "cjson.safe"
 local resolver = require "resty.dns.resolver"
 local ok_http, resty_http = pcall(require, "resty.http")
 
+local PUBLIC_KEY_PATH = "/etc/ssl/private/public_key.pem"
+local FULLCHAIN_PATH = "/etc/ssl/private/fullchain.pem"
+local PRIVKEY_PATH = "/etc/ssl/private/privkey.pem"
+local STATIC_ROOT_INDEX_PATH = "/var/www/html/index.html"
+
 local function trim(value)
     if not value then
         return ""
@@ -120,10 +125,10 @@ local function check_dns(host)
     return true
 end
 
-local function check_mysql()
+local function check_tcp_service(host, port)
     local sock = ngx.socket.tcp()
     sock:settimeouts(100, 100, 100)
-    local ok, err = sock:connect("mysql", 3306)
+    local ok, err = sock:connect(host, port)
     if not ok then
         return false, err
     end
@@ -131,15 +136,12 @@ local function check_mysql()
     return true
 end
 
+local function check_mysql()
+    return check_tcp_service("mysql", 3306)
+end
+
 local function check_guacd()
-    local sock = ngx.socket.tcp()
-    sock:settimeouts(100, 100, 100)
-    local ok, err = sock:connect("guacd", 4822)
-    if not ok then
-        return false, err
-    end
-    sock:close()
-    return true
+    return check_tcp_service("guacd", 4822)
 end
 
 local function check_guac_schema()
@@ -237,13 +239,13 @@ local function overall_status(services)
 end
 
 local function check_lite_issuer_trust(issuer)
-    local local_public_key = read_file("/etc/ssl/private/public_key.pem")
+    local local_public_key = read_file(PUBLIC_KEY_PATH)
     local local_public_key_ok = looks_like_public_key_pem(local_public_key)
     local parsed = parse_issuer_url(issuer)
     local details = {
         issuer = issuer,
         issuer_url_valid = parsed ~= nil,
-        local_public_key_present = file_exists("/etc/ssl/private/public_key.pem"),
+        local_public_key_present = file_exists(PUBLIC_KEY_PATH),
         local_public_key_valid = local_public_key_ok,
         remote_public_key_ok = false,
         remote_public_key_status = "not_checked",
@@ -337,7 +339,7 @@ for _, h in ipairs(dns_hosts) do
 end
 
 -- Certificate expiry (days)
-local cert_days = cert_days_remaining("/etc/ssl/private/fullchain.pem")
+local cert_days = cert_days_remaining(FULLCHAIN_PATH)
 
 -- Env/config sanity
 local required_env = { "SERVER_NAME", "LAB_MANAGER_TOKEN" }
@@ -408,7 +410,7 @@ local result = {
             external_issuer = lite_auth and lite_auth.external_issuer or false,
             issuer_url_valid = lite_auth and lite_auth.issuer_url_valid or false,
             issuer_host_dns_ok = lite_auth and lite_auth.issuer_host_dns_ok or false,
-            local_public_key_present = lite_auth and lite_auth.local_public_key_present or file_exists("/etc/ssl/private/public_key.pem"),
+            local_public_key_present = lite_auth and lite_auth.local_public_key_present or file_exists(PUBLIC_KEY_PATH),
             local_public_key_valid = lite_auth and lite_auth.local_public_key_valid or false,
             remote_public_key_ok = lite_auth and lite_auth.remote_public_key_ok or false,
             remote_public_key_status = lite_auth and lite_auth.remote_public_key_status or "not_applicable"
@@ -419,10 +421,10 @@ local result = {
         mysql_up = mysql_ok or false,
         cert = {
             days_remaining = cert_days,
-            fullchain_present = file_exists("/etc/ssl/private/fullchain.pem"),
-            privkey_present = file_exists("/etc/ssl/private/privkey.pem")
+            fullchain_present = file_exists(FULLCHAIN_PATH),
+            privkey_present = file_exists(PRIVKEY_PATH)
         },
-        static_root_ok = file_exists("/var/www/html/index.html"),
+        static_root_ok = file_exists(STATIC_ROOT_INDEX_PATH),
         env = env_ok
     },
     version = block_body.version

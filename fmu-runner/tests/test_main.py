@@ -5,6 +5,7 @@ Uses pytest + httpx (TestClient for FastAPI).
 Mocks fmpy functions and JWT auth to test endpoints in isolation.
 """
 
+import asyncio
 import json
 import time
 import zipfile
@@ -28,6 +29,8 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _effective_timeout_seconds,
         MAX_SIMULATION_TIMEOUT,
         _build_proxy_model_description_xml,
+        _issue_session_ticket,
+        _redeem_session_ticket,
         _validate_proxy_generation_supported,
     )
     from auth import verify_jwt as _original_verify_jwt
@@ -50,6 +53,35 @@ app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 client = TestClient(app)
 
 
+class _FakeHttpxResponse:
+    def __init__(self, status_code=200, *, json_data=None, text="", json_error=None):
+        self.status_code = status_code
+        self._json_data = json_data
+        self.text = text
+        self._json_error = json_error
+
+    def json(self):
+        if self._json_error is not None:
+            raise self._json_error
+        return self._json_data
+
+
+class _FakeAsyncClient:
+    def __init__(self, response):
+        self._response = response
+        self.calls = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, url, *, headers=None, json=None):
+        self.calls.append({"url": url, "headers": headers, "json": json})
+        return self._response
+
+
 # ─── /health ─────────────────────────────────────────────────────────
 
 def test_health_returns_status():
@@ -59,6 +91,111 @@ def test_health_returns_status():
     assert data["status"] in ("UP", "DEGRADED")
     assert "checks" in data
     assert "fmuCount" in data
+
+
+def test_issue_session_ticket_uses_authorization_header_and_payload():
+    fake_response = _FakeHttpxResponse(
+        json_data={"sessionTicket": "st_ticket_1", "expiresAt": 1735689600},
+    )
+    fake_client = _FakeAsyncClient(fake_response)
+
+    with patch("main.httpx.AsyncClient", return_value=fake_client):
+        ticket, expires_at = asyncio.run(
+            _issue_session_ticket(
+                "Bearer token-123",
+                lab_id="42",
+                reservation_key="RES-1",
+                request_id="req-1",
+            )
+        )
+
+    assert ticket == "st_ticket_1"
+    assert expires_at == 1735689600
+    assert fake_client.calls == [{
+        "url": "http://blockchain-services:8080/auth/fmu/session-ticket/issue",
+        "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer token-123",
+        },
+        "json": {
+            "labId": "42",
+            "reservationKey": "RES-1",
+        },
+    }]
+
+
+def test_issue_session_ticket_surfaces_json_error_message():
+    fake_response = _FakeHttpxResponse(
+        status_code=403,
+        json_data={"message": "forbidden"},
+        text="fallback detail",
+    )
+    fake_client = _FakeAsyncClient(fake_response)
+
+    with patch("main.httpx.AsyncClient", return_value=fake_client):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                _issue_session_ticket(
+                    "Bearer token-123",
+                    lab_id="42",
+                    reservation_key=None,
+                )
+            )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Unable to issue session ticket: forbidden"
+
+
+def test_redeem_session_ticket_returns_claims_payload():
+    fake_response = _FakeHttpxResponse(
+        json_data={"claims": {"sub": "test-user", "labId": "42"}},
+    )
+    fake_client = _FakeAsyncClient(fake_response)
+
+    with patch("main.httpx.AsyncClient", return_value=fake_client):
+        claims = asyncio.run(
+            _redeem_session_ticket(
+                session_ticket="st_ticket_1",
+                lab_id="42",
+                reservation_key="RES-1",
+                request_id="req-1",
+            )
+        )
+
+    assert claims == {"sub": "test-user", "labId": "42"}
+    assert fake_client.calls == [{
+        "url": "http://blockchain-services:8080/auth/fmu/session-ticket/redeem",
+        "headers": {
+            "Content-Type": "application/json",
+        },
+        "json": {
+            "sessionTicket": "st_ticket_1",
+            "labId": "42",
+            "reservationKey": "RES-1",
+        },
+    }]
+
+
+def test_redeem_session_ticket_preserves_json_error_payload():
+    fake_response = _FakeHttpxResponse(
+        status_code=400,
+        json_data={"code": "INVALID_TICKET", "error": "expired"},
+        text="expired",
+    )
+    fake_client = _FakeAsyncClient(fake_response)
+
+    with patch("main.httpx.AsyncClient", return_value=fake_client):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                _redeem_session_ticket(
+                    session_ticket="st_ticket_1",
+                    lab_id=None,
+                    reservation_key=None,
+                )
+            )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {"code": "INVALID_TICKET", "error": "expired"}
 
 
 # ─── /api/v1/simulations/describe ───────────────────────────────────

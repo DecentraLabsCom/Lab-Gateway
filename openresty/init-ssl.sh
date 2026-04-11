@@ -157,13 +157,27 @@ is_acme_cert() {
 get_cert_days_until_expiry() {
     end_date=$(openssl x509 -in "$CERT_FILE" -noout -enddate 2>/dev/null | sed 's/notAfter=//')
     if [ -z "$end_date" ]; then
-        echo "0"
+        echo "unknown"
         return
     fi
-    end_epoch=$(date -d "$end_date" +%s 2>/dev/null || date -j -f "%b %d %H:%M:%S %Y %Z" "$end_date" +%s 2>/dev/null || echo "0")
+    end_epoch=$(
+        date -d "$end_date" +%s 2>/dev/null ||
+        date -j -f "%b %d %H:%M:%S %Y %Z" "$end_date" +%s 2>/dev/null ||
+        date -u -D "%b %e %H:%M:%S %Y %Z" -d "$end_date" +%s 2>/dev/null ||
+        echo ""
+    )
+    if [ -z "$end_epoch" ]; then
+        echo "unknown"
+        return
+    fi
     now_epoch=$(date +%s)
     days=$(( (end_epoch - now_epoch) / 86400 ))
     echo "$days"
+}
+
+cert_expires_within() {
+    threshold_seconds="$1"
+    openssl x509 -checkend "$threshold_seconds" -noout -in "$CERT_FILE" >/dev/null 2>&1
 }
 
 renew_acme_cert() {
@@ -224,7 +238,7 @@ else
     
     if is_acme_cert; then
         # ACME cert: renew at 30 days before expiry
-        if [ "$days_left" -lt 30 ]; then
+        if ! cert_expires_within "$RENEW_THRESHOLD_SECONDS"; then
             echo "   Status: ACME certificate expires in less than 30 days. Renewing..."
             if renew_acme_cert; then
                 echo "   ACME certificate renewed successfully"
@@ -236,7 +250,7 @@ else
         fi
     elif is_localhost_self_signed; then
         # Self-signed cert: regenerate at 10 days before expiry
-        if [ "$days_left" -lt 10 ]; then
+        if ! cert_expires_within "$SELF_SIGNED_RENEW_THRESHOLD"; then
             echo "   Status: Self-signed certificate expiring soon. Regenerating..."
             generate_self_signed
         else
@@ -368,7 +382,7 @@ auto_renew_acme() {
             continue
         fi
         days_left=$(get_cert_days_until_expiry)
-        if [ "$days_left" -lt 30 ]; then
+        if ! cert_expires_within "$RENEW_THRESHOLD_SECONDS"; then
             echo "ACME certificate expires in $days_left days - attempting renewal..."
             if renew_acme_cert; then
                 echo "ACME certificate renewed. Reloading OpenResty..."
@@ -400,4 +414,3 @@ auto_refresh_jwt_public_key() {
 auto_refresh_jwt_public_key &
 
 exec /usr/local/openresty/bin/openresty -g "daemon off;"
-

@@ -8,6 +8,7 @@ SessionGuard.__index = SessionGuard
 local INITIAL_DELAY_SECONDS = 30
 local EXPIRED_CHECK_INTERVAL = 30
 local TUNNEL_CHECK_INTERVAL = 2
+local DEFAULT_GUAC_API = "http://guacamole:8080/guacamole/api"
 
 local function default_http_factory()
     if not ok_http then
@@ -36,9 +37,23 @@ function SessionGuard.new(opts)
     self.admin_user = opts.admin_user or self.config:get("admin_user")
     self.admin_pass = opts.admin_pass or self.config:get("admin_pass")
     self.guac_uri = opts.guac_uri or (self.config:get("guac_uri") or "/guacamole")
-    local default_api = "http://127.0.0.1:8080" .. self.guac_uri .. "/api"
-    self.guac_api = opts.guac_api_url or self.config:get("guac_api_url") or default_api
+    self.guac_api = opts.guac_api_url or self.config:get("guac_api_url") or DEFAULT_GUAC_API
     return self
+end
+
+local function token_cache_key(username)
+    return "token:" .. username
+end
+
+local function token_reverse_cache_key(token)
+    return "guac_token:" .. token
+end
+
+local function clear_cached_user_token(dict, username, user_token)
+    dict:delete(token_cache_key(username))
+    if user_token then
+        dict:delete(token_reverse_cache_key(user_token))
+    end
 end
 
 local function request_guac_token(self, httpc)
@@ -62,6 +77,28 @@ local function request_guac_token(self, httpc)
     end
 
     return auth_data.authToken, auth_data.dataSource
+end
+
+local function revoke_user_token(self, httpc, auth_token, username, success_message)
+    local ngx = self.ngx
+    local user_token = self.dict:get(token_cache_key(username))
+    if not user_token then
+        ngx.log(ngx.DEBUG, "Worker - No token found for " .. username .. ", skipping revocation")
+        return nil
+    end
+
+    local res = httpc:request_uri(self.guac_api .. "/tokens/" .. user_token .. "?token=" .. auth_token, {
+        method = "DELETE",
+        headers = {}
+    })
+
+    if not res or res.status ~= 204 then
+        ngx.log(ngx.ERR, "Worker - Error revoking Guacamole token for " .. username)
+    else
+        ngx.log(ngx.INFO, string.format(success_message, username))
+    end
+
+    return user_token
 end
 
 function SessionGuard:check_expired_sessions()
@@ -119,24 +156,8 @@ function SessionGuard:check_expired_sessions()
                 ngx.log(ngx.INFO, "Worker - Connection terminated for " .. username)
             end
 
-            local user_token = dict:get("token:" .. username)
-            if not user_token then
-                ngx.log(ngx.DEBUG, "Worker - No token found for " .. username .. ", skipping revocation")
-            else
-                res, err = httpc:request_uri(self.guac_api .. "/tokens/" .. user_token ..
-                    "?token=" .. auth_token, {
-                    method = "DELETE",
-                    headers = {}
-                })
-
-                if not res or res.status ~= 204 then
-                    ngx.log(ngx.ERR, "Worker - Error revoking Guacamole token for " .. username)
-                else
-                    ngx.log(ngx.INFO, "Worker - Session token revoked for " .. username)
-                end
-                dict:delete("token:" .. username)
-                dict:delete("guac_token:" .. user_token)
-            end
+            local user_token = revoke_user_token(self, httpc, auth_token, username, "Worker - Session token revoked for %s")
+            clear_cached_user_token(dict, username, user_token)
         end
     end
 end
@@ -176,28 +197,14 @@ function SessionGuard:check_tunnel_closures()
 
         if closed_time then
             ngx.log(ngx.INFO, "Worker - Processing tunnel closure for user: " .. username)
-            local user_token = dict:get("token:" .. username)
-            if not user_token then
-                ngx.log(ngx.DEBUG, "Worker - No token found for " .. username .. ", skipping revocation")
-            else
-                local res, err = httpc:request_uri(self.guac_api .. "/tokens/" .. user_token ..
-                    "?token=" .. auth_token, {
-                    method = "DELETE",
-                    headers = {}
-                })
-
-                if not res or res.status ~= 204 then
-                    ngx.log(ngx.ERR, "Worker - Error revoking Guacamole token for " .. username)
-                else
-                    ngx.log(ngx.INFO, "Worker - Session token revoked for " .. username .. " after tunnel closure")
-                end
-            end
-
-            local user_token = dict:get("token:" .. username)
-            dict:delete("token:" .. username)
-            if user_token then
-                dict:delete("guac_token:" .. user_token)
-            end
+            local user_token = revoke_user_token(
+                self,
+                httpc,
+                auth_token,
+                username,
+                "Worker - Session token revoked for %s after tunnel closure"
+            )
+            clear_cached_user_token(dict, username, user_token)
             dict:delete("tunnel_closed:" .. username)
         end
 

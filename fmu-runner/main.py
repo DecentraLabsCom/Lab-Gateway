@@ -28,7 +28,7 @@ try:
 except ImportError:
     posix_resource = None  # Not available on Windows
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, Future
 from collections import defaultdict, deque
 from threading import Lock
@@ -1010,27 +1010,20 @@ async def _issue_session_ticket(
     reservation_key: Optional[str],
     request_id: Optional[str] = None,
 ) -> tuple[str, int]:
-    headers = {"Content-Type": "application/json", "Authorization": authorization}
-    if AUTH_SESSION_TICKET_INTERNAL_TOKEN:
-        headers["X-Access-Token"] = AUTH_SESSION_TICKET_INTERNAL_TOKEN
-
     payload = {"labId": str(lab_id)}
     if reservation_key:
         payload["reservationKey"] = reservation_key
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(AUTH_SESSION_TICKET_ISSUE_URL, headers=headers, json=payload)
+    response = await _post_session_ticket_request(
+        AUTH_SESSION_TICKET_ISSUE_URL,
+        payload=payload,
+        authorization=authorization,
+    )
 
     if response.status_code >= 400:
-        detail_text = response.text
-        try:
-            detail_json = response.json()
-            detail_text = detail_json.get("error") or detail_json.get("message") or detail_text
-        except Exception:
-            pass
         raise HTTPException(
             status_code=response.status_code,
-            detail=f"Unable to issue session ticket: {detail_text}",
+            detail=f"Unable to issue session ticket: {_extract_response_error_text(response)}",
         )
 
     data = response.json()
@@ -1056,27 +1049,19 @@ async def _redeem_session_ticket(
     reservation_key: Optional[str],
     request_id: Optional[str] = None,
 ) -> dict:
-    headers = {"Content-Type": "application/json"}
-    if AUTH_SESSION_TICKET_INTERNAL_TOKEN:
-        headers["X-Access-Token"] = AUTH_SESSION_TICKET_INTERNAL_TOKEN
     payload = {"sessionTicket": session_ticket}
     if lab_id:
         payload["labId"] = str(lab_id)
     if reservation_key:
         payload["reservationKey"] = str(reservation_key)
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(AUTH_SESSION_TICKET_REDEEM_URL, headers=headers, json=payload)
+    response = await _post_session_ticket_request(
+        AUTH_SESSION_TICKET_REDEEM_URL,
+        payload=payload,
+    )
 
     if response.status_code >= 400:
-        detail = {"error": response.text}
-        try:
-            payload = response.json()
-            if isinstance(payload, dict):
-                detail = payload
-        except Exception:
-            pass
-        raise HTTPException(status_code=response.status_code, detail=detail)
+        raise HTTPException(status_code=response.status_code, detail=_extract_response_error_payload(response))
 
     payload = response.json()
     claims = payload.get("claims") if isinstance(payload, dict) else None
@@ -1090,6 +1075,51 @@ async def _redeem_session_ticket(
         _normalize_ticket_id(session_ticket) or "-",
     )
     return claims
+
+
+def _build_session_ticket_headers(*, authorization: Optional[str] = None) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if authorization:
+        headers["Authorization"] = authorization
+    if AUTH_SESSION_TICKET_INTERNAL_TOKEN:
+        headers["X-Access-Token"] = AUTH_SESSION_TICKET_INTERNAL_TOKEN
+    return headers
+
+
+async def _post_session_ticket_request(
+    url: str,
+    *,
+    payload: dict[str, Any],
+    authorization: Optional[str] = None,
+) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=10) as client:
+        return await client.post(
+            url,
+            headers=_build_session_ticket_headers(authorization=authorization),
+            json=payload,
+        )
+
+
+def _extract_response_error_text(response: httpx.Response) -> str:
+    detail_text = response.text
+    try:
+        detail_json = response.json()
+        if isinstance(detail_json, dict):
+            detail_text = detail_json.get("error") or detail_json.get("message") or detail_text
+    except Exception:
+        pass
+    return detail_text
+
+
+def _extract_response_error_payload(response: httpx.Response) -> dict[str, Any]:
+    detail = {"error": response.text}
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = payload
+    except Exception:
+        pass
+    return detail
 
 
 _fmu_backend = _build_fmu_backend()

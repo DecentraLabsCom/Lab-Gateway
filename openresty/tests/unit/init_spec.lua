@@ -106,7 +106,7 @@ runner.describe("OpenResty init.lua", function()
         runner.assert.equals("really-strong-secret", ngx.shared.config:get("admin_pass"))
         runner.assert.equals("8443", ngx.shared.config:get("https_port"))
         runner.assert.equals(true, ngx.shared.config:get("auto_logout_on_disconnect"))
-        runner.assert.equals("http://127.0.0.1:8080/guacamole/api", ngx.shared.config:get("guac_api_url"))
+        runner.assert.equals("http://guacamole:8080/guacamole/api", ngx.shared.config:get("guac_api_url"))
         runner.assert.equals(public_key, ngx.shared.cache:get("public_key"))
     end)
 
