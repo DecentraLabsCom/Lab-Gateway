@@ -233,8 +233,8 @@ if "!access_token!"=="" (
 call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN" "!access_token!"
 call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
 call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
-call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
-call :UpdateEnvBoth "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
+call :UpdateEnvBlockchainOnly "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
+call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
 echo.
 echo Wallet Dashboard Access Scope
 echo =============================
@@ -245,17 +245,17 @@ set "dashboard_access_scope="
 set /p "dashboard_access_scope=Choose [1/2] (default: 1): "
 if defined dashboard_access_scope set "dashboard_access_scope=!dashboard_access_scope: =!"
 if "!dashboard_access_scope!"=="2" (
-    call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-    call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+    call :UpdateEnvBlockchainOnly "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+    call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
     set "admin_allowed_cidrs="
     set /p "admin_allowed_cidrs=Allowed private CIDRs (comma-separated, leave empty for any private range): "
     if defined admin_allowed_cidrs set "admin_allowed_cidrs=!admin_allowed_cidrs: =!"
-    call :UpdateEnvBoth "ADMIN_ALLOWED_CIDRS" "!admin_allowed_cidrs!"
+    call :UpdateEnvBlockchainOnly "ADMIN_ALLOWED_CIDRS" "!admin_allowed_cidrs!"
     echo Configured wallet dashboard access for private networks protected by ADMIN_ACCESS_TOKEN.
 ) else (
-    call :UpdateEnvBoth "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
-    call :UpdateEnvBoth "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
-    call :UpdateEnvBoth "ADMIN_ALLOWED_CIDRS" ""
+    call :UpdateEnvBlockchainOnly "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
+    call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
+    call :UpdateEnvBlockchainOnly "ADMIN_ALLOWED_CIDRS" ""
     echo Configured wallet dashboard access for localhost only.
 )
 echo.
@@ -714,6 +714,10 @@ goto :eof
 
 :UpdateEnvBoth
 call :UpdateEnv "%ROOT_ENV_FILE%" "%~1" "%~2"
+if exist "%BLOCKCHAIN_ENV_FILE%" call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "%~1" "%~2"
+exit /b
+
+:UpdateEnvBlockchainOnly
 if exist "%BLOCKCHAIN_ENV_FILE%" call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "%~1" "%~2"
 exit /b
 
