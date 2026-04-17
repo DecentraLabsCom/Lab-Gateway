@@ -19,11 +19,23 @@ echo "=== OpenResty SSL Certificate Check ==="
 echo "Certificate: $CERT_FILE"
 echo "Private Key: $KEY_FILE"
 
-# Create SSL directory if it doesn't exist
+# Create SSL directory if it doesn't exist and make it traversable by OpenResty workers
 mkdir -p "$SSL_DIR"
+chmod 755 "$SSL_DIR" 2>/dev/null || true
 
 trim() {
     echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+set_ssl_permissions() {
+    chmod 755 "$SSL_DIR" 2>/dev/null || true
+    chmod 644 "$CERT_FILE" 2>/dev/null || true
+    if grep -q '^openresty:' /etc/group 2>/dev/null; then
+        chgrp openresty "$KEY_FILE" 2>/dev/null || true
+        chmod 640 "$KEY_FILE" 2>/dev/null || true
+    else
+        chmod 644 "$KEY_FILE" 2>/dev/null || true
+    fi
 }
 
 build_local_issuer() {
@@ -130,8 +142,7 @@ EOF
     if [ -f "$TEMP_SSL_DIR/fullchain.pem" ] && [ -f "$TEMP_SSL_DIR/privkey.pem" ]; then
         cp "$TEMP_SSL_DIR/fullchain.pem" "$CERT_FILE"
         cp "$TEMP_SSL_DIR/privkey.pem" "$KEY_FILE"
-        chmod 644 "$CERT_FILE"
-        chmod 600 "$KEY_FILE"
+        set_ssl_permissions
         date +%s > "$SELF_SIGNED_MARKER" 2>/dev/null || true
         echo "Self-signed SSL certificates generated successfully"
         echo "   Valid for: localhost, *.localhost, 127.0.0.1"
@@ -233,6 +244,7 @@ if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
     fi
 else
     echo "SSL certificates found"
+    set_ssl_permissions
     days_left=$(get_cert_days_until_expiry)
     echo "   Days until expiry: $days_left"
     
