@@ -119,10 +119,11 @@ services:
         max-size: "10m"
         max-file: "5"
         labels: "service=openresty"
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    # OpenResty needs to chown temporary files during startup, so do not drop all capabilities.
+    #security_opt:
+    #  - no-new-privileges:true
+    #cap_drop:
+    #  - ALL
     cap_add:
       - NET_BIND_SERVICE
     restart: always
