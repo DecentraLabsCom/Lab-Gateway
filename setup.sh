@@ -668,7 +668,7 @@ echo "Next Steps"
 echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
-echo "3. Configure blockchain settings in blockchain-services/.env (CONTRACT_ADDRESS, ETHEREUM_*_RPC_URL, INSTITUTIONAL_WALLET_*)"
+echo "3. Configure blockchain settings in blockchain-services/.env is needed"
 echo "4. Run: $compose_full up -d"
 if [ "$cf_enabled" = true ]; then
     echo "5. Cloudflare tunnel: check '$compose_full logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
@@ -710,16 +710,14 @@ case "$start_services" in
         if [ "$cf_enabled" = true ]; then
             echo "4. Cloudflare tunnel hostname: $compose_full logs ${cf_service:-cloudflared}"
         fi
+        echo
+        echo "For more information, see README.md"
+        echo "Setup complete!"
+        exit 0
         ;;
     *)
         ;;
 esac
-    fi
-    echo
-    echo "For more information, see README.md"
-    echo "Setup complete!"
-    exit 0
-fi
 
 echo
 echo "Building and starting services..."

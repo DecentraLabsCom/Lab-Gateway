@@ -581,7 +581,7 @@ echo Next Steps
 echo ==========
 echo 1. Review and customize %ROOT_ENV_FILE% if needed
 echo 2. Ensure SSL certificates and RSA keys are present in certs\
-echo 3. Review blockchain contract/RPC/wallet settings in %BLOCKCHAIN_ENV_FILE%
+echo 3. Review blockchain settings in %BLOCKCHAIN_ENV_FILE if needed%
 echo 4. Run: !compose_full! up -d
 if "!cf_enabled!"=="1" (
     echo 5. Cloudflare tunnel: check '!compose_full! logs !cf_service!' for the public hostname ^(or your configured tunnel token domain^).

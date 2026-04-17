@@ -421,8 +421,8 @@ services:
         max-size: "10m"
         max-file: "3"
         labels: "service=ops-worker"
-    security_opt:
-      - no-new-privileges:true
+    #security_opt:
+    #  - no-new-privileges:true
     cap_drop:
       - ALL
     restart: always
