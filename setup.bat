@@ -247,6 +247,7 @@ if defined dashboard_access_scope set "dashboard_access_scope=!dashboard_access_
 if "!dashboard_access_scope!"=="2" (
     call :UpdateEnvBlockchainOnly "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
     call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+    call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_LOCAL_ONLY" "false"
     set "admin_allowed_cidrs="
     set /p "admin_allowed_cidrs=Allowed private CIDRs (comma-separated, leave empty for any private range): "
     if defined admin_allowed_cidrs set "admin_allowed_cidrs=!admin_allowed_cidrs: =!"
@@ -255,6 +256,7 @@ if "!dashboard_access_scope!"=="2" (
 ) else (
     call :UpdateEnvBlockchainOnly "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
     call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
+    call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
     call :UpdateEnvBlockchainOnly "ADMIN_ALLOWED_CIDRS" ""
     echo Configured wallet dashboard access for localhost only.
 )

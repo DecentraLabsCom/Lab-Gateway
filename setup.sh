@@ -278,6 +278,7 @@ dashboard_access_scope=$(echo "$dashboard_access_scope" | tr -d ' ')
 if [ "$dashboard_access_scope" = "2" ]; then
     update_env_blockchain_only "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
     update_env_blockchain_only "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+    update_env_blockchain_only "ADMIN_DASHBOARD_LOCAL_ONLY" "false"
     read -p "Allowed private CIDRs (comma-separated, leave empty for any private range): " admin_allowed_cidrs
     admin_allowed_cidrs=$(echo "$admin_allowed_cidrs" | sed 's/[[:space:]]//g')
     update_env_blockchain_only "ADMIN_ALLOWED_CIDRS" "$admin_allowed_cidrs"
@@ -285,6 +286,7 @@ if [ "$dashboard_access_scope" = "2" ]; then
 else
     update_env_blockchain_only "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
     update_env_blockchain_only "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
+    update_env_blockchain_only "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
     update_env_blockchain_only "ADMIN_ALLOWED_CIDRS" ""
     echo "Configured wallet dashboard access for localhost only."
 fi
