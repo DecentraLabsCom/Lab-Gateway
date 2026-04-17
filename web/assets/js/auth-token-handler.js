@@ -379,16 +379,26 @@
                 // Prevent navigation and show token modal
                 e.preventDefault();
                 showTokenModal(config, (token) => {
-                    // Add token to URL and navigate
-                    const separator = href.includes('?') ? '&' : '?';
-                    window.location.href = `${href}${separator}token=${encodeURIComponent(token)}`;
+                    // Prefer exact bootstrap path for wallet-dashboard and institution-config
+                    let targetHref = href;
+                    const requestPath = getRequestPath(href);
+                    if ((requestPath === '/wallet-dashboard' || requestPath === '/institution-config') && href.endsWith('/')) {
+                        targetHref = href.slice(0, -1);
+                    }
+                    const separator = targetHref.includes('?') ? '&' : '?';
+                    window.location.href = `${targetHref}${separator}token=${encodeURIComponent(token)}`;
                 });
             } else {
                 // Add token to URL if not already present
                 if (!href.includes('token=')) {
                     e.preventDefault();
-                    const separator = href.includes('?') ? '&' : '?';
-                    window.location.href = `${href}${separator}token=${encodeURIComponent(storedToken)}`;
+                    let targetHref = href;
+                    const requestPath = getRequestPath(href);
+                    if ((requestPath === '/wallet-dashboard' || requestPath === '/institution-config') && href.endsWith('/')) {
+                        targetHref = href.slice(0, -1);
+                    }
+                    const separator = targetHref.includes('?') ? '&' : '?';
+                    window.location.href = `${targetHref}${separator}token=${encodeURIComponent(storedToken)}`;
                 }
             }
         });
