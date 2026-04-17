@@ -133,11 +133,11 @@ if [ -f "$ROOT_ENV_FILE" ]; then
     echo ".env file already exists!"
     read -p "Do you want to overwrite it? (y/N): " overwrite
     overwrite=$(echo "$overwrite" | tr -d ' ')
-    if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
-        echo "Keeping existing .env file."
-    else
+    if [ "$overwrite" = "Y" ] || [ "$overwrite" = "y" ]; then
         cp .env.example "$ROOT_ENV_FILE"
         echo "Overwritten .env file from template"
+    else
+        echo "Keeping existing .env file."
     fi
 else
     cp .env.example "$ROOT_ENV_FILE"
@@ -198,7 +198,7 @@ if [ -n "$mysql_volume_name" ] && [ "$db_credentials_changed" = true ]; then
     echo "Database credentials changed in .env, so startup can fail with Access denied (1045)."
     read -p "Reset MySQL volume now to apply new credentials? This removes MySQL data. (y/N): " reset_mysql_input
     reset_mysql_input="$(echo "$reset_mysql_input" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
-    if [[ "$reset_mysql_input" =~ ^(y|yes)$ ]]; then
+    if [ "$reset_mysql_input" = "y" ] || [ "$reset_mysql_input" = "yes" ]; then
         reset_mysql_volume=true
         echo "MySQL volume will be reset before startup."
     else
@@ -275,7 +275,7 @@ echo "  2) Private networks + admin access token"
 read -p "Choose [1/2] (default: 1): " dashboard_access_scope
 dashboard_access_scope=$(echo "$dashboard_access_scope" | tr -d ' ')
 
-if [ "$dashboard_access_scope" == "2" ]; then
+if [ "$dashboard_access_scope" = "2" ]; then
     update_env_blockchain_only "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
     update_env_blockchain_only "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
     read -p "Allowed private CIDRs (comma-separated, leave empty for any private range): " admin_allowed_cidrs
@@ -324,7 +324,7 @@ if [ -z "$domain" ]; then
 fi
 
 # Update .env file with intelligent defaults
-if [ "$domain" == "localhost" ]; then
+if [ "$domain" = "localhost" ]; then
     echo "Configuring for local development..."
     update_env_var "$ROOT_ENV_FILE" "SERVER_NAME" "localhost"
     update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "8443"
@@ -348,7 +348,7 @@ else
     read -p "Choose [1/2] (default: 1): " deploy_mode
     deploy_mode=$(echo "$deploy_mode" | tr -d ' ')
     
-    if [ "$deploy_mode" == "2" ]; then
+    if [ "$deploy_mode" = "2" ]; then
         echo "Router mode selected."
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_ADDRESS" "0.0.0.0"
         read -p "Public HTTPS port (the port clients use; default: 443): " public_https
@@ -468,7 +468,7 @@ echo "Remote Access (Cloudflare Tunnel)"
 echo "================================="
 read -p "Enable Cloudflare Tunnel to expose the gateway without opening inbound ports? (y/N): " enable_cf
 enable_cf=$(echo "$enable_cf" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
-if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
+if [ "$enable_cf" = "y" ] || [ "$enable_cf" = "yes" ]; then
     cf_enabled=true
     read -p "Cloudflare Tunnel token (leave empty to use a Quick Tunnel): " cf_token
     cf_token=$(echo "$cf_token" | tr -d ' ')
@@ -477,14 +477,13 @@ if [[ "$enable_cf" =~ ^(y|yes)$ ]]; then
     else
         update_env_var "$ROOT_ENV_FILE" "CLOUDFLARE_TUNNEL_TOKEN" ""
     fi
-    if [ "$domain" == "localhost" ]; then
+    if [ "$domain" = "localhost" ]; then
         echo "Cloudflare enabled: switching to standard ports (443/80) for a cleaner public URL."
         update_env_var "$ROOT_ENV_FILE" "HTTPS_PORT" "443"
         update_env_var "$ROOT_ENV_FILE" "HTTP_PORT" "80"
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTPS_PORT" "443"
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "80"
     fi
-else
 fi
 
 echo
@@ -676,12 +675,12 @@ if [ "$cf_enabled" = true ]; then
 fi
 https_port=$(get_env_default "HTTPS_PORT" "$ROOT_ENV_FILE")
 http_port=$(get_env_default "HTTP_PORT" "$ROOT_ENV_FILE")
-if [ "$domain" == "localhost" ]; then
+if [ "$domain" = "localhost" ]; then
     echo "Access: https://localhost:${https_port:-8443} (HTTP: ${http_port:-8081})"
 else
     echo "Access: https://$domain"
 fi
-if [ "$domain" == "localhost" ]; then
+if [ "$domain" = "localhost" ]; then
     token_host="https://localhost"
     if [ "${https_port:-8443}" != "443" ]; then
         token_host="${token_host}:${https_port:-8443}"
@@ -700,15 +699,21 @@ echo
 
 # Ask if user wants to start services
 read -p "Do you want to start the services now? (Y/n): " start_services
-if [[ "$start_services" =~ ^[Nn]$ ]] || [[ "$start_services" =~ ^[Nn][Oo]$ ]]; then
-    echo "Configuration complete!"
-    echo
-    echo "Next steps:"
-echo "1. Configure blockchain settings in blockchain-services/.env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
-echo "2. Run: $compose_full up -d"
-    echo "3. Access your services"
-    if [ "$cf_enabled" = true ]; then
-        echo "4. Cloudflare tunnel hostname: $compose_full logs ${cf_service:-cloudflared}"
+case "$start_services" in
+    [Nn]|[Nn][Oo])
+        echo "Configuration complete!"
+        echo
+        echo "Next steps:"
+        echo "1. Configure blockchain settings in blockchain-services/.env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
+        echo "2. Run: $compose_full up -d"
+        echo "3. Access your services"
+        if [ "$cf_enabled" = true ]; then
+            echo "4. Cloudflare tunnel hostname: $compose_full logs ${cf_service:-cloudflared}"
+        fi
+        ;;
+    *)
+        ;;
+esac
     fi
     echo
     echo "For more information, see README.md"
@@ -734,12 +739,12 @@ set -e
 if [ $compose_result -eq 0 ]; then
     echo
     echo "Services started successfully!"
-if [ "$domain" == "localhost" ]; then
+if [ "$domain" = "localhost" ]; then
     echo "Access your lab at: https://localhost:${https_port:-8443}"
 else
     echo "Access your lab at: https://$domain"
 fi
-if [ "$domain" == "localhost" ]; then
+if [ "$domain" = "localhost" ]; then
     token_host="https://localhost"
     if [ "${https_port:-8443}" != "443" ]; then
         token_host="${token_host}:${https_port:-8443}"
