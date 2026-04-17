@@ -382,19 +382,22 @@
                     // Prefer exact bootstrap path for wallet-dashboard and institution-config
                     let targetHref = href;
                     const requestPath = getRequestPath(href);
-                    if ((requestPath === '/wallet-dashboard' || requestPath === '/institution-config') && href.endsWith('/')) {
+                    const normalizedRequestPath = requestPath.endsWith('/') && requestPath !== '/' ? requestPath.slice(0, -1) : requestPath;
+                    if ((normalizedRequestPath === '/wallet-dashboard' || normalizedRequestPath === '/institution-config') && href.endsWith('/')) {
                         targetHref = href.slice(0, -1);
                     }
                     const separator = targetHref.includes('?') ? '&' : '?';
                     window.location.href = `${targetHref}${separator}token=${encodeURIComponent(token)}`;
                 });
             } else {
-                // Add token to URL if not already present
+                // Add token to URL if not already present — same behaviour as /lab-manager.
+                // The destination page (admin.js / auth-token-fetch.js) cleans it on load.
                 if (!href.includes('token=')) {
                     e.preventDefault();
                     let targetHref = href;
                     const requestPath = getRequestPath(href);
-                    if ((requestPath === '/wallet-dashboard' || requestPath === '/institution-config') && href.endsWith('/')) {
+                    const normalizedRequestPath = requestPath.endsWith('/') && requestPath !== '/' ? requestPath.slice(0, -1) : requestPath;
+                    if ((normalizedRequestPath === '/wallet-dashboard' || normalizedRequestPath === '/institution-config') && href.endsWith('/')) {
                         targetHref = href.slice(0, -1);
                     }
                     const separator = targetHref.includes('?') ? '&' : '?';
