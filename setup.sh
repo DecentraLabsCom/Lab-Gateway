@@ -15,6 +15,7 @@ compose_profiles=""
 cf_enabled=false
 certbot_enabled=false
 aas_bundled=false
+fmu_runner_enabled=true
 existing_mysql_root_password=""
 existing_mysql_password=""
 db_credentials_changed=false
@@ -426,6 +427,41 @@ fi
 echo
 
 echo
+echo "FMU Runner Integration"
+echo "======================"
+echo "Controls whether /fmu and FMU AAS sync routes are active on this gateway."
+echo "When disabled, OpenResty starts without requiring the fmu-runner container and those routes return 503."
+current_fmu_runner_enabled="$(get_env_default "FMU_RUNNER_ENABLED" "$ROOT_ENV_FILE")"
+if [ -z "$current_fmu_runner_enabled" ]; then
+    if [ -n "$issuer_value" ]; then
+        current_fmu_runner_enabled="false"
+    else
+        current_fmu_runner_enabled="true"
+    fi
+fi
+if [ "$current_fmu_runner_enabled" = "true" ]; then
+    fmu_prompt="Y/n"
+else
+    fmu_prompt="y/N"
+fi
+read -p "Enable FMU runner integration? [$fmu_prompt]: " enable_fmu_runner
+enable_fmu_runner=$(echo "$enable_fmu_runner" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+if [ -z "$enable_fmu_runner" ]; then
+    fmu_runner_enabled="$current_fmu_runner_enabled"
+elif [ "$enable_fmu_runner" = "y" ] || [ "$enable_fmu_runner" = "yes" ] || [ "$enable_fmu_runner" = "true" ] || [ "$enable_fmu_runner" = "1" ]; then
+    fmu_runner_enabled="true"
+else
+    fmu_runner_enabled="false"
+fi
+update_env_var "$ROOT_ENV_FILE" "FMU_RUNNER_ENABLED" "$fmu_runner_enabled"
+if [ "$fmu_runner_enabled" = "true" ]; then
+    echo "   * FMU runner enabled. /fmu routes are active."
+else
+    echo "   * FMU runner disabled. Startup will use '--scale fmu-runner=0'."
+fi
+echo
+
+echo
 echo "AAS Support (Asset Administration Shell)"
 echo "========================================="
 if [ -n "$issuer_value" ]; then
@@ -653,6 +689,10 @@ fi
 if [ -n "$compose_profiles" ]; then
     compose_full="$compose_full $compose_profiles"
 fi
+compose_up_args="up -d"
+if [ "$fmu_runner_enabled" != "true" ]; then
+    compose_up_args="up -d --scale fmu-runner=0"
+fi
 
 echo
 echo "Institutional Wallet Reminder"
@@ -671,7 +711,7 @@ echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
 echo "3. Configure blockchain settings in blockchain-services/.env is needed"
-echo "4. Run: $compose_full up -d"
+echo "4. Run: $compose_full $compose_up_args"
 if [ "$cf_enabled" = true ]; then
     echo "5. Cloudflare tunnel: check '$compose_full logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
 fi
@@ -707,7 +747,7 @@ case "$start_services" in
         echo
         echo "Next steps:"
         echo "1. Configure blockchain settings in blockchain-services/.env (CONTRACT_ADDRESS, WALLET_ADDRESS, INSTITUTIONAL_WALLET_*)"
-        echo "2. Run: $compose_full up -d"
+        echo "2. Run: $compose_full $compose_up_args"
         echo "3. Access your services"
         if [ "$cf_enabled" = true ]; then
             echo "4. Cloudflare tunnel hostname: $compose_full logs ${cf_service:-cloudflared}"
@@ -732,7 +772,7 @@ else
     $compose_full down --remove-orphans
 fi
 $compose_full build --no-cache
-$compose_full up -d
+$compose_full $compose_up_args
 compose_result=$?
 set -e
 

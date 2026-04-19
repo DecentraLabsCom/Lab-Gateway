@@ -13,6 +13,7 @@ set "compose_full="
 set "cf_enabled=0"
 set "certbot_enabled=0"
 set "aas_enabled=0"
+set "fmu_runner_enabled=1"
 set "external_aas_url="
 set "existing_mysql_root_password="
 set "existing_mysql_password="
@@ -388,6 +389,53 @@ if "!issuer_value!"=="" (
 )
 echo.
 
+echo FMU Runner Integration
+echo ======================
+echo Controls whether /fmu and FMU AAS sync routes are active on this gateway.
+echo When disabled, OpenResty starts without requiring the fmu-runner container and those routes return 503.
+set "current_fmu_runner_enabled="
+call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_RUNNER_ENABLED" current_fmu_runner_enabled
+if not defined current_fmu_runner_enabled (
+    if "!issuer_value!"=="" (
+        set "current_fmu_runner_enabled=true"
+    ) else (
+        set "current_fmu_runner_enabled=false"
+    )
+)
+if /i "!current_fmu_runner_enabled!"=="true" (
+    set "fmu_prompt=Y/n"
+) else (
+    set "fmu_prompt=y/N"
+)
+set "enable_fmu_runner="
+set /p "enable_fmu_runner=Enable FMU runner integration? [!fmu_prompt!]: "
+if defined enable_fmu_runner set "enable_fmu_runner=!enable_fmu_runner: =!"
+if /i "!enable_fmu_runner!"=="" (
+    if /i "!current_fmu_runner_enabled!"=="true" (
+        set "fmu_runner_enabled=1"
+    ) else (
+        set "fmu_runner_enabled=0"
+    )
+) else if /i "!enable_fmu_runner!"=="y" (
+    set "fmu_runner_enabled=1"
+) else if /i "!enable_fmu_runner!"=="yes" (
+    set "fmu_runner_enabled=1"
+) else if /i "!enable_fmu_runner!"=="true" (
+    set "fmu_runner_enabled=1"
+) else if "!enable_fmu_runner!"=="1" (
+    set "fmu_runner_enabled=1"
+) else (
+    set "fmu_runner_enabled=0"
+)
+if "!fmu_runner_enabled!"=="1" (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_RUNNER_ENABLED" "true"
+    echo    * FMU runner enabled. /fmu routes are active.
+) else (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_RUNNER_ENABLED" "false"
+    echo    * FMU runner disabled. Startup will use '--scale fmu-runner=0'.
+)
+echo.
+
 echo AAS Support ^(Asset Administration Shell^)
 echo ==========================================
 if not "!issuer_value!"=="" (
@@ -462,6 +510,8 @@ if "!cf_enabled!"=="1" (
 REM Build complete compose command: base + files + profile
 set "compose_full=%compose_cmd% !compose_files!"
 if "!cf_enabled!"=="1" set "compose_full=!compose_full! --profile !cf_profile!"
+set "compose_up_args=up -d"
+if "!fmu_runner_enabled!"=="0" set "compose_up_args=up -d --scale fmu-runner=0"
 echo.
 
 echo Ops Worker configuration
@@ -584,7 +634,7 @@ echo ==========
 echo 1. Review and customize %ROOT_ENV_FILE% if needed
 echo 2. Ensure SSL certificates and RSA keys are present in certs\
 echo 3. Review blockchain settings in %BLOCKCHAIN_ENV_FILE if needed%
-echo 4. Run: !compose_full! up -d
+echo 4. Run: !compose_full! !compose_up_args!
 if "!cf_enabled!"=="1" (
     echo 5. Cloudflare tunnel: check '!compose_full! logs !cf_service!' for the public hostname ^(or your configured tunnel token domain^).
 )
@@ -639,7 +689,7 @@ if errorlevel 1 (
     call !compose_full! build --no-cache
     if errorlevel 1 goto compose_fail
 )
-call !compose_full! up -d
+call !compose_full! !compose_up_args!
 if errorlevel 1 goto compose_fail
 goto compose_success
 
@@ -698,7 +748,7 @@ echo Configuration complete!
 echo.
 echo Next steps:
 echo 1. Update blockchain contract and wallet values if needed.
-echo 2. Run: !compose_full! up -d
+echo 2. Run: !compose_full! !compose_up_args!
 echo 3. Access your services as listed above.
 if "!cf_enabled!"=="1" (
     echo 4. Cloudflare tunnel hostname: !compose_full! logs !cf_service!

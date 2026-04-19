@@ -94,10 +94,20 @@ if configured_issuer and configured_issuer ~= "" then
     lite_mode = normalize_issuer(configured_issuer) ~= normalize_issuer(local_issuer)
 end
 
+local fmu_runner_env = (trim(os.getenv("FMU_RUNNER_ENABLED")) or ""):lower()
+local fmu_runner_enabled
+if fmu_runner_env == "" then
+    -- Keep Full behavior unchanged while allowing Lite to run without fmu-runner by default.
+    fmu_runner_enabled = not lite_mode
+else
+    fmu_runner_enabled = not (fmu_runner_env == "0" or fmu_runner_env == "false" or fmu_runner_env == "no")
+end
+
 config:set("server_name", server_name)
 config:set("guac_uri", "/guacamole")
 config:set("issuer", issuer)
 config:set("lite_mode", lite_mode and 1 or 0)
+config:set("fmu_runner_enabled", fmu_runner_enabled and 1 or 0)
 config:set("admin_user", admin_user)
 config:set("admin_pass", admin_pass)
 config:set("https_port", https_port)
@@ -120,6 +130,12 @@ if lite_mode then
     ngx.log(ngx.INFO, "Lite mode enabled: billing/auth/intents endpoints are restricted on this gateway")
 else
     ngx.log(ngx.INFO, "Full mode enabled")
+end
+
+if fmu_runner_enabled then
+    ngx.log(ngx.INFO, "FMU runner integration enabled")
+else
+    ngx.log(ngx.INFO, "FMU runner integration disabled: /fmu and FMU AAS sync endpoints will return 503")
 end
 
 -- Read the public key from a file

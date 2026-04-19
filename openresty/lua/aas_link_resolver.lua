@@ -37,6 +37,12 @@ end
 function _M.resolve(shell_id)
     if not shell_id or shell_id == "" then return shell_id, false end
 
+    local config = ngx.shared and ngx.shared.config
+    local fmu_runner_enabled = config and config:get("fmu_runner_enabled")
+    if fmu_runner_enabled == 0 or fmu_runner_enabled == false or fmu_runner_enabled == "0" then
+        return shell_id, false
+    end
+
     local cache = ngx.shared.aas_link_cache
 
     -- Positive cache hit (override exists)
