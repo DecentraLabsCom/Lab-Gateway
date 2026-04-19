@@ -437,6 +437,7 @@ services:
 
   # FMU Runner - FMI Co-Simulation execution service
   fmu-runner:
+    profiles: ["fmu-runner"]
     build:
       context: ./fmu-runner
       dockerfile: Dockerfile

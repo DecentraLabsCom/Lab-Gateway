@@ -393,13 +393,20 @@ echo FMU Runner Integration
 echo ======================
 echo Controls whether /fmu and FMU AAS sync routes are active on this gateway.
 echo When disabled, OpenResty starts without requiring the fmu-runner container and those routes return 503.
+echo FMU runner is started unless FMU_RUNNER_ENABLED is explicitly set to false.
 set "current_fmu_runner_enabled="
 call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_RUNNER_ENABLED" current_fmu_runner_enabled
 if not defined current_fmu_runner_enabled (
-    if "!issuer_value!"=="" (
-        set "current_fmu_runner_enabled=true"
-    ) else (
+    set "current_fmu_runner_enabled=true"
+) else (
+    if /i "!current_fmu_runner_enabled!"=="false" (
         set "current_fmu_runner_enabled=false"
+    ) else if /i "!current_fmu_runner_enabled!"=="0" (
+        set "current_fmu_runner_enabled=false"
+    ) else if /i "!current_fmu_runner_enabled!"=="no" (
+        set "current_fmu_runner_enabled=false"
+    ) else (
+        set "current_fmu_runner_enabled=true"
     )
 )
 if /i "!current_fmu_runner_enabled!"=="true" (

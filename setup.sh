@@ -431,13 +431,19 @@ echo "FMU Runner Integration"
 echo "======================"
 echo "Controls whether /fmu and FMU AAS sync routes are active on this gateway."
 echo "When disabled, OpenResty starts without requiring the fmu-runner container and those routes return 503."
+echo "FMU runner is started unless FMU_RUNNER_ENABLED is explicitly set to false."
 current_fmu_runner_enabled="$(get_env_default "FMU_RUNNER_ENABLED" "$ROOT_ENV_FILE")"
 if [ -z "$current_fmu_runner_enabled" ]; then
-    if [ -n "$issuer_value" ]; then
-        current_fmu_runner_enabled="false"
-    else
-        current_fmu_runner_enabled="true"
-    fi
+    current_fmu_runner_enabled="true"
+else
+    case "${current_fmu_runner_enabled,,}" in
+        false|0|no)
+            current_fmu_runner_enabled="false"
+            ;;
+        *)
+            current_fmu_runner_enabled="true"
+            ;;
+    esac
 fi
 if [ "$current_fmu_runner_enabled" = "true" ]; then
     fmu_prompt="Y/n"
@@ -678,6 +684,14 @@ if [ "$aas_bundled" = true ]; then
         compose_profiles="$compose_profiles --profile aas"
     else
         compose_profiles="--profile aas"
+    fi
+fi
+
+if [ "$fmu_runner_enabled" = "true" ]; then
+    if [ -n "$compose_profiles" ]; then
+        compose_profiles="$compose_profiles --profile fmu-runner"
+    else
+        compose_profiles="--profile fmu-runner"
     fi
 fi
 
