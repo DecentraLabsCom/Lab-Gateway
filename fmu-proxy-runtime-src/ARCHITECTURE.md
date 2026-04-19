@@ -16,7 +16,7 @@ flowchart LR
     Tool["FMI master tool"]
     Proxy["proxy.fmu runtime"]
     Gateway["Lab Gateway\n(public REST/WSS facade)"]
-    Station["Lab Station / Lab App Control\n(internal backend)"]
+    Station["Lab Station\n(internal backend)"]
     RealFMU["real provider .fmu"]
 
     Tool --> Proxy

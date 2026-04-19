@@ -7,7 +7,7 @@ It exposes the public REST/WSS contract consumed by generated `proxy.fmu` artifa
 
 Target architecture:
 
-- real `.fmu` files live on Lab Station / Lab App Control
+- real `.fmu` files live on Lab Station
 - this service remains in the Gateway as the public FMU facade
 - execution and model loading move behind an internal `station` backend
 
@@ -49,7 +49,7 @@ flowchart LR
 | Mode | Purpose | Real FMU location | Notes |
 |------|---------|-------------------|-------|
 | `local` | Development and test | Gateway filesystem (`fmu-data`) | Permanent non-production path via FMPy |
-| `station` | Target production mode | Lab Station / Lab App Control | Gateway becomes auth + proxy + router only |
+| `station` | Target production mode | Lab Station | Gateway becomes auth + proxy + router only |
 
 ## Unit Tests
 

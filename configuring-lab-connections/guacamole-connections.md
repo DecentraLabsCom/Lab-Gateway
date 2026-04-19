@@ -26,9 +26,9 @@ There, you must setup a few things:
   * _Security mode:_ Should be set to "Any".
   * _Ignore server certificate:_ Should be checked.
 * **Remote App**
-  * _Program:_ This should be filled with the name of the DecentraLabs' App Control .exe file.
-  * _Working directory:_ The path to where dLabAppControl.exe is located in your Windows system.
-  * _Parameters:_ These are inline parameters passed to dLabAppControl.exe and to your lab app. For the first ones, there are two required: the lab app's window class and the lab app's path in your system. To learn how to obtain the window class of your lab app and what other parameters you can use, read the documentation in Lab App Control. For the second ones (parameters to be passed to your lab app), those are dependant to the program you will be running. You can find more details on this in the Lab App Control documentation too.
+  * _Program:_ This should be filled with the name of the DecentraLabs' Lab Station .exe file (e.g. `AppControl.exe`).
+  * _Working directory:_ The path to where the Lab Station executables are located in your Windows system.
+  * _Parameters:_ These are inline parameters passed to AppControl.exe and to your lab app. For the first ones, there are two required: the lab app's window class and the lab app's path in your system. To learn how to obtain the window class of your lab app and what other parameters you can use, read the documentation in Lab Station. For the second ones (parameters to be passed to your lab app), those are dependant to the program you will be running. You can find more details on this in the Lab Station documentation too.
 
 The image below shows the full set of parameters configured for a lab connection.
 

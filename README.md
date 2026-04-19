@@ -23,7 +23,7 @@ flowchart LR
     Ops["ops-worker"]
     Mysql[("MySQL")]
     Contracts["Smart contracts"]
-    Station["Lab Station / Lab App Control"]
+    Station["Lab Station"]
 
     User --> OpenResty
     OpenResty --> Blockchain
@@ -59,7 +59,7 @@ sequenceDiagram
 
 FMU target model:
 
-- The real `.fmu` remains on Lab Station / Lab App Control.
+- The real `.fmu` remains on Lab Station.
 - The Gateway keeps the public REST/WSS surface, proxy generation, auth and ticketing.
 - The generated `proxy.fmu` contains interface metadata, runtime binaries and reservation-scoped config, never the real model.
 - This repository keeps a local FMU execution path in `fmu-runner` as a permanent dev/test mode. That local path is not the intended production topology.
