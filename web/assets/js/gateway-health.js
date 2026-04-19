@@ -47,21 +47,31 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (statusVal === 'PARTIAL') setStatus('Partial', 'partial');
         else setStatus('System Unavailable', 'offline');
 
-        renderTop(data);
-        renderServices(data.services || {});
+        const liteMode = data.lite === true || (data.mode || '').toLowerCase() === 'lite';
+        renderTop(data, liteMode);
+        renderServices(data.services || {}, liteMode);
         renderInfra(data.infra || {});
     }
 
-    function renderTop(data) {
+    function renderTop(data, liteMode) {
         if (!topGrid) return;
         topGrid.innerHTML = '';
+        const blockchainItem = liteMode
+            ? { label: 'Lite auth trust', ok: data.services?.lite_auth?.ok, na: false }
+            : { label: 'Blockchain services', ok: data.services?.blockchain?.ok, na: false };
         const items = [
-            { label: 'Blockchain services', ok: data.services?.blockchain?.ok },
+            blockchainItem,
             { label: 'Labs access', ok: data.services?.guacamole?.ok && data.services?.guacamole_api?.ok && data.services?.guacd?.ok && data.services?.guacamole_schema?.ok && data.services?.mysql?.ok },
             { label: 'Ops worker', ok: data.services?.ops?.ok },
             { label: 'MySQL (gateway)', ok: data.services?.mysql?.ok },
             { label: 'Cert validity', ok: (data.infra?.cert?.days_remaining || 0) > 0 }
         ];
+        if (data.services?.fmu_runner?.enabled === true) {
+            items.push({ label: 'FMU runner', ok: data.services.fmu_runner.ok });
+        }
+        if (data.services?.aas?.enabled === true) {
+            items.push({ label: 'AAS server', ok: data.services.aas.ok });
+        }
         items.forEach(item => {
             const div = document.createElement('div');
             div.className = 'health-row';
@@ -70,51 +80,114 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderServices(services) {
+    function renderServices(services, liteMode) {
         if (!serviceGrid) return;
         serviceGrid.innerHTML = '';
-        const blockchainVal = services.blockchain || {};
-        const blockchainCard = document.createElement('div');
-        blockchainCard.className = 'health-card service-column';
-        const blockchainOk = blockchainVal.ok === true;
-        const blockchainTag = summaryTag(blockchainOk, blockchainVal.status);
-        blockchainCard.innerHTML = `
-            <div class="health-row">
-                <strong>Blockchain services</strong>
-                <span class="tag ${blockchainTag.cls}">${blockchainTag.text}</span>
-            </div>
-        `;
-        if (blockchainVal.details) {
-            const d = blockchainVal.details;
-            const grid = document.createElement('div');
-            grid.className = 'keyval';
-            const fields = [
-                ['RPC', boolTag(d.rpc_up)],
-                ['Marketplace key', boolTag(d.marketplace_key_cached)],
-                ['Private key', boolTag(d.private_key_present)],
-                ['DB', boolTag(d.database_up)],
-                ['Wallet configured', boolTag(d.wallet_configured)],
-                ['Billing configured', boolTag(d.billing_configured ?? d.treasury_configured)],
-                ['Provider registered', boolTag(d.provider_registered)],
-                ['Invite token', boolTag(d.invite_token_configured)],
-                ['Event listener', boolTag(d.event_listener_enabled)],
-                ['SAML validation', boolTag(d.saml_validation_ready)],
-                ['JWT validation', jwtTag(d.jwt_validation)],
-                ['Version', textTag(d.version)]
+
+        if (liteMode) {
+            // Lite mode: show lite_auth card instead of blockchain
+            const liteAuthVal = services.lite_auth || {};
+            const liteAuthCard = document.createElement('div');
+            liteAuthCard.className = 'health-card service-column';
+            const liteAuthOk = liteAuthVal.ok === true;
+            const liteAuthTag = summaryTag(liteAuthOk, liteAuthOk ? 'OK' : 'issue');
+            liteAuthCard.innerHTML = `
+                <div class="health-row">
+                    <strong>Lite auth trust</strong>
+                    <span class="tag ${liteAuthTag.cls}">${liteAuthTag.text}</span>
+                </div>
+            `;
+            const liteGrid = document.createElement('div');
+            liteGrid.className = 'keyval';
+            const liteFields = [
+                ['External issuer', boolTag(liteAuthVal.external_issuer)],
+                ['Issuer URL valid', boolTag(liteAuthVal.issuer_url_valid)],
+                ['Issuer DNS', boolTag(liteAuthVal.issuer_host_dns_ok)],
+                ['Local public key', boolTag(liteAuthVal.local_public_key_present)],
+                ['Local key valid', boolTag(liteAuthVal.local_public_key_valid)],
+                ['Remote public key', boolTag(liteAuthVal.remote_public_key_ok)]
             ];
-            fields.forEach(([k,v]) => {
+            liteFields.forEach(([k, v]) => {
                 const key = document.createElement('div');
                 key.className = 'key';
                 key.textContent = k;
                 const valEl = document.createElement('div');
                 valEl.className = 'val';
                 valEl.appendChild(v);
-                grid.appendChild(key);
-                grid.appendChild(valEl);
+                liteGrid.appendChild(key);
+                liteGrid.appendChild(valEl);
             });
-            blockchainCard.appendChild(grid);
+            if (liteAuthVal.remote_public_key_status && liteAuthVal.remote_public_key_status !== 'not_applicable') {
+                const noteKey = document.createElement('div');
+                noteKey.className = 'key';
+                noteKey.textContent = 'Status';
+                const noteVal = document.createElement('div');
+                noteVal.className = 'val';
+                noteVal.textContent = liteAuthVal.remote_public_key_status;
+                liteGrid.appendChild(noteKey);
+                liteGrid.appendChild(noteVal);
+            }
+            liteAuthCard.appendChild(liteGrid);
+
+            // Blockchain card: shown as N/A in Lite mode
+            const blockchainCard = document.createElement('div');
+            blockchainCard.className = 'health-card service-column';
+            blockchainCard.innerHTML = `
+                <div class="health-row">
+                    <strong>Blockchain services</strong>
+                    <span class="tag ok">N/A</span>
+                </div>
+                <div class="keyval">
+                    <div class="key" style="grid-column:1/-1;color:var(--muted,#888)">Not required in Lite mode</div>
+                </div>
+            `;
+            serviceGrid.appendChild(liteAuthCard);
+            serviceGrid.appendChild(blockchainCard);
+        } else {
+            // Full mode: show blockchain card with all sub-checks
+            const blockchainVal = services.blockchain || {};
+            const blockchainCard = document.createElement('div');
+            blockchainCard.className = 'health-card service-column';
+            const blockchainOk = blockchainVal.ok === true;
+            const blockchainTag = summaryTag(blockchainOk, blockchainVal.status);
+            blockchainCard.innerHTML = `
+                <div class="health-row">
+                    <strong>Blockchain services</strong>
+                    <span class="tag ${blockchainTag.cls}">${blockchainTag.text}</span>
+                </div>
+            `;
+            if (blockchainVal.details) {
+                const d = blockchainVal.details;
+                const grid = document.createElement('div');
+                grid.className = 'keyval';
+                const fields = [
+                    ['RPC', boolTag(d.rpc_up)],
+                    ['Marketplace key', boolTag(d.marketplace_key_cached)],
+                    ['Private key', boolTag(d.private_key_present)],
+                    ['DB', boolTag(d.database_up)],
+                    ['Wallet configured', boolTag(d.wallet_configured)],
+                    ['Billing configured', boolTag(d.billing_configured ?? d.treasury_configured)],
+                    ['Provider registered', boolTag(d.provider_registered)],
+                    ['Invite token', boolTag(d.invite_token_configured)],
+                    ['Event listener', boolTag(d.event_listener_enabled)],
+                    ['SAML validation', boolTag(d.saml_validation_ready)],
+                    ['JWT validation', jwtTag(d.jwt_validation)],
+                    ['Version', textTag(d.version)]
+                ];
+                fields.forEach(([k, v]) => {
+                    const key = document.createElement('div');
+                    key.className = 'key';
+                    key.textContent = k;
+                    const valEl = document.createElement('div');
+                    valEl.className = 'val';
+                    valEl.appendChild(v);
+                    grid.appendChild(key);
+                    grid.appendChild(valEl);
+                });
+                blockchainCard.appendChild(grid);
+            }
+            serviceGrid.appendChild(blockchainCard);
         }
-        serviceGrid.appendChild(blockchainCard);
 
         const otherCard = document.createElement('div');
         otherCard.className = 'health-card service-column';
@@ -149,6 +222,81 @@ document.addEventListener('DOMContentLoaded', () => {
             otherCard.appendChild(row);
         });
         serviceGrid.appendChild(otherCard);
+
+        // FMU runner card (only shown when FMU runner is enabled)
+        const fmuRunner = services.fmu_runner || {};
+        if (fmuRunner.enabled === true) {
+            const fmuCard = document.createElement('div');
+            fmuCard.className = 'health-card service-column';
+            const fmuOk = fmuRunner.ok === true;
+            const fmuTag = summaryTag(fmuOk, fmuRunner.status);
+            fmuCard.innerHTML = `
+                <div class="health-row">
+                    <strong>FMU runner</strong>
+                    <span class="tag ${fmuTag.cls}">${fmuTag.text}</span>
+                </div>
+            `;
+            const d = fmuRunner.details || {};
+            const fmuGrid = document.createElement('div');
+            fmuGrid.className = 'keyval';
+            const fmuFields = [
+                ['Status', textTag(d.status)],
+                ['Backend mode', textTag(d.backendMode)],
+                ['FMU count', textTag(d.fmuCount !== undefined ? String(d.fmuCount) : undefined)]
+            ];
+            if (d.checks && typeof d.checks === 'object') {
+                Object.keys(d.checks).forEach(k => fmuFields.push([k, boolTag(d.checks[k])]));
+            }
+            fmuFields.forEach(([k, v]) => {
+                const key = document.createElement('div');
+                key.className = 'key';
+                key.textContent = k;
+                const valEl = document.createElement('div');
+                valEl.className = 'val';
+                valEl.appendChild(v);
+                fmuGrid.appendChild(key);
+                fmuGrid.appendChild(valEl);
+            });
+            fmuCard.appendChild(fmuGrid);
+            serviceGrid.appendChild(fmuCard);
+        }
+
+        // AAS server card (only shown when AAS is enabled)
+        const aas = services.aas || {};
+        if (aas.enabled === true) {
+            const aasCard = document.createElement('div');
+            aasCard.className = 'health-card service-column';
+            const aasOk = aas.ok === true;
+            const aasTag = summaryTag(aasOk, aas.status);
+            aasCard.innerHTML = `
+                <div class="health-row">
+                    <strong>AAS server (BaSyx)</strong>
+                    <span class="tag ${aasTag.cls}">${aasTag.text}</span>
+                </div>
+            `;
+            const aasGrid = document.createElement('div');
+            aasGrid.className = 'keyval';
+            const aasReachableKey = document.createElement('div');
+            aasReachableKey.className = 'key';
+            aasReachableKey.textContent = 'Reachable';
+            const aasReachableVal = document.createElement('div');
+            aasReachableVal.className = 'val';
+            aasReachableVal.appendChild(boolTag(aas.ok));
+            aasGrid.appendChild(aasReachableKey);
+            aasGrid.appendChild(aasReachableVal);
+            if (aas.status !== undefined) {
+                const aasStatusKey = document.createElement('div');
+                aasStatusKey.className = 'key';
+                aasStatusKey.textContent = 'HTTP status';
+                const aasStatusVal = document.createElement('div');
+                aasStatusVal.className = 'val';
+                aasStatusVal.appendChild(textTag(String(aas.status)));
+                aasGrid.appendChild(aasStatusKey);
+                aasGrid.appendChild(aasStatusVal);
+            }
+            aasCard.appendChild(aasGrid);
+            serviceGrid.appendChild(aasCard);
+        }
     }
 
     function renderInfra(infra) {

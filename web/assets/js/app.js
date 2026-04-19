@@ -185,6 +185,24 @@ document.addEventListener('DOMContentLoaded', function() {
                     missingItems.push({ text: 'Ops worker inoperative', href: '/gateway-health/' });
                 }
 
+                const fmuRunner = services.fmu_runner || {};
+                if (fmuRunner.enabled === true) {
+                    if (fmuRunner.ok === true) {
+                        okItems.push('FMU runner operative');
+                    } else {
+                        missingItems.push({ text: 'FMU runner inoperative', href: '/gateway-health/' });
+                    }
+                }
+
+                const aas = services.aas || {};
+                if (aas.enabled === true) {
+                    if (aas.ok === true) {
+                        okItems.push('AAS server operative');
+                    } else {
+                        missingItems.push({ text: 'AAS server inoperative', href: '/gateway-health/' });
+                    }
+                }
+
                 if (statusValue === 'UP') {
                     statusIndicator.className = 'status-indicator online';
                     statusText.textContent = 'System Online';

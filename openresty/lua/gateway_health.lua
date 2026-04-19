@@ -302,6 +302,8 @@ end
 local lite_mode = is_lite_mode()
 local config = ngx.shared and ngx.shared.config
 local configured_issuer = trim((config and config:get("issuer")) or os.getenv("ISSUER") or "")
+local fmu_runner_enabled = config and config:get("fmu_runner_enabled") == 1
+local aas_enabled = config and config:get("aas_enabled") == 1
 local local_issuer = build_local_issuer()
 local external_issuer = normalize_issuer(configured_issuer) ~= normalize_issuer(local_issuer)
 
@@ -320,6 +322,8 @@ local blockchain = capture("/__health_blockchain")
 local guac = capture("/__health_guacamole")
 local guac_api = capture("/__health_guac_api")
 local ops = capture("/__health_ops")
+local fmu_runner = fmu_runner_enabled and capture("/__health_fmu_runner") or { ok = false, status = nil, body = {} }
+local aas = aas_enabled and capture("/__health_aas") or { ok = false, status = nil, body = {} }
 local mysql_ok, mysql_err = check_mysql()
 local guacd_ok, guacd_err = check_guacd()
 local guac_schema_ok, guac_schema_err = check_guac_schema()
@@ -364,6 +368,12 @@ if not lite_mode then
     table.insert(status_checks, 1, blockchain)
 elseif lite_auth then
     table.insert(status_checks, { ok = lite_auth.ok })
+end
+if fmu_runner_enabled then
+    table.insert(status_checks, { ok = fmu_runner.ok })
+end
+if aas_enabled then
+    table.insert(status_checks, { ok = aas.ok })
 end
 
 -- Build structured response
@@ -414,6 +424,17 @@ local result = {
             local_public_key_valid = lite_auth and lite_auth.local_public_key_valid or false,
             remote_public_key_ok = lite_auth and lite_auth.remote_public_key_ok or false,
             remote_public_key_status = lite_auth and lite_auth.remote_public_key_status or "not_applicable"
+        },
+        fmu_runner = {
+            ok = fmu_runner.ok,
+            enabled = fmu_runner_enabled,
+            status = fmu_runner.status,
+            details = fmu_runner.body
+        },
+        aas = {
+            ok = aas.ok,
+            enabled = aas_enabled,
+            status = aas.status
         }
     },
     infra = {

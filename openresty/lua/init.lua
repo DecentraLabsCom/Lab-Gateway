@@ -126,6 +126,22 @@ local basyx_aas_url = (basyx_aas_raw ~= "") and basyx_aas_raw or "http://basyx-a
 basyx_aas_url = basyx_aas_url:gsub("/+$", "")  -- strip trailing slash
 config:set("basyx_aas_url", basyx_aas_url)
 
+-- AAS enabled flag: explicit AAS_ENABLED env takes precedence; otherwise infer
+-- from BASYX_AAS_URL being explicitly set (non-empty), meaning an external or
+-- known-active AAS server has been configured.  When using --profile aas with
+-- the bundled BaSyx, set AAS_ENABLED=1 in .env.
+local aas_enabled_env = (trim(os.getenv("AAS_ENABLED")) or ""):lower()
+local aas_enabled
+if aas_enabled_env == "1" or aas_enabled_env == "true" or aas_enabled_env == "yes" then
+    aas_enabled = true
+elseif aas_enabled_env == "0" or aas_enabled_env == "false" or aas_enabled_env == "no" then
+    aas_enabled = false
+else
+    -- Auto-detect: explicit BASYX_AAS_URL means AAS is intentionally configured.
+    aas_enabled = basyx_aas_raw ~= ""
+end
+config:set("aas_enabled", aas_enabled and 1 or 0)
+
 if lite_mode then
     ngx.log(ngx.INFO, "Lite mode enabled: billing/auth/intents endpoints are restricted on this gateway")
 else
