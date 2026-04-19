@@ -130,6 +130,94 @@ runner.describe("OpenResty init.lua", function()
         runner.assert.equals("http://guac.internal/guacamole/api", ngx.shared.config:get("guac_api_url"))
     end)
 
+    runner.it("defaults FMU runner to enabled even in lite mode when FMU_RUNNER_ENABLED is empty", function()
+        local ngx = run_init({
+            env = {
+                GUAC_ADMIN_USER = "admin",
+                GUAC_ADMIN_PASS = "really-strong-secret",
+                SERVER_NAME = "gateway.example",
+                HTTPS_PORT = "443",
+                ISSUER = "https://issuer.example/auth"
+            },
+            files = {
+                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+            }
+        })
+
+        runner.assert.equals(1, ngx.shared.config:get("lite_mode"))
+        runner.assert.equals(1, ngx.shared.config:get("fmu_runner_enabled"))
+    end)
+
+    runner.it("disables FMU runner only when FMU_RUNNER_ENABLED is explicitly false", function()
+        local ngx = run_init({
+            env = {
+                GUAC_ADMIN_USER = "admin",
+                GUAC_ADMIN_PASS = "really-strong-secret",
+                SERVER_NAME = "gateway.example",
+                HTTPS_PORT = "443",
+                FMU_RUNNER_ENABLED = "false"
+            },
+            files = {
+                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+            }
+        })
+
+        runner.assert.equals(0, ngx.shared.config:get("fmu_runner_enabled"))
+    end)
+
+    runner.it("enables AAS when AAS_ENABLED is true", function()
+        local ngx = run_init({
+            env = {
+                GUAC_ADMIN_USER = "admin",
+                GUAC_ADMIN_PASS = "really-strong-secret",
+                SERVER_NAME = "gateway.example",
+                HTTPS_PORT = "443",
+                AAS_ENABLED = "true"
+            },
+            files = {
+                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+            }
+        })
+
+        runner.assert.equals(1, ngx.shared.config:get("aas_enabled"))
+    end)
+
+    runner.it("disables AAS when AAS_ENABLED is false", function()
+        local ngx = run_init({
+            env = {
+                GUAC_ADMIN_USER = "admin",
+                GUAC_ADMIN_PASS = "really-strong-secret",
+                SERVER_NAME = "gateway.example",
+                HTTPS_PORT = "443",
+                AAS_ENABLED = "false",
+                BASYX_AAS_URL = "https://external-aas.example"
+            },
+            files = {
+                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+            }
+        })
+
+        runner.assert.equals(0, ngx.shared.config:get("aas_enabled"))
+    end)
+
+    runner.it("auto-enables AAS when BASYX_AAS_URL is explicitly configured", function()
+        local ngx = run_init({
+            env = {
+                GUAC_ADMIN_USER = "admin",
+                GUAC_ADMIN_PASS = "really-strong-secret",
+                SERVER_NAME = "gateway.example",
+                HTTPS_PORT = "443",
+                BASYX_AAS_URL = "https://external-aas.example"
+            },
+            files = {
+                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+            }
+        })
+
+        runner.assert.equals(1, ngx.shared.config:get("aas_enabled"))
+        runner.assert.equals("https://external-aas.example", ngx.shared.config:get("basyx_aas_url"))
+    end)
+
     runner.it("fails fast when required variables are missing", function()
         local ok, err = pcall(function()
             run_init({

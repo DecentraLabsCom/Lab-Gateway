@@ -97,8 +97,8 @@ end
 local fmu_runner_env = (trim(os.getenv("FMU_RUNNER_ENABLED")) or ""):lower()
 local fmu_runner_enabled
 if fmu_runner_env == "" then
-    -- Keep Full behavior unchanged while allowing Lite to run without fmu-runner by default.
-    fmu_runner_enabled = not lite_mode
+    -- Default to enabled unless explicitly disabled.
+    fmu_runner_enabled = true
 else
     fmu_runner_enabled = not (fmu_runner_env == "0" or fmu_runner_env == "false" or fmu_runner_env == "no")
 end

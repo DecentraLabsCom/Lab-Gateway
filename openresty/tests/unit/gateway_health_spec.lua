@@ -424,6 +424,53 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals("mysql credentials missing", result.services.guacamole_schema.status)
         runner.assert.equals(true, result.services.mysql.ok)
     end)
+
+    runner.it("includes FMU and AAS checks when enabled and marks PARTIAL if one fails", function()
+        local opts = healthy_gateway_health_opts()
+        opts.config.fmu_runner_enabled = 1
+        opts.config.aas_enabled = 1
+        opts.captures["/__health_fmu_runner"] = {
+            status = 503,
+            body = { status = "DOWN", backendMode = "local" }
+        }
+        opts.captures["/__health_aas"] = {
+            status = 200,
+            body = { status = "UP" }
+        }
+
+        local ngx = run_gateway_health(opts)
+
+        local result = ngx._body
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(true, result.services.fmu_runner.enabled)
+        runner.assert.equals(false, result.services.fmu_runner.ok)
+        runner.assert.equals(503, result.services.fmu_runner.status)
+        runner.assert.equals(true, result.services.aas.enabled)
+        runner.assert.equals(true, result.services.aas.ok)
+    end)
+
+    runner.it("does not include FMU and AAS checks in status when disabled", function()
+        local opts = healthy_gateway_health_opts()
+        opts.config.fmu_runner_enabled = 0
+        opts.config.aas_enabled = 0
+        opts.captures["/__health_fmu_runner"] = {
+            status = 503,
+            body = { status = "DOWN" }
+        }
+        opts.captures["/__health_aas"] = {
+            status = 503,
+            body = { status = "DOWN" }
+        }
+
+        local ngx = run_gateway_health(opts)
+
+        local result = ngx._body
+        runner.assert.equals("UP", result.status)
+        runner.assert.equals(false, result.services.fmu_runner.enabled)
+        runner.assert.equals(false, result.services.fmu_runner.ok)
+        runner.assert.equals(false, result.services.aas.enabled)
+        runner.assert.equals(false, result.services.aas.ok)
+    end)
 end)
 
 return runner
