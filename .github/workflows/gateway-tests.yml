@@ -71,14 +71,14 @@ jobs:
 
       - name: Upload Python coverage artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fmu-runner-coverage
           path: fmu-runner/coverage.xml
 
       - name: Upload Python summary artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-unit-summary
           path: .ci-summary/python-unit.json
@@ -131,7 +131,7 @@ jobs:
 
       - name: Upload Lua coverage artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openresty-luacov
           path: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload Lua summary artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lua-unit-summary
           path: .ci-summary/lua-unit.json
@@ -180,7 +180,7 @@ jobs:
 
       - name: Upload integration summary artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-summary
           path: .ci-summary/integration.json
@@ -220,7 +220,7 @@ jobs:
 
       - name: Upload FMU integration summary artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fmu-integration-summary
           path: .ci-summary/fmu-integration.json
@@ -261,7 +261,7 @@ jobs:
 
       - name: Upload smoke summary artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-summary
           path: .ci-summary/smoke.json
