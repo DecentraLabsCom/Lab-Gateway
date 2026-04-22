@@ -117,8 +117,10 @@ def _write_suite_summary(args: argparse.Namespace) -> int:
         if passed is not None and failed is not None:
             total = passed + failed
         if args.coverage_report:
-            coverage_pct = _parse_luacov_pct(Path(args.coverage_report))
-            coverage_covered, coverage_total = _parse_luacov_counts(Path(args.coverage_report))
+            cov_path = Path(args.coverage_report)
+            if cov_path.exists():
+                coverage_pct = _parse_luacov_pct(cov_path)
+                coverage_covered, coverage_total = _parse_luacov_counts(cov_path)
     else:
         raise ValueError(f"Unsupported kind: {args.kind}")
 

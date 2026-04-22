@@ -329,7 +329,8 @@ runner.describe("Access handler – JWT from URL fallback", function()
     end)
 
     runner.it("skips when JWT is missing jti claim", function()
-        local payload = build_jwt_payload({ jti = nil })
+        local payload = build_jwt_payload()
+        payload.jti = nil
         local ngx = ngx_factory.new({
             cache = { public_key = "pub" },
             config = default_config(),
@@ -340,7 +341,8 @@ runner.describe("Access handler – JWT from URL fallback", function()
     end)
 
     runner.it("skips when JWT is missing sub claim", function()
-        local payload = build_jwt_payload({ sub = nil })
+        local payload = build_jwt_payload()
+        payload.sub = nil
         local ngx = ngx_factory.new({
             cache = { public_key = "pub" },
             config = default_config(),

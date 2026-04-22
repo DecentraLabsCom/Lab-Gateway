@@ -113,8 +113,8 @@ jobs:
             -w /workspace \
             openresty/openresty:alpine-fat sh -c \
             "luarocks install luacov >/dev/null && \
-             luajit -lluacov tests/run.lua && \
-             luacov" | tee .ci-logs/lua-unit.log
+             luajit -lluacov tests/run.lua; \
+             test_exit=\$?; luacov; exit \$test_exit" | tee .ci-logs/lua-unit.log
 
       - name: Build Lua suite summary
         if: always()
