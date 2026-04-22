@@ -67,7 +67,7 @@ function _M.run(ngx_ctx, deps)
 
     local jwt_obj = jwt:verify_jwt_obj(public_key, jwt_object)
     if not jwt_obj or not jwt_obj.verified then
-        ngx.log(ngx.WARN, "Access - Invalid or expired JWT signature")
+        ngx.log(ngx.WARN, "Access - JWT verification failed: " .. tostring(jwt_obj and jwt_obj.reason or "unknown"))
         return
     end
 
