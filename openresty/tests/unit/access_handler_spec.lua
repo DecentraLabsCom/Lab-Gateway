@@ -9,16 +9,18 @@ runner.describe("Access handler", function()
         runner.assert.equals(nil, ngx.req.headers["Authorization"], "Authorization header should not be set")
     end)
 
-    runner.it("rejects unknown JTI", function()
+    runner.it("falls through silently for unknown JTI (stale cookie)", function()
         local ngx = ngx_factory.new({
             var = { http_cookie = "foo=bar; JTI=abc123" }
         })
 
         handler.run(ngx)
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        -- Stale cookie: no Authorization header set, no error status – falls through
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.status)
     end)
 
-    runner.it("rejects when expiration is missing", function()
+    runner.it("falls through when expiration is missing", function()
         local cache = { ["username:abc"] = "alice" }
         local ngx = ngx_factory.new({
             cache = cache,
@@ -26,10 +28,12 @@ runner.describe("Access handler", function()
         })
 
         handler.run(ngx)
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        -- Missing exp: falls through silently, no Authorization, no error status
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.status)
     end)
 
-    runner.it("rejects expired sessions", function()
+    runner.it("falls through for expired sessions", function()
         local cache = {
             ["username:abc"] = "alice",
             ["exp:alice"] = tostring(100)
@@ -41,7 +45,9 @@ runner.describe("Access handler", function()
         })
 
         handler.run(ngx)
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        -- Expired: falls through silently, no Authorization, no error status
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.status)
     end)
 
     runner.it("sets Authorization header for valid cookies", function()

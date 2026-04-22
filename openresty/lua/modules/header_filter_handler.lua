@@ -39,10 +39,12 @@ function _M.run(ngx_ctx, deps)
     end
 
     local existing_jti = ngx.var.cookie_JTI
-    if existing_jti then
-        ngx.log(ngx.DEBUG, "Header filter - Cookie with JTI already present. Skipping JWT processing.")
+    if existing_jti and dict:get("username:" .. existing_jti) then
+        -- Active, valid session cookie present – no need to re-process the JWT.
+        ngx.log(ngx.DEBUG, "Header filter - Valid JTI cookie already present. Skipping JWT processing.")
         return
     end
+    -- Stale/unknown cookie or no cookie: fall through and process ?jwt= if present.
 
     local token = ngx.var.arg_jwt
     if not token or token == "" then

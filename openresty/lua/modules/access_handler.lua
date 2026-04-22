@@ -13,38 +13,32 @@ function _M.run(ngx_ctx, deps)
     local dict = ngx.shared.cache
 
     -- ── Path 1: JTI cookie present ─────────────────────────────────────────
+    -- Only uses the cookie fast-path when the JTI is still live in the shared
+    -- dict.  A stale or unknown JTI (e.g. after a gateway restart wipes the
+    -- dict) falls through to Path 2 so a fresh ?jwt= token in the URL can
+    -- still authenticate the user on the very same request.
     local cookies = ngx.var.http_cookie
     if cookies and cookies ~= "" then
         local jti = string.match(cookies, "JTI=([^;]+)")
         if jti and jti ~= "" then
             local username = dict:get("username:" .. jti)
-            if not username then
-                ngx.log(ngx.DEBUG, "Access - JTI in cookie is not valid: " .. tostring(jti))
-                ngx.status = ngx.HTTP_UNAUTHORIZED
-                ngx.header["Content-Type"] = "text/plain"
-                ngx.log(ngx.WARN, "Access - Invalid or expired cookie for JTI: " .. tostring(jti))
-                return
+            if username then
+                local exp = dict:get("exp:" .. username)
+                if exp then
+                    local now = ngx.time()
+                    if now <= tonumber(exp) then
+                        ngx.req.set_header("Authorization", username)
+                        ngx.log(ngx.INFO, "Access - Valid cookie. Authorization header set for " .. username)
+                        return
+                    end
+                    ngx.log(ngx.INFO, "Access - JWT expired for user: " .. username .. " – falling through to JWT URL path")
+                else
+                    ngx.log(ngx.WARN, "Access - No expiration for user: " .. username .. " – falling through to JWT URL path")
+                end
+            else
+                ngx.log(ngx.DEBUG, "Access - JTI cookie not in cache (stale?) – falling through to JWT URL path")
             end
-
-            local exp = dict:get("exp:" .. username)
-            if not exp then
-                ngx.log(ngx.WARN, "Access - No expiration found for user: " .. username)
-                ngx.status = ngx.HTTP_UNAUTHORIZED
-                ngx.header["Content-Type"] = "text/plain"
-                return
-            end
-
-            local now = ngx.time()
-            if now > tonumber(exp) then
-                ngx.log(ngx.INFO, "Access - JWT expired for user: " .. username .. " (exp: " .. exp .. ", now: " .. now .. ")")
-                ngx.status = ngx.HTTP_UNAUTHORIZED
-                ngx.header["Content-Type"] = "text/plain"
-                return
-            end
-
-            ngx.req.set_header("Authorization", username)
-            ngx.log(ngx.INFO, "Access - Valid cookie. Authorization header set for " .. username)
-            return
+            -- Fall through to Path 2 in all failure cases above.
         end
     end
 

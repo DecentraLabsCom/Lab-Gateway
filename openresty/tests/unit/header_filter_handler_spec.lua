@@ -63,16 +63,34 @@ runner.describe("Header filter handler", function()
         runner.assert.truthy(ngx.header["Set-Cookie"]:find("Path=/guacamole"))
     end)
 
-    runner.it("skips JWT processing if cookie already exists", function()
+    runner.it("skips JWT processing if cookie JTI is valid in cache", function()
+        -- Cookie present AND JTI live in shared dict → skip processing
         local ngx = ngx_factory.new({
-            cache = { public_key = "pub" },
+            cache = { public_key = "pub", ["username:existing"] = "alice" },
             config = default_config(),
             var = { cookie_JTI = "existing", arg_jwt = "token" }
         })
 
         handler.run(ngx, { jwt = jwt_stub() })
+        -- New JWT's JTI "abc" must NOT be stored (processing was skipped)
         local cache = ngx.shared.cache._data
         runner.assert.equals(nil, cache["username:abc"])
+    end)
+
+    runner.it("processes JWT when cookie JTI is stale (not in cache)", function()
+        -- Cookie present but JTI NOT in shared dict → fall through and process JWT
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },  -- no username:stale-jti entry
+            config = default_config(),
+            var = { cookie_JTI = "stale-jti", arg_jwt = "token" },
+            now = 50,
+            header = {},
+            status = 200
+        })
+
+        handler.run(ngx, { jwt = jwt_stub() })
+        -- New JWT should have been processed and cookie set
+        runner.assert.truthy(ngx.header["Set-Cookie"])
     end)
 
     runner.it("rejects invalid audience without setting cookie", function()

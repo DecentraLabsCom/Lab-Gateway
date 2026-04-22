@@ -80,7 +80,7 @@ runner.describe("Access handler extended tests", function()
     end)
 
     -- Edge case: Expiration one second before current time
-    runner.it("rejects session when exp is before now", function()
+    runner.it("falls through silently when exp is before now", function()
         local cache = {
             ["username:expired"] = "eve",
             ["exp:eve"] = tostring(99)
@@ -91,7 +91,9 @@ runner.describe("Access handler extended tests", function()
             now = 100
         })
         handler.run(ngx)
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        -- Expired cookie: falls through silently so ?jwt= URL can still authenticate
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.status)
     end)
 
     -- Edge case: Username with mixed case stored
@@ -135,11 +137,11 @@ runner.describe("Access handler extended tests", function()
             var = { http_cookie = "JTI=badexp" },
             now = 100
         })
-        -- tonumber("not-a-number") returns nil, comparison with nil raises error
-        -- handler should gracefully reject
+        -- tonumber("not-a-number") returns nil; now <= nil is false in Lua,
+        -- so the handler falls through without setting Authorization or status.
         local ok = pcall(handler.run, ngx)
-        -- Either rejects or errors - both acceptable for malformed data
-        runner.assert.truthy(ngx.status == ngx.HTTP_UNAUTHORIZED or not ok)
+        -- Either falls through silently or errors – both acceptable for malformed data.
+        runner.assert.truthy(ngx.req.headers["Authorization"] == nil or not ok)
     end)
 
     -- Edge case: Cookie with trailing semicolon
@@ -163,9 +165,10 @@ runner.describe("Access handler extended tests", function()
             var = { http_cookie = " JTI=spaced" }
         })
         handler.run(ngx)
-        -- Pattern "JTI=([^;]+)" still matches " JTI=spaced" and extracts "spaced"
-        -- Since username:spaced doesn't exist, returns 401
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        -- Pattern "JTI=([^;]+)" still matches " JTI=spaced" and extracts "spaced".
+        -- Since username:spaced doesn't exist, falls through silently.
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.status)
     end)
 end)
 
