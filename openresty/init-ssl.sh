@@ -411,14 +411,31 @@ auto_refresh_jwt_public_key() {
         return
     fi
     while true; do
-        sleep 86400  # 24h
+        sleep 86400  # 24h between routine refreshes
         sync_jwt_public_key_from_issuer "$EFFECTIVE_ISSUER"
         sync_result=$?
         if [ $sync_result -eq 10 ]; then
             echo "JWT public key changed - reloading OpenResty"
             /usr/local/openresty/bin/openresty -s reload || true
         elif [ $sync_result -ne 0 ]; then
-            echo "WARNING: JWT public key refresh failed; keeping current cached key"
+            echo "WARNING: JWT public key refresh failed; will retry every hour until it succeeds"
+            # Retry loop: attempt once per hour until the remote is reachable again
+            retry_interval=3600
+            while true; do
+                sleep $retry_interval
+                sync_jwt_public_key_from_issuer "$EFFECTIVE_ISSUER"
+                retry_result=$?
+                if [ $retry_result -eq 0 ] || [ $retry_result -eq 10 ]; then
+                    if [ $retry_result -eq 10 ]; then
+                        echo "JWT public key updated on retry - reloading OpenResty"
+                        /usr/local/openresty/bin/openresty -s reload || true
+                    else
+                        echo "JWT public key confirmed up-to-date after retry"
+                    fi
+                    break  # success – return to 24h cycle
+                fi
+                echo "WARNING: JWT public key refresh retry failed; will try again in ${retry_interval}s"
+            done
         fi
     done
 }
