@@ -154,14 +154,31 @@ else
     ngx.log(ngx.INFO, "FMU runner integration disabled: /fmu and FMU AAS sync endpoints will return 503")
 end
 
--- Read the public key from a file
-local file = io.open("/etc/ssl/private/public_key.pem", "r")
-if file then
-    local public_key = file:read("*all")
-    file:close()
-    -- Store public key in shared dict
-    ngx.shared.cache:set("public_key", public_key)
-else
+-- Read the public key from a file.
+-- Full mode:  blockchain-services writes keys to ./blockchain-data/keys/,
+--             which is mounted at /etc/openresty/jwt-keys (read-only).
+-- Lite mode:  init-ssl.sh downloads the issuer's public key to
+--             /etc/ssl/private/public_key.pem (= ./certs/).
+-- Try the Full-mode path first so the correct key is always used.
+local key_paths = {
+    "/etc/openresty/jwt-keys/public_key.pem",
+    "/etc/ssl/private/public_key.pem",
+}
+local public_key_loaded = false
+for _, path in ipairs(key_paths) do
+    local file = io.open(path, "r")
+    if file then
+        local public_key = file:read("*all")
+        file:close()
+        if public_key and public_key ~= "" then
+            ngx.shared.cache:set("public_key", public_key)
+            public_key_loaded = true
+            ngx.log(ngx.INFO, "Loaded JWT public key from: " .. path)
+            break
+        end
+    end
+end
+if not public_key_loaded then
     ---@diagnostic disable-next-line: param-type-mismatch
-    ngx.log(ngx.ERR, "Unable to read public key file")
+    ngx.log(ngx.ERR, "Unable to read public key file from any known path")
 end

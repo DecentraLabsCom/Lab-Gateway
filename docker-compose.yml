@@ -25,11 +25,6 @@ services:
       - ADMIN_DASHBOARD_ALLOW_PRIVATE=${ADMIN_DASHBOARD_ALLOW_PRIVATE:-true}
       - SECURITY_ALLOW_PRIVATE_NETWORKS=${SECURITY_ALLOW_PRIVATE_NETWORKS:-true}
       - ADMIN_ALLOWED_CIDRS=${ADMIN_ALLOWED_CIDRS:-}
-      # JWT signing keys must live in ./certs/ (mounted as /app/config/keys) so
-      # that OpenResty can read the public key and /.well-known/public-key.pem
-      # always serves the key that blockchain-services is actually using to sign.
-      - PRIVATE_KEY_PATH=/app/config/keys/private_key.pem
-      - PUBLIC_KEY_PATH=/app/config/keys/public_key.pem
     volumes:
       - ./certs:/app/config/keys
       - ./blockchain-data:/app/data
@@ -79,6 +74,11 @@ services:
       - ./openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
       - ./openresty/lua:/etc/openresty/lua:ro
       - ./web:/var/www/html:ro
+      # Full mode: expose blockchain-services JWT public key to OpenResty so
+      # /.well-known/public-key.pem and init.lua always use the correct key.
+      # In Lite mode this directory is empty/absent; init.lua falls back to
+      # the key downloaded by init-ssl.sh into /etc/ssl/private/.
+      - ./blockchain-data/keys:/etc/openresty/jwt-keys:ro
     tmpfs:
       - /tmp:size=64M,mode=1777
       - /var/run:size=16M,mode=755
