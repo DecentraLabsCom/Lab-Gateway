@@ -197,19 +197,47 @@ runner.describe("Header filter handler extended tests", function()
         runner.assert.equals("alice", cache["username:abc"])
     end)
 
-    -- Test: JTI already registered (prevents replay)
-    runner.it("skips if JTI already registered", function()
+    -- Test: JTI already registered (access phase pre-validated) – cookie must still be set
+    runner.it("sets cookie when JTI is already registered (access phase pre-validation)", function()
+        -- Simulate the access phase having stored the JTI before the response phase runs
         local ngx = ngx_factory.new({
-            cache = { public_key = "pub", ["username:existingjti"] = "bob" },
+            cache = {
+                public_key = "pub",
+                ["username:existingjti"] = "bob",
+                ["exp:bob"] = tostring(600)
+            },
             config = default_config(),
             var = { arg_jwt = "token" },
             header = {},
-            status = 200
+            status = 200,
+            now = 100
         })
 
-        local payload = build_jwt_payload({ jti = "existingjti" })
+        local payload = build_jwt_payload({ jti = "existingjti", sub = "bob" })
         handler.run(ngx, { jwt = jwt_stub(payload) })
-        -- Should not set cookie for already registered JTI
+        -- Cookie MUST be set so subsequent requests can use the fast JTI-cookie path
+        runner.assert.truthy(ngx.header["Set-Cookie"])
+        runner.assert.truthy(ngx.header["Set-Cookie"]:find("JTI=existingjti"))
+        runner.assert.truthy(ngx.header["Set-Cookie"]:find("Max%-Age=500"))
+    end)
+
+    -- Test: JTI already registered but exp missing – cookie not set
+    runner.it("does not set cookie when JTI is pre-registered but exp is missing", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                public_key = "pub",
+                ["username:nexpjti"] = "bob"
+                -- deliberately no "exp:bob"
+            },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            header = {},
+            status = 200,
+            now = 100
+        })
+
+        local payload = build_jwt_payload({ jti = "nexpjti" })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
         runner.assert.equals(nil, ngx.header["Set-Cookie"])
     end)
 

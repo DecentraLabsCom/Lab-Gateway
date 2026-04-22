@@ -169,4 +169,198 @@ runner.describe("Access handler extended tests", function()
     end)
 end)
 
+-- ── JWT-from-URL fallback (access phase) ─────────────────────────────────────
+local function default_config()
+    return {
+        issuer = "https://issuer.example",
+        https_port = "8443",
+        server_name = "gateway.local",
+        guac_uri = "/guacamole"
+    }
+end
+
+local function build_jwt_payload(overrides)
+    local payload = {
+        jti = "jti-url-1",
+        sub = "Bob",
+        iss = "https://issuer.example",
+        aud = "https://gateway.local:8443/guacamole",
+        exp = 500
+    }
+    if overrides then
+        for k, v in pairs(overrides) do payload[k] = v end
+    end
+    return payload
+end
+
+local function jwt_stub(payload, opts)
+    local p = payload or build_jwt_payload()
+    return {
+        load_jwt = function(_, _token)
+            if opts and opts.invalid_format then
+                return { valid = false, reason = "bad format" }
+            end
+            return { valid = true, payload = p }
+        end,
+        verify_jwt_obj = function(_, _, obj)
+            if opts and opts.fail_signature then
+                return { verified = false }
+            end
+            return { verified = true, payload = obj.payload }
+        end
+    }
+end
+
+runner.describe("Access handler – JWT from URL fallback", function()
+    runner.it("sets Authorization header when valid JWT in ?jwt= and no cookie", function()
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            now = 100
+        })
+        handler.run(ngx, { jwt = jwt_stub() })
+        runner.assert.equals("bob", ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.status)
+    end)
+
+    runner.it("stores username and exp in shared dict", function()
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            now = 100
+        })
+        handler.run(ngx, { jwt = jwt_stub() })
+        local cache = ngx.shared.cache._data
+        runner.assert.equals("bob", cache["username:jti-url-1"])
+        runner.assert.equals(500, cache["exp:bob"])
+    end)
+
+    runner.it("does nothing when ?jwt= is absent and no cookie", function()
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = {}
+        })
+        handler.run(ngx, { jwt = jwt_stub() })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.status)
+    end)
+
+    runner.it("ignores ?jwt= when JTI cookie is present and valid", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                public_key = "pub",
+                ["username:existing-jti"] = "alice",
+                ["exp:alice"] = tostring(600)
+            },
+            config = default_config(),
+            var = { http_cookie = "JTI=existing-jti", arg_jwt = "token" },
+            now = 100
+        })
+        handler.run(ngx, { jwt = jwt_stub() })
+        -- Cookie path wins; sub from JWT ("bob") must NOT be used
+        runner.assert.equals("alice", ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("skips when public key is missing", function()
+        local ngx = ngx_factory.new({
+            cache = {},
+            config = default_config(),
+            var = { arg_jwt = "token" }
+        })
+        handler.run(ngx, { jwt = jwt_stub() })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("skips on invalid JWT format", function()
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "malformed" }
+        })
+        handler.run(ngx, { jwt = jwt_stub(nil, { invalid_format = true }) })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("skips on failed JWT signature", function()
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" }
+        })
+        handler.run(ngx, { jwt = jwt_stub(nil, { fail_signature = true }) })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("rejects mismatched issuer", function()
+        local payload = build_jwt_payload({ iss = "https://wrong-issuer.example" })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" }
+        })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("rejects mismatched audience", function()
+        local payload = build_jwt_payload({ aud = "https://wrong-audience.example/guac" })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" }
+        })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("accepts trailing-slash audience via normalization", function()
+        local payload = build_jwt_payload({ aud = "https://gateway.local:8443/guacamole/" })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            now = 100
+        })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+        runner.assert.equals("bob", ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("skips when JWT is missing jti claim", function()
+        local payload = build_jwt_payload({ jti = nil })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" }
+        })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("skips when JWT is missing sub claim", function()
+        local payload = build_jwt_payload({ sub = nil })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" }
+        })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+    end)
+
+    runner.it("lowercases the username from sub claim", function()
+        local payload = build_jwt_payload({ sub = "UPPER_USER" })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            now = 100
+        })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+        runner.assert.equals("upper_user", ngx.req.headers["Authorization"])
+    end)
+end)
+
 return runner

@@ -112,7 +112,18 @@ function _M.run(ngx_ctx, deps)
 
     local existing_username = dict:get("username:" .. jti)
     if existing_username then
-        ngx.log(ngx.DEBUG, "Header filter - JTI already registered: " .. tostring(jti))
+        -- JTI was already registered (e.g., pre-validated in the access phase).
+        -- Still set the JTI cookie so future requests can use the fast cookie path.
+        local guac_uri = config:get("guac_uri")
+        local exp_time = dict:get("exp:" .. existing_username)
+        if exp_time then
+            local now = ngx.time()
+            local max_age = tonumber(exp_time) - now
+            if max_age > 0 then
+                ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=" .. max_age .. "; Path=" .. guac_uri .. "; Secure; HttpOnly; SameSite=Lax"
+                ngx.log(ngx.DEBUG, "Header filter - JTI already registered, cookie refreshed for: " .. tostring(jti))
+            end
+        end
         return
     end
 
