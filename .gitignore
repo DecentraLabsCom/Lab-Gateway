@@ -25,6 +25,9 @@ mysql_data/
 blockchain-data/
 fmu-data/*
 !fmu-data/README.md
+!fmu-data/*.fmu
+!fmu-data/test-fmus/
+!fmu-data/test-fmus/**
 fmu-proxy-runtime/*
 !fmu-proxy-runtime/README.md
 !fmu-proxy-runtime/binaries/
