@@ -11,7 +11,7 @@ function tryDecodeFmuJwt(token) {
         const parts = token.split('.');
         if (parts.length !== 3) return null;
         const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const json = atob(padded + '=='.slice((padded.length + 3) % 4 === 0 ? 2 : (padded.length % 4)));
+        const json = atob(padded + '='.repeat((4 - padded.length % 4) % 4));
         return JSON.parse(json);
     } catch (_) {
         return null;
