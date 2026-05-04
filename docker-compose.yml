@@ -25,9 +25,6 @@ services:
       - ADMIN_DASHBOARD_ALLOW_PRIVATE=${ADMIN_DASHBOARD_ALLOW_PRIVATE:-true}
       - SECURITY_ALLOW_PRIVATE_NETWORKS=${SECURITY_ALLOW_PRIVATE_NETWORKS:-true}
       - ADMIN_ALLOWED_CIDRS=${ADMIN_ALLOWED_CIDRS:-}
-      # SAML IdP metadata override: map each issuer entityID to its correct metadata URL.
-      # Set in .env: SAML_IDP_METADATA_OVERRIDE={'issuer1':'url1','issuer2':'url2'}
-      - SAML_IDP_METADATA_OVERRIDE=${SAML_IDP_METADATA_OVERRIDE:-}
     volumes:
       - ./certs:/app/config/keys
       - ./blockchain-data:/app/data
