@@ -881,8 +881,15 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
 
     model_variables = ET.SubElement(root, "ModelVariables")
     output_indexes = []
+    written_index = 0  # 1-based position in ModelVariables (independent vars excluded)
 
     for index, var in enumerate(model_metadata.get("modelVariables", []), start=1):
+        # Skip independent variables (time) — always implicit in FMI; including them in the
+        # proxy causes FMI2XML parsers (e.g. OpenModelica) to reject the modelDescription.xml
+        # because start is N.A. for independent causality yet some parsers require it.
+        if (var.get("causality") or "").lower() == "independent":
+            continue
+        written_index += 1
         var_type = str(var.get("type", "Real") or "Real")
         value_reference = var.get("valueReference")
         if value_reference is None:
@@ -964,7 +971,7 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
                 ET.SubElement(scalar, "Real", type_attrs)
 
         if (causality or "").lower() == "output":
-            output_indexes.append((index, value_reference))
+            output_indexes.append((written_index, value_reference))
 
     model_structure = ET.SubElement(root, "ModelStructure")
     if output_indexes:
