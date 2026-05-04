@@ -97,8 +97,8 @@ function showFmuAccessPanel(claims, rawJwt) {
                     <li>
                         <span class="step-num">2</span>
                         <div>
-                            <strong>Open in OpenModelica:</strong> File &rarr; Import FMU &rarr; select <code>proxy.fmu</code>.
-                            When you run a simulation OMEdit will connect to this gateway in real time.
+                            <strong>Open in OpenModelica</strong> (or any FMI-compatible client of your choice): File &rarr; Import FMU &rarr; select <code>proxy.fmu</code>.
+                            When you run a simulation the client will connect to this gateway in real time.
                         </div>
                     </li>
                     <li>

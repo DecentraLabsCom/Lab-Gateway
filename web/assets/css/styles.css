@@ -1369,6 +1369,9 @@ footer a:hover, .footer a:hover {
 /* Download button */
 .fmu-download-block {
     margin-bottom: 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 .fmu-download-btn {
