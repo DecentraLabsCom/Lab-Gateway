@@ -360,7 +360,63 @@ def test_proxy_model_description_preserves_zero_value_reference():
     assert scalar_variables[0].attrib["valueReference"] == "0"
 
 
-def test_proxy_model_description_preserves_initial_and_start_when_exact():
+def test_proxy_model_description_preserves_zero_value_reference():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyDemo",
+        "guid": "{proxy-guid}",
+        "modelVariables": [
+            {
+                "name": "u",
+                "type": "Real",
+                "causality": "input",
+                "variability": "continuous",
+                "valueReference": 0,
+            },
+            {
+                "name": "y",
+                "type": "Real",
+                "causality": "output",
+                "variability": "continuous",
+                "valueReference": 2,
+            },
+        ],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    scalar_variables = root.findall("./ModelVariables/ScalarVariable")
+    assert scalar_variables[0].attrib["valueReference"] == "0"
+
+
+def test_proxy_model_description_fmi2_excludes_independent_and_corrects_output_indexes():
+    """FMI 2: time (independent) must be omitted from the proxy XML.
+    Output Unknown/@index must reflect positions in the written XML, not the original list."""
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "BouncingBall",
+        "guid": "{bb-guid}",
+        "fmiVersion": "2.0",
+        "modelVariables": [
+            {"name": "time",   "type": "Real", "causality": "independent", "variability": "continuous",  "valueReference": 0},
+            {"name": "h",      "type": "Real", "causality": "output",      "variability": "continuous",  "valueReference": 1, "start": 1.0, "initial": "exact"},
+            {"name": "der(h)", "type": "Real", "causality": "local",       "variability": "continuous",  "valueReference": 2, "initial": "calculated"},
+            {"name": "v",      "type": "Real", "causality": "output",      "variability": "continuous",  "valueReference": 3, "start": 0.0, "initial": "exact"},
+            {"name": "g",      "type": "Real", "causality": "parameter",   "variability": "fixed",       "valueReference": 4, "start": -9.81, "initial": "exact"},
+        ],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    # time must not appear
+    names = [sv.attrib["name"] for sv in root.findall("./ModelVariables/ScalarVariable")]
+    assert "time" not in names
+    assert names == ["h", "der(h)", "v", "g"]
+
+    # Output indexes must be 1-based positions in the written XML (time excluded)
+    # h → written position 1, v → written position 3
+    unknowns = root.findall("./ModelStructure/Outputs/Unknown")
+    assert len(unknowns) == 2
+    assert unknowns[0].attrib["index"] == "1"
+    assert unknowns[1].attrib["index"] == "3"
+
+
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "ProxyDemo",
         "guid": "{proxy-guid}",
