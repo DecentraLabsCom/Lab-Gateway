@@ -267,7 +267,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     console.log('🚀 DecentraLabs Gateway - System started');
     console.log('🔗 Developed by Nebulous Systems');
-});
+    // FMU access flow: detect ?jwt= param and render access panel if applicable
+    const urlParams = new URLSearchParams(window.location.search);
+    const jwtParam = urlParams.get('jwt');
+    if (jwtParam) {
+        const fmuClaims = tryDecodeFmuJwt(jwtParam);
+        if (fmuClaims && fmuClaims.resourceType === 'fmu') {
+            showFmuAccessPanel(fmuClaims, jwtParam);
+        }
+    }});
 
 function createStatusModal() {
     const modal = document.createElement('div');
