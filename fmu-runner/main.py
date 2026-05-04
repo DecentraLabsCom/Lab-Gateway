@@ -884,10 +884,11 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
     written_index = 0  # 1-based position in ModelVariables (independent vars excluded)
 
     for index, var in enumerate(model_metadata.get("modelVariables", []), start=1):
-        # Skip independent variables (time) — always implicit in FMI; including them in the
-        # proxy causes FMI2XML parsers (e.g. OpenModelica) to reject the modelDescription.xml
-        # because start is N.A. for independent causality yet some parsers require it.
-        if (var.get("causality") or "").lower() == "independent":
+        # FMI 2: skip independent variables (time) — OpenModelica's FMI2XML parser rejects the
+        # modelDescription.xml when an independent variable lacks a start attribute, even though
+        # start is N.A. for that causality/variability combination per the FMI 2.0 spec.
+        # FMI 3 keeps independent variables because parsers handle them correctly there.
+        if fmi_major_version < 3 and (var.get("causality") or "").lower() == "independent":
             continue
         written_index += 1
         var_type = str(var.get("type", "Real") or "Real")
