@@ -907,6 +907,22 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         if unit and (var_type == "Real" or normalized_fmi3_type in {"Float32", "Float64"}):
             type_attrs["unit"] = unit
         start_value = _format_fmi_start_value(var.get("start"))
+        # FMI 2: start is required by spec when causality=parameter/input or initial=exact/approx.
+        # Provide a safe default if the source FMU metadata omitted it.
+        if fmi_major_version < 3 and start_value is None:
+            _requires_start = (
+                (causality or "").lower() in {"parameter", "input"}
+                or (initial or "").lower() in {"exact", "approx"}
+            )
+            if _requires_start:
+                if var_type == "Boolean":
+                    start_value = "false"
+                elif var_type == "String":
+                    start_value = ""
+                elif var_type == "Enumeration":
+                    start_value = "1"
+                else:
+                    start_value = "0"
         # FMI 3: Binary and String use <Start value="..."/> child elements,
         # Clock has no start at all.  Other types use a start attribute.
         _fmi3_start_child_types = {"Binary", "String"}

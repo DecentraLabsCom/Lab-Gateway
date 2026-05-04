@@ -37,10 +37,13 @@ fmu-proxy-runtime/binaries/*
 !fmu-proxy-runtime/binaries/darwin64/
 fmu-proxy-runtime/binaries/linux64/*
 !fmu-proxy-runtime/binaries/linux64/.gitkeep
+!fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so
 fmu-proxy-runtime/binaries/win64/*
 !fmu-proxy-runtime/binaries/win64/.gitkeep
+!fmu-proxy-runtime/binaries/win64/decentralabs_proxy.dll
 fmu-proxy-runtime/binaries/darwin64/*
 !fmu-proxy-runtime/binaries/darwin64/.gitkeep
+!fmu-proxy-runtime/binaries/darwin64/decentralabs_proxy.dylib
 fmu-proxy-runtime-src/build-*/
 tests/integration/artifacts/
 

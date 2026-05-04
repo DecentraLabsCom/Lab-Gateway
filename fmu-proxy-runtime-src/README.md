@@ -75,6 +75,52 @@ This uses `docker/linux64-builder.Dockerfile` and produces:
 - `build-linux64/libdecentralabs_proxy.so`
 - optionally `../fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so`
 
+## Deploying the linux64 binary to a Lab Gateway server
+
+The compiled binaries (`decentralabs_proxy.so`, `.dll`, `.dylib`) are committed to the repository.
+On a new or existing server a `git pull` is sufficient to get the latest binary:
+
+```bash
+cd /opt/Lab-Gateway
+git pull
+docker compose up -d --no-deps fmu-runner
+```
+
+> **Note:** The volume `./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro` is mounted at container start.
+> Any time the binary on the host changes you must restart (not just reload) the `fmu-runner` container
+> so the new `.so` is visible inside.
+
+### Rebuilding the binary after source changes
+
+Run this once from your Windows dev machine whenever the source in `fmu-proxy-runtime-src/` changes:
+
+```powershell
+# Build inside Docker and promote the .so to the runtime drop path
+pwsh .\fmu-proxy-runtime-src\build-linux64-runtime.ps1 -Promote
+```
+
+Then commit and push `fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so`. The server just needs a `git pull` + container restart as above.
+
+If you need to rebuild directly on the server (e.g. no Windows machine available):
+
+```bash
+cd /opt/Lab-Gateway/fmu-proxy-runtime-src
+
+docker build -f docker/linux64-builder.Dockerfile -t fmu-proxy-builder:local .
+
+docker run --rm \
+  -v "$(pwd):/workspace" \
+  fmu-proxy-builder:local \
+  bash -lc "cmake -S /workspace -B /workspace/build-linux64 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release && cmake --build /workspace/build-linux64 -j"
+
+cp build-linux64/libdecentralabs_proxy.so \
+   /opt/Lab-Gateway/fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so
+
+cd /opt/Lab-Gateway
+docker compose up -d --no-deps fmu-runner
+```
+
 ## Native darwin64 build
 
 Run this on a real macOS machine with Xcode Command Line Tools, CMake, Ninja and OpenSSL 3 installed:

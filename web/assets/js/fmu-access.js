@@ -195,7 +195,7 @@ function triggerFmuDownload(url, jwt, modelName) {
         .then(blob => {
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = (modelName || 'proxy') + '.fmu';
+            a.download = 'proxy.fmu';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
