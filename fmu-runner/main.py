@@ -1583,6 +1583,10 @@ async def download_proxy_fmu(
     archive_buffer = io.BytesIO()
     with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("modelDescription.xml", model_xml)
+        # Also place modelDescription.xml inside resources/ — the proxy DLL receives
+        # fmuResourceLocation pointing to the resources/ directory and looks for
+        # modelDescription.xml there first (FMI spec §2.1.6).
+        archive.writestr("resources/modelDescription.xml", model_xml)
         archive.writestr("resources/config.json", json.dumps(config_payload, separators=(",", ":")))
         for file_path, archive_name in runtime_files:
             archive.write(file_path, archive_name)

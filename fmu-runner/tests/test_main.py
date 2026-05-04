@@ -1004,6 +1004,7 @@ def test_proxy_download_generates_fmu_archive(mock_resolve, mock_issue_ticket, m
         archive = zipfile.ZipFile(io.BytesIO(response.content))
         names = set(archive.namelist())
         assert "modelDescription.xml" in names
+        assert "resources/modelDescription.xml" in names
         assert "resources/config.json" in names
         assert "binaries/linux64/decentralabs_proxy.so" in names
         assert all(not name.lower().endswith(".fmu") for name in names)
@@ -1086,6 +1087,7 @@ def test_proxy_download_generates_fmi3_archive_layout(mock_resolve, mock_issue_t
         archive = zipfile.ZipFile(io.BytesIO(response.content))
         names = set(archive.namelist())
         assert "modelDescription.xml" in names
+        assert "resources/modelDescription.xml" in names
         assert "resources/config.json" in names
         assert "binaries/x86_64-windows/decentralabs_proxy.dll" in names
 
