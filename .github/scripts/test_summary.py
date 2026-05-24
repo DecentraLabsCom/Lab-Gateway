@@ -56,9 +56,9 @@ def _parse_luacov_counts(path: Path) -> tuple[int | None, int | None]:
     total_match = re.search(r"^Total\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)%$", text, re.MULTILINE)
     if not total_match:
         return None, None
-    total = int(total_match.group(1))
+    hit = int(total_match.group(1))
     missed = int(total_match.group(2))
-    return total - missed, total
+    return hit, hit + missed
 
 
 def _parse_shell_counts(path: Path) -> tuple[int | None, int | None]:

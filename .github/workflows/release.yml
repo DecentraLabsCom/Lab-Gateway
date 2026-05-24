@@ -57,15 +57,18 @@ jobs:
       - name: Run Lua unit tests with coverage
         id: run_lua_tests
         continue-on-error: true
+        env:
+          LUA_PATH: "/workspace/lua/?.lua;/workspace/lua/?/init.lua;;"
         run: |
           set -o pipefail
           mkdir -p .ci-logs
           docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
+            -e LUA_PATH="${LUA_PATH}" \
+            -v "${{ github.workspace }}/openresty:/workspace" \
             -w /workspace \
             openresty/openresty:alpine-fat sh -c \
             "luarocks install luacov >/dev/null && \
-             luajit -lluacov openresty/tests/run.lua; \
+             luajit -lluacov tests/run.lua; \
              test_exit=\$?; luacov; exit \$test_exit" | tee .ci-logs/lua-unit.log
 
       - name: Enforce consolidated coverage baseline
@@ -84,9 +87,9 @@ jobs:
             --suite-name "Lua unit" \
             --kind shell \
             --log .ci-logs/lua-unit.log \
-            --coverage-report luacov.report.out \
+            --coverage-report openresty/luacov.report.out \
             --coverage-label "luacov" \
-            --exit-code ${{ steps.run_lua_tests.outcome == 'success' && 0 || 1 }} \
+            --exit-code ${{ steps.run_lua_tests.outcome != 'success' && '1' || '0' }} \
             --output .ci-summary/lua-unit.json
           python .github/scripts/test_summary.py gate \
             --input-dir .ci-summary \

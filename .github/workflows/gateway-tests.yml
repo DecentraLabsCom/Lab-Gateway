@@ -66,7 +66,7 @@ jobs:
             --junit fmu-runner/pytest-results.xml \
             --coverage-xml fmu-runner/coverage.xml \
             --coverage-label "coverage.py" \
-            --exit-code ${{ steps.run_python_tests.outcome == 'success' && 0 || 1 }} \
+            --exit-code ${{ steps.run_python_tests.outcome != 'success' && '1' || '0' }} \
             --output .ci-summary/python-unit.json
 
       - name: Upload Python coverage artifact
@@ -126,7 +126,7 @@ jobs:
             --log .ci-logs/lua-unit.log \
             --coverage-report openresty/luacov.report.out \
             --coverage-label "luacov" \
-            --exit-code ${{ steps.run_lua_tests.outcome == 'success' && 0 || 1 }} \
+            --exit-code ${{ steps.run_lua_tests.outcome != 'success' && '1' || '0' }} \
             --output .ci-summary/lua-unit.json
 
       - name: Upload Lua coverage artifact
@@ -175,7 +175,7 @@ jobs:
             --suite-name "Gateway integration" \
             --kind shell \
             --log .ci-logs/integration.log \
-            --exit-code ${{ steps.run_integration_tests.outcome == 'success' && 0 || 1 }} \
+            --exit-code ${{ steps.run_integration_tests.outcome != 'success' && '1' || '0' }} \
             --output .ci-summary/integration.json
 
       - name: Upload integration summary artifact
@@ -215,7 +215,7 @@ jobs:
             --suite-name "FMU integration" \
             --kind shell \
             --log .ci-logs/fmu-integration.log \
-            --exit-code ${{ steps.run_fmu_integration_tests.outcome == 'success' && 0 || 1 }} \
+            --exit-code ${{ steps.run_fmu_integration_tests.outcome != 'success' && '1' || '0' }} \
             --output .ci-summary/fmu-integration.json
 
       - name: Upload FMU integration summary artifact
@@ -256,7 +256,7 @@ jobs:
             --suite-name "Smoke" \
             --kind shell \
             --log .ci-logs/smoke.log \
-            --exit-code ${{ steps.run_smoke_tests.outcome == 'success' && 0 || 1 }} \
+            --exit-code ${{ steps.run_smoke_tests.outcome != 'success' && '1' || '0' }} \
             --output .ci-summary/smoke.json
 
       - name: Upload smoke summary artifact
