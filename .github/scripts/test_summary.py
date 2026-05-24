@@ -62,6 +62,8 @@ def _parse_luacov_counts(path: Path) -> tuple[int | None, int | None]:
 
 
 def _parse_shell_counts(path: Path) -> tuple[int | None, int | None]:
+    if not path.exists():
+        return None, None
     text = _read_text(path)
 
     smoke_match = re.search(r"Smoke Test Results:\s*(\d+)\s+passed,\s*(\d+)\s+failed", text, re.IGNORECASE)
@@ -72,6 +74,11 @@ def _parse_shell_counts(path: Path) -> tuple[int | None, int | None]:
     failed_match = re.search(r"Failed:\s*(\d+)", text, re.IGNORECASE)
     if passed_match and failed_match:
         return int(passed_match.group(1)), int(failed_match.group(1))
+
+    # Matches "P passed, F failed" (our Lua runner format and busted-style output)
+    pf_match = re.search(r"(\d+)\s+passed,\s*(\d+)\s+failed", text, re.IGNORECASE)
+    if pf_match:
+        return int(pf_match.group(1)), int(pf_match.group(2))
 
     busted_match = re.search(r"(\d+)\s+passed", text, re.IGNORECASE)
     if busted_match:

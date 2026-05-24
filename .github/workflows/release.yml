@@ -55,12 +55,18 @@ jobs:
             -q
 
       - name: Run Lua unit tests with coverage
-        run: >
-          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace
-          openresty/openresty:alpine-fat sh -c
-          "luarocks install luacov >/dev/null &&
-           luajit -lluacov openresty/tests/run.lua &&
-           luacov"
+        id: run_lua_tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p .ci-logs
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            openresty/openresty:alpine-fat sh -c \
+            "luarocks install luacov >/dev/null && \
+             luajit -lluacov openresty/tests/run.lua; \
+             test_exit=\$?; luacov; exit \$test_exit" | tee .ci-logs/lua-unit.log
 
       - name: Enforce consolidated coverage baseline
         run: |
@@ -77,14 +83,19 @@ jobs:
             --suite-id lua-unit \
             --suite-name "Lua unit" \
             --kind shell \
-            --log openresty/luacov.report.out \
-            --coverage-report openresty/luacov.report.out \
+            --log .ci-logs/lua-unit.log \
+            --coverage-report luacov.report.out \
             --coverage-label "luacov" \
+            --exit-code ${{ steps.run_lua_tests.outcome == 'success' && 0 || 1 }} \
             --output .ci-summary/lua-unit.json
           python .github/scripts/test_summary.py gate \
             --input-dir .ci-summary \
             --suite-ids python-unit,lua-unit \
             --min-coverage ${REPO_COVERAGE_MIN}
+
+      - name: Fail job if Lua tests failed
+        if: steps.run_lua_tests.outcome != 'success'
+        run: exit 1
 
       - name: Run gateway integration suite
         run: |
