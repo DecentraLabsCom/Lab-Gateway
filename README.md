@@ -301,7 +301,7 @@ GUAC_ADMIN_PASS=secure_admin_password
 AUTO_LOGOUT_ON_DISCONNECT=true
 
 # OpenResty CORS allowlist (comma-separated, optional)
-CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
+CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace-decentralabs.vercel.app
 
 # Lab Manager + Ops Worker
 LAB_MANAGER_TOKEN=your_lab_manager_token
@@ -378,8 +378,8 @@ INSTITUTIONAL_WALLET_ADDRESS=0xYourWalletAddress
 INSTITUTIONAL_WALLET_PASSWORD=YourSecurePassword
 
 # Security
-ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace.com
-MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.com/.well-known/public-key.pem
+ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace-decentralabs.vercel.app
+MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem
 ```
 
 #### Access Controls (Important)
@@ -522,7 +522,7 @@ lab-gateway/
 ├── 📁 nix/
 │   ├── nixos-module.nix         # services.lab-gateway (compose-managed) module
 │   └── hosts/gateway.nix        # Host defaults for nixosConfigurations.gateway
-├── 📁 blockchain-services/       # Blockchain auth/wallet service (submodule)
+├── 📁 blockchain-services/      # Blockchain auth/wallet service (submodule)
 ├── 📁 openresty/                # Reverse proxy (Nginx + Lua)
 │   ├── nginx.conf
 │   ├── lab_access.conf
