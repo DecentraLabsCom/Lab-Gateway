@@ -42,6 +42,14 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
+    const activityFeedState = {
+        limit: 8,
+        offset: 0,
+        operations: [],
+        pagination: null,
+        loading: false
+    };
+
     const smtpHostEl = $('#smtpHost');
     const smtpPortEl = $('#smtpPort');
     const smtpUserEl = $('#smtpUser');
@@ -822,27 +830,87 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function loadActivityFeed(limit = 8) {
+    async function loadActivityFeed(append = false) {
         const activityFeed = $('#activityFeedList');
         if (!activityFeed) return;
+        if (!append) {
+            activityFeedState.offset = 0;
+            activityFeedState.operations = [];
+            activityFeedState.pagination = null;
+        }
+        activityFeedState.loading = true;
         activityFeed.innerHTML = '<div class="empty">Loading recent operations...</div>';
         try {
-            const res = await fetch(`/ops/api/operations/recent?limit=${encodeURIComponent(limit)}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            const entries = data.operations || [];
-            if (!entries.length) {
-                activityFeed.innerHTML = '<div class="empty">No recent activity available yet.</div>';
-                return;
-            }
-            activityFeed.innerHTML = '';
-            entries.forEach(entry => {
-                activityFeed.appendChild(renderActivityFeedItem(entry));
+            const params = new URLSearchParams({
+                limit: String(activityFeedState.limit),
+                offset: String(activityFeedState.offset)
             });
+            const res = await fetch(`/ops/api/operations/recent?${params.toString()}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const body = await res.json();
+            const entries = Array.isArray(body.operations) ? body.operations : [];
+            activityFeedState.operations = append
+                ? activityFeedState.operations.concat(entries)
+                : entries;
+            activityFeedState.pagination = normalizePagination(
+                body.pagination,
+                activityFeedState.offset,
+                entries.length,
+                activityFeedState.limit
+            );
+            activityFeedState.offset = activityFeedState.pagination.nextOffset;
+            renderActivityFeed();
         } catch (err) {
             console.error(err);
             activityFeed.innerHTML = `<div class="empty">Unable to load activity: ${escapeHtml(err.message)}</div>`;
+        } finally {
+            activityFeedState.loading = false;
         }
+    }
+
+    function renderActivityFeed() {
+        const activityFeed = $('#activityFeedList');
+        if (!activityFeed) return;
+        if (!activityFeedState.operations.length) {
+            activityFeed.innerHTML = '<div class="empty">No recent activity available yet.</div>';
+            return;
+        }
+        activityFeed.innerHTML = '';
+        activityFeedState.operations.forEach(entry => {
+            activityFeed.appendChild(renderActivityFeedItem(entry));
+        });
+        const paginationEl = renderActivityFeedPagination(activityFeedState.pagination);
+        if (paginationEl) {
+            activityFeed.appendChild(paginationEl);
+        }
+    }
+
+    function renderActivityFeedPagination(pagination) {
+        if (!pagination) return null;
+        const footer = document.createElement('div');
+        footer.className = 'activity-pagination';
+        const summary = document.createElement('div');
+        summary.className = 'activity-meta';
+        const start = pagination.returned ? pagination.offset + 1 : pagination.offset;
+        const end = pagination.offset + pagination.returned;
+        summary.textContent = pagination.total
+            ? `Showing ${start}-${end} of ${pagination.total}`
+            : `Showing ${pagination.returned} entr${pagination.returned === 1 ? 'y' : 'ies'}`;
+        footer.appendChild(summary);
+        if (pagination.hasMore) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'mini-btn primary';
+            btn.textContent = 'Load more';
+            btn.disabled = activityFeedState.loading;
+            btn.addEventListener('click', () => {
+                if (!activityFeedState.loading) {
+                    loadActivityFeed(true);
+                }
+            });
+            footer.appendChild(btn);
+        }
+        return footer;
     }
 
     function renderActivityFeedItem(item) {

@@ -220,6 +220,14 @@ body {
 }
 .item-title { font-weight: 700; }
 .item-meta { color: var(--muted); font-size: 0.9rem; }
+.activity-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding-top: 10px;
+}
+.activity-meta { color: var(--muted); font-size: 0.9rem; }
 .empty { padding: 14px; color: var(--muted); background: #0f1422; border: 1px dashed var(--border); border-radius: 10px; }
 .host-input {
     min-width: 160px;

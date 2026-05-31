@@ -394,6 +394,15 @@ def parse_recipients(value: Any, default: Optional[List[str]] = None) -> List[st
 
 NOTIFICATION_SERVICE_RECIPIENTS = parse_recipients(os.getenv("NOTIFICATION_SERVICE_RECIPIENTS"))
 
+OPS_ALERT_FAILURE_THRESHOLD = max(1, int(os.getenv("OPS_ALERT_FAILURE_THRESHOLD", "3")))
+OPS_ALERT_WINDOW_SECONDS = max(60, int(os.getenv("OPS_ALERT_WINDOW_SECONDS", "300")))
+OPS_ALERT_COOLDOWN_SECONDS = max(60, int(os.getenv("OPS_ALERT_COOLDOWN_SECONDS", "900")))
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def record_reservation_operation(
     reservation_id: str,
     lab_id: Optional[str],
@@ -408,6 +417,7 @@ def record_reservation_operation(
 ):
     if not DB_ENGINE:
         return
+    created_at = _now_utc()
     try:
         with DB_ENGINE.begin() as conn:
             conn.execute(
@@ -415,10 +425,10 @@ def record_reservation_operation(
                     """
                     INSERT INTO reservation_operations (
                         reservation_id, lab_id, host, action, status, success,
-                        response_code, duration_ms, payload, message
+                        response_code, duration_ms, payload, message, created_at
                     ) VALUES (
                         :reservation_id, :lab_id, :host, :action, :status, :success,
-                        :response_code, :duration_ms, :payload, :message
+                        :response_code, :duration_ms, :payload, :message, :created_at
                     )
                     """
                 ),
@@ -433,10 +443,162 @@ def record_reservation_operation(
                     "duration_ms": duration_ms,
                     "payload": json.dumps(payload) if payload is not None else None,
                     "message": message,
+                    "created_at": created_at,
                 },
             )
+        if not success and action not in ("notification", "alert"):
+            try:
+                _check_failure_alert(host_name, reservation_id, lab_id, action, message, payload)
+            except Exception as exc:
+                logging.warning("Failure alert check failed for %s: %s", host_name, exc)
     except Exception as exc:
         logging.error("Failed to persist reservation operation %s/%s: %s", reservation_id, action, exc)
+
+
+def _should_send_failure_alert(host_name: str) -> bool:
+    if not DB_ENGINE or not host_name:
+        return False
+    if not NOTIFICATION_SERVICE_ENABLED or not NOTIFICATION_SERVICE_URL:
+        return False
+
+    now = _now_utc()
+    window_start = now - timedelta(seconds=OPS_ALERT_WINDOW_SECONDS)
+    cooldown_start = now - timedelta(seconds=OPS_ALERT_COOLDOWN_SECONDS)
+
+    with DB_ENGINE.begin() as conn:
+        failure_count = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM reservation_operations "
+                "WHERE host = :host AND success = 0 "
+                "AND action NOT IN ('notification', 'alert') "
+                "AND created_at >= :window_start"
+            ),
+            {"host": host_name, "window_start": window_start},
+        ).scalar() or 0
+
+        recent_alert = conn.execute(
+            text(
+                "SELECT 1 FROM reservation_operations "
+                "WHERE host = :host AND action = 'alert' "
+                "AND created_at >= :cooldown_start LIMIT 1"
+            ),
+            {"host": host_name, "cooldown_start": cooldown_start},
+        ).scalar()
+
+    return failure_count >= OPS_ALERT_FAILURE_THRESHOLD and recent_alert is None
+
+
+def _send_failure_alert(
+    reservation_id: str,
+    lab_id: Optional[str],
+    host_name: str,
+    failure_reason: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    subject = f"Lab Gateway alert: repeated failures for {host_name}"
+    body = [
+        f"Reservation: {reservation_id}",
+        f"Lab ID: {lab_id or 'unknown'}",
+        f"Host: {host_name}",
+        f"Condition: {failure_reason}",
+    ]
+    if details:
+        body.append(f"Details: {json.dumps(details, default=str)}")
+
+    recipients = list(NOTIFICATION_SERVICE_RECIPIENTS)
+    payload = {
+        "recipients": recipients,
+        "subject": subject,
+        "textBody": "\n".join(body),
+        "htmlBody": "<p>" + "</p><p>".join(body) + "</p>",
+        "icsContent": None,
+        "icsFileName": None,
+    }
+    headers = {"Content-Type": "application/json"}
+    if NOTIFICATION_SERVICE_ACCESS_TOKEN:
+        headers[NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER] = NOTIFICATION_SERVICE_ACCESS_TOKEN
+
+    attempt = 0
+    response = None
+    resp_text = None
+    status_code = None
+    last_exception: Optional[Exception] = None
+    while attempt <= NOTIFICATION_SERVICE_RETRY_ATTEMPTS:
+        attempt += 1
+        start = time.time()
+        try:
+            response = requests.post(NOTIFICATION_SERVICE_URL, json=payload, headers=headers, timeout=10)
+            status_code = response.status_code
+            resp_text = response.text
+            success = response.ok
+            if success:
+                break
+            if attempt > NOTIFICATION_SERVICE_RETRY_ATTEMPTS:
+                break
+            time.sleep(NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS * attempt)
+        except Exception as exc:
+            last_exception = exc
+            if attempt > NOTIFICATION_SERVICE_RETRY_ATTEMPTS:
+                break
+            time.sleep(NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS * attempt)
+
+    if response is not None and response.ok:
+        record_reservation_operation(
+            reservation_id,
+            lab_id,
+            host_name,
+            "alert",
+            "completed",
+            True,
+            response_code=status_code,
+            payload={
+                "failureReason": failure_reason,
+                "attempts": attempt,
+                "response": resp_text,
+            },
+            message=f"Alert sent after {attempt} attempt(s)",
+        )
+    else:
+        record_reservation_operation(
+            reservation_id,
+            lab_id,
+            host_name,
+            "alert",
+            "failed",
+            False,
+            response_code=status_code,
+            payload={
+                "failureReason": failure_reason,
+                "attempts": attempt,
+                "response": resp_text,
+                "exception": str(last_exception) if last_exception else None,
+            },
+            message=(
+                f"Alert failed after {attempt} attempt(s): {resp_text or last_exception}"
+            ),
+        )
+
+
+def _check_failure_alert(
+    host_name: str,
+    reservation_id: str,
+    lab_id: Optional[str],
+    action: str,
+    message: Optional[str],
+    payload: Optional[Dict[str, Any]],
+) -> None:
+    if not _should_send_failure_alert(host_name):
+        return
+
+    failure_reason = (
+        f"At least {OPS_ALERT_FAILURE_THRESHOLD} failed operations in the last {OPS_ALERT_WINDOW_SECONDS} seconds"
+    )
+    details = {
+        "triggerAction": action,
+        "triggerMessage": message,
+        "payload": payload,
+    }
+    _send_failure_alert(reservation_id, lab_id, host_name, failure_reason, details)
 
 
 def notify_critical_failure(
@@ -1287,21 +1449,51 @@ def api_operations_recent():
     if not DB_ENGINE:
         return jsonify({"error": "Database not configured"}), 500
     limit = _sanitize_limit(request.args.get("limit"))
+    offset = _sanitize_offset(request.args.get("offset"))
     host_name = request.args.get("host")
-    query = "SELECT reservation_id, lab_id, host, action, status, success, message, payload, response_code, duration_ms, created_at FROM reservation_operations"
+    reservation_id = request.args.get("reservationId") or request.args.get("reservation_id")
+
+    query_base = "FROM reservation_operations"
     params: Dict[str, Any] = {}
+    where_clauses: List[str] = []
     if host_name:
         host = HOSTS.get(host_name)
         if not host:
             return jsonify({"error": f"host '{host_name}' not found"}), 404
-        query += " WHERE host = :host"
+        where_clauses.append("host = :host")
         params["host"] = host_name
-    query += " ORDER BY created_at DESC, id DESC LIMIT :limit_value"
+    if reservation_id:
+        where_clauses.append("reservation_id = :reservation_id")
+        params["reservation_id"] = reservation_id
+
+    if where_clauses:
+        query_base += " WHERE " + " AND ".join(where_clauses)
+
     params["limit_value"] = limit
+    params["offset_value"] = offset
     try:
         with DB_ENGINE.begin() as conn:
-            rows = conn.execute(text(query), params).mappings().all()
-        return jsonify({"operations": _rows_to_operations(rows)})
+            total = conn.execute(text("SELECT COUNT(*) as total " + query_base), params).scalar() or 0
+            rows = conn.execute(
+                text(
+                    "SELECT reservation_id, lab_id, host, action, status, success, message, payload, response_code, duration_ms, created_at "
+                    + query_base
+                    + " ORDER BY created_at DESC, id DESC LIMIT :limit_value OFFSET :offset_value"
+                ),
+                params,
+            ).mappings().all()
+        returned = len(rows)
+        pagination = {
+            "limit": limit,
+            "offset": offset,
+            "returned": returned,
+            "total": total,
+            "nextOffset": offset + returned,
+            "hasMore": total > offset + returned,
+            "page": (offset // limit) + 1 if limit else 1,
+            "pageSize": limit,
+        }
+        return jsonify({"operations": _rows_to_operations(rows), "pagination": pagination})
     except Exception as exc:
         logging.exception("Failed to load recent operations")
         return jsonify({"error": str(exc)}), 500
