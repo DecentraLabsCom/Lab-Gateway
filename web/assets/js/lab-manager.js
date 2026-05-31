@@ -94,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAuthHealth();
     checkOpsAvailability();
     updateBillingStatusAction();
+    loadActivityFeed();
 
     // Lab Station ops state
     const hostInput = $('#hostInput');
@@ -668,6 +669,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="mini-btn primary" data-action="prepare">Prepare</button>
                 <button class="mini-btn" data-action="release">Release</button>
                 <button class="mini-btn danger" data-action="shutdown">Shutdown</button>
+                <button class="mini-btn secondary" data-action="toggle-local-mode">${localMode ? 'Disable' : 'Enable'} Local</button>
                 <button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS</button>
                 <button class="mini-btn" data-action="remove">Remove</button>
             </div>
@@ -703,6 +705,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (action === 'shutdown') {
             triggerWinrm(host, 'power', ['shutdown', '--delay=60', '--reason=Remote order']);
+            return;
+        }
+        if (action === 'toggle-local-mode') {
+            const currentMode = hostState[host]?.heartbeat?.status?.localModeEnabled;
+            toggleLocalMode(host, !currentMode);
+            return;
         }
         if (action === 'sync-aas') {
             syncAasHost(host);
@@ -732,10 +740,83 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
             hostState[host] = data;
             renderHosts();
+            loadActivityFeed();
             showToast(`Heartbeat ${host} ok`, 'success');
         } catch (err) {
             console.error(err);
             showToast(`Heartbeat failed for ${host}: ${err.message}`, 'error');
+        }
+    }
+
+    async function toggleLocalMode(host, enabled) {
+        try {
+            const res = await fetch('/ops/api/hosts/local-mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host, enabled })
+            });
+            if (res.status === 403) {
+                showToast('Access denied: /ops restricted to private networks', 'error');
+                return;
+            }
+            if (res.status === 401) {
+                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                return;
+            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            await pollHeartbeat(host);
+            showToast(`Local mode ${data.localModeEnabled ? 'enabled' : 'disabled'} for ${host}`, 'success');
+        } catch (err) {
+            console.error(err);
+            showToast(`Local mode toggle failed for ${host}: ${err.message}`, 'error');
+        }
+    }
+
+    async function loadActivityFeed(limit = 8) {
+        const activityFeed = $('#activityFeedList');
+        if (!activityFeed) return;
+        activityFeed.innerHTML = '<div class="empty">Loading recent operations...</div>';
+        try {
+            const res = await fetch(`/ops/api/operations/recent?limit=${encodeURIComponent(limit)}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const entries = data.operations || [];
+            if (!entries.length) {
+                activityFeed.innerHTML = '<div class="empty">No recent activity available yet.</div>';
+                return;
+            }
+            activityFeed.innerHTML = '';
+            entries.forEach(entry => {
+                activityFeed.appendChild(renderActivityFeedItem(entry));
+            });
+        } catch (err) {
+            console.error(err);
+            activityFeed.innerHTML = `<div class="empty">Unable to load activity: ${escapeHtml(err.message)}</div>`;
+        }
+    }
+
+    function renderActivityFeedItem(item) {
+        const payloadText = item.payload && typeof item.payload === 'object'
+            ? JSON.stringify(item.payload)
+            : String(item.payload || '');
+        const row = document.createElement('div');
+        row.className = 'item';
+        row.innerHTML = `
+            <div class="item-title">${escapeHtml(item.action)} (${escapeHtml(item.status)})</div>
+            <div class="item-meta">${escapeHtml(item.host || 'unknown host')} · ${escapeHtml(formatDateTime(item.createdAt) || 'n/a')}</div>
+            <div class="item-description">${escapeHtml(item.message || payloadText)}</div>
+        `;
+        return row;
+    }
+
+    function formatDateTime(value) {
+        if (!value) return null;
+        try {
+            const dt = new Date(value);
+            return dt.toLocaleString();
+        } catch (_e) {
+            return value;
         }
     }
 

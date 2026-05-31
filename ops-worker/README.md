@@ -88,6 +88,13 @@ Reservation automation knobs:
 - `OPS_RESERVATION_LOOKBACK` (default `21600`)
 - `OPS_RESERVATION_RETRY_COOLDOWN` (default `60`)
 
+Notification integration knobs:
+
+- `NOTIFICATION_SERVICE_URL` (default `http://blockchain-services:8080/billing/admin/notifications/send`)
+- `NOTIFICATION_SERVICE_RECIPIENTS` (comma-separated recipients for failure alerts; optional if blockchain-services has `defaultTo` configured)
+- `NOTIFICATION_SERVICE_RETRY_ATTEMPTS` (default `3`)
+- `NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS` (default `5`)
+
 ## Deployment notes
 
 - OpenResty proxies `/ops/` to this service.

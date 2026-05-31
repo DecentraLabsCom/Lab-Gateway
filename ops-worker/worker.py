@@ -16,6 +16,7 @@ from flask import Flask, jsonify, request
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, Connection
 from wakeonlan import send_magic_packet
+import requests
 import winrm
 from apscheduler.schedulers.background import BackgroundScheduler
 import aas_generator
@@ -39,6 +40,18 @@ ALLOWED_WINRM_COMMANDS = {
 TIMELINE_MAX_LIMIT = max(1, int(os.getenv("OPS_TIMELINE_MAX_OPS", "500")))
 TIMELINE_DEFAULT_LIMIT = max(1, min(int(os.getenv("OPS_TIMELINE_DEFAULT_LIMIT", "100")), TIMELINE_MAX_LIMIT))
 TIMELINE_PHASE_LOOKBACK = max(TIMELINE_MAX_LIMIT, int(os.getenv("OPS_TIMELINE_PHASE_LOOKBACK", "500")))
+NOTIFICATION_SERVICE_URL = os.getenv(
+    "NOTIFICATION_SERVICE_URL",
+    os.getenv("BLOCKCHAIN_SERVICES_NOTIFICATION_URL", "http://blockchain-services:8080/billing/admin/notifications/send")
+)
+NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER = os.getenv("NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER", "X-Access-Token")
+NOTIFICATION_SERVICE_ACCESS_TOKEN = (
+    os.getenv("NOTIFICATION_SERVICE_ACCESS_TOKEN") or
+    os.getenv("ADMIN_ACCESS_TOKEN")
+)
+NOTIFICATION_SERVICE_ENABLED = os.getenv("NOTIFICATION_SERVICE_ENABLED", "true").strip().lower() not in ("false", "0", "no", "off")
+NOTIFICATION_SERVICE_RETRY_ATTEMPTS = max(0, int(os.getenv("NOTIFICATION_SERVICE_RETRY_ATTEMPTS", "3")))
+NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS = max(1, int(os.getenv("NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS", "5")))
 
 
 def load_config() -> Dict[str, Any]:
@@ -209,6 +222,51 @@ def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], passw
     return (result.std_out or b"").decode("utf-8", errors="ignore")
 
 
+def write_remote_file(host: Dict[str, Any], path: str, contents: str,
+                      user: Optional[str], password: Optional[str],
+                      transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> None:
+    user = user or host.get("winrm_user")
+    password = password or host.get("winrm_pass")
+    if not user or not password:
+        raise ValueError("WinRM credentials are required")
+
+    endpoint = winrm_endpoint(host, use_ssl, port)
+    transport = transport or host.get("winrm_transport", "ntlm")
+    escaped_path = path.replace("'", "''")
+    escaped_contents = contents.replace("'", "''")
+    ps = f"Set-Content -LiteralPath '{escaped_path}' -Value '{escaped_contents}' -Encoding UTF8"
+
+    session = winrm.Session(endpoint, auth=(user, password), transport=transport)
+    result = session.run_ps(ps)
+    if result.status_code != 0:
+        raise RuntimeError(f"WinRM write failed ({result.status_code}): {(result.std_err or b'').decode('utf-8', errors='ignore')}")
+
+
+def remove_remote_file(host: Dict[str, Any], path: str,
+                       user: Optional[str], password: Optional[str],
+                       transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> None:
+    user = user or host.get("winrm_user")
+    password = password or host.get("winrm_pass")
+    if not user or not password:
+        raise ValueError("WinRM credentials are required")
+
+    endpoint = winrm_endpoint(host, use_ssl, port)
+    transport = transport or host.get("winrm_transport", "ntlm")
+    escaped_path = path.replace("'", "''")
+    ps = (
+        f"if (Test-Path -LiteralPath '{escaped_path}') {{ Remove-Item -LiteralPath '{escaped_path}' -Force }}"
+    )
+
+    session = winrm.Session(endpoint, auth=(user, password), transport=transport)
+    result = session.run_ps(ps)
+    if result.status_code != 0:
+        raise RuntimeError(f"WinRM remove failed ({result.status_code}): {(result.std_err or b'').decode('utf-8', errors='ignore')}")
+
+
+def get_local_mode_flag_path(host: Dict[str, Any]) -> str:
+    return host.get("local_mode_flag_path", r"C:\LabStation\labstation\data\local-mode.flag")
+
+
 def persist_heartbeat(engine: Engine, host: Dict[str, Any], heartbeat: Dict[str, Any],
                       last_event: Optional[Dict[str, Any]]) -> None:
     ts = to_utc(heartbeat.get("timestamp")) or datetime.now(timezone.utc)
@@ -317,6 +375,24 @@ def normalize_args(args: Any, default: Optional[List[str]] = None) -> List[str]:
     return [str(args)]
 
 
+def parse_recipients(value: Any, default: Optional[List[str]] = None) -> List[str]:
+    if value is None:
+        return list(default or [])
+    if isinstance(value, list):
+        items = [str(item) for item in value]
+    else:
+        items = [str(value)]
+    recipients: List[str] = []
+    for item in items:
+        for part in item.split(","):
+            normalized = part.strip()
+            if normalized:
+                recipients.append(normalized)
+    return recipients
+
+
+NOTIFICATION_SERVICE_RECIPIENTS = parse_recipients(os.getenv("NOTIFICATION_SERVICE_RECIPIENTS"))
+
 def record_reservation_operation(
     reservation_id: str,
     lab_id: Optional[str],
@@ -360,6 +436,112 @@ def record_reservation_operation(
             )
     except Exception as exc:
         logging.error("Failed to persist reservation operation %s/%s: %s", reservation_id, action, exc)
+
+
+def notify_critical_failure(
+    reservation_id: str,
+    lab_id: Optional[str],
+    host_name: str,
+    action: str,
+    failure_reason: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    if not NOTIFICATION_SERVICE_ENABLED or not NOTIFICATION_SERVICE_URL:
+        return
+
+    subject = f"Lab Gateway alert: {action} failed for {host_name}"
+    body = [
+        f"Reservation: {reservation_id}",
+        f"Lab ID: {lab_id or 'unknown'}",
+        f"Host: {host_name}",
+        f"Action: {action}",
+        f"Reason: {failure_reason}",
+    ]
+    if details:
+        body.append(f"Details: {json.dumps(details, default=str)}")
+
+    recipients = list(NOTIFICATION_SERVICE_RECIPIENTS)
+    payload = {
+        "recipients": recipients,
+        "subject": subject,
+        "textBody": "\n".join(body),
+        "htmlBody": "<p>" + "</p><p>".join(body) + "</p>",
+        "icsContent": None,
+        "icsFileName": None,
+    }
+    headers = {"Content-Type": "application/json"}
+    if NOTIFICATION_SERVICE_ACCESS_TOKEN:
+        headers[NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER] = NOTIFICATION_SERVICE_ACCESS_TOKEN
+
+    attempt = 0
+    duration_ms = 0
+    response = None
+    resp_text = None
+    status_code = None
+    last_exception: Optional[Exception] = None
+    while attempt <= NOTIFICATION_SERVICE_RETRY_ATTEMPTS:
+        attempt += 1
+        start = time.time()
+        try:
+            response = requests.post(NOTIFICATION_SERVICE_URL, json=payload, headers=headers, timeout=10)
+            status_code = response.status_code
+            resp_text = response.text
+            success = response.ok
+            duration_ms = int((time.time() - start) * 1000)
+            if success:
+                break
+            if attempt > NOTIFICATION_SERVICE_RETRY_ATTEMPTS:
+                break
+            time.sleep(NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS * attempt)
+        except Exception as exc:
+            last_exception = exc
+            duration_ms = int((time.time() - start) * 1000)
+            if attempt > NOTIFICATION_SERVICE_RETRY_ATTEMPTS:
+                break
+            time.sleep(NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS * attempt)
+
+    if response is not None and response.ok:
+        op_payload = {
+            "failureAction": action,
+            "notificationUrl": NOTIFICATION_SERVICE_URL,
+            "attempts": attempt,
+            "response": resp_text,
+        }
+        record_reservation_operation(
+            reservation_id,
+            lab_id,
+            host_name,
+            "notification",
+            "completed",
+            True,
+            response_code=status_code,
+            duration_ms=duration_ms,
+            payload=op_payload,
+            message=f"Notification sent after {attempt} attempt(s)",
+        )
+    else:
+        error_details = {
+            "failureAction": action,
+            "notificationUrl": NOTIFICATION_SERVICE_URL,
+            "attempts": attempt,
+            "response": resp_text,
+        }
+        if last_exception is not None:
+            error_details["exception"] = str(last_exception)
+        record_reservation_operation(
+            reservation_id,
+            lab_id,
+            host_name,
+            "notification",
+            "failed",
+            False,
+            response_code=status_code,
+            duration_ms=duration_ms,
+            payload=error_details,
+            message=(
+                f"Notification failed after {attempt} attempt(s): {resp_text or last_exception}"
+            ),
+        )
 
 
 def perform_wake_step(
@@ -429,6 +611,8 @@ def perform_wake_step(
         payload=details,
         message=message,
     )
+    if not success:
+        notify_critical_failure(reservation_id, lab_id, host.get("name", ""), "wake", message, details)
     return success, {
         "action": "wake",
         "success": success,
@@ -479,6 +663,8 @@ def perform_command_step(
         payload=summarized,
         message=message,
     )
+    if not success:
+        notify_critical_failure(reservation_id, lab_id, host.get("name", ""), action, message, summarized)
     return success, {
         "action": action,
         "success": success,
@@ -726,6 +912,14 @@ def api_reservation_end():
 def _to_iso(dt: Optional[datetime]) -> Optional[str]:
     if not dt:
         return None
+    if isinstance(dt, str):
+        try:
+            parsed = datetime.fromisoformat(dt)
+        except ValueError:
+            return dt
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc).isoformat()
     return dt.astimezone(timezone.utc).isoformat()
@@ -922,9 +1116,9 @@ def _fetch_latest_heartbeat(conn: Connection, host_name: str) -> Optional[Dict[s
 
     return {
         "timestamp": _to_iso(row.get("timestamp_utc")),
-        "ready": row.get("ready"),
-        "localMode": row.get("local_mode"),
-        "localSession": row.get("local_session"),
+        "ready": bool(row.get("ready")),
+        "localMode": bool(row.get("local_mode")),
+        "localSession": bool(row.get("local_session")),
         "lastPower": {
             "timestamp": _to_iso(row.get("last_power_action_ts")),
             "mode": row.get("last_power_action_mode"),
@@ -1025,6 +1219,59 @@ def api_hosts_quarantine():
     if not ok:
         return jsonify({"error": f"host {name} not found"}), 404
     return jsonify({"host": name, "quarantined": quarantined})
+
+
+@APP.route("/api/hosts/local-mode", methods=["POST"])
+def api_hosts_local_mode():
+    payload = request.get_json(force=True, silent=True) or {}
+    host_name = payload.get("host")
+    if host_name is None:
+        return jsonify({"error": "host is required"}), 400
+    enabled = payload.get("enabled")
+    if enabled is None:
+        return jsonify({"error": "enabled is required"}), 400
+    enabled = parse_bool(enabled, False)
+
+    host = HOSTS.get(host_name)
+    if not host:
+        return jsonify({"error": f"host '{host_name}' not found"}), 404
+
+    flag_path = get_local_mode_flag_path(host)
+    try:
+        if enabled:
+            write_remote_file(host, flag_path, "1", None, None, None, None, None)
+        else:
+            remove_remote_file(host, flag_path, None, None, None, None, None)
+    except Exception as exc:
+        logging.exception("Local mode toggle failed for %s", host_name)
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({"host": host_name, "localModeEnabled": enabled}), 200
+
+
+@APP.route("/api/operations/recent", methods=["GET"])
+def api_operations_recent():
+    if not DB_ENGINE:
+        return jsonify({"error": "Database not configured"}), 500
+    limit = _sanitize_limit(request.args.get("limit"))
+    host_name = request.args.get("host")
+    query = "SELECT reservation_id, lab_id, host, action, status, success, message, payload, response_code, duration_ms, created_at FROM reservation_operations"
+    params: Dict[str, Any] = {}
+    if host_name:
+        host = HOSTS.get(host_name)
+        if not host:
+            return jsonify({"error": f"host '{host_name}' not found"}), 404
+        query += " WHERE host = :host"
+        params["host"] = host_name
+    query += " ORDER BY created_at DESC, id DESC LIMIT :limit_value"
+    params["limit_value"] = limit
+    try:
+        with DB_ENGINE.begin() as conn:
+            rows = conn.execute(text(query), params).mappings().all()
+        return jsonify({"operations": _rows_to_operations(rows)})
+    except Exception as exc:
+        logging.exception("Failed to load recent operations")
+        return jsonify({"error": str(exc)}), 500
 
 
 @APP.route("/aas-admin/lab/<lab_id>/sync", methods=["POST"])
@@ -1140,8 +1387,8 @@ class ReservationOrchestrator:
             self._dispatch_end(row)
 
     def _fetch_start_candidates(self, conn: Connection, now: datetime):
-        # Set lock wait timeout to prevent hanging on locked rows
-        conn.execute(text("SET SESSION innodb_lock_wait_timeout = 20"))
+        if conn.dialect.name == "mysql":
+            conn.execute(text("SET SESSION innodb_lock_wait_timeout = 20"))
         
         window_upper = now + timedelta(seconds=self.start_lead)
         window_lower = now - timedelta(seconds=self.lookback)
@@ -1162,7 +1409,6 @@ class ReservationOrchestrator:
               )
             ORDER BY r.start_time ASC
             LIMIT :max_batch
-            FOR UPDATE SKIP LOCKED
             """
         )
         result = conn.execute(
@@ -1177,8 +1423,8 @@ class ReservationOrchestrator:
         return result.mappings().all()
 
     def _fetch_end_candidates(self, conn: Connection, now: datetime):
-        # Set lock wait timeout to prevent hanging on locked rows
-        conn.execute(text("SET SESSION innodb_lock_wait_timeout = 20"))
+        if conn.dialect.name == "mysql":
+            conn.execute(text("SET SESSION innodb_lock_wait_timeout = 20"))
         
         ready_time = now - timedelta(seconds=self.end_delay)
         window_lower = now - timedelta(seconds=self.lookback)
@@ -1199,7 +1445,6 @@ class ReservationOrchestrator:
               )
             ORDER BY r.end_time ASC
             LIMIT :max_batch
-            FOR UPDATE SKIP LOCKED
             """
         )
         result = conn.execute(
