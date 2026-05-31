@@ -64,3 +64,35 @@ def test_api_poll_heartbeat_persists_data(db_engine, client, monkeypatch):
         assert bool(heartbeat_row["local_session"]) is False
         raw_json = json.loads(heartbeat_row["raw_json"])
         assert raw_json["timestamp"] == "2026-01-01T12:00:00.000Z"
+
+
+def test_generate_heartbeat_stream_emits_heartbeat_event(db_engine, monkeypatch):
+    host = {
+        "name": "lab-ws-01",
+        "address": "192.168.1.50",
+        "mac": "00:11:22:33:44:55",
+        "winrm_user": "user",
+        "winrm_pass": "pass",
+    }
+    worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+
+    heartbeat = {
+        "timestamp": "2026-01-01T12:00:00.000Z",
+        "summary": {"ready": True},
+        "status": {
+            "localModeEnabled": True,
+            "localSessionActive": False,
+        },
+        "operations": {
+            "lastPowerAction": {"timestamp": "2026-01-01T11:00:00.000Z", "mode": "powerOn"},
+        },
+    }
+
+    monkeypatch.setattr(worker, "read_remote_file", lambda *args, **kwargs: json.dumps(heartbeat))
+
+    stream = worker.generate_heartbeat_stream(host, include_events=False)
+    first_chunk = next(stream)
+
+    assert first_chunk.startswith("event: heartbeat")
+    assert '"host": "lab-ws-01"' in first_chunk
+    assert '"summary"' in first_chunk

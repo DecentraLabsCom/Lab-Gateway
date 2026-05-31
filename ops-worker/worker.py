@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request, stream_with_context
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, Connection
 from wakeonlan import send_magic_packet
@@ -52,6 +52,7 @@ NOTIFICATION_SERVICE_ACCESS_TOKEN = (
 NOTIFICATION_SERVICE_ENABLED = os.getenv("NOTIFICATION_SERVICE_ENABLED", "true").strip().lower() not in ("false", "0", "no", "off")
 NOTIFICATION_SERVICE_RETRY_ATTEMPTS = max(0, int(os.getenv("NOTIFICATION_SERVICE_RETRY_ATTEMPTS", "3")))
 NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS = max(1, int(os.getenv("NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS", "5")))
+HEARTBEAT_SSE_INTERVAL_SECONDS = max(1, int(os.getenv("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")))
 
 
 def load_config() -> Dict[str, Any]:
@@ -795,6 +796,38 @@ def api_poll_heartbeat():
     except Exception as exc:
         logging.exception("Heartbeat poll failed")
         return jsonify({"error": str(exc)}), 500
+
+
+def _format_sse_event(event: str, data: str) -> str:
+    return f"event: {event}\ndata: {data}\n\n"
+
+
+def generate_heartbeat_stream(host: Dict[str, Any], include_events: bool):
+    while True:
+        try:
+            data = poll_heartbeat(host, include_events=include_events)
+            data["host"] = host.get("name")
+            yield _format_sse_event("heartbeat", json.dumps(data))
+        except Exception as exc:
+            yield _format_sse_event("error", json.dumps({"error": str(exc), "host": host.get("name")}))
+        time.sleep(HEARTBEAT_SSE_INTERVAL_SECONDS)
+
+
+@APP.route("/api/heartbeat/stream", methods=["GET"])
+def api_stream_heartbeat():
+    host_name = request.args.get("host")
+    include_events = request.args.get("include_events", "true").strip().lower() not in ("0", "false", "no", "off")
+    if not host_name:
+        return jsonify({"error": "host is required"}), 400
+    host = HOSTS.get(host_name)
+    if not host:
+        return jsonify({"error": f"host '{host_name}' not found"}), 404
+    response = Response(
+        stream_with_context(generate_heartbeat_stream(host, include_events)),
+        content_type="text/event-stream",
+    )
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 def _get_mandatory_field(payload: Dict[str, Any], *keys: str) -> Optional[str]:

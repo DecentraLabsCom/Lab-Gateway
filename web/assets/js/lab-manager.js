@@ -102,6 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshHostsBtn = $('#refreshHostsBtn');
     const hostListEl = $('#hostList');
     const hostState = {};
+    const heartbeatSources = {};
     let hostNames = loadHosts();
 
     // FMU AAS sync elements
@@ -331,6 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hostListEl) {
         hostListEl.addEventListener('click', handleHostActions);
         renderHosts();
+        hostNames.forEach(startHeartbeatStream);
     }
 
     function loadConfig() {
@@ -602,6 +604,7 @@ document.addEventListener('DOMContentLoaded', () => {
             hostNames.push(value);
             saveHosts();
             renderHosts();
+            startHeartbeatStream(value);
             showToast(`Host ${value} added`, 'success');
         }
         hostInput.value = '';
@@ -610,9 +613,50 @@ document.addEventListener('DOMContentLoaded', () => {
     function removeHost(name) {
         hostNames = hostNames.filter(h => h !== name);
         delete hostState[name];
+        stopHeartbeatStream(name);
         saveHosts();
         renderHosts();
         showToast(`Host ${name} removed`, 'success');
+    }
+
+    function startHeartbeatStream(host) {
+        if (!host || !window.EventSource || heartbeatSources[host]) return;
+        const url = new URL('/ops/api/heartbeat/stream', window.location.origin);
+        url.searchParams.set('host', host);
+        url.searchParams.set('include_events', 'false');
+
+        const source = new EventSource(url.toString());
+        heartbeatSources[host] = source;
+
+        source.addEventListener('heartbeat', evt => {
+            try {
+                const data = JSON.parse(evt.data || '{}');
+                hostState[host] = data;
+                renderHosts();
+                loadActivityFeed();
+            } catch (err) {
+                console.warn('Heartbeat SSE parse failed', err);
+            }
+        });
+
+        source.addEventListener('error', evt => {
+            const errorText = evt?.data || 'Heartbeat SSE connection error';
+            if (source.readyState === EventSource.CLOSED) {
+                stopHeartbeatStream(host);
+            }
+            showToast(`Heartbeat stream error for ${host}: ${errorText}`, 'error');
+        });
+    }
+
+    function stopHeartbeatStream(host) {
+        const source = heartbeatSources[host];
+        if (!source) return;
+        try {
+            source.close();
+        } catch (_) {
+            // ignore
+        }
+        delete heartbeatSources[host];
     }
 
     function renderHosts() {
@@ -718,6 +762,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function refreshAllHosts() {
+        if (window.EventSource) {
+            hostNames.forEach(startHeartbeatStream);
+            showToast('Heartbeat streaming started for all hosts', 'success');
+            return;
+        }
         hostNames.forEach(pollHeartbeat);
     }
 
