@@ -103,6 +103,8 @@ services:
       - FMU_RUNNER_ENABLED=${FMU_RUNNER_ENABLED:-}
       - AAS_ENABLED=${AAS_ENABLED:-}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-}
+      - DEMO_USER=${DEMO_USER:-demo}
+      - DEMO_LAB_ID=${DEMO_LAB_ID:-}
     depends_on:
       guacamole:
         condition: service_healthy
@@ -277,6 +279,7 @@ services:
       BLOCKCHAIN_MYSQL_DATABASE: ${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       GUAC_ADMIN_USER: ${GUAC_ADMIN_USER}
       GUAC_ADMIN_PASS: ${GUAC_ADMIN_PASS}
+      DEMO_USER: ${DEMO_USER:-demo}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/ensure-user-entrypoint.sh:/usr/local/bin/ensure-user-entrypoint.sh:ro

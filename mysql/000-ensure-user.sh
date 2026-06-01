@@ -226,4 +226,28 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     WHERE e.name = @legacy_admin AND @guac_admin_user <> @legacy_admin;
 EOSQL
 
+# ── Demo Guacamole user (header-auth only, password login disabled) ──────────
+# The user is pre-created so the lab admin only needs to assign a connection.
+# Connection assignment is intentionally NOT automated here.
+DEMO_GUAC_USER="${DEMO_USER:-demo}"
+escaped_demo_user="$(escape_sql "$DEMO_GUAC_USER")"
+echo "Ensuring demo Guacamole user: ${DEMO_GUAC_USER}"
+
+mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
+    USE \`${MYSQL_DATABASE}\`;
+
+    -- Random, non-guessable hash and salt so password login is effectively impossible.
+    -- Authentication happens via the Authorization header set by OpenResty.
+    SET @demo_salt = UNHEX(SHA2(CONCAT('demo-salt-', UUID()), 256));
+    SET @demo_hash = UNHEX(SHA2(CONCAT('demo-hash-', UUID()), 256));
+
+    INSERT IGNORE INTO guacamole_entity (name, type)
+    VALUES ('${escaped_demo_user}', 'USER');
+
+    INSERT IGNORE INTO guacamole_user (entity_id, password_hash, password_salt, password_date)
+    SELECT entity_id, @demo_hash, @demo_salt, NOW()
+    FROM guacamole_entity
+    WHERE name = '${escaped_demo_user}' AND type = 'USER';
+EOSQL
+
 echo "=== User configuration completed successfully ==="

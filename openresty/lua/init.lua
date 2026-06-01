@@ -148,6 +148,16 @@ else
     ngx.log(ngx.INFO, "Full mode enabled")
 end
 
+-- Demo access configuration
+local demo_user = trim(os.getenv("DEMO_USER")) or ""
+if demo_user == "" then demo_user = "demo" end
+config:set("demo_user", demo_user)
+local demo_lab_id = trim(os.getenv("DEMO_LAB_ID")) or ""
+config:set("demo_lab_id", demo_lab_id)
+local marketplace_url = trim(os.getenv("MARKETPLACE_URL")) or ""
+marketplace_url = marketplace_url:gsub("/+$", "")
+config:set("marketplace_url", marketplace_url)
+
 if fmu_runner_enabled then
     ngx.log(ngx.INFO, "FMU runner integration enabled")
 else

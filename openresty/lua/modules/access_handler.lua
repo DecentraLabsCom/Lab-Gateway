@@ -1,5 +1,7 @@
 local _M = {}
 
+local demo_guard = require "modules.demo_guard"
+
 ---Processes the access phase logic that validates the JTI cookie and
 -- propagates the username to Guacamole when it is still valid.
 -- When no JTI cookie is present the JWT supplied via the ?jwt= query
@@ -29,6 +31,7 @@ function _M.run(ngx_ctx, deps)
                     if now <= tonumber(exp) then
                         ngx.req.set_header("Authorization", username)
                         ngx.log(ngx.INFO, "Access - Valid cookie. Authorization header set for " .. username)
+                        demo_guard.run(ngx)
                         return
                     end
                     ngx.log(ngx.INFO, "Access - JWT expired for user: " .. username .. " – falling through to JWT URL path")
@@ -116,6 +119,7 @@ function _M.run(ngx_ctx, deps)
 
     ngx.req.set_header("Authorization", username_lower)
     ngx.log(ngx.INFO, "Access - JWT validated from URL. Authorization header set for " .. username_lower)
+    demo_guard.run(ngx)
 end
 
 return _M
