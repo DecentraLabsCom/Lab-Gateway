@@ -8,6 +8,10 @@ function HttpClientStub.new(responses)
     }, HttpClientStub)
 end
 
+function HttpClientStub:set_timeout(_ms)
+    -- no-op in tests
+end
+
 function HttpClientStub:request_uri(url, opts)
     table.insert(self.calls, { url = url, opts = opts })
     if #self.responses == 0 then

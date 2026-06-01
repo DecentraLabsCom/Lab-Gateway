@@ -25,14 +25,17 @@ local MARKETPLACE_CHECK_TIMEOUT_MS = 3000
 -- with a 60-second window starting at the current epoch second.
 -- On network error the function returns false (fail-open) and logs a warning
 -- so a temporary Marketplace outage does not block demo access permanently.
-local function is_lab_busy(marketplace_url, lab_id)
+local function is_lab_busy(ngx, marketplace_url, lab_id, deps)
     if not lab_id or lab_id == "" then
         ngx.log(ngx.WARN, "demo_guard: DEMO_LAB_ID not configured; skipping busy check")
         return false
     end
 
-    local http = require "resty.http"
-    local httpc = http.new()
+    local http_factory = (deps and deps.http_factory) or function()
+        local resty_http = require "resty.http"
+        return resty_http.new()
+    end
+    local httpc = http_factory()
     httpc:set_timeout(MARKETPLACE_CHECK_TIMEOUT_MS)
 
     local now = ngx.time()
@@ -65,8 +68,9 @@ local function is_lab_busy(marketplace_url, lab_id)
 end
 
 -- Public entry point.  ngx_ctx defaults to the global ngx table.
-function _M.run(ngx_ctx)
+function _M.run(ngx_ctx, deps)
     local ngx = ngx_ctx or ngx
+    deps = deps or {}
 
     local config = ngx.shared.config
     local demo_user = config:get("demo_user") or "demo"
@@ -93,7 +97,7 @@ function _M.run(ngx_ctx)
         -- If it is genuinely missing we skip the check (fail-open) and warn.
         ngx.log(ngx.WARN, "demo_guard: marketplace_url not set; skipping busy check")
     else
-        if is_lab_busy(marketplace_url, lab_id) then
+        if is_lab_busy(ngx, marketplace_url, lab_id, deps) then
             ngx.log(ngx.WARN, "demo_guard: rejecting demo access – lab " .. lab_id .. " is currently in use")
             ngx.header["Content-Type"] = "text/plain"
             ngx.status = 503

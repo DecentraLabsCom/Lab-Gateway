@@ -29,6 +29,18 @@ local function new_shared_dict(initial)
         return keys
     end
 
+    function dict:incr(key, amount, default, _ttl)
+        local current = store[key]
+        if current == nil then
+            if default == nil then
+                return nil, "not found"
+            end
+            current = default
+        end
+        store[key] = current + amount
+        return store[key], nil
+    end
+
     dict._data = store
     return dict
 end
@@ -57,8 +69,9 @@ local function new(opts)
         var = opts.var or {},
         http = opts.http or {},
         shared = {
-            cache = opts.cache_dict or new_shared_dict(opts.cache or {}),
-            config = opts.config_dict or new_shared_dict(opts.config or {})
+            cache         = opts.cache_dict         or new_shared_dict(opts.cache         or {}),
+            config        = opts.config_dict        or new_shared_dict(opts.config        or {}),
+            demo_sessions = opts.demo_sessions_dict or new_shared_dict(opts.demo_sessions or {})
         },
         req = {},
         ctx = opts.ctx or {},
@@ -75,6 +88,10 @@ local function new(opts)
 
     function ngx_stub.req.set_header(key, value)
         req_headers[key] = value
+    end
+
+    function ngx_stub.req.get_headers()
+        return req_headers
     end
 
     ngx_stub.req.headers = req_headers
@@ -96,6 +113,20 @@ local function new(opts)
     end
 
     ngx_stub._timer_calls = timer_calls
+
+    local say_output = {}
+    function ngx_stub.say(msg)
+        say_output[#say_output + 1] = tostring(msg)
+    end
+    ngx_stub._say_output = say_output
+
+    function ngx_stub.exit(code)
+        ngx_stub._exit_code = code
+    end
+
+    function ngx_stub.escape_uri(s)
+        return tostring(s)
+    end
 
     return ngx_stub
 end
