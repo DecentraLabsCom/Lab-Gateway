@@ -34,8 +34,9 @@ extension-priority: header, mysql
 guacd-hostname: ${GUACD_HOSTNAME:-guacd}
 guacd-port: ${GUACD_PORT:-4822}
 
-# Session timeout (minutes)
-api-session-timeout: ${API_SESSION_TIMEOUT:-1}
+# API session timeout for manual Guacamole logins (minutes).
+# Marketplace/JWT sessions are additionally limited by OpenResty.
+api-session-timeout: ${API_SESSION_TIMEOUT:-15}
 EOF
 
 echo "✔ Generated ${PROPERTIES_FILE}"

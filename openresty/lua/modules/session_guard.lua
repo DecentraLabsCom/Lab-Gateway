@@ -53,6 +53,8 @@ local function clear_cached_user_token(dict, username, user_token)
     dict:delete(token_cache_key(username))
     if user_token then
         dict:delete(token_reverse_cache_key(user_token))
+        dict:delete("guac_jwt_exp:" .. user_token)
+        dict:delete("guac_jwt_last_seen:" .. user_token)
     end
 end
 

@@ -2,6 +2,59 @@ local _M = {}
 
 local demo_guard = require "modules.demo_guard"
 
+local DEFAULT_JWT_GUAC_IDLE_TIMEOUT_SECONDS = 60
+
+local function jwt_guac_exp_key(token)
+    return "guac_jwt_exp:" .. token
+end
+
+local function jwt_guac_last_seen_key(token)
+    return "guac_jwt_last_seen:" .. token
+end
+
+local function get_jwt_guac_idle_timeout(config)
+    local configured = config and tonumber(config:get("jwt_guac_idle_timeout_seconds"))
+    if configured and configured > 0 then
+        return configured
+    end
+    return DEFAULT_JWT_GUAC_IDLE_TIMEOUT_SECONDS
+end
+
+local function reject_jwt_guac_token(ngx, token, reason)
+    ngx.status = ngx.HTTP_UNAUTHORIZED
+    ngx.header["Content-Type"] = "text/plain"
+    ngx.say("Unauthorized: Guacamole JWT session expired")
+    ngx.log(ngx.INFO, "Access - Rejected Guacamole JWT auth token: " .. reason)
+    ngx.exit(ngx.HTTP_UNAUTHORIZED)
+    return true
+end
+
+local function enforce_jwt_guac_token_timeout(ngx, dict)
+    local token = ngx.var.arg_token
+    if not token or token == "" then
+        return false
+    end
+
+    local exp = tonumber(dict:get(jwt_guac_exp_key(token)))
+    if not exp then
+        return false
+    end
+
+    local now = ngx.time()
+    if now > exp then
+        return reject_jwt_guac_token(ngx, token, "JWT expired")
+    end
+
+    local idle_timeout = get_jwt_guac_idle_timeout(ngx.shared.config)
+    local last_seen = tonumber(dict:get(jwt_guac_last_seen_key(token)))
+    if last_seen and (now - last_seen) > idle_timeout then
+        return reject_jwt_guac_token(ngx, token, "idle timeout exceeded")
+    end
+
+    dict:set(jwt_guac_last_seen_key(token), now, 7200)
+    return false
+end
+
 ---Processes the access phase logic that validates the JTI cookie and
 -- propagates the username to Guacamole when it is still valid.
 -- When no JTI cookie is present the JWT supplied via the ?jwt= query
@@ -13,6 +66,10 @@ local demo_guard = require "modules.demo_guard"
 function _M.run(ngx_ctx, deps)
     local ngx = ngx_ctx or ngx
     local dict = ngx.shared.cache
+
+    if enforce_jwt_guac_token_timeout(ngx, dict) then
+        return
+    end
 
     -- ── Path 1: JTI cookie present ─────────────────────────────────────────
     -- Only uses the cookie fast-path when the JTI is still live in the shared
@@ -30,6 +87,9 @@ function _M.run(ngx_ctx, deps)
                     local now = ngx.time()
                     if now <= tonumber(exp) then
                         ngx.req.set_header("Authorization", username)
+                        ngx.ctx.jwt_authenticated = true
+                        ngx.ctx.jwt_username = username
+                        ngx.ctx.jwt_exp = tonumber(exp)
                         ngx.log(ngx.INFO, "Access - Valid cookie. Authorization header set for " .. username)
                         demo_guard.run(ngx)
                         return
@@ -118,6 +178,9 @@ function _M.run(ngx_ctx, deps)
     dict:set("exp:" .. username_lower, jwt_obj.payload.exp, 7200)
 
     ngx.req.set_header("Authorization", username_lower)
+    ngx.ctx.jwt_authenticated = true
+    ngx.ctx.jwt_username = username_lower
+    ngx.ctx.jwt_exp = jwt_obj.payload.exp
     ngx.log(ngx.INFO, "Access - JWT validated from URL. Authorization header set for " .. username_lower)
     demo_guard.run(ngx)
 end

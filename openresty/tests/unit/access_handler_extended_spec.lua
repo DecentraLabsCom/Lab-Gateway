@@ -170,6 +170,83 @@ runner.describe("Access handler extended tests", function()
         runner.assert.equals(nil, ngx.req.headers["Authorization"])
         runner.assert.equals(nil, ngx.status)
     end)
+
+    runner.it("does not apply JWT idle timeout to manual Guacamole tokens", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["guac_token:manual-token"] = "admin",
+                ["token:admin"] = "manual-token"
+            },
+            var = { arg_token = "manual-token" },
+            now = 1000
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("admin", ngx.shared.cache._data["guac_token:manual-token"])
+    end)
+
+    runner.it("refreshes JWT-backed Guacamole token last-seen while within idle timeout", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["guac_token:jwt-token"] = "alice",
+                ["token:alice"] = "jwt-token",
+                ["guac_jwt_exp:jwt-token"] = 1000,
+                ["guac_jwt_last_seen:jwt-token"] = 100
+            },
+            config = { jwt_guac_idle_timeout_seconds = 60 },
+            var = { arg_token = "jwt-token" },
+            now = 150
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals(150, ngx.shared.cache._data["guac_jwt_last_seen:jwt-token"])
+    end)
+
+    runner.it("rejects JWT-backed Guacamole tokens after idle timeout", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["guac_token:jwt-token"] = "alice",
+                ["token:alice"] = "jwt-token",
+                ["guac_jwt_exp:jwt-token"] = 1000,
+                ["guac_jwt_last_seen:jwt-token"] = 100
+            },
+            config = { jwt_guac_idle_timeout_seconds = 60 },
+            var = { arg_token = "jwt-token" },
+            now = 161
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(401, ngx.status)
+        runner.assert.equals(401, ngx._exit_code)
+        runner.assert.equals("alice", ngx.shared.cache._data["guac_token:jwt-token"])
+        runner.assert.equals("jwt-token", ngx.shared.cache._data["token:alice"])
+        runner.assert.equals(1000, ngx.shared.cache._data["guac_jwt_exp:jwt-token"])
+        runner.assert.equals(100, ngx.shared.cache._data["guac_jwt_last_seen:jwt-token"])
+    end)
+
+    runner.it("rejects JWT-backed Guacamole tokens after JWT expiration", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["guac_token:jwt-token"] = "alice",
+                ["token:alice"] = "jwt-token",
+                ["guac_jwt_exp:jwt-token"] = 200,
+                ["guac_jwt_last_seen:jwt-token"] = 199
+            },
+            config = { jwt_guac_idle_timeout_seconds = 60 },
+            var = { arg_token = "jwt-token" },
+            now = 201
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(401, ngx.status)
+        runner.assert.equals(401, ngx._exit_code)
+    end)
 end)
 
 -- ── JWT-from-URL fallback (access phase) ─────────────────────────────────────

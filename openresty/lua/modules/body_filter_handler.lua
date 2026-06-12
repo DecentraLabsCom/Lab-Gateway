@@ -56,6 +56,15 @@ function _M.run(ngx_ctx, chunk, eof, deps)
         return
     end
 
+    if ngx.ctx and ngx.ctx.jwt_authenticated then
+        local jwt_exp = tonumber(ngx.ctx.jwt_exp) or tonumber(dict:get("exp:" .. username_lower))
+        if jwt_exp then
+            dict:set("guac_jwt_exp:" .. decoded.authToken, jwt_exp, 7200)
+            dict:set("guac_jwt_last_seen:" .. decoded.authToken, ngx.time(), 7200)
+            ngx.log(ngx.INFO, "Body filter - JWT-backed session token marked for " .. decoded.username)
+        end
+    end
+
     ngx.log(ngx.INFO, "Body filter - Session token stored for " .. decoded.username)
 end
 

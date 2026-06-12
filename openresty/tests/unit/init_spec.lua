@@ -106,8 +106,26 @@ runner.describe("OpenResty init.lua", function()
         runner.assert.equals("really-strong-secret", ngx.shared.config:get("admin_pass"))
         runner.assert.equals("8443", ngx.shared.config:get("https_port"))
         runner.assert.equals(true, ngx.shared.config:get("auto_logout_on_disconnect"))
+        runner.assert.equals(60, ngx.shared.config:get("jwt_guac_idle_timeout_seconds"))
         runner.assert.equals("http://guacamole:8080/guacamole/api", ngx.shared.config:get("guac_api_url"))
         runner.assert.equals(public_key, ngx.shared.cache:get("public_key"))
+    end)
+
+    runner.it("stores custom JWT Guacamole idle timeout", function()
+        local ngx = run_init({
+            env = {
+                GUAC_ADMIN_USER = "admin",
+                GUAC_ADMIN_PASS = "really-strong-secret",
+                SERVER_NAME = "gateway.example",
+                HTTPS_PORT = "443",
+                JWT_GUAC_IDLE_TIMEOUT_SECONDS = "300"
+            },
+            files = {
+                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+            }
+        })
+
+        runner.assert.equals(300, ngx.shared.config:get("jwt_guac_idle_timeout_seconds"))
     end)
 
     runner.it("enables lite mode when ISSUER points to an external origin", function()

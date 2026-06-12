@@ -105,6 +105,7 @@ services:
       - BASYX_AAS_URL=${BASYX_AAS_URL:-}
       - DEMO_USER=${DEMO_USER:-demo}
       - DEMO_LAB_ID=${DEMO_LAB_ID:-}
+      - JWT_GUAC_IDLE_TIMEOUT_SECONDS=${JWT_GUAC_IDLE_TIMEOUT_SECONDS:-60}
     depends_on:
       guacamole:
         condition: service_healthy
@@ -329,6 +330,7 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_HOSTNAME: mysql
+      API_SESSION_TIMEOUT: ${API_SESSION_TIMEOUT:-15}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/guacamole/"]
       timeout: 10s

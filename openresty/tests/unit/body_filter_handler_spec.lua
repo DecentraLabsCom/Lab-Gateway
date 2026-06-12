@@ -33,6 +33,27 @@ runner.describe("Body filter handler", function()
         local cache = ngx.shared.cache._data
         runner.assert.equals("abc", cache["token:user"])
         runner.assert.equals("user", cache["guac_token:abc"])
+        runner.assert.equals(nil, cache["guac_jwt_exp:abc"])
+    end)
+
+    runner.it("marks JWT-backed Guacamole tokens with expiration and last-seen", function()
+        local ngx = ngx_factory.new({
+            header = { ["Content-Type"] = "application/json" },
+            cache = {},
+            ctx = {
+                jwt_authenticated = true,
+                jwt_exp = 500
+            },
+            now = 100
+        })
+
+        handler.run(ngx, '{"authToken":"jwt-token","username":"JwtUser"}', true, { cjson = cjson })
+
+        local cache = ngx.shared.cache._data
+        runner.assert.equals("jwt-token", cache["token:jwtuser"])
+        runner.assert.equals("jwtuser", cache["guac_token:jwt-token"])
+        runner.assert.equals(500, cache["guac_jwt_exp:jwt-token"])
+        runner.assert.equals(100, cache["guac_jwt_last_seen:jwt-token"])
     end)
 
     runner.it("handles chunked responses", function()
