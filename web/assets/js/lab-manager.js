@@ -25,6 +25,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    let billingAccessReady = false;
+
+    function hasBillingAccess() {
+        return billingAccessReady || hasBillingToken();
+    }
+
     const driverEl = $('#driver');
     const enabledEl = $('#enabled');
     const fromEl = $('#from');
@@ -63,13 +69,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const driverSummary = $('#driverSummary');
     const configStatusEl = $('#configStatus');
 
-    // Auth/health elements
-    const authStatusPill = $('#authStatusPill');
-    const authRefreshBtn = $('#authRefreshBtn');
-    const authRpcEl = $('#authRpc');
-    const authMarketplaceEl = $('#authMarketplace');
-    const authPrivateKeyEl = $('#authPrivateKey');
-
     // Modal controls
     const modal = $('#configModal');
     const configureBtn = $('#configureBtn');
@@ -83,9 +82,8 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#btnTestEmail').addEventListener('click', sendTestEmail);
     driverEl.addEventListener('change', toggleSections);
     configureBtn.addEventListener('click', () => {
-        if (!hasBillingToken()) {
-            promptBillingToken(() => {
-                loadConfig();
+        if (!hasBillingAccess()) {
+            loadConfig(() => {
                 openModal();
             });
             return;
@@ -94,12 +92,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     closeModalBtn.addEventListener('click', closeModal);
     cancelModalBtn.addEventListener('click', closeModal);
-    if (authRefreshBtn) {
-        authRefreshBtn.addEventListener('click', loadAuthHealth);
-    }
 
     loadConfig();
-    loadAuthHealth();
     checkOpsAvailability();
     updateBillingStatusAction();
     loadActivityFeed();
@@ -343,21 +337,16 @@ document.addEventListener('DOMContentLoaded', () => {
         hostNames.forEach(startHeartbeatStream);
     }
 
-    function loadConfig() {
-        if (!hasBillingToken()) {
-            setStatus('Admin access token not configured');
-            updateBillingStatusAction();
-            return;
-        }
-
+    function loadConfig(onSuccess) {
         setStatus('Loading...');
         updateBillingStatusAction();
-        fetch('/billing/admin/notifications', { credentials: 'include' })
+        return fetch('/billing/admin/notifications', { credentials: 'include' })
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
             })
             .then(data => {
+                billingAccessReady = true;
                 const cfg = data.config || {};
                 enabledEl.checked = !!cfg.enabled;
                 driverEl.value = cfg.driver || 'NOOP';
@@ -383,18 +372,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 setStatus('Loaded');
                 updateBillingStatusAction();
                 showToast('Configuration loaded', 'success');
+                if (typeof onSuccess === 'function') {
+                    onSuccess();
+                }
             })
             .catch(err => {
                 console.error(err);
-                setStatus('Error');
+                billingAccessReady = false;
+                const needsToken = err.message === 'HTTP 401';
+                setStatus(needsToken ? 'Admin access token required' : 'Error');
                 updateBillingStatusAction();
-                showToast('Cannot load config (check admin access)', 'error');
+                showToast(needsToken ? 'Enter Wallet & Billing token to load notifications' : 'Cannot load config (check admin access)', 'error');
             });
     }
 
     function saveConfig() {
-        if (!hasBillingToken()) {
-            showToast('Admin access token required for notifications', 'error');
+        if (!hasBillingAccess()) {
+            promptBillingToken(() => saveConfig());
             return;
         }
 
@@ -505,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function promptBillingToken(onSuccess) {
         const handler = window.AuthTokenHandler;
         if (!handler || typeof handler.showTokenModal !== 'function') {
-            showToast('Token modal unavailable on this page', 'error');
+            showToast('Token prompt unavailable on this page', 'error');
             return;
         }
 
@@ -524,6 +518,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         handler.showTokenModal(config, () => {
+            billingAccessReady = true;
             if (typeof onSuccess === 'function') {
                 onSuccess();
             }
@@ -534,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!configStatusEl) {
             return;
         }
-        const needsToken = !hasBillingToken();
+        const needsToken = !hasBillingAccess();
         configStatusEl.classList.toggle('token-required-action', needsToken);
         configStatusEl.title = needsToken ? 'Click to enter Wallet & Billing token' : '';
         configStatusEl.setAttribute('aria-disabled', needsToken ? 'false' : 'true');
@@ -544,12 +539,12 @@ document.addEventListener('DOMContentLoaded', () => {
         configStatusEl.setAttribute('role', 'button');
         configStatusEl.tabIndex = 0;
         configStatusEl.addEventListener('click', () => {
-            if (!hasBillingToken()) {
+            if (!hasBillingAccess()) {
                 promptBillingToken(() => loadConfig());
             }
         });
         configStatusEl.addEventListener('keydown', (e) => {
-            if ((e.key === 'Enter' || e.key === ' ') && !hasBillingToken()) {
+            if ((e.key === 'Enter' || e.key === ' ') && !hasBillingAccess()) {
                 e.preventDefault();
                 promptBillingToken(() => loadConfig());
             }
@@ -557,8 +552,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function sendTestEmail() {
-        if (!hasBillingToken()) {
-            showToast('Admin access token required for notifications', 'error');
+        if (!hasBillingAccess()) {
+            promptBillingToken(() => sendTestEmail());
             return;
         }
 
@@ -1431,114 +1426,6 @@ document.addEventListener('DOMContentLoaded', () => {
         })[ch] || ch);
     }
 
-    // ---- Auth / blockchain-services health ----
-    async function loadAuthHealth() {
-        if (authStatusPill) {
-            authStatusPill.textContent = 'Loading...';
-            authStatusPill.className = 'pill soft';
-        }
-        try {
-            const [blockchainResult, labsOk] = await Promise.all([
-                fetch('/health', { headers: { 'Accept': 'application/json' } })
-                    .then(async res => {
-                        const bodyText = await res.text();
-                        let data = {};
-                        try {
-                            data = bodyText ? JSON.parse(bodyText) : {};
-                        } catch (e) {
-                            data = { parseError: e.message };
-                        }
-                        const ok = res.ok && (data.status === 'UP' || data.status === 'DEGRADED');
-                        return { ok, res, data };
-                    })
-                    .catch(err => ({ ok: false, error: err.message, data: null })),
-                fetch('/guacamole/', { method: 'GET' })
-                    .then(res => res.ok)
-                    .catch(() => false)
-            ]);
-
-            const labsHealthy = labsOk === true;
-            const blockchainHealthy = blockchainResult.ok === true;
-            const overall = computeOverallStatus(labsHealthy, blockchainHealthy);
-
-            renderAuthHealth({
-                statusText: overall.text,
-                pillClass: overall.className,
-                rpcUp: blockchainResult?.data?.rpc_up,
-                rpcClient: blockchainResult?.data?.rpc_client_version,
-                privateKey: blockchainResult?.data?.private_key_present,
-                marketplaceCached: blockchainResult?.data?.marketplace_key_cached,
-                marketplaceUrl: blockchainResult?.data?.marketplace_key_url
-            });
-        } catch (err) {
-            console.error(err);
-            renderAuthHealth({
-                statusText: 'System Unavailable',
-                pillClass: 'bad',
-                rpcUp: false,
-                rpcClient: '-',
-                privateKey: false,
-                marketplaceCached: false,
-                marketplaceUrl: ''
-            });
-            showToast('Auth health check failed', 'error');
-        }
-    }
-
-    function renderAuthHealth(state) {
-        const cls = state.pillClass || statusToClass(state.statusText);
-        if (authStatusPill) {
-            authStatusPill.textContent = state.statusText || 'Unknown';
-            authStatusPill.className = `pill ${cls}`;
-        }
-        if (authRpcEl) authRpcEl.textContent = formatRpc(state.rpcUp, state.rpcClient);
-        if (authMarketplaceEl) authMarketplaceEl.textContent = formatMarketplace(state.marketplaceCached, state.marketplaceUrl);
-        if (authPrivateKeyEl) authPrivateKeyEl.textContent = formatPrivateKey(state.privateKey);
-    }
-
-    function computeOverallStatus(labsOk, blockchainOk) {
-        const available = [];
-        const missing = [];
-        if (labsOk) available.push('Labs');
-        else missing.push('Labs');
-        if (blockchainOk) available.push('Blockchain');
-        else missing.push('Blockchain');
-
-        if (labsOk && blockchainOk) {
-            return { text: 'System Online', className: 'good' };
-        }
-        if (labsOk || blockchainOk) {
-            const missingText = missing.length ? ` (missing: ${missing.join(', ')})` : '';
-            return { text: `Partial: ${available.join(', ')}${missingText}`, className: 'warn' };
-        }
-        return { text: 'System Unavailable (missing: Labs, Blockchain)', className: 'bad' };
-    }
-
-    function statusToClass(status) {
-        const val = (status || '').toString().toUpperCase();
-        if (val.startsWith('SYSTEM ONLINE')) return 'good';
-        if (val.startsWith('PARTIAL')) return 'warn';
-        if (val === 'UP' || val === 'HEALTHY') return 'good';
-        if (val === 'DEGRADED') return 'warn';
-        if (val.startsWith('HTTP')) return 'warn';
-        return 'bad';
-    }
-
-    function formatRpc(up, client) {
-        const state = up === undefined ? 'n/a' : up ? 'up' : 'down';
-        return `${state}${client ? ` (${client})` : ''}`;
-    }
-
-    function formatMarketplace(cached, url) {
-        const state = cached === undefined ? 'unknown' : cached ? 'cached' : 'missing';
-        return url ? `${state} - ${url}` : state;
-    }
-
-    function formatPrivateKey(value) {
-        if (value === true) return 'present';
-        if (value === false) return 'missing';
-        return 'unknown';
-    }
     async function checkOpsAvailability() {
         try {
             const res = await fetch('/ops/health', { method: 'HEAD' });
