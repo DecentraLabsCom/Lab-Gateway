@@ -401,6 +401,7 @@ services:
       - OPS_BIND=0.0.0.0
       - OPS_PORT=8081
       - OPS_CONFIG=/app/hosts.json
+      - OPS_DYNAMIC_CONFIG=/app/data/hosts.json
       - OPS_POLL_ENABLED=true
       - OPS_POLL_INTERVAL=60
       - OPS_RESERVATION_AUTOMATION=true
@@ -408,9 +409,14 @@ services:
       - OPS_RESERVATION_START_LEAD=120
       - OPS_RESERVATION_END_DELAY=60
       - MYSQL_DSN=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
+      - MYSQL_HOSTNAME=mysql
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
+      - ./ops-data:/app/data
     tmpfs:
       - /tmp:size=32M,mode=1777
     read_only: true

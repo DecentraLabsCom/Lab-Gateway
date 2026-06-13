@@ -63,6 +63,15 @@ Copy `hosts.sample.json` and replace credentials.
   - Runs `C:\LabStation\LabStation.exe <command> <args>` via WinRM.
 - `POST /api/heartbeat/poll`
   - Body: `{ host, include_events? }`
+- `GET /api/hosts`
+  - Returns configured ops hosts plus auto-linked Guacamole connection metadata.
+- `POST /api/hosts/discover`
+  - Body: `{ connectionId }`
+  - Probes a Guacamole connection candidate for DNS, WinRM, and optional Lab Station HTTP health.
+- `POST /api/hosts/provision`
+  - Body: `{ connectionId, name?, address?, mac?, labs?, winrmUserEnv, winrmPassEnv, heartbeatPath? }`
+  - Re-runs discovery and only provisions candidates with Lab Station HTTP health or reachable WinRM.
+  - Writes a dynamic host entry using `env:WINRM_*` references only; raw WinRM credentials are rejected.
 - `POST /api/reservations/start`
   - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
 - `POST /api/reservations/end`
@@ -95,6 +104,13 @@ Notification integration knobs:
 - `NOTIFICATION_SERVICE_RETRY_ATTEMPTS` (default `3`)
 - `NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS` (default `5`)
 
+Discovery knobs:
+
+- `OPS_DISCOVERY_TIMEOUT_SECONDS` (default `1.5`)
+- `OPS_DISCOVERY_WINRM_PORTS` (default `5985,5986`)
+- `OPS_DISCOVERY_LABSTATION_PORTS` (default `8765,8088`)
+- `OPS_DISCOVERY_LABSTATION_PATHS` (default `/labstation/health,/health`)
+
 ## Deployment notes
 
 - OpenResty proxies `/ops/` to this service.
@@ -105,4 +121,7 @@ Notification integration knobs:
   - When accessing Lab Manager remotely, ops features will show a network restriction warning.
 - Container runtime uses `waitress` instead of the Flask development server.
 - Prefer `env:VAR_NAME` in `hosts.json` for WinRM credentials.
-- Keep `hosts.json` secrets out of git.
+- `OPS_CONFIG` is the base, usually read-only host catalog.
+- `OPS_DYNAMIC_CONFIG` is the writable dynamic catalog used by Lab Manager provisioning; Docker Compose maps it to `./ops-data/hosts.json`.
+- Store actual `WINRM_USER_*` and `WINRM_PASS_*` values in the service environment, not in either host catalog.
+- Keep `hosts.json` and `ops-data/hosts.json` secrets out of git.

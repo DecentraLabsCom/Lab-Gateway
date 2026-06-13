@@ -6,6 +6,8 @@ Exposes a small Flask API and optional scheduler.
 import json
 import logging
 import os
+import re
+import socket
 import subprocess
 import time
 from datetime import datetime, timezone, timedelta
@@ -14,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.engine import Engine, Connection
 from wakeonlan import send_magic_packet
 import requests
@@ -24,7 +27,14 @@ import aas_generator
 APP = Flask(__name__)
 
 CONFIG_PATH = os.getenv("OPS_CONFIG", os.path.join(os.path.dirname(__file__), "hosts.json"))
+DYNAMIC_CONFIG_PATH = os.getenv("OPS_DYNAMIC_CONFIG", "/app/data/hosts.json")
 MYSQL_DSN = os.getenv("MYSQL_DSN")
+GUACAMOLE_MYSQL_DSN = os.getenv("GUACAMOLE_MYSQL_DSN")
+GUACAMOLE_MYSQL_DATABASE = os.getenv("GUACAMOLE_MYSQL_DATABASE") or os.getenv("MYSQL_DATABASE")
+MYSQL_HOSTNAME = os.getenv("MYSQL_HOSTNAME") or os.getenv("MYSQL_HOST") or "mysql"
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_USER = os.getenv("MYSQL_USER")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 DEFAULT_LABSTATION_EXE = r"C:\LabStation\LabStation.exe"
 WINRM_READ_TIMEOUT = int(os.getenv("OPS_WINRM_READ_TIMEOUT", "30"))
 WINRM_OPERATION_TIMEOUT = int(os.getenv("OPS_WINRM_OPERATION_TIMEOUT", "20"))
@@ -53,15 +63,58 @@ NOTIFICATION_SERVICE_ENABLED = os.getenv("NOTIFICATION_SERVICE_ENABLED", "true")
 NOTIFICATION_SERVICE_RETRY_ATTEMPTS = max(0, int(os.getenv("NOTIFICATION_SERVICE_RETRY_ATTEMPTS", "3")))
 NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS = max(1, int(os.getenv("NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS", "5")))
 HEARTBEAT_SSE_INTERVAL_SECONDS = max(1, int(os.getenv("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")))
+DISCOVERY_TIMEOUT_SECONDS = max(0.2, float(os.getenv("OPS_DISCOVERY_TIMEOUT_SECONDS", "1.5")))
+DISCOVERY_WINRM_PORTS = [
+    int(port.strip())
+    for port in os.getenv("OPS_DISCOVERY_WINRM_PORTS", "5985,5986").split(",")
+    if port.strip().isdigit()
+]
+DISCOVERY_LABSTATION_PORTS = [
+    int(port.strip())
+    for port in os.getenv("OPS_DISCOVERY_LABSTATION_PORTS", "8765,8088").split(",")
+    if port.strip().isdigit()
+]
+DISCOVERY_LABSTATION_PATHS = [
+    path.strip() if path.strip().startswith("/") else f"/{path.strip()}"
+    for path in os.getenv("OPS_DISCOVERY_LABSTATION_PATHS", "/labstation/health,/health").split(",")
+    if path.strip()
+]
+ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+HOST_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+ENOUGH_DISCOVERY_SIGNALS = {"labstation-detected", "winrm-reachable"}
 
 
-def load_config() -> Dict[str, Any]:
-    if not os.path.exists(CONFIG_PATH):
-        logging.warning("Config file %s not found, continuing with empty host list", CONFIG_PATH)
+def read_hosts_config(path: str, missing_ok: bool = True) -> Dict[str, Any]:
+    if not path or not os.path.exists(path):
+        if not missing_ok:
+            logging.warning("Config file %s not found, continuing with empty host list", path)
         return {"hosts": []}
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    # Resolve env-based secrets if they use the form "env:VAR_NAME"
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        return {"hosts": []}
+    if not isinstance(data.get("hosts"), list):
+        data["hosts"] = []
+    return data
+
+
+def merge_host_configs(base: Dict[str, Any], dynamic: Dict[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    for source in (base, dynamic):
+        for host in source.get("hosts", []):
+            if not isinstance(host, dict):
+                continue
+            name = str(host.get("name") or "").strip()
+            if not name:
+                continue
+            merged[name.lower()] = dict(host)
+    return {"hosts": list(merged.values())}
+
+
+def resolve_host_secret_refs(raw: Dict[str, Any]) -> Dict[str, Any]:
+    # Resolve env-based secrets if they use the form "env:VAR_NAME".
+    # Missing env vars are allowed so UI-provisioned hosts can be visible as
+    # not yet operable without storing plaintext credentials.
     for host in raw.get("hosts", []):
         for key in ("winrm_user", "winrm_pass"):
             val = host.get(key)
@@ -77,8 +130,14 @@ def load_config() -> Dict[str, Any]:
                     )
                 host[key] = env_val or ""
         if not host.get("winrm_user") or not host.get("winrm_pass"):
-            raise RuntimeError(f"Missing WinRM credentials for host {host.get('name', '<unknown>')}")
+            logging.warning("Missing WinRM credentials for host %s", host.get("name", "<unknown>"))
     return raw
+
+
+def load_config() -> Dict[str, Any]:
+    base = read_hosts_config(CONFIG_PATH, missing_ok=False)
+    dynamic = read_hosts_config(DYNAMIC_CONFIG_PATH, missing_ok=True)
+    return resolve_host_secret_refs(merge_host_configs(base, dynamic))
 
 
 class HostRegistry:
@@ -126,6 +185,33 @@ class HostRegistry:
 HOSTS_LOCK = RLock()
 HOSTS = HostRegistry(load_config())
 DB_ENGINE: Optional[Engine] = create_engine(MYSQL_DSN, pool_pre_ping=True) if MYSQL_DSN else None
+
+
+def build_guacamole_dsn() -> Optional[str]:
+    if GUACAMOLE_MYSQL_DSN:
+        return GUACAMOLE_MYSQL_DSN
+    if MYSQL_USER and MYSQL_PASSWORD and GUACAMOLE_MYSQL_DATABASE:
+        return URL.create(
+            "mysql+pymysql",
+            username=MYSQL_USER,
+            password=MYSQL_PASSWORD,
+            host=MYSQL_HOSTNAME,
+            port=MYSQL_PORT,
+            database=GUACAMOLE_MYSQL_DATABASE,
+        )
+    if not MYSQL_DSN or not GUACAMOLE_MYSQL_DATABASE:
+        return None
+    try:
+        return str(make_url(MYSQL_DSN).set(database=GUACAMOLE_MYSQL_DATABASE))
+    except Exception as exc:
+        logging.warning("Unable to derive Guacamole DSN from MYSQL_DSN: %s", exc)
+        return None
+
+
+GUACAMOLE_DSN = build_guacamole_dsn()
+GUACAMOLE_DB_ENGINE: Optional[Engine] = (
+    create_engine(GUACAMOLE_DSN, pool_pre_ping=True) if GUACAMOLE_DSN else None
+)
 
 
 def to_utc(ts: str) -> Optional[datetime]:
@@ -1360,6 +1446,381 @@ def api_reservation_timeline():
         logging.error("Timeline error: %s", exc)
         return jsonify({"error": str(exc)}), 500
     return jsonify(data)
+
+
+def normalize_match_key(value: Optional[Any]) -> str:
+    return str(value or "").strip().lower()
+
+
+def tcp_port_open(host: str, port: int, timeout: Optional[float] = None) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout or DISCOVERY_TIMEOUT_SECONDS):
+            return True
+    except OSError:
+        return False
+
+
+def response_looks_like_labstation(response: requests.Response) -> Tuple[bool, Optional[str]]:
+    service = None
+    try:
+        body = response.json()
+        if isinstance(body, dict):
+            service = body.get("service") or body.get("name") or body.get("app")
+            text_blob = json.dumps(body).lower()
+        else:
+            text_blob = str(body).lower()
+    except ValueError:
+        text_blob = response.text.lower()
+
+    detected = "labstation" in text_blob or str(service or "").lower() == "labstation"
+    return detected, service
+
+
+def probe_labstation_http(host: str) -> Dict[str, Any]:
+    if not host:
+        return {"checked": False, "detected": False, "status": "missing-hostname"}
+
+    for port in DISCOVERY_LABSTATION_PORTS:
+        for path in DISCOVERY_LABSTATION_PATHS:
+            url = f"http://{host}:{port}{path}"
+            try:
+                response = requests.get(url, timeout=DISCOVERY_TIMEOUT_SECONDS)
+            except requests.RequestException:
+                continue
+            detected, service = response_looks_like_labstation(response)
+            if detected:
+                return {
+                    "checked": True,
+                    "detected": True,
+                    "url": url,
+                    "statusCode": response.status_code,
+                    "service": service,
+                }
+
+    return {"checked": True, "detected": False, "status": "no-response"}
+
+
+def resolve_guacamole_connection(connection_id: Any) -> Optional[Dict[str, Any]]:
+    try:
+        wanted = int(connection_id)
+    except (TypeError, ValueError):
+        return None
+    connections, _ = load_guacamole_connections()
+    for connection in connections:
+        if connection.get("id") == wanted:
+            return connection
+    return None
+
+
+def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
+    host = normalize_match_key(connection.get("hostname"))
+    if not host:
+        return {
+            "connection": connection,
+            "status": "missing-hostname",
+            "checks": {
+                "dns": False,
+                "winrm": {},
+                "labStationHttp": {"checked": False, "detected": False, "status": "missing-hostname"},
+            },
+        }
+
+    try:
+        socket.getaddrinfo(host, None)
+        dns_ok = True
+    except OSError:
+        dns_ok = False
+
+    winrm_checks = {
+        str(port): tcp_port_open(host, port, DISCOVERY_TIMEOUT_SECONDS)
+        for port in DISCOVERY_WINRM_PORTS
+    }
+    labstation_http = probe_labstation_http(host)
+
+    if labstation_http.get("detected") is True:
+        status = "labstation-detected"
+    elif any(winrm_checks.values()):
+        status = "winrm-reachable"
+    elif dns_ok:
+        status = "host-resolves"
+    else:
+        status = "no-response"
+
+    return {
+        "connection": connection,
+        "status": status,
+        "checks": {
+            "dns": dns_ok,
+            "winrm": winrm_checks,
+            "labStationHttp": labstation_http,
+        },
+        "opsHostDraft": {
+            "name": connection.get("hostname"),
+            "address": connection.get("hostname"),
+            "winrm_transport": "ntlm",
+            "heartbeat_path": r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
+            "events_path": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+            "labs": [],
+        },
+    }
+
+
+def require_env_ref_name(value: Any, field: str) -> Tuple[Optional[str], Optional[str]]:
+    candidate = str(value or "").strip()
+    if candidate.startswith("env:"):
+        candidate = candidate.split(":", 1)[1].strip()
+    if not ENV_VAR_NAME_RE.fullmatch(candidate):
+        return None, f"{field} must be an environment variable name like WINRM_USER_LAB_WS_01"
+    return candidate, None
+
+
+def sanitize_host_name(value: Any, fallback: str) -> Tuple[Optional[str], Optional[str]]:
+    name = str(value or fallback or "").strip()
+    if not HOST_NAME_RE.fullmatch(name):
+        return None, "name must contain only letters, numbers, dots, underscores, and hyphens"
+    return name, None
+
+
+def normalize_labs(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = value.split(",")
+    elif isinstance(value, list):
+        parts = value
+    else:
+        parts = []
+    return [str(part).strip() for part in parts if str(part).strip()]
+
+
+def load_dynamic_config() -> Dict[str, Any]:
+    return read_hosts_config(DYNAMIC_CONFIG_PATH, missing_ok=True)
+
+
+def write_dynamic_config(config: Dict[str, Any]) -> None:
+    directory = os.path.dirname(DYNAMIC_CONFIG_PATH) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{DYNAMIC_CONFIG_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(config, handle, indent=2)
+        handle.write("\n")
+    os.replace(tmp_path, DYNAMIC_CONFIG_PATH)
+
+
+def upsert_dynamic_host(host_config: Dict[str, Any]) -> None:
+    config = load_dynamic_config()
+    hosts = [host for host in config.get("hosts", []) if isinstance(host, dict)]
+    key = str(host_config.get("name") or "").strip().lower()
+    replaced = False
+    for index, host in enumerate(hosts):
+        if str(host.get("name") or "").strip().lower() == key:
+            hosts[index] = host_config
+            replaced = True
+            break
+    if not replaced:
+        hosts.append(host_config)
+    config["hosts"] = hosts
+    write_dynamic_config(config)
+
+
+def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    fallback_name = connection.get("hostname") or connection.get("name")
+    name, error = sanitize_host_name(payload.get("name"), fallback_name)
+    if error:
+        return None, error
+    address = str(payload.get("address") or connection.get("hostname") or "").strip()
+    if not address:
+        return None, "address is required"
+
+    user_env, error = require_env_ref_name(payload.get("winrmUserEnv"), "winrmUserEnv")
+    if error:
+        return None, error
+    pass_env, error = require_env_ref_name(payload.get("winrmPassEnv"), "winrmPassEnv")
+    if error:
+        return None, error
+
+    host_config = {
+        "name": name,
+        "address": address,
+        "winrm_user": f"env:{user_env}",
+        "winrm_pass": f"env:{pass_env}",
+        "winrm_transport": str(payload.get("winrmTransport") or "ntlm").strip() or "ntlm",
+        "heartbeat_path": str(
+            payload.get("heartbeatPath")
+            or r"C:\LabStation\labstation\data\telemetry\heartbeat.json"
+        ),
+        "events_path": str(
+            payload.get("eventsPath")
+            or r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl"
+        ),
+        "labs": normalize_labs(payload.get("labs")),
+    }
+    mac = str(payload.get("mac") or "").strip()
+    if mac:
+        host_config["mac"] = mac
+    return host_config, None
+
+
+def safe_host_inventory_entry(host: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "name": host.get("name"),
+        "address": host.get("address"),
+        "mac": host.get("mac"),
+        "mode": host.get("mode"),
+        "labs": [str(lab) for lab in host.get("labs", [])],
+        "quarantined": bool(host.get("quarantined", False)),
+        "winrmConfigured": bool(host.get("winrm_user") and host.get("winrm_pass")),
+    }
+
+
+def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    if not GUACAMOLE_DB_ENGINE:
+        return [], "Guacamole database not configured"
+
+    try:
+        with GUACAMOLE_DB_ENGINE.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT
+                        c.connection_id,
+                        c.connection_name,
+                        c.protocol,
+                        MAX(CASE WHEN p.parameter_name = 'hostname' THEN p.parameter_value END) AS hostname,
+                        MAX(CASE WHEN p.parameter_name = 'port' THEN p.parameter_value END) AS port
+                    FROM guacamole_connection c
+                    LEFT JOIN guacamole_connection_parameter p
+                        ON p.connection_id = c.connection_id
+                        AND p.parameter_name IN ('hostname', 'port')
+                    GROUP BY c.connection_id, c.connection_name, c.protocol
+                    ORDER BY c.connection_id ASC
+                    """
+                )
+            ).mappings().all()
+    except Exception as exc:
+        logging.warning("Unable to load Guacamole connections: %s", exc)
+        return [], str(exc)
+
+    return [
+        {
+            "id": row.get("connection_id"),
+            "name": row.get("connection_name"),
+            "protocol": row.get("protocol"),
+            "hostname": row.get("hostname"),
+            "port": row.get("port"),
+        }
+        for row in rows
+    ], None
+
+
+def build_host_inventory() -> Dict[str, Any]:
+    with HOSTS_LOCK:
+        hosts = HOSTS.all_hosts()
+    guacamole_connections, guacamole_error = load_guacamole_connections()
+    claimed_ids = set()
+    host_entries = []
+
+    for host in hosts:
+        match_keys = {
+            normalize_match_key(host.get("name")),
+            normalize_match_key(host.get("address")),
+        }
+        match_keys.discard("")
+        matches = [
+            conn for conn in guacamole_connections
+            if normalize_match_key(conn.get("hostname")) in match_keys
+        ]
+        for conn in matches:
+            claimed_ids.add(conn.get("id"))
+
+        if len(matches) == 1:
+            status = "linked"
+        elif len(matches) > 1:
+            status = "ambiguous"
+        else:
+            status = "missing"
+
+        entry = safe_host_inventory_entry(host)
+        entry["guacamole"] = {
+            "status": status,
+            "connections": matches,
+        }
+        host_entries.append(entry)
+
+    unmatched = [
+        conn for conn in guacamole_connections
+        if conn.get("id") not in claimed_ids
+    ]
+
+    return {
+        "hosts": host_entries,
+        "guacamoleAvailable": guacamole_error is None,
+        "guacamoleError": guacamole_error,
+        "guacamoleUnmatched": unmatched,
+    }
+
+
+@APP.route("/api/hosts", methods=["GET"])
+def api_hosts_inventory():
+    return jsonify(build_host_inventory())
+
+
+@APP.route("/api/hosts/discover", methods=["POST"])
+def api_hosts_discover():
+    payload = request.get_json(force=True, silent=True) or {}
+    connection_id = payload.get("connectionId") or payload.get("connection_id")
+    if connection_id in (None, ""):
+        return jsonify({"error": "connectionId is required"}), 400
+
+    connection = resolve_guacamole_connection(connection_id)
+    if not connection:
+        return jsonify({"error": f"Guacamole connection {connection_id} not found"}), 404
+
+    return jsonify(discover_labstation_candidate(connection))
+
+
+@APP.route("/api/hosts/provision", methods=["POST"])
+def api_hosts_provision():
+    payload = request.get_json(force=True, silent=True) or {}
+    connection_id = payload.get("connectionId") or payload.get("connection_id")
+    if connection_id in (None, ""):
+        return jsonify({"error": "connectionId is required"}), 400
+
+    connection = resolve_guacamole_connection(connection_id)
+    if not connection:
+        return jsonify({"error": f"Guacamole connection {connection_id} not found"}), 404
+
+    discovery = discover_labstation_candidate(connection)
+    if discovery.get("status") not in ENOUGH_DISCOVERY_SIGNALS:
+        return jsonify({
+            "error": "insufficient discovery signal for ops host provisioning",
+            "discovery": discovery,
+        }), 409
+
+    host_config, error = build_provisioned_host(payload, connection)
+    if error:
+        return jsonify({"error": error}), 400
+
+    existing = HOSTS.get(host_config["name"])
+    if existing:
+        return jsonify({"error": f"host {host_config['name']} already exists"}), 409
+
+    try:
+        upsert_dynamic_host(host_config)
+        count, reload_error = reload_hosts()
+    except Exception as exc:
+        logging.exception("Failed to provision ops host")
+        return jsonify({"error": str(exc)}), 500
+
+    if reload_error:
+        return jsonify({"error": reload_error}), 500
+
+    return jsonify({
+        "provisioned": True,
+        "hosts": count,
+        "host": safe_host_inventory_entry(host_config),
+        "discoveryStatus": discovery.get("status"),
+    })
 
 
 @APP.route("/api/hosts/reload", methods=["POST"])

@@ -37,15 +37,17 @@
                             <p>Poll heartbeat and trigger LabStation commands via /ops.</p>
                         </div>
                         <div class="actions inline-actions">
-                            <input type="text" id="hostInput" class="host-input" placeholder="lab-ws-01">
-                            <button class="ghost-btn" id="addHostBtn"><i class="fas fa-plus"></i> Add host</button>
                             <button class="primary-btn" id="refreshHostsBtn"><i class="fas fa-rotate-right"></i> Refresh</button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="hint" id="opsHint">Hosts are stored locally in your browser. Ensure ops-worker/hosts.json has matching entries and WinRM creds.</div>
+                        <div class="hint" id="opsHint">Hosts are loaded from ops-worker/hosts.json plus provisioned hosts in ops-data/hosts.json, then auto-linked to matching Guacamole connections.</div>
                         <div class="host-list" id="hostList">
-                            <div class="empty">Add a host to start polling heartbeat.</div>
+                            <div class="empty">No ops hosts loaded yet.</div>
+                        </div>
+                        <div class="hint" style="margin-top: 1rem;">Guacamole connections without an ops host</div>
+                        <div class="host-list" id="guacamoleCandidateList">
+                            <div class="empty">No Guacamole candidates loaded yet.</div>
                         </div>
                     </div>
                 </div>
@@ -339,6 +341,54 @@
             <div class="modal-footer">
                 <div class="footer-actions">
                     <button class="ghost-btn" id="cancelModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="provisionHostModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-desktop"></i> Configure Ops Host</h3>
+                <button class="ghost-btn icon-btn" id="closeProvisionHostModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="provisionConnectionId">
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Name</span>
+                        <input type="text" id="provisionHostName" placeholder="lab-ws-01">
+                    </label>
+                    <label class="field">
+                        <span>Address</span>
+                        <input type="text" id="provisionHostAddress" placeholder="lab-ws-01">
+                    </label>
+                    <label class="field">
+                        <span>MAC</span>
+                        <input type="text" id="provisionHostMac" placeholder="00:11:22:33:44:55">
+                    </label>
+                    <label class="field">
+                        <span>Labs</span>
+                        <input type="text" id="provisionHostLabs" placeholder="1, 2">
+                    </label>
+                    <label class="field">
+                        <span>WinRM user env</span>
+                        <input type="text" id="provisionWinrmUserEnv" placeholder="WINRM_USER_LAB_WS_01">
+                    </label>
+                    <label class="field">
+                        <span>WinRM password env</span>
+                        <input type="text" id="provisionWinrmPassEnv" placeholder="WINRM_PASS_LAB_WS_01">
+                    </label>
+                    <label class="field full">
+                        <span>Heartbeat path</span>
+                        <input type="text" id="provisionHeartbeatPath" placeholder="C:\LabStation\labstation\data\telemetry\heartbeat.json">
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="cancelProvisionHost">Cancel</button>
+                    <button class="primary-btn" id="saveProvisionHost"><i class="fas fa-save"></i> Save Host</button>
                 </div>
             </div>
         </div>
