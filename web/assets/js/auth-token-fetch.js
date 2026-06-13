@@ -11,7 +11,15 @@
             key: 'dlabs_lab_manager_token',
             header: 'X-Lab-Manager-Token'
         },
+        '/lab-admin': {
+            key: 'dlabs_lab_manager_token',
+            header: 'X-Lab-Manager-Token'
+        },
         '/ops': {
+            key: 'dlabs_lab_manager_token',
+            header: 'X-Lab-Manager-Token'
+        },
+        '/aas-admin': {
             key: 'dlabs_lab_manager_token',
             header: 'X-Lab-Manager-Token'
         },

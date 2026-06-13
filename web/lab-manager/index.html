@@ -266,7 +266,7 @@
                                 <input type="text" id="aasLinkKey" placeholder="fmu-access-key">
                             </label>
                             <label class="field">
-                                <span>Lab ID <span class="muted-text">(numeric on-chain ID — same as in FMU Sync)</span></span>
+                                <span class="inline-help-label">Lab ID <span class="muted-text">(on-chain ID — same as in FMU Sync)</span></span>
                                 <input type="text" id="aasLinkLabId" placeholder="42">
                             </label>
                             <label class="field full">
@@ -336,28 +336,6 @@
                 <div class="card">
                     <div class="card-header">
                         <div>
-                            <h2>Lab Connections</h2>
-                            <p>Guacamole / remote access endpoints.</p>
-                        </div>
-                        <span class="pill soft">coming soon</span>
-                    </div>
-                    <div class="card-body list">
-                        <div class="item">
-                            <div class="item-title">Guacamole</div>
-                            <div class="item-meta">Synchronized via Gateway</div>
-                        </div>
-                        <div class="item">
-                            <div class="item-title">Additional integrations</div>
-                            <div class="item-meta">SSH/VNC/HTTP endpoints can be shown here.</div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="grid two-columns">
-                <div class="card">
-                    <div class="card-header">
-                        <div>
                             <h2>Upcoming Reservations</h2>
                             <p>Auto-sync to calendar when approved.</p>
                         </div>
@@ -367,7 +345,9 @@
                         <div class="empty">No data yet. This will list approved/pending reservations with start/end and lab.</div>
                     </div>
                 </div>
+            </section>
 
+            <section class="grid single-column">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -538,7 +518,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="../assets/js/auth-token-handler.js"></script>
+    <script src="../assets/js/auth-token-handler.js?v=lab-admin-strict-token"></script>
     <script src="../assets/js/lab-manager.js"></script>
     <script src="../assets/js/lab-publisher.js"></script>
 </body>

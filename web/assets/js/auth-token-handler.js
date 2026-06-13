@@ -21,12 +21,29 @@
             title: 'Lab Manager Access Token',
             description: 'This area requires a Lab Manager access token.'
         },
+        '/lab-admin': {
+            key: TOKEN_STORAGE.LAB_MANAGER,
+            header: 'X-Lab-Manager-Token',
+            cookie: 'lab_manager_token',
+            title: 'Lab Manager Access Token',
+            description: 'Lab publishing operations require a Lab Manager access token.',
+            strictToken: true
+        },
         '/ops': {
             key: TOKEN_STORAGE.LAB_MANAGER,
             header: 'X-Lab-Manager-Token',
             cookie: 'lab_manager_token',
             title: 'Lab Manager Access Token',
-            description: 'This area requires a Lab Manager access token.'
+            description: 'Lab Station operations require a Lab Manager access token.',
+            strictToken: true
+        },
+        '/aas-admin': {
+            key: TOKEN_STORAGE.LAB_MANAGER,
+            header: 'X-Lab-Manager-Token',
+            cookie: 'lab_manager_token',
+            title: 'Lab Manager Access Token',
+            description: 'AAS administration requires a Lab Manager access token.',
+            strictToken: true
         },
         '/wallet': {
             key: TOKEN_STORAGE.BILLING,
@@ -96,6 +113,11 @@
         }
         return false;
     }
+
+    const activeTokenPrompt = {
+        key: null,
+        callbacks: []
+    };
 
     // Create token modal HTML
     function createTokenModal() {
@@ -182,13 +204,23 @@
     // Show token modal
     function showTokenModal(config, callback) {
         createTokenModal();
-        
+
         const modal = document.getElementById('authTokenModal');
+        if (activeTokenPrompt.key === config.key && modal.style.display === 'block') {
+            if (callback) {
+                activeTokenPrompt.callbacks.push(callback);
+            }
+            return;
+        }
+
         const title = document.getElementById('authTokenModalTitle');
         const description = document.getElementById('authTokenModalDescription');
         const input = document.getElementById('authTokenInput');
         const submitBtn = document.getElementById('authTokenSubmit');
         const errorDiv = document.getElementById('authTokenError');
+
+        activeTokenPrompt.key = config.key;
+        activeTokenPrompt.callbacks = callback ? [callback] : [];
 
         // Set content
         title.textContent = config.title;
@@ -223,10 +255,11 @@
                 localStorage.removeItem(config.key);
             }
 
+            const callbacks = activeTokenPrompt.callbacks.slice();
+            activeTokenPrompt.key = null;
+            activeTokenPrompt.callbacks = [];
             hideTokenModal();
-            if (callback) {
-                callback(token);
-            }
+            callbacks.forEach(cb => cb(token));
         };
     }
 
@@ -239,6 +272,8 @@
                 modal.style.display = 'none';
             }, 300);
         }
+        activeTokenPrompt.key = null;
+        activeTokenPrompt.callbacks = [];
     }
 
     // Show error in modal
@@ -292,6 +327,9 @@
 
     function shouldBypassTokenPrompt(config) {
         if (!config) {
+            return false;
+        }
+        if (config.strictToken) {
             return false;
         }
         // If this client is already in a private/loopback context and no token

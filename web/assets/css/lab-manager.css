@@ -172,6 +172,10 @@ body {
 .subcard-header { display: flex; align-items: center; justify-content: space-between; }
 .subcard-header-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .muted-text { color: var(--muted); }
+.inline-help-label {
+    white-space: nowrap;
+    font-size: 0.88rem;
+}
 .switch {
     position: relative;
     display: inline-block;

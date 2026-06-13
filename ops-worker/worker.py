@@ -30,6 +30,7 @@ CONFIG_PATH = os.getenv("OPS_CONFIG", os.path.join(os.path.dirname(__file__), "h
 DYNAMIC_CONFIG_PATH = os.getenv("OPS_DYNAMIC_CONFIG", "/app/data/hosts.json")
 MYSQL_DSN = os.getenv("MYSQL_DSN")
 GUACAMOLE_MYSQL_DSN = os.getenv("GUACAMOLE_MYSQL_DSN")
+OPS_MYSQL_DATABASE = os.getenv("OPS_MYSQL_DATABASE") or os.getenv("BLOCKCHAIN_MYSQL_DATABASE")
 GUACAMOLE_MYSQL_DATABASE = os.getenv("GUACAMOLE_MYSQL_DATABASE") or os.getenv("MYSQL_DATABASE")
 MYSQL_HOSTNAME = os.getenv("MYSQL_HOSTNAME") or os.getenv("MYSQL_HOST") or "mysql"
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
@@ -184,7 +185,25 @@ class HostRegistry:
 
 HOSTS_LOCK = RLock()
 HOSTS = HostRegistry(load_config())
-DB_ENGINE: Optional[Engine] = create_engine(MYSQL_DSN, pool_pre_ping=True) if MYSQL_DSN else None
+
+
+def build_ops_dsn():
+    if MYSQL_DSN:
+        return MYSQL_DSN
+    if MYSQL_USER and MYSQL_PASSWORD and OPS_MYSQL_DATABASE:
+        return URL.create(
+            "mysql+pymysql",
+            username=MYSQL_USER,
+            password=MYSQL_PASSWORD,
+            host=MYSQL_HOSTNAME,
+            port=MYSQL_PORT,
+            database=OPS_MYSQL_DATABASE,
+        )
+    return None
+
+
+OPS_DSN = build_ops_dsn()
+DB_ENGINE: Optional[Engine] = create_engine(OPS_DSN, pool_pre_ping=True) if OPS_DSN else None
 
 
 def build_guacamole_dsn() -> Optional[str]:
@@ -2037,7 +2056,7 @@ class ReservationOrchestrator:
             logging.info("Reservation orchestrator disabled (OPS_RESERVATION_AUTOMATION=false)")
             return 0
         if not self.engine:
-            logging.warning("Reservation orchestrator disabled: MYSQL_DSN not configured")
+            logging.warning("Reservation orchestrator disabled: ops database DSN is not configured")
             return 0
         scheduler.add_job(
             self.scan_once,
