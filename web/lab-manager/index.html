@@ -33,6 +33,148 @@
                 <div class="card">
                     <div class="card-header">
                         <div>
+                            <h2>Labs</h2>
+                            <p>Publish remote labs and FMU simulations from this Gateway.</p>
+                        </div>
+                        <div class="actions inline-actions">
+                            <button class="ghost-btn" id="labPublisherRefreshBtn"><i class="fas fa-rotate-right"></i> Refresh</button>
+                            <button class="primary-btn" id="labPublisherSubmitBtn"><i class="fas fa-upload"></i> Publish Lab</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="publisher-status" id="labPublisherStatus">Loading provider status...</div>
+                        <div class="publisher-layout">
+                            <div class="subcard">
+                                <div class="subcard-header">
+                                    <h3><i class="fas fa-compass"></i> Detected Resources</h3>
+                                </div>
+                                <div class="form-grid">
+                                    <label class="field">
+                                        <span>Resource Type</span>
+                                        <select id="labResourceType">
+                                            <option value="0">Remote lab</option>
+                                            <option value="1">FMU simulation</option>
+                                        </select>
+                                    </label>
+                                    <label class="field">
+                                        <span>Detected Resource</span>
+                                        <select id="labDetectedResource">
+                                            <option value="">Manual entry</option>
+                                        </select>
+                                    </label>
+                                    <label class="field">
+                                        <span>Setup Mode</span>
+                                        <select id="labSetupMode">
+                                            <option value="full">Full Setup</option>
+                                            <option value="quick">Quick Setup</option>
+                                        </select>
+                                    </label>
+                                    <label class="field">
+                                        <span>Publish State</span>
+                                        <select id="labListImmediately">
+                                            <option value="true">Publish and list</option>
+                                            <option value="false">Create draft</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div class="resource-preview" id="labResourcePreview">No resource selected.</div>
+                            </div>
+
+                            <div class="subcard">
+                                <div class="subcard-header">
+                                    <h3><i class="fas fa-cube"></i> On-chain Fields</h3>
+                                </div>
+                                <div class="form-grid">
+                                    <label class="field">
+                                        <span>Price (raw service credits)</span>
+                                        <input type="number" id="labPrice" min="0" step="1" value="0">
+                                    </label>
+                                    <label class="field">
+                                        <span>Access Key</span>
+                                        <input type="text" id="labAccessKey" placeholder="guacamole-connection-id or model.fmu">
+                                    </label>
+                                    <label class="field full">
+                                        <span>Access URI</span>
+                                        <input type="url" id="labAccessURI" placeholder="https://gateway.example/guacamole">
+                                    </label>
+                                    <label class="field full" id="quickMetadataField" style="display:none;">
+                                        <span>Metadata URL</span>
+                                        <input type="url" id="labMetadataUrl" placeholder="https://.../metadata.json">
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="subcard" id="fullMetadataPanel">
+                                <div class="subcard-header">
+                                    <h3><i class="fas fa-file-code"></i> Metadata</h3>
+                                </div>
+                                <div class="form-grid">
+                                    <label class="field">
+                                        <span>Name</span>
+                                        <input type="text" id="labName" maxlength="160" placeholder="Basic Electronics Lab">
+                                    </label>
+                                    <label class="field">
+                                        <span>Category</span>
+                                        <input type="text" id="labCategory" placeholder="Electronics, Control">
+                                    </label>
+                                    <label class="field full">
+                                        <span>Description</span>
+                                        <textarea id="labDescription" rows="4" placeholder="What users can do in this lab..."></textarea>
+                                    </label>
+                                    <label class="field full">
+                                        <span>Keywords</span>
+                                        <input type="text" id="labKeywords" placeholder="circuits, fmu, simulation">
+                                    </label>
+                                    <label class="field">
+                                        <span>Time Slots (minutes)</span>
+                                        <input type="text" id="labTimeSlots" value="30,60">
+                                    </label>
+                                    <label class="field">
+                                        <span>Timezone</span>
+                                        <input type="text" id="labTimezone" value="Europe/Madrid">
+                                    </label>
+                                    <label class="field">
+                                        <span>Available Days</span>
+                                        <input type="text" id="labAvailableDays" value="MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY">
+                                    </label>
+                                    <label class="field">
+                                        <span>Available Hours</span>
+                                        <input type="text" id="labAvailableHours" value="09:00-17:00">
+                                    </label>
+                                    <label class="field">
+                                        <span>Max Concurrent Users</span>
+                                        <input type="number" id="labMaxConcurrentUsers" min="1" step="1" value="1">
+                                    </label>
+                                    <label class="field">
+                                        <span>Content ID</span>
+                                        <input type="text" id="labContentId" placeholder="auto-generated">
+                                    </label>
+                                    <label class="field">
+                                        <span>Images</span>
+                                        <input type="file" id="labImages" accept="image/*" multiple>
+                                    </label>
+                                    <label class="field">
+                                        <span>Documents</span>
+                                        <input type="file" id="labDocs" accept="application/pdf" multiple>
+                                    </label>
+                                </div>
+                                <div class="asset-list" id="labAssetList"></div>
+                            </div>
+                        </div>
+                        <div class="subcard labs-list-card">
+                            <div class="subcard-header">
+                                <h3><i class="fas fa-list"></i> Published Labs</h3>
+                            </div>
+                            <div id="labPublisherList" class="lab-publisher-list empty">No labs loaded yet.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="grid single-column">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
                             <h2>Lab Station Ops</h2>
                             <p>Poll heartbeat and trigger LabStation commands via /ops.</p>
                         </div>
@@ -398,5 +540,6 @@
 
     <script src="../assets/js/auth-token-handler.js"></script>
     <script src="../assets/js/lab-manager.js"></script>
+    <script src="../assets/js/lab-publisher.js"></script>
 </body>
 </html>

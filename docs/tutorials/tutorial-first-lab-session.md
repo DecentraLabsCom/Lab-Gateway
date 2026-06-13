@@ -139,8 +139,22 @@ confirm the desktop appears and the lab application launches.
 
 ## Part 3 — Publish the lab on the Marketplace
 
-Lab publishing is done entirely from the **Marketplace**. You need to be logged in with
-your institutional SSO credentials and have the provider role confirmed (Part 1 complete).
+Lab publishing can be done from either the **Marketplace** or the local **Lab Manager**.
+Use Marketplace publishing when the provider has eduGAIN/SSO access. Use Lab Manager
+publishing when the provider was onboarded with a Marketplace invitation token but does
+not have an eduGAIN IdP.
+
+### 3.0 Publish from Lab Manager
+
+1. Open `https://lab.your-institution.edu/lab-manager`.
+2. Enter your `LAB_MANAGER_TOKEN` when prompted.
+3. In **Labs**, select an existing Guacamole connection or FMU discovered from the
+   Gateway inventory.
+4. Choose **Full Setup** to generate metadata and upload images/documents locally, or
+   **Quick Setup** to reference an externally hosted metadata JSON.
+5. Click **Publish Lab**. The Gateway stores generated metadata/assets under its
+   persistent lab-content volume, exposes them at `/lab-content/...`, and signs the
+   on-chain transaction with the institutional provider wallet.
 
 ### 3.1 Open the provider dashboard
 
