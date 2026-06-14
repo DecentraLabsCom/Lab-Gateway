@@ -331,6 +331,11 @@
 
         window.fetch = function(...args) {
             let [url, options = {}] = args;
+            const skipAuthPrompt = options && options.skipAuthPrompt === true;
+            if (skipAuthPrompt) {
+                options = { ...options };
+                delete options.skipAuthPrompt;
+            }
 
             const requestPath = getRequestPath(url);
             const config = getTokenConfigForPath(requestPath) || getTokenConfigForPath(window.location.pathname);
@@ -348,6 +353,9 @@
                 .then(response => {
                     // If 401 and we have config for this path
                     if (response.status === 401 && config) {
+                        if (skipAuthPrompt) {
+                            return response;
+                        }
                         if (shouldBypassTokenPrompt(config)) {
                             return response;
                         }

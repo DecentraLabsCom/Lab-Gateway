@@ -607,7 +607,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const badge = $('#labManagerAccessBadge');
         if (!badge) return;
         try {
-            const res = await fetch('/lab-manager/access-policy', { credentials: 'include' });
+            const res = await fetch('/lab-manager/access-policy', {
+                credentials: 'include',
+                skipAuthPrompt: true
+            });
+            if (res.status === 401) {
+                badge.textContent = 'Access Policy Requires Token';
+                badge.classList.remove('local', 'private', 'external');
+                return;
+            }
+            if (res.status === 403) {
+                badge.textContent = 'Access Policy Blocked';
+                badge.classList.remove('local', 'private', 'external');
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const status = await res.json();
             updateAccessPolicyBadge(status);
