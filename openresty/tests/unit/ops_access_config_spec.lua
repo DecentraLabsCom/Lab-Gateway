@@ -54,13 +54,21 @@ local function extract_location_block(conf, location)
 end
 
 runner.describe("Ops access configuration", function()
-    runner.it("uses the Lab Manager token guard and config policy instead of a fixed network ACL", function()
+    runner.it("leaves ops health public for readiness checks", function()
+        local conf = resolve_conf_path()
+        local block = extract_location_block(conf, "= /ops/health")
+
+        runner.assert.equals(nil, block:find("access_by_lua_", 1, true))
+        runner.assert.truthy(block:find("proxy_pass $ops_health_upstream", 1, true))
+    end)
+
+    runner.it("uses the Lab Manager UI guard and config policy instead of a fixed network ACL", function()
         local conf = resolve_conf_path()
         local block = extract_location_block(conf, "/ops/")
 
         runner.assert.truthy(
-            block:find("access_by_lua_file /etc/openresty/lua/lab_manager_admin_access.lua", 1, true),
-            "Expected /ops/ to use the strict Lab Manager token guard"
+            block:find("access_by_lua_file /etc/openresty/lua/lab_manager_access.lua", 1, true),
+            "Expected /ops/ to use the Lab Manager UI guard"
         )
         local _, access_directive_count = block:gsub("access_by_lua_", "")
         runner.assert.equals(1, access_directive_count)

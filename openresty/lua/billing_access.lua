@@ -38,6 +38,11 @@ if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
     return deny_forbidden("Forbidden: wallet/billing endpoints are disabled in Lite mode.")
 end
 
+local uri = ngx.var.uri or ""
+if uri == "/wallet/health" or uri == "/billing/health" then
+    return
+end
+
 local function is_loopback_or_docker(ip)
     if not ip or ip == "" then
         return false
@@ -56,6 +61,15 @@ local function is_loopback_or_docker(ip)
         end
     end
     return false
+end
+
+local function is_loopback(ip)
+    if not ip or ip == "" then
+        return false
+    end
+    return ip == "::1"
+        or ip == "0:0:0:0:0:0:0:1"
+        or ip:match("^127%.") ~= nil
 end
 
 local function is_private(ip)
@@ -82,6 +96,51 @@ local function is_private(ip)
         return true
     end
     return false
+end
+
+local function env_bool(name, default)
+    local value = os.getenv(name)
+    if value == nil or value == "" then
+        return default
+    end
+    value = tostring(value):lower()
+    return value == "true" or value == "1" or value == "yes" or value == "on"
+end
+
+local function ipv4_to_number(ip)
+    local a, b, c, d = tostring(ip or ""):match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+    a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+    if not a or not b or not c or not d then
+        return nil
+    end
+    if a > 255 or b > 255 or c > 255 or d > 255 then
+        return nil
+    end
+    return ((a * 256 + b) * 256 + c) * 256 + d
+end
+
+local function cidr_matches(ip, cidr)
+    local base, prefix = tostring(cidr or ""):match("^%s*([^/%s]+)%s*/%s*(%d+)%s*$")
+    prefix = tonumber(prefix)
+    local ip_num = ipv4_to_number(ip)
+    local base_num = ipv4_to_number(base)
+    if not ip_num or not base_num or not prefix or prefix < 0 or prefix > 32 then
+        return false
+    end
+    local size = 2 ^ (32 - prefix)
+    return math.floor(ip_num / size) == math.floor(base_num / size)
+end
+
+local function configured_cidr_matches(ip)
+    local raw = os.getenv("ADMIN_ALLOWED_CIDRS") or ""
+    local has_cidr = false
+    for cidr in raw:gmatch("[^,]+") do
+        has_cidr = true
+        if cidr_matches(ip, cidr) then
+            return true
+        end
+    end
+    return not has_cidr and is_private(ip)
 end
 
 local function extract_first_ip(value)
@@ -119,11 +178,28 @@ if xff_trusted and forwarded_ip and forwarded_ip ~= "" and is_private(remote_add
     client_ip = forwarded_ip
 end
 
+local function network_policy_allows()
+    local local_only = env_bool("ADMIN_DASHBOARD_LOCAL_ONLY", true)
+    if not local_only then
+        return true
+    end
+    if is_loopback_or_docker(client_ip) then
+        return true
+    end
+    local private_enabled = env_bool("ADMIN_DASHBOARD_ALLOW_PRIVATE", false)
+        and env_bool("SECURITY_ALLOW_PRIVATE_NETWORKS", false)
+    return private_enabled and configured_cidr_matches(client_ip)
+end
+
 if token == "" then
-    if not is_loopback_or_docker(client_ip) then
+    if not is_loopback(client_ip) then
         return deny("Forbidden: Remote access is disabled. To enable external access, set ADMIN_ACCESS_TOKEN in your .env file and restart the service.")
     end
     return
+end
+
+if not network_policy_allows() then
+    return deny_forbidden("Forbidden: Wallet and billing access is disabled for this network by dashboard access policy.")
 end
 
 local header_name = os.getenv("ADMIN_ACCESS_TOKEN_HEADER") or os.getenv("TREASURY_TOKEN_HEADER") or "X-Access-Token"
@@ -144,7 +220,6 @@ local function is_tokenized_path(value)
     return false
 end
 
-local uri = ngx.var.uri or ""
 local request_uri = ngx.var.request_uri or ""
 local is_tokenized_request = is_tokenized_path(uri) or is_tokenized_path(request_uri)
 
@@ -176,6 +251,11 @@ end
 
 local function redirect_without_token()
     local target = uri ~= "" and uri or "/wallet-dashboard/"
+    if target == "/wallet-dashboard" then
+        target = "/wallet-dashboard/"
+    elseif target == "/institution-config" then
+        target = "/institution-config/"
+    end
     local query = build_query_without_token()
     if query and query ~= "" then
         target = target .. "?" .. query
@@ -234,7 +314,7 @@ if provided and provided ~= "" then
         ngx.header["Set-Cookie"] = cookie_name .. "=" .. provided .. "; Path=/; HttpOnly; Secure; SameSite=Lax"
         return redirect_without_token()
     end
-elseif not is_private(client_ip) then
+elseif not is_loopback(client_ip) then
     return deny("Unauthorized: Access token required for remote access. " .. token_hint())
 end
 

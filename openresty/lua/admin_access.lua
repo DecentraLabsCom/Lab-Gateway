@@ -1,5 +1,5 @@
 -- Strict access guard for billing admin endpoints.
--- Uses ADMIN_ACCESS_TOKEN. If unset, allows loopback/Docker ranges only.
+-- Uses ADMIN_ACCESS_TOKEN. If unset, allows loopback only.
 
 local token = os.getenv("ADMIN_ACCESS_TOKEN") or ""
 local config = ngx.shared and ngx.shared.config
@@ -61,6 +61,15 @@ local function is_loopback_or_docker(ip)
     return false
 end
 
+local function is_loopback(ip)
+    if not ip or ip == "" then
+        return false
+    end
+    return ip == "::1"
+        or ip == "0:0:0:0:0:0:0:1"
+        or ip:match("^127%.") ~= nil
+end
+
 local function is_private(ip)
     if not ip or ip == "" then
         return false
@@ -85,6 +94,51 @@ local function is_private(ip)
         return true
     end
     return false
+end
+
+local function env_bool(name, default)
+    local value = os.getenv(name)
+    if value == nil or value == "" then
+        return default
+    end
+    value = tostring(value):lower()
+    return value == "true" or value == "1" or value == "yes" or value == "on"
+end
+
+local function ipv4_to_number(ip)
+    local a, b, c, d = tostring(ip or ""):match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+    a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+    if not a or not b or not c or not d then
+        return nil
+    end
+    if a > 255 or b > 255 or c > 255 or d > 255 then
+        return nil
+    end
+    return ((a * 256 + b) * 256 + c) * 256 + d
+end
+
+local function cidr_matches(ip, cidr)
+    local base, prefix = tostring(cidr or ""):match("^%s*([^/%s]+)%s*/%s*(%d+)%s*$")
+    prefix = tonumber(prefix)
+    local ip_num = ipv4_to_number(ip)
+    local base_num = ipv4_to_number(base)
+    if not ip_num or not base_num or not prefix or prefix < 0 or prefix > 32 then
+        return false
+    end
+    local size = 2 ^ (32 - prefix)
+    return math.floor(ip_num / size) == math.floor(base_num / size)
+end
+
+local function configured_cidr_matches(ip)
+    local raw = os.getenv("ADMIN_ALLOWED_CIDRS") or ""
+    local has_cidr = false
+    for cidr in raw:gmatch("[^,]+") do
+        has_cidr = true
+        if cidr_matches(ip, cidr) then
+            return true
+        end
+    end
+    return not has_cidr and is_private(ip)
 end
 
 local function extract_first_ip(value)
@@ -125,11 +179,28 @@ if forwarded_ip and forwarded_ip ~= "" and is_private(remote_addr) and not is_pr
     client_ip = forwarded_ip
 end
 
+local function network_policy_allows()
+    local local_only = env_bool("ADMIN_DASHBOARD_LOCAL_ONLY", true)
+    if not local_only then
+        return true
+    end
+    if is_loopback_or_docker(client_ip) then
+        return true
+    end
+    local private_enabled = env_bool("ADMIN_DASHBOARD_ALLOW_PRIVATE", false)
+        and env_bool("SECURITY_ALLOW_PRIVATE_NETWORKS", false)
+    return private_enabled and configured_cidr_matches(client_ip)
+end
+
 if token == "" then
-    if not is_loopback_or_docker(client_ip) then
+    if not is_loopback(client_ip) then
         return deny("Forbidden: Remote billing admin access is disabled. Set ADMIN_ACCESS_TOKEN in your .env file and restart the service.")
     end
     return
+end
+
+if not network_policy_allows() then
+    return deny_forbidden("Forbidden: Billing admin access is disabled for this network by dashboard access policy.")
 end
 
 local provided = headers[header_name]

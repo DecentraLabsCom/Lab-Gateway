@@ -119,9 +119,26 @@ runner.it("allows loopback when no token configured", function()
     runner.assert.equals(nil, ngx.req.headers["X-Access-Token"])
 end)
 
+runner.it("allows wallet health without token from public IP", function()
+    local ngx = run_treasury_access({
+        env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+        var = {
+            remote_addr = "8.8.8.8",
+            uri = "/wallet/health"
+        }
+    })
+
+    runner.assert.equals(nil, ngx.status)
+    runner.assert.equals(nil, ngx._exit)
+    runner.assert.equals(nil, ngx.req.headers["X-Access-Token"])
+end)
+
     runner.it("rejects when token is invalid", function()
         local ngx = run_treasury_access({
-            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             headers = { ["X-Access-Token"] = "wrong-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -131,10 +148,26 @@ end)
         runner.assert.equals("text/plain", ngx.header["Content-Type"])
     end)
 
-    runner.it("allows private network without provided token", function()
+    runner.it("requires token on private network when ADMIN_ACCESS_TOKEN is configured", function()
         local ngx = run_treasury_access({
             env = { ADMIN_ACCESS_TOKEN = "secret-token" },
             var = { remote_addr = "172.17.0.2" }
+        })
+
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
+        runner.assert.equals(nil, ngx.req.headers["X-Access-Token"])
+    end)
+
+    runner.it("allows private network with valid token when private access is enabled", function()
+        local ngx = run_treasury_access({
+            env = {
+                ADMIN_ACCESS_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            headers = { ["X-Access-Token"] = "secret-token" },
+            var = { remote_addr = "10.20.30.40" }
         })
 
         runner.assert.equals(nil, ngx.status)
@@ -143,7 +176,10 @@ end)
 
     runner.it("allows valid token on public IP", function()
         local ngx = run_treasury_access({
-            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             headers = { ["X-Access-Token"] = "secret-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -154,7 +190,10 @@ end)
 
     runner.it("accepts token from cookie", function()
         local ngx = run_treasury_access({
-            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = {
                 remote_addr = "8.8.8.8",
                 cookie_access_token = "secret-token"
@@ -167,7 +206,10 @@ end)
 
     runner.it("accepts bootstrap query on tokenized dashboard paths and redirects cleanly", function()
         local ngx = run_treasury_access({
-            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/wallet-dashboard/",
@@ -184,7 +226,10 @@ end)
 
     runner.it("preserves non-token query args when redirecting institution-config bootstrap", function()
         local ngx = run_treasury_access({
-            env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/institution-config/",
@@ -202,15 +247,15 @@ end)
         runner.assert.equals(302, ngx._redirect_code)
     end)
 
-    runner.it("rejects external clients forwarded through private proxies without token", function()
+    runner.it("rejects external clients forwarded through private proxies by dashboard policy", function()
         local ngx = run_treasury_access({
             env = { ADMIN_ACCESS_TOKEN = "secret-token" },
             headers = { ["X-Forwarded-For"] = "203.0.113.5" },
             var = { remote_addr = "172.18.0.10" }
         })
 
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
+        runner.assert.equals(403, ngx.status)
+        runner.assert.equals(403, ngx._exit)
     end)
 end)
 

@@ -106,7 +106,7 @@ runner.describe("Lab manager access guard", function()
         runner.assert.equals(nil, ngx.req.headers["X-Lab-Manager-Token"])
     end)
 
-    runner.it("allows RFC1918 private networks when no token configured", function()
+    runner.it("rejects RFC1918 private networks when no token configured", function()
         local ngx = run_lab_manager_access({
             env = {
                 LAB_MANAGER_TOKEN = "",
@@ -116,8 +116,8 @@ runner.describe("Lab manager access guard", function()
             var = { remote_addr = "10.20.30.40" }
         })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals(nil, ngx._exit)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
     end)
 
     runner.it("rejects external clients forwarded through private proxies when no token configured", function()
@@ -143,14 +143,14 @@ runner.describe("Lab manager access guard", function()
         runner.assert.equals("text/plain", ngx.header["Content-Type"])
     end)
 
-    runner.it("allows private network without provided token", function()
+    runner.it("rejects private network without provided token", function()
         local ngx = run_lab_manager_access({
             env = { LAB_MANAGER_TOKEN = "secret-token" },
             var = { remote_addr = "172.17.0.2" }
         })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("secret-token", ngx.req.headers["X-Lab-Manager-Token"])
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
     end)
 
     runner.it("allows valid token on public IP", function()
@@ -264,9 +264,9 @@ runner.describe("Lab manager access guard", function()
             var = { remote_addr = "10.20.30.40" }
         })
 
-        -- remote_addr is private; XFF should be ignored → allow (no token required when empty)
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals(nil, ngx._exit)
+        -- remote_addr is private; XFF should be ignored, but tokenless access is loopback-only.
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
     end)
 
     runner.it("rejects public token when dashboard policy is localhost only", function()

@@ -82,7 +82,10 @@ end
 runner.describe("Treasury admin token guard", function()
     runner.it("blocks treasury admin access in lite mode", function()
         local ngx = run_admin_access({
-            env = { ADMIN_ACCESS_TOKEN = "treasury-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "treasury-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             config = { lite_mode = 1 },
             var = { remote_addr = "127.0.0.1" }
         })
@@ -124,7 +127,10 @@ runner.describe("Treasury admin token guard", function()
 
     runner.it("rejects invalid ADMIN_ACCESS_TOKEN on public IP", function()
         local ngx = run_admin_access({
-            env = { ADMIN_ACCESS_TOKEN = "treasury-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "treasury-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             headers = { ["X-Access-Token"] = "wrong-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -135,7 +141,10 @@ runner.describe("Treasury admin token guard", function()
 
     runner.it("requires token on private network when ADMIN_ACCESS_TOKEN is configured", function()
         local ngx = run_admin_access({
-            env = { ADMIN_ACCESS_TOKEN = "treasury-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "treasury-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = { remote_addr = "172.17.0.2" }
         })
 
@@ -143,9 +152,27 @@ runner.describe("Treasury admin token guard", function()
         runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
     end)
 
+    runner.it("allows valid ADMIN_ACCESS_TOKEN on private network when private access is enabled", function()
+        local ngx = run_admin_access({
+            env = {
+                ADMIN_ACCESS_TOKEN = "treasury-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            headers = { ["X-Access-Token"] = "treasury-token" },
+            var = { remote_addr = "10.20.30.40" }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("treasury-token", ngx.req.headers["X-Access-Token"])
+    end)
+
     runner.it("allows valid ADMIN_ACCESS_TOKEN on public IP", function()
         local ngx = run_admin_access({
-            env = { ADMIN_ACCESS_TOKEN = "treasury-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "treasury-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             headers = { ["X-Access-Token"] = "treasury-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -158,6 +185,7 @@ runner.describe("Treasury admin token guard", function()
         local ngx = run_admin_access({
             env = {
                 ADMIN_ACCESS_TOKEN = "treasury-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false",
                 LAB_MANAGER_TOKEN = "lab-token"
             },
             headers = { ["X-Lab-Manager-Token"] = "lab-token" },
@@ -170,7 +198,10 @@ runner.describe("Treasury admin token guard", function()
 
     runner.it("does not accept token from query parameter", function()
         local ngx = run_admin_access({
-            env = { ADMIN_ACCESS_TOKEN = "treasury-token" },
+            env = {
+                ADMIN_ACCESS_TOKEN = "treasury-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             uri_args = { token = "treasury-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -186,9 +217,9 @@ runner.describe("Treasury admin token guard", function()
             var = { remote_addr = "172.18.0.10" }
         })
 
-        -- remote_addr is private; XFF should be ignored → allow (no token required when empty)
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals(nil, ngx._exit)
+        -- remote_addr is private; XFF should be ignored, but tokenless access is loopback-only.
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
     end)
 end)
 

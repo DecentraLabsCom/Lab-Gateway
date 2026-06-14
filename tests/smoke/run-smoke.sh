@@ -99,25 +99,27 @@ else
 fi
 
 # =================================================================
-# Test 4: Ops endpoint requires token
+# Test 4: Ops health works without token
 # =================================================================
-echo "Test 4: Ops endpoint requires token"
+echo "Test 4: Ops health without token"
 OPS_HEALTH=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" https://lab.test:${PORT}/ops/health || true)
-if [ "$OPS_HEALTH" = "401" ] || [ "$OPS_HEALTH" = "403" ] || [ "$OPS_HEALTH" = "503" ]; then
-  log_pass "Ops endpoint rejects requests without token (status: $OPS_HEALTH)"
+if [ "$OPS_HEALTH" = "200" ] || [ "$OPS_HEALTH" = "503" ]; then
+  log_pass "Ops health works without token (status: $OPS_HEALTH)"
 else
-  log_fail "Ops endpoint should reject without token (status: $OPS_HEALTH)"
+  log_fail "Ops health should not require token (status: $OPS_HEALTH)"
 fi
 
 # =================================================================
-# Test 5: Ops endpoint accepts valid token
+# Test 5: Ops API requires token and accepts valid token
 # =================================================================
-echo "Test 5: Ops endpoint accepts valid token"
-OPS_OK=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -H "X-Lab-Manager-Token: test-ops-secret-123" -b "lab_manager_token=test-ops-secret-123" https://lab.test:${PORT}/ops/health || true)
-if echo "$OPS_OK" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' || [ "$OPS_OK" = "ops-worker-ok" ]; then
-  log_pass "Ops endpoint accepts valid token"
+echo "Test 5: Ops API token protection"
+OPS_API_NO_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" https://lab.test:${PORT}/ops/api/hosts || true)
+OPS_OK=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" -H "X-Lab-Manager-Token: test-ops-secret-123" -b "lab_manager_token=test-ops-secret-123" https://lab.test:${PORT}/ops/api/hosts || true)
+if { [ "$OPS_API_NO_TOKEN" = "401" ] || [ "$OPS_API_NO_TOKEN" = "403" ]; } \
+  && [ "$OPS_OK" != "401" ] && [ "$OPS_OK" != "403" ]; then
+  log_pass "Ops API requires token and accepts valid token"
 else
-  log_fail "Ops health failed with token: $OPS_OK"
+  log_fail "Ops API token behavior mismatch: no-token=$OPS_API_NO_TOKEN with-token=$OPS_OK"
 fi
 
 # =================================================================
@@ -126,7 +128,7 @@ fi
 echo "Test 6: Ops endpoint rejects invalid token"
 OPS_BAD_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
   -H "X-Lab-Manager-Token: wrong-token" \
-  https://lab.test:${PORT}/ops/health || true)
+  https://lab.test:${PORT}/ops/api/hosts || true)
 if [ "$OPS_BAD_TOKEN" = "401" ] || [ "$OPS_BAD_TOKEN" = "403" ]; then
   log_pass "Ops endpoint rejects invalid token (status: $OPS_BAD_TOKEN)"
 else
@@ -138,10 +140,10 @@ fi
 # =================================================================
 echo "Test 7: Wallet endpoint protection"
 WALLET_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" https://lab.test:${PORT}/wallet/health || true)
-if [ "$WALLET_STATUS" = "200" ] || [ "$WALLET_STATUS" = "403" ]; then
-  log_pass "Wallet endpoint access controlled (status: $WALLET_STATUS)"
+if [ "$WALLET_STATUS" = "200" ]; then
+  log_pass "Wallet health works without token (status: $WALLET_STATUS)"
 else
-  log_fail "Unexpected wallet health status: $WALLET_STATUS"
+  log_fail "Wallet health should not require token (status: $WALLET_STATUS)"
 fi
 
 # =================================================================

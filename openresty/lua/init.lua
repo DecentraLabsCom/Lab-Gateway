@@ -41,7 +41,7 @@ refuse_default_secret("GUAC_ADMIN_PASS", admin_pass, { "guacadmin", "changeme", 
 
 local lab_manager_token = os.getenv("LAB_MANAGER_TOKEN")
 if not lab_manager_token or lab_manager_token == "" then
-    ngx.log(ngx.WARN, "LAB_MANAGER_TOKEN not set; /ops endpoints will remain disabled and /lab-manager will be private-network-only")
+    ngx.log(ngx.WARN, "LAB_MANAGER_TOKEN not set; /ops endpoints will remain disabled and /lab-manager will be loopback-only")
 else
     refuse_default_secret("LAB_MANAGER_TOKEN", lab_manager_token, { "supersecretvalue", "changeme", "change_me", "password", "test" })
 end

@@ -45,6 +45,15 @@ local function is_loopback_or_docker(ip)
     return false
 end
 
+local function is_loopback(ip)
+    if not ip or ip == "" then
+        return false
+    end
+    return ip == "::1"
+        or ip == "0:0:0:0:0:0:0:1"
+        or ip:match("^127%.") ~= nil
+end
+
 local function is_private(ip)
     if not ip or ip == "" then
         return false
@@ -168,17 +177,12 @@ local function network_policy_allows()
 end
 
 local function tokenless_network_allows()
-    if is_loopback_or_docker(client_ip) then
-        return true
-    end
-    local private_enabled = env_bool("ADMIN_DASHBOARD_ALLOW_PRIVATE", false)
-        and env_bool("SECURITY_ALLOW_PRIVATE_NETWORKS", false)
-    return private_enabled and configured_cidr_matches(client_ip)
+    return is_loopback(client_ip)
 end
 
 if token == "" then
     if not tokenless_network_allows() then
-        return deny("Unauthorized: LAB_MANAGER_TOKEN not set; access allowed only from loopback or RFC1918 private networks.")
+        return deny("Unauthorized: LAB_MANAGER_TOKEN not set; access allowed only from loopback.")
     end
     return
 end
@@ -315,7 +319,7 @@ if provided and provided ~= "" then
         ngx.header["Set-Cookie"] = cookie_name .. "=" .. provided .. "; Path=/; HttpOnly; Secure; SameSite=Lax"
         return redirect_without_token()
     end
-elseif not is_private(client_ip) then
+elseif not is_loopback(client_ip) then
     return deny("Unauthorized: lab manager token required. " .. token_hint())
 end
 

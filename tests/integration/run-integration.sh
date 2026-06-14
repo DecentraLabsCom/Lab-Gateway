@@ -176,33 +176,35 @@ else
 fi
 
 # =================================================================
-# Test 8: Ops endpoint requires token
+# Test 8: Ops health works without token
 # =================================================================
-echo "Test 8: Ops endpoint security"
+echo "Test 8: Ops health without token"
 OPS_NO_TOKEN=$(curl -sk -o /dev/null -w "%{http_code}" "${BASE_URL}/ops/health")
-if [ "$OPS_NO_TOKEN" = "401" ] || [ "$OPS_NO_TOKEN" = "403" ] || [ "$OPS_NO_TOKEN" = "503" ]; then
-  log_pass "Ops endpoint rejects requests without token"
+if [ "$OPS_NO_TOKEN" = "200" ] || [ "$OPS_NO_TOKEN" = "503" ]; then
+  log_pass "Ops health works without token"
 else
-  log_fail "Ops endpoint should reject without token, got: $OPS_NO_TOKEN"
+  log_fail "Ops health should not require token, got: $OPS_NO_TOKEN"
 fi
 
 # =================================================================
-# Test 9: Ops endpoint rejects invalid token
+# Test 9: Ops API rejects missing/invalid token
 # =================================================================
-echo "Test 9: Ops endpoint rejects invalid token"
-OPS_BAD_TOKEN=$(curl -sk -o /dev/null -w "%{http_code}" -H "X-Lab-Manager-Token: wrong-token" "${BASE_URL}/ops/health")
-if [ "$OPS_BAD_TOKEN" = "401" ] || [ "$OPS_BAD_TOKEN" = "403" ]; then
-  log_pass "Ops endpoint rejects invalid token"
+echo "Test 9: Ops API rejects missing/invalid token"
+OPS_API_NO_TOKEN=$(curl -sk -o /dev/null -w "%{http_code}" "${BASE_URL}/ops/api/hosts")
+OPS_BAD_TOKEN=$(curl -sk -o /dev/null -w "%{http_code}" -H "X-Lab-Manager-Token: wrong-token" "${BASE_URL}/ops/api/hosts")
+if { [ "$OPS_API_NO_TOKEN" = "401" ] || [ "$OPS_API_NO_TOKEN" = "403" ]; } \
+  && { [ "$OPS_BAD_TOKEN" = "401" ] || [ "$OPS_BAD_TOKEN" = "403" ]; }; then
+  log_pass "Ops API rejects missing and invalid token"
 else
-  log_fail "Ops endpoint should reject invalid token, got: $OPS_BAD_TOKEN"
+  log_fail "Ops API token checks failed: missing=$OPS_API_NO_TOKEN invalid=$OPS_BAD_TOKEN"
 fi
 
 # =================================================================
 # Test 10: Ops endpoint accepts valid token
 # =================================================================
 echo "Test 10: Ops endpoint with valid token"
-OPS_WITH_TOKEN=$(curl -sk -H "X-Lab-Manager-Token: integration-test-secret" "${BASE_URL}/ops/health" || echo "error")
-if echo "$OPS_WITH_TOKEN" | grep -q "ok\|status"; then
+OPS_WITH_TOKEN=$(curl -sk -o /dev/null -w "%{http_code}" -H "X-Lab-Manager-Token: integration-test-secret" "${BASE_URL}/ops/api/hosts" || echo "error")
+if [ "$OPS_WITH_TOKEN" != "401" ] && [ "$OPS_WITH_TOKEN" != "403" ] && [ "$OPS_WITH_TOKEN" != "error" ]; then
   log_pass "Ops endpoint accepts valid token"
 else
   log_fail "Ops endpoint did not accept valid token: $OPS_WITH_TOKEN"

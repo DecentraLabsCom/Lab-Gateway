@@ -87,31 +87,15 @@
         return lower !== 'change_me' && lower !== 'changeme';
     }
 
-    function isPrivateOrLoopbackHost(hostname) {
+    function isLoopbackHost(hostname) {
         if (!hostname) {
             return false;
         }
         const host = hostname.toLowerCase();
-        if (host === 'localhost' || host === '::1' || host === '[::1]') {
-            return true;
-        }
-        if (/^127\./.test(host)) {
-            return true;
-        }
-        if (/^10\./.test(host)) {
-            return true;
-        }
-        if (/^192\.168\./.test(host)) {
-            return true;
-        }
-        const match172 = host.match(/^172\.(\d{1,3})\./);
-        if (match172) {
-            const octet = Number(match172[1]);
-            if (octet >= 16 && octet <= 31) {
-                return true;
-            }
-        }
-        return false;
+        return host === 'localhost'
+            || host === '::1'
+            || host === '[::1]'
+            || /^127\./.test(host);
     }
 
     const activeTokenPrompt = {
@@ -332,9 +316,9 @@
         if (config.strictToken) {
             return false;
         }
-        // If this client is already in a private/loopback context and no token
-        // is stored, let the request fail/succeed naturally without forcing modal.
-        if (!isPrivateOrLoopbackHost(window.location.hostname)) {
+        // Only loopback may rely on the server-side localhost exception.
+        // Private-network clients still need the configured admin token.
+        if (!isLoopbackHost(window.location.hostname)) {
             return false;
         }
         const storedToken = localStorage.getItem(config.key);
@@ -409,9 +393,7 @@
             // Check if we have a stored token
             const storedToken = localStorage.getItem(config.key);
             if (!isUsableToken(storedToken)) {
-                // If access rules already allow this client (localhost/private host),
-                // don't force token entry from the UI; let server-side ACL decide.
-                if (isPrivateOrLoopbackHost(window.location.hostname)) {
+                if (isLoopbackHost(window.location.hostname)) {
                     return;
                 }
                 // Prevent navigation and show token modal
