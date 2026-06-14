@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="../assets/css/lab-manager.css">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=marketplace-fields">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
@@ -84,14 +84,14 @@
                                 <div class="subcard-header">
                                     <h3><i class="fas fa-cube"></i> On-chain Fields</h3>
                                 </div>
-                                <div class="form-grid">
-                                    <label class="field">
-                                        <span>Price (raw service credits)</span>
-                                        <input type="number" id="labPrice" min="0" step="1" value="0">
-                                    </label>
-                                    <label class="field">
+                                <div class="form-grid onchain-fields-grid">
+                                    <label class="field lab-access-key-field">
                                         <span>Access Key</span>
                                         <input type="text" id="labAccessKey" placeholder="guacamole-connection-id or model.fmu">
+                                    </label>
+                                    <label class="field lab-price-field">
+                                        <span>Price (per hour)</span>
+                                        <input type="number" id="labPrice" min="0" step="0.1" value="0" inputmode="decimal">
                                     </label>
                                     <label class="field full">
                                         <span>Access URI</span>
@@ -108,54 +108,168 @@
                                 <div class="subcard-header">
                                     <h3><i class="fas fa-file-code"></i> Metadata</h3>
                                 </div>
+                                <div class="form-section-title">Basic Information</div>
                                 <div class="form-grid">
                                     <label class="field">
                                         <span>Name</span>
-                                        <input type="text" id="labName" maxlength="160" placeholder="Basic Electronics Lab">
-                                    </label>
-                                    <label class="field">
-                                        <span>Category</span>
-                                        <input type="text" id="labCategory" placeholder="Electronics, Control">
+                                        <input type="text" id="labName" maxlength="160" placeholder="Lab Name">
                                     </label>
                                     <label class="field full">
-                                        <span>Description</span>
-                                        <textarea id="labDescription" rows="4" placeholder="What users can do in this lab..."></textarea>
+                                        <span>Categories</span>
+                                        <div class="multi-select" id="labCategorySelect" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false">
+                                            <div class="chip-list" id="labCategoryChips">
+                                                <span class="placeholder">Select one or more categories...</span>
+                                            </div>
+                                            <i class="fas fa-chevron-down"></i>
+                                        </div>
+                                        <div class="multi-select-menu" id="labCategoryMenu" role="listbox"></div>
                                     </label>
                                     <label class="field full">
                                         <span>Keywords</span>
-                                        <input type="text" id="labKeywords" placeholder="circuits, fmu, simulation">
+                                        <input type="text" id="labKeywords" placeholder="Keywords (comma-separated)">
+                                    </label>
+                                    <label class="field full">
+                                        <span>Description</span>
+                                        <textarea id="labDescription" rows="4" placeholder="Description"></textarea>
+                                    </label>
+                                </div>
+
+                                <div class="form-section-title">Availability & Scheduling</div>
+                                <div class="form-grid">
+                                    <label class="field">
+                                        <span>Opens</span>
+                                        <input type="date" id="labOpens">
+                                    </label>
+                                    <label class="field">
+                                        <span>Closes</span>
+                                        <input type="date" id="labCloses">
                                     </label>
                                     <label class="field">
                                         <span>Time Slots (minutes)</span>
-                                        <input type="text" id="labTimeSlots" value="30,60">
+                                        <input type="text" id="labTimeSlots" placeholder="15, 30, 60" value="30,60">
                                     </label>
                                     <label class="field">
                                         <span>Timezone</span>
-                                        <input type="text" id="labTimezone" value="Europe/Madrid">
+                                        <select id="labTimezone"></select>
                                     </label>
-                                    <label class="field">
+                                    <div class="field full">
                                         <span>Available Days</span>
-                                        <input type="text" id="labAvailableDays" value="MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY">
+                                        <div class="day-toggle-group" id="labAvailableDays"></div>
+                                    </div>
+                                    <label class="field">
+                                        <span>Daily Start Time</span>
+                                        <input type="time" id="labAvailableHoursStart" value="09:00" step="900">
                                     </label>
                                     <label class="field">
-                                        <span>Available Hours</span>
-                                        <input type="text" id="labAvailableHours" value="09:00-17:00">
+                                        <span>Daily End Time</span>
+                                        <input type="time" id="labAvailableHoursEnd" value="17:00" step="900">
                                     </label>
-                                    <label class="field">
-                                        <span>Max Concurrent Users</span>
-                                        <input type="number" id="labMaxConcurrentUsers" min="1" step="1" value="1">
+                                    <input type="hidden" id="labMaxConcurrentUsers" value="1">
+                                </div>
+
+                                <div class="form-section-title with-action">
+                                    <span>Unavailable Windows</span>
+                                    <button class="mini-btn primary" type="button" id="labAddUnavailableWindow">
+                                        <i class="fas fa-plus"></i> Add window
+                                    </button>
+                                </div>
+                                <div class="stack" id="labUnavailableWindows"></div>
+
+                                <div class="form-section-title">Terms of Use</div>
+                                <div class="form-grid">
+                                    <label class="field full">
+                                        <span>Terms URL (optional)</span>
+                                        <input type="url" id="labTermsUrl" placeholder="Terms URL (optional)">
                                     </label>
+                                    <input type="hidden" id="labTermsVersion">
+                                    <input type="hidden" id="labTermsEffectiveDate">
+                                    <input type="hidden" id="labTermsSha256">
+                                    <div class="hint full" id="labTermsStatus"></div>
+                                </div>
+
+                                <div class="form-section-title" id="fmuConfigTitle">FMU Configuration</div>
+                                <div class="fmu-config" id="fmuConfigPanel">
+                                    <div class="form-grid">
+                                        <label class="field full">
+                                            <span>FMU File Name <span class="muted-text">(file on Lab Station in production, e.g. spring-damper.fmu)</span></span>
+                                            <div class="input-action-row">
+                                                <input type="text" id="labFmuFileName" placeholder="spring-damper.fmu">
+                                                <button class="mini-btn primary" type="button" id="labFmuAutoDetectBtn">Auto-detect</button>
+                                            </div>
+                                        </label>
+                                        <label class="field">
+                                            <span>FMI Version</span>
+                                            <input type="text" id="labFmiVersion" readonly>
+                                        </label>
+                                        <label class="field">
+                                            <span>Simulation Type</span>
+                                            <input type="text" id="labSimulationType" readonly>
+                                        </label>
+                                        <label class="field">
+                                            <span>Default Start Time</span>
+                                            <input type="text" id="labDefaultStartTime" readonly>
+                                        </label>
+                                        <label class="field">
+                                            <span>Default Stop Time</span>
+                                            <input type="text" id="labDefaultStopTime" readonly>
+                                        </label>
+                                        <label class="field">
+                                            <span>Default Step Size</span>
+                                            <input type="text" id="labDefaultStepSize" readonly>
+                                        </label>
+                                    </div>
+                                    <div class="resource-preview" id="labFmuDescribeStatus">Set Access URI and FMU File Name to enable auto-detect.</div>
+                                    <div class="table-wrap" id="labModelVariablesWrap" style="display:none;">
+                                        <table class="mini-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Name</th>
+                                                    <th>Causality</th>
+                                                    <th>Type</th>
+                                                    <th>Unit</th>
+                                                    <th>Start</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="labModelVariables"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div class="form-section-title">Media</div>
+                                <div class="form-grid">
                                     <label class="field">
                                         <span>Content ID</span>
                                         <input type="text" id="labContentId" placeholder="auto-generated">
                                     </label>
-                                    <label class="field">
+                                    <div class="field full media-field">
                                         <span>Images</span>
-                                        <input type="file" id="labImages" accept="image/*" multiple>
-                                    </label>
-                                    <label class="field">
+                                        <div class="segmented-control" id="labImageMode">
+                                            <button type="button" data-mode="link" class="active"><i class="fas fa-link"></i> Link</button>
+                                            <button type="button" data-mode="upload"><i class="fas fa-upload"></i> Upload</button>
+                                        </div>
+                                        <input type="text" id="labImageUrls" placeholder="Images URLs (comma-separated)">
+                                        <input type="file" id="labImages" accept="image/*" multiple style="display:none;">
+                                        <button class="ghost-btn upload-choice" type="button" id="labImagesChooseBtn" style="display:none;"><i class="fas fa-upload"></i> Choose Files</button>
+                                    </div>
+                                    <div class="field full media-field">
                                         <span>Documents</span>
-                                        <input type="file" id="labDocs" accept="application/pdf" multiple>
+                                        <div class="segmented-control" id="labDocMode">
+                                            <button type="button" data-mode="link" class="active"><i class="fas fa-link"></i> Link</button>
+                                            <button type="button" data-mode="upload"><i class="fas fa-upload"></i> Upload</button>
+                                        </div>
+                                        <input type="text" id="labDocUrls" placeholder="Docs URLs (comma-separated)">
+                                        <input type="file" id="labDocs" accept="application/pdf" multiple style="display:none;">
+                                        <button class="ghost-btn upload-choice" type="button" id="labDocsChooseBtn" style="display:none;"><i class="fas fa-upload"></i> Choose Files</button>
+                                    </div>
+                                </div>
+                                <div class="demo-toggle-row">
+                                    <div>
+                                        <div class="demo-toggle-title">Enable Demo Access</div>
+                                        <div class="hint">Allow visitors to try this lab without a booking. A "Demo" badge will appear in the catalogue.</div>
+                                    </div>
+                                    <label class="switch" for="labDemoEnabled">
+                                        <input type="checkbox" id="labDemoEnabled" aria-label="Enable Demo Access">
+                                        <span class="slider"></span>
                                     </label>
                                 </div>
                                 <div class="asset-list" id="labAssetList"></div>
@@ -520,6 +634,6 @@
 
     <script src="../assets/js/auth-token-handler.js?v=lab-admin-strict-token"></script>
     <script src="../assets/js/lab-manager.js"></script>
-    <script src="../assets/js/lab-publisher.js"></script>
+    <script src="../assets/js/lab-publisher.js?v=marketplace-fields"></script>
 </body>
 </html>
