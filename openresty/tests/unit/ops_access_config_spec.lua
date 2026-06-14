@@ -59,9 +59,11 @@ runner.describe("Ops access configuration", function()
         local block = extract_location_block(conf, "/ops/")
 
         runner.assert.truthy(
-            block:find("access_by_lua_file /etc/openresty/lua/lab_manager_admin_access.lua", 1, true),
+            block:find('dofile("/etc/openresty/lua/lab_manager_admin_access.lua")', 1, true),
             "Expected /ops/ to use the strict Lab Manager token guard"
         )
+        local _, access_directive_count = block:gsub("access_by_lua_", "")
+        runner.assert.equals(1, access_directive_count)
         runner.assert.equals(nil, block:find("allow 127.0.0.1", 1, true))
         runner.assert.equals(nil, block:find("deny all", 1, true))
         runner.assert.equals(nil, block:find("$http_x_lab_manager_token", 1, true))
