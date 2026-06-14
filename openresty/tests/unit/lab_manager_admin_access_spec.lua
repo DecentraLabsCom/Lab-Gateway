@@ -87,7 +87,11 @@ runner.describe("Lab manager strict admin guard", function()
 
     runner.it("requires token even on private networks", function()
         local ngx = run_guard({
-            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
             var = { remote_addr = "172.17.0.2" }
         })
 
@@ -97,7 +101,11 @@ runner.describe("Lab manager strict admin guard", function()
 
     runner.it("accepts valid header token", function()
         local ngx = run_guard({
-            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
             headers = { ["X-Lab-Manager-Token"] = "secret-token" },
             var = { remote_addr = "172.17.0.2" }
         })
@@ -108,7 +116,10 @@ runner.describe("Lab manager strict admin guard", function()
 
     runner.it("accepts token from cookie", function()
         local ngx = run_guard({
-            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = {
                 remote_addr = "8.8.8.8",
                 cookie_lab_manager_token = "secret-token"
@@ -121,7 +132,10 @@ runner.describe("Lab manager strict admin guard", function()
 
     runner.it("rejects invalid cookie token", function()
         local ngx = run_guard({
-            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = {
                 remote_addr = "8.8.8.8",
                 cookie_lab_manager_token = "wrong-token"
@@ -130,6 +144,17 @@ runner.describe("Lab manager strict admin guard", function()
 
         runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
         runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
+    end)
+
+    runner.it("rejects public token when dashboard policy is localhost only", function()
+        local ngx = run_guard({
+            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            headers = { ["X-Lab-Manager-Token"] = "secret-token" },
+            var = { remote_addr = "8.8.8.8" }
+        })
+
+        runner.assert.equals(403, ngx.status)
+        runner.assert.equals(403, ngx._exit)
     end)
 end)
 

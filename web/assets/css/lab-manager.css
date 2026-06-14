@@ -52,6 +52,31 @@ body {
 .brand-subtitle { color: var(--muted); font-size: 0.95rem; }
 
 .header-actions { display: flex; gap: 10px; }
+.access-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 39px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--pill-soft);
+    color: var(--muted);
+    font-size: 0.84rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.access-badge.local {
+    border-color: #ff6b6b;
+    color: #ffb3b3;
+}
+.access-badge.private {
+    border-color: var(--warning);
+    color: var(--warning);
+}
+.access-badge.external {
+    border-color: var(--success);
+    color: var(--success);
+}
 .primary-btn, .ghost-btn {
     border: none;
     border-radius: 999px;

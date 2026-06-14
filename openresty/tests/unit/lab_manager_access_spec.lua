@@ -108,7 +108,11 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("allows RFC1918 private networks when no token configured", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_TOKEN = "" },
+            env = {
+                LAB_MANAGER_TOKEN = "",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
             var = { remote_addr = "10.20.30.40" }
         })
 
@@ -151,7 +155,10 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("allows valid token on public IP", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             headers = { ["X-Lab-Manager-Token"] = "secret-token" },
             var = { remote_addr = "8.8.8.8" }
         })
@@ -162,7 +169,10 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("accepts token from cookie", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = {
                 remote_addr = "8.8.8.8",
                 cookie_lab_manager_token = "secret-token"
@@ -175,7 +185,10 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("accepts token from query for lab-manager path and redirects to clean URL", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/lab-manager/",
@@ -192,7 +205,10 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("preserves non-token query args when redirecting lab-manager bootstrap", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/lab-manager/",
@@ -238,7 +254,12 @@ runner.describe("Lab manager access guard", function()
 
     runner.it("ignores XFF when ADMIN_TRUST_FORWARDED_IP=false", function()
         local ngx = run_lab_manager_access({
-            env = { LAB_MANAGER_TOKEN = "", ADMIN_TRUST_FORWARDED_IP = "false" },
+            env = {
+                LAB_MANAGER_TOKEN = "",
+                ADMIN_TRUST_FORWARDED_IP = "false",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
             headers = { ["X-Forwarded-For"] = "203.0.113.5" },
             var = { remote_addr = "10.20.30.40" }
         })
@@ -246,6 +267,30 @@ runner.describe("Lab manager access guard", function()
         -- remote_addr is private; XFF should be ignored → allow (no token required when empty)
         runner.assert.equals(nil, ngx.status)
         runner.assert.equals(nil, ngx._exit)
+    end)
+
+    runner.it("rejects public token when dashboard policy is localhost only", function()
+        local ngx = run_lab_manager_access({
+            env = { LAB_MANAGER_TOKEN = "secret-token" },
+            headers = { ["X-Lab-Manager-Token"] = "secret-token" },
+            var = { remote_addr = "8.8.8.8" }
+        })
+
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
+    end)
+
+    runner.it("does not allow public access without LAB_MANAGER_TOKEN even when external policy is enabled", function()
+        local ngx = run_lab_manager_access({
+            env = {
+                LAB_MANAGER_TOKEN = "",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
+            var = { remote_addr = "8.8.8.8" }
+        })
+
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
     end)
 end)
 

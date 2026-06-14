@@ -396,8 +396,8 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-kno
   `ADMIN_DASHBOARD_LOCAL_ONLY=true`, `ADMIN_DASHBOARD_ALLOW_PRIVATE=true`, `SECURITY_ALLOW_PRIVATE_NETWORKS=true`, and keep `ADMIN_ACCESS_TOKEN_REQUIRED=true`
 - To limit private-network mode to specific subnets, set `ADMIN_ALLOWED_CIDRS`:
   `ADMIN_ALLOWED_CIDRS=10.20.0.0/16,192.168.50.0/24`
-- `/lab-manager`: allows loopback and RFC1918 private networks by default; requires `LAB_MANAGER_TOKEN` for non-private clients. Click "Lab Manager→" from the homepage and enter your token when prompted. The bootstrap `?token=...` is stripped from the browser URL after the cookie is set.
-- `/ops`: **network-restricted** to loopback plus RFC1918 private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), and also requires `LAB_MANAGER_TOKEN`.
+- `/lab-manager`: follows the same dashboard network policy (`ADMIN_DASHBOARD_LOCAL_ONLY`, `ADMIN_DASHBOARD_ALLOW_PRIVATE`, `SECURITY_ALLOW_PRIVATE_NETWORKS`, `ADMIN_ALLOWED_CIDRS`). It still requires `LAB_MANAGER_TOKEN` for non-private clients, and never permits public access when `LAB_MANAGER_TOKEN` is unset. Click "Lab Manager→" from the homepage and enter your token when prompted. The bootstrap `?token=...` is stripped from the browser URL after the cookie is set.
+- `/ops`: follows the same Lab Manager token and dashboard network policy. It requires `LAB_MANAGER_TOKEN`, including on private networks.
 - `/aas-admin/**`: always requires `LAB_MANAGER_TOKEN` via header/cookie, even from private networks. This keeps AAS write operations aligned with explicit admin auth instead of LAN-only trust.
 - If wallet actions return `JSON.parse` errors in the browser, ensure `CORS_ALLOWED_ORIGINS` includes your gateway origin.
 

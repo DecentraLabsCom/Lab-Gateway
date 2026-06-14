@@ -109,6 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (saveProvisionHostBtn) saveProvisionHostBtn.addEventListener('click', saveProvisionedHost);
 
     loadConfig();
+    loadAccessPolicy();
     checkOpsAvailability();
     updateBillingStatusAction();
     loadActivityFeed();
@@ -602,6 +603,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function $(sel) { return document.querySelector(sel); }
 
+    async function loadAccessPolicy() {
+        const badge = $('#labManagerAccessBadge');
+        if (!badge) return;
+        try {
+            const res = await fetch('/lab-manager/access-policy', { credentials: 'include' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const status = await res.json();
+            updateAccessPolicyBadge(status);
+        } catch (err) {
+            badge.textContent = 'Access Policy Unavailable';
+            badge.classList.remove('local', 'private', 'external');
+        }
+    }
+
+    function updateAccessPolicyBadge(status) {
+        const badge = $('#labManagerAccessBadge');
+        if (!badge || !status) return;
+
+        const localOnly = status.dashboardLocalOnly !== false;
+        const privateEnabled = status.allowPrivateNetworks === true && status.dashboardAllowPrivate === true;
+        const cidrs = typeof status.dashboardAllowedCidrs === 'string'
+            ? status.dashboardAllowedCidrs.split(',').map(item => item.trim()).filter(Boolean)
+            : [];
+
+        badge.classList.remove('local', 'private', 'external');
+        if (!localOnly) {
+            badge.textContent = 'External Access Allowed';
+            badge.classList.add('external');
+        } else if (privateEnabled && cidrs.length > 0) {
+            badge.textContent = 'Private CIDR Allowlist';
+            badge.title = cidrs.join(', ');
+            badge.classList.add('private');
+        } else if (privateEnabled) {
+            badge.textContent = 'Any Private Network';
+            badge.classList.add('private');
+        } else {
+            badge.textContent = 'Localhost Only';
+            badge.classList.add('local');
+        }
+    }
+
     // ---- Lab Station ops helpers ----
     async function loadHostInventory() {
         try {
@@ -1037,7 +1079,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ host })
             });
             if (res.status === 403) {
-                showToast('Access denied: /ops restricted to private networks', 'error');
+                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                 return;
             }
             if (res.status === 401) {
@@ -1064,7 +1106,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ host, enabled })
             });
             if (res.status === 403) {
-                showToast('Access denied: /ops restricted to private networks', 'error');
+                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                 return;
             }
             if (res.status === 401) {
@@ -1196,7 +1238,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ host })
             });
             if (res.status === 403) {
-                showToast('Access denied: /ops restricted to private networks', 'error');
+                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                 return;
             }
             if (res.status === 401) {
@@ -1220,7 +1262,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ host, command, args })
             });
             if (res.status === 403) {
-                showToast('Access denied: /ops restricted to private networks', 'error');
+                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                 return;
             }
             if (res.status === 401) {
@@ -1307,7 +1349,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ host })
             });
             if (res.status === 403) {
-                showToast('Access denied: /ops restricted to private networks', 'error');
+                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                 return;
             }
             if (res.status === 401) {
@@ -1374,7 +1416,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const res = await fetch(`/ops/api/reservations/timeline?${params.toString()}`);
             if (res.status === 403) {
-                const msg = 'Access denied: /ops restricted to private networks';
+                const msg = 'Access denied: /ops blocked by Lab Manager access policy';
                 if (!append) setTimelineMessage(msg);
                 showToast(msg, 'error');
                 return;
@@ -1700,8 +1742,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (opsHint) {
             opsHint.innerHTML = `
                 <i class="fas fa-exclamation-triangle" style="color: #856404; margin-right: 8px;"></i>
-                <strong>Network restriction:</strong> Lab Station operations require access from the gateway server or private networks (127.0.0.1, 172.16.0.0/12).
-                Access /lab-manager from the institution network to enable these features.
+                <strong>Access policy:</strong> Lab Station operations require an allowed Lab Manager network scope and a valid Lab Manager token.
+                Check ADMIN_DASHBOARD_LOCAL_ONLY, ADMIN_DASHBOARD_ALLOW_PRIVATE, SECURITY_ALLOW_PRIVATE_NETWORKS, and ADMIN_ALLOWED_CIDRS.
             `;
             opsHint.style.backgroundColor = '#fff3cd';
             opsHint.style.color = '#856404';
