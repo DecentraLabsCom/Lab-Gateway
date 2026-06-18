@@ -1716,9 +1716,35 @@ def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
                     """
                 )
             ).mappings().all()
+            try:
+                user_rows = conn.execute(
+                    text(
+                        """
+                        SELECT
+                            cp.connection_id,
+                            e.name AS username
+                        FROM guacamole_connection_permission cp
+                        JOIN guacamole_entity e
+                            ON e.entity_id = cp.entity_id
+                        WHERE cp.permission = 'READ'
+                            AND e.type = 'USER'
+                        ORDER BY cp.connection_id ASC, e.entity_id ASC
+                        """
+                    )
+                ).mappings().all()
+            except Exception as exc:
+                logging.warning("Unable to load Guacamole connection users: %s", exc)
+                user_rows = []
     except Exception as exc:
         logging.warning("Unable to load Guacamole connections: %s", exc)
         return [], str(exc)
+
+    users_by_connection: Dict[Any, List[str]] = {}
+    for row in user_rows:
+        connection_id = row.get("connection_id")
+        username = str(row.get("username") or "").strip()
+        if connection_id is not None and username:
+            users_by_connection.setdefault(connection_id, []).append(username)
 
     return [
         {
@@ -1727,6 +1753,7 @@ def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
             "protocol": row.get("protocol"),
             "hostname": row.get("hostname"),
             "port": row.get("port"),
+            "users": users_by_connection.get(row.get("connection_id"), []),
         }
         for row in rows
     ], None

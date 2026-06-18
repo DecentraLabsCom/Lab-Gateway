@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pagination: null,
         loading: false
     };
+    const OPS_LIST_PAGE_SIZE = 5;
 
     const smtpHostEl = $('#smtpHost');
     const smtpPortEl = $('#smtpPort');
@@ -124,6 +125,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const heartbeatSources = {};
     let hostNames = [];
     let guacamoleCandidates = [];
+    let hostListPage = 0;
+    let guacamoleCandidatePage = 0;
 
     // FMU AAS sync elements
     const fmuSyncBtn = $('#fmuSyncBtn');
@@ -348,12 +351,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (hostListEl) {
         hostListEl.addEventListener('click', handleHostActions);
+        hostListEl.addEventListener('input', handleOpsListSlider);
         renderHosts();
         hostNames.forEach(startHeartbeatStream);
         loadHostInventory();
     }
     if (guacamoleCandidateListEl) {
         guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
+        guacamoleCandidateListEl.addEventListener('input', handleOpsListSlider);
     }
 
     function loadConfig(onSuccess) {
@@ -757,9 +762,11 @@ document.addEventListener('DOMContentLoaded', () => {
             hostListEl.innerHTML = '<div class="empty">No ops hosts loaded. Configure ops-worker/hosts.json.</div>';
             return;
         }
-        hostNames.forEach(host => {
+        hostListPage = clampOpsListPage(hostListPage, hostNames.length);
+        pageSlice(hostNames, hostListPage).forEach(host => {
             hostListEl.appendChild(buildHostRow(host));
         });
+        appendOpsListSlider(hostListEl, 'hosts', hostNames.length, hostListPage);
     }
 
     function buildHostRow(host) {
@@ -823,9 +830,52 @@ document.addEventListener('DOMContentLoaded', () => {
             guacamoleCandidateListEl.innerHTML = '<div class="empty">All Guacamole connections are linked or no connections are configured.</div>';
             return;
         }
-        candidates.forEach(candidate => {
+        guacamoleCandidatePage = clampOpsListPage(guacamoleCandidatePage, candidates.length);
+        pageSlice(candidates, guacamoleCandidatePage).forEach(candidate => {
             guacamoleCandidateListEl.appendChild(buildGuacamoleCandidateRow(candidate));
         });
+        appendOpsListSlider(guacamoleCandidateListEl, 'guacamole', candidates.length, guacamoleCandidatePage);
+    }
+
+    function clampOpsListPage(page, total) {
+        const pageCount = Math.max(1, Math.ceil((Number(total) || 0) / OPS_LIST_PAGE_SIZE));
+        const parsed = Number(page);
+        if (!Number.isFinite(parsed)) return 0;
+        return Math.min(Math.max(0, Math.floor(parsed)), pageCount - 1);
+    }
+
+    function pageSlice(items, page) {
+        const offset = page * OPS_LIST_PAGE_SIZE;
+        return items.slice(offset, offset + OPS_LIST_PAGE_SIZE);
+    }
+
+    function appendOpsListSlider(container, listName, total, page) {
+        if (total <= OPS_LIST_PAGE_SIZE) return;
+        const pageCount = Math.ceil(total / OPS_LIST_PAGE_SIZE);
+        const start = page * OPS_LIST_PAGE_SIZE + 1;
+        const end = Math.min(total, start + OPS_LIST_PAGE_SIZE - 1);
+        const pager = document.createElement('div');
+        pager.className = 'ops-list-pager';
+        pager.innerHTML = `
+            <div class="ops-list-pager-meta">Showing ${start}-${end} of ${total}</div>
+            <input type="range" min="0" max="${pageCount - 1}" step="1" value="${page}" data-ops-list-slider="${htmlEscape(listName)}" aria-label="Select ${htmlEscape(listName)} page">
+        `;
+        container.appendChild(pager);
+    }
+
+    function handleOpsListSlider(e) {
+        const slider = e.target.closest('input[data-ops-list-slider]');
+        if (!slider) return;
+        const nextPage = Number(slider.value) || 0;
+        if (slider.dataset.opsListSlider === 'hosts') {
+            hostListPage = nextPage;
+            renderHosts();
+            return;
+        }
+        if (slider.dataset.opsListSlider === 'guacamole') {
+            guacamoleCandidatePage = nextPage;
+            renderGuacamoleCandidates(guacamoleCandidates);
+        }
     }
 
     function buildGuacamoleCandidateRow(candidate) {

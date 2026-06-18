@@ -30,9 +30,24 @@ def make_guacamole_engine(rows):
         Column("parameter_name", String(128), nullable=False),
         Column("parameter_value", String(4096), nullable=False),
     )
+    Table(
+        "guacamole_entity",
+        metadata,
+        Column("entity_id", Integer, primary_key=True),
+        Column("name", String(128), nullable=False),
+        Column("type", String(16), nullable=False),
+    )
+    Table(
+        "guacamole_connection_permission",
+        metadata,
+        Column("entity_id", Integer, nullable=False),
+        Column("connection_id", Integer, nullable=False),
+        Column("permission", String(16), nullable=False),
+    )
     metadata.create_all(engine)
 
     with engine.begin() as conn:
+        entity_id = 1
         for row in rows:
             conn.execute(
                 text(
@@ -56,6 +71,24 @@ def make_guacamole_engine(rows):
                         ),
                         {"id": row["id"], "name": key, "value": row[key]},
                     )
+            for username in row.get("users", []):
+                conn.execute(
+                    text(
+                        "INSERT INTO guacamole_entity "
+                        "(entity_id, name, type) "
+                        "VALUES (:entity_id, :name, 'USER')"
+                    ),
+                    {"entity_id": entity_id, "name": username},
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO guacamole_connection_permission "
+                        "(entity_id, connection_id, permission) "
+                        "VALUES (:entity_id, :connection_id, 'READ')"
+                    ),
+                    {"entity_id": entity_id, "connection_id": row["id"]},
+                )
+                entity_id += 1
     return engine
 
 
@@ -117,6 +150,7 @@ def test_host_inventory_links_guacamole_connection_by_hostname(client):
         "protocol": "rdp",
         "hostname": "lab-ws-01",
         "port": "3389",
+        "users": ["demo", "alice"],
     }]
 
     with with_inventory_state(hosts, guacamole):
@@ -128,6 +162,7 @@ def test_host_inventory_links_guacamole_connection_by_hostname(client):
     assert body["hosts"][0]["guacamole"]["status"] == "linked"
     assert body["hosts"][0]["guacamole"]["connections"][0]["name"] == "RDP Lab 01"
     assert body["hosts"][0]["guacamole"]["connections"][0]["hostname"] == "lab-ws-01"
+    assert body["hosts"][0]["guacamole"]["connections"][0]["users"] == ["demo", "alice"]
     assert body["guacamoleUnmatched"] == []
 
 

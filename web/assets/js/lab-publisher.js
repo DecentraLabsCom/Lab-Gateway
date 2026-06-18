@@ -55,6 +55,28 @@
         'Australia/Sydney',
         'Pacific/Auckland',
     ];
+
+    function normalizeConnectionUsers(connection) {
+        const rawUsers = Array.isArray(connection?.users) ? connection.users : [];
+        return rawUsers
+            .map(user => {
+                if (typeof user === 'string') return user.trim();
+                if (user && typeof user === 'object') return String(user.username || user.name || '').trim();
+                return '';
+            })
+            .filter(Boolean);
+    }
+
+    function resolveConnectionAccessKey(connection) {
+        const users = normalizeConnectionUsers(connection);
+        const nonDemoUser = users.find(user => user.toLowerCase() !== 'demo');
+        return nonDemoUser || users[0] || (connection?.id ? String(connection.id) : (connection?.name || ''));
+    }
+
+    function formatConnectionUsers(connection) {
+        const users = normalizeConnectionUsers(connection);
+        return users.length ? ` - ${users.join(', ')}` : '';
+    }
     const LAB_CATEGORIES_GROUPED = {
         'Mathematics & Computer Science': [
             'Mathematics',
@@ -315,7 +337,7 @@
             option.value = String(index);
             option.textContent = type === '1'
                 ? `${resource.fileName} (${resource.relativePath || 'fmu-data'})`
-                : `${resource.name || 'Connection'} #${resource.id} ${resource.hostname ? '- ' + resource.hostname : ''}`;
+                : `${resource.name || 'Connection'} #${resource.id} ${resource.hostname ? '- ' + resource.hostname : ''}${formatConnectionUsers(resource)}`;
             select.appendChild(option);
         });
         applySelectedResource();
@@ -518,9 +540,10 @@
 
         const conn = uniqueGuacamole()[Number(index)];
         $('labAccessURI').value = state.status?.recommendedRemoteAccessURI || `${window.location.origin}/guacamole`;
-        $('labAccessKey').value = conn?.id ? String(conn.id) : (conn?.name || '');
+        $('labAccessKey').value = resolveConnectionAccessKey(conn);
         if (!$('labName').value) $('labName').value = conn?.name || '';
-        preview.textContent = `Guacamole: ${conn?.name || 'Connection'} (${conn?.hostname || 'no host'})`;
+        const accessUser = resolveConnectionAccessKey(conn);
+        preview.textContent = `Guacamole: ${conn?.name || 'Connection'} (${conn?.hostname || 'no host'}) - access user: ${accessUser || 'n/a'}`;
         $('labMaxConcurrentUsers').value = 1;
         syncResourceTypeFields();
     }

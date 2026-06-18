@@ -581,6 +581,18 @@ body {
 .host-title { font-weight: 700; }
 .host-meta { color: var(--muted); font-size: 0.9rem; }
 .host-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
+.ops-list-pager {
+    display: grid;
+    grid-template-columns: minmax(120px, max-content) minmax(180px, 1fr);
+    gap: 12px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+.ops-list-pager input[type="range"] {
+    width: 100%;
+    accent-color: var(--primary-2);
+}
 .mini-btn {
     padding: 6px 10px;
     border-radius: 10px;
