@@ -122,10 +122,13 @@ body {
 .card-body { padding: 12px 20px 20px; }
 
 .pill {
+    display: inline-flex;
+    align-items: center;
     padding: 6px 12px;
     background: var(--pill);
     border-radius: 999px;
     font-size: 0.8rem;
+    line-height: 1.2;
     border: 1px solid var(--border);
     color: var(--muted);
 }
@@ -592,7 +595,7 @@ body {
     align-self: start;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     color: var(--muted);
     font-size: 0.9rem;
 }
@@ -600,6 +603,7 @@ body {
     align-self: flex-start;
 }
 .candidate-station-detail {
+    margin-top: 2px;
     line-height: 1.35;
 }
 .host-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
