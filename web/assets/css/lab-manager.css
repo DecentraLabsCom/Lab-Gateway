@@ -543,8 +543,13 @@ body {
 }
 
 .asset-row a {
+    flex: 1;
     color: var(--primary);
     overflow-wrap: anywhere;
+}
+
+.asset-delete-btn {
+    flex: 0 0 auto;
 }
 
 .lab-publisher-list.empty {
@@ -587,7 +592,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-height: 620px;
+    max-height: 530px;
     overflow-y: auto;
     padding-right: 4px;
     scrollbar-color: var(--primary-2) #0d1220;

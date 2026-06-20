@@ -199,6 +199,7 @@
         const docs = $('labDocs');
         const imageChoose = $('labImagesChooseBtn');
         const docChoose = $('labDocsChooseBtn');
+        const assetList = $('labAssetList');
         const addWindow = $('labAddUnavailableWindow');
         const termsUrl = $('labTermsUrl');
         const fmuAutoDetect = $('labFmuAutoDetectBtn');
@@ -220,6 +221,7 @@
         docs.addEventListener('change', () => uploadAssets(docs.files, 'docs'));
         imageChoose.addEventListener('click', () => images.click());
         docChoose.addEventListener('click', () => docs.click());
+        if (assetList) assetList.addEventListener('click', handleAssetListClick);
         addWindow.addEventListener('click', addUnavailableWindow);
         termsUrl.addEventListener('blur', autoFetchTermsMetadata);
         fmuAutoDetect.addEventListener('click', autoDetectFmuMetadata);
@@ -570,16 +572,23 @@
         const list = Array.from(files || []);
         if (!list.length) return;
         const contentId = ensureContentId();
-        for (const file of list) {
-            const form = new FormData();
-            form.append('contentId', contentId);
-            form.append('kind', kind);
-            form.append('file', file);
-            const result = await fetchJson('/lab-admin/assets', { method: 'POST', body: form });
-            if (kind === 'images') state.uploadedImages.push(result.url);
-            else state.uploadedDocs.push(result.url);
+        try {
+            for (const file of list) {
+                const form = new FormData();
+                form.append('contentId', contentId);
+                form.append('kind', kind);
+                form.append('file', file);
+                const result = await fetchJson('/lab-admin/assets', { method: 'POST', body: form });
+                if (kind === 'images') state.uploadedImages.push(result.url);
+                else state.uploadedDocs.push(result.url);
+            }
+        } catch (err) {
+            setStatus(err.message || 'Upload failed', true);
+        } finally {
+            const input = $(kind === 'images' ? 'labImages' : 'labDocs');
+            if (input) input.value = '';
+            renderAssets();
         }
-        renderAssets();
     }
 
     async function publishLab() {
@@ -768,12 +777,42 @@
     function renderAssets() {
         const target = $('labAssetList');
         const entries = [
-            ...state.uploadedImages.map(url => ({ label: 'Image', url })),
-            ...state.uploadedDocs.map(url => ({ label: 'Doc', url })),
+            ...state.uploadedImages.map(url => ({ kind: 'images', label: 'Image', url })),
+            ...state.uploadedDocs.map(url => ({ kind: 'docs', label: 'Doc', url })),
         ];
         target.innerHTML = entries.length
-            ? entries.map(entry => `<div class="asset-row"><span>${escapeHtml(entry.label)}</span><a href="${escapeAttr(entry.url)}" target="_blank" rel="noopener">${escapeHtml(entry.url)}</a></div>`).join('')
+            ? entries.map(entry => `
+                <div class="asset-row">
+                    <span>${escapeHtml(entry.label)}</span>
+                    <a href="${escapeAttr(entry.url)}" target="_blank" rel="noopener">${escapeHtml(entry.url)}</a>
+                    <button class="mini-btn danger asset-delete-btn" type="button" data-kind="${escapeAttr(entry.kind)}" data-url="${escapeAttr(entry.url)}" title="Delete ${escapeAttr(entry.label)}" aria-label="Delete ${escapeAttr(entry.label)}">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `).join('')
             : '';
+    }
+
+    async function handleAssetListClick(event) {
+        const button = event.target.closest('button[data-url][data-kind]');
+        if (!button) return;
+        const url = button.dataset.url || '';
+        const kind = button.dataset.kind || '';
+        button.disabled = true;
+        try {
+            await fetchJson('/lab-admin/assets', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: url }),
+            });
+            const stateKey = kind === 'images' ? 'uploadedImages' : 'uploadedDocs';
+            state[stateKey] = state[stateKey].filter(item => item !== url);
+            setStatus('Asset deleted.', false);
+        } catch (err) {
+            setStatus(err.message || 'Delete failed', true);
+        } finally {
+            renderAssets();
+        }
     }
 
     async function autoFetchTermsMetadata() {
