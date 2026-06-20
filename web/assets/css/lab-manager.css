@@ -196,7 +196,7 @@ body {
 }
 .field input[type="date"],
 .field input[type="time"] {
-    color-scheme: dark;
+    color-scheme: light;
 }
 .field input[type="date"]::-webkit-calendar-picker-indicator,
 .field input[type="time"]::-webkit-calendar-picker-indicator {
