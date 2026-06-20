@@ -25,6 +25,7 @@ local specs = {
     "tests.unit.admin_access_spec",
     "tests.unit.lab_manager_access_spec",
     "tests.unit.lab_manager_admin_access_spec",
+    "tests.unit.lab_content_config_spec",
     "tests.unit.ops_access_config_spec",
     "tests.unit.jwt_handler_spec",
     "tests.unit.demo_guard_spec"

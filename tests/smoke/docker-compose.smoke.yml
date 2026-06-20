@@ -28,6 +28,7 @@ services:
       - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ../../openresty/lua:/etc/openresty/lua:ro
       - ../../web:/var/www/html:ro
+      - ./lab-content:/var/www/lab-content:ro
     ports:
       - "18443:443"
     depends_on:

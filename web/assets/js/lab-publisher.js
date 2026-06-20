@@ -633,6 +633,8 @@
         const docs = state.docMode === 'link'
             ? splitCsv($('labDocUrls').value)
             : [...state.uploadedDocs];
+        const categories = [...state.selectedCategories];
+        const keywords = splitCsv($('labKeywords').value);
         const resourceType = $('labResourceType').value === '1' ? RESOURCE_TYPES.FMU : RESOURCE_TYPES.LAB;
         const fmuFileName = $('labFmuFileName').value.trim();
         const unavailableWindows = sanitizeUnavailableWindows(state.unavailableWindows);
@@ -643,8 +645,8 @@
             sha256: $('labTermsSha256').value.trim(),
         });
         const attributes = [
-            { trait_type: 'category', value: [...state.selectedCategories] },
-            { trait_type: 'keywords', value: splitCsv($('labKeywords').value) },
+            { trait_type: 'category', value: categories },
+            { trait_type: 'keywords', value: keywords },
             { trait_type: 'timeSlots', value: splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite) },
             { trait_type: 'opens', value: dateInputToUnix($('labOpens').value) },
             { trait_type: 'closes', value: dateInputToUnix($('labCloses').value) },
@@ -670,6 +672,10 @@
             name: $('labName').value.trim(),
             description: $('labDescription').value.trim(),
             image: imageUrls[0] || '',
+            images: imageUrls,
+            category: categories,
+            keywords,
+            docs,
             demoEnabled: $('labDemoEnabled').checked === true,
             attributes,
         };

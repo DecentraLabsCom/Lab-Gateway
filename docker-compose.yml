@@ -29,6 +29,7 @@ services:
       - ADMIN_ALLOWED_CIDRS=${ADMIN_ALLOWED_CIDRS:-}
       - LAB_CONTENT_BASE_PATH=/app/lab-content
       - FMU_DATA_PATH=/app/fmu-data
+      - 'SPRING_APPLICATION_JSON={"ethereum":{"gas":{"price":{"default":5},"limit":{"contract":1000000}}}}'
     volumes:
       - ./certs:/app/config/keys
       - ./blockchain-data:/app/data
@@ -80,6 +81,7 @@ services:
       - ./openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
       - ./openresty/lua:/etc/openresty/lua:ro
       - ./web:/var/www/html:ro
+      - ./lab-content:/var/www/lab-content:ro
       # Full mode: expose blockchain-services JWT public key to OpenResty so
       # /.well-known/public-key.pem and init.lua always use the correct key.
       # In Lite mode this directory is empty/absent; init.lua falls back to
