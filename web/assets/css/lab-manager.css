@@ -128,7 +128,6 @@ body {
     background: var(--pill);
     border-radius: 999px;
     font-size: 0.8rem;
-    line-height: 1.2;
     border: 1px solid var(--border);
     color: var(--muted);
 }
@@ -595,7 +594,7 @@ body {
     align-self: start;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 6px;
     color: var(--muted);
     font-size: 0.9rem;
 }
