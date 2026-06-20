@@ -588,6 +588,20 @@ body {
 }
 .host-title { font-weight: 700; }
 .host-meta { color: var(--muted); font-size: 0.9rem; }
+.candidate-station-status {
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+.candidate-station-status .pill {
+    align-self: flex-start;
+}
+.candidate-station-detail {
+    line-height: 1.35;
+}
 .host-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
 .mini-btn {
     padding: 6px 10px;

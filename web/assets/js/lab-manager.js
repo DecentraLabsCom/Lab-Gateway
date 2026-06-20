@@ -845,9 +845,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="host-meta">Host: ${safeHost}</div>
                 <div class="host-meta">Protocol: ${safeProtocol} · Port: ${safePort}</div>
             </div>
-            <div class="host-meta">
+            <div class="candidate-station-status">
                 <span class="pill ${statusClass}">Lab Station: ${escapeHtml(statusText)}</span>
-                ${state.detail ? `<div class="host-meta">${escapeHtml(state.detail)}</div>` : ''}
+                ${state.detail ? `<div class="candidate-station-detail">${escapeHtml(state.detail)}</div>` : ''}
             </div>
             <div class="host-actions">
                 <button class="mini-btn primary" data-action="probe-candidate">Check Lab Station</button>
