@@ -194,6 +194,20 @@ body {
     transition: border 0.2s ease, box-shadow 0.2s ease;
     font-family: inherit;
 }
+.field input[type="date"],
+.field input[type="time"] {
+    color-scheme: dark;
+}
+.field input[type="date"]::-webkit-calendar-picker-indicator,
+.field input[type="time"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    filter: invert(1) brightness(1.8) contrast(1.05);
+    opacity: 0.9;
+}
+.field input[type="date"]::-webkit-calendar-picker-indicator:hover,
+.field input[type="time"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
 .field textarea { resize: vertical; min-height: 96px; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(77,225,255,0.1); }
 .field input[readonly] {
