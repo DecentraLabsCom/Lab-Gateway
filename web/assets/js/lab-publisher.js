@@ -14,6 +14,8 @@
         docMode: 'link',
         fmuDescribeController: null,
         termsController: null,
+        labs: [],
+        editingLabId: null,
     };
 
     const CREDIT_DECIMALS = 5;
@@ -192,6 +194,8 @@
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
         const submit = $('labPublisherSubmitBtn');
+        const cancelEdit = $('labPublisherCancelEditBtn');
+        const labList = $('labPublisherList');
         const resourceType = $('labResourceType');
         const resourceSelect = $('labDetectedResource');
         const setupMode = $('labSetupMode');
@@ -211,6 +215,8 @@
         initMarketplaceFields();
         refresh.addEventListener('click', loadPublisherData);
         submit.addEventListener('click', publishLab);
+        if (cancelEdit) cancelEdit.addEventListener('click', clearEditMode);
+        if (labList) labList.addEventListener('click', handleLabListClick);
         resourceType.addEventListener('change', () => {
             renderResourceOptions();
             syncResourceTypeFields();
@@ -319,7 +325,8 @@
             ];
             state.fmus = status?.fmuInventory || [];
             renderResourceOptions();
-            renderLabs(labs?.labs || []);
+            state.labs = labs?.labs || [];
+            renderLabs(state.labs);
             const providerLabel = status?.isProvider
                 ? `Provider wallet: ${status.providerAddress}`
                 : 'This Gateway wallet is not registered as provider yet.';
@@ -593,35 +600,42 @@
 
     async function publishLab() {
         try {
-            const setupMode = $('labSetupMode').value;
-            const payload = {
-                setupMode,
-                listImmediately: $('labListImmediately').value === 'true',
-                price: convertHourlyCreditsToRawPerSecond($('labPrice').value || '0').toString(),
-                accessURI: $('labAccessURI').value.trim(),
-                accessKey: $('labAccessKey').value.trim(),
-                resourceType: Number($('labResourceType').value),
-            };
-            if (setupMode === 'quick') {
-                payload.metadataUrl = $('labMetadataUrl').value.trim();
-            } else {
-                payload.metadata = buildMetadata();
-            }
+            const payload = buildLabPayload();
+            const editing = !!state.editingLabId;
 
             $('labPublisherSubmitBtn').disabled = true;
-            setStatus('Publishing lab on-chain...', false);
-            const result = await fetchJson('/lab-admin/labs', {
-                method: 'POST',
+            setStatus(editing ? `Updating Lab #${state.editingLabId} on-chain...` : 'Publishing lab on-chain...', false);
+            const result = await fetchJson(editing ? `/lab-admin/labs/${encodeURIComponent(state.editingLabId)}` : '/lab-admin/labs', {
+                method: editing ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
-            setStatus(`Published. Tx: ${result.transactionHash || 'pending'}${result.labId ? ' Lab #' + result.labId : ''}`, false);
+            setStatus(`${editing ? 'Updated' : 'Published'}. Tx: ${result.transactionHash || 'pending'}${result.labId ? ' Lab #' + result.labId : ''}`, false);
+            if (editing) clearEditMode(false);
             await loadPublisherData();
         } catch (err) {
-            setStatus(err.message || 'Publish failed', true);
+            setStatus(err.message || (state.editingLabId ? 'Update failed' : 'Publish failed'), true);
         } finally {
             $('labPublisherSubmitBtn').disabled = false;
         }
+    }
+
+    function buildLabPayload() {
+        const setupMode = $('labSetupMode').value;
+        const payload = {
+            setupMode,
+            listImmediately: $('labListImmediately').value === 'true',
+            price: convertHourlyCreditsToRawPerSecond($('labPrice').value || '0').toString(),
+            accessURI: $('labAccessURI').value.trim(),
+            accessKey: $('labAccessKey').value.trim(),
+            resourceType: Number($('labResourceType').value),
+        };
+        if (setupMode === 'quick') {
+            payload.metadataUrl = $('labMetadataUrl').value.trim();
+        } else {
+            payload.metadata = buildMetadata();
+        }
+        return payload;
     }
 
     function buildMetadata() {
@@ -946,7 +960,7 @@
         `).join('');
     }
 
-    function renderLabs(labs) {
+    function renderLabsLegacy(labs) {
         const target = $('labPublisherList');
         if (!labs.length) {
             target.classList.add('empty');
@@ -963,6 +977,229 @@
                 <div class="item-meta">${escapeHtml(formatRawPricePerHour(lab.price || '0'))} credits/hour</div>
             </div>
         `).join('');
+    }
+
+    function renderLabs(labs) {
+        const target = $('labPublisherList');
+        if (!labs.length) {
+            target.classList.add('empty');
+            target.textContent = 'No labs published by this provider wallet yet.';
+            return;
+        }
+        target.classList.remove('empty');
+        target.innerHTML = labs.map(lab => `
+            <div class="lab-row">
+                <div>
+                    <div class="item-title">Lab #${escapeHtml(lab.labId)} ${Number(lab.resourceType) === 1 ? 'FMU' : 'Remote'} ${lab.listed ? '<span class="pill good">Listed</span>' : '<span class="pill soft">Draft</span>'}</div>
+                    <div class="item-meta">${escapeHtml(lab.accessKey || '')} - ${escapeHtml(lab.uri || '')}</div>
+                </div>
+                <div class="lab-row-side">
+                    <div class="item-meta">${escapeHtml(formatRawPricePerHour(lab.price || '0'))} credits/hour</div>
+                    <div class="lab-actions">
+                        <button class="mini-btn primary" type="button" data-lab-action="edit" data-lab-id="${escapeAttr(lab.labId)}" title="Edit Lab #${escapeAttr(lab.labId)}" aria-label="Edit Lab #${escapeAttr(lab.labId)}">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <button class="mini-btn" type="button" data-lab-action="${lab.listed ? 'unlist' : 'list'}" data-lab-id="${escapeAttr(lab.labId)}" title="${lab.listed ? 'Unlist' : 'List'} Lab #${escapeAttr(lab.labId)}" aria-label="${lab.listed ? 'Unlist' : 'List'} Lab #${escapeAttr(lab.labId)}">
+                            <i class="fas ${lab.listed ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                        </button>
+                        <button class="mini-btn danger" type="button" data-lab-action="delete" data-lab-id="${escapeAttr(lab.labId)}" title="Delete Lab #${escapeAttr(lab.labId)}" aria-label="Delete Lab #${escapeAttr(lab.labId)}">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function handleLabListClick(event) {
+        const button = event.target.closest('button[data-lab-action][data-lab-id]');
+        if (!button) return;
+        const labId = button.dataset.labId;
+        const action = button.dataset.labAction;
+        const lab = state.labs.find(item => String(item.labId) === String(labId));
+        if (!lab) return;
+
+        if (action === 'edit') {
+            await enterEditMode(lab);
+            return;
+        }
+        if (action === 'delete') {
+            await deleteLab(lab, button);
+            return;
+        }
+        if (action === 'list' || action === 'unlist') {
+            await toggleLabListing(lab, action === 'list', button);
+        }
+    }
+
+    async function enterEditMode(lab) {
+        state.editingLabId = String(lab.labId);
+        resetFmuDescribeFields(false);
+        applyLabBaseFields(lab);
+        await applyLabMetadata(lab);
+        syncSetupMode();
+        syncResourceTypeFields();
+        updateEditControls();
+        setStatus(`Editing Lab #${lab.labId}. Use Save Lab to persist changes.`, false);
+        $('labName').focus();
+    }
+
+    function applyLabBaseFields(lab) {
+        $('labSetupMode').value = 'full';
+        $('labResourceType').value = String(Number(lab.resourceType) || 0);
+        $('labDetectedResource').value = '';
+        $('labListImmediately').value = lab.listed ? 'true' : 'false';
+        $('labAccessURI').value = lab.accessURI || '';
+        $('labAccessKey').value = lab.accessKey || '';
+        $('labPrice').value = formatRawPricePerHour(lab.price || '0');
+        $('labMetadataUrl').value = lab.uri || '';
+        const contentId = extractContentIdFromMetadataUri(lab.uri);
+        if (contentId) $('labContentId').value = contentId;
+        if (Number(lab.resourceType) === 1) {
+            $('labFmuFileName').value = lab.accessKey || '';
+        }
+    }
+
+    async function applyLabMetadata(lab) {
+        const metadataUrl = lab.uri || '';
+        if (!metadataUrl) return;
+        try {
+            const response = await fetch(metadataUrl, { credentials: 'omit' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const metadata = await response.json();
+            populateMetadataForm(metadata);
+        } catch (err) {
+            $('labSetupMode').value = 'quick';
+            $('labMetadataUrl').value = metadataUrl;
+            setStatus(`Editing Lab #${lab.labId}. Metadata could not be loaded; quick URL mode enabled.`, true);
+        }
+    }
+
+    function populateMetadataForm(metadata) {
+        $('labName').value = metadata?.name || '';
+        $('labDescription').value = metadata?.description || '';
+        $('labKeywords').value = normalizeArray(metadata?.keywords).join(', ');
+        state.selectedCategories = normalizeArray(metadata?.category);
+        renderCategoryChips();
+        const images = normalizeArray(metadata?.images);
+        if (!images.length && metadata?.image) images.push(metadata.image);
+        $('labImageUrls').value = images.join(', ');
+        $('labDocUrls').value = normalizeArray(metadata?.docs).join(', ');
+        $('labDemoEnabled').checked = metadata?.demoEnabled === true;
+
+        const attributes = metadataAttributes(metadata?.attributes);
+        setAttributeValue(attributes, 'timeSlots', value => $('labTimeSlots').value = normalizeArray(value).join(', '));
+        setAttributeValue(attributes, 'opens', value => $('labOpens').value = unixToDateInput(value));
+        setAttributeValue(attributes, 'closes', value => $('labCloses').value = unixToDateInput(value));
+        setAttributeValue(attributes, 'availableDays', value => {
+            state.availableDays = normalizeArray(value);
+            renderDayToggles();
+        });
+        setAttributeValue(attributes, 'availableHours', value => {
+            $('labAvailableHoursStart').value = sanitizeTime(value?.start || '') || '09:00';
+            $('labAvailableHoursEnd').value = sanitizeTime(value?.end || '') || '17:00';
+        });
+        setAttributeValue(attributes, 'maxConcurrentUsers', value => $('labMaxConcurrentUsers').value = String(value || 1));
+        setAttributeValue(attributes, 'unavailableWindows', value => {
+            state.unavailableWindows = Array.isArray(value) ? value.map(window => ({ ...window, clientId: cryptoRandomId() })) : [];
+            renderUnavailableWindows();
+        });
+        setAttributeValue(attributes, 'termsOfUse', value => {
+            $('labTermsUrl').value = value?.url || '';
+            $('labTermsVersion').value = value?.version || '';
+            $('labTermsEffectiveDate').value = value?.effectiveDate || '';
+            $('labTermsSha256').value = value?.sha256 || '';
+        });
+        setAttributeValue(attributes, 'timezone', value => {
+            if (value) $('labTimezone').value = value;
+        });
+        setAttributeValue(attributes, 'fmuFileName', value => {
+            if (value) $('labFmuFileName').value = value;
+        });
+        setAttributeValue(attributes, 'fmiVersion', value => $('labFmiVersion').value = value || '');
+        setAttributeValue(attributes, 'simulationType', value => $('labSimulationType').value = value || '');
+        setAttributeValue(attributes, 'defaultStartTime', value => $('labDefaultStartTime').value = value ?? '');
+        setAttributeValue(attributes, 'defaultStopTime', value => $('labDefaultStopTime').value = value ?? '');
+        setAttributeValue(attributes, 'defaultStepSize', value => $('labDefaultStepSize').value = value ?? '');
+        setAttributeValue(attributes, 'modelVariables', value => {
+            state.modelVariables = Array.isArray(value) ? value : [];
+            renderModelVariables();
+        });
+    }
+
+    async function toggleLabListing(lab, shouldList, button) {
+        button.disabled = true;
+        try {
+            const result = await fetchJson(`/lab-admin/labs/${encodeURIComponent(lab.labId)}/${shouldList ? 'list' : 'unlist'}`, {
+                method: 'POST',
+            });
+            setStatus(`${shouldList ? 'Listed' : 'Unlisted'} Lab #${lab.labId}. Tx: ${result.transactionHash || 'pending'}`, false);
+            await loadPublisherData();
+        } catch (err) {
+            setStatus(err.message || `${shouldList ? 'List' : 'Unlist'} failed`, true);
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async function deleteLab(lab, button) {
+        if (!window.confirm(`Delete Lab #${lab.labId}? This cannot be undone on-chain.`)) return;
+        button.disabled = true;
+        try {
+            const result = await fetchJson(`/lab-admin/labs/${encodeURIComponent(lab.labId)}`, { method: 'DELETE' });
+            if (state.editingLabId === String(lab.labId)) clearEditMode(false);
+            setStatus(`Deleted Lab #${lab.labId}. Tx: ${result.transactionHash || 'pending'}`, false);
+            await loadPublisherData();
+        } catch (err) {
+            setStatus(err.message || 'Delete failed', true);
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function clearEditMode(resetStatus = true) {
+        state.editingLabId = null;
+        updateEditControls();
+        if (resetStatus) setStatus('Edit cancelled.', false);
+    }
+
+    function updateEditControls() {
+        const submit = $('labPublisherSubmitBtn');
+        const cancel = $('labPublisherCancelEditBtn');
+        const editing = !!state.editingLabId;
+        submit.innerHTML = editing ? '<i class="fas fa-save"></i> Save Lab' : '<i class="fas fa-upload"></i> Publish Lab';
+        if (cancel) cancel.style.display = editing ? '' : 'none';
+    }
+
+    function metadataAttributes(value) {
+        return Array.isArray(value) ? value.filter(item => item && typeof item === 'object') : [];
+    }
+
+    function setAttributeValue(attributes, traitType, setter) {
+        const attribute = attributes.find(item => item.trait_type === traitType);
+        if (attribute) setter(attribute.value);
+    }
+
+    function normalizeArray(value) {
+        if (Array.isArray(value)) return value.map(item => String(item ?? '').trim()).filter(Boolean);
+        const text = String(value ?? '').trim();
+        return text ? [text] : [];
+    }
+
+    function unixToDateInput(value) {
+        const timestamp = Number(value);
+        if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+        return new Date(timestamp * 1000).toISOString().slice(0, 10);
+    }
+
+    function extractContentIdFromMetadataUri(value) {
+        try {
+            const path = new URL(value, window.location.origin).pathname;
+            const match = path.match(/\/lab-content\/content\/([^/]+)\/metadata\.json$/);
+            return match ? decodeURIComponent(match[1]) : '';
+        } catch {
+            return '';
+        }
     }
 
     async function fetchJson(url, options) {
