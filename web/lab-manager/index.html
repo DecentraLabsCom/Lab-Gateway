@@ -96,12 +96,12 @@
                                         <input type="number" id="labPrice" min="0" step="0.1" value="0" inputmode="decimal">
                                     </label>
                                     <label class="field">
-                                        <span>Price Unit</span>
+                                        <span>Per</span>
                                         <select id="labPriceUnit">
-                                            <option value="hour">per hour</option>
-                                            <option value="day">per day</option>
-                                            <option value="week">per week</option>
-                                            <option value="month">per 30-day month</option>
+                                            <option value="hour">hour</option>
+                                            <option value="day">day</option>
+                                            <option value="week">week</option>
+                                            <option value="month">30-day month</option>
                                         </select>
                                     </label>
                                     <label class="field full">
@@ -155,7 +155,7 @@
                                         <span>Closes</span>
                                         <input type="date" id="labCloses">
                                     </label>
-                                    <label class="field">
+                                    <label class="field booking-slot-field">
                                         <span>Time Slots (minutes)</span>
                                         <input type="text" id="labTimeSlots" placeholder="15, 30, 60" value="30,60">
                                     </label>
@@ -166,9 +166,19 @@
                                             <option value="calendar-period">Calendar periods</option>
                                         </select>
                                     </label>
-                                    <label class="field">
-                                        <span>Allowed Periods</span>
-                                        <input type="text" id="labAllowedPeriods" placeholder="1 day, 1 week, 1 month" value="1 day">
+                                    <label class="field booking-period-field is-hidden">
+                                        <span>Length</span>
+                                        <select id="labAllowedPeriodValue">
+                                            <option value="1">1</option>
+                                        </select>
+                                    </label>
+                                    <label class="field booking-period-field is-hidden">
+                                        <span>Unit</span>
+                                        <select id="labAllowedPeriodUnit">
+                                            <option value="day">days</option>
+                                            <option value="week">weeks</option>
+                                            <option value="month">30-day months</option>
+                                        </select>
                                     </label>
                                     <label class="field">
                                         <span>Timezone</span>

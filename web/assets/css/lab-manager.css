@@ -169,7 +169,7 @@ body {
 }
 
 .onchain-fields-grid {
-    grid-template-columns: minmax(160px, 50fr) minmax(88px, 15fr) minmax(130px, 35fr);
+    grid-template-columns: minmax(160px, 52fr) minmax(88px, 15fr) minmax(130px, 33fr);
 }
 
 .onchain-fields-grid .field.full {
@@ -216,6 +216,7 @@ body {
     cursor: not-allowed;
 }
 .field.full { grid-column: 1 / -1; }
+.field.is-hidden { display: none; }
 
 .form-section-title {
     display: flex;

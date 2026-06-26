@@ -216,6 +216,8 @@
         const fmuAutoDetect = $('labFmuAutoDetectBtn');
         const categorySelect = $('labCategorySelect');
         const fmuFileName = $('labFmuFileName');
+        const bookingMode = $('labBookingMode');
+        const periodUnit = $('labAllowedPeriodUnit');
 
         if (!refresh || !submit) return;
 
@@ -230,6 +232,8 @@
         });
         resourceSelect.addEventListener('change', applySelectedResource);
         setupMode.addEventListener('change', syncSetupMode);
+        if (bookingMode) bookingMode.addEventListener('change', syncBookingModeFields);
+        if (periodUnit) periodUnit.addEventListener('change', () => populateAllowedPeriodValues());
         images.addEventListener('change', () => uploadAssets(images.files, 'images'));
         docs.addEventListener('change', () => uploadAssets(docs.files, 'docs'));
         imageChoose.addEventListener('click', () => images.click());
@@ -259,23 +263,51 @@
 
         syncSetupMode();
         syncResourceTypeFields();
+        syncBookingModeFields();
         loadPublisherData();
     });
 
     function initMarketplaceFields() {
         populateTimezoneOptions();
+        populateAllowedPeriodValues();
         renderCategoryMenu();
         renderCategoryChips();
         renderDayToggles();
         renderUnavailableWindows();
         setupMediaMode('images', 'link');
         setupMediaMode('docs', 'link');
+        syncBookingModeFields();
         $('labImageMode').querySelectorAll('button').forEach(button => {
             button.addEventListener('click', () => setupMediaMode('images', button.dataset.mode));
         });
         $('labDocMode').querySelectorAll('button').forEach(button => {
             button.addEventListener('click', () => setupMediaMode('docs', button.dataset.mode));
         });
+    }
+
+    function syncBookingModeFields() {
+        const mode = $('labBookingMode')?.value === 'calendar-period' ? 'calendar-period' : 'slot';
+        document.querySelectorAll('.booking-slot-field').forEach(field => {
+            field.classList.toggle('is-hidden', mode !== 'slot');
+        });
+        document.querySelectorAll('.booking-period-field').forEach(field => {
+            field.classList.toggle('is-hidden', mode !== 'calendar-period');
+        });
+    }
+
+    function populateAllowedPeriodValues(preferredValue) {
+        const valueSelect = $('labAllowedPeriodValue');
+        const unit = normalizePeriodUnit($('labAllowedPeriodUnit')?.value || 'day');
+        if (!valueSelect) return;
+
+        const maxByUnit = { day: 90, week: 12, month: 3 };
+        const max = maxByUnit[unit] || 90;
+        const current = Number(preferredValue || valueSelect.value || 1);
+        valueSelect.innerHTML = '';
+        for (let value = 1; value <= max; value += 1) {
+            valueSelect.add(new Option(String(value), String(value)));
+        }
+        valueSelect.value = String(Math.min(Math.max(Number.isFinite(current) ? current : 1, 1), max));
     }
 
     function populateTimezoneOptions() {
@@ -664,7 +696,7 @@
         const bookingMode = $('labBookingMode').value === 'calendar-period' ? 'calendar-period' : 'slot';
         const timeSlots = splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite);
         const allowedDurations = bookingMode === 'calendar-period'
-            ? parseAllowedPeriods($('labAllowedPeriods').value)
+            ? getSelectedAllowedPeriods()
             : timeSlots.map(slot => ({ unit: 'minute', value: slot }));
         const periodRules = bookingMode === 'calendar-period'
             ? {
@@ -756,8 +788,8 @@
         if (bookingMode === 'slot' && !splitCsv($('labTimeSlots').value).map(Number).some(Number.isFinite)) {
             throw new Error('Time Slots must include at least one duration in minutes');
         }
-        if (bookingMode === 'calendar-period' && !parseAllowedPeriods($('labAllowedPeriods').value).length) {
-            throw new Error('Allowed Periods must include at least one day, week, or month duration');
+        if (bookingMode === 'calendar-period' && !getSelectedAllowedPeriods().length) {
+            throw new Error('Select a valid period length and unit');
         }
         const opens = dateInputToUnix($('labOpens').value);
         const closes = dateInputToUnix($('labCloses').value);
@@ -1144,10 +1176,7 @@
             $('labBookingMode').value = metadata.bookingMode === 'calendar-period' ? 'calendar-period' : 'slot';
         }
         if (Array.isArray(metadata?.allowedDurations) && metadata.allowedDurations.length) {
-            $('labAllowedPeriods').value = metadata.allowedDurations
-                .filter(item => item?.unit && item?.value)
-                .map(item => `${item.value} ${item.unit}`)
-                .join(', ');
+            setAllowedPeriodControls(metadata.allowedDurations.find(item => item?.unit && item?.value));
         }
         setAttributeValue(attributes, 'timeSlots', value => $('labTimeSlots').value = normalizeArray(value).join(', '));
         setAttributeValue(attributes, 'pricing', value => {
@@ -1157,11 +1186,11 @@
             $('labBookingMode').value = value === 'calendar-period' ? 'calendar-period' : 'slot';
         });
         setAttributeValue(attributes, 'allowedDurations', value => {
-            const durations = normalizeArray(value)
-                .filter(item => item && typeof item === 'object' && item.unit && item.value)
-                .map(item => `${item.value} ${item.unit}`);
-            if (durations.length) $('labAllowedPeriods').value = durations.join(', ');
+            const duration = (Array.isArray(value) ? value : [])
+                .find(item => item && typeof item === 'object' && item.unit && item.value);
+            if (duration) setAllowedPeriodControls(duration);
         });
+        syncBookingModeFields();
         setAttributeValue(attributes, 'opens', value => $('labOpens').value = unixToDateInput(value));
         setAttributeValue(attributes, 'closes', value => $('labCloses').value = unixToDateInput(value));
         setAttributeValue(attributes, 'availableDays', value => {
@@ -1358,16 +1387,27 @@
         return (rawPerUnit + seconds - 1n) / seconds;
     }
 
-    function parseAllowedPeriods(value) {
-        return splitCsv(value)
-            .map(item => {
-                const match = String(item).trim().match(/^(\d+)\s*(minute|minutes|hour|hours|day|days|week|weeks|month|months)$/i);
-                if (!match) return null;
-                const unit = match[2].toLowerCase().replace(/s$/, '');
-                const normalizedUnit = normalizePricingUnit(unit);
-                return { unit: normalizedUnit, value: Number(match[1]) };
-            })
-            .filter(item => item && Number.isFinite(item.value) && item.value > 0);
+    function getSelectedAllowedPeriods() {
+        const value = Number($('labAllowedPeriodValue')?.value || 0);
+        const unit = normalizePeriodUnit($('labAllowedPeriodUnit')?.value || 'day');
+        return Number.isFinite(value) && value > 0 ? [{ unit, value }] : [];
+    }
+
+    function normalizePeriodUnit(unit) {
+        const normalized = String(unit || 'day').trim().toLowerCase().replace(/s$/, '');
+        return ['day', 'week', 'month'].includes(normalized) ? normalized : 'day';
+    }
+
+    function setAllowedPeriodControls(duration) {
+        const valueSelect = $('labAllowedPeriodValue');
+        const unitSelect = $('labAllowedPeriodUnit');
+        if (!valueSelect || !unitSelect || !duration) return;
+
+        unitSelect.value = normalizePeriodUnit(duration.unit);
+        const value = Number(duration.value);
+        if (Number.isFinite(value) && value > 0) {
+            populateAllowedPeriodValues(value);
+        }
     }
 
     function formatRawPriceForUnit(rawPricePerSecond, unit = 'hour') {
