@@ -177,11 +177,15 @@ body {
 }
 
 .scheduling-grid {
-    grid-template-columns: minmax(120px, 16fr) minmax(120px, 16fr) minmax(90px, 10fr) minmax(118px, 14fr) minmax(180px, 44fr);
+    grid-template-columns: minmax(0, 15fr) minmax(0, 15fr) minmax(0, 8fr) minmax(0, 8fr) minmax(0, 14fr) minmax(0, 40fr);
 }
 
 .scheduling-grid .field.full {
     grid-column: 1 / -1;
+}
+
+.scheduling-grid .field {
+    min-width: 0;
 }
 
 .scheduling-grid .booking-slot-field {
@@ -190,6 +194,10 @@ body {
 
 .scheduling-grid .scheduling-timezone-field {
     grid-column: span 2;
+}
+
+.scheduling-grid.calendar-period-mode .scheduling-timezone-field {
+    grid-column: span 1;
 }
 
 .scheduling-grid .booking-slot-field.is-hidden,

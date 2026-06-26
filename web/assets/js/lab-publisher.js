@@ -233,7 +233,7 @@
         resourceSelect.addEventListener('change', applySelectedResource);
         setupMode.addEventListener('change', syncSetupMode);
         if (priceUnit) priceUnit.addEventListener('change', syncBookingModeFields);
-        if (periodUnit) periodUnit.addEventListener('change', () => normalizeAllowedPeriodValue());
+        if (periodUnit) periodUnit.addEventListener('change', () => normalizeAllowedPeriodRange());
         images.addEventListener('change', () => uploadAssets(images.files, 'images'));
         docs.addEventListener('change', () => uploadAssets(docs.files, 'docs'));
         imageChoose.addEventListener('click', () => images.click());
@@ -269,7 +269,7 @@
 
     function initMarketplaceFields() {
         populateTimezoneOptions();
-        normalizeAllowedPeriodValue();
+        normalizeAllowedPeriodRange();
         renderCategoryMenu();
         renderCategoryChips();
         renderDayToggles();
@@ -290,7 +290,10 @@
         const mode = getDerivedBookingMode();
         if ($('labBookingMode')) $('labBookingMode').value = mode;
         populateAllowedPeriodUnitOptions(priceUnit);
-        normalizeAllowedPeriodValue();
+        normalizeAllowedPeriodRange();
+        document.querySelectorAll('.scheduling-grid').forEach(grid => {
+            grid.classList.toggle('calendar-period-mode', mode === 'calendar-period');
+        });
         document.querySelectorAll('.booking-slot-field').forEach(field => {
             field.classList.toggle('is-hidden', mode !== 'slot');
         });
@@ -322,19 +325,27 @@
         unitSelect.value = options.some(unit => unit.value === previous) ? previous : options[0].value;
     }
 
-    function normalizeAllowedPeriodValue(preferredValue) {
-        const valueInput = $('labAllowedPeriodValue');
+    function normalizeAllowedPeriodRange(preferredRange = {}) {
+        const minInput = $('labAllowedPeriodMin');
+        const maxInput = $('labAllowedPeriodMax');
         const unit = normalizePeriodUnit($('labAllowedPeriodUnit')?.value || 'day');
-        if (!valueInput) return;
+        if (!minInput || !maxInput) return;
 
         const maxByUnit = { day: 90, week: 12, month: 3 };
-        const max = maxByUnit[unit] || 90;
-        const current = Math.trunc(Number(preferredValue || valueInput.value || 1));
-        const normalized = Math.min(Math.max(Number.isFinite(current) ? current : 1, 1), max);
-        valueInput.min = '1';
-        valueInput.max = String(max);
-        valueInput.step = '1';
-        valueInput.value = String(normalized);
+        const unitMax = maxByUnit[unit] || 90;
+        const rawMin = Math.trunc(Number(preferredRange.min ?? minInput.value ?? 1));
+        const rawMax = Math.trunc(Number(preferredRange.max ?? maxInput.value ?? rawMin));
+        const normalizedMin = Math.min(Math.max(Number.isFinite(rawMin) ? rawMin : 1, 1), unitMax);
+        const normalizedMax = Math.min(Math.max(Number.isFinite(rawMax) ? rawMax : normalizedMin, normalizedMin), unitMax);
+
+        [minInput, maxInput].forEach(input => {
+            input.min = '1';
+            input.max = String(unitMax);
+            input.step = '1';
+        });
+        minInput.value = String(normalizedMin);
+        maxInput.min = String(normalizedMin);
+        maxInput.value = String(normalizedMax);
     }
 
     function populateTimezoneOptions() {
@@ -722,16 +733,14 @@
         const rawPricePerSecond = convertDisplayCreditsToRawPerSecond($('labPrice').value || '0', priceUnit);
         const bookingMode = getDerivedBookingMode();
         const timeSlots = splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite);
+        const allowedDurationRange = bookingMode === 'calendar-period'
+            ? getSelectedAllowedPeriodRange()
+            : null;
         const allowedDurations = bookingMode === 'calendar-period'
-            ? getSelectedAllowedPeriods()
+            ? expandAllowedDurations(allowedDurationRange)
             : timeSlots.map(slot => ({ unit: 'minute', value: slot }));
         const periodRules = bookingMode === 'calendar-period'
-            ? {
-                startGranularity: 'day',
-                allowCustomDateRange: true,
-                minDurationDays: 1,
-                maxDurationDays: 90,
-            }
+            ? buildPeriodRules(allowedDurationRange)
             : null;
         const pricing = {
             displayAmount: $('labPrice').value.trim(),
@@ -754,6 +763,7 @@
             { trait_type: 'pricingUnit', value: priceUnit },
             { trait_type: 'pricingDisplayAmount', value: $('labPrice').value.trim() },
             { trait_type: 'bookingMode', value: bookingMode },
+            ...(allowedDurationRange ? [{ trait_type: 'allowedDurationRange', value: allowedDurationRange }] : []),
             { trait_type: 'allowedDurations', value: allowedDurations },
             ...(periodRules ? [{ trait_type: 'periodRules', value: periodRules }] : []),
             { trait_type: 'opens', value: dateInputToUnix($('labOpens').value) },
@@ -786,6 +796,7 @@
             docs,
             pricing,
             bookingMode,
+            ...(allowedDurationRange ? { allowedDurationRange } : {}),
             allowedDurations,
             ...(periodRules ? { periodRules } : {}),
             demoEnabled: $('labDemoEnabled').checked === true,
@@ -815,8 +826,8 @@
         if (bookingMode === 'slot' && !splitCsv($('labTimeSlots').value).map(Number).some(Number.isFinite)) {
             throw new Error('Time Slots must include at least one duration in minutes');
         }
-        if (bookingMode === 'calendar-period' && !getSelectedAllowedPeriods().length) {
-            throw new Error('Select a valid period length and unit');
+        if (bookingMode === 'calendar-period' && !expandAllowedDurations(getSelectedAllowedPeriodRange()).length) {
+            throw new Error('Select a valid minimum and maximum period');
         }
         const opens = dateInputToUnix($('labOpens').value);
         const closes = dateInputToUnix($('labCloses').value);
@@ -1208,17 +1219,22 @@
         if (metadata?.pricing?.displayUnit) {
             $('labPriceUnit').value = normalizePricingUnit(metadata.pricing.displayUnit);
         }
+        if (metadata?.allowedDurationRange) {
+            setAllowedPeriodRangeControls(metadata.allowedDurationRange);
+        }
         if (Array.isArray(metadata?.allowedDurations) && metadata.allowedDurations.length) {
-            setAllowedPeriodControls(metadata.allowedDurations.find(item => item?.unit && item?.value));
+            setAllowedPeriodRangeControls(deriveAllowedPeriodRange(metadata.allowedDurations));
         }
         setAttributeValue(attributes, 'timeSlots', value => $('labTimeSlots').value = normalizeArray(value).join(', '));
         setAttributeValue(attributes, 'pricing', value => {
             if (value?.displayUnit) $('labPriceUnit').value = normalizePricingUnit(value.displayUnit);
         });
         setAttributeValue(attributes, 'allowedDurations', value => {
-            const duration = (Array.isArray(value) ? value : [])
-                .find(item => item && typeof item === 'object' && item.unit && item.value);
-            if (duration) setAllowedPeriodControls(duration);
+            const range = deriveAllowedPeriodRange(value);
+            if (range) setAllowedPeriodRangeControls(range);
+        });
+        setAttributeValue(attributes, 'allowedDurationRange', value => {
+            if (value) setAllowedPeriodRangeControls(value);
         });
         syncBookingModeFields();
         setAttributeValue(attributes, 'opens', value => $('labOpens').value = unixToDateInput(value));
@@ -1417,11 +1433,35 @@
         return (rawPerUnit + seconds - 1n) / seconds;
     }
 
-    function getSelectedAllowedPeriods() {
-        normalizeAllowedPeriodValue();
-        const value = Number($('labAllowedPeriodValue')?.value || 0);
+    function getSelectedAllowedPeriodRange() {
+        normalizeAllowedPeriodRange();
+        const min = Number($('labAllowedPeriodMin')?.value || 0);
+        const max = Number($('labAllowedPeriodMax')?.value || 0);
         const unit = normalizePeriodUnit($('labAllowedPeriodUnit')?.value || 'day');
-        return Number.isFinite(value) && value > 0 ? [{ unit, value }] : [];
+        return Number.isFinite(min) && Number.isFinite(max) && min > 0 && max >= min
+            ? { unit, min, max }
+            : null;
+    }
+
+    function expandAllowedDurations(range) {
+        if (!range || !Number.isFinite(Number(range.min)) || !Number.isFinite(Number(range.max))) return [];
+        const unit = normalizePeriodUnit(range.unit);
+        const min = Math.trunc(Number(range.min));
+        const max = Math.trunc(Number(range.max));
+        if (min <= 0 || max < min) return [];
+        return Array.from({ length: max - min + 1 }, (_, index) => ({ unit, value: min + index }));
+    }
+
+    function buildPeriodRules(range) {
+        if (!range) return null;
+        const daysPerUnit = { day: 1, week: 7, month: 30 };
+        const unit = normalizePeriodUnit(range.unit);
+        return {
+            startGranularity: 'day',
+            allowCustomDateRange: true,
+            minDurationDays: Number(range.min) * daysPerUnit[unit],
+            maxDurationDays: Number(range.max) * daysPerUnit[unit],
+        };
     }
 
     function normalizePeriodUnit(unit) {
@@ -1429,16 +1469,32 @@
         return ['day', 'week', 'month'].includes(normalized) ? normalized : 'day';
     }
 
-    function setAllowedPeriodControls(duration) {
-        const valueSelect = $('labAllowedPeriodValue');
+    function setAllowedPeriodRangeControls(range) {
+        const minInput = $('labAllowedPeriodMin');
+        const maxInput = $('labAllowedPeriodMax');
         const unitSelect = $('labAllowedPeriodUnit');
-        if (!valueSelect || !unitSelect || !duration) return;
+        if (!minInput || !maxInput || !unitSelect || !range) return;
 
-        unitSelect.value = normalizePeriodUnit(duration.unit);
-        const value = Number(duration.value);
-        if (Number.isFinite(value) && value > 0) {
-            normalizeAllowedPeriodValue(value);
-        }
+        unitSelect.value = normalizePeriodUnit(range.unit);
+        normalizeAllowedPeriodRange({ min: range.min, max: range.max });
+    }
+
+    function deriveAllowedPeriodRange(value) {
+        const durations = (Array.isArray(value) ? value : [])
+            .map(item => ({
+                unit: normalizePeriodUnit(item?.unit),
+                value: Number(item?.value),
+            }))
+            .filter(item => Number.isFinite(item.value) && item.value > 0);
+        if (!durations.length) return null;
+        const unit = durations[0].unit;
+        const matching = durations.filter(item => item.unit === unit);
+        const values = matching.map(item => item.value);
+        return {
+            unit,
+            min: Math.min(...values),
+            max: Math.max(...values),
+        };
     }
 
     function formatRawPriceForUnit(rawPricePerSecond, unit = 'hour') {
