@@ -20,7 +20,14 @@
 
     const CREDIT_DECIMALS = 5;
     const RAW_PER_CREDIT = 10n ** BigInt(CREDIT_DECIMALS);
-    const SECONDS_PER_HOUR = 3600n;
+    const SECONDS_PER_UNIT = {
+        minute: 60n,
+        hour: 3600n,
+        day: 86400n,
+        week: 604800n,
+        month: 2592000n,
+    };
+    const SECONDS_PER_HOUR = SECONDS_PER_UNIT.hour;
     const DISPLAY_PRICE_DECIMALS = 1;
     const RESOURCE_TYPES = { LAB: 'lab', FMU: 'fmu' };
     const WEEKDAY_OPTIONS = [
@@ -625,7 +632,7 @@
         const payload = {
             setupMode,
             listImmediately: $('labListImmediately').value === 'true',
-            price: convertHourlyCreditsToRawPerSecond($('labPrice').value || '0').toString(),
+            price: convertDisplayCreditsToRawPerSecond($('labPrice').value || '0', $('labPriceUnit').value || 'hour').toString(),
             accessURI: $('labAccessURI').value.trim(),
             accessKey: $('labAccessKey').value.trim(),
             resourceType: Number($('labResourceType').value),
@@ -652,6 +659,28 @@
         const resourceType = $('labResourceType').value === '1' ? RESOURCE_TYPES.FMU : RESOURCE_TYPES.LAB;
         const fmuFileName = $('labFmuFileName').value.trim();
         const unavailableWindows = sanitizeUnavailableWindows(state.unavailableWindows);
+        const priceUnit = normalizePricingUnit($('labPriceUnit').value || 'hour');
+        const rawPricePerSecond = convertDisplayCreditsToRawPerSecond($('labPrice').value || '0', priceUnit);
+        const bookingMode = $('labBookingMode').value === 'calendar-period' ? 'calendar-period' : 'slot';
+        const timeSlots = splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite);
+        const allowedDurations = bookingMode === 'calendar-period'
+            ? parseAllowedPeriods($('labAllowedPeriods').value)
+            : timeSlots.map(slot => ({ unit: 'minute', value: slot }));
+        const periodRules = bookingMode === 'calendar-period'
+            ? {
+                startGranularity: 'day',
+                allowCustomDateRange: true,
+                minDurationDays: 1,
+                maxDurationDays: 90,
+            }
+            : null;
+        const pricing = {
+            displayAmount: $('labPrice').value.trim(),
+            displayUnit: priceUnit,
+            rawPricePerSecond: rawPricePerSecond.toString(),
+            roundingMode: 'ceil-per-second',
+            billingMode: 'linear-duration',
+        };
         const termsOfUse = sanitizeTermsOfUse({
             url: $('labTermsUrl').value.trim(),
             version: $('labTermsVersion').value.trim(),
@@ -661,7 +690,13 @@
         const attributes = [
             { trait_type: 'category', value: categories },
             { trait_type: 'keywords', value: keywords },
-            { trait_type: 'timeSlots', value: splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite) },
+            ...(bookingMode === 'slot' ? [{ trait_type: 'timeSlots', value: timeSlots }] : []),
+            { trait_type: 'pricing', value: pricing },
+            { trait_type: 'pricingUnit', value: priceUnit },
+            { trait_type: 'pricingDisplayAmount', value: $('labPrice').value.trim() },
+            { trait_type: 'bookingMode', value: bookingMode },
+            { trait_type: 'allowedDurations', value: allowedDurations },
+            ...(periodRules ? [{ trait_type: 'periodRules', value: periodRules }] : []),
             { trait_type: 'opens', value: dateInputToUnix($('labOpens').value) },
             { trait_type: 'closes', value: dateInputToUnix($('labCloses').value) },
             { trait_type: 'additionalImages', value: imageUrls.slice(1) },
@@ -690,6 +725,10 @@
             category: categories,
             keywords,
             docs,
+            pricing,
+            bookingMode,
+            allowedDurations,
+            ...(periodRules ? { periodRules } : {}),
             demoEnabled: $('labDemoEnabled').checked === true,
             attributes,
         };
@@ -699,18 +738,26 @@
         const required = [
             ['Name', $('labName').value.trim()],
             ['Description', $('labDescription').value.trim()],
-            ['Price per hour', $('labPrice').value.trim()],
+            ['Price', $('labPrice').value.trim()],
             ['Access URI', $('labAccessURI').value.trim()],
             ['Timezone', $('labTimezone').value.trim()],
-            ['Daily Start Time', $('labAvailableHoursStart').value.trim()],
-            ['Daily End Time', $('labAvailableHoursEnd').value.trim()],
         ];
+        const bookingMode = $('labBookingMode').value === 'calendar-period' ? 'calendar-period' : 'slot';
+        if (bookingMode === 'slot') {
+            required.push(
+                ['Daily Start Time', $('labAvailableHoursStart').value.trim()],
+                ['Daily End Time', $('labAvailableHoursEnd').value.trim()]
+            );
+        }
         const missing = required.find(([, value]) => !value);
         if (missing) throw new Error(`${missing[0]} is required`);
         if (!state.selectedCategories.length) throw new Error('Category is required');
         if (!state.availableDays.length) throw new Error('Select at least one available day');
-        if (!splitCsv($('labTimeSlots').value).map(Number).some(Number.isFinite)) {
+        if (bookingMode === 'slot' && !splitCsv($('labTimeSlots').value).map(Number).some(Number.isFinite)) {
             throw new Error('Time Slots must include at least one duration in minutes');
+        }
+        if (bookingMode === 'calendar-period' && !parseAllowedPeriods($('labAllowedPeriods').value).length) {
+            throw new Error('Allowed Periods must include at least one day, week, or month duration');
         }
         const opens = dateInputToUnix($('labOpens').value);
         const closes = dateInputToUnix($('labCloses').value);
@@ -974,7 +1021,7 @@
                     <div class="item-title">Lab #${escapeHtml(lab.labId)} ${lab.resourceType === 1 ? 'FMU' : 'Remote'}</div>
                     <div class="item-meta">${escapeHtml(lab.accessKey || '')} · ${escapeHtml(lab.uri || '')}</div>
                 </div>
-                <div class="item-meta">${escapeHtml(formatRawPricePerHour(lab.price || '0'))} credits/hour</div>
+                <div class="item-meta">${escapeHtml(formatRawPriceForUnit(lab.price || '0', resolveLabPriceUnit(lab)))} credits/${escapeHtml(resolveLabPriceUnit(lab))}</div>
             </div>
         `).join('');
     }
@@ -994,7 +1041,7 @@
                     <div class="item-meta">${escapeHtml(lab.accessKey || '')} - ${escapeHtml(lab.uri || '')}</div>
                 </div>
                 <div class="lab-row-side">
-                    <div class="item-meta">${escapeHtml(formatRawPricePerHour(lab.price || '0'))} credits/hour</div>
+                    <div class="item-meta">${escapeHtml(formatRawPriceForUnit(lab.price || '0', resolveLabPriceUnit(lab)))} credits/${escapeHtml(resolveLabPriceUnit(lab))}</div>
                     <div class="lab-actions">
                         <button class="mini-btn primary" type="button" data-lab-action="edit" data-lab-id="${escapeAttr(lab.labId)}" title="Edit Lab #${escapeAttr(lab.labId)}" aria-label="Edit Lab #${escapeAttr(lab.labId)}">
                             <i class="fas fa-pen"></i>
@@ -1051,7 +1098,9 @@
         $('labListImmediately').value = lab.listed ? 'true' : 'false';
         $('labAccessURI').value = lab.accessURI || '';
         $('labAccessKey').value = lab.accessKey || '';
-        $('labPrice').value = formatRawPricePerHour(lab.price || '0');
+        const priceUnit = resolveLabPriceUnit(lab);
+        $('labPriceUnit').value = priceUnit;
+        $('labPrice').value = formatRawPriceForUnit(lab.price || '0', priceUnit);
         $('labMetadataUrl').value = lab.uri || '';
         const contentId = extractContentIdFromMetadataUri(lab.uri);
         if (contentId) $('labContentId').value = contentId;
@@ -1088,7 +1137,31 @@
         $('labDemoEnabled').checked = metadata?.demoEnabled === true;
 
         const attributes = metadataAttributes(metadata?.attributes);
+        if (metadata?.pricing?.displayUnit) {
+            $('labPriceUnit').value = normalizePricingUnit(metadata.pricing.displayUnit);
+        }
+        if (metadata?.bookingMode) {
+            $('labBookingMode').value = metadata.bookingMode === 'calendar-period' ? 'calendar-period' : 'slot';
+        }
+        if (Array.isArray(metadata?.allowedDurations) && metadata.allowedDurations.length) {
+            $('labAllowedPeriods').value = metadata.allowedDurations
+                .filter(item => item?.unit && item?.value)
+                .map(item => `${item.value} ${item.unit}`)
+                .join(', ');
+        }
         setAttributeValue(attributes, 'timeSlots', value => $('labTimeSlots').value = normalizeArray(value).join(', '));
+        setAttributeValue(attributes, 'pricing', value => {
+            if (value?.displayUnit) $('labPriceUnit').value = normalizePricingUnit(value.displayUnit);
+        });
+        setAttributeValue(attributes, 'bookingMode', value => {
+            $('labBookingMode').value = value === 'calendar-period' ? 'calendar-period' : 'slot';
+        });
+        setAttributeValue(attributes, 'allowedDurations', value => {
+            const durations = normalizeArray(value)
+                .filter(item => item && typeof item === 'object' && item.unit && item.value)
+                .map(item => `${item.value} ${item.unit}`);
+            if (durations.length) $('labAllowedPeriods').value = durations.join(', ');
+        });
         setAttributeValue(attributes, 'opens', value => $('labOpens').value = unixToDateInput(value));
         setAttributeValue(attributes, 'closes', value => $('labCloses').value = unixToDateInput(value));
         setAttributeValue(attributes, 'availableDays', value => {
@@ -1273,22 +1346,53 @@
         return BigInt(whole) * RAW_PER_CREDIT + BigInt(fraction);
     }
 
-    function convertHourlyCreditsToRawPerSecond(hourlyCredits) {
-        const rawPerHour = parseHourlyCreditsToRaw(hourlyCredits);
-        const base = rawPerHour / SECONDS_PER_HOUR;
-        const remainder = rawPerHour % SECONDS_PER_HOUR;
-        return remainder * 2n >= SECONDS_PER_HOUR ? base + 1n : base;
+    function normalizePricingUnit(unit) {
+        const normalized = String(unit || 'hour').trim().toLowerCase();
+        return Object.prototype.hasOwnProperty.call(SECONDS_PER_UNIT, normalized) ? normalized : 'hour';
     }
 
-    function formatRawPricePerHour(rawPricePerSecond) {
+    function convertDisplayCreditsToRawPerSecond(displayCredits, unit = 'hour') {
+        const rawPerUnit = parseHourlyCreditsToRaw(displayCredits);
+        const seconds = SECONDS_PER_UNIT[normalizePricingUnit(unit)];
+        if (rawPerUnit === 0n) return 0n;
+        return (rawPerUnit + seconds - 1n) / seconds;
+    }
+
+    function parseAllowedPeriods(value) {
+        return splitCsv(value)
+            .map(item => {
+                const match = String(item).trim().match(/^(\d+)\s*(minute|minutes|hour|hours|day|days|week|weeks|month|months)$/i);
+                if (!match) return null;
+                const unit = match[2].toLowerCase().replace(/s$/, '');
+                const normalizedUnit = normalizePricingUnit(unit);
+                return { unit: normalizedUnit, value: Number(match[1]) };
+            })
+            .filter(item => item && Number.isFinite(item.value) && item.value > 0);
+    }
+
+    function formatRawPriceForUnit(rawPricePerSecond, unit = 'hour') {
         try {
             const rawPerSecond = typeof rawPricePerSecond === 'bigint'
                 ? rawPricePerSecond
                 : BigInt(rawPricePerSecond ?? 0);
-            return roundDecimalString(formatRawCredits(rawPerSecond * SECONDS_PER_HOUR), DISPLAY_PRICE_DECIMALS);
+            const seconds = SECONDS_PER_UNIT[normalizePricingUnit(unit)];
+            return roundDecimalString(formatRawCredits(rawPerSecond * seconds), DISPLAY_PRICE_DECIMALS);
         } catch {
             return '0';
         }
+    }
+
+    function resolveLabPriceUnit(lab) {
+        return normalizePricingUnit(
+            lab?.pricing?.displayUnit
+            || lab?.metadata?.pricing?.displayUnit
+            || lab?.priceUnit
+            || 'hour'
+        );
+    }
+
+    function formatRawPricePerHour(rawPricePerSecond) {
+        return formatRawPriceForUnit(rawPricePerSecond, 'hour');
     }
 
     function formatRawCredits(rawAmount) {

@@ -328,7 +328,7 @@ CERTBOT_STAGING=0
 
 Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` loopback-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/billing endpoints exposed through OpenResty for remote access.
 
-`blockchain-services` uses a dedicated schema named `blockchain_services` by default. If you want a different name, set `BLOCKCHAIN_MYSQL_DATABASE` in `.env`.
+In the full Lab Gateway compose stack, `blockchain-services` uses the root MySQL credentials and a dedicated schema named `blockchain_services` by default. If you run `blockchain-services` with its own compose file, configure its `BLOCKCHAIN_MYSQL_*` keys in `blockchain-services/.env`.
 
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.

@@ -92,8 +92,17 @@
                                         <input type="text" id="labAccessKey" placeholder="guacamole-connection-id or model.fmu">
                                     </label>
                                     <label class="field lab-price-field">
-                                        <span>Price (per hour)</span>
+                                        <span>Price</span>
                                         <input type="number" id="labPrice" min="0" step="0.1" value="0" inputmode="decimal">
+                                    </label>
+                                    <label class="field">
+                                        <span>Price Unit</span>
+                                        <select id="labPriceUnit">
+                                            <option value="hour">per hour</option>
+                                            <option value="day">per day</option>
+                                            <option value="week">per week</option>
+                                            <option value="month">per 30-day month</option>
+                                        </select>
                                     </label>
                                     <label class="field full">
                                         <span>Access URI</span>
@@ -149,6 +158,17 @@
                                     <label class="field">
                                         <span>Time Slots (minutes)</span>
                                         <input type="text" id="labTimeSlots" placeholder="15, 30, 60" value="30,60">
+                                    </label>
+                                    <label class="field">
+                                        <span>Booking Mode</span>
+                                        <select id="labBookingMode">
+                                            <option value="slot">Time slots</option>
+                                            <option value="calendar-period">Calendar periods</option>
+                                        </select>
+                                    </label>
+                                    <label class="field">
+                                        <span>Allowed Periods</span>
+                                        <input type="text" id="labAllowedPeriods" placeholder="1 day, 1 week, 1 month" value="1 day">
                                     </label>
                                     <label class="field">
                                         <span>Timezone</span>

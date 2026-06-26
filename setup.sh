@@ -183,8 +183,8 @@ if [ -z "$mysql_password" ]; then
     fi
 fi
 
-# Update passwords only in gateway env (.env). Standalone blockchain-services
-# uses BCHAIN_MYSQL_* keys in its own .env.
+# Update passwords only in gateway env (.env). The embedded blockchain-services
+# compose file has its own BLOCKCHAIN_MYSQL_* defaults in blockchain-services/.env.
 update_env_var "$ROOT_ENV_FILE" "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
 update_env_var "$ROOT_ENV_FILE" "MYSQL_PASSWORD" "$mysql_password"
 
