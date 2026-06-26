@@ -169,7 +169,7 @@ body {
 }
 
 .onchain-fields-grid {
-    grid-template-columns: minmax(0, 65fr) minmax(180px, 35fr);
+    grid-template-columns: minmax(160px, 42%) minmax(88px, 16%) minmax(130px, 24%);
 }
 
 .onchain-fields-grid .field.full {
