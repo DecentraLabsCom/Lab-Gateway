@@ -790,16 +790,6 @@
             name: $('labName').value.trim(),
             description: $('labDescription').value.trim(),
             image: imageUrls[0] || '',
-            images: imageUrls,
-            category: categories,
-            keywords,
-            docs,
-            pricing,
-            bookingMode,
-            ...(allowedDurationRange ? { allowedDurationRange } : {}),
-            allowedDurations,
-            ...(periodRules ? { periodRules } : {}),
-            demoEnabled: $('labDemoEnabled').checked === true,
             attributes,
         };
     }
@@ -1206,18 +1196,22 @@
     function populateMetadataForm(metadata) {
         $('labName').value = metadata?.name || '';
         $('labDescription').value = metadata?.description || '';
-        $('labKeywords').value = normalizeArray(metadata?.keywords).join(', ');
-        state.selectedCategories = normalizeArray(metadata?.category);
-        renderCategoryChips();
+        const attributes = metadataAttributes(metadata?.attributes);
+        const categoriesFromAttributes = getAttributeValue(attributes, 'category');
+        const keywordsFromAttributes = getAttributeValue(attributes, 'keywords');
+        $('labKeywords').value = normalizeArray(metadata?.keywords ?? keywordsFromAttributes).join(', ');
+        state.selectedCategories = normalizeArray(metadata?.category ?? categoriesFromAttributes);
         const images = normalizeArray(metadata?.images);
         if (!images.length && metadata?.image) images.push(metadata.image);
         $('labImageUrls').value = images.join(', ');
         $('labDocUrls').value = normalizeArray(metadata?.docs).join(', ');
         $('labDemoEnabled').checked = metadata?.demoEnabled === true;
 
-        const attributes = metadataAttributes(metadata?.attributes);
         if (metadata?.pricing?.displayUnit) {
             $('labPriceUnit').value = normalizePricingUnit(metadata.pricing.displayUnit);
+        }
+        if (metadata?.pricing?.displayAmount) {
+            $('labPrice').value = metadata.pricing.displayAmount;
         }
         if (metadata?.allowedDurationRange) {
             setAllowedPeriodRangeControls(metadata.allowedDurationRange);
@@ -1228,6 +1222,13 @@
         setAttributeValue(attributes, 'timeSlots', value => $('labTimeSlots').value = normalizeArray(value).join(', '));
         setAttributeValue(attributes, 'pricing', value => {
             if (value?.displayUnit) $('labPriceUnit').value = normalizePricingUnit(value.displayUnit);
+            if (value?.displayAmount) $('labPrice').value = value.displayAmount;
+        });
+        setAttributeValue(attributes, 'pricingUnit', value => {
+            if (value) $('labPriceUnit').value = normalizePricingUnit(value);
+        });
+        setAttributeValue(attributes, 'pricingDisplayAmount', value => {
+            if (value !== undefined && value !== null && value !== '') $('labPrice').value = String(value);
         });
         setAttributeValue(attributes, 'allowedDurations', value => {
             const range = deriveAllowedPeriodRange(value);
@@ -1273,6 +1274,7 @@
             state.modelVariables = Array.isArray(value) ? value : [];
             renderModelVariables();
         });
+        renderCategoryChips();
     }
 
     async function toggleLabListing(lab, shouldList, button) {
@@ -1324,8 +1326,16 @@
     }
 
     function setAttributeValue(attributes, traitType, setter) {
-        const attribute = attributes.find(item => item.trait_type === traitType);
+        const attribute = attributes.find(item => normalizeTraitType(item.trait_type) === normalizeTraitType(traitType));
         if (attribute) setter(attribute.value);
+    }
+
+    function getAttributeValue(attributes, traitType) {
+        return attributes.find(item => normalizeTraitType(item.trait_type) === normalizeTraitType(traitType))?.value;
+    }
+
+    function normalizeTraitType(value) {
+        return String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
     }
 
     function normalizeArray(value) {
