@@ -233,7 +233,7 @@
         resourceSelect.addEventListener('change', applySelectedResource);
         setupMode.addEventListener('change', syncSetupMode);
         if (priceUnit) priceUnit.addEventListener('change', syncBookingModeFields);
-        if (periodUnit) periodUnit.addEventListener('change', () => populateAllowedPeriodValues());
+        if (periodUnit) periodUnit.addEventListener('change', () => normalizeAllowedPeriodValue());
         images.addEventListener('change', () => uploadAssets(images.files, 'images'));
         docs.addEventListener('change', () => uploadAssets(docs.files, 'docs'));
         imageChoose.addEventListener('click', () => images.click());
@@ -269,7 +269,7 @@
 
     function initMarketplaceFields() {
         populateTimezoneOptions();
-        populateAllowedPeriodValues();
+        normalizeAllowedPeriodValue();
         renderCategoryMenu();
         renderCategoryChips();
         renderDayToggles();
@@ -290,7 +290,7 @@
         const mode = getDerivedBookingMode();
         if ($('labBookingMode')) $('labBookingMode').value = mode;
         populateAllowedPeriodUnitOptions(priceUnit);
-        populateAllowedPeriodValues();
+        normalizeAllowedPeriodValue();
         document.querySelectorAll('.booking-slot-field').forEach(field => {
             field.classList.toggle('is-hidden', mode !== 'slot');
         });
@@ -322,19 +322,19 @@
         unitSelect.value = options.some(unit => unit.value === previous) ? previous : options[0].value;
     }
 
-    function populateAllowedPeriodValues(preferredValue) {
-        const valueSelect = $('labAllowedPeriodValue');
+    function normalizeAllowedPeriodValue(preferredValue) {
+        const valueInput = $('labAllowedPeriodValue');
         const unit = normalizePeriodUnit($('labAllowedPeriodUnit')?.value || 'day');
-        if (!valueSelect) return;
+        if (!valueInput) return;
 
         const maxByUnit = { day: 90, week: 12, month: 3 };
         const max = maxByUnit[unit] || 90;
-        const current = Number(preferredValue || valueSelect.value || 1);
-        valueSelect.innerHTML = '';
-        for (let value = 1; value <= max; value += 1) {
-            valueSelect.add(new Option(String(value), String(value)));
-        }
-        valueSelect.value = String(Math.min(Math.max(Number.isFinite(current) ? current : 1, 1), max));
+        const current = Math.trunc(Number(preferredValue || valueInput.value || 1));
+        const normalized = Math.min(Math.max(Number.isFinite(current) ? current : 1, 1), max);
+        valueInput.min = '1';
+        valueInput.max = String(max);
+        valueInput.step = '1';
+        valueInput.value = String(normalized);
     }
 
     function populateTimezoneOptions() {
@@ -1418,6 +1418,7 @@
     }
 
     function getSelectedAllowedPeriods() {
+        normalizeAllowedPeriodValue();
         const value = Number($('labAllowedPeriodValue')?.value || 0);
         const unit = normalizePeriodUnit($('labAllowedPeriodUnit')?.value || 'day');
         return Number.isFinite(value) && value > 0 ? [{ unit, value }] : [];
@@ -1436,7 +1437,7 @@
         unitSelect.value = normalizePeriodUnit(duration.unit);
         const value = Number(duration.value);
         if (Number.isFinite(value) && value > 0) {
-            populateAllowedPeriodValues(value);
+            normalizeAllowedPeriodValue(value);
         }
     }
 

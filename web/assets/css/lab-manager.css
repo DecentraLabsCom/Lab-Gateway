@@ -176,6 +176,27 @@ body {
     grid-column: 1 / -1;
 }
 
+.scheduling-grid {
+    grid-template-columns: minmax(120px, 16fr) minmax(120px, 16fr) minmax(90px, 10fr) minmax(118px, 14fr) minmax(180px, 44fr);
+}
+
+.scheduling-grid .field.full {
+    grid-column: 1 / -1;
+}
+
+.scheduling-grid .booking-slot-field {
+    grid-column: span 2;
+}
+
+.scheduling-grid .scheduling-timezone-field {
+    grid-column: span 2;
+}
+
+.scheduling-grid .booking-slot-field.is-hidden,
+.scheduling-grid .booking-period-field.is-hidden {
+    display: none;
+}
+
 .field {
     display: flex;
     flex-direction: column;
@@ -217,8 +238,17 @@ body {
 }
 .field.full { grid-column: 1 / -1; }
 .field.is-hidden { display: none; }
+.inline-readonly-field {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+.inline-readonly-field > span {
+    flex: 0 0 auto;
+}
 .readonly-value {
     min-height: 43px;
+    flex: 1 1 auto;
     display: flex;
     align-items: center;
     padding: 10px 12px;
@@ -602,6 +632,16 @@ body {
     }
 
     .onchain-fields-grid .field {
+        grid-column: 1 / -1;
+    }
+
+    .scheduling-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .scheduling-grid .field,
+    .scheduling-grid .booking-slot-field,
+    .scheduling-grid .scheduling-timezone-field {
         grid-column: 1 / -1;
     }
 

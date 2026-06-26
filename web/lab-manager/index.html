@@ -146,12 +146,12 @@
                                 </div>
 
                                 <div class="form-section-title">Availability & Scheduling</div>
-                                <div class="form-grid">
-                                    <label class="field">
+                                <div class="form-grid scheduling-grid">
+                                    <label class="field scheduling-date-field">
                                         <span>Opens</span>
                                         <input type="date" id="labOpens">
                                     </label>
-                                    <label class="field">
+                                    <label class="field scheduling-date-field">
                                         <span>Closes</span>
                                         <input type="date" id="labCloses">
                                     </label>
@@ -162,9 +162,7 @@
                                     <input type="hidden" id="labBookingMode" value="slot">
                                     <label class="field booking-period-field is-hidden">
                                         <span>Length</span>
-                                        <select id="labAllowedPeriodValue">
-                                            <option value="1">1</option>
-                                        </select>
+                                        <input type="number" id="labAllowedPeriodValue" min="1" max="90" step="1" value="1" inputmode="numeric">
                                     </label>
                                     <label class="field booking-period-field is-hidden">
                                         <span>Unit</span>
@@ -174,7 +172,7 @@
                                             <option value="month">30-day months</option>
                                         </select>
                                     </label>
-                                    <label class="field">
+                                    <label class="field scheduling-timezone-field">
                                         <span>Timezone</span>
                                         <select id="labTimezone"></select>
                                     </label>
@@ -263,7 +261,7 @@
 
                                 <div class="form-section-title">Media</div>
                                 <div class="form-grid">
-                                    <div class="field">
+                                    <div class="field inline-readonly-field">
                                         <span>Content ID</span>
                                         <input type="hidden" id="labContentId">
                                         <div class="readonly-value" id="labContentIdDisplay">auto-generated</div>
