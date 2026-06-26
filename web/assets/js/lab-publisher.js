@@ -216,7 +216,7 @@
         const fmuAutoDetect = $('labFmuAutoDetectBtn');
         const categorySelect = $('labCategorySelect');
         const fmuFileName = $('labFmuFileName');
-        const bookingMode = $('labBookingMode');
+        const priceUnit = $('labPriceUnit');
         const periodUnit = $('labAllowedPeriodUnit');
 
         if (!refresh || !submit) return;
@@ -232,7 +232,7 @@
         });
         resourceSelect.addEventListener('change', applySelectedResource);
         setupMode.addEventListener('change', syncSetupMode);
-        if (bookingMode) bookingMode.addEventListener('change', syncBookingModeFields);
+        if (priceUnit) priceUnit.addEventListener('change', syncBookingModeFields);
         if (periodUnit) periodUnit.addEventListener('change', () => populateAllowedPeriodValues());
         images.addEventListener('change', () => uploadAssets(images.files, 'images'));
         docs.addEventListener('change', () => uploadAssets(docs.files, 'docs'));
@@ -286,13 +286,40 @@
     }
 
     function syncBookingModeFields() {
-        const mode = $('labBookingMode')?.value === 'calendar-period' ? 'calendar-period' : 'slot';
+        const priceUnit = normalizePricingUnit($('labPriceUnit')?.value || 'hour');
+        const mode = getDerivedBookingMode();
+        if ($('labBookingMode')) $('labBookingMode').value = mode;
+        populateAllowedPeriodUnitOptions(priceUnit);
+        populateAllowedPeriodValues();
         document.querySelectorAll('.booking-slot-field').forEach(field => {
             field.classList.toggle('is-hidden', mode !== 'slot');
         });
         document.querySelectorAll('.booking-period-field').forEach(field => {
             field.classList.toggle('is-hidden', mode !== 'calendar-period');
         });
+    }
+
+    function getDerivedBookingMode() {
+        return normalizePricingUnit($('labPriceUnit')?.value || 'hour') === 'hour' ? 'slot' : 'calendar-period';
+    }
+
+    function populateAllowedPeriodUnitOptions(priceUnit = normalizePricingUnit($('labPriceUnit')?.value || 'hour')) {
+        const unitSelect = $('labAllowedPeriodUnit');
+        if (!unitSelect) return;
+
+        const orderedUnits = [
+            { value: 'day', label: 'days' },
+            { value: 'week', label: 'weeks' },
+            { value: 'month', label: '30-day months' },
+        ];
+        const minimumUnit = priceUnit === 'month' ? 'month' : priceUnit === 'week' ? 'week' : 'day';
+        const minimumIndex = orderedUnits.findIndex(unit => unit.value === minimumUnit);
+        const previous = normalizePeriodUnit(unitSelect.value);
+        const options = orderedUnits.slice(Math.max(0, minimumIndex));
+
+        unitSelect.innerHTML = '';
+        options.forEach(unit => unitSelect.add(new Option(unit.label, unit.value)));
+        unitSelect.value = options.some(unit => unit.value === previous) ? previous : options[0].value;
     }
 
     function populateAllowedPeriodValues(preferredValue) {
@@ -693,7 +720,7 @@
         const unavailableWindows = sanitizeUnavailableWindows(state.unavailableWindows);
         const priceUnit = normalizePricingUnit($('labPriceUnit').value || 'hour');
         const rawPricePerSecond = convertDisplayCreditsToRawPerSecond($('labPrice').value || '0', priceUnit);
-        const bookingMode = $('labBookingMode').value === 'calendar-period' ? 'calendar-period' : 'slot';
+        const bookingMode = getDerivedBookingMode();
         const timeSlots = splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite);
         const allowedDurations = bookingMode === 'calendar-period'
             ? getSelectedAllowedPeriods()
@@ -774,7 +801,7 @@
             ['Access URI', $('labAccessURI').value.trim()],
             ['Timezone', $('labTimezone').value.trim()],
         ];
-        const bookingMode = $('labBookingMode').value === 'calendar-period' ? 'calendar-period' : 'slot';
+        const bookingMode = getDerivedBookingMode();
         if (bookingMode === 'slot') {
             required.push(
                 ['Daily Start Time', $('labAvailableHoursStart').value.trim()],
@@ -868,9 +895,17 @@
     function ensureContentId() {
         const el = $('labContentId');
         if (!el.value.trim()) {
-            el.value = `lab-${Date.now().toString(36)}`;
+            setContentId(`lab-${Date.now().toString(36)}`);
         }
         return el.value.trim();
+    }
+
+    function setContentId(value) {
+        const normalized = String(value || '').trim();
+        const input = $('labContentId');
+        const display = $('labContentIdDisplay');
+        if (input) input.value = normalized;
+        if (display) display.textContent = normalized || 'auto-generated';
     }
 
     function renderAssets() {
@@ -1118,6 +1153,7 @@
         await applyLabMetadata(lab);
         syncSetupMode();
         syncResourceTypeFields();
+        syncBookingModeFields();
         updateEditControls();
         setStatus(`Editing Lab #${lab.labId}. Use Save Lab to persist changes.`, false);
         $('labName').focus();
@@ -1135,7 +1171,7 @@
         $('labPrice').value = formatRawPriceForUnit(lab.price || '0', priceUnit);
         $('labMetadataUrl').value = lab.uri || '';
         const contentId = extractContentIdFromMetadataUri(lab.uri);
-        if (contentId) $('labContentId').value = contentId;
+        setContentId(contentId);
         if (Number(lab.resourceType) === 1) {
             $('labFmuFileName').value = lab.accessKey || '';
         }
@@ -1172,18 +1208,12 @@
         if (metadata?.pricing?.displayUnit) {
             $('labPriceUnit').value = normalizePricingUnit(metadata.pricing.displayUnit);
         }
-        if (metadata?.bookingMode) {
-            $('labBookingMode').value = metadata.bookingMode === 'calendar-period' ? 'calendar-period' : 'slot';
-        }
         if (Array.isArray(metadata?.allowedDurations) && metadata.allowedDurations.length) {
             setAllowedPeriodControls(metadata.allowedDurations.find(item => item?.unit && item?.value));
         }
         setAttributeValue(attributes, 'timeSlots', value => $('labTimeSlots').value = normalizeArray(value).join(', '));
         setAttributeValue(attributes, 'pricing', value => {
             if (value?.displayUnit) $('labPriceUnit').value = normalizePricingUnit(value.displayUnit);
-        });
-        setAttributeValue(attributes, 'bookingMode', value => {
-            $('labBookingMode').value = value === 'calendar-period' ? 'calendar-period' : 'slot';
         });
         setAttributeValue(attributes, 'allowedDurations', value => {
             const duration = (Array.isArray(value) ? value : [])

@@ -159,13 +159,7 @@
                                         <span>Time Slots (minutes)</span>
                                         <input type="text" id="labTimeSlots" placeholder="15, 30, 60" value="30,60">
                                     </label>
-                                    <label class="field">
-                                        <span>Booking Mode</span>
-                                        <select id="labBookingMode">
-                                            <option value="slot">Time slots</option>
-                                            <option value="calendar-period">Calendar periods</option>
-                                        </select>
-                                    </label>
+                                    <input type="hidden" id="labBookingMode" value="slot">
                                     <label class="field booking-period-field is-hidden">
                                         <span>Length</span>
                                         <select id="labAllowedPeriodValue">
@@ -269,10 +263,11 @@
 
                                 <div class="form-section-title">Media</div>
                                 <div class="form-grid">
-                                    <label class="field">
+                                    <div class="field">
                                         <span>Content ID</span>
-                                        <input type="text" id="labContentId" placeholder="auto-generated">
-                                    </label>
+                                        <input type="hidden" id="labContentId">
+                                        <div class="readonly-value" id="labContentIdDisplay">auto-generated</div>
+                                    </div>
                                     <div class="field full media-field">
                                         <span>Images</span>
                                         <div class="segmented-control" id="labImageMode">
