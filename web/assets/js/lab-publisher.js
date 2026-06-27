@@ -8,6 +8,7 @@
         uploadedDocs: [],
         selectedCategories: [],
         selectedIscedCodes: [],
+        iscedSelectionTouched: false,
         educationalProgramLinked: false,
         availableDays: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'],
         unavailableWindows: [],
@@ -349,9 +350,13 @@
         if (educationalProgramLinked) {
             educationalProgramLinked.addEventListener('change', () => {
                 state.educationalProgramLinked = educationalProgramLinked.checked;
-                state.selectedIscedCodes = state.educationalProgramLinked
-                    ? (state.selectedIscedCodes.length ? state.selectedIscedCodes : getSuggestedIscedCodes(state.selectedCategories))
-                    : [];
+                if (state.educationalProgramLinked) {
+                    if (!state.selectedIscedCodes.length && !state.iscedSelectionTouched) {
+                        state.selectedIscedCodes = getSuggestedIscedCodes(state.selectedCategories);
+                    }
+                } else {
+                    state.selectedIscedCodes = [];
+                }
                 renderIscedSuggestions();
             });
         }
@@ -596,9 +601,6 @@
         state.selectedCategories = state.selectedCategories.includes(category)
             ? state.selectedCategories.filter(item => item !== category)
             : [...state.selectedCategories, category];
-        if (state.educationalProgramLinked && state.selectedIscedCodes.length === 0) {
-            state.selectedIscedCodes = getSuggestedIscedCodes(state.selectedCategories);
-        }
         renderCategoryChips();
         renderIscedSuggestions();
     }
@@ -649,6 +651,7 @@
                 state.selectedIscedCodes = state.selectedIscedCodes.includes(code)
                     ? state.selectedIscedCodes.filter(item => item !== code)
                     : [...state.selectedIscedCodes, code];
+                state.iscedSelectionTouched = true;
                 renderIscedSuggestions();
             });
         });
@@ -1361,6 +1364,7 @@
         state.selectedIscedCodes = normalizedClassification
             .filter(entry => entry.scheme === CLASSIFICATION_SCHEMES.ISCED_F)
             .map(entry => entry.code);
+        state.iscedSelectionTouched = state.selectedIscedCodes.length > 0;
         state.educationalProgramLinked = state.selectedIscedCodes.length > 0
             || getAttributeValue(attributes, 'educationalProgramLinked') === true;
         const images = normalizeArray(metadata?.images);
