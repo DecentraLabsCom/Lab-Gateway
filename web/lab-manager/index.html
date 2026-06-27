@@ -39,7 +39,7 @@
                         </div>
                         <div class="actions inline-actions">
                             <button class="ghost-btn" id="labPublisherRefreshBtn"><i class="fas fa-rotate-right"></i> Refresh</button>
-                            <button class="ghost-btn" id="labPublisherCancelEditBtn" style="display:none;"><i class="fas fa-xmark"></i> Cancel Edit</button>
+                            <button class="ghost-btn" id="labPublisherCancelEditBtn" hidden><i class="fas fa-xmark"></i> Cancel Edit</button>
                             <button class="primary-btn" id="labPublisherSubmitBtn"><i class="fas fa-upload"></i> Publish Lab</button>
                         </div>
                     </div>
@@ -108,7 +108,7 @@
                                         <span>Access URI</span>
                                         <input type="url" id="labAccessURI" placeholder="https://gateway.example/guacamole">
                                     </label>
-                                    <label class="field full" id="quickMetadataField" style="display:none;">
+                                    <label class="field full" id="quickMetadataField" hidden>
                                         <span>Metadata URL</span>
                                         <input type="url" id="labMetadataUrl" placeholder="https://.../metadata.json">
                                     </label>
@@ -126,15 +126,23 @@
                                         <input type="text" id="labName" maxlength="160" placeholder="Lab Name">
                                     </label>
                                     <label class="field full">
-                                        <span>Categories</span>
+                                        <span>FORD Classification</span>
                                         <div class="multi-select" id="labCategorySelect" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false">
                                             <div class="chip-list" id="labCategoryChips">
-                                                <span class="placeholder">Select one or more categories...</span>
+                                                <span class="placeholder">Select one or more OECD FORD fields...</span>
                                             </div>
                                             <i class="fas fa-chevron-down"></i>
                                         </div>
-                                        <div class="multi-select-menu" id="labCategoryMenu" role="listbox"></div>
+                                        <div class="multi-select-menu" id="labCategoryMenu" role="listbox" aria-label="OECD FORD classification options"></div>
                                     </label>
+                                    <div class="field full">
+                                        <label class="inline-help-label">
+                                            <input type="checkbox" id="labEducationalProgramLinked">
+                                            <span>Linked to education programs</span>
+                                        </label>
+                                        <div class="hint">ISCED-F is optional and contextual. Suggested fields are based on the selected FORD classification.</div>
+                                        <div class="inline-actions isced-suggestions" id="labIscedSuggestions" hidden></div>
+                                    </div>
                                     <label class="field full">
                                         <span>Keywords</span>
                                         <input type="text" id="labKeywords" placeholder="Keywords (comma-separated)">
@@ -247,7 +255,7 @@
                                         </label>
                                     </div>
                                     <div class="resource-preview" id="labFmuDescribeStatus">Set Access URI and FMU File Name to enable auto-detect.</div>
-                                    <div class="table-wrap" id="labModelVariablesWrap" style="display:none;">
+                                    <div class="table-wrap" id="labModelVariablesWrap" hidden>
                                         <table class="mini-table">
                                             <thead>
                                                 <tr>
@@ -277,8 +285,8 @@
                                             <button type="button" data-mode="upload"><i class="fas fa-upload"></i> Upload</button>
                                         </div>
                                         <input type="text" id="labImageUrls" placeholder="Images URLs (comma-separated)">
-                                        <input type="file" id="labImages" accept="image/*" multiple style="display:none;">
-                                        <button class="ghost-btn upload-choice" type="button" id="labImagesChooseBtn" style="display:none;"><i class="fas fa-upload"></i> Choose Files</button>
+                                        <input type="file" id="labImages" accept="image/*" multiple hidden>
+                                        <button class="ghost-btn upload-choice" type="button" id="labImagesChooseBtn" hidden><i class="fas fa-upload"></i> Choose Files</button>
                                     </div>
                                     <div class="field full media-field">
                                         <span>Documents</span>
@@ -287,8 +295,8 @@
                                             <button type="button" data-mode="upload"><i class="fas fa-upload"></i> Upload</button>
                                         </div>
                                         <input type="text" id="labDocUrls" placeholder="Docs URLs (comma-separated)">
-                                        <input type="file" id="labDocs" accept="application/pdf" multiple style="display:none;">
-                                        <button class="ghost-btn upload-choice" type="button" id="labDocsChooseBtn" style="display:none;"><i class="fas fa-upload"></i> Choose Files</button>
+                                        <input type="file" id="labDocs" accept="application/pdf" multiple hidden>
+                                        <button class="ghost-btn upload-choice" type="button" id="labDocsChooseBtn" hidden><i class="fas fa-upload"></i> Choose Files</button>
                                     </div>
                                 </div>
                                 <div class="demo-toggle-row">
@@ -330,7 +338,7 @@
                         <div class="host-list" id="hostList">
                             <div class="empty">No ops hosts loaded yet.</div>
                         </div>
-                        <div class="hint" style="margin-top: 1rem;">Guacamole connections without an ops host</div>
+                        <div class="hint mt-4">Guacamole connections without an ops host</div>
                         <div class="host-list" id="guacamoleCandidateList">
                             <div class="empty">No Guacamole candidates loaded yet.</div>
                         </div>
@@ -351,7 +359,7 @@
                             Enter the FMU access key. Optionally upload a <code>.aasx</code> package
                             to override the auto-generated metadata.
                         </div>
-                        <div class="form-grid" style="margin-top: 0.75rem;">
+                        <div class="form-grid mt-3">
                             <label class="field">
                                 <span>Access Key</span>
                                 <input type="text" id="fmuSyncKey" placeholder="fmu-access-key">
@@ -365,11 +373,11 @@
                                 <input type="file" id="fmuSyncFile" accept=".aasx">
                             </label>
                             <label class="field full">
-                                <span>Description <span class="muted-text">(optional)</span> <span id="fmuSyncDescriptionHint" style="display:none;color:var(--color-success,#1a7f4b);font-size:0.78em;margin-left:0.4rem;"></span></span>
+                                <span>Description <span class="muted-text">(optional)</span> <span class="source-hint" id="fmuSyncDescriptionHint" hidden></span></span>
                                 <textarea id="fmuSyncDescription" rows="2" placeholder="Brief description of this FMU simulation model..."></textarea>
                             </label>
                             <label class="field">
-                                <span>License <span class="muted-text">(optional)</span> <span id="fmuSyncLicenseHint" style="display:none;color:var(--color-success,#1a7f4b);font-size:0.78em;margin-left:0.4rem;"></span></span>
+                                <span>License <span class="muted-text">(optional)</span> <span class="source-hint" id="fmuSyncLicenseHint" hidden></span></span>
                                 <input type="text" id="fmuSyncLicense" placeholder="MIT / Apache-2.0 / ...">
                             </label>
                             <label class="field">
@@ -381,10 +389,10 @@
                                 <input type="email" id="fmuSyncContactEmail" placeholder="contact@example.com">
                             </label>
                         </div>
-                        <div class="actions inline-actions" style="margin-top: 1rem;">
+                        <div class="actions inline-actions mt-4">
                             <button class="primary-btn" id="fmuSyncBtn"><i class="fas fa-sync"></i> Sync AAS</button>
                         </div>
-                        <div id="fmuSyncResult" style="margin-top: 0.75rem;"></div>
+                        <div id="fmuSyncResult" class="mt-3"></div>
                     </div>
                 </div>
             </section>
@@ -403,7 +411,7 @@
                             <code>urn:decentralabs:lab:{labId}</code> shell are transparently
                             redirected to the linked external AAS ID — no Marketplace changes needed.
                         </div>
-                        <div class="form-grid" style="margin-top: 0.75rem;">
+                        <div class="form-grid mt-3">
                             <label class="field">
                                 <span>Access Key</span>
                                 <input type="text" id="aasLinkKey" placeholder="fmu-access-key">
@@ -417,12 +425,12 @@
                                 <input type="text" id="aasLinkAasId" placeholder="urn:example:aas:my-simulation-model">
                             </label>
                         </div>
-                        <div class="actions inline-actions" style="margin-top: 1rem;">
+                        <div class="actions inline-actions mt-4">
                             <button class="primary-btn" id="aasLinkSaveBtn"><i class="fas fa-link"></i> Save Link</button>
                             <button class="ghost-btn" id="aasLinkCheckBtn"><i class="fas fa-search"></i> Check</button>
                             <button class="danger-btn" id="aasLinkDeleteBtn"><i class="fas fa-unlink"></i> Remove Link</button>
                         </div>
-                        <div id="aasLinkResult" style="margin-top: 0.75rem;"></div>
+                        <div id="aasLinkResult" class="mt-3"></div>
                     </div>
                 </div>
             </section>

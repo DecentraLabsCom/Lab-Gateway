@@ -538,6 +538,17 @@ body {
 .actions { display: flex; flex-direction: column; gap: 12px; }
 .inline-actions { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
 .hint { color: var(--muted); font-size: 0.9rem; }
+.mt-3 { margin-top: 0.75rem; }
+.mt-4 { margin-top: 1rem; }
+.isced-suggestions {
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+}
+.source-hint {
+    color: var(--success);
+    font-size: 0.78em;
+    margin-left: 0.4rem;
+}
 
 .list { display: flex; flex-direction: column; gap: 10px; }
 .fixed-height { max-height: 260px; overflow-y: auto; }
@@ -688,7 +699,21 @@ body {
     max-height: 530px;
     overflow-y: auto;
     padding-right: 4px;
-    scrollbar-color: var(--primary-2) #0d1220;
+}
+
+.host-list::-webkit-scrollbar {
+    width: 10px;
+}
+
+.host-list::-webkit-scrollbar-track {
+    background: #0d1220;
+    border-radius: 999px;
+}
+
+.host-list::-webkit-scrollbar-thumb {
+    background: var(--primary-2);
+    border: 2px solid #0d1220;
+    border-radius: 999px;
 }
 .host-row {
     border: 1px solid var(--border);

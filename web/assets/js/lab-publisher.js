@@ -7,6 +7,8 @@
         uploadedImages: [],
         uploadedDocs: [],
         selectedCategories: [],
+        selectedIscedCodes: [],
+        educationalProgramLinked: false,
         availableDays: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'],
         unavailableWindows: [],
         modelVariables: [],
@@ -196,6 +198,107 @@
         ],
     };
 
+    const CLASSIFICATION_SCHEMES = {
+        FORD: 'OECD-FORD',
+        ISCED_F: 'ISCED-F',
+    };
+    const CLASSIFICATION_SCHEME_VERSIONS = {
+        'OECD-FORD': 'Frascati Manual 2015',
+        'ISCED-F': 'ISCED-F 2013',
+    };
+    const FORD_FIELDS_GROUPED = {
+        '1 Natural Sciences': [
+            { code: '1.1', label: 'Mathematics' },
+            { code: '1.2', label: 'Computer and information sciences' },
+            { code: '1.3', label: 'Physical sciences' },
+            { code: '1.4', label: 'Chemical sciences' },
+            { code: '1.5', label: 'Earth and related environmental sciences' },
+            { code: '1.6', label: 'Biological sciences' },
+            { code: '1.7', label: 'Other natural sciences' },
+        ],
+        '2 Engineering and Technology': [
+            { code: '2.1', label: 'Civil engineering' },
+            { code: '2.2', label: 'Electrical engineering, electronic engineering, information engineering' },
+            { code: '2.3', label: 'Mechanical engineering' },
+            { code: '2.4', label: 'Chemical engineering' },
+            { code: '2.5', label: 'Materials engineering' },
+            { code: '2.6', label: 'Medical engineering' },
+            { code: '2.7', label: 'Environmental engineering' },
+            { code: '2.8', label: 'Environmental biotechnology' },
+            { code: '2.9', label: 'Industrial biotechnology' },
+            { code: '2.10', label: 'Nano-technology' },
+            { code: '2.11', label: 'Other engineering and technologies' },
+        ],
+        '3 Medical and Health Sciences': [
+            { code: '3.1', label: 'Basic medicine' },
+            { code: '3.2', label: 'Clinical medicine' },
+            { code: '3.3', label: 'Health sciences' },
+            { code: '3.4', label: 'Medical biotechnology' },
+            { code: '3.5', label: 'Other medical sciences' },
+        ],
+        '4 Agricultural and Veterinary Sciences': [
+            { code: '4.1', label: 'Agriculture, forestry, and fisheries' },
+            { code: '4.2', label: 'Animal and dairy science' },
+            { code: '4.3', label: 'Veterinary science' },
+            { code: '4.4', label: 'Agricultural biotechnology' },
+            { code: '4.5', label: 'Other agricultural sciences' },
+        ],
+        '5 Social Sciences': [
+            { code: '5.1', label: 'Psychology' },
+            { code: '5.2', label: 'Economics and business' },
+            { code: '5.3', label: 'Educational sciences' },
+            { code: '5.4', label: 'Sociology' },
+            { code: '5.5', label: 'Law' },
+            { code: '5.6', label: 'Political science' },
+            { code: '5.7', label: 'Social and economic geography' },
+            { code: '5.8', label: 'Media and communications' },
+            { code: '5.9', label: 'Other social sciences' },
+        ],
+        '6 Humanities and the Arts': [
+            { code: '6.1', label: 'History and archaeology' },
+            { code: '6.2', label: 'Languages and literature' },
+            { code: '6.3', label: 'Philosophy, ethics and religion' },
+            { code: '6.4', label: 'Arts' },
+            { code: '6.5', label: 'Other humanities' },
+        ],
+    };
+    const FORD_FIELDS = Object.values(FORD_FIELDS_GROUPED).flat();
+    const ISCED_F_FIELDS = [
+        { code: '05', label: 'Natural sciences, mathematics and statistics' },
+        { code: '051', label: 'Biological and related sciences' },
+        { code: '052', label: 'Environment' },
+        { code: '053', label: 'Physical sciences' },
+        { code: '054', label: 'Mathematics and statistics' },
+        { code: '061', label: 'Information and Communication Technologies (ICTs)' },
+        { code: '071', label: 'Engineering and engineering trades' },
+        { code: '072', label: 'Manufacturing and processing' },
+        { code: '073', label: 'Architecture and construction' },
+        { code: '081', label: 'Agriculture' },
+        { code: '082', label: 'Forestry' },
+        { code: '083', label: 'Fisheries' },
+        { code: '084', label: 'Veterinary' },
+        { code: '091', label: 'Health' },
+        { code: '092', label: 'Welfare' },
+        { code: '031', label: 'Social and behavioural sciences' },
+        { code: '032', label: 'Journalism and information' },
+        { code: '041', label: 'Business and administration' },
+        { code: '042', label: 'Law' },
+        { code: '011', label: 'Education' },
+        { code: '021', label: 'Arts' },
+        { code: '022', label: 'Humanities except languages' },
+        { code: '023', label: 'Languages' },
+    ];
+    const FORD_TO_ISCED_F_SUGGESTIONS = {
+        '1.1': ['054'], '1.2': ['061'], '1.3': ['053'], '1.4': ['053', '071'], '1.5': ['052', '053'], '1.6': ['051'], '1.7': ['05'],
+        '2.1': ['073', '071'], '2.2': ['071', '061'], '2.3': ['071'], '2.4': ['071', '072'], '2.5': ['071', '072'], '2.6': ['091', '071'], '2.7': ['071', '052'], '2.8': ['051', '071'], '2.9': ['072', '071'], '2.10': ['071', '053'], '2.11': ['071'],
+        '3.1': ['091'], '3.2': ['091'], '3.3': ['091', '092'], '3.4': ['091', '051'], '3.5': ['091'],
+        '4.1': ['081', '082', '083'], '4.2': ['081'], '4.3': ['084'], '4.4': ['081', '051'], '4.5': ['081'],
+        '5.1': ['031'], '5.2': ['041', '031'], '5.3': ['011'], '5.4': ['031'], '5.5': ['042'], '5.6': ['031'], '5.7': ['031', '052'], '5.8': ['032'], '5.9': ['031'],
+        '6.1': ['022'], '6.2': ['023'], '6.3': ['022'], '6.4': ['021'], '6.5': ['022'],
+    };
+    const FORD_BY_CODE = new Map(FORD_FIELDS.map(field => [field.code, field]));
+    const ISCED_BY_CODE = new Map(ISCED_F_FIELDS.map(field => [field.code, field]));
+
     const $ = (id) => document.getElementById(id);
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -215,6 +318,7 @@
         const termsUrl = $('labTermsUrl');
         const fmuAutoDetect = $('labFmuAutoDetectBtn');
         const categorySelect = $('labCategorySelect');
+        const educationalProgramLinked = $('labEducationalProgramLinked');
         const fmuFileName = $('labFmuFileName');
         const priceUnit = $('labPriceUnit');
         const periodUnit = $('labAllowedPeriodUnit');
@@ -242,6 +346,15 @@
         addWindow.addEventListener('click', addUnavailableWindow);
         termsUrl.addEventListener('blur', autoFetchTermsMetadata);
         fmuAutoDetect.addEventListener('click', autoDetectFmuMetadata);
+        if (educationalProgramLinked) {
+            educationalProgramLinked.addEventListener('change', () => {
+                state.educationalProgramLinked = educationalProgramLinked.checked;
+                state.selectedIscedCodes = state.educationalProgramLinked
+                    ? (state.selectedIscedCodes.length ? state.selectedIscedCodes : getSuggestedIscedCodes(state.selectedCategories))
+                    : [];
+                renderIscedSuggestions();
+            });
+        }
         fmuFileName.addEventListener('input', () => {
             if ($('labResourceType').value === '1') $('labAccessKey').value = fmuFileName.value.trim();
             resetFmuDescribeFields(false);
@@ -272,6 +385,7 @@
         normalizeAllowedPeriodRange();
         renderCategoryMenu();
         renderCategoryChips();
+        renderIscedSuggestions();
         renderDayToggles();
         renderUnavailableWindows();
         setupMediaMode('images', 'link');
@@ -441,13 +555,14 @@
 
     function renderCategoryMenu() {
         const menu = $('labCategoryMenu');
-        menu.innerHTML = Object.entries(LAB_CATEGORIES_GROUPED).map(([groupName, categories]) => `
+        menu.innerHTML = Object.entries(FORD_FIELDS_GROUPED).map(([groupName, categories]) => `
             <div class="multi-select-group">
                 <div class="multi-select-group-title">${escapeHtml(groupName)}</div>
                 ${categories.map(category => `
                     <label class="multi-select-option">
-                        <input type="checkbox" value="${escapeAttr(category)}">
-                        <span>${escapeHtml(category)}</span>
+                        <input type="checkbox" value="${escapeAttr(category.code)}">
+                        <span>${escapeHtml(category.label)}</span>
+                        <small>${escapeHtml(category.code)}</small>
                     </label>
                 `).join('')}
             </div>
@@ -481,7 +596,11 @@
         state.selectedCategories = state.selectedCategories.includes(category)
             ? state.selectedCategories.filter(item => item !== category)
             : [...state.selectedCategories, category];
+        if (state.educationalProgramLinked && state.selectedIscedCodes.length === 0) {
+            state.selectedIscedCodes = getSuggestedIscedCodes(state.selectedCategories);
+        }
         renderCategoryChips();
+        renderIscedSuggestions();
     }
 
     function renderCategoryChips() {
@@ -490,11 +609,11 @@
         chips.innerHTML = state.selectedCategories.length
             ? state.selectedCategories.map(category => `
                 <span class="chip">
-                    ${escapeHtml(category)}
+                    ${escapeHtml(getFordField(category)?.label || category)}
                     <button type="button" data-category="${escapeAttr(category)}" aria-label="Remove ${escapeAttr(category)}">&times;</button>
                 </span>
             `).join('')
-            : '<span class="placeholder">Select one or more categories...</span>';
+            : '<span class="placeholder">Select one or more OECD FORD fields...</span>';
         chips.querySelectorAll('button[data-category]').forEach(button => {
             button.addEventListener('click', (event) => {
                 event.stopPropagation();
@@ -503,6 +622,35 @@
         });
         menu.querySelectorAll('input[type="checkbox"]').forEach(input => {
             input.checked = state.selectedCategories.includes(input.value);
+        });
+    }
+
+    function renderIscedSuggestions() {
+        const linked = $('labEducationalProgramLinked');
+        const target = $('labIscedSuggestions');
+        if (!linked || !target) return;
+        linked.checked = state.educationalProgramLinked;
+        target.hidden = !state.educationalProgramLinked;
+        if (!state.educationalProgramLinked) {
+            target.innerHTML = '';
+            return;
+        }
+        const suggested = getSuggestedIscedCodes(state.selectedCategories);
+        const codes = suggested.length ? suggested : ISCED_F_FIELDS.map(field => field.code);
+        target.innerHTML = codes.map(code => {
+            const field = getIscedField(code);
+            if (!field) return '';
+            const checked = state.selectedIscedCodes.includes(code);
+            return `<button type="button" class="mini-btn ${checked ? 'primary' : ''}" data-isced-code="${escapeAttr(code)}">${escapeHtml(code)} ${escapeHtml(field.label)}</button>`;
+        }).join('');
+        target.querySelectorAll('button[data-isced-code]').forEach(button => {
+            button.addEventListener('click', () => {
+                const code = button.dataset.iscedCode;
+                state.selectedIscedCodes = state.selectedIscedCodes.includes(code)
+                    ? state.selectedIscedCodes.filter(item => item !== code)
+                    : [...state.selectedIscedCodes, code];
+                renderIscedSuggestions();
+            });
         });
     }
 
@@ -600,8 +748,8 @@
         control.querySelectorAll('button').forEach(button => {
             button.classList.toggle('active', button.dataset.mode === mode);
         });
-        linkInput.style.display = mode === 'link' ? '' : 'none';
-        chooseBtn.style.display = mode === 'upload' ? '' : 'none';
+        linkInput.hidden = mode !== 'link';
+        chooseBtn.hidden = mode !== 'upload';
     }
 
     function applySelectedResource() {
@@ -636,14 +784,14 @@
 
     function syncSetupMode() {
         const quick = $('labSetupMode').value === 'quick';
-        $('fullMetadataPanel').style.display = quick ? 'none' : '';
-        $('quickMetadataField').style.display = quick ? '' : 'none';
+        $('fullMetadataPanel').hidden = quick;
+        $('quickMetadataField').hidden = !quick;
     }
 
     function syncResourceTypeFields() {
         const isFmu = $('labResourceType').value === '1';
-        $('fmuConfigTitle').style.display = isFmu ? '' : 'none';
-        $('fmuConfigPanel').style.display = isFmu ? '' : 'none';
+        $('fmuConfigTitle').hidden = !isFmu;
+        $('fmuConfigPanel').hidden = !isFmu;
         if (isFmu && !$('labFmuFileName').value.trim() && $('labAccessKey').value.trim().toLowerCase().endsWith('.fmu')) {
             $('labFmuFileName').value = $('labAccessKey').value.trim();
         }
@@ -724,7 +872,11 @@
         const docs = state.docMode === 'link'
             ? splitCsv($('labDocUrls').value)
             : [...state.uploadedDocs];
-        const categories = [...state.selectedCategories];
+        const classification = buildClassificationEntries({
+            fordCodes: state.selectedCategories,
+            iscedCodes: state.selectedIscedCodes,
+            educationalProgramLinked: state.educationalProgramLinked,
+        });
         const keywords = splitCsv($('labKeywords').value);
         const resourceType = $('labResourceType').value === '1' ? RESOURCE_TYPES.FMU : RESOURCE_TYPES.LAB;
         const fmuFileName = $('labFmuFileName').value.trim();
@@ -756,7 +908,9 @@
             sha256: $('labTermsSha256').value.trim(),
         });
         const attributes = [
-            { trait_type: 'category', value: categories },
+            { trait_type: 'classification', value: classification },
+            { trait_type: 'classificationPrimaryScheme', value: CLASSIFICATION_SCHEMES.FORD },
+            ...(state.educationalProgramLinked ? [{ trait_type: 'educationalProgramLinked', value: true }] : []),
             { trait_type: 'keywords', value: keywords },
             ...(bookingMode === 'slot' ? [{ trait_type: 'timeSlots', value: timeSlots }] : []),
             { trait_type: 'pricing', value: pricing },
@@ -811,7 +965,7 @@
         }
         const missing = required.find(([, value]) => !value);
         if (missing) throw new Error(`${missing[0]} is required`);
-        if (!state.selectedCategories.length) throw new Error('Category is required');
+        if (!state.selectedCategories.some(code => getFordField(code))) throw new Error('At least one valid OECD FORD field is required');
         if (!state.availableDays.length) throw new Error('Select at least one available day');
         if (bookingMode === 'slot' && !splitCsv($('labTimeSlots').value).map(Number).some(Number.isFinite)) {
             throw new Error('Time Slots must include at least one duration in minutes');
@@ -1063,7 +1217,7 @@
     function renderModelVariables() {
         const wrap = $('labModelVariablesWrap');
         const body = $('labModelVariables');
-        wrap.style.display = state.modelVariables.length ? '' : 'none';
+        wrap.hidden = state.modelVariables.length === 0;
         body.innerHTML = state.modelVariables.map(variable => `
             <tr>
                 <td>${escapeHtml(variable.name || '')}</td>
@@ -1197,10 +1351,18 @@
         $('labName').value = metadata?.name || '';
         $('labDescription').value = metadata?.description || '';
         const attributes = metadataAttributes(metadata?.attributes);
-        const categoriesFromAttributes = getAttributeValue(attributes, 'category');
+        const classificationFromAttributes = getAttributeValue(attributes, 'classification');
         const keywordsFromAttributes = getAttributeValue(attributes, 'keywords');
         $('labKeywords').value = normalizeArray(metadata?.keywords ?? keywordsFromAttributes).join(', ');
-        state.selectedCategories = normalizeArray(metadata?.category ?? categoriesFromAttributes);
+        const normalizedClassification = normalizeClassificationEntries(metadata?.classification ?? classificationFromAttributes);
+        state.selectedCategories = normalizedClassification
+            .filter(entry => entry.scheme === CLASSIFICATION_SCHEMES.FORD)
+            .map(entry => entry.code);
+        state.selectedIscedCodes = normalizedClassification
+            .filter(entry => entry.scheme === CLASSIFICATION_SCHEMES.ISCED_F)
+            .map(entry => entry.code);
+        state.educationalProgramLinked = state.selectedIscedCodes.length > 0
+            || getAttributeValue(attributes, 'educationalProgramLinked') === true;
         const images = normalizeArray(metadata?.images);
         if (!images.length && metadata?.image) images.push(metadata.image);
         $('labImageUrls').value = images.join(', ');
@@ -1275,6 +1437,7 @@
             renderModelVariables();
         });
         renderCategoryChips();
+        renderIscedSuggestions();
     }
 
     async function toggleLabListing(lab, shouldList, button) {
@@ -1318,7 +1481,7 @@
         const cancel = $('labPublisherCancelEditBtn');
         const editing = !!state.editingLabId;
         submit.innerHTML = editing ? '<i class="fas fa-save"></i> Save Lab' : '<i class="fas fa-upload"></i> Publish Lab';
-        if (cancel) cancel.style.display = editing ? '' : 'none';
+        if (cancel) cancel.hidden = !editing;
     }
 
     function metadataAttributes(value) {
@@ -1336,6 +1499,64 @@
 
     function normalizeTraitType(value) {
         return String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    }
+
+    function getFordField(code) {
+        return FORD_BY_CODE.get(String(code || '').trim()) || null;
+    }
+
+    function getIscedField(code) {
+        return ISCED_BY_CODE.get(String(code || '').trim()) || null;
+    }
+
+    function normalizeClassificationEntries(value) {
+        return (Array.isArray(value) ? value : [])
+            .map(entry => {
+                const scheme = String(entry?.scheme || '').trim();
+                const code = String(entry?.code || '').trim();
+                const field = scheme === CLASSIFICATION_SCHEMES.FORD
+                    ? getFordField(code)
+                    : scheme === CLASSIFICATION_SCHEMES.ISCED_F
+                        ? getIscedField(code)
+                        : null;
+                if (!field) return null;
+                return {
+                    scheme,
+                    schemeVersion: CLASSIFICATION_SCHEME_VERSIONS[scheme],
+                    code: field.code,
+                    label: field.label,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    function buildClassificationEntries({ fordCodes, iscedCodes = [], educationalProgramLinked = false }) {
+        const seen = new Set();
+        const add = (scheme, code) => {
+            const field = scheme === CLASSIFICATION_SCHEMES.FORD ? getFordField(code) : getIscedField(code);
+            if (!field) return null;
+            const key = `${scheme}:${field.code}`;
+            if (seen.has(key)) return null;
+            seen.add(key);
+            return {
+                scheme,
+                schemeVersion: CLASSIFICATION_SCHEME_VERSIONS[scheme],
+                code: field.code,
+                label: field.label,
+            };
+        };
+        return [
+            ...(Array.isArray(fordCodes) ? fordCodes : [fordCodes]).map(code => add(CLASSIFICATION_SCHEMES.FORD, code)),
+            ...(educationalProgramLinked ? (Array.isArray(iscedCodes) ? iscedCodes : [iscedCodes]).map(code => add(CLASSIFICATION_SCHEMES.ISCED_F, code)) : []),
+        ].filter(Boolean);
+    }
+
+    function getSuggestedIscedCodes(fordCodes) {
+        const seen = new Set();
+        (Array.isArray(fordCodes) ? fordCodes : [fordCodes]).forEach(code => {
+            (FORD_TO_ISCED_F_SUGGESTIONS[String(code || '').trim()] || []).forEach(iscedCode => seen.add(iscedCode));
+        });
+        return [...seen];
     }
 
     function normalizeArray(value) {

@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inputEl.readOnly = true;
         inputEl.style.opacity = '0.7';
         inputEl.style.cursor = 'default';
-        if (hintEl) { hintEl.textContent = '\u2139\ufe0f From FMU'; hintEl.style.display = 'inline'; }
+        if (hintEl) { hintEl.textContent = '\u2139\ufe0f From FMU'; hintEl.hidden = false; }
     }
 
     function _clearFmuFieldHint(inputEl, hintEl) {
@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inputEl.readOnly = false;
         inputEl.style.opacity = '';
         inputEl.style.cursor = '';
-        if (hintEl) { hintEl.textContent = ''; hintEl.style.display = 'none'; }
+        if (hintEl) { hintEl.textContent = ''; hintEl.hidden = true; }
     }
 
     function _clearAllFmuHints() {
