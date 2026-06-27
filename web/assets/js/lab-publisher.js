@@ -19,6 +19,9 @@
         termsController: null,
         labs: [],
         editingLabId: null,
+        originalRawPrice: null,
+        originalDisplayPrice: null,
+        originalPriceUnit: null,
     };
 
     const CREDIT_DECIMALS = 5;
@@ -853,7 +856,7 @@
         const payload = {
             setupMode,
             listImmediately: $('labListImmediately').value === 'true',
-            price: convertDisplayCreditsToRawPerSecond($('labPrice').value || '0', $('labPriceUnit').value || 'hour').toString(),
+            price: resolvePayloadRawPrice(),
             accessURI: $('labAccessURI').value.trim(),
             accessKey: $('labAccessKey').value.trim(),
             resourceType: Number($('labResourceType').value),
@@ -1309,6 +1312,7 @@
         resetFmuDescribeFields(false);
         applyLabBaseFields(lab);
         await applyLabMetadata(lab);
+        captureOriginalEditPrice(lab);
         syncSetupMode();
         syncResourceTypeFields();
         syncBookingModeFields();
@@ -1476,8 +1480,32 @@
 
     function clearEditMode(resetStatus = true) {
         state.editingLabId = null;
+        state.originalRawPrice = null;
+        state.originalDisplayPrice = null;
+        state.originalPriceUnit = null;
         updateEditControls();
         if (resetStatus) setStatus('Edit cancelled.', false);
+    }
+
+    function captureOriginalEditPrice(lab) {
+        state.originalRawPrice = String(lab?.price ?? '0');
+        state.originalDisplayPrice = String($('labPrice')?.value ?? '').trim();
+        state.originalPriceUnit = normalizePricingUnit($('labPriceUnit')?.value || 'hour');
+    }
+
+    function resolvePayloadRawPrice() {
+        const priceInput = String($('labPrice')?.value ?? '0').trim();
+        const priceUnit = normalizePricingUnit($('labPriceUnit')?.value || 'hour');
+        const priceUnchangedDuringEdit = !!state.editingLabId
+            && state.originalRawPrice !== null
+            && priceInput === String(state.originalDisplayPrice ?? '').trim()
+            && priceUnit === state.originalPriceUnit;
+
+        if (priceUnchangedDuringEdit) {
+            return state.originalRawPrice;
+        }
+
+        return convertDisplayCreditsToRawPerSecond(priceInput || '0', priceUnit).toString();
     }
 
     function updateEditControls() {
