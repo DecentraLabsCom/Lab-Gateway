@@ -1615,7 +1615,15 @@
 
     async function fetchJson(url, options) {
         const res = await fetch(url, { credentials: 'include', ...(options || {}) });
-        const body = await res.json().catch(() => ({}));
+        const rawBody = await res.text().catch(() => '');
+        let body = {};
+        if (rawBody) {
+            try {
+                body = JSON.parse(rawBody);
+            } catch {
+                body = { error: rawBody.trim() };
+            }
+        }
         if (!res.ok) {
             throw new Error(body.error || body.detail || `HTTP ${res.status}`);
         }
