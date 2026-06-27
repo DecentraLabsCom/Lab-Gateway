@@ -1,6 +1,7 @@
 -- Lab Manager access guard.
 -- Enforces a dedicated access token for non-local clients when configured.
 
+local bit = require("bit")
 local token = os.getenv("LAB_MANAGER_TOKEN") or ""
 
 local function deny(message)
@@ -147,8 +148,8 @@ local remote_addr = ngx.var.remote_addr or ""
 
 -- When ADMIN_TRUST_FORWARDED_IP=false the gateway is the public edge and
 -- XFF headers MUST NOT be trusted for access-control decisions.
-local trust_xff = os.getenv("ADMIN_TRUST_FORWARDED_IP")
-trust_xff = (trust_xff == nil or trust_xff == "" or trust_xff ~= "false")
+local trust_xff_env = os.getenv("ADMIN_TRUST_FORWARDED_IP")
+local trust_xff = (trust_xff_env == nil or trust_xff_env == "" or trust_xff_env ~= "false")
 
 local forwarded_ip = nil
 if trust_xff then

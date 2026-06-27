@@ -128,8 +128,7 @@ end
 -- Empty → use bundled BaSyx (http://basyx-aas-server:8081) when --profile aas is active.
 -- Non-empty → proxy to the configured external AAS server URL.
 local basyx_aas_raw = trim(os.getenv("BASYX_AAS_URL")) or ""
-local basyx_aas_url = (basyx_aas_raw ~= "") and basyx_aas_raw or "http://basyx-aas-server:8081"
-basyx_aas_url = basyx_aas_url:gsub("/+$", "")  -- strip trailing slash
+local basyx_aas_url = ((basyx_aas_raw ~= "") and basyx_aas_raw or "http://basyx-aas-server:8081"):gsub("/+$", "")  -- strip trailing slash
 config:set("basyx_aas_url", basyx_aas_url)
 
 -- AAS enabled flag: explicit AAS_ENABLED env takes precedence; otherwise infer
@@ -160,8 +159,7 @@ if demo_user == "" then demo_user = "demo" end
 config:set("demo_user", demo_user)
 local demo_lab_id = trim(os.getenv("DEMO_LAB_ID")) or ""
 config:set("demo_lab_id", demo_lab_id)
-local marketplace_url = trim(os.getenv("MARKETPLACE_URL")) or ""
-marketplace_url = marketplace_url:gsub("/+$", "")
+local marketplace_url = (trim(os.getenv("MARKETPLACE_URL")) or ""):gsub("/+$", "")
 config:set("marketplace_url", marketplace_url)
 
 if fmu_runner_enabled then

@@ -1,6 +1,7 @@
 -- Strict Lab Manager admin guard.
 -- Requires a valid LAB_MANAGER_TOKEN header or cookie for privileged admin routes.
 
+local bit = require("bit")
 local token = os.getenv("LAB_MANAGER_TOKEN") or ""
 local header_name = os.getenv("LAB_MANAGER_TOKEN_HEADER") or "X-Lab-Manager-Token"
 local cookie_name = os.getenv("LAB_MANAGER_TOKEN_COOKIE") or "lab_manager_token"
