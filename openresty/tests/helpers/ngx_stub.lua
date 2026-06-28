@@ -90,6 +90,10 @@ local function new(opts)
         req_headers[key] = value
     end
 
+    function ngx_stub.req.clear_header(key)
+        req_headers[key] = nil
+    end
+
     function ngx_stub.req.get_headers()
         return req_headers
     end

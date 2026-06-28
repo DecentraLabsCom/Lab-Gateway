@@ -44,12 +44,16 @@ para la descripción completa de cada variable):
 ```env
 # .env
 SERVER_NAME=lab.tu-institucion.edu
+ISSUER=
 MYSQL_ROOT_PASSWORD=contraseña_segura
 MYSQL_PASSWORD=contraseña_segura
 GUAC_ADMIN_USER=admin
 GUAC_ADMIN_PASS=contraseña_segura
 ADMIN_ACCESS_TOKEN=token_aleatorio
 LAB_MANAGER_TOKEN=token_aleatorio
+LAB_MANAGER_ALLOWED_CIDRS=
+LAB_ADMIN_BACKEND_URL=
+LAB_ADMIN_BACKEND_TOKEN=
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 ```
 
@@ -62,6 +66,11 @@ FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ALLOWED_ORIGINS=https://lab.tu-institucion.edu,https://marketplace-decentralabs.vercel.app
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem
 ```
+
+Mantén los valores de orquestacion Gateway/OpenResty solo en `.env`. El `docker-compose.yml` raiz inyecta esos valores al backend embebido desde `.env`.
+
+Para un despliegue standalone de `blockchain-services` no gestionado por este Compose del Gateway, configura el `.env` propio de ese servicio standalone con su
+`LAB_MANAGER_TOKEN` y, si procede, `LAB_MANAGER_ALLOWED_CIDRS`.
 
 ## Paso 4 — Aplicar la configuración NixOS
 

@@ -51,7 +51,8 @@ local function run_guard(opts)
     local env = opts.env or {}
     local headers = opts.headers or {}
     local ngx = ngx_factory.new({
-        var = opts.var or {}
+        var = opts.var or {},
+        config = opts.config or {}
     })
 
     ngx.req.get_headers = function()
@@ -112,6 +113,97 @@ runner.describe("Lab manager strict admin guard", function()
 
         runner.assert.equals(nil, ngx.status)
         runner.assert.equals("secret-token", ngx.req.headers["X-Lab-Manager-Token"])
+        runner.assert.equals("http://blockchain-services:8080", ngx.var.backend_lab_admin)
+    end)
+
+    runner.it("blocks lab admin in Lite mode without explicit remote backend", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "secret-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            config = { lite_mode = 1 },
+            headers = { ["X-Lab-Manager-Token"] = "secret-token" },
+            var = { remote_addr = "172.17.0.2" }
+        })
+
+        runner.assert.equals(403, ngx.status)
+        runner.assert.equals(403, ngx._exit)
+    end)
+
+    runner.it("proxies Lite lab admin to configured HTTPS backend with backend-only token", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                LAB_ADMIN_BACKEND_URL = "https://standalone.example.edu",
+                LAB_ADMIN_BACKEND_TOKEN = "backend-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            config = { lite_mode = 1 },
+            headers = { ["X-Lab-Manager-Token"] = "browser-token" },
+            var = { remote_addr = "172.17.0.2" }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("https://standalone.example.edu", ngx.var.backend_lab_admin)
+        runner.assert.equals("backend-token", ngx.req.headers["X-Lab-Manager-Token"])
+    end)
+
+    runner.it("does not forward browser token when backend token uses a custom header", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                LAB_ADMIN_BACKEND_URL = "https://standalone.example.edu",
+                LAB_ADMIN_BACKEND_TOKEN = "backend-token",
+                LAB_ADMIN_BACKEND_TOKEN_HEADER = "X-Standalone-Lab-Manager-Token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            config = { lite_mode = 1 },
+            headers = { ["X-Lab-Manager-Token"] = "browser-token" },
+            var = { remote_addr = "172.17.0.2" }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals(nil, ngx.req.headers["X-Lab-Manager-Token"])
+        runner.assert.equals("backend-token", ngx.req.headers["X-Standalone-Lab-Manager-Token"])
+    end)
+
+    runner.it("rejects remote HTTP backend unless explicitly allowed", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                LAB_ADMIN_BACKEND_URL = "http://standalone.example.edu",
+                LAB_ADMIN_BACKEND_TOKEN = "backend-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            config = { lite_mode = 1 },
+            headers = { ["X-Lab-Manager-Token"] = "browser-token" },
+            var = { remote_addr = "172.17.0.2" }
+        })
+
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx.status)
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit)
+    end)
+
+    runner.it("requires distinct backend token for remote lab admin backend", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                LAB_ADMIN_BACKEND_URL = "https://standalone.example.edu",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            config = { lite_mode = 1 },
+            headers = { ["X-Lab-Manager-Token"] = "browser-token" },
+            var = { remote_addr = "172.17.0.2" }
+        })
+
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx.status)
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit)
     end)
 
     runner.it("accepts token from cookie", function()

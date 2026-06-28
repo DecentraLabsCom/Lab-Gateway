@@ -93,6 +93,7 @@ if exist "%BLOCKCHAIN_ENV_FILE%" (
         exit /b 1
     )
 )
+call :RemoveGatewayManagedBackendEnv
 echo.
 
 REM Database Passwords
@@ -231,11 +232,11 @@ if "!access_token!"=="" (
     echo Generated admin access token: !access_token!
 )
 
-call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN" "!access_token!"
-call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
-call :UpdateEnvBoth "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
-call :UpdateEnvBlockchainOnly "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
-call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
+call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_ACCESS_TOKEN" "!access_token!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
+call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
+call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
+call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
 echo.
 echo Wallet Dashboard Access Scope
 echo =============================
@@ -246,19 +247,19 @@ set "dashboard_access_scope="
 set /p "dashboard_access_scope=Choose [1/2] (default: 1): "
 if defined dashboard_access_scope set "dashboard_access_scope=!dashboard_access_scope: =!"
 if "!dashboard_access_scope!"=="2" (
-    call :UpdateEnvBlockchainOnly "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-    call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
-    call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_LOCAL_ONLY" "false"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_DASHBOARD_LOCAL_ONLY" "false"
     set "admin_allowed_cidrs="
     set /p "admin_allowed_cidrs=Allowed private CIDRs (comma-separated, leave empty for any private range): "
     if defined admin_allowed_cidrs set "admin_allowed_cidrs=!admin_allowed_cidrs: =!"
-    call :UpdateEnvBlockchainOnly "ADMIN_ALLOWED_CIDRS" "!admin_allowed_cidrs!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_ALLOWED_CIDRS" "!admin_allowed_cidrs!"
     echo Configured wallet dashboard access for private networks protected by ADMIN_ACCESS_TOKEN.
 ) else (
-    call :UpdateEnvBlockchainOnly "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
-    call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
-    call :UpdateEnvBlockchainOnly "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
-    call :UpdateEnvBlockchainOnly "ADMIN_ALLOWED_CIDRS" ""
+    call :UpdateEnv "%ROOT_ENV_FILE%" "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ADMIN_ALLOWED_CIDRS" ""
     echo Configured wallet dashboard access for localhost only.
 )
 echo.
@@ -283,6 +284,21 @@ if "!lab_manager_token!"=="" (
 call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_TOKEN" "!lab_manager_token!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_TOKEN_HEADER" "X-Lab-Manager-Token"
 call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_TOKEN_COOKIE" "lab_manager_token"
+echo.
+
+echo Lab Manager Backend Allowlist
+echo =============================
+echo Optional CIDR allowlist enforced by blockchain-services for /lab-admin calls authenticated with LAB_MANAGER_TOKEN.
+echo Leave empty to keep the current behavior and allow any request that already passes the existing admin network policy.
+set "lab_manager_allowed_cidrs="
+set /p "lab_manager_allowed_cidrs=LAB_MANAGER_ALLOWED_CIDRS [empty]: "
+if defined lab_manager_allowed_cidrs set "lab_manager_allowed_cidrs=!lab_manager_allowed_cidrs: =!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_ALLOWED_CIDRS" "!lab_manager_allowed_cidrs!"
+if "!lab_manager_allowed_cidrs!"=="" (
+    echo    * LAB_MANAGER_ALLOWED_CIDRS left empty ^(no extra /lab-admin CIDR allowlist^).
+) else (
+    echo    * LAB_MANAGER_ALLOWED_CIDRS set to: !lab_manager_allowed_cidrs!
+)
 echo.
 
 
@@ -384,8 +400,42 @@ if defined issuer_value set "issuer_value=!issuer_value: =!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "ISSUER" "!issuer_value!"
 if "!issuer_value!"=="" (
     echo    * ISSUER left empty ^(Full mode^).
+    call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_URL" ""
+    call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_TOKEN" ""
+    call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_TOKEN_HEADER" "X-Lab-Manager-Token"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_ALLOW_INSECURE" "false"
+    echo    * LAB_ADMIN_BACKEND_URL left empty ^(Full mode uses embedded blockchain-services^).
 ) else (
     echo    * ISSUER set to: !issuer_value! ^(Lite mode^).
+    echo.
+    echo Lite /lab-admin Remote Backend
+    echo ==============================
+    echo Optional. Configure this only if this Lite gateway must publish/update labs on-chain from /lab-manager.
+    echo Leave empty to keep /lab-admin blocked in Lite mode.
+    set "lab_admin_backend_url="
+    set /p "lab_admin_backend_url=LAB_ADMIN_BACKEND_URL [empty -^> blocked]: "
+    if defined lab_admin_backend_url set "lab_admin_backend_url=!lab_admin_backend_url: =!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_URL" "!lab_admin_backend_url!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_TOKEN_HEADER" "X-Lab-Manager-Token"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_ALLOW_INSECURE" "false"
+    if "!lab_admin_backend_url!"=="" (
+        call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_TOKEN" ""
+        echo    * LAB_ADMIN_BACKEND_URL left empty ^(/lab-admin remains blocked in Lite mode^).
+        echo    * LAB_ADMIN_BACKEND_TOKEN left empty.
+    ) else (
+        set "lab_admin_backend_token="
+        set /p "lab_admin_backend_token=LAB_ADMIN_BACKEND_TOKEN [empty -^> configure later]: "
+        if defined lab_admin_backend_token set "lab_admin_backend_token=!lab_admin_backend_token: =!"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_TOKEN" "!lab_admin_backend_token!"
+        echo    * LAB_ADMIN_BACKEND_URL set to: !lab_admin_backend_url!
+        if "!lab_admin_backend_token!"=="" (
+            echo    * LAB_ADMIN_BACKEND_TOKEN left empty ^(/lab-admin remote calls will fail until it is configured^).
+        ) else (
+            echo    * LAB_ADMIN_BACKEND_TOKEN configured.
+        )
+    )
+    echo    * LAB_ADMIN_BACKEND_TOKEN_HEADER set to: X-Lab-Manager-Token
+    echo    * LAB_ADMIN_BACKEND_ALLOW_INSECURE set to: false
 )
 echo.
 
@@ -771,13 +821,26 @@ echo.
 pause
 goto :eof
 
-:UpdateEnvBoth
-call :UpdateEnv "%ROOT_ENV_FILE%" "%~1" "%~2"
-if exist "%BLOCKCHAIN_ENV_FILE%" call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "%~1" "%~2"
+:RemoveGatewayManagedBackendEnv
+if not exist "%BLOCKCHAIN_ENV_FILE%" exit /b
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "ADMIN_ACCESS_TOKEN"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "ADMIN_ACCESS_TOKEN_HEADER"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "ADMIN_ACCESS_TOKEN_COOKIE"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "ADMIN_ACCESS_TOKEN_REQUIRED"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "ADMIN_DASHBOARD_LOCAL_ONLY"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "ADMIN_DASHBOARD_ALLOW_PRIVATE"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "SECURITY_ALLOW_PRIVATE_NETWORKS"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "ADMIN_ALLOWED_CIDRS"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_MANAGER_TOKEN"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_MANAGER_TOKEN_HEADER"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_MANAGER_TOKEN_COOKIE"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_MANAGER_ALLOWED_CIDRS"
 exit /b
 
-:UpdateEnvBlockchainOnly
-if exist "%BLOCKCHAIN_ENV_FILE%" call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "%~1" "%~2"
+:RemoveEnv
+set "env_file=%~1"
+set "env_key=%~2"
+powershell -NoLogo -NoProfile -Command "& { param($file,$key); if (-not (Test-Path -LiteralPath $file)) { return }; $pattern = '^' + [regex]::Escape($key) + '=.*$'; $content = @(Get-Content -LiteralPath $file | Where-Object { $_ -notmatch $pattern }); Set-Content -LiteralPath $file -Value $content -Encoding Ascii }" "%env_file%" "%env_key%"
 exit /b
 
 :UpdateEnv

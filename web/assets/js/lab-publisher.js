@@ -381,6 +381,9 @@
                 closeCategoryMenu();
             }
         });
+        $('labCategoryMenu').addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
 
         syncSetupMode();
         syncResourceTypeFields();
@@ -575,9 +578,20 @@
                 `).join('')}
             </div>
         `).join('');
+        menu.querySelectorAll('.multi-select-option').forEach(option => {
+            option.addEventListener('click', (event) => {
+                event.stopPropagation();
+            });
+        });
         menu.querySelectorAll('input[type="checkbox"]').forEach(input => {
             input.checked = false;
-            input.addEventListener('change', () => toggleCategory(input.value));
+            input.addEventListener('click', (event) => {
+                event.stopPropagation();
+            });
+            input.addEventListener('change', (event) => {
+                event.stopPropagation();
+                toggleCategory(input.value);
+            });
         });
     }
 

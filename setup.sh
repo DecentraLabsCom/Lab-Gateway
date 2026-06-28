@@ -82,21 +82,32 @@ detect_mysql_volume() {
     echo "$volume_name"
 }
 
-update_env_in_all() {
-    local key="$1"
-    local value="$2"
-    update_env_var "$ROOT_ENV_FILE" "$key" "$value"
-    if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
-        update_env_var "$BLOCKCHAIN_ENV_FILE" "$key" "$value"
+remove_env_var() {
+    local file="$1"
+    local key="$2"
+
+    if [ -f "$file" ]; then
+        sed -i "/^${key}=.*/d" "$file"
     fi
 }
 
-update_env_blockchain_only() {
-    local key="$1"
-    local value="$2"
-    if [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
-        update_env_var "$BLOCKCHAIN_ENV_FILE" "$key" "$value"
+remove_gateway_managed_backend_env() {
+    if [ ! -f "$BLOCKCHAIN_ENV_FILE" ]; then
+        return
     fi
+
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "ADMIN_ACCESS_TOKEN"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "ADMIN_ACCESS_TOKEN_HEADER"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "ADMIN_ACCESS_TOKEN_COOKIE"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "ADMIN_ACCESS_TOKEN_REQUIRED"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "ADMIN_DASHBOARD_LOCAL_ONLY"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "ADMIN_DASHBOARD_ALLOW_PRIVATE"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "SECURITY_ALLOW_PRIVATE_NETWORKS"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "ADMIN_ALLOWED_CIDRS"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_MANAGER_TOKEN"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_MANAGER_TOKEN_HEADER"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_MANAGER_TOKEN_COOKIE"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_MANAGER_ALLOWED_CIDRS"
 }
 
 # Check prerequisites
@@ -153,6 +164,7 @@ else
     cp blockchain-services/.env.example "$BLOCKCHAIN_ENV_FILE"
     echo "Created blockchain-services/.env from template"
 fi
+remove_gateway_managed_backend_env
 echo
 
 # Database Passwords Configuration
@@ -261,11 +273,11 @@ if [ -z "$access_token" ]; then
     echo "Generated admin access token: $access_token"
 fi
 
-update_env_in_all "ADMIN_ACCESS_TOKEN" "$access_token"
-update_env_in_all "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
-update_env_in_all "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
-update_env_blockchain_only "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
-update_env_blockchain_only "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
+update_env_var "$ROOT_ENV_FILE" "ADMIN_ACCESS_TOKEN" "$access_token"
+update_env_var "$ROOT_ENV_FILE" "ADMIN_ACCESS_TOKEN_HEADER" "X-Access-Token"
+update_env_var "$ROOT_ENV_FILE" "ADMIN_ACCESS_TOKEN_COOKIE" "access_token"
+update_env_var "$ROOT_ENV_FILE" "ADMIN_ACCESS_TOKEN_REQUIRED" "true"
+update_env_var "$ROOT_ENV_FILE" "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
 
 echo
 echo "Wallet Dashboard Access Scope"
@@ -277,18 +289,18 @@ read -p "Choose [1/2] (default: 1): " dashboard_access_scope
 dashboard_access_scope=$(echo "$dashboard_access_scope" | tr -d ' ')
 
 if [ "$dashboard_access_scope" = "2" ]; then
-    update_env_blockchain_only "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
-    update_env_blockchain_only "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
-    update_env_blockchain_only "ADMIN_DASHBOARD_LOCAL_ONLY" "false"
+    update_env_var "$ROOT_ENV_FILE" "SECURITY_ALLOW_PRIVATE_NETWORKS" "true"
+    update_env_var "$ROOT_ENV_FILE" "ADMIN_DASHBOARD_ALLOW_PRIVATE" "true"
+    update_env_var "$ROOT_ENV_FILE" "ADMIN_DASHBOARD_LOCAL_ONLY" "false"
     read -p "Allowed private CIDRs (comma-separated, leave empty for any private range): " admin_allowed_cidrs
     admin_allowed_cidrs=$(echo "$admin_allowed_cidrs" | sed 's/[[:space:]]//g')
-    update_env_blockchain_only "ADMIN_ALLOWED_CIDRS" "$admin_allowed_cidrs"
+    update_env_var "$ROOT_ENV_FILE" "ADMIN_ALLOWED_CIDRS" "$admin_allowed_cidrs"
     echo "Configured wallet dashboard access for private networks protected by ADMIN_ACCESS_TOKEN."
 else
-    update_env_blockchain_only "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
-    update_env_blockchain_only "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
-    update_env_blockchain_only "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
-    update_env_blockchain_only "ADMIN_ALLOWED_CIDRS" ""
+    update_env_var "$ROOT_ENV_FILE" "SECURITY_ALLOW_PRIVATE_NETWORKS" "false"
+    update_env_var "$ROOT_ENV_FILE" "ADMIN_DASHBOARD_ALLOW_PRIVATE" "false"
+    update_env_var "$ROOT_ENV_FILE" "ADMIN_DASHBOARD_LOCAL_ONLY" "true"
+    update_env_var "$ROOT_ENV_FILE" "ADMIN_ALLOWED_CIDRS" ""
     echo "Configured wallet dashboard access for localhost only."
 fi
 echo
@@ -313,6 +325,20 @@ fi
 update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN" "$lab_manager_token"
 update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN_HEADER" "X-Lab-Manager-Token"
 update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN_COOKIE" "lab_manager_token"
+
+echo
+echo "Lab Manager Backend Allowlist"
+echo "============================="
+echo "Optional CIDR allowlist enforced by blockchain-services for /lab-admin calls authenticated with LAB_MANAGER_TOKEN."
+echo "Leave empty to keep the current behavior and allow any request that already passes the existing admin network policy."
+read -p "LAB_MANAGER_ALLOWED_CIDRS [empty]: " lab_manager_allowed_cidrs
+lab_manager_allowed_cidrs=$(echo "$lab_manager_allowed_cidrs" | sed 's/[[:space:]]//g')
+update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_ALLOWED_CIDRS" "$lab_manager_allowed_cidrs"
+if [ -z "$lab_manager_allowed_cidrs" ]; then
+    echo "   * LAB_MANAGER_ALLOWED_CIDRS left empty (no extra /lab-admin CIDR allowlist)."
+else
+    echo "   * LAB_MANAGER_ALLOWED_CIDRS set to: $lab_manager_allowed_cidrs"
+fi
 echo
 
 # Domain Configuration
@@ -421,8 +447,40 @@ issuer_value=$(echo "$issuer_value" | tr -d ' ')
 update_env_var "$ROOT_ENV_FILE" "ISSUER" "$issuer_value"
 if [ -z "$issuer_value" ]; then
     echo "   * ISSUER left empty (Full mode)."
+    update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_URL" ""
+    update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_TOKEN" ""
+    update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_TOKEN_HEADER" "X-Lab-Manager-Token"
+    update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_ALLOW_INSECURE" "false"
+    echo "   * LAB_ADMIN_BACKEND_URL left empty (Full mode uses embedded blockchain-services)."
 else
     echo "   * ISSUER set to: $issuer_value (Lite mode)."
+    echo
+    echo "Lite /lab-admin Remote Backend"
+    echo "=============================="
+    echo "Optional. Configure this only if this Lite gateway must publish/update labs on-chain from /lab-manager."
+    echo "Leave empty to keep /lab-admin blocked in Lite mode."
+    read -p "LAB_ADMIN_BACKEND_URL [empty -> blocked]: " lab_admin_backend_url
+    lab_admin_backend_url=$(echo "$lab_admin_backend_url" | tr -d ' ')
+    update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_URL" "$lab_admin_backend_url"
+    update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_TOKEN_HEADER" "X-Lab-Manager-Token"
+    update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_ALLOW_INSECURE" "false"
+    if [ -z "$lab_admin_backend_url" ]; then
+        update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_TOKEN" ""
+        echo "   * LAB_ADMIN_BACKEND_URL left empty (/lab-admin remains blocked in Lite mode)."
+        echo "   * LAB_ADMIN_BACKEND_TOKEN left empty."
+    else
+        read -p "LAB_ADMIN_BACKEND_TOKEN [empty -> configure later]: " lab_admin_backend_token
+        lab_admin_backend_token=$(echo "$lab_admin_backend_token" | tr -d ' ')
+        update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_TOKEN" "$lab_admin_backend_token"
+        echo "   * LAB_ADMIN_BACKEND_URL set to: $lab_admin_backend_url"
+        if [ -z "$lab_admin_backend_token" ]; then
+            echo "   * LAB_ADMIN_BACKEND_TOKEN left empty (/lab-admin remote calls will fail until it is configured)."
+        else
+            echo "   * LAB_ADMIN_BACKEND_TOKEN configured."
+        fi
+    fi
+    echo "   * LAB_ADMIN_BACKEND_TOKEN_HEADER set to: X-Lab-Manager-Token"
+    echo "   * LAB_ADMIN_BACKEND_ALLOW_INSECURE set to: false"
 fi
 echo
 

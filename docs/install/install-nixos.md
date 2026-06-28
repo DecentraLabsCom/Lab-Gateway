@@ -44,12 +44,21 @@ the full description of each variable):
 ```env
 # .env
 SERVER_NAME=lab.your-institution.edu
+# Leave ISSUER empty for Full mode. Set it to https://<full-gateway>/auth for Lite mode.
+ISSUER=
 MYSQL_ROOT_PASSWORD=strong_password
 MYSQL_PASSWORD=strong_password
 GUAC_ADMIN_USER=admin
 GUAC_ADMIN_PASS=strong_password
 ADMIN_ACCESS_TOKEN=random_token
 LAB_MANAGER_TOKEN=random_token
+# Optional: restrict /lab-admin backend calls authenticated with LAB_MANAGER_TOKEN.
+# For Full + multiple Lite gateways, list the Lite gateway source IPs/CIDRs here.
+LAB_MANAGER_ALLOWED_CIDRS=
+# Lite only: set these when this Lite gateway must delegate lab publishing/update
+# operations to a remote Full/standalone blockchain-services backend.
+LAB_ADMIN_BACKEND_URL=
+LAB_ADMIN_BACKEND_TOKEN=
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 ```
 
@@ -62,6 +71,10 @@ FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ALLOWED_ORIGINS=https://lab.your-institution.edu,https://marketplace-decentralabs.vercel.app
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem
 ```
+
+Keep Gateway/OpenResty orchestration values only in `.env`. The root `docker-compose.yml` injects those values into the embedded backend from `.env`.
+
+For a standalone `blockchain-services` deployment not managed by this Gateway compose stack, configure that standalone service's own `.env` with its `LAB_MANAGER_TOKEN` and, if desired, `LAB_MANAGER_ALLOWED_CIDRS`.
 
 ## Step 4 — Apply the NixOS configuration
 
