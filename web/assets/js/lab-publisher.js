@@ -568,7 +568,7 @@
                 <div class="multi-select-group-title">${escapeHtml(groupName)}</div>
                 ${categories.map(category => `
                     <label class="multi-select-option">
-                        <input type="checkbox" value="${escapeAttr(category.code)}">
+                        <input type="checkbox" value="${escapeAttr(category.code)}" autocomplete="off">
                         <span>${escapeHtml(category.label)}</span>
                         <small>${escapeHtml(category.code)}</small>
                     </label>
@@ -576,6 +576,7 @@
             </div>
         `).join('');
         menu.querySelectorAll('input[type="checkbox"]').forEach(input => {
+            input.checked = false;
             input.addEventListener('change', () => toggleCategory(input.value));
         });
     }
@@ -588,6 +589,7 @@
         select.classList.toggle('open', open);
         select.setAttribute('aria-expanded', String(open));
         if (open) {
+            renderCategoryChips();
             const rect = select.getBoundingClientRect();
             menu.style.left = `${rect.left}px`;
             menu.style.top = `${rect.bottom + 4}px`;
