@@ -127,11 +127,26 @@ setup.bat
 
 **Linux/macOS:**
 ```bash
+git clone https://github.com/DecentraLabsCom/Lab-Gateway.git Lab-Gateway
+cd Lab-Gateway
+
+# Optional, for production TLS before the first setup run:
+mkdir -p certs
+cp /path/to/fullchain.pem certs/fullchain.pem
+cp /path/to/privkey.pem certs/privkey.pem
+
 chmod +x setup.sh
 ./setup.sh
 ```
 
 That's it! The script will guide you through the setup and start all services automatically.
+
+If you add or replace `certs/fullchain.pem` and `certs/privkey.pem` after the stack is already
+running, restart OpenResty so it loads the new files:
+
+```bash
+docker compose restart openresty
+```
 
 ### NixOS Deployment
 
@@ -241,6 +256,12 @@ If you prefer manual configuration:
    ```
 
 4. **Add SSL certificates** to `certs/` folder:
+   ```bash
+   mkdir -p certs
+   cp /path/to/fullchain.pem certs/fullchain.pem
+   cp /path/to/privkey.pem certs/privkey.pem
+   ```
+
    ```
    certs/
    ├── fullchain.pem      # SSL certificate chain

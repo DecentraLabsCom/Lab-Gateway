@@ -22,13 +22,37 @@ docker compose version
 ## Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/DecentraLabsCom/lite-lab-gateway.git /srv/lab-gateway
-cd /srv/lab-gateway
+git clone https://github.com/DecentraLabsCom/Lab-Gateway.git Lab-Gateway
+cd Lab-Gateway
 ```
 
 On Windows, clone to a path without spaces, for example `C:\lab-gateway`.
 
-## Step 2 — Run the setup script
+## Step 2 - Optional: add production TLS certificates
+
+If you already have a certificate for the gateway domain, copy it into `certs/`
+before running setup:
+
+```bash
+mkdir -p certs
+cp /path/to/fullchain.pem certs/fullchain.pem
+cp /path/to/privkey.pem certs/privkey.pem
+chmod 700 certs
+chmod 600 certs/privkey.pem
+chmod 644 certs/fullchain.pem
+```
+
+The setup script detects `certs/fullchain.pem` and `certs/privkey.pem`.
+If you skip this step, OpenResty generates self-signed certificates for
+development/local testing.
+
+If you add or replace these files after the stack is running, restart OpenResty:
+
+```bash
+docker compose restart openresty
+```
+
+## Step 3 - Run the setup script
 
 **Linux / macOS:**
 
@@ -43,7 +67,7 @@ chmod +x setup.sh
 setup.bat
 ```
 
-## Step 3 — Answer the interactive prompts
+## Step 4 - Answer the interactive prompts
 
 The script will guide you through the following steps automatically:
 
@@ -56,7 +80,7 @@ The script will guide you through the following steps automatically:
 7. **Asks about Cloudflare Tunnel** — Optional; use this if the server does not have a public IP.
 8. **Starts the stack** — Runs `docker compose up -d` with all containers.
 
-## Step 4 — Verify the stack is running
+## Step 5 - Verify the stack is running
 
 ```bash
 docker compose ps
@@ -74,14 +98,14 @@ Expected response:
 {"status":"ok"}
 ```
 
-## Step 5 — Set up the institutional wallet
+## Step 6 - Set up the institutional wallet
 
 1. Open `https://your-domain/wallet-dashboard` in a browser.
 2. Enter your `ADMIN_ACCESS_TOKEN` (set in `.env`) when prompted.
 3. Click **Create wallet** (new institution) or **Import wallet** (existing key).
 4. The encrypted wallet is stored in `blockchain-data/wallets.json` and loaded automatically on every restart.
 
-## Step 6 — Add your blockchain configuration
+## Step 7 - Add your blockchain configuration
 
 Edit `blockchain-services/.env` and set:
 
@@ -99,7 +123,7 @@ Restart the blockchain-services container to apply:
 docker compose restart blockchain-services
 ```
 
-## Step 7 — Configure a lab connection in Guacamole
+## Step 8 - Configure a lab connection in Guacamole
 
 See [Guacamole Connections](../../configuring-lab-connections/guacamole-connections.md) for the
 full step-by-step guide on adding RDP/VNC connections to your physical lab computers.

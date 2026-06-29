@@ -23,13 +23,37 @@ docker compose version
 ## Paso 1 — Clonar el repositorio
 
 ```bash
-git clone https://github.com/DecentraLabsCom/lite-lab-gateway.git /srv/lab-gateway
-cd /srv/lab-gateway
+git clone https://github.com/DecentraLabsCom/Lab-Gateway.git Lab-Gateway
+cd Lab-Gateway
 ```
 
 En Windows, clona en una ruta sin espacios, por ejemplo `C:\lab-gateway`.
 
-## Paso 2 — Ejecutar el script de configuración
+## Paso 2 - Opcional: anadir certificados TLS de produccion
+
+Si ya tienes un certificado para el dominio del gateway, copialo dentro de
+`certs/` antes de ejecutar el setup:
+
+```bash
+mkdir -p certs
+cp /ruta/fullchain.pem certs/fullchain.pem
+cp /ruta/privkey.pem certs/privkey.pem
+chmod 700 certs
+chmod 600 certs/privkey.pem
+chmod 644 certs/fullchain.pem
+```
+
+El script detecta `certs/fullchain.pem` y `certs/privkey.pem`. Si omites este
+paso, OpenResty genera certificados autofirmados para desarrollo/pruebas locales.
+
+Si anades o sustituyes estos archivos cuando el stack ya esta en ejecucion,
+reinicia OpenResty:
+
+```bash
+docker compose restart openresty
+```
+
+## Paso 3 - Ejecutar el script de configuracion
 
 **Linux / macOS:**
 
@@ -44,7 +68,7 @@ chmod +x setup.sh
 setup.bat
 ```
 
-## Paso 3 — Responder las preguntas interactivas
+## Paso 4 - Responder las preguntas interactivas
 
 El script te guiará automáticamente por los siguientes pasos:
 
@@ -57,7 +81,7 @@ El script te guiará automáticamente por los siguientes pasos:
 7. **Pregunta sobre el Túnel Cloudflare** — opcional; úsalo si el servidor no tiene IP pública.
 8. **Arranca el stack** — ejecuta `docker compose up -d` con todos los contenedores.
 
-## Paso 4 — Verificar que el stack está en ejecución
+## Paso 5 - Verificar que el stack esta en ejecucion
 
 ```bash
 docker compose ps
@@ -75,14 +99,14 @@ Respuesta esperada:
 {"status":"ok"}
 ```
 
-## Paso 5 — Configurar la cartera institucional
+## Paso 6 - Configurar la cartera institucional
 
 1. Abre `https://tu-dominio/wallet-dashboard` en un navegador.
 2. Introduce tu `ADMIN_ACCESS_TOKEN` (definido en `.env`) cuando se te solicite.
 3. Haz clic en **Create wallet** (institución nueva) o **Import wallet** (clave existente).
 4. La cartera cifrada se guarda en `blockchain-data/wallets.json` y se carga automáticamente en cada reinicio.
 
-## Paso 6 — Añadir la configuración de blockchain
+## Paso 7 - Anadir la configuracion de blockchain
 
 Edita `blockchain-services/.env` y establece:
 
@@ -100,7 +124,7 @@ Reinicia el contenedor de blockchain-services para aplicar los cambios:
 docker compose restart blockchain-services
 ```
 
-## Paso 7 — Configurar una conexión de laboratorio en Guacamole
+## Paso 8 - Configurar una conexion de laboratorio en Guacamole
 
 Consulta [Conexiones Guacamole](../../configuring-lab-connections/guacamole-connections.md) para
 la guía paso a paso sobre cómo añadir conexiones RDP/VNC a los ordenadores físicos del laboratorio.
