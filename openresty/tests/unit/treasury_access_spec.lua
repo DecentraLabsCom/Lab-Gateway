@@ -224,6 +224,27 @@ end)
         runner.assert.equals(302, ngx._redirect_code)
     end)
 
+    runner.it("lets dashboard bootstrap query replace a stale access cookie", function()
+        local ngx = run_treasury_access({
+            env = {
+                ADMIN_ACCESS_TOKEN = "new-secret-token",
+                ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+            },
+            var = {
+                remote_addr = "8.8.8.8",
+                uri = "/wallet-dashboard",
+                args = "token=new-secret-token",
+                cookie_access_token = "old-secret-token"
+            },
+            uri_args = { token = "new-secret-token" }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("access_token=new-secret-token; Path=/; HttpOnly; Secure; SameSite=Lax", ngx.header["Set-Cookie"])
+        runner.assert.equals("/wallet-dashboard/", ngx._redirect_target)
+        runner.assert.equals(302, ngx._redirect_code)
+    end)
+
     runner.it("preserves non-token query args when redirecting institution-config bootstrap", function()
         local ngx = run_treasury_access({
             env = {

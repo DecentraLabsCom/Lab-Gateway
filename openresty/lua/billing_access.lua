@@ -288,22 +288,22 @@ local function token_hint()
     return hint .. "."
 end
 
-local provided = headers[header_name]
-
-if not provided or provided == "" then
-    local cookie_var = "cookie_" .. cookie_name
-    provided = ngx.var[cookie_var]
-end
-
 local arg_token = get_arg_token()
-if not provided or provided == "" then
-    if is_tokenized_request and arg_token and arg_token ~= "" then
-        if ngx.unescape_uri then
-            arg_token = ngx.unescape_uri(arg_token)
-        end
-        provided = arg_token
-        ngx.ctx = ngx.ctx or {}
-        ngx.ctx.billing_query_token = true
+local provided = nil
+
+if is_tokenized_request and arg_token and arg_token ~= "" then
+    if ngx.unescape_uri then
+        arg_token = ngx.unescape_uri(arg_token)
+    end
+    provided = arg_token
+    ngx.ctx = ngx.ctx or {}
+    ngx.ctx.billing_query_token = true
+else
+    provided = headers[header_name]
+
+    if not provided or provided == "" then
+        local cookie_var = "cookie_" .. cookie_name
+        provided = ngx.var[cookie_var]
     end
 end
 
