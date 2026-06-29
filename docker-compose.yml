@@ -305,7 +305,7 @@ services:
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
       - ./mysql/002-labstation-ops.sql:/docker-entrypoint-initdb.d/002-labstation-ops.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$${MYSQL_ROOT_PASSWORD}\" && mysql -h localhost -u\"$${MYSQL_USER}\" -p\"$${MYSQL_PASSWORD}\" \"$${BLOCKCHAIN_MYSQL_DATABASE}\" -e \"SELECT 1\""]
       timeout: 20s
       retries: 10
       interval: 30s
