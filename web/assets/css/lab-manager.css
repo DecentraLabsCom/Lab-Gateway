@@ -16,6 +16,11 @@
 }
 
 * { box-sizing: border-box; }
+
+[hidden] {
+    display: none !important;
+}
+
 body {
     margin: 0;
     background: radial-gradient(circle at 20% 20%, rgba(77,225,255,0.05), transparent 25%),
