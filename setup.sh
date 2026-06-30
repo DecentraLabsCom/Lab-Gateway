@@ -599,12 +599,14 @@ echo "================"
 
 mkdir -p certs
 mkdir -p blockchain-data
+mkdir -p lab-content
 mkdir -p fmu-data
 mkdir -p fmu-proxy-runtime/binaries/linux64
 mkdir -p fmu-proxy-runtime/binaries/win64
 mkdir -p fmu-proxy-runtime/binaries/darwin64
 chmod 700 certs 2>/dev/null || true
 chmod 700 blockchain-data 2>/dev/null || true
+chmod 755 lab-content 2>/dev/null || true
 chmod 755 fmu-data 2>/dev/null || true
 chmod 755 fmu-proxy-runtime 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries 2>/dev/null || true
@@ -628,10 +630,10 @@ if [ -n "$host_uid" ] && [ -n "$host_gid" ]; then
 
     # Align permissions so containers can write to bind mounts without manual chmod.
     if command -v chown >/dev/null 2>&1; then
-        if chown -R "${host_uid}:${host_gid}" certs blockchain-data 2>/dev/null; then
-            echo "Adjusted ownership of certs/ and blockchain-data/ to ${host_uid}:${host_gid}"
+        if chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content 2>/dev/null; then
+            echo "Adjusted ownership of certs/, blockchain-data/, and lab-content/ to ${host_uid}:${host_gid}"
         else
-            echo "Warning: Unable to change ownership of certs/ or blockchain-data/. Run chown manually if needed." >&2
+            echo "Warning: Unable to change ownership of certs/, blockchain-data/, or lab-content/. Run chown manually if needed." >&2
         fi
     fi
 else

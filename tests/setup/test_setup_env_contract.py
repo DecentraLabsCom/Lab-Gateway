@@ -128,6 +128,22 @@ class SetupEnvContractTest(unittest.TestCase):
             with self.subTest(script="setup.bat", snippet=snippet):
                 self.assertIn(snippet, self.setup_bat)
 
+    def test_setup_prepares_lab_content_bind_mount(self):
+        expected_shell = [
+            "mkdir -p lab-content",
+            "chmod 755 lab-content",
+            'chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content',
+        ]
+        expected_bat = [
+            "if not exist lab-content mkdir lab-content",
+        ]
+        for snippet in expected_shell:
+            with self.subTest(script="setup.sh", snippet=snippet):
+                self.assertIn(snippet, self.setup_sh)
+        for snippet in expected_bat:
+            with self.subTest(script="setup.bat", snippet=snippet):
+                self.assertIn(snippet, self.setup_bat)
+
 
 if __name__ == "__main__":
     unittest.main()

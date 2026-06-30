@@ -579,6 +579,7 @@ echo.
 
 if not exist certs mkdir certs
 if not exist blockchain-data mkdir blockchain-data
+if not exist lab-content mkdir lab-content
 if not exist fmu-data mkdir fmu-data
 if not exist fmu-proxy-runtime mkdir fmu-proxy-runtime
 if not exist fmu-proxy-runtime\binaries mkdir fmu-proxy-runtime\binaries
