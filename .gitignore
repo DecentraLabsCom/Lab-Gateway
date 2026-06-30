@@ -88,6 +88,8 @@ Thumbs.db
 # Development notes and planning (keep local only)
 dev/
 ops-worker/hosts.json
+ops-data/winrm-credentials.json
+ops-data/ops-secrets.key
 
 # Smart contracts
 contracts/

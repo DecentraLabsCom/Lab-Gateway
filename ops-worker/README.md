@@ -33,7 +33,7 @@ python worker.py
 
 ## hosts.json example
 
-Copy `hosts.sample.json` and replace credentials.
+New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and password are saved separately from the host catalog.
 
 ```json
 {
@@ -42,8 +42,7 @@ Copy `hosts.sample.json` and replace credentials.
       "name": "lab-ws-01",
       "address": "lab-ws-01",
       "mac": "00:11:22:33:44:55",
-      "winrm_user": "env:WINRM_USER_LAB_WS_01",
-      "winrm_pass": "env:WINRM_PASS_LAB_WS_01",
+      "credential_ref": "lab-ws-01",
       "winrm_transport": "ntlm",
       "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
       "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl",
@@ -69,9 +68,12 @@ Copy `hosts.sample.json` and replace credentials.
   - Body: `{ connectionId }`
   - Probes a Guacamole connection candidate for DNS, WinRM, and optional Lab Station HTTP health.
 - `POST /api/hosts/provision`
-  - Body: `{ connectionId, name?, address?, mac?, labs?, winrmUserEnv, winrmPassEnv, heartbeatPath? }`
+  - Body: `{ connectionId, name?, address?, mac?, labs?, credentialRef?, heartbeatPath? }`
   - Re-runs discovery and only provisions candidates with Lab Station HTTP health or reachable WinRM.
-  - Writes a dynamic host entry using `env:WINRM_*` references only; raw WinRM credentials are rejected.
+  - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). Raw WinRM credentials are saved separately.
+- `POST /api/hosts/winrm-credentials`
+  - Body: `{ credentialRef, user, password }`
+  - Encrypts and stores WinRM credentials for the configured host.
 - `POST /api/reservations/start`
   - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
 - `POST /api/reservations/end`
@@ -111,6 +113,13 @@ Discovery knobs:
 - `OPS_DISCOVERY_LABSTATION_PORTS` (default `8765,8088`)
 - `OPS_DISCOVERY_LABSTATION_PATHS` (default `/labstation/health,/health`)
 
+Credential storage knobs:
+
+- `OPS_CREDENTIALS_PATH` (compose default: `/app/data/winrm-credentials.json`)
+- `OPS_SECRETS_KEY` is the production encryption key for WinRM credentials saved from Lab Manager. Generate a Fernet key with:
+  `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+- `OPS_SECRETS_KEY_PATH` (compose default: `/app/data/ops-secrets.key`) is the fallback local key file used when `OPS_SECRETS_KEY` is not set. This fallback is useful for local pilots, but the file must be backed up with `ops-data`; losing it makes stored credentials undecryptable.
+
 ## Deployment notes
 
 - OpenResty proxies `/ops/` to this service.
@@ -120,8 +129,10 @@ Discovery knobs:
   - Lab Station operations (`/ops` API) require access from gateway server or private networks.
   - When accessing Lab Manager remotely, ops features will show a network restriction warning.
 - Container runtime uses `waitress` instead of the Flask development server.
-- Prefer `env:VAR_NAME` in `hosts.json` for WinRM credentials.
+- Prefer the Lab Manager `WinRM Credentials` modal for new hosts. It stores encrypted credentials in `OPS_CREDENTIALS_PATH`, keyed by host address.
+- Legacy `env:VAR_NAME` references in `hosts.json` are still supported for static catalogs.
 - `OPS_CONFIG` is the base, usually read-only host catalog.
 - `OPS_DYNAMIC_CONFIG` is the writable dynamic catalog used by Lab Manager provisioning; Docker Compose maps it to `./ops-data/hosts.json`.
-- Store actual `WINRM_USER_*` and `WINRM_PASS_*` values in the service environment, not in either host catalog.
-- Keep `hosts.json` and `ops-data/hosts.json` secrets out of git.
+- In production, set `OPS_SECRETS_KEY` to a stable secret and include it in the deployment backup/secret rotation process.
+- If `OPS_SECRETS_KEY` is not set, ops-worker generates a local key at `OPS_SECRETS_KEY_PATH`; this is the alternative for local/single-node deployments.
+- Keep `hosts.json`, `ops-data/hosts.json`, `ops-data/winrm-credentials.json`, and `ops-data/ops-secrets.key` out of git.

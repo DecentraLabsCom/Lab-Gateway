@@ -63,6 +63,8 @@ function _M.run(ngx_ctx, chunk, eof, deps)
             dict:set("guac_jwt_last_seen:" .. decoded.authToken, ngx.time(), 7200)
             ngx.log(ngx.INFO, "Body filter - JWT-backed session token marked for " .. decoded.username)
         end
+    else
+        dict:set("guac_manual_last_seen:" .. decoded.authToken, ngx.time(), 7200)
     end
 
     ngx.log(ngx.INFO, "Body filter - Session token stored for " .. decoded.username)

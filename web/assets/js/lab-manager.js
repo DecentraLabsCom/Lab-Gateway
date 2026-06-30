@@ -77,13 +77,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeProvisionHostModalBtn = $('#closeProvisionHostModal');
     const cancelProvisionHostBtn = $('#cancelProvisionHost');
     const saveProvisionHostBtn = $('#saveProvisionHost');
+    const winrmCredentialsModal = $('#winrmCredentialsModal');
+    const closeWinrmCredentialsModalBtn = $('#closeWinrmCredentialsModal');
+    const cancelWinrmCredentialsBtn = $('#cancelWinrmCredentials');
+    const saveWinrmCredentialsBtn = $('#saveWinrmCredentials');
+    const winrmCredentialRefEl = $('#winrmCredentialRef');
+    const winrmCredentialAddressEl = $('#winrmCredentialAddress');
+    const winrmCredentialUserEl = $('#winrmCredentialUser');
+    const winrmCredentialPasswordEl = $('#winrmCredentialPassword');
     const provisionConnectionIdEl = $('#provisionConnectionId');
     const provisionHostNameEl = $('#provisionHostName');
+    const provisionHostNameCandidatesEl = $('#provisionHostNameCandidates');
     const provisionHostAddressEl = $('#provisionHostAddress');
     const provisionHostMacEl = $('#provisionHostMac');
     const provisionHostLabsEl = $('#provisionHostLabs');
-    const provisionWinrmUserEnvEl = $('#provisionWinrmUserEnv');
-    const provisionWinrmPassEnvEl = $('#provisionWinrmPassEnv');
     const provisionHeartbeatPathEl = $('#provisionHeartbeatPath');
 
     populateTimezones();
@@ -106,6 +113,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeProvisionHostModalBtn) closeProvisionHostModalBtn.addEventListener('click', closeProvisionHostModal);
     if (cancelProvisionHostBtn) cancelProvisionHostBtn.addEventListener('click', closeProvisionHostModal);
     if (saveProvisionHostBtn) saveProvisionHostBtn.addEventListener('click', saveProvisionedHost);
+    if (closeWinrmCredentialsModalBtn) closeWinrmCredentialsModalBtn.addEventListener('click', closeWinrmCredentialsModal);
+    if (cancelWinrmCredentialsBtn) cancelWinrmCredentialsBtn.addEventListener('click', closeWinrmCredentialsModal);
+    if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.addEventListener('click', saveWinrmCredentials);
 
     loadConfig();
     loadAccessPolicy();
@@ -769,6 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const summary = heartbeat.summary || {};
         const status = heartbeat.status || {};
         const operations = heartbeat.operations || {};
+        const winrmConfigured = Boolean(meta.winrmConfigured);
         const ready = summary.ready;
         const localSession = status.localSessionActive;
         const localMode = status.localModeEnabled;
@@ -794,6 +805,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="host-title">${safeHost}</div>
                 <div class="host-meta">Updated: ${safeUpdated}</div>
                 <div class="host-meta">Guacamole: <span class="pill ${guacamoleClass}">${safeGuacamole}</span></div>
+                <div class="host-meta">WinRM credentials: <span class="pill ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></div>
                 <div class="host-meta">Last forced logoff: ${safeLastForcedTs}</div>
                 <div class="host-meta">Last power: ${safeLastPower}</div>
             </div>
@@ -809,6 +821,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="mini-btn" data-action="release">Release</button>
                 <button class="mini-btn danger" data-action="shutdown">Shutdown</button>
                 <button class="mini-btn secondary" data-action="toggle-local-mode">${localMode ? 'Disable' : 'Enable'} Local</button>
+                <button class="mini-btn" data-action="set-winrm-credentials">WinRM Credentials</button>
                 <button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS</button>
             </div>
         `;
@@ -905,12 +918,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const winrmOpen = Object.entries(body.checks?.winrm || {})
                 .filter(([, open]) => open)
                 .map(([port]) => port);
+            const suggestedMac = body.opsHostDraft?.mac;
             const detail = body.status === 'labstation-detected'
                 ? `HTTP health matched at ${body.checks?.labStationHttp?.url || 'configured discovery endpoint'}`
                 : winrmOpen.length
                     ? `Open WinRM port${winrmOpen.length === 1 ? '' : 's'}: ${winrmOpen.join(', ')}`
                     : 'No Lab Station health endpoint or WinRM port detected.';
-            guacamoleCandidateState[connectionId] = { status: body.status, detail };
+            guacamoleCandidateState[connectionId] = {
+                status: body.status,
+                detail: suggestedMac ? `${detail} Suggested MAC: ${suggestedMac}` : detail,
+                opsHostDraft: body.opsHostDraft || {}
+            };
             showToast(`Discovery finished for ${body.connection?.hostname || connectionId}`, 'success');
         } catch (err) {
             console.error(err);
@@ -921,13 +939,131 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function envNameFromHost(host, prefix) {
-        const normalized = (host || 'LAB_HOST').toString().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-        return `${prefix}_${normalized || 'LAB_HOST'}`;
-    }
-
     function findGuacamoleCandidate(connectionId) {
         return guacamoleCandidates.find(candidate => String(candidate.id ?? '') === String(connectionId));
+    }
+
+    function normalizeMatchValue(value) {
+        return (value || '').toString().trim().toLowerCase();
+    }
+
+    function normalizeLooseValue(value) {
+        return normalizeMatchValue(value).replace(/[^a-z0-9]+/g, '');
+    }
+
+    function urlHost(value) {
+        const raw = (value || '').toString().trim();
+        if (!raw) return '';
+        try {
+            return new URL(raw, window.location.origin).hostname.toLowerCase();
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function labMatchesConnection(lab, connection) {
+        const connectionTokens = [
+            connection.id,
+            connection.name,
+            connection.hostname
+        ].map(normalizeMatchValue).filter(Boolean);
+        const looseConnectionTokens = connectionTokens.map(normalizeLooseValue).filter(Boolean);
+        const labTokens = [
+            lab.accessKey,
+            lab.accessURI,
+            urlHost(lab.accessURI)
+        ].map(normalizeMatchValue).filter(Boolean);
+        const looseLabTokens = labTokens.map(normalizeLooseValue).filter(Boolean);
+
+        if (labTokens.some(token => connectionTokens.includes(token))) return true;
+        if (looseLabTokens.some(token => looseConnectionTokens.includes(token))) return true;
+        if (connection.hostname && urlHost(lab.accessURI) === normalizeMatchValue(connection.hostname)) return true;
+        return false;
+    }
+
+    async function loadLabCandidates() {
+        const res = await fetch('/lab-admin/labs');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json().catch(() => ({}));
+        return Array.isArray(body.labs) ? body.labs : [];
+    }
+
+    function renderProvisionLabOptions(labs, selectedIds = []) {
+        if (!provisionHostLabsEl) return;
+        provisionHostLabsEl.innerHTML = '';
+        const selectedSet = new Set(selectedIds.map(String));
+        if (!labs.length) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No matching labs found';
+            option.disabled = true;
+            provisionHostLabsEl.appendChild(option);
+            provisionHostLabsEl.disabled = true;
+            return;
+        }
+        provisionHostLabsEl.disabled = false;
+        labs.forEach(lab => {
+            const labId = String(lab.labId || '').trim();
+            if (!labId) return;
+            const option = document.createElement('option');
+            option.value = labId;
+            option.textContent = `Lab ${labId}${lab.accessKey ? ` - ${lab.accessKey}` : ''}`;
+            option.selected = selectedSet.has(labId) || (labs.length === 1 && selectedSet.size === 0);
+            provisionHostLabsEl.appendChild(option);
+        });
+    }
+
+    function selectedProvisionLabIds() {
+        if (!provisionHostLabsEl) return [];
+        return Array.from(provisionHostLabsEl.selectedOptions || [])
+            .map(option => option.value.trim())
+            .filter(Boolean);
+    }
+
+    function provisionLabCandidateIds() {
+        if (!provisionHostLabsEl) return [];
+        return Array.from(provisionHostLabsEl.options || [])
+            .map(option => option.value.trim())
+            .filter(Boolean);
+    }
+
+    function renderProvisionNameCandidates(candidates) {
+        if (!provisionHostNameCandidatesEl) return;
+        provisionHostNameCandidatesEl.innerHTML = '';
+        const seen = new Set();
+        (Array.isArray(candidates) ? candidates : []).forEach(candidate => {
+            const value = (candidate || '').toString().trim();
+            if (!value || seen.has(value)) return;
+            seen.add(value);
+            const option = document.createElement('option');
+            option.value = value;
+            provisionHostNameCandidatesEl.appendChild(option);
+        });
+    }
+
+    async function populateProvisionLabCandidates(connectionId, candidate, draft) {
+        renderProvisionLabOptions([], []);
+        provisionHostLabsEl.disabled = true;
+        const loading = document.createElement('option');
+        loading.value = '';
+        loading.textContent = 'Loading lab candidates...';
+        loading.disabled = true;
+        provisionHostLabsEl.innerHTML = '';
+        provisionHostLabsEl.appendChild(loading);
+        try {
+            const labs = await loadLabCandidates();
+            const candidateLabs = labs.filter(lab => labMatchesConnection(lab, candidate));
+            renderProvisionLabOptions(candidateLabs, draft.labs || []);
+        } catch (err) {
+            console.warn('Unable to load lab candidates', err);
+            provisionHostLabsEl.innerHTML = '';
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'Unable to load lab candidates';
+            option.disabled = true;
+            provisionHostLabsEl.appendChild(option);
+            provisionHostLabsEl.disabled = true;
+        }
     }
 
     function openProvisionHostModal(connectionId) {
@@ -940,28 +1076,87 @@ document.addEventListener('DOMContentLoaded', () => {
             !provisionHostAddressEl ||
             !provisionHostMacEl ||
             !provisionHostLabsEl ||
-            !provisionWinrmUserEnvEl ||
-            !provisionWinrmPassEnvEl ||
             !provisionHeartbeatPathEl
         ) {
             showToast('Host provisioning modal is unavailable', 'error');
             return;
         }
         const host = candidate.hostname || candidate.name || '';
+        const draft = guacamoleCandidateState[String(connectionId)]?.opsHostDraft || {};
         provisionConnectionIdEl.value = String(connectionId);
-        provisionHostNameEl.value = host;
-        provisionHostAddressEl.value = candidate.hostname || '';
-        provisionHostMacEl.value = '';
-        provisionHostLabsEl.value = '';
-        provisionWinrmUserEnvEl.value = envNameFromHost(host, 'WINRM_USER');
-        provisionWinrmPassEnvEl.value = envNameFromHost(host, 'WINRM_PASS');
-        provisionHeartbeatPathEl.value = 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
+        provisionHostNameEl.value = draft.name || host;
+        renderProvisionNameCandidates(draft.nameCandidates || [candidate.name, candidate.hostname].filter(Boolean));
+        provisionHostAddressEl.value = draft.address || candidate.hostname || '';
+        provisionHostMacEl.value = draft.mac || '';
+        populateProvisionLabCandidates(connectionId, candidate, draft);
+        provisionHeartbeatPathEl.value = draft.heartbeat_path || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
         provisionHostModal.classList.add('show');
     }
 
     function closeProvisionHostModal() {
         if (provisionHostModal) {
             provisionHostModal.classList.remove('show');
+        }
+    }
+
+    function openWinrmCredentialsModal(host) {
+        const meta = hostMetadata[host] || {};
+        const credentialRef = meta.credentialRef || meta.address || host;
+        if (
+            !winrmCredentialsModal ||
+            !winrmCredentialRefEl ||
+            !winrmCredentialAddressEl ||
+            !winrmCredentialUserEl ||
+            !winrmCredentialPasswordEl
+        ) {
+            showToast('WinRM credentials modal is unavailable', 'error');
+            return;
+        }
+        winrmCredentialRefEl.value = credentialRef;
+        winrmCredentialAddressEl.value = meta.address || credentialRef;
+        winrmCredentialUserEl.value = '.\\LabGatewaySvc';
+        winrmCredentialPasswordEl.value = '';
+        winrmCredentialsModal.classList.add('show');
+    }
+
+    function closeWinrmCredentialsModal() {
+        if (winrmCredentialsModal) {
+            winrmCredentialsModal.classList.remove('show');
+        }
+    }
+
+    async function saveWinrmCredentials() {
+        if (!winrmCredentialRefEl || !winrmCredentialUserEl || !winrmCredentialPasswordEl) {
+            showToast('WinRM credentials modal is unavailable', 'error');
+            return;
+        }
+        const payload = {
+            credentialRef: winrmCredentialRefEl.value.trim(),
+            user: winrmCredentialUserEl.value.trim(),
+            password: winrmCredentialPasswordEl.value
+        };
+        if (!payload.credentialRef || !payload.user || !payload.password) {
+            showToast('WinRM credential reference, user, and password are required', 'error');
+            return;
+        }
+        if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.disabled = true;
+        try {
+            const res = await fetch('/ops/api/hosts/winrm-credentials', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(body.error || `HTTP ${res.status}`);
+            }
+            closeWinrmCredentialsModal();
+            showToast('WinRM credentials saved', 'success');
+            loadHostInventory();
+        } catch (err) {
+            showToast(`WinRM credential save failed: ${err.message}`, 'error');
+        } finally {
+            if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.disabled = false;
         }
     }
 
@@ -972,8 +1167,6 @@ document.addEventListener('DOMContentLoaded', () => {
             !provisionHostAddressEl ||
             !provisionHostMacEl ||
             !provisionHostLabsEl ||
-            !provisionWinrmUserEnvEl ||
-            !provisionWinrmPassEnvEl ||
             !provisionHeartbeatPathEl
         ) {
             showToast('Host provisioning modal is unavailable', 'error');
@@ -984,13 +1177,17 @@ document.addEventListener('DOMContentLoaded', () => {
             name: provisionHostNameEl.value.trim(),
             address: provisionHostAddressEl.value.trim(),
             mac: provisionHostMacEl.value.trim(),
-            labs: provisionHostLabsEl.value.split(',').map(part => part.trim()).filter(Boolean),
-            winrmUserEnv: provisionWinrmUserEnvEl.value.trim(),
-            winrmPassEnv: provisionWinrmPassEnvEl.value.trim(),
+            labs: selectedProvisionLabIds(),
+            validLabIds: provisionLabCandidateIds(),
+            credentialRef: provisionHostAddressEl.value.trim(),
             heartbeatPath: provisionHeartbeatPathEl.value.trim()
         };
         if (!payload.connectionId || !payload.name || !payload.address) {
             showToast('Name and address are required', 'error');
+            return;
+        }
+        if (!payload.labs.length) {
+            showToast('Select at least one matching lab', 'error');
             return;
         }
         if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = true;
@@ -1066,6 +1263,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (action === 'toggle-local-mode') {
             const currentMode = hostState[host]?.heartbeat?.status?.localModeEnabled;
             toggleLocalMode(host, !currentMode);
+            return;
+        }
+        if (action === 'set-winrm-credentials') {
+            openWinrmCredentialsModal(host);
             return;
         }
         if (action === 'sync-aas') {

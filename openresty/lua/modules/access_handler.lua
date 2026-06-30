@@ -3,6 +3,7 @@ local _M = {}
 local demo_guard = require "modules.demo_guard"
 
 local DEFAULT_JWT_GUAC_IDLE_TIMEOUT_SECONDS = 60
+local DEFAULT_MANUAL_GUAC_IDLE_TIMEOUT_SECONDS = 60
 
 local function jwt_guac_exp_key(token)
     return "guac_jwt_exp:" .. token
@@ -10,6 +11,10 @@ end
 
 local function jwt_guac_last_seen_key(token)
     return "guac_jwt_last_seen:" .. token
+end
+
+local function manual_guac_last_seen_key(token)
+    return "guac_manual_last_seen:" .. token
 end
 
 local function get_jwt_guac_idle_timeout(config)
@@ -20,11 +25,28 @@ local function get_jwt_guac_idle_timeout(config)
     return DEFAULT_JWT_GUAC_IDLE_TIMEOUT_SECONDS
 end
 
+local function get_manual_guac_idle_timeout(config)
+    local configured = config and tonumber(config:get("manual_guac_idle_timeout_seconds"))
+    if configured and configured > 0 then
+        return configured
+    end
+    return DEFAULT_MANUAL_GUAC_IDLE_TIMEOUT_SECONDS
+end
+
 local function reject_jwt_guac_token(ngx, token, reason)
     ngx.status = ngx.HTTP_UNAUTHORIZED
     ngx.header["Content-Type"] = "text/plain"
     ngx.say("Unauthorized: Guacamole JWT session expired")
     ngx.log(ngx.INFO, "Access - Rejected Guacamole JWT auth token: " .. reason)
+    ngx.exit(ngx.HTTP_UNAUTHORIZED)
+    return true
+end
+
+local function reject_manual_guac_token(ngx, token, reason)
+    ngx.status = ngx.HTTP_UNAUTHORIZED
+    ngx.header["Content-Type"] = "text/plain"
+    ngx.say("Unauthorized: Guacamole manual session expired")
+    ngx.log(ngx.INFO, "Access - Rejected Guacamole manual auth token: " .. reason)
     ngx.exit(ngx.HTTP_UNAUTHORIZED)
     return true
 end
@@ -55,6 +77,38 @@ local function enforce_jwt_guac_token_timeout(ngx, dict)
     return false
 end
 
+local function enforce_manual_guac_token_timeout(ngx, dict)
+    local token = ngx.var.arg_token
+    if not token or token == "" then
+        return false
+    end
+
+    if dict:get(jwt_guac_exp_key(token)) then
+        return false
+    end
+
+    local username = dict:get("guac_token:" .. token)
+    if not username or username == "" then
+        return false
+    end
+
+    local config = ngx.shared.config
+    local admin_user = config and config:get("admin_user")
+    if admin_user and string.lower(username) == string.lower(admin_user) then
+        return false
+    end
+
+    local now = ngx.time()
+    local last_seen_key = manual_guac_last_seen_key(token)
+    local last_seen = tonumber(dict:get(last_seen_key))
+    if last_seen and (now - last_seen) > get_manual_guac_idle_timeout(config) then
+        return reject_manual_guac_token(ngx, token, "idle timeout exceeded")
+    end
+
+    dict:set(last_seen_key, now, 7200)
+    return false
+end
+
 ---Processes the access phase logic that validates the JTI cookie and
 -- propagates the username to Guacamole when it is still valid.
 -- When no JTI cookie is present the JWT supplied via the ?jwt= query
@@ -68,6 +122,9 @@ function _M.run(ngx_ctx, deps)
     local dict = ngx.shared.cache
 
     if enforce_jwt_guac_token_timeout(ngx, dict) then
+        return
+    end
+    if enforce_manual_guac_token_timeout(ngx, dict) then
         return
     end
 

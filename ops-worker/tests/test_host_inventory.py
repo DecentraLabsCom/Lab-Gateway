@@ -267,6 +267,158 @@ def test_discover_detects_labstation_http_service(client):
     assert body["checks"]["labStationHttp"]["detected"] is True
 
 
+def test_discover_suggests_mac_from_heartbeat_when_winrm_reachable(client, monkeypatch):
+    guacamole = [{
+        "id": 16,
+        "name": "Lab Station With Telemetry",
+        "protocol": "rdp",
+        "hostname": "lab-telemetry",
+        "port": "3389",
+    }]
+    heartbeat = {
+        "status": {
+            "wake": {
+                "nicPower": [
+                    {
+                        "name": "Wi-Fi",
+                        "macAddress": "AA-BB-CC-DD-EE-FF",
+                        "status": "Up",
+                        "wolReady": False,
+                    },
+                    {
+                        "name": "Ethernet",
+                        "macAddress": "00-11-22-33-44-55",
+                        "status": "Up",
+                        "wolReady": True,
+                    },
+                ]
+            }
+        }
+    }
+    monkeypatch.setenv("WINRM_USER_LAB_TELEMETRY", "ops-user")
+    monkeypatch.setenv("WINRM_PASS_LAB_TELEMETRY", "ops-pass")
+
+    with with_inventory_state([], guacamole), \
+            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5985), \
+            patch("worker.probe_labstation_http", return_value={
+                "checked": True,
+                "detected": False,
+                "status": "no-response",
+            }), \
+            patch("worker.read_remote_file", return_value=json.dumps(heartbeat)):
+        response = client.post("/api/hosts/discover", json={"connectionId": 16})
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["opsHostDraft"]["mac"] == "00:11:22:33:44:55"
+    assert body["checks"]["heartbeat"]["detected"] is True
+    assert body["checks"]["heartbeat"]["suggestedMac"]["source"] == "status.wake.nicPower"
+
+
+def test_discover_uses_first_readable_heartbeat_path(client, monkeypatch):
+    guacamole = [{
+        "id": 19,
+        "name": "Lab Station Custom Path",
+        "protocol": "rdp",
+        "hostname": "lab-custom-path",
+        "port": "3389",
+    }]
+    monkeypatch.setenv("WINRM_USER_LAB_CUSTOM_PATH", "ops-user")
+    monkeypatch.setenv("WINRM_PASS_LAB_CUSTOM_PATH", "ops-pass")
+    monkeypatch.setattr(worker, "DISCOVERY_HEARTBEAT_PATHS", [
+        r"C:\Missing\heartbeat.json",
+        r"D:\LabStation\data\heartbeat.json",
+    ])
+
+    def fake_read_remote_file(_host, path, *_args):
+        if path == r"D:\LabStation\data\heartbeat.json":
+            return json.dumps({"status": {"wake": {"nicPower": []}}})
+        raise RuntimeError("missing")
+
+    with with_inventory_state([], guacamole), \
+            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5985), \
+            patch("worker.probe_labstation_http", return_value={
+                "checked": True,
+                "detected": False,
+                "status": "no-response",
+            }), \
+            patch("worker.read_remote_file", side_effect=fake_read_remote_file):
+        response = client.post("/api/hosts/discover", json={"connectionId": 19})
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["checks"]["heartbeat"]["path"] == r"D:\LabStation\data\heartbeat.json"
+    assert body["opsHostDraft"]["heartbeat_path"] == r"D:\LabStation\data\heartbeat.json"
+
+
+def test_discover_derives_heartbeat_path_from_scheduled_task(client, monkeypatch):
+    guacamole = [{
+        "id": 23,
+        "name": "Installed Lab Station",
+        "protocol": "rdp",
+        "hostname": "lab-installed",
+        "port": "3389",
+    }]
+    monkeypatch.setenv("WINRM_USER_LAB_INSTALLED", "ops-user")
+    monkeypatch.setenv("WINRM_PASS_LAB_INSTALLED", "ops-pass")
+    derived_path = r"C:\Users\operator\Downloads\LabStation\labstation\data\telemetry\heartbeat.json"
+
+    with with_inventory_state([], guacamole), \
+            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5985), \
+            patch("worker.probe_labstation_http", return_value={
+                "checked": True,
+                "detected": False,
+                "status": "no-response",
+            }), \
+            patch("worker.query_labstation_task_heartbeat_path", return_value=derived_path), \
+            patch("worker.read_remote_file", return_value=json.dumps({"status": {"wake": {"nicPower": []}}})):
+        response = client.post("/api/hosts/discover", json={"connectionId": 23})
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["checks"]["heartbeat"]["path"] == derived_path
+    assert body["opsHostDraft"]["heartbeat_path"] == derived_path
+
+
+def test_discover_suggests_names_from_guacamole_connections_with_same_host(client):
+    guacamole = [
+        {
+            "id": 20,
+            "name": "Physics Bench A",
+            "protocol": "rdp",
+            "hostname": "10.7.74.10",
+            "port": "3389",
+        },
+        {
+            "id": 21,
+            "name": "Physics Bench A Admin",
+            "protocol": "rdp",
+            "hostname": "10.7.74.10",
+            "port": "3390",
+        },
+        {
+            "id": 22,
+            "name": "Other Bench",
+            "protocol": "rdp",
+            "hostname": "10.7.74.11",
+            "port": "3389",
+        },
+    ]
+
+    with with_inventory_state([], guacamole), \
+            patch("worker.tcp_port_open", return_value=False), \
+            patch("worker.probe_labstation_http", return_value={
+                "checked": True,
+                "detected": False,
+                "status": "no-response",
+            }):
+        response = client.post("/api/hosts/discover", json={"connectionId": 20})
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["opsHostDraft"]["nameCandidates"] == ["Physics Bench A", "Physics Bench A Admin", "10.7.74.10"]
+
+
 def test_discover_reports_winrm_reachable_when_no_labstation_http(client):
     guacamole = [{
         "id": 12,
@@ -317,7 +469,7 @@ def test_provision_rejects_candidate_without_labstation_or_winrm_signal(client):
     assert "insufficient discovery signal" in response.get_data(as_text=True)
 
 
-def test_provision_writes_dynamic_host_with_env_refs_and_reloads(client):
+def test_provision_writes_dynamic_host_with_credential_ref_and_reloads(client):
     guacamole = [{
         "id": 14,
         "name": "Provisionable",
@@ -337,8 +489,6 @@ def test_provision_writes_dynamic_host_with_env_refs_and_reloads(client):
             "name": "lab-ws-14",
             "mac": "00:11:22:33:44:55",
             "labs": ["14"],
-            "winrmUserEnv": "WINRM_USER_LAB_WS_14",
-            "winrmPassEnv": "WINRM_PASS_LAB_WS_14",
         })
         with open(state.dynamic_path, "r", encoding="utf-8") as handle:
             saved = json.load(handle)
@@ -346,32 +496,101 @@ def test_provision_writes_dynamic_host_with_env_refs_and_reloads(client):
     assert response.status_code == 200
     assert response.get_json()["host"]["name"] == "lab-ws-14"
     saved_host = saved["hosts"][0]
-    assert saved_host["winrm_user"] == "env:WINRM_USER_LAB_WS_14"
-    assert saved_host["winrm_pass"] == "env:WINRM_PASS_LAB_WS_14"
+    assert saved_host["credential_ref"] == "lab-ws-14"
     assert saved_host["mac"] == "00:11:22:33:44:55"
     assert saved_host["labs"] == ["14"]
 
 
-def test_provision_rejects_raw_winrm_secret(client):
+def test_provision_rejects_lab_not_in_candidate_allowlist(client):
     guacamole = [{
-        "id": 15,
-        "name": "Bad Secret",
+        "id": 18,
+        "name": "Provisionable With Lab Candidates",
         "protocol": "rdp",
-        "hostname": "lab-ws-15",
+        "hostname": "lab-ws-18",
         "port": "3389",
     }]
 
     with with_dynamic_inventory_state([], guacamole), \
             patch("worker.discover_labstation_candidate", return_value={
                 "connection": guacamole[0],
-                "status": "winrm-reachable",
+                "status": "labstation-detected",
                 "checks": {},
             }):
         response = client.post("/api/hosts/provision", json={
-            "connectionId": 15,
-            "winrmUserEnv": "Administrator",
-            "winrmPassEnv": "plaintext-password",
+            "connectionId": 18,
+            "name": "lab-ws-18",
+            "labs": ["99"],
+            "validLabIds": ["18"],
+            "winrmUserEnv": "WINRM_USER_LAB_WS_18",
+            "winrmPassEnv": "WINRM_PASS_LAB_WS_18",
         })
 
     assert response.status_code == 400
-    assert "environment variable name" in response.get_data(as_text=True)
+    assert "not valid candidates" in response.get_data(as_text=True)
+
+
+def test_provision_uses_discovered_mac_when_payload_mac_blank(client):
+    guacamole = [{
+        "id": 17,
+        "name": "Provisionable With Suggested MAC",
+        "protocol": "rdp",
+        "hostname": "lab-ws-17",
+        "port": "3389",
+    }]
+
+    with with_dynamic_inventory_state([], guacamole) as state, \
+            patch("worker.discover_labstation_candidate", return_value={
+                "connection": guacamole[0],
+                "status": "labstation-detected",
+                "checks": {},
+                "opsHostDraft": {"mac": "00:11:22:33:44:55"},
+            }):
+        response = client.post("/api/hosts/provision", json={
+            "connectionId": 17,
+            "name": "lab-ws-17",
+            "mac": "",
+            "labs": ["17"],
+            "winrmUserEnv": "WINRM_USER_LAB_WS_17",
+            "winrmPassEnv": "WINRM_PASS_LAB_WS_17",
+        })
+        with open(state.dynamic_path, "r", encoding="utf-8") as handle:
+            saved = json.load(handle)
+
+    assert response.status_code == 200
+    assert saved["hosts"][0]["mac"] == "00:11:22:33:44:55"
+
+
+def test_save_winrm_credentials_stores_secret_and_reloads(client, monkeypatch, tmp_path):
+    guacamole = [{
+        "id": 15,
+        "name": "Credential Host",
+        "protocol": "rdp",
+        "hostname": "lab-ws-15",
+        "port": "3389",
+    }]
+    monkeypatch.setattr(worker, "OPS_CREDENTIALS_PATH", str(tmp_path / "credentials.json"))
+    monkeypatch.setattr(worker, "OPS_SECRETS_KEY_PATH", str(tmp_path / "secrets.key"))
+    monkeypatch.setattr(worker, "_FERNET", None)
+
+    with with_dynamic_inventory_state([], guacamole) as state, \
+            patch("worker.discover_labstation_candidate", return_value={
+                "connection": guacamole[0],
+                "status": "winrm-reachable",
+                "checks": {},
+            }):
+        provision_response = client.post("/api/hosts/provision", json={
+            "connectionId": 15,
+        })
+        credentials_response = client.post("/api/hosts/winrm-credentials", json={
+            "credentialRef": "lab-ws-15",
+            "user": ".\\LabGatewaySvc",
+            "password": "secret-password",
+        })
+        with open(state.dynamic_path, "r", encoding="utf-8") as handle:
+            saved = json.load(handle)
+
+    assert provision_response.status_code == 200
+    assert credentials_response.status_code == 200
+    assert saved["hosts"][0]["credential_ref"] == "lab-ws-15"
+    creds = worker.load_winrm_credentials("lab-ws-15")
+    assert creds == {"user": ".\\LabGatewaySvc", "password": "secret-password"}

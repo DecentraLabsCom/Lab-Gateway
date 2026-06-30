@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 
+from cryptography.fernet import Fernet, InvalidToken
 from flask import Flask, Response, jsonify, request, stream_with_context
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
@@ -28,6 +29,8 @@ APP = Flask(__name__)
 
 CONFIG_PATH = os.getenv("OPS_CONFIG", os.path.join(os.path.dirname(__file__), "hosts.json"))
 DYNAMIC_CONFIG_PATH = os.getenv("OPS_DYNAMIC_CONFIG", "/app/data/hosts.json")
+OPS_CREDENTIALS_PATH = os.getenv("OPS_CREDENTIALS_PATH", "/app/data/winrm-credentials.json")
+OPS_SECRETS_KEY_PATH = os.getenv("OPS_SECRETS_KEY_PATH", "/app/data/ops-secrets.key")
 MYSQL_DSN = os.getenv("MYSQL_DSN")
 GUACAMOLE_MYSQL_DSN = os.getenv("GUACAMOLE_MYSQL_DSN")
 OPS_MYSQL_DATABASE = os.getenv("OPS_MYSQL_DATABASE") or os.getenv("BLOCKCHAIN_MYSQL_DATABASE")
@@ -80,9 +83,20 @@ DISCOVERY_LABSTATION_PATHS = [
     for path in os.getenv("OPS_DISCOVERY_LABSTATION_PATHS", "/labstation/health,/health").split(",")
     if path.strip()
 ]
+DISCOVERY_HEARTBEAT_PATHS = [
+    path.strip()
+    for path in os.getenv(
+        "OPS_DISCOVERY_HEARTBEAT_PATHS",
+        r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
+    ).split(",")
+    if path.strip()
+]
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 HOST_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$")
 ENOUGH_DISCOVERY_SIGNALS = {"labstation-detected", "winrm-reachable"}
+HOSTS_LOCK = RLock()
+_FERNET: Optional[Fernet] = None
 
 
 def read_hosts_config(path: str, missing_ok: bool = True) -> Dict[str, Any]:
@@ -112,11 +126,115 @@ def merge_host_configs(base: Dict[str, Any], dynamic: Dict[str, Any]) -> Dict[st
     return {"hosts": list(merged.values())}
 
 
+def _load_or_create_fernet() -> Fernet:
+    global _FERNET  # pylint: disable=global-statement
+    if _FERNET:
+        return _FERNET
+    key = os.getenv("OPS_SECRETS_KEY", "").strip()
+    if not key:
+        try:
+            if os.path.exists(OPS_SECRETS_KEY_PATH):
+                with open(OPS_SECRETS_KEY_PATH, "rb") as handle:
+                    key = handle.read().decode("ascii").strip()
+            else:
+                os.makedirs(os.path.dirname(OPS_SECRETS_KEY_PATH) or ".", exist_ok=True)
+                key = Fernet.generate_key().decode("ascii")
+                with open(OPS_SECRETS_KEY_PATH, "w", encoding="ascii") as handle:
+                    handle.write(key)
+                    handle.write("\n")
+                try:
+                    os.chmod(OPS_SECRETS_KEY_PATH, 0o600)
+                except OSError:
+                    pass
+                logging.warning("Generated local OPS_SECRETS_KEY at %s; set OPS_SECRETS_KEY explicitly for production backups", OPS_SECRETS_KEY_PATH)
+        except OSError as exc:
+            raise RuntimeError(f"Unable to load or create OPS_SECRETS_KEY: {exc}") from exc
+    _FERNET = Fernet(key.encode("ascii"))
+    return _FERNET
+
+
+def normalize_credential_ref(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def credential_ref_for_host(host: Dict[str, Any]) -> str:
+    return normalize_credential_ref(host.get("credential_ref") or host.get("address") or host.get("name"))
+
+
+def read_winrm_credentials_store() -> Dict[str, Any]:
+    if not os.path.exists(OPS_CREDENTIALS_PATH):
+        return {"credentials": {}}
+    with open(OPS_CREDENTIALS_PATH, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        return {"credentials": {}}
+    if not isinstance(data.get("credentials"), dict):
+        data["credentials"] = {}
+    return data
+
+
+def write_winrm_credentials_store(data: Dict[str, Any]) -> None:
+    directory = os.path.dirname(OPS_CREDENTIALS_PATH) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{OPS_CREDENTIALS_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    os.replace(tmp_path, OPS_CREDENTIALS_PATH)
+    try:
+        os.chmod(OPS_CREDENTIALS_PATH, 0o600)
+    except OSError:
+        pass
+
+
+def save_winrm_credentials(credential_ref: str, user: str, password: str) -> None:
+    ref = normalize_credential_ref(credential_ref)
+    if not ref:
+        raise ValueError("credentialRef is required")
+    if not str(user or "").strip():
+        raise ValueError("user is required")
+    if not str(password or "").strip():
+        raise ValueError("password is required")
+    token = _load_or_create_fernet().encrypt(json.dumps({
+        "user": str(user).strip(),
+        "password": str(password),
+    }).encode("utf-8")).decode("ascii")
+    data = read_winrm_credentials_store()
+    data["credentials"][ref] = {"token": token}
+    write_winrm_credentials_store(data)
+
+
+def load_winrm_credentials(credential_ref: str) -> Optional[Dict[str, str]]:
+    ref = normalize_credential_ref(credential_ref)
+    if not ref:
+        return None
+    entry = read_winrm_credentials_store().get("credentials", {}).get(ref)
+    if not isinstance(entry, dict) or not entry.get("token"):
+        return None
+    try:
+        raw = _load_or_create_fernet().decrypt(str(entry["token"]).encode("ascii"))
+        parsed = json.loads(raw.decode("utf-8"))
+    except (InvalidToken, ValueError, TypeError, json.JSONDecodeError) as exc:
+        logging.warning("Unable to decrypt WinRM credential ref %s: %s", ref, exc)
+        return None
+    user = str(parsed.get("user") or "").strip()
+    password = str(parsed.get("password") or "")
+    if not user or not password:
+        return None
+    return {"user": user, "password": password}
+
+
+def winrm_credentials_configured(credential_ref: str) -> bool:
+    return load_winrm_credentials(credential_ref) is not None
+
+
 def resolve_host_secret_refs(raw: Dict[str, Any]) -> Dict[str, Any]:
     # Resolve env-based secrets if they use the form "env:VAR_NAME".
     # Missing env vars are allowed so UI-provisioned hosts can be visible as
     # not yet operable without storing plaintext credentials.
     for host in raw.get("hosts", []):
+        if not host.get("credential_ref"):
+            host["credential_ref"] = host.get("address") or host.get("name")
         for key in ("winrm_user", "winrm_pass"):
             val = host.get(key)
             if isinstance(val, str) and val.startswith("env:"):
@@ -130,6 +248,11 @@ def resolve_host_secret_refs(raw: Dict[str, Any]) -> Dict[str, Any]:
                         key,
                     )
                 host[key] = env_val or ""
+        if not host.get("winrm_user") or not host.get("winrm_pass"):
+            creds = load_winrm_credentials(credential_ref_for_host(host))
+            if creds:
+                host["winrm_user"] = creds["user"]
+                host["winrm_pass"] = creds["password"]
         if not host.get("winrm_user") or not host.get("winrm_pass"):
             logging.warning("Missing WinRM credentials for host %s", host.get("name", "<unknown>"))
     return raw
@@ -183,7 +306,6 @@ class HostRegistry:
         return len(self.hosts)
 
 
-HOSTS_LOCK = RLock()
 HOSTS = HostRegistry(load_config())
 
 
@@ -308,6 +430,22 @@ def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[li
         "stderr": (result.std_err or b"").decode("utf-8", errors="ignore"),
         "duration_ms": duration_ms,
     }
+
+
+def run_remote_powershell(host: Dict[str, Any], script: str, user: Optional[str], password: Optional[str],
+                          transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> str:
+    user = user or host.get("winrm_user")
+    password = password or host.get("winrm_pass")
+    if not user or not password:
+        raise ValueError("WinRM credentials are required")
+
+    endpoint = winrm_endpoint(host, use_ssl, port)
+    transport = transport or host.get("winrm_transport", "ntlm")
+    session = winrm.Session(endpoint, auth=(user, password), transport=transport)
+    result = session.run_ps(script)
+    if result.status_code != 0:
+        raise RuntimeError(f"WinRM PowerShell failed ({result.status_code}): {(result.std_err or b'').decode('utf-8', errors='ignore')}")
+    return (result.std_out or b"").decode("utf-8", errors="ignore")
 
 
 def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], password: Optional[str],
@@ -1495,6 +1633,65 @@ def response_looks_like_labstation(response: requests.Response) -> Tuple[bool, O
     return detected, service
 
 
+def normalize_env_name_from_host(host: Any, prefix: str) -> str:
+    normalized = re.sub(r"[^A-Z0-9]+", "_", str(host or "LAB_HOST").upper()).strip("_")
+    return f"{prefix}_{normalized or 'LAB_HOST'}"
+
+
+def normalize_mac(value: Any) -> str:
+    candidate = str(value or "").strip()
+    if not MAC_RE.fullmatch(candidate):
+        return ""
+    return candidate.replace("-", ":").upper()
+
+
+def parse_boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled", "up"}
+
+
+def extract_nic_candidates_from_heartbeat(heartbeat: Dict[str, Any]) -> List[Dict[str, Any]]:
+    status = heartbeat.get("status") if isinstance(heartbeat.get("status"), dict) else heartbeat
+    wake = status.get("wake") if isinstance(status, dict) and isinstance(status.get("wake"), dict) else {}
+    adapters = wake.get("nicPower") if isinstance(wake.get("nicPower"), list) else []
+    candidates = []
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            continue
+        mac = normalize_mac(adapter.get("macAddress") or adapter.get("mac") or adapter.get("physicalAddress"))
+        if not mac:
+            continue
+        candidates.append({
+            "mac": mac,
+            "name": adapter.get("name") or adapter.get("interfaceAlias") or "",
+            "status": adapter.get("status") or "",
+            "wolReady": parse_boolish(adapter.get("wolReady")),
+            "wakeArmed": parse_boolish(adapter.get("wakeArmed")),
+        })
+    return candidates
+
+
+def choose_wol_mac(candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not candidates:
+        return None
+
+    def score(candidate: Dict[str, Any]) -> Tuple[int, int, int]:
+        status = str(candidate.get("status") or "").strip().lower()
+        return (
+            1 if candidate.get("wolReady") else 0,
+            1 if status == "up" else 0,
+            1 if candidate.get("wakeArmed") else 0,
+        )
+
+    best = sorted(candidates, key=score, reverse=True)[0]
+    return {"mac": best["mac"], "source": "status.wake.nicPower", "adapter": best}
+
+
+def suggest_mac_from_heartbeat(heartbeat: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    return choose_wol_mac(extract_nic_candidates_from_heartbeat(heartbeat))
+
+
 def probe_labstation_http(host: str) -> Dict[str, Any]:
     if not host:
         return {"checked": False, "detected": False, "status": "missing-hostname"}
@@ -1508,15 +1705,133 @@ def probe_labstation_http(host: str) -> Dict[str, Any]:
                 continue
             detected, service = response_looks_like_labstation(response)
             if detected:
-                return {
+                result = {
                     "checked": True,
                     "detected": True,
                     "url": url,
                     "statusCode": response.status_code,
                     "service": service,
                 }
+                try:
+                    body = response.json()
+                    if isinstance(body, dict):
+                        mac_hint = suggest_mac_from_heartbeat(body)
+                        if mac_hint:
+                            result["suggestedMac"] = mac_hint
+                except ValueError:
+                    pass
+                return result
 
     return {"checked": True, "detected": False, "status": "no-response"}
+
+
+def query_labstation_task_heartbeat_path(host: Dict[str, Any]) -> Optional[str]:
+    script = r"""
+$task = Get-ScheduledTask -TaskPath '\LabStation\' -TaskName 'BackgroundService' -ErrorAction Stop
+$action = @($task.Actions)[0]
+$execute = [string]$action.Execute
+$arguments = [string]$action.Arguments
+$heartbeatPath = ''
+if ($arguments -match '"([^"]*\\LabStation\.ahk)"') {
+    $root = Split-Path -Parent $Matches[1]
+    $heartbeatPath = Join-Path $root 'data\telemetry\heartbeat.json'
+} elseif ($execute -match '(?i)LabStation\.exe$') {
+    $root = Split-Path -Parent $execute.Trim('"')
+    $heartbeatPath = Join-Path $root 'data\telemetry\heartbeat.json'
+}
+[pscustomobject]@{
+    execute = $execute
+    arguments = $arguments
+    heartbeatPath = $heartbeatPath
+} | ConvertTo-Json -Compress
+"""
+    try:
+        raw = run_remote_powershell(host, script, None, None, None, None, None)
+        parsed = json.loads(raw)
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.debug("Unable to derive Lab Station heartbeat path from scheduled task: %s", exc)
+        return None
+    path = str(parsed.get("heartbeatPath") or "").strip() if isinstance(parsed, dict) else ""
+    return path or None
+
+
+def build_heartbeat_path_candidates(host: Dict[str, Any]) -> List[str]:
+    candidates = []
+    task_path = query_labstation_task_heartbeat_path(host)
+    if task_path:
+        candidates.append(task_path)
+    for path in DISCOVERY_HEARTBEAT_PATHS:
+        if path and path not in candidates:
+            candidates.append(path)
+    return candidates
+
+
+def discover_heartbeat_hint(hostname: str) -> Dict[str, Any]:
+    if not hostname:
+        return {"checked": False, "detected": False, "status": "missing-hostname"}
+    user_env = normalize_env_name_from_host(hostname, 'WINRM_USER')
+    pass_env = normalize_env_name_from_host(hostname, 'WINRM_PASS')
+    stored_creds = load_winrm_credentials(hostname) or {}
+    temp_host = {
+        "name": hostname,
+        "address": hostname,
+        "credential_ref": hostname,
+        "winrm_user": stored_creds.get("user") or os.getenv(user_env) or "",
+        "winrm_pass": stored_creds.get("password") or os.getenv(pass_env) or "",
+        "winrm_transport": "ntlm",
+    }
+    if not temp_host.get("winrm_user") or not temp_host.get("winrm_pass"):
+        return {"checked": False, "detected": False, "status": "missing-winrm-env"}
+    errors = []
+    heartbeat = None
+    detected_path = None
+    for path in build_heartbeat_path_candidates(temp_host):
+        try:
+            raw = read_remote_file(
+                temp_host,
+                path,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            heartbeat = json.loads(raw)
+            detected_path = path
+            break
+        except Exception as exc:  # pylint: disable=broad-except
+            errors.append({"path": path, "error": str(exc)})
+
+    if heartbeat is None:
+        return {"checked": True, "detected": False, "status": "read-failed", "errors": errors}
+
+    mac_hint = suggest_mac_from_heartbeat(heartbeat)
+    result = {"checked": True, "detected": True, "path": detected_path}
+    if mac_hint:
+        result["suggestedMac"] = mac_hint
+    return result
+
+
+def guacamole_name_candidates(connection: Dict[str, Any]) -> List[str]:
+    host_key = normalize_match_key(connection.get("hostname"))
+    candidates = []
+    connections, _ = load_guacamole_connections()
+    for item in connections:
+        if normalize_match_key(item.get("hostname")) != host_key:
+            continue
+        text = str(item.get("name") or "").strip()
+        if text and text not in candidates:
+            candidates.append(text)
+    for item in connections:
+        if normalize_match_key(item.get("hostname")) != host_key:
+            continue
+        text = str(item.get("hostname") or "").strip()
+        if text and text not in candidates:
+            candidates.append(text)
+    fallback = str(connection.get("hostname") or connection.get("name") or "").strip()
+    if fallback and fallback not in candidates:
+        candidates.append(fallback)
+    return candidates
 
 
 def resolve_guacamole_connection(connection_id: Any) -> Optional[Dict[str, Any]]:
@@ -1555,6 +1870,12 @@ def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
         for port in DISCOVERY_WINRM_PORTS
     }
     labstation_http = probe_labstation_http(host)
+    heartbeat_hint = discover_heartbeat_hint(host) if any(winrm_checks.values()) else {
+        "checked": False,
+        "detected": False,
+        "status": "winrm-unreachable",
+    }
+    mac_hint = labstation_http.get("suggestedMac") or heartbeat_hint.get("suggestedMac")
 
     if labstation_http.get("detected") is True:
         status = "labstation-detected"
@@ -1565,6 +1886,18 @@ def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
     else:
         status = "no-response"
 
+    ops_host_draft = {
+        "name": connection.get("hostname"),
+        "address": connection.get("hostname"),
+        "winrm_transport": "ntlm",
+        "heartbeat_path": heartbeat_hint.get("path") or DISCOVERY_HEARTBEAT_PATHS[0],
+        "events_path": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+        "labs": [],
+        "nameCandidates": guacamole_name_candidates(connection),
+    }
+    if mac_hint:
+        ops_host_draft["mac"] = mac_hint["mac"]
+
     return {
         "connection": connection,
         "status": status,
@@ -1572,15 +1905,9 @@ def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
             "dns": dns_ok,
             "winrm": winrm_checks,
             "labStationHttp": labstation_http,
+            "heartbeat": heartbeat_hint,
         },
-        "opsHostDraft": {
-            "name": connection.get("hostname"),
-            "address": connection.get("hostname"),
-            "winrm_transport": "ntlm",
-            "heartbeat_path": r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
-            "events_path": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
-            "labs": [],
-        },
+        "opsHostDraft": ops_host_draft,
     }
 
 
@@ -1610,6 +1937,18 @@ def normalize_labs(value: Any) -> List[str]:
     else:
         parts = []
     return [str(part).strip() for part in parts if str(part).strip()]
+
+
+def validate_labs_against_candidates(labs: List[str], candidates: Any) -> Optional[str]:
+    if candidates is None:
+        return None
+    valid = set(normalize_labs(candidates))
+    if not valid:
+        return "validLabIds must contain at least one lab candidate when provided"
+    invalid = [lab for lab in labs if lab not in valid]
+    if invalid:
+        return f"labs contain values that are not valid candidates: {', '.join(invalid)}"
+    return None
 
 
 def load_dynamic_config() -> Dict[str, Any]:
@@ -1651,18 +1990,16 @@ def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) 
     if not address:
         return None, "address is required"
 
-    user_env, error = require_env_ref_name(payload.get("winrmUserEnv"), "winrmUserEnv")
-    if error:
-        return None, error
-    pass_env, error = require_env_ref_name(payload.get("winrmPassEnv"), "winrmPassEnv")
-    if error:
-        return None, error
+    labs = normalize_labs(payload.get("labs"))
+    labs_error = validate_labs_against_candidates(labs, payload.get("validLabIds"))
+    if labs_error:
+        return None, labs_error
+    credential_ref = str(payload.get("credentialRef") or address).strip()
 
     host_config = {
         "name": name,
         "address": address,
-        "winrm_user": f"env:{user_env}",
-        "winrm_pass": f"env:{pass_env}",
+        "credential_ref": credential_ref,
         "winrm_transport": str(payload.get("winrmTransport") or "ntlm").strip() or "ntlm",
         "heartbeat_path": str(
             payload.get("heartbeatPath")
@@ -1672,7 +2009,7 @@ def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) 
             payload.get("eventsPath")
             or r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl"
         ),
-        "labs": normalize_labs(payload.get("labs")),
+        "labs": labs,
     }
     mac = str(payload.get("mac") or "").strip()
     if mac:
@@ -1681,14 +2018,16 @@ def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) 
 
 
 def safe_host_inventory_entry(host: Dict[str, Any]) -> Dict[str, Any]:
+    credential_ref = credential_ref_for_host(host)
     return {
         "name": host.get("name"),
         "address": host.get("address"),
+        "credentialRef": credential_ref,
         "mac": host.get("mac"),
         "mode": host.get("mode"),
         "labs": [str(lab) for lab in host.get("labs", [])],
         "quarantined": bool(host.get("quarantined", False)),
-        "winrmConfigured": bool(host.get("winrm_user") and host.get("winrm_pass")),
+        "winrmConfigured": bool(host.get("winrm_user") and host.get("winrm_pass")) or winrm_credentials_configured(credential_ref),
     }
 
 
@@ -1843,7 +2182,13 @@ def api_hosts_provision():
             "discovery": discovery,
         }), 409
 
-    host_config, error = build_provisioned_host(payload, connection)
+    provision_payload = dict(payload)
+    if not str(provision_payload.get("mac") or "").strip():
+        suggested_mac = (discovery.get("opsHostDraft") or {}).get("mac")
+        if suggested_mac:
+            provision_payload["mac"] = suggested_mac
+
+    host_config, error = build_provisioned_host(provision_payload, connection)
     if error:
         return jsonify({"error": error}), 400
 
@@ -1866,6 +2211,29 @@ def api_hosts_provision():
         "hosts": count,
         "host": safe_host_inventory_entry(host_config),
         "discoveryStatus": discovery.get("status"),
+    })
+
+
+@APP.route("/api/hosts/winrm-credentials", methods=["POST"])
+def api_save_winrm_credentials():
+    payload = request.get_json(force=True, silent=True) or {}
+    credential_ref = payload.get("credentialRef") or payload.get("credential_ref")
+    user = payload.get("user") or payload.get("username")
+    password = payload.get("password")
+    try:
+        save_winrm_credentials(str(credential_ref or ""), str(user or ""), str(password or ""))
+        count, reload_error = reload_hosts()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.exception("Failed to save WinRM credentials")
+        return jsonify({"error": str(exc)}), 500
+    if reload_error:
+        return jsonify({"error": reload_error}), 500
+    return jsonify({
+        "saved": True,
+        "credentialRef": normalize_credential_ref(credential_ref),
+        "hosts": count,
     })
 
 

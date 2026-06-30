@@ -123,6 +123,7 @@ services:
       - DEMO_USER=${DEMO_USER:-demo}
       - DEMO_LAB_ID=${DEMO_LAB_ID:-}
       - JWT_GUAC_IDLE_TIMEOUT_SECONDS=${JWT_GUAC_IDLE_TIMEOUT_SECONDS:-60}
+      - MANUAL_GUAC_IDLE_TIMEOUT_SECONDS=${MANUAL_GUAC_IDLE_TIMEOUT_SECONDS:-60}
     depends_on:
       guacamole:
         condition: service_healthy
@@ -419,6 +420,9 @@ services:
       - OPS_PORT=8081
       - OPS_CONFIG=/app/hosts.json
       - OPS_DYNAMIC_CONFIG=/app/data/hosts.json
+      - OPS_CREDENTIALS_PATH=${OPS_CREDENTIALS_PATH:-/app/data/winrm-credentials.json}
+      - OPS_SECRETS_KEY=${OPS_SECRETS_KEY:-}
+      - OPS_SECRETS_KEY_PATH=${OPS_SECRETS_KEY_PATH:-/app/data/ops-secrets.key}
       - OPS_POLL_ENABLED=true
       - OPS_POLL_INTERVAL=60
       - OPS_RESERVATION_AUTOMATION=true

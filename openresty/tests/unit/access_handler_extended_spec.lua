@@ -187,6 +187,70 @@ runner.describe("Access handler extended tests", function()
         runner.assert.equals("admin", ngx.shared.cache._data["guac_token:manual-token"])
     end)
 
+    runner.it("refreshes non-admin manual Guacamole token last-seen while within idle timeout", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["guac_token:manual-token"] = "alice",
+                ["token:alice"] = "manual-token",
+                ["guac_manual_last_seen:manual-token"] = 100
+            },
+            config = {
+                admin_user = "admin",
+                manual_guac_idle_timeout_seconds = 60
+            },
+            var = { arg_token = "manual-token" },
+            now = 150
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals(150, ngx.shared.cache._data["guac_manual_last_seen:manual-token"])
+    end)
+
+    runner.it("rejects non-admin manual Guacamole tokens after idle timeout", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["guac_token:manual-token"] = "alice",
+                ["token:alice"] = "manual-token",
+                ["guac_manual_last_seen:manual-token"] = 100
+            },
+            config = {
+                admin_user = "admin",
+                manual_guac_idle_timeout_seconds = 60
+            },
+            var = { arg_token = "manual-token" },
+            now = 161
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(401, ngx.status)
+        runner.assert.equals(401, ngx._exit_code)
+        runner.assert.equals(100, ngx.shared.cache._data["guac_manual_last_seen:manual-token"])
+    end)
+
+    runner.it("does not apply non-admin manual idle timeout to admin Guacamole token", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["guac_token:manual-token"] = "admin",
+                ["token:admin"] = "manual-token",
+                ["guac_manual_last_seen:manual-token"] = 100
+            },
+            config = {
+                admin_user = "admin",
+                manual_guac_idle_timeout_seconds = 60
+            },
+            var = { arg_token = "manual-token" },
+            now = 1000
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals(100, ngx.shared.cache._data["guac_manual_last_seen:manual-token"])
+    end)
+
     runner.it("refreshes JWT-backed Guacamole token last-seen while within idle timeout", function()
         local ngx = ngx_factory.new({
             cache = {

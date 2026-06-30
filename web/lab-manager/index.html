@@ -630,11 +630,12 @@
                 <div class="form-grid">
                     <label class="field">
                         <span>Name</span>
-                        <input type="text" id="provisionHostName" placeholder="lab-ws-01">
+                        <input type="text" id="provisionHostName" list="provisionHostNameCandidates" placeholder="lab-ws-01">
+                        <datalist id="provisionHostNameCandidates"></datalist>
                     </label>
                     <label class="field">
                         <span>Address</span>
-                        <input type="text" id="provisionHostAddress" placeholder="lab-ws-01">
+                        <input type="text" id="provisionHostAddress" placeholder="lab-ws-01" readonly aria-readonly="true">
                     </label>
                     <label class="field">
                         <span>MAC</span>
@@ -642,15 +643,9 @@
                     </label>
                     <label class="field">
                         <span>Labs</span>
-                        <input type="text" id="provisionHostLabs" placeholder="1, 2">
-                    </label>
-                    <label class="field">
-                        <span>WinRM user env</span>
-                        <input type="text" id="provisionWinrmUserEnv" placeholder="WINRM_USER_LAB_WS_01">
-                    </label>
-                    <label class="field">
-                        <span>WinRM password env</span>
-                        <input type="text" id="provisionWinrmPassEnv" placeholder="WINRM_PASS_LAB_WS_01">
+                        <select id="provisionHostLabs" multiple size="4">
+                            <option value="">Check Lab Station to load candidates</option>
+                        </select>
                     </label>
                     <label class="field full">
                         <span>Heartbeat path</span>
@@ -662,6 +657,38 @@
                 <div class="footer-actions">
                     <button class="ghost-btn" id="cancelProvisionHost">Cancel</button>
                     <button class="primary-btn" id="saveProvisionHost"><i class="fas fa-save"></i> Save Host</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="winrmCredentialsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-key"></i> Set WinRM Credentials</h3>
+                <button class="ghost-btn icon-btn" id="closeWinrmCredentialsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="winrmCredentialRef">
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Host address</span>
+                        <input type="text" id="winrmCredentialAddress" readonly aria-readonly="true">
+                    </label>
+                    <label class="field">
+                        <span>User</span>
+                        <input type="text" id="winrmCredentialUser" placeholder=".\LabGatewaySvc">
+                    </label>
+                    <label class="field full">
+                        <span>Password</span>
+                        <input type="password" id="winrmCredentialPassword" autocomplete="new-password">
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="cancelWinrmCredentials">Cancel</button>
+                    <button class="primary-btn" id="saveWinrmCredentials"><i class="fas fa-save"></i> Save Credentials</button>
                 </div>
             </div>
         </div>
