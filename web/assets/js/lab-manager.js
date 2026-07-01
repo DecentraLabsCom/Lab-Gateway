@@ -696,6 +696,7 @@ document.addEventListener('DOMContentLoaded', () => {
             hostNames = nextHostNames;
             renderHosts();
             guacamoleCandidates = data.guacamoleUnmatched || [];
+            guacamoleCandidates.forEach(rememberGuacamoleCandidate);
             renderGuacamoleCandidates(guacamoleCandidates);
             hostNames.forEach(startHeartbeatStream);
             updateOpsHint(data);
@@ -902,7 +903,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (btn.dataset.action !== 'probe-candidate') return;
-        guacamoleCandidateState[connectionId] = { status: 'checking' };
+        const candidate = findGuacamoleCandidate(connectionId);
+        guacamoleCandidateState[connectionId] = {
+            ...(guacamoleCandidateState[connectionId] || {}),
+            candidate,
+            status: 'checking'
+        };
         btn.disabled = true;
         renderGuacamoleCandidates(guacamoleCandidates);
         try {
@@ -925,6 +931,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? `Open WinRM port${winrmOpen.length === 1 ? '' : 's'}: ${winrmOpen.join(', ')}`
                     : 'No Lab Station health endpoint or WinRM port detected.';
             guacamoleCandidateState[connectionId] = {
+                ...(guacamoleCandidateState[connectionId] || {}),
+                candidate: body.connection || candidate,
                 status: body.status,
                 detail: suggestedMac ? `${detail} Suggested MAC: ${suggestedMac}` : detail,
                 opsHostDraft: body.opsHostDraft || {}
@@ -932,7 +940,12 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Discovery finished for ${body.connection?.hostname || connectionId}`, 'success');
         } catch (err) {
             console.error(err);
-            guacamoleCandidateState[connectionId] = { status: 'error', detail: err.message };
+            guacamoleCandidateState[connectionId] = {
+                ...(guacamoleCandidateState[connectionId] || {}),
+                candidate,
+                status: 'error',
+                detail: err.message
+            };
             showToast(`Lab Station check failed: ${err.message}`, 'error');
         } finally {
             loadHostInventory();
@@ -940,7 +953,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function findGuacamoleCandidate(connectionId) {
-        return guacamoleCandidates.find(candidate => String(candidate.id ?? '') === String(connectionId));
+        const key = String(connectionId);
+        return guacamoleCandidates.find(candidate => String(candidate.id ?? '') === key)
+            || guacamoleCandidateState[key]?.candidate
+            || null;
+    }
+
+    function rememberGuacamoleCandidate(candidate) {
+        const id = String(candidate?.id ?? '');
+        if (!id) return;
+        guacamoleCandidateState[id] = {
+            ...(guacamoleCandidateState[id] || {}),
+            candidate
+        };
     }
 
     function normalizeMatchValue(value) {

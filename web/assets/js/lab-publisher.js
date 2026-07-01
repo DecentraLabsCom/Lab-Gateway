@@ -1387,10 +1387,24 @@
         state.iscedSelectionTouched = state.selectedIscedCodes.length > 0;
         state.educationalProgramLinked = state.selectedIscedCodes.length > 0
             || getAttributeValue(attributes, 'educationalProgramLinked') === true;
-        const images = normalizeArray(metadata?.images);
-        if (!images.length && metadata?.image) images.push(metadata.image);
+        const images = mergeMediaUrls(
+            metadata?.image,
+            metadata?.images,
+            getAttributeValue(attributes, 'additionalImages')
+        );
+        const docs = mergeMediaUrls(
+            metadata?.docs,
+            metadata?.documents,
+            getAttributeValue(attributes, 'docs'),
+            getAttributeValue(attributes, 'documents')
+        );
+        setupMediaMode('images', 'link');
+        setupMediaMode('docs', 'link');
+        state.uploadedImages = [];
+        state.uploadedDocs = [];
         $('labImageUrls').value = images.join(', ');
-        $('labDocUrls').value = normalizeArray(metadata?.docs).join(', ');
+        $('labDocUrls').value = docs.join(', ');
+        renderAssets();
         $('labDemoEnabled').checked = metadata?.demoEnabled === true;
 
         if (metadata?.pricing?.displayUnit) {
@@ -1547,6 +1561,16 @@
 
     function normalizeTraitType(value) {
         return String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    }
+
+    function mergeMediaUrls(...values) {
+        const urls = [];
+        values.forEach(value => {
+            normalizeArray(value).forEach(url => {
+                if (!urls.includes(url)) urls.push(url);
+            });
+        });
+        return urls;
     }
 
     function getFordField(code) {
