@@ -332,7 +332,7 @@
         initMarketplaceFields();
         refresh.addEventListener('click', loadPublisherData);
         submit.addEventListener('click', publishLab);
-        if (cancelEdit) cancelEdit.addEventListener('click', clearEditMode);
+        if (cancelEdit) cancelEdit.addEventListener('click', () => clearEditMode(true));
         if (labList) labList.addEventListener('click', handleLabListClick);
         resourceType.addEventListener('change', () => {
             renderResourceOptions();
@@ -1513,8 +1513,90 @@
         state.originalRawPrice = null;
         state.originalDisplayPrice = null;
         state.originalPriceUnit = null;
+        resetLabPublisherForm();
         updateEditControls();
         if (resetStatus) setStatus('Edit cancelled.', false);
+    }
+
+    function resetLabPublisherForm() {
+        if (state.fmuDescribeController) {
+            state.fmuDescribeController.abort();
+            state.fmuDescribeController = null;
+        }
+
+        state.selectedCategories = [];
+        state.selectedIscedCodes = [];
+        state.iscedSelectionTouched = false;
+        state.educationalProgramLinked = false;
+        state.availableDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+        state.unavailableWindows = [];
+        state.modelVariables = [];
+        state.uploadedImages = [];
+        state.uploadedDocs = [];
+
+        setValue('labResourceType', '0');
+        setValue('labSetupMode', 'full');
+        setValue('labListImmediately', 'true');
+        setValue('labAccessKey', '');
+        setValue('labPrice', '0');
+        setValue('labPriceUnit', 'hour');
+        setValue('labAccessURI', '');
+        setValue('labMetadataUrl', '');
+        setValue('labName', '');
+        setValue('labKeywords', '');
+        setValue('labDescription', '');
+        setValue('labOpens', '');
+        setValue('labCloses', '');
+        setValue('labTimeSlots', '30,60');
+        setValue('labAllowedPeriodMin', '1');
+        setValue('labAllowedPeriodMax', '1');
+        setValue('labAllowedPeriodUnit', 'day');
+        setValue('labAvailableHoursStart', '09:00');
+        setValue('labAvailableHoursEnd', '17:00');
+        setValue('labMaxConcurrentUsers', '1');
+        setValue('labTermsUrl', '');
+        setValue('labTermsVersion', '');
+        setValue('labTermsEffectiveDate', '');
+        setValue('labTermsSha256', '');
+        setText('labTermsStatus', '');
+        setValue('labFmuFileName', '');
+        setValue('labImageUrls', '');
+        setValue('labDocUrls', '');
+        setValue('labImages', '');
+        setValue('labDocs', '');
+        setChecked('labEducationalProgramLinked', false);
+        setChecked('labDemoEnabled', false);
+        setContentId('');
+        closeCategoryMenu();
+        populateTimezoneOptions();
+        renderResourceOptions();
+        renderCategoryMenu();
+        renderCategoryChips();
+        renderIscedSuggestions();
+        renderDayToggles();
+        renderUnavailableWindows();
+        setupMediaMode('images', 'link');
+        setupMediaMode('docs', 'link');
+        renderAssets();
+        resetFmuDescribeFields(false);
+        syncSetupMode();
+        syncResourceTypeFields();
+        syncBookingModeFields();
+    }
+
+    function setValue(id, value) {
+        const el = $(id);
+        if (el) el.value = value;
+    }
+
+    function setChecked(id, checked) {
+        const el = $(id);
+        if (el) el.checked = checked;
+    }
+
+    function setText(id, value) {
+        const el = $(id);
+        if (el) el.textContent = value;
     }
 
     function captureOriginalEditPrice(lab) {
