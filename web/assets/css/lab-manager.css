@@ -251,6 +251,28 @@ body {
 }
 .field.full { grid-column: 1 / -1; }
 .field.is-hidden { display: none; }
+.provision-host-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+}
+.provision-host-left {
+    display: grid;
+    grid-template-rows: repeat(3, minmax(0, auto));
+    gap: 14px;
+    min-width: 0;
+}
+.provision-labs-field {
+    min-width: 0;
+    height: 100%;
+}
+.provision-labs-field select {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.provision-labs-summary {
+    flex: 1 1 auto;
+    align-items: flex-start;
+}
 .inline-readonly-field {
     flex-direction: row;
     align-items: center;
@@ -667,6 +689,15 @@ body {
     .scheduling-grid .booking-slot-field,
     .scheduling-grid .scheduling-timezone-field {
         grid-column: 1 / -1;
+    }
+
+    .provision-host-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .provision-labs-field select,
+    .provision-labs-summary {
+        min-height: 120px;
     }
 
     .lab-row {

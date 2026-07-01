@@ -1398,10 +1398,10 @@
             getAttributeValue(attributes, 'docs'),
             getAttributeValue(attributes, 'documents')
         );
-        setupMediaMode('images', 'link');
-        setupMediaMode('docs', 'link');
-        state.uploadedImages = [];
-        state.uploadedDocs = [];
+        setupMediaMode('images', 'upload');
+        setupMediaMode('docs', 'upload');
+        state.uploadedImages = images;
+        state.uploadedDocs = docs;
         $('labImageUrls').value = images.join(', ');
         $('labDocUrls').value = docs.join(', ');
         renderAssets();

@@ -91,6 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const provisionHostAddressEl = $('#provisionHostAddress');
     const provisionHostMacEl = $('#provisionHostMac');
     const provisionHostLabsEl = $('#provisionHostLabs');
+    const provisionHostLabsSummaryEl = $('#provisionHostLabsSummary');
     const provisionHeartbeatPathEl = $('#provisionHeartbeatPath');
 
     populateTimezones();
@@ -1016,8 +1017,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderProvisionLabOptions(labs, selectedIds = []) {
         if (!provisionHostLabsEl) return;
         provisionHostLabsEl.innerHTML = '';
+        if (provisionHostLabsSummaryEl) {
+            provisionHostLabsSummaryEl.hidden = true;
+            provisionHostLabsSummaryEl.textContent = '';
+        }
+        provisionHostLabsEl.hidden = false;
         const selectedSet = new Set(selectedIds.map(String));
-        if (!labs.length) {
+        const validLabs = (Array.isArray(labs) ? labs : [])
+            .filter(lab => String(lab?.labId || '').trim());
+        if (!validLabs.length) {
             const option = document.createElement('option');
             option.value = '';
             option.textContent = 'No matching labs found';
@@ -1027,15 +1035,25 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         provisionHostLabsEl.disabled = false;
-        labs.forEach(lab => {
+        const singleLab = validLabs.length === 1;
+        validLabs.forEach(lab => {
             const labId = String(lab.labId || '').trim();
-            if (!labId) return;
             const option = document.createElement('option');
             option.value = labId;
-            option.textContent = `Lab ${labId}${lab.accessKey ? ` - ${lab.accessKey}` : ''}`;
-            option.selected = selectedSet.has(labId) || (labs.length === 1 && selectedSet.size === 0);
+            option.textContent = formatProvisionLabLabel(lab);
+            option.selected = singleLab || selectedSet.has(labId);
             provisionHostLabsEl.appendChild(option);
         });
+        if (singleLab && provisionHostLabsSummaryEl) {
+            provisionHostLabsSummaryEl.textContent = formatProvisionLabLabel(validLabs[0]);
+            provisionHostLabsSummaryEl.hidden = false;
+            provisionHostLabsEl.hidden = true;
+        }
+    }
+
+    function formatProvisionLabLabel(lab) {
+        const labId = String(lab?.labId || '').trim();
+        return `Lab ${labId}${lab?.accessKey ? ` - ${lab.accessKey}` : ''}`;
     }
 
     function selectedProvisionLabIds() {
@@ -1106,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('Host provisioning modal is unavailable', 'error');
             return;
         }
-        const host = candidate.hostname || candidate.name || '';
+        const host = candidate.name || candidate.hostname || '';
         const draft = guacamoleCandidateState[String(connectionId)]?.opsHostDraft || {};
         provisionConnectionIdEl.value = String(connectionId);
         provisionHostNameEl.value = draft.name || host;
