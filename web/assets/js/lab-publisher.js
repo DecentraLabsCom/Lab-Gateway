@@ -856,6 +856,7 @@
         $('fmuConfigPanel').hidden = !isFmu;
         setGroupHidden('.lab-access-key-field', isFmu);
         setGroupHidden('.lab-fmu-file-field', !isFmu);
+        setGroupHidden('.lab-max-concurrent-users-field', !isFmu);
         if (isFmu && !fmuFileNameInput.value.trim() && accessKeyInput.value.trim().toLowerCase().endsWith('.fmu')) {
             fmuFileNameInput.value = accessKeyInput.value.trim();
         }
