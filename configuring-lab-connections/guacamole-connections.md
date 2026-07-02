@@ -2,6 +2,16 @@
 
 Access http(s)://labgatewayURL/guacamole and log in to guacamole using the admin username and password you configured during the installation of the Lab Gateway.
 
+```mermaid
+flowchart LR
+    Admin["Gateway admin"] --> Guac["Guacamole admin UI"]
+    Guac --> Conn["Create RDP connection"]
+    Conn --> Station["Windows lab computer"]
+    Conn --> Selector["Connection ID"]
+    Selector --> LabManager["Lab Manager"]
+    LabManager --> Chain["Published lab accessKey = guac:id:<id>"]
+```
+
 <figure><img src="../.gitbook/assets/image (2).png" alt=""><figcaption></figcaption></figure>
 
 After that, go to Settings on the top right.\

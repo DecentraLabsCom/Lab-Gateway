@@ -88,8 +88,15 @@
                                 </div>
                                 <div class="form-grid onchain-fields-grid">
                                     <label class="field lab-access-key-field">
-                                        <span>Access Key</span>
-                                        <input type="text" id="labAccessKey" placeholder="guacamole-connection-id or model.fmu">
+                                        <span>Connection ID</span>
+                                        <input type="text" id="labAccessKey" placeholder="guac:id:42 or model.fmu">
+                                    </label>
+                                    <label class="field lab-fmu-file-field" hidden>
+                                        <span>FMU File Name</span>
+                                        <div class="input-action-row">
+                                            <input type="text" id="labFmuFileName" placeholder="spring-damper.fmu">
+                                            <button class="mini-btn primary" type="button" id="labFmuAutoDetectBtn">Auto-detect</button>
+                                        </div>
                                     </label>
                                     <label class="field lab-price-field">
                                         <span>Price</span>
@@ -226,13 +233,6 @@
                                 <div class="form-section-title" id="fmuConfigTitle">FMU Configuration</div>
                                 <div class="fmu-config" id="fmuConfigPanel">
                                     <div class="form-grid">
-                                        <label class="field full">
-                                            <span>FMU File Name <span class="muted-text">(file on Lab Station in production, e.g. spring-damper.fmu)</span></span>
-                                            <div class="input-action-row">
-                                                <input type="text" id="labFmuFileName" placeholder="spring-damper.fmu">
-                                                <button class="mini-btn primary" type="button" id="labFmuAutoDetectBtn">Auto-detect</button>
-                                            </div>
-                                        </label>
                                         <label class="field">
                                             <span>FMI Version</span>
                                             <input type="text" id="labFmiVersion" readonly>
@@ -701,6 +701,6 @@
 
     <script src="../assets/js/auth-token-handler.js?v=lab-admin-strict-token"></script>
     <script src="../assets/js/lab-manager.js"></script>
-    <script src="../assets/js/lab-publisher.js?v=metadata-top-level-v2"></script>
+    <script src="../assets/js/lab-publisher.js?v=fmu-field-replacement-v1"></script>
 </body>
 </html>

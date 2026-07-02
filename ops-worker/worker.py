@@ -39,6 +39,23 @@ MYSQL_HOSTNAME = os.getenv("MYSQL_HOSTNAME") or os.getenv("MYSQL_HOST") or "mysq
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
 MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
+GUACAMOLE_TEMP_USER_CLEANUP_ENABLED = os.getenv(
+    "GUACAMOLE_TEMP_USER_CLEANUP_ENABLED",
+    "true",
+).strip().lower() not in ("false", "0", "no", "off")
+GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS = max(
+    60,
+    int(os.getenv("GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS", "300")),
+)
+GUACAMOLE_PROVISIONER_TOKEN = (
+    os.getenv("GUACAMOLE_PROVISIONER_TOKEN") or
+    os.getenv("LAB_MANAGER_TOKEN") or
+    ""
+)
+GUACAMOLE_PROVISIONER_TOKEN_HEADER = os.getenv(
+    "GUACAMOLE_PROVISIONER_TOKEN_HEADER",
+    "X-Guacamole-Provisioner-Token",
+)
 DEFAULT_LABSTATION_EXE = r"C:\LabStation\LabStation.exe"
 WINRM_READ_TIMEOUT = int(os.getenv("OPS_WINRM_READ_TIMEOUT", "30"))
 WINRM_OPERATION_TIMEOUT = int(os.getenv("OPS_WINRM_OPERATION_TIMEOUT", "20"))
@@ -94,6 +111,7 @@ DISCOVERY_HEARTBEAT_PATHS = [
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 HOST_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$")
+GUAC_SELECTOR_RE = re.compile(r"^guac:id:([1-9][0-9]*)$")
 ENOUGH_DISCOVERY_SIGNALS = {"labstation-detected", "winrm-reachable"}
 HOSTS_LOCK = RLock()
 _FERNET: Optional[Fernet] = None
@@ -2067,6 +2085,7 @@ def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
                             ON e.entity_id = cp.entity_id
                         WHERE cp.permission = 'READ'
                             AND e.type = 'USER'
+                            AND e.name NOT LIKE 'dlabs-res-%'
                         ORDER BY cp.connection_id ASC, e.entity_id ASC
                         """
                     )
@@ -2088,6 +2107,7 @@ def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
     return [
         {
             "id": row.get("connection_id"),
+            "selector": f"guac:id:{row.get('connection_id')}",
             "name": row.get("connection_name"),
             "protocol": row.get("protocol"),
             "hostname": row.get("hostname"),
@@ -2096,6 +2116,178 @@ def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
         }
         for row in rows
     ], None
+
+
+def require_guacamole_provisioner_auth():
+    expected = str(GUACAMOLE_PROVISIONER_TOKEN or "").strip()
+    if not expected:
+        return None
+    provided = request.headers.get(GUACAMOLE_PROVISIONER_TOKEN_HEADER)
+    if not provided and GUACAMOLE_PROVISIONER_TOKEN_HEADER.lower() != "x-lab-manager-token":
+        provided = request.headers.get("X-Lab-Manager-Token")
+    if provided != expected:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    return None
+
+
+def parse_guacamole_selector(selector: Any) -> int:
+    match = GUAC_SELECTOR_RE.match(str(selector or "").strip())
+    if not match:
+        raise ValueError("selector must use guac:id:<connection_id>")
+    return int(match.group(1))
+
+
+def safe_connection_response(connection: Dict[str, Any]) -> Dict[str, Any]:
+    connection_id = connection.get("id")
+    return {
+        "id": connection_id,
+        "selector": connection.get("selector") or f"guac:id:{connection_id}",
+        "name": connection.get("name"),
+        "protocol": connection.get("protocol"),
+        "hostname": connection.get("hostname"),
+        "port": connection.get("port"),
+        "warnings": [],
+    }
+
+
+def provision_guacamole_temporary_user(selector: str, session_id: str, valid_until_epoch: Optional[Any]) -> Dict[str, Any]:
+    if not GUACAMOLE_DB_ENGINE:
+        raise RuntimeError("Guacamole database not configured")
+    connection_id = parse_guacamole_selector(selector)
+    if not session_id or not re.match(r"^[A-Za-z0-9_.-]{1,128}$", str(session_id)):
+        raise ValueError("sessionId is required and must be a safe identifier")
+    username = f"dlabs-res-{session_id}"
+    valid_until_date = None
+    if valid_until_epoch not in (None, ""):
+        valid_until_date = datetime.fromtimestamp(int(valid_until_epoch), tz=timezone.utc).date().isoformat()
+
+    connection = resolve_guacamole_connection(connection_id)
+    if not connection:
+        raise ValueError(f"Guacamole connection {connection_id} not found")
+
+    with GUACAMOLE_DB_ENGINE.begin() as conn:
+        if conn.dialect.name == "mysql":
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO guacamole_entity (name, type)
+                    VALUES (:username, 'USER')
+                    ON DUPLICATE KEY UPDATE name = VALUES(name)
+                    """
+                ),
+                {"username": username},
+            )
+        else:
+            conn.execute(
+                text(
+                    """
+                    INSERT OR IGNORE INTO guacamole_entity (name, type)
+                    VALUES (:username, 'USER')
+                    """
+                ),
+                {"username": username},
+            )
+
+        entity_id = conn.execute(
+            text("SELECT entity_id FROM guacamole_entity WHERE name = :username AND type = 'USER'"),
+            {"username": username},
+        ).scalar()
+        if entity_id is None:
+            raise RuntimeError("Unable to resolve temporary Guacamole entity")
+
+        if conn.dialect.name == "mysql":
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO guacamole_user (entity_id, password_hash, password_date, disabled, expired, valid_until)
+                    VALUES (:entity_id, UNHEX(SHA2(UUID(), 256)), UTC_TIMESTAMP(), FALSE, FALSE, :valid_until)
+                    ON DUPLICATE KEY UPDATE disabled = FALSE, expired = FALSE, valid_until = VALUES(valid_until)
+                    """
+                ),
+                {"entity_id": entity_id, "valid_until": valid_until_date},
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
+                    VALUES (:entity_id, :connection_id, 'READ')
+                    ON DUPLICATE KEY UPDATE permission = VALUES(permission)
+                    """
+                ),
+                {"entity_id": entity_id, "connection_id": connection_id},
+            )
+        else:
+            conn.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO guacamole_user (entity_id, valid_until)
+                    VALUES (:entity_id, :valid_until)
+                    """
+                ),
+                {"entity_id": entity_id, "valid_until": valid_until_date},
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO guacamole_connection_permission (entity_id, connection_id, permission)
+                    VALUES (:entity_id, :connection_id, 'READ')
+                    """
+                ),
+                {"entity_id": entity_id, "connection_id": connection_id},
+            )
+
+    logging.info("Provisioned temporary Guacamole user %s for connection %s", username, connection_id)
+    return {
+        "success": True,
+        "sessionId": session_id,
+        "username": username,
+        "connection": safe_connection_response(connection),
+    }
+
+
+def cleanup_expired_guacamole_temp_users() -> int:
+    if not GUACAMOLE_DB_ENGINE:
+        logging.debug("Skipping Guacamole temp user cleanup: database not configured")
+        return 0
+    try:
+        with GUACAMOLE_DB_ENGINE.begin() as conn:
+            if conn.dialect.name == "mysql":
+                result = conn.execute(
+                    text(
+                        """
+                        DELETE e FROM guacamole_entity e
+                        JOIN guacamole_user u ON u.entity_id = e.entity_id
+                        WHERE e.type = 'USER'
+                          AND e.name LIKE 'dlabs-res-%'
+                          AND u.valid_until IS NOT NULL
+                          AND u.valid_until < UTC_TIMESTAMP()
+                        """
+                    )
+                )
+            else:
+                result = conn.execute(
+                    text(
+                        """
+                        DELETE FROM guacamole_entity
+                        WHERE entity_id IN (
+                            SELECT e.entity_id
+                            FROM guacamole_entity e
+                            JOIN guacamole_user u ON u.entity_id = e.entity_id
+                            WHERE e.type = 'USER'
+                              AND e.name LIKE 'dlabs-res-%'
+                              AND u.valid_until IS NOT NULL
+                              AND u.valid_until < CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+                )
+        deleted = result.rowcount if result.rowcount is not None else 0
+        if deleted:
+            logging.info("Cleaned up %s expired Guacamole temporary users", deleted)
+        return deleted
+    except Exception as exc:
+        logging.warning("Guacamole temp user cleanup failed: %s", exc)
+        return 0
 
 
 def build_host_inventory() -> Dict[str, Any]:
@@ -2148,6 +2340,40 @@ def build_host_inventory() -> Dict[str, Any]:
 @APP.route("/api/hosts", methods=["GET"])
 def api_hosts_inventory():
     return jsonify(build_host_inventory())
+
+
+@APP.route("/internal/guacamole/connections", methods=["GET"])
+def api_internal_guacamole_connections():
+    auth_response = require_guacamole_provisioner_auth()
+    if auth_response:
+        return auth_response
+    connections, error = load_guacamole_connections()
+    if error:
+        return jsonify({"success": False, "error": error}), 503
+    return jsonify({
+        "success": True,
+        "connections": [safe_connection_response(connection) for connection in connections],
+    })
+
+
+@APP.route("/internal/guacamole/provision", methods=["POST"])
+def api_internal_guacamole_provision():
+    auth_response = require_guacamole_provisioner_auth()
+    if auth_response:
+        return auth_response
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = provision_guacamole_temporary_user(
+            payload.get("selector"),
+            str(payload.get("sessionId") or "").strip(),
+            payload.get("validUntilEpochSeconds"),
+        )
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.exception("Guacamole provisioning failed")
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @APP.route("/api/hosts/discover", methods=["POST"])
@@ -2726,6 +2952,21 @@ def start_scheduler():
         logging.info("Heartbeat poller enabled (interval %ss)", interval)
 
     jobs += RESERVATION_AUTOMATOR.register(scheduler)
+
+    if GUACAMOLE_TEMP_USER_CLEANUP_ENABLED:
+        scheduler.add_job(
+            cleanup_expired_guacamole_temp_users,
+            "interval",
+            seconds=GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS,
+            next_run_time=datetime.now(timezone.utc),
+            id="guacamole-temp-user-cleanup",
+            replace_existing=True,
+        )
+        jobs += 1
+        logging.info(
+            "Guacamole temporary user cleanup enabled (interval %ss)",
+            GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS,
+        )
 
     if jobs == 0:
         logging.info("Scheduler not started (no jobs enabled)")

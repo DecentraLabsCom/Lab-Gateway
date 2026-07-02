@@ -83,9 +83,7 @@
     }
 
     function resolveConnectionAccessKey(connection) {
-        const users = normalizeConnectionUsers(connection);
-        const nonDemoUser = users.find(user => user.toLowerCase() !== 'demo');
-        return nonDemoUser || users[0] || (connection?.id ? String(connection.id) : (connection?.name || ''));
+        return connection?.selector || (connection?.id ? `guac:id:${connection.id}` : '');
     }
 
     function formatConnectionUsers(connection) {
@@ -798,8 +796,8 @@
         $('labAccessURI').value = state.status?.recommendedRemoteAccessURI || `${window.location.origin}/guacamole`;
         $('labAccessKey').value = resolveConnectionAccessKey(conn);
         if (!$('labName').value) $('labName').value = conn?.name || '';
-        const accessUser = resolveConnectionAccessKey(conn);
-        preview.textContent = `Guacamole: ${conn?.name || 'Connection'} (${conn?.hostname || 'no host'}) - access user: ${accessUser || 'n/a'}`;
+        const selector = resolveConnectionAccessKey(conn);
+        preview.textContent = `Guacamole: ${conn?.name || 'Connection'} (${conn?.hostname || 'no host'}) - connection ${selector || 'n/a'}`;
         $('labMaxConcurrentUsers').value = 1;
         syncResourceTypeFields();
     }
@@ -812,14 +810,28 @@
 
     function syncResourceTypeFields() {
         const isFmu = $('labResourceType').value === '1';
+        syncSetupMode();
         $('fmuConfigTitle').hidden = !isFmu;
         $('fmuConfigPanel').hidden = !isFmu;
+        setGroupHidden('.lab-access-key-field', isFmu);
+        setGroupHidden('.lab-fmu-file-field', !isFmu);
         if (isFmu && !$('labFmuFileName').value.trim() && $('labAccessKey').value.trim().toLowerCase().endsWith('.fmu')) {
             $('labFmuFileName').value = $('labAccessKey').value.trim();
         }
         if (isFmu && $('labFmuFileName').value.trim()) {
             $('labAccessKey').value = $('labFmuFileName').value.trim();
         }
+        if (isFmu && !$('labAccessURI').value.trim()) {
+            $('labAccessURI').value = state.status?.recommendedFmuAccessURI || `${window.location.origin}/fmu`;
+        }
+        $('labAccessKey').readOnly = true;
+        $('labAccessURI').readOnly = !isFmu;
+    }
+
+    function setGroupHidden(selector, hidden) {
+        document.querySelectorAll(selector).forEach(element => {
+            element.hidden = hidden;
+        });
     }
 
     async function uploadAssets(files, kind) {
@@ -868,7 +880,12 @@
     }
 
     function buildLabPayload() {
+        syncResourceTypeFields();
         const setupMode = $('labSetupMode').value;
+        const isFmu = $('labResourceType').value === '1';
+        if (isFmu && !$('labFmuFileName').value.trim()) {
+            throw new Error('FMU File Name is required');
+        }
         const payload = {
             setupMode,
             listImmediately: $('labListImmediately').value === 'true',
@@ -971,6 +988,7 @@
     }
 
     function validateMarketplaceFields() {
+        const isFmu = $('labResourceType').value === '1';
         const required = [
             ['Name', $('labName').value.trim()],
             ['Description', $('labDescription').value.trim()],
@@ -1000,14 +1018,14 @@
         if (!opens) throw new Error('Opens is required');
         if (!closes) throw new Error('Closes is required');
         if (closes < opens) throw new Error('Closes must be after or equal to Opens');
-        if ($('labResourceType').value === '1') {
+        if (isFmu) {
             const fmuFileName = $('labFmuFileName').value.trim();
             if (!fmuFileName) throw new Error('FMU File Name is required');
             if (!/^[A-Za-z0-9._/-]+\.fmu$/i.test(fmuFileName)) {
                 throw new Error('FMU File Name must end with .fmu and contain only valid characters');
             }
-        } else if (!$('labAccessKey').value.trim()) {
-            throw new Error('Access Key is required');
+        } else if (!/^guac:id:[1-9][0-9]*$/.test($('labAccessKey').value.trim())) {
+            throw new Error('Connection ID is required');
         }
     }
 

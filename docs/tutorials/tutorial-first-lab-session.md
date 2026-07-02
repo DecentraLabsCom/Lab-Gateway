@@ -13,19 +13,14 @@ running (`docker compose ps` shows every service as `Up`).
 
 ## Overview
 
-```
-Institution server                  Lab computer (Windows)
-┌──────────────────┐                ┌─────────────────────┐
-│  Lab Gateway     │  internal RDP  │  Lab Station + app  │
-│  ├ OpenResty     │◄──────────────►│  (physical or VM)   │
-│  ├ Guacamole     │                └─────────────────────┘
-│  └ blockchain-   │
-│    services      │
-└────────┬─────────┘
-         │ HTTPS
-         ▼
-    User browser
-    (Marketplace)
+```mermaid
+flowchart LR
+    User["User browser / Marketplace"] --> Gateway["Institution server<br/>Lab Gateway"]
+    Gateway --> OpenResty["OpenResty"]
+    Gateway --> Guac["Guacamole"]
+    Gateway --> Backend["blockchain-services"]
+    Guac -- "internal RDP" --> LabPc["Windows lab computer<br/>Lab Station + app"]
+    Backend --> Chain["Smart contracts<br/>reservation check"]
 ```
 
 The gateway receives the user, validates their blockchain reservation, issues a session

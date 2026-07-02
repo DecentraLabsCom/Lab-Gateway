@@ -17,23 +17,21 @@ institucionales de Single Sign-On. No es necesario crear cuentas separadas.
 
 ## Arquitectura
 
-```
-Navegador del usuario
-     │ 1. reservar lab / iniciar sesión
-     ▼
-Marketplace (SP SAML registrado en eduGAIN)
-     │ 2. redirección al IdP de la universidad
-     ▼
-IdP de la universidad (Shibboleth / SimpleSAMLphp / ADFS)
-     │ 3. aserción SAML de vuelta al Marketplace
-     ▼
-Marketplace → emite JWT firmado anclado a la reserva en cadena
-     │ 4. el usuario presenta el JWT + aserción SAML al gateway
-     ▼
-blockchain-services del Lab Gateway (proveedor externo)
-     │ 5. valida JWT + aserción, cruza reserva en cadena, emite JWT de sesión
-     ▼
-Sesión de Guacamole abierta
+```mermaid
+sequenceDiagram
+    participant Browser as Navegador usuario
+    participant Marketplace as Marketplace SAML SP
+    participant IdP as IdP universidad
+    participant Gateway as Lab Gateway blockchain-services
+    participant Guac as Guacamole
+
+    Browser->>Marketplace: reservar lab / iniciar sesion
+    Marketplace->>IdP: redireccion para login SAML
+    IdP-->>Marketplace: asercion SAML
+    Marketplace-->>Browser: JWT firmado anclado a reserva
+    Browser->>Gateway: presentar JWT + asercion SAML
+    Gateway->>Gateway: validar JWT, asercion y reserva
+    Gateway-->>Guac: emitir JWT de sesion / abrir acceso
 ```
 
 `blockchain-services` valida la aserción SAML para el cruce de identidad mediante

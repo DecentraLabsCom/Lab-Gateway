@@ -4,7 +4,7 @@ import sys
 import tempfile
 from unittest.mock import patch
 
-from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, text
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine, text
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
@@ -36,6 +36,12 @@ def make_guacamole_engine(rows):
         Column("entity_id", Integer, primary_key=True),
         Column("name", String(128), nullable=False),
         Column("type", String(16), nullable=False),
+    )
+    Table(
+        "guacamole_user",
+        metadata,
+        Column("entity_id", Integer, primary_key=True),
+        Column("valid_until", DateTime, nullable=True),
     )
     Table(
         "guacamole_connection_permission",
@@ -150,7 +156,7 @@ def test_host_inventory_links_guacamole_connection_by_hostname(client):
         "protocol": "rdp",
         "hostname": "lab-ws-01",
         "port": "3389",
-        "users": ["demo", "alice"],
+        "users": ["demo", "alice", "dlabs-res-session"],
     }]
 
     with with_inventory_state(hosts, guacamole):
@@ -161,9 +167,99 @@ def test_host_inventory_links_guacamole_connection_by_hostname(client):
     assert body["hosts"][0]["name"] == "lab-ws-01"
     assert body["hosts"][0]["guacamole"]["status"] == "linked"
     assert body["hosts"][0]["guacamole"]["connections"][0]["name"] == "RDP Lab 01"
+    assert body["hosts"][0]["guacamole"]["connections"][0]["selector"] == "guac:id:7"
     assert body["hosts"][0]["guacamole"]["connections"][0]["hostname"] == "lab-ws-01"
     assert body["hosts"][0]["guacamole"]["connections"][0]["users"] == ["demo", "alice"]
     assert body["guacamoleUnmatched"] == []
+
+
+def test_cleanup_expired_guacamole_temp_users_removes_only_expired_temp_entities():
+    with with_inventory_state([], []):
+        with worker.GUACAMOLE_DB_ENGINE.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO guacamole_entity (entity_id, name, type) "
+                    "VALUES (1, 'dlabs-res-expired', 'USER'), "
+                    "(2, 'dlabs-res-live', 'USER'), "
+                    "(3, 'alice', 'USER')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO guacamole_user (entity_id, valid_until) "
+                    "VALUES (1, datetime('now', '-1 hour')), "
+                    "(2, datetime('now', '+1 hour')), "
+                    "(3, datetime('now', '-1 hour'))"
+                )
+            )
+
+        deleted = worker.cleanup_expired_guacamole_temp_users()
+
+        with worker.GUACAMOLE_DB_ENGINE.begin() as conn:
+            names = [
+                row[0]
+                for row in conn.execute(
+                    text("SELECT name FROM guacamole_entity ORDER BY entity_id")
+                ).all()
+            ]
+        assert deleted == 1
+        assert names == ["dlabs-res-live", "alice"]
+
+
+def test_internal_guacamole_provision_creates_temp_user(client):
+    guacamole = [{
+        "id": 42,
+        "name": "RDP Lab 42",
+        "protocol": "rdp",
+        "hostname": "lab-ws-42",
+        "port": "3389",
+    }]
+
+    with with_inventory_state([], guacamole):
+        response = client.post(
+            "/internal/guacamole/provision",
+            json={
+                "selector": "guac:id:42",
+                "sessionId": "session-42",
+                "validUntilEpochSeconds": 1800000000,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["success"] is True
+        assert body["username"] == "dlabs-res-session-42"
+        assert body["connection"]["selector"] == "guac:id:42"
+
+        with worker.GUACAMOLE_DB_ENGINE.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT e.name, cp.connection_id, cp.permission
+                    FROM guacamole_entity e
+                    JOIN guacamole_connection_permission cp ON cp.entity_id = e.entity_id
+                    WHERE e.name = 'dlabs-res-session-42'
+                    """
+                )
+            ).mappings().all()
+        assert rows[0]["connection_id"] == 42
+        assert rows[0]["permission"] == "READ"
+
+
+def test_internal_guacamole_provision_requires_token_when_configured(client):
+    original = worker.GUACAMOLE_PROVISIONER_TOKEN
+    try:
+        worker.GUACAMOLE_PROVISIONER_TOKEN = "secret"
+        with with_inventory_state([], []):
+            unauthorized = client.get("/internal/guacamole/connections")
+            authorized = client.get(
+                "/internal/guacamole/connections",
+                headers={"X-Guacamole-Provisioner-Token": "secret"},
+            )
+        assert unauthorized.status_code == 401
+        assert authorized.status_code == 200
+    finally:
+        worker.GUACAMOLE_PROVISIONER_TOKEN = original
 
 
 def test_host_inventory_marks_missing_when_no_connection_matches(client):

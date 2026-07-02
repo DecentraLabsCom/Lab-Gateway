@@ -322,6 +322,7 @@ GUAC_ADMIN_PASS=secure_admin_password
 AUTO_LOGOUT_ON_DISCONNECT=true
 API_SESSION_TIMEOUT=15
 JWT_GUAC_IDLE_TIMEOUT_SECONDS=60
+MANUAL_GUAC_IDLE_TIMEOUT_SECONDS=60
 
 # OpenResty CORS allowlist (comma-separated, optional)
 CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace-decentralabs.vercel.app
@@ -347,6 +348,8 @@ CERTBOT_EMAIL=you@example.com
 CERTBOT_STAGING=0
 ```
 
+See [Guacamole Session Policy](docs/guacamole-session-policy.md) for the different timeout and logout behavior of admin, manual non-admin, and reservation/JWT users.
+
 Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` loopback-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/billing endpoints exposed through OpenResty for remote access.
 
 In the full Lab Gateway compose stack, `blockchain-services` uses the root MySQL credentials and a dedicated schema named `blockchain_services` by default. If you run `blockchain-services` with its own compose file, configure its `BLOCKCHAIN_MYSQL_*` keys in `blockchain-services/.env`.
@@ -360,6 +363,8 @@ environment. All authentication endpoints live under the fixed `/auth` base path
   This gateway exposes its own auth endpoints and validates its own locally generated JWT signing keys.
 - **Lite mode**: set `ISSUER=https://<full-gateway-or-external-issuer>/auth`.
   This gateway no longer acts as the JWT issuer. Instead, it trusts JWTs issued elsewhere and synchronizes the remote public key automatically.
+
+For Full-only, Full + Lite, and standalone `blockchain-services` + Lite topologies, see [Deployment Architectures](docs/deployment-architectures.md).
 
 ##### Deployment modes: Direct vs Router forwarding
 

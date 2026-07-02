@@ -7,6 +7,8 @@
 ## Configuration
 
 * [Guacamole Connections](configuring-lab-connections/guacamole-connections.md)
+* [Deployment Architectures](docs/deployment-architectures.md)
+* [Guacamole Session Policy](docs/guacamole-session-policy.md)
 * [Logging Configuration](LOGGING.md)
 
 ## Installation

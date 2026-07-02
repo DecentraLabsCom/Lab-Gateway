@@ -16,30 +16,28 @@ account creation is needed.
 
 ## Architecture
 
-```
-User browser
-     │ 1. book lab / log in
-     ▼
-Marketplace (registered SAML SP in eduGAIN)
-     │ 2. redirect to university IdP
-     ▼
-University IdP (Shibboleth / SimpleSAMLphp / ADFS)
-     │ 3. SAML assertion back to Marketplace
-     ▼
-Marketplace → issues signed JWT anchored to on-chain reservation
-     │ 4. user presents JWT + SAML assertion to gateway
-     ▼
-Lab Gateway blockchain-services (external provider)
-     │ 5. validates JWT + assertion, cross-checks booking on-chain, issues session JWT
-     ▼
-Guacamole session opened
-```
-
 `blockchain-services` validates the SAML assertion for identity cross-checks using
 auto-discovery of the IdP's published metadata (no manual certificate configuration
 needed). It extracts `userid` and `affiliation` and cross-validates them against the
 Marketplace JWT and the on-chain reservation. It acts as a verifier, not as a
 federation-registered SP.
+
+```mermaid
+sequenceDiagram
+    participant Browser as User browser
+    participant Marketplace as Marketplace SAML SP
+    participant IdP as University IdP
+    participant Gateway as Lab Gateway blockchain-services
+    participant Guac as Guacamole
+
+    Browser->>Marketplace: book lab / log in
+    Marketplace->>IdP: redirect for SAML login
+    IdP-->>Marketplace: SAML assertion
+    Marketplace-->>Browser: signed JWT anchored to reservation
+    Browser->>Gateway: present JWT + SAML assertion
+    Gateway->>Gateway: validate JWT, assertion, and booking
+    Gateway-->>Guac: issue session JWT / open access
+```
 
 ---
 
