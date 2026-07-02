@@ -61,12 +61,33 @@ function createDocument() {
     'labFmuFileName',
     'labAccessURI',
     'labName',
+    'labPrice',
+    'labPriceUnit',
     'labMaxConcurrentUsers',
     'labFmiVersion',
     'labSimulationType',
     'labDefaultStartTime',
     'labDefaultStopTime',
     'labDefaultStepSize',
+    'labCategorySelect',
+    'labEducationalProgramLinked',
+    'labKeywords',
+    'labDescription',
+    'labTimeSlots',
+    'labOpens',
+    'labCloses',
+    'labAvailableHoursStart',
+    'labAvailableHoursEnd',
+    'labTimezone',
+    'labTermsUrl',
+    'labTermsVersion',
+    'labTermsEffectiveDate',
+    'labTermsSha256',
+    'labImageUrls',
+    'labDocUrls',
+    'labDemoEnabled',
+    'labContentId',
+    'labContentIdDisplay',
     'labFmuDescribeStatus',
     'labModelVariablesWrap',
     'labModelVariables',
@@ -74,6 +95,7 @@ function createDocument() {
 
   add(createElement({ className: 'lab-access-key-field' }));
   add(createElement({ className: 'lab-fmu-file-field' }));
+  add(createElement({ className: 'lab-max-concurrent-users-field' }));
 
   return {
     getElementById: (id) => elements.get(id) || null,
@@ -92,7 +114,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
-    window.__labPublisherTestHooks = { state, syncResourceTypeFields, applySelectedResource };
+    window.__labPublisherTestHooks = { state, syncResourceTypeFields, applySelectedResource, buildMetadata };
 })();`
   );
   const document = createDocument();
@@ -109,6 +131,16 @@ assert.match(
   'Connection ID placeholder should only describe Guacamole selectors'
 );
 assert.doesNotMatch(html, /id="labFmuAutoDetectBtn"/, 'FMU metadata should load from the resource dropdown, not a button');
+assert.match(
+  html,
+  /id="labMaxConcurrentUsers"[\s\S]*placeholder="Concurrent users"/,
+  'FMU max concurrent users should be an editable visible field in the FMU configuration'
+);
+assert.doesNotMatch(
+  html,
+  /type="hidden"\s+id="labMaxConcurrentUsers"|id="labMaxConcurrentUsers"\s+type="hidden"/,
+  'FMU max concurrent users must not remain hidden'
+);
 
 const { document, hooks } = loadPublisherHooks();
 hooks.state.status = {
@@ -119,11 +151,13 @@ hooks.state.status = {
 document.getElementById('labResourceType').value = '1';
 document.getElementById('labAccessURI').value = 'https://gateway.example/guacamole';
 document.getElementById('labFmuFileName').value = 'spring-damper.fmu';
+document.getElementById('labMaxConcurrentUsers').value = '1';
 hooks.syncResourceTypeFields();
 
 assert.equal(document.getElementById('labAccessURI').value, 'https://sarlab.dia.uned.es/fmu');
 assert.equal(document.getElementById('labAccessURI').readOnly, true);
 assert.equal(document.getElementById('labAccessKey').value, 'spring-damper.fmu');
+assert.equal(document.getElementById('labMaxConcurrentUsers').value, '2');
 
 document.getElementById('labResourceType').value = '0';
 hooks.syncResourceTypeFields();
@@ -131,6 +165,7 @@ hooks.syncResourceTypeFields();
 assert.equal(document.getElementById('labAccessURI').value, 'https://gateway.example/guacamole');
 assert.equal(document.getElementById('labAccessURI').readOnly, true);
 assert.equal(document.getElementById('labAccessKey').value, '');
+assert.equal(document.getElementById('labMaxConcurrentUsers').value, '1');
 
 document.getElementById('labAccessURI').value = 'https://lite.example.edu/guacamole';
 document.getElementById('labAccessKey').value = 'guac:id:42';
@@ -188,8 +223,25 @@ assert.equal(autoDetect.document.getElementById('labName').value, 'first');
 assert.equal(autoDetect.document.getElementById('labAccessURI').value, 'https://gateway.example/fmu');
 assert.equal(autoDetect.document.getElementById('labAccessKey').value, 'first.fmu');
 assert.equal(autoDetect.document.getElementById('labFmuFileName').value, 'first.fmu');
+assert.equal(autoDetect.document.getElementById('labMaxConcurrentUsers').value, '2');
 assert.equal(autoDetect.document.getElementById('labFmiVersion').value, '2.0');
 assert.match(autoDetect.document.getElementById('labModelVariables').innerHTML, /speed/);
+
+autoDetect.document.getElementById('labMaxConcurrentUsers').value = '8';
+autoDetect.hooks.state.selectedCategories = ['1.2'];
+autoDetect.hooks.state.availableDays = ['MONDAY'];
+autoDetect.document.getElementById('labDescription').value = 'FMU test metadata';
+autoDetect.document.getElementById('labPrice').value = '1';
+autoDetect.document.getElementById('labPriceUnit').value = 'hour';
+autoDetect.document.getElementById('labTimeSlots').value = '30';
+autoDetect.document.getElementById('labOpens').value = '2026-01-01';
+autoDetect.document.getElementById('labCloses').value = '2026-12-31';
+autoDetect.document.getElementById('labAvailableHoursStart').value = '09:00';
+autoDetect.document.getElementById('labAvailableHoursEnd').value = '17:00';
+autoDetect.document.getElementById('labTimezone').value = 'Europe/Madrid';
+const metadata = autoDetect.hooks.buildMetadata();
+const maxConcurrentAttribute = metadata.attributes.find((attr) => attr.trait_type === 'maxConcurrentUsers');
+assert.equal(maxConcurrentAttribute?.value, 8);
 
 autoDetect.document.getElementById('labDetectedResource').value = '1';
 await autoDetect.hooks.applySelectedResource();

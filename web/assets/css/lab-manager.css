@@ -173,6 +173,20 @@ body {
     gap: 14px;
 }
 
+.fmu-config-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.fmu-config-grid .field {
+    min-width: 0;
+}
+
+.fmu-config-grid .field span {
+    min-height: 2.4em;
+    line-height: 1.2;
+}
+
 .onchain-fields-grid {
     grid-template-columns: minmax(160px, 55fr) minmax(88px, 15fr) minmax(130px, 30fr);
 }
@@ -198,6 +212,10 @@ body {
 }
 
 .scheduling-grid .scheduling-timezone-field {
+    grid-column: span 2;
+}
+
+.scheduling-grid .lab-max-concurrent-users-field {
     grid-column: span 2;
 }
 
@@ -688,6 +706,14 @@ body {
     .scheduling-grid .field,
     .scheduling-grid .booking-slot-field,
     .scheduling-grid .scheduling-timezone-field {
+        grid-column: 1 / -1;
+    }
+
+    .fmu-config-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .fmu-config-grid .field {
         grid-column: 1 / -1;
     }
 

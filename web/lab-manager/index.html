@@ -198,6 +198,10 @@
                                         <span>Available Days</span>
                                         <div class="day-toggle-group" id="labAvailableDays"></div>
                                     </div>
+                                    <label class="field lab-max-concurrent-users-field">
+                                        <span>Max Concurrent Users</span>
+                                        <input type="number" id="labMaxConcurrentUsers" min="2" step="1" value="2" placeholder="Concurrent users" inputmode="numeric">
+                                    </label>
                                     <label class="field">
                                         <span>Daily Start Time</span>
                                         <input type="time" id="labAvailableHoursStart" value="09:00" step="900">
@@ -206,7 +210,6 @@
                                         <span>Daily End Time</span>
                                         <input type="time" id="labAvailableHoursEnd" value="17:00" step="900">
                                     </label>
-                                    <input type="hidden" id="labMaxConcurrentUsers" value="1">
                                 </div>
 
                                 <div class="form-section-title with-action">
@@ -231,7 +234,7 @@
 
                                 <div class="form-section-title" id="fmuConfigTitle">FMU Configuration</div>
                                 <div class="fmu-config" id="fmuConfigPanel">
-                                    <div class="form-grid">
+                                    <div class="form-grid fmu-config-grid">
                                         <label class="field">
                                             <span>FMI Version</span>
                                             <input type="text" id="labFmiVersion" readonly>

@@ -839,11 +839,18 @@
         }
     }
 
+    function normalizeMaxConcurrentUsers(value, isFmu) {
+        const parsed = Math.trunc(Number(value));
+        const minimum = isFmu ? 2 : 1;
+        return Number.isFinite(parsed) && parsed >= minimum ? parsed : minimum;
+    }
+
     function syncResourceTypeFields() {
         const isFmu = $('labResourceType').value === '1';
         const accessKeyInput = $('labAccessKey');
         const accessURIInput = $('labAccessURI');
         const fmuFileNameInput = $('labFmuFileName');
+        const maxConcurrentUsersInput = $('labMaxConcurrentUsers');
         syncSetupMode();
         $('fmuConfigTitle').hidden = !isFmu;
         $('fmuConfigPanel').hidden = !isFmu;
@@ -860,10 +867,14 @@
             if (!currentAccessURI || accessURIHasSegment(currentAccessURI, 'guacamole')) {
                 accessURIInput.value = recommendedFmuAccessURI();
             }
+            maxConcurrentUsersInput.value = String(normalizeMaxConcurrentUsers(maxConcurrentUsersInput.value, true));
         } else {
             if (accessKeyInput.value.trim() && !/^guac:id:[1-9][0-9]*$/.test(accessKeyInput.value.trim())) {
                 accessKeyInput.value = '';
             }
+            fmuFileNameInput.value = '';
+            maxConcurrentUsersInput.value = '1';
+            resetFmuDescribeFields(false);
             if (!currentAccessURI || !accessURIHasSegment(currentAccessURI, 'guacamole')) {
                 accessURIInput.value = recommendedRemoteAccessURI();
             }
@@ -1009,7 +1020,7 @@
             { trait_type: 'docs', value: docs },
             { trait_type: 'availableDays', value: [...state.availableDays] },
             { trait_type: 'availableHours', value: sanitizeAvailableHours($('labAvailableHoursStart').value, $('labAvailableHoursEnd').value) },
-            { trait_type: 'maxConcurrentUsers', value: Number($('labMaxConcurrentUsers').value) || 1 },
+            { trait_type: 'maxConcurrentUsers', value: normalizeMaxConcurrentUsers($('labMaxConcurrentUsers').value, resourceType === RESOURCE_TYPES.FMU) },
             { trait_type: 'unavailableWindows', value: unavailableWindows },
             { trait_type: 'termsOfUse', value: termsOfUse },
             { trait_type: 'timezone', value: $('labTimezone').value.trim() || '' },
@@ -1408,6 +1419,7 @@
         $('labListImmediately').value = lab.listed ? 'true' : 'false';
         $('labAccessURI').value = lab.accessURI || '';
         $('labAccessKey').value = lab.accessKey || '';
+        $('labMaxConcurrentUsers').value = Number(lab.resourceType) === 1 ? '2' : '1';
         const priceUnit = resolveLabPriceUnit(lab);
         $('labPriceUnit').value = priceUnit;
         $('labPrice').value = formatRawPriceForUnit(lab.price || '0', priceUnit);
@@ -1512,7 +1524,10 @@
             $('labAvailableHoursStart').value = sanitizeTime(value?.start || '') || '09:00';
             $('labAvailableHoursEnd').value = sanitizeTime(value?.end || '') || '17:00';
         });
-        setAttributeValue(attributes, 'maxConcurrentUsers', value => $('labMaxConcurrentUsers').value = String(value || 1));
+        setAttributeValue(attributes, 'maxConcurrentUsers', value => {
+            const isFmu = $('labResourceType').value === '1';
+            $('labMaxConcurrentUsers').value = String(normalizeMaxConcurrentUsers(value, isFmu));
+        });
         setAttributeValue(attributes, 'unavailableWindows', value => {
             state.unavailableWindows = Array.isArray(value) ? value.map(window => ({ ...window, clientId: cryptoRandomId() })) : [];
             renderUnavailableWindows();
