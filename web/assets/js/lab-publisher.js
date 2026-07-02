@@ -318,7 +318,6 @@
         const assetList = $('labAssetList');
         const addWindow = $('labAddUnavailableWindow');
         const termsUrl = $('labTermsUrl');
-        const fmuAutoDetect = $('labFmuAutoDetectBtn');
         const categorySelect = $('labCategorySelect');
         const educationalProgramLinked = $('labEducationalProgramLinked');
         const fmuFileName = $('labFmuFileName');
@@ -336,7 +335,9 @@
             renderResourceOptions();
             syncResourceTypeFields();
         });
-        resourceSelect.addEventListener('change', applySelectedResource);
+        resourceSelect.addEventListener('change', () => {
+            void applySelectedResource();
+        });
         setupMode.addEventListener('change', syncSetupMode);
         if (priceUnit) priceUnit.addEventListener('change', syncBookingModeFields);
         if (periodUnit) periodUnit.addEventListener('change', () => normalizeAllowedPeriodRange());
@@ -347,7 +348,6 @@
         if (assetList) assetList.addEventListener('click', handleAssetListClick);
         addWindow.addEventListener('click', addUnavailableWindow);
         termsUrl.addEventListener('blur', autoFetchTermsMetadata);
-        fmuAutoDetect.addEventListener('click', autoDetectFmuMetadata);
         if (educationalProgramLinked) {
             educationalProgramLinked.addEventListener('change', () => {
                 state.educationalProgramLinked = educationalProgramLinked.checked;
@@ -549,7 +549,7 @@
                 : `${resource.name || 'Connection'} #${resource.id} ${resource.hostname ? '- ' + resource.hostname : ''}${formatConnectionUsers(resource)}`;
             select.appendChild(option);
         });
-        applySelectedResource();
+        void applySelectedResource();
     }
 
     function uniqueGuacamole() {
@@ -772,33 +772,41 @@
         chooseBtn.hidden = mode !== 'upload';
     }
 
-    function applySelectedResource() {
+    async function applySelectedResource() {
         const type = $('labResourceType').value;
         const index = $('labDetectedResource').value;
         const preview = $('labResourcePreview');
         if (index === '') {
             preview.textContent = 'No resource selected.';
+            resetFmuDescribeFields(false);
             return;
         }
         if (type === '1') {
             const fmu = state.fmus[Number(index)];
-            $('labAccessURI').value = state.status?.recommendedFmuAccessURI || `${window.location.origin}/fmu`;
-            $('labAccessKey').value = fmu?.fileName || '';
-            $('labFmuFileName').value = fmu?.fileName || '';
-            if (!$('labName').value) $('labName').value = (fmu?.fileName || '').replace(/\.fmu$/i, '');
-            preview.textContent = `FMU: ${fmu?.relativePath || fmu?.fileName || 'selected'}`;
+            const fmuFileName = fmu?.fileName || '';
+            $('labAccessURI').value = recommendedFmuAccessURI();
+            $('labAccessKey').value = fmuFileName;
+            $('labFmuFileName').value = fmuFileName;
+            $('labName').value = fmuFileName ? fmuFileName.replace(/\.fmu$/i, '') : '';
+            preview.textContent = `FMU: ${fmu?.relativePath || fmuFileName || 'selected'}`;
             $('labMaxConcurrentUsers').value = Math.max(2, Number($('labMaxConcurrentUsers').value) || 2);
             syncResourceTypeFields();
+            if (fmuFileName) {
+                await autoDetectFmuMetadata();
+            } else {
+                resetFmuDescribeFields(false);
+            }
             return;
         }
 
         const conn = uniqueGuacamole()[Number(index)];
-        $('labAccessURI').value = state.status?.recommendedRemoteAccessURI || `${window.location.origin}/guacamole`;
+        $('labAccessURI').value = recommendedRemoteAccessURI();
         $('labAccessKey').value = resolveConnectionAccessKey(conn);
-        if (!$('labName').value) $('labName').value = conn?.name || '';
+        $('labName').value = conn?.name || '';
         const selector = resolveConnectionAccessKey(conn);
         preview.textContent = `Guacamole: ${conn?.name || 'Connection'} (${conn?.hostname || 'no host'}) - connection ${selector || 'n/a'}`;
         $('labMaxConcurrentUsers').value = 1;
+        resetFmuDescribeFields(false);
         syncResourceTypeFields();
     }
 
@@ -808,24 +816,60 @@
         $('quickMetadataField').hidden = !quick;
     }
 
+    function recommendedRemoteAccessURI() {
+        return state.status?.recommendedRemoteAccessURI || `${window.location.origin}/guacamole`;
+    }
+
+    function recommendedFmuAccessURI() {
+        return state.status?.recommendedFmuAccessURI || `${window.location.origin}/fmu`;
+    }
+
+    function accessURIHasSegment(value, segment) {
+        const text = String(value || '').trim();
+        if (!text) return false;
+        const normalizedSegment = String(segment || '').trim().toLowerCase();
+        try {
+            const url = new URL(text, window.location.origin);
+            return url.pathname
+                .split('/')
+                .map(part => part.toLowerCase())
+                .includes(normalizedSegment);
+        } catch {
+            return text.toLowerCase().includes(`/${normalizedSegment}`);
+        }
+    }
+
     function syncResourceTypeFields() {
         const isFmu = $('labResourceType').value === '1';
+        const accessKeyInput = $('labAccessKey');
+        const accessURIInput = $('labAccessURI');
+        const fmuFileNameInput = $('labFmuFileName');
         syncSetupMode();
         $('fmuConfigTitle').hidden = !isFmu;
         $('fmuConfigPanel').hidden = !isFmu;
         setGroupHidden('.lab-access-key-field', isFmu);
         setGroupHidden('.lab-fmu-file-field', !isFmu);
-        if (isFmu && !$('labFmuFileName').value.trim() && $('labAccessKey').value.trim().toLowerCase().endsWith('.fmu')) {
-            $('labFmuFileName').value = $('labAccessKey').value.trim();
+        if (isFmu && !fmuFileNameInput.value.trim() && accessKeyInput.value.trim().toLowerCase().endsWith('.fmu')) {
+            fmuFileNameInput.value = accessKeyInput.value.trim();
         }
-        if (isFmu && $('labFmuFileName').value.trim()) {
-            $('labAccessKey').value = $('labFmuFileName').value.trim();
+        if (isFmu && fmuFileNameInput.value.trim()) {
+            accessKeyInput.value = fmuFileNameInput.value.trim();
         }
-        if (isFmu && !$('labAccessURI').value.trim()) {
-            $('labAccessURI').value = state.status?.recommendedFmuAccessURI || `${window.location.origin}/fmu`;
+        const currentAccessURI = accessURIInput.value.trim();
+        if (isFmu) {
+            if (!currentAccessURI || accessURIHasSegment(currentAccessURI, 'guacamole')) {
+                accessURIInput.value = recommendedFmuAccessURI();
+            }
+        } else {
+            if (accessKeyInput.value.trim() && !/^guac:id:[1-9][0-9]*$/.test(accessKeyInput.value.trim())) {
+                accessKeyInput.value = '';
+            }
+            if (!currentAccessURI || !accessURIHasSegment(currentAccessURI, 'guacamole')) {
+                accessURIInput.value = recommendedRemoteAccessURI();
+            }
         }
-        $('labAccessKey').readOnly = true;
-        $('labAccessURI').readOnly = !isFmu;
+        accessKeyInput.readOnly = true;
+        accessURIInput.readOnly = true;
     }
 
     function setGroupHidden(selector, hidden) {
@@ -1200,7 +1244,6 @@
         state.fmuDescribeController = controller;
         resetFmuDescribeFields(true);
         status.textContent = 'Loading FMU metadata...';
-        $('labFmuAutoDetectBtn').disabled = true;
         try {
             const tokenResponse = await fetch('/lab-admin/fmu/provider-describe-token', {
                 method: 'POST',
@@ -1222,13 +1265,13 @@
             if (!describeResponse.ok) {
                 throw new Error(metadata.error || `Gateway returned HTTP ${describeResponse.status}`);
             }
+            if (state.fmuDescribeController !== controller) return;
             applyFmuMetadata(metadata);
             status.textContent = 'FMU metadata loaded successfully.';
         } catch (err) {
             if (err.name === 'AbortError') return;
             status.textContent = `Auto-detect failed: ${err.message}`;
         } finally {
-            $('labFmuAutoDetectBtn').disabled = false;
             if (state.fmuDescribeController === controller) state.fmuDescribeController = null;
         }
     }
@@ -1250,6 +1293,9 @@
         $('labDefaultStartTime').value = metadata.defaultStartTime ?? '';
         $('labDefaultStopTime').value = metadata.defaultStopTime ?? '';
         $('labDefaultStepSize').value = metadata.defaultStepSize ?? '';
+        if (metadata.modelName) {
+            $('labName').value = metadata.modelName;
+        }
         state.modelVariables = Array.isArray(metadata.modelVariables) ? metadata.modelVariables : [];
         renderModelVariables();
     }

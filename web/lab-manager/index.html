@@ -89,13 +89,12 @@
                                 <div class="form-grid onchain-fields-grid">
                                     <label class="field lab-access-key-field">
                                         <span>Connection ID</span>
-                                        <input type="text" id="labAccessKey" placeholder="guac:id:42 or model.fmu">
+                                        <input type="text" id="labAccessKey" placeholder="guac:id:42">
                                     </label>
                                     <label class="field lab-fmu-file-field" hidden>
                                         <span>FMU File Name</span>
                                         <div class="input-action-row">
                                             <input type="text" id="labFmuFileName" placeholder="spring-damper.fmu">
-                                            <button class="mini-btn primary" type="button" id="labFmuAutoDetectBtn">Auto-detect</button>
                                         </div>
                                     </label>
                                     <label class="field lab-price-field">
@@ -701,6 +700,6 @@
 
     <script src="../assets/js/auth-token-handler.js?v=lab-admin-strict-token"></script>
     <script src="../assets/js/lab-manager.js"></script>
-    <script src="../assets/js/lab-publisher.js?v=fmu-field-replacement-v1"></script>
+    <script src="../assets/js/lab-publisher.js?v=fmu-resource-autodetect-v1"></script>
 </body>
 </html>
