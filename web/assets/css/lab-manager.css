@@ -215,10 +215,6 @@ body {
     grid-column: span 2;
 }
 
-.scheduling-grid .lab-max-concurrent-users-field {
-    grid-column: span 2;
-}
-
 .scheduling-grid.calendar-period-mode .scheduling-timezone-field {
     grid-column: span 1;
 }
@@ -226,6 +222,14 @@ body {
 .scheduling-grid .booking-slot-field.is-hidden,
 .scheduling-grid .booking-period-field.is-hidden {
     display: none;
+}
+
+.availability-days-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
+    gap: 14px;
+    align-items: start;
 }
 
 .field {
@@ -707,6 +711,10 @@ body {
     .scheduling-grid .booking-slot-field,
     .scheduling-grid .scheduling-timezone-field {
         grid-column: 1 / -1;
+    }
+
+    .availability-days-row {
+        grid-template-columns: 1fr;
     }
 
     .fmu-config-grid {

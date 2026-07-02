@@ -194,14 +194,16 @@
                                         <span>Timezone</span>
                                         <select id="labTimezone"></select>
                                     </label>
-                                    <div class="field full">
-                                        <span>Available Days</span>
-                                        <div class="day-toggle-group" id="labAvailableDays"></div>
+                                    <div class="availability-days-row">
+                                        <div class="field">
+                                            <span>Available Days</span>
+                                            <div class="day-toggle-group" id="labAvailableDays"></div>
+                                        </div>
+                                        <label class="field lab-max-concurrent-users-field">
+                                            <span>Max Concurrent Users</span>
+                                            <input type="number" id="labMaxConcurrentUsers" min="2" step="1" value="2" placeholder="Concurrent users" inputmode="numeric">
+                                        </label>
                                     </div>
-                                    <label class="field lab-max-concurrent-users-field">
-                                        <span>Max Concurrent Users</span>
-                                        <input type="number" id="labMaxConcurrentUsers" min="2" step="1" value="2" placeholder="Concurrent users" inputmode="numeric">
-                                    </label>
                                     <label class="field">
                                         <span>Daily Start Time</span>
                                         <input type="time" id="labAvailableHoursStart" value="09:00" step="900">
