@@ -12,7 +12,7 @@ import subprocess
 import time
 from datetime import datetime, timezone, timedelta
 from threading import RLock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from cryptography.fernet import Fernet, InvalidToken
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -327,7 +327,7 @@ class HostRegistry:
 HOSTS = HostRegistry(load_config())
 
 
-def build_ops_dsn():
+def build_ops_dsn() -> Optional[str]:
     if MYSQL_DSN:
         return MYSQL_DSN
     if MYSQL_USER and MYSQL_PASSWORD and OPS_MYSQL_DATABASE:
@@ -338,7 +338,7 @@ def build_ops_dsn():
             host=MYSQL_HOSTNAME,
             port=MYSQL_PORT,
             database=OPS_MYSQL_DATABASE,
-        )
+        ).render_as_string(hide_password=False)
     return None
 
 
@@ -357,7 +357,7 @@ def build_guacamole_dsn() -> Optional[str]:
             host=MYSQL_HOSTNAME,
             port=MYSQL_PORT,
             database=GUACAMOLE_MYSQL_DATABASE,
-        )
+        ).render_as_string(hide_password=False)
     if not MYSQL_DSN or not GUACAMOLE_MYSQL_DATABASE:
         return None
     try:
@@ -373,13 +373,13 @@ GUACAMOLE_DB_ENGINE: Optional[Engine] = (
 )
 
 
-def to_utc(ts: str) -> Optional[datetime]:
+def to_utc(ts: Any) -> Optional[datetime]:
     if not ts:
         return None
     try:
         # Handle trailing Z
-        ts = ts.replace("Z", "+00:00")
-        return datetime.fromisoformat(ts).astimezone(timezone.utc)
+        value = str(ts).replace("Z", "+00:00")
+        return datetime.fromisoformat(value).astimezone(timezone.utc)
     except Exception:
         return None
 
@@ -1149,7 +1149,9 @@ def api_wol():
     if not mac:
         return jsonify({"error": "mac is required"}), 400
 
-    ping_target = payload.get("ping_target") or (host or {}).get("ping_target") or (host or {}).get("address")
+    ping_target = str(payload.get("ping_target") or (host or {}).get("ping_target") or (host or {}).get("address") or "").strip()
+    if not ping_target:
+        return jsonify({"error": "ping_target or host address is required"}), 400
     attempts = int(payload.get("attempts", 3))
     wait_seconds = float(payload.get("ping_timeout", 10))
     broadcast = payload.get("broadcast")
@@ -1365,7 +1367,7 @@ def api_reservation_end():
     return jsonify(response), status
 
 
-def _to_iso(dt: Optional[datetime]) -> Optional[str]:
+def _to_iso(dt: Any) -> Optional[str]:
     if not dt:
         return None
     if isinstance(dt, str):
@@ -1401,7 +1403,7 @@ def _sanitize_offset(value: Optional[str]) -> int:
     return max(0, parsed)
 
 
-def _rows_to_operations(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _rows_to_operations(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     op_entries: List[Dict[str, Any]] = []
     for op in rows:
         payload = op.get("payload")
@@ -1478,7 +1480,7 @@ def build_reservation_timeline(reservation_id: str, limit: int, offset: int) -> 
                 "offset_value": offset,
             },
         ).mappings().all()
-        op_entries = _rows_to_operations(operations)
+        op_entries = _rows_to_operations([dict(row) for row in operations])
 
         phase_rows = conn.execute(
             text(
@@ -1493,7 +1495,7 @@ def build_reservation_timeline(reservation_id: str, limit: int, offset: int) -> 
             ),
             {"reservation_id": reservation_id, "phase_limit": TIMELINE_PHASE_LOOKBACK},
         ).mappings().all()
-        phase_entries = _rows_to_operations(list(reversed(phase_rows)))
+        phase_entries = _rows_to_operations([dict(row) for row in reversed(phase_rows)])
 
         latest_heartbeat = None
         if host_name:
@@ -1587,8 +1589,8 @@ def _fetch_latest_heartbeat(conn: Connection, host_name: str) -> Optional[Dict[s
     }
 
 
-def _summarize_phases(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
-    def picker(prefixes: List[str]) -> Optional[Dict[str, Any]]:
+def _summarize_phases(operations: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    def picker(prefixes: List[str]) -> Optional[Mapping[str, Any]]:
         for entry in reversed(operations):
             action = entry.get("action") or ""
             if any(action.startswith(prefix) for prefix in prefixes):
@@ -1670,9 +1672,12 @@ def parse_boolish(value: Any) -> bool:
 
 
 def extract_nic_candidates_from_heartbeat(heartbeat: Dict[str, Any]) -> List[Dict[str, Any]]:
-    status = heartbeat.get("status") if isinstance(heartbeat.get("status"), dict) else heartbeat
-    wake = status.get("wake") if isinstance(status, dict) and isinstance(status.get("wake"), dict) else {}
-    adapters = wake.get("nicPower") if isinstance(wake.get("nicPower"), list) else []
+    raw_status = heartbeat.get("status")
+    status = raw_status if isinstance(raw_status, dict) else heartbeat
+    raw_wake = status.get("wake")
+    wake = raw_wake if isinstance(raw_wake, dict) else {}
+    raw_adapters = wake.get("nicPower")
+    adapters = raw_adapters if isinstance(raw_adapters, list) else []
     candidates = []
     for adapter in adapters:
         if not isinstance(adapter, dict):
@@ -1938,7 +1943,7 @@ def require_env_ref_name(value: Any, field: str) -> Tuple[Optional[str], Optiona
     return candidate, None
 
 
-def sanitize_host_name(value: Any, fallback: str) -> Tuple[Optional[str], Optional[str]]:
+def sanitize_host_name(value: Any, fallback: Optional[Any]) -> Tuple[Optional[str], Optional[str]]:
     name = str(value or fallback or "").strip()
     if not HOST_NAME_RE.fullmatch(name):
         return None, "name must contain only letters, numbers, dots, underscores, and hyphens"
@@ -2260,7 +2265,7 @@ def cleanup_expired_guacamole_temp_users() -> int:
                         WHERE e.type = 'USER'
                           AND e.name LIKE 'dlabs-res-%'
                           AND u.valid_until IS NOT NULL
-                          AND u.valid_until < UTC_TIMESTAMP()
+                          AND u.valid_until < UTC_DATE()
                         """
                     )
                 )
@@ -2276,7 +2281,7 @@ def cleanup_expired_guacamole_temp_users() -> int:
                             WHERE e.type = 'USER'
                               AND e.name LIKE 'dlabs-res-%'
                               AND u.valid_until IS NOT NULL
-                              AND u.valid_until < CURRENT_TIMESTAMP
+                              AND u.valid_until < CURRENT_DATE
                         )
                         """
                     )
@@ -2364,7 +2369,7 @@ def api_internal_guacamole_provision():
     payload = request.get_json(silent=True) or {}
     try:
         result = provision_guacamole_temporary_user(
-            payload.get("selector"),
+            str(payload.get("selector") or "").strip(),
             str(payload.get("sessionId") or "").strip(),
             payload.get("validUntilEpochSeconds"),
         )
@@ -2410,13 +2415,16 @@ def api_hosts_provision():
 
     provision_payload = dict(payload)
     if not str(provision_payload.get("mac") or "").strip():
-        suggested_mac = (discovery.get("opsHostDraft") or {}).get("mac")
+        ops_host_draft = discovery.get("opsHostDraft")
+        suggested_mac = ops_host_draft.get("mac") if isinstance(ops_host_draft, dict) else None
         if suggested_mac:
             provision_payload["mac"] = suggested_mac
 
     host_config, error = build_provisioned_host(provision_payload, connection)
     if error:
         return jsonify({"error": error}), 400
+    if host_config is None:
+        return jsonify({"error": "host configuration could not be built"}), 400
 
     existing = HOSTS.get(host_config["name"])
     if existing:
@@ -2594,7 +2602,7 @@ def api_operations_recent():
             "page": (offset // limit) + 1 if limit else 1,
             "pageSize": limit,
         }
-        return jsonify({"operations": _rows_to_operations(rows), "pagination": pagination})
+        return jsonify({"operations": _rows_to_operations([dict(row) for row in rows]), "pagination": pagination})
     except Exception as exc:
         logging.exception("Failed to load recent operations")
         return jsonify({"error": str(exc)}), 500
@@ -2708,9 +2716,9 @@ class ReservationOrchestrator:
             return
 
         for row in start_rows:
-            self._dispatch_start(row)
+            self._dispatch_start(dict(row))
         for row in end_rows:
-            self._dispatch_end(row)
+            self._dispatch_end(dict(row))
 
     def _fetch_start_candidates(self, conn: Connection, now: datetime):
         if conn.dialect.name == "mysql":
@@ -2784,7 +2792,7 @@ class ReservationOrchestrator:
         )
         return result.mappings().all()
 
-    def _dispatch_start(self, row: Dict[str, Any]):
+    def _dispatch_start(self, row: Mapping[str, Any]):
         reservation_id = row["transaction_hash"]
         lab_id = row.get("lab_id")
         host = self.registry.get_by_lab(lab_id)
@@ -2816,7 +2824,7 @@ class ReservationOrchestrator:
         if success:
             self._update_status(reservation_id, row.get("status"), "ACTIVE")
 
-    def _dispatch_end(self, row: Dict[str, Any]):
+    def _dispatch_end(self, row: Mapping[str, Any]):
         reservation_id = row["transaction_hash"]
         lab_id = row.get("lab_id")
         host = self.registry.get_by_lab(lab_id)

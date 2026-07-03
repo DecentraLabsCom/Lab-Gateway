@@ -1,16 +1,24 @@
 import json
+import json
 import os
 import sys
 import tempfile
 from unittest.mock import patch
 
 from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine, text
+from sqlalchemy.engine import Engine
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import worker
+
+
+def guacamole_engine() -> Engine:
+    engine = worker.GUACAMOLE_DB_ENGINE
+    assert engine is not None
+    return engine
 
 
 def make_guacamole_engine(rows):
@@ -175,7 +183,7 @@ def test_host_inventory_links_guacamole_connection_by_hostname(client):
 
 def test_cleanup_expired_guacamole_temp_users_removes_only_expired_temp_entities():
     with with_inventory_state([], []):
-        with worker.GUACAMOLE_DB_ENGINE.begin() as conn:
+        with guacamole_engine().begin() as conn:
             conn.execute(
                 text(
                     "INSERT INTO guacamole_entity (entity_id, name, type) "
@@ -187,15 +195,15 @@ def test_cleanup_expired_guacamole_temp_users_removes_only_expired_temp_entities
             conn.execute(
                 text(
                     "INSERT INTO guacamole_user (entity_id, valid_until) "
-                    "VALUES (1, datetime('now', '-1 hour')), "
-                    "(2, datetime('now', '+1 hour')), "
-                    "(3, datetime('now', '-1 hour'))"
+                    "VALUES (1, date('now', '-1 day')), "
+                    "(2, date('now')), "
+                    "(3, date('now', '-1 day'))"
                 )
             )
 
         deleted = worker.cleanup_expired_guacamole_temp_users()
 
-        with worker.GUACAMOLE_DB_ENGINE.begin() as conn:
+        with guacamole_engine().begin() as conn:
             names = [
                 row[0]
                 for row in conn.execute(
@@ -231,7 +239,7 @@ def test_internal_guacamole_provision_creates_temp_user(client):
         assert body["username"] == "dlabs-res-session-42"
         assert body["connection"]["selector"] == "guac:id:42"
 
-        with worker.GUACAMOLE_DB_ENGINE.begin() as conn:
+        with guacamole_engine().begin() as conn:
             rows = conn.execute(
                 text(
                     """
