@@ -74,6 +74,7 @@ AUTH_SESSION_TICKET_REDEEM_URL = os.getenv(
     "http://blockchain-services:8080/auth/fmu/session-ticket/redeem",
 )
 AUTH_SESSION_TICKET_INTERNAL_TOKEN = os.getenv("AUTH_SESSION_TICKET_INTERNAL_TOKEN", "")
+FMU_GATEWAY_ID = os.getenv("FMU_GATEWAY_ID", os.getenv("GATEWAY_ID", "fmu-runner"))
 FMU_PROXY_RUNTIME_PATH = os.getenv("FMU_PROXY_RUNTIME_PATH", "/app/fmu-proxy-runtime")
 FMU_PROXY_GATEWAY_WS_URL = os.getenv("FMU_PROXY_GATEWAY_WS_URL", "")
 FMU_PROXY_SIGNING_KEY = os.getenv("FMU_PROXY_SIGNING_KEY", "")
@@ -1071,6 +1072,7 @@ async def _redeem_session_ticket(
     session_ticket: str,
     lab_id: Optional[str],
     reservation_key: Optional[str],
+    session_id: Optional[str] = None,
     request_id: Optional[str] = None,
 ) -> dict:
     payload = {"sessionTicket": session_ticket}
@@ -1078,6 +1080,11 @@ async def _redeem_session_ticket(
         payload["labId"] = str(lab_id)
     if reservation_key:
         payload["reservationKey"] = str(reservation_key)
+    if session_id:
+        payload["sessionId"] = str(session_id)
+    if FMU_GATEWAY_ID:
+        payload["gatewayId"] = str(FMU_GATEWAY_ID)
+    payload["observedAt"] = int(time.time())
 
     response = await _post_session_ticket_request(
         AUTH_SESSION_TICKET_REDEEM_URL,
@@ -1092,11 +1099,13 @@ async def _redeem_session_ticket(
     if not isinstance(claims, dict):
         raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "error": "Invalid ticket redeem response"})
     logger.info(
-        "Redeemed FMU session ticket request_id=%s lab_id=%s reservation_key=%s ticket_id=%s",
+        "Redeemed FMU session ticket request_id=%s session_id=%s lab_id=%s reservation_key=%s ticket_id=%s observed=%s",
         request_id or "-",
+        session_id or payload.get("sessionId") or "-",
         lab_id or "-",
         reservation_key or "-",
         _normalize_ticket_id(session_ticket) or "-",
+        payload.get("sessionObserved", False),
     )
     return claims
 

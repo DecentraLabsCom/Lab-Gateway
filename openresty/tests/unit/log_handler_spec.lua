@@ -29,10 +29,18 @@ runner.describe("Log handler", function()
         runner.assert.equals(nil, ngx.shared.cache._data["has_pending_closures"])
     end)
 
-    runner.it("ignores active connections", function()
+    runner.it("reports active JWT-backed websocket connections without marking closures", function()
         local ngx = base_env()
         ngx.var.status = "101"
-        handler.run(ngx)
+        local reported = false
+        handler.run(ngx, {
+            access_audit_reporter = {
+                report_guacamole_session_observed = function()
+                    reported = true
+                end
+            }
+        })
+        runner.assert.truthy(reported)
         runner.assert.equals(nil, ngx.shared.cache._data["has_pending_closures"])
     end)
 

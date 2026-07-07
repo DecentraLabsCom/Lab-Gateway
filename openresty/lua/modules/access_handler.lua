@@ -146,6 +146,8 @@ function _M.run(ngx_ctx, deps)
                         ngx.req.set_header("Authorization", username)
                         ngx.ctx.jwt_authenticated = true
                         ngx.ctx.jwt_username = username
+                        ngx.ctx.jwt_jti = jti
+                        ngx.ctx.jwt_reservation_key = dict:get("reservation:" .. jti)
                         ngx.ctx.jwt_exp = tonumber(exp)
                         ngx.log(ngx.INFO, "Access - Valid cookie. Authorization header set for " .. username)
                         demo_guard.run(ngx)
@@ -233,10 +235,15 @@ function _M.run(ngx_ctx, deps)
     -- on the response without re-doing the full JWT validation.
     dict:set("username:" .. jti, username_lower, 7200)
     dict:set("exp:" .. username_lower, jwt_obj.payload.exp, 7200)
+    if jwt_obj.payload.reservationKey then
+        dict:set("reservation:" .. jti, jwt_obj.payload.reservationKey, 7200)
+    end
 
     ngx.req.set_header("Authorization", username_lower)
     ngx.ctx.jwt_authenticated = true
     ngx.ctx.jwt_username = username_lower
+    ngx.ctx.jwt_jti = jti
+    ngx.ctx.jwt_reservation_key = jwt_obj.payload.reservationKey
     ngx.ctx.jwt_exp = jwt_obj.payload.exp
     ngx.log(ngx.INFO, "Access - JWT validated from URL. Authorization header set for " .. username_lower)
     demo_guard.run(ngx)

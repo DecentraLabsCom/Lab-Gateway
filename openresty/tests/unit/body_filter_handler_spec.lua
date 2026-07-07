@@ -43,6 +43,8 @@ runner.describe("Body filter handler", function()
             cache = {},
             ctx = {
                 jwt_authenticated = true,
+                jwt_jti = "jwt-jti",
+                jwt_reservation_key = "0xabc",
                 jwt_exp = 500
             },
             now = 100
@@ -55,6 +57,8 @@ runner.describe("Body filter handler", function()
         runner.assert.equals("jwtuser", cache["guac_token:jwt-token"])
         runner.assert.equals(500, cache["guac_jwt_exp:jwt-token"])
         runner.assert.equals(100, cache["guac_jwt_last_seen:jwt-token"])
+        runner.assert.equals("jwt-jti", cache["guac_jti:jwt-token"])
+        runner.assert.equals("0xabc", cache["guac_reservation:jwt-token"])
         runner.assert.equals(nil, cache["guac_manual_last_seen:jwt-token"])
     end)
 

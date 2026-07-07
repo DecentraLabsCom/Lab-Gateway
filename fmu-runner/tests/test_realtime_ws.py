@@ -143,7 +143,14 @@ def _patch_realtime_manager(monkeypatch):
     async def _fake_verify(_token: str):
         return _claims()
 
-    async def _fake_redeem(*, session_ticket: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
+    async def _fake_redeem(
+        *,
+        session_ticket: str,
+        lab_id: str | None,
+        reservation_key: str | None,
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ):
         if session_ticket != "st_valid":
             raise RuntimeError("invalid ticket")
         return _claims()
@@ -1590,7 +1597,14 @@ def test_ws_session_create_maps_ticket_redeem_failures(monkeypatch):
     async def _unauthorized(_token: str):
         raise HTTPException(status_code=401, detail="missing token")
 
-    async def _redeem(*, session_ticket: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
+    async def _redeem(
+        *,
+        session_ticket: str,
+        lab_id: str | None,
+        reservation_key: str | None,
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ):
         if session_ticket == "st_expired":
             raise HTTPException(status_code=401, detail="invalid ticket")
         if session_ticket == "st_forbidden":

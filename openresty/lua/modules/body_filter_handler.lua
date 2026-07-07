@@ -61,6 +61,12 @@ function _M.run(ngx_ctx, chunk, eof, deps)
         if jwt_exp then
             dict:set("guac_jwt_exp:" .. decoded.authToken, jwt_exp, 7200)
             dict:set("guac_jwt_last_seen:" .. decoded.authToken, ngx.time(), 7200)
+            if ngx.ctx.jwt_jti then
+                dict:set("guac_jti:" .. decoded.authToken, ngx.ctx.jwt_jti, 7200)
+            end
+            if ngx.ctx.jwt_reservation_key then
+                dict:set("guac_reservation:" .. decoded.authToken, ngx.ctx.jwt_reservation_key, 7200)
+            end
             ngx.log(ngx.INFO, "Body filter - JWT-backed session token marked for " .. decoded.username)
         end
     else
