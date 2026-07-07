@@ -113,6 +113,18 @@ local function capture(path)
     }
 end
 
+local function blockchain_reachable(check)
+    if not check or not check.status then
+        return false
+    end
+    if check.status < 400 then
+        return true
+    end
+    local body = check.body or {}
+    local status = tostring(body.status or ""):upper()
+    return check.status == 503 and status == "DEGRADED"
+end
+
 local function check_dns(host)
     local r, err = resolver:new{ nameservers = { "127.0.0.11" }, retrans = 1, timeout = 100 }
     if not r then
@@ -333,6 +345,7 @@ local block_body = blockchain.body or {}
 if block_body.billing_configured == nil and block_body.treasury_configured ~= nil then
     block_body.billing_configured = block_body.treasury_configured
 end
+local blockchain_ok = blockchain_reachable(blockchain)
 
 -- DNS checks
 local dns_hosts = { "blockchain-services", "guacamole", "ops-worker", "mysql" }
@@ -365,7 +378,7 @@ local status_checks = {
 }
 
 if not lite_mode then
-    table.insert(status_checks, 1, blockchain)
+    table.insert(status_checks, 1, { ok = blockchain_ok })
 elseif lite_auth then
     table.insert(status_checks, { ok = lite_auth.ok })
 end
@@ -383,7 +396,7 @@ local result = {
     status = overall_status(status_checks),
     services = {
         blockchain = {
-            ok = blockchain.ok,
+            ok = blockchain_ok,
             status = blockchain.status,
             required = not lite_mode,
             details = block_body

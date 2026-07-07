@@ -373,6 +373,37 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals(false, result.infra.mysql_up)
     end)
 
+    runner.it("treats blockchain DEGRADED health as reachable and keeps details", function()
+        local opts = healthy_gateway_health_opts()
+        opts.captures["/__health_blockchain"] = {
+            status = 503,
+            body = {
+                status = "DEGRADED",
+                rpc_up = true,
+                marketplace_key_cached = true,
+                private_key_present = true,
+                database_up = true,
+                wallet_configured = true,
+                treasury_configured = false,
+                provider_registered = true,
+                invite_token_configured = true,
+                event_listener_enabled = true,
+                saml_validation_ready = true,
+                jwt_validation = "ready",
+                version = "1.2.3"
+            }
+        }
+
+        local ngx = run_gateway_health(opts)
+
+        local result = ngx._body
+        runner.assert.equals("UP", result.status)
+        runner.assert.equals(true, result.services.blockchain.ok)
+        runner.assert.equals(503, result.services.blockchain.status)
+        runner.assert.equals(false, result.services.blockchain.details.billing_configured)
+        runner.assert.equals("1.2.3", result.version)
+    end)
+
     runner.it("marks lite auth as degraded when the issuer URL is invalid", function()
         local opts = healthy_gateway_health_opts()
         opts.config.lite_mode = 1
