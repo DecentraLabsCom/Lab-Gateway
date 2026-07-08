@@ -98,10 +98,10 @@ function _M.run(ngx_ctx, deps)
         ngx.log(ngx.WARN, "demo_guard: marketplace_url not set; skipping busy check")
     else
         if is_lab_busy(ngx, marketplace_url, lab_id, deps) then
-            ngx.log(ngx.WARN, "demo_guard: rejecting demo access – lab " .. lab_id .. " is currently in use")
+            ngx.log(ngx.WARN, "demo_guard: rejecting demo access - lab " .. lab_id .. " is currently reserved")
             ngx.header["Content-Type"] = "text/plain"
             ngx.status = 503
-            ngx.say("Lab currently in use. Please try again later.")
+            ngx.say("Lab currently reserved. Please try again later.")
             return ngx.exit(503)
         end
     end
