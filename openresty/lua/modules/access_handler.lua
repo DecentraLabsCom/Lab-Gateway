@@ -109,6 +109,23 @@ local function enforce_manual_guac_token_timeout(ngx, dict)
     return false
 end
 
+local function is_temporally_valid_jwt(payload, now)
+    local exp = tonumber(payload and payload.exp)
+    if not exp then
+        return false, "missing exp"
+    end
+    if now > exp then
+        return false, "JWT expired"
+    end
+
+    local nbf = tonumber(payload.nbf)
+    if nbf and now < nbf then
+        return false, "JWT not yet valid"
+    end
+
+    return true, nil
+end
+
 ---Processes the access phase logic that validates the JTI cookie and
 -- propagates the username to Guacamole when it is still valid.
 -- When no JTI cookie is present the JWT supplied via the ?jwt= query
@@ -228,6 +245,12 @@ function _M.run(ngx_ctx, deps)
     if normalize_audience(audience) ~= normalize_audience(req_audience) then
         ngx.log(ngx.WARN, "Access - Invalid audience claim: " .. tostring(audience) ..
             " (expected: " .. req_audience .. ")")
+        return
+    end
+
+    local temporal_ok, temporal_err = is_temporally_valid_jwt(jwt_obj.payload, ngx.time())
+    if not temporal_ok then
+        ngx.log(ngx.WARN, "Access - Invalid temporal JWT claim: " .. tostring(temporal_err))
         return
     end
 

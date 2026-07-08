@@ -1,5 +1,22 @@
 local _M = {}
 
+local function is_temporally_valid_jwt(payload, now)
+    local exp = tonumber(payload and payload.exp)
+    if not exp then
+        return false, "missing exp"
+    end
+    if now > exp then
+        return false, "JWT expired"
+    end
+
+    local nbf = tonumber(payload.nbf)
+    if nbf and now < nbf then
+        return false, "JWT not yet valid"
+    end
+
+    return true, nil
+end
+
 ---Handles the header filter phase by validating Guacamole JWT responses and
 -- issuing a secure cookie that propagates authenticated sessions.
 -- @param ngx_ctx table Optional ngx-like context (defaults to global ngx).
@@ -112,6 +129,13 @@ function _M.run(ngx_ctx, deps)
         return
     end
 
+    local now = ngx.time()
+    local temporal_ok, temporal_err = is_temporally_valid_jwt(jwt_obj.payload, now)
+    if not temporal_ok then
+        ngx.log(ngx.WARN, "Header filter - Invalid temporal JWT claim: " .. tostring(temporal_err))
+        return
+    end
+
     local existing_username = dict:get("username:" .. jti)
     if existing_username then
         -- JTI was already registered (e.g., pre-validated in the access phase).
@@ -119,7 +143,6 @@ function _M.run(ngx_ctx, deps)
         local guac_uri = config:get("guac_uri")
         local exp_time = dict:get("exp:" .. existing_username)
         if exp_time then
-            local now = ngx.time()
             local max_age = tonumber(exp_time) - now
             if max_age > 0 then
                 ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=" .. max_age .. "; Path=" .. guac_uri .. "; Secure; HttpOnly; SameSite=Lax"
@@ -142,7 +165,6 @@ function _M.run(ngx_ctx, deps)
     end
 
     local guac_uri = config:get("guac_uri")
-    local now = ngx.time()
     local max_age = jwt_obj.payload.exp - now
     if max_age < 0 then
         max_age = 0

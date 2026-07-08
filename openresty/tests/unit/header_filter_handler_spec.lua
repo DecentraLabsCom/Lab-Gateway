@@ -115,6 +115,40 @@ runner.describe("Header filter handler", function()
         handler.run(ngx, { jwt = jwt_stub(nil, { fail_signature = true }) })
         runner.assert.equals(nil, ngx.header["Set-Cookie"])
     end)
+
+    runner.it("rejects expired JWT without storing cookie state", function()
+        local payload = build_jwt_payload({ exp = 49 })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            now = 50,
+            header = {},
+            status = 200
+        })
+
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+
+        runner.assert.equals(nil, ngx.header["Set-Cookie"])
+        runner.assert.equals(nil, ngx.shared.cache._data["username:abc"])
+    end)
+
+    runner.it("rejects not-yet-valid JWT without storing cookie state", function()
+        local payload = build_jwt_payload({ nbf = 51 })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            now = 50,
+            header = {},
+            status = 200
+        })
+
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+
+        runner.assert.equals(nil, ngx.header["Set-Cookie"])
+        runner.assert.equals(nil, ngx.shared.cache._data["username:abc"])
+    end)
 end)
 
 return runner

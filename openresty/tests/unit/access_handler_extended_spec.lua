@@ -472,6 +472,32 @@ runner.describe("Access handler – JWT from URL fallback", function()
         runner.assert.equals("bob", ngx.req.headers["Authorization"])
     end)
 
+    runner.it("rejects expired JWT from URL before setting Authorization", function()
+        local payload = build_jwt_payload({ exp = 99 })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            now = 100
+        })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.shared.cache._data["username:jti-url-1"])
+    end)
+
+    runner.it("rejects not-yet-valid JWT from URL before setting Authorization", function()
+        local payload = build_jwt_payload({ nbf = 101 })
+        local ngx = ngx_factory.new({
+            cache = { public_key = "pub" },
+            config = default_config(),
+            var = { arg_jwt = "token" },
+            now = 100
+        })
+        handler.run(ngx, { jwt = jwt_stub(payload) })
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.shared.cache._data["username:jti-url-1"])
+    end)
+
     runner.it("skips when JWT is missing jti claim", function()
         local payload = build_jwt_payload()
         payload.jti = nil
