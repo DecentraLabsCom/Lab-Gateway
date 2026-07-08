@@ -10,7 +10,13 @@ local function extract_arg(args, name)
     if not args or not name then
         return nil
     end
-    return args:match("(^|&)" .. name .. "=([^&]+)")
+    for pair in tostring(args):gmatch("[^&]+") do
+        local key, value = pair:match("^([^=]+)=?(.*)$")
+        if key == name then
+            return key, value
+        end
+    end
+    return nil
 end
 
 local function to_hex(binary)

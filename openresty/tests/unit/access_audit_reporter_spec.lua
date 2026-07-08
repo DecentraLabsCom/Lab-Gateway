@@ -81,6 +81,8 @@ runner.describe("Access audit reporter", function()
         reporter.report_guacamole_session_observed(ngx, deps)
 
         runner.assert.equals(1, #ngx._timer_calls.at)
+        ngx._timer_calls.at[1].callback(false)
+        runner.assert.equals(1, #calls)
     end)
 
     runner.it("skips when reservation metadata is missing", function()
