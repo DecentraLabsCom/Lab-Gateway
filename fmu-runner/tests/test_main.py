@@ -158,22 +158,20 @@ def test_redeem_session_ticket_returns_claims_payload():
                 session_ticket="st_ticket_1",
                 lab_id="42",
                 reservation_key="RES-1",
+                session_id="sess-fmu-1",
                 request_id="req-1",
             )
         )
 
     assert claims == {"sub": "test-user", "labId": "42"}
-    assert fake_client.calls == [{
-        "url": "http://blockchain-services:8080/auth/fmu/session-ticket/redeem",
-        "headers": {
-            "Content-Type": "application/json",
-        },
-        "json": {
-            "sessionTicket": "st_ticket_1",
-            "labId": "42",
-            "reservationKey": "RES-1",
-        },
-    }]
+    assert fake_client.calls[0]["url"] == "http://blockchain-services:8080/auth/fmu/session-ticket/redeem"
+    assert fake_client.calls[0]["headers"] == {"Content-Type": "application/json"}
+    assert fake_client.calls[0]["json"]["sessionTicket"] == "st_ticket_1"
+    assert fake_client.calls[0]["json"]["labId"] == "42"
+    assert fake_client.calls[0]["json"]["reservationKey"] == "RES-1"
+    assert fake_client.calls[0]["json"]["sessionId"] == "sess-fmu-1"
+    assert fake_client.calls[0]["json"]["gatewayId"] == "fmu-runner"
+    assert isinstance(fake_client.calls[0]["json"]["observedAt"], int)
 
 
 def test_redeem_session_ticket_preserves_json_error_payload():

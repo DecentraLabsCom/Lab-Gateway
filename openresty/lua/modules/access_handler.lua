@@ -109,6 +109,23 @@ local function enforce_manual_guac_token_timeout(ngx, dict)
     return false
 end
 
+local function is_temporally_valid_jwt(payload, now)
+    local exp = tonumber(payload and payload.exp)
+    if not exp then
+        return false, "missing exp"
+    end
+    if now > exp then
+        return false, "JWT expired"
+    end
+
+    local nbf = tonumber(payload.nbf)
+    if nbf and now < nbf then
+        return false, "JWT not yet valid"
+    end
+
+    return true, nil
+end
+
 ---Processes the access phase logic that validates the JTI cookie and
 -- propagates the username to Guacamole when it is still valid.
 -- When no JTI cookie is present the JWT supplied via the ?jwt= query
@@ -146,6 +163,8 @@ function _M.run(ngx_ctx, deps)
                         ngx.req.set_header("Authorization", username)
                         ngx.ctx.jwt_authenticated = true
                         ngx.ctx.jwt_username = username
+                        ngx.ctx.jwt_jti = jti
+                        ngx.ctx.jwt_reservation_key = dict:get("reservation:" .. jti)
                         ngx.ctx.jwt_exp = tonumber(exp)
                         ngx.log(ngx.INFO, "Access - Valid cookie. Authorization header set for " .. username)
                         demo_guard.run(ngx)
@@ -229,14 +248,25 @@ function _M.run(ngx_ctx, deps)
         return
     end
 
+    local temporal_ok, temporal_err = is_temporally_valid_jwt(jwt_obj.payload, ngx.time())
+    if not temporal_ok then
+        ngx.log(ngx.WARN, "Access - Invalid temporal JWT claim: " .. tostring(temporal_err))
+        return
+    end
+
     -- Store session data so that header_filter_handler can set the JTI cookie
     -- on the response without re-doing the full JWT validation.
     dict:set("username:" .. jti, username_lower, 7200)
     dict:set("exp:" .. username_lower, jwt_obj.payload.exp, 7200)
+    if jwt_obj.payload.reservationKey then
+        dict:set("reservation:" .. jti, jwt_obj.payload.reservationKey, 7200)
+    end
 
     ngx.req.set_header("Authorization", username_lower)
     ngx.ctx.jwt_authenticated = true
     ngx.ctx.jwt_username = username_lower
+    ngx.ctx.jwt_jti = jti
+    ngx.ctx.jwt_reservation_key = jwt_obj.payload.reservationKey
     ngx.ctx.jwt_exp = jwt_obj.payload.exp
     ngx.log(ngx.INFO, "Access - JWT validated from URL. Authorization header set for " .. username_lower)
     demo_guard.run(ngx)

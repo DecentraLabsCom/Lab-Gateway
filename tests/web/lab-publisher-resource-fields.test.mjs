@@ -63,6 +63,10 @@ function createDocument() {
     'labName',
     'labPrice',
     'labPriceUnit',
+    'labBookingMode',
+    'labAllowedPeriodMin',
+    'labAllowedPeriodMax',
+    'labAllowedPeriodUnit',
     'labMaxConcurrentUsers',
     'labFmiVersion',
     'labSimulationType',
@@ -242,6 +246,27 @@ autoDetect.document.getElementById('labTimezone').value = 'Europe/Madrid';
 const metadata = autoDetect.hooks.buildMetadata();
 const maxConcurrentAttribute = metadata.attributes.find((attr) => attr.trait_type === 'maxConcurrentUsers');
 assert.equal(maxConcurrentAttribute?.value, 8);
+assert.equal(metadata.attributes.find((attr) => attr.trait_type === 'resourceType')?.value, 'fmu');
+
+autoDetect.document.getElementById('labPriceUnit').value = 'week';
+autoDetect.document.getElementById('labAllowedPeriodMin').value = '1';
+autoDetect.document.getElementById('labAllowedPeriodMax').value = '2';
+autoDetect.document.getElementById('labAllowedPeriodUnit').value = 'week';
+const periodMetadata = autoDetect.hooks.buildMetadata();
+const periodAttributes = Object.fromEntries(periodMetadata.attributes.map((attr) => [attr.trait_type, attr.value]));
+assert.equal(periodAttributes.bookingMode, 'calendar-period');
+const plain = (value) => JSON.parse(JSON.stringify(value));
+assert.deepEqual(plain(periodAttributes.allowedDurationRange), { unit: 'week', min: 1, max: 2 });
+assert.deepEqual(plain(periodAttributes.allowedDurations), [
+  { unit: 'week', value: 1 },
+  { unit: 'week', value: 2 },
+]);
+assert.deepEqual(plain(periodAttributes.periodRules), {
+  startGranularity: 'day',
+  allowCustomDateRange: true,
+  minDurationDays: 7,
+  maxDurationDays: 14,
+});
 
 autoDetect.document.getElementById('labDetectedResource').value = '1';
 await autoDetect.hooks.applySelectedResource();

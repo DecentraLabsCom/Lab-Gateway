@@ -143,7 +143,14 @@ def _patch_realtime_manager(monkeypatch):
     async def _fake_verify(_token: str):
         return _claims()
 
-    async def _fake_redeem(*, session_ticket: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
+    async def _fake_redeem(
+        *,
+        session_ticket: str,
+        lab_id: str | None,
+        reservation_key: str | None,
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ):
         if session_ticket != "st_valid":
             raise RuntimeError("invalid ticket")
         return _claims()
@@ -235,6 +242,48 @@ def test_ws_create_with_session_ticket_without_bearer():
         created = ws.receive_json()
         assert created["type"] == "session.created"
         assert created["sessionId"].startswith("sess_")
+
+
+def test_ws_duplicate_ticket_session_create_reuses_local_cache_without_second_redeem(monkeypatch):
+    redeem_calls = []
+
+    async def _fake_redeem(
+        *,
+        session_ticket: str,
+        lab_id: str | None,
+        reservation_key: str | None,
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ):
+        redeem_calls.append({
+            "session_ticket": session_ticket,
+            "lab_id": lab_id,
+            "reservation_key": reservation_key,
+            "session_id": session_id,
+            "request_id": request_id,
+        })
+        return _claims()
+
+    monkeypatch.setattr(_realtime_manager, "redeem_session_ticket", _fake_redeem)
+
+    with client.websocket_connect("/api/v1/fmu/sessions") as ws:
+        message = {
+            "type": "session.create",
+            "requestId": "req-ticket",
+            "labId": "1",
+            "reservationKey": "0xabc",
+            "sessionTicket": "st_valid",
+        }
+        ws.send_text(json.dumps(message))
+        created = ws.receive_json()
+
+        ws.send_text(json.dumps(message))
+        duplicate = ws.receive_json()
+
+    assert duplicate == created
+    assert len(redeem_calls) == 1
+    assert redeem_calls[0]["session_ticket"] == "st_valid"
+    assert redeem_calls[0]["request_id"] == "req-ticket"
 
 
 def test_ws_create_is_rate_limited(monkeypatch):
@@ -1590,7 +1639,14 @@ def test_ws_session_create_maps_ticket_redeem_failures(monkeypatch):
     async def _unauthorized(_token: str):
         raise HTTPException(status_code=401, detail="missing token")
 
-    async def _redeem(*, session_ticket: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
+    async def _redeem(
+        *,
+        session_ticket: str,
+        lab_id: str | None,
+        reservation_key: str | None,
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ):
         if session_ticket == "st_expired":
             raise HTTPException(status_code=401, detail="invalid ticket")
         if session_ticket == "st_forbidden":

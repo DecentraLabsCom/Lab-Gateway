@@ -821,6 +821,7 @@ class RealtimeWsManager:
                     reservation_key = self.normalize_lab_id(message.get("reservationKey"))
                     create_claims = claims
                     session_ticket = str(message.get("sessionTicket") or "").strip()
+                    session_id = "sess_" + uuid4().hex[:12]
                     client_host = websocket.client.host if websocket.client else "unknown"
                     create_key = (
                         f"sub:{create_claims.get('sub')}:{req_lab_id or '-'}"
@@ -864,6 +865,7 @@ class RealtimeWsManager:
                                 session_ticket=session_ticket,
                                 lab_id=req_lab_id,
                                 reservation_key=reservation_key,
+                                session_id=session_id,
                                 request_id=request_id,
                             )
                             self.enforce_fmu_claim(create_claims)
@@ -922,7 +924,6 @@ class RealtimeWsManager:
                     try:
                         fmu_path = self.resolve_fmu_path(str(access_key))
                         self.acquire_slot(claim_lab_id or req_lab_id or "unknown")
-                        session_id = "sess_" + uuid4().hex[:12]
                         session = _RealtimeSession(self, session_id, create_claims, fmu_path)
                         session.ensure_reservation_window()
                         await session.attach(connection)

@@ -204,6 +204,48 @@ def test_station_ws_session_create_redeems_ticket_and_forwards_context(monkeypat
     assert "sessionTicket" not in fake_station.sent_messages[0]
 
 
+def test_station_ws_duplicate_ticket_session_create_reuses_local_cache_without_second_redeem(monkeypatch):
+    manager = _build_manager()
+    fake_station = _FakeStationConnection()
+    redeem_calls = []
+
+    async def _fake_connect(_headers):
+        return fake_station
+
+    async def _fake_redeem(*, session_ticket: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
+        redeem_calls.append({
+            "session_ticket": session_ticket,
+            "lab_id": lab_id,
+            "reservation_key": reservation_key,
+            "request_id": request_id,
+        })
+        return _claims()
+
+    monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    manager.redeem_session_ticket = _fake_redeem
+    monkeypatch.setattr(main, "_realtime_manager", manager)
+
+    with client.websocket_connect("/api/v1/fmu/sessions") as ws:
+        message = {
+            "type": "session.create",
+            "requestId": "req-create",
+            "labId": "1",
+            "reservationKey": "res-1",
+            "sessionTicket": "st_valid",
+        }
+        ws.send_text(json.dumps(message))
+        created = ws.receive_json()
+
+        ws.send_text(json.dumps(message))
+        duplicate = ws.receive_json()
+
+    assert duplicate == created
+    assert len(redeem_calls) == 1
+    assert redeem_calls[0]["session_ticket"] == "st_valid"
+    assert redeem_calls[0]["request_id"] == "req-create"
+    assert len(fake_station.sent_messages) == 1
+
+
 def test_station_ws_attach_requires_bearer(monkeypatch):
     manager = _build_manager()
     monkeypatch.setattr(main, "_realtime_manager", manager)

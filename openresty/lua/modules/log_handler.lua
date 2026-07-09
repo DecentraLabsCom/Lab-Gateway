@@ -23,7 +23,7 @@ local function extract_username_from_token(dict, args)
     return dict:get("guac_token:" .. token)
 end
 
-function _M.run(ngx_ctx)
+function _M.run(ngx_ctx, deps)
     local ngx = ngx_ctx or ngx
     local uri = ngx.var.uri
     if not is_websocket_tunnel(uri) then
@@ -32,6 +32,8 @@ function _M.run(ngx_ctx)
 
     local status = ngx.var.status
     if is_connection_active(status) then
+        local reporter = (deps and deps.access_audit_reporter) or require "modules.access_audit_reporter"
+        reporter.report_guacamole_session_observed(ngx, deps and deps.access_audit)
         return
     end
 
