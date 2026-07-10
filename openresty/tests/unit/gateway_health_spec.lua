@@ -159,29 +159,6 @@ local function build_http_stub(map)
     }
 end
 
-local function build_mysql_stub(opts)
-    return {
-        new = function()
-            return {
-                set_timeout = function(_, timeout) end,
-                connect = function(_, params)
-                    if opts.connect == false then
-                        return nil, opts.connect_err or "mysql connect failed"
-                    end
-                    return true
-                end,
-                query = function(_, query)
-                    if opts.query == false then
-                        return nil, opts.query_err or "mysql query failed"
-                    end
-                    return { { value = 1 } }
-                end,
-                set_keepalive = function(_, max_idle_timeout, pool_size) end
-            }
-        end
-    }
-end
-
 local function run_gateway_health(opts)
     local ngx = ngx_factory.new({
         config = opts.config or {},
@@ -234,8 +211,7 @@ local function run_gateway_health(opts)
     with_module_stubs({
         ["cjson.safe"] = cjson_stub,
         ["resty.dns.resolver"] = build_dns_stub(opts.dns or {}),
-        ["resty.http"] = build_http_stub(opts.http or {}),
-        ["resty.mysql"] = build_mysql_stub(opts.mysql or {})
+        ["resty.http"] = build_http_stub(opts.http or {})
     }, function()
         with_gateway_runtime({
             env = opts.env,
@@ -260,10 +236,7 @@ local function healthy_gateway_health_opts()
         },
         env = {
             SERVER_NAME = "gateway.example",
-            LAB_MANAGER_TOKEN = "lab-token",
-            MYSQL_USER = "guac",
-            MYSQL_PASSWORD = "mysql-secret",
-            MYSQL_DATABASE = "guacamole_db"
+            LAB_MANAGER_TOKEN = "lab-token"
         },
         files = {
             ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nlocal\n-----END PUBLIC KEY-----",
@@ -295,10 +268,6 @@ local function healthy_gateway_health_opts()
                 status = 200,
                 body = "-----BEGIN PUBLIC KEY-----\nremote\n-----END PUBLIC KEY-----"
             }
-        },
-        mysql = {
-            connect = true,
-            query = true
         },
         openssl_output = "notAfter=Jan 12 00:00:00 1970 GMT\n",
         cert_expiry = 86400 * 42,
@@ -355,11 +324,6 @@ runner.describe("OpenResty gateway_health.lua", function()
             ["mysql:3306"] = false,
             ["guacd:4822"] = false
         }
-        opts.mysql = {
-            connect = false,
-            connect_err = "mysql connect failed"
-        }
-
         local ngx = run_gateway_health(opts)
 
         local result = ngx._body
@@ -368,7 +332,6 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals(false, result.services.guacamole.ok)
         runner.assert.equals(false, result.services.guacamole_api.ok)
         runner.assert.equals("connection refused", result.services.guacd.status)
-        runner.assert.equals("mysql connect failed", result.services.guacamole_schema.status)
         runner.assert.equals(false, result.infra.dns["blockchain-services"])
         runner.assert.equals(false, result.infra.mysql_up)
     end)
@@ -443,16 +406,14 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals("invalid public key payload", result.services.lite_auth.remote_public_key_status)
     end)
 
-    runner.it("marks guacamole schema as degraded when mysql credentials are missing", function()
+    runner.it("does not require database credentials for gateway health", function()
         local opts = healthy_gateway_health_opts()
-        opts.env.MYSQL_PASSWORD = ""
 
         local ngx = run_gateway_health(opts)
 
         local result = ngx._body
-        runner.assert.equals("PARTIAL", result.status)
-        runner.assert.equals(false, result.services.guacamole_schema.ok)
-        runner.assert.equals("mysql credentials missing", result.services.guacamole_schema.status)
+        runner.assert.equals("UP", result.status)
+        runner.assert.equals(nil, result.services.guacamole_schema)
         runner.assert.equals(true, result.services.mysql.ok)
     end)
 

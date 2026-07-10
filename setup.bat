@@ -293,6 +293,15 @@ if "!access_code_redeemer_token!"=="" (
     echo Generated access-code redeemer token.
 )
 call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "!access_code_redeemer_token!"
+call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVATION_INGEST_TOKEN" session_observation_ingest_token
+if /i "!session_observation_ingest_token!"=="CHANGE_ME" set "session_observation_ingest_token="
+if "!session_observation_ingest_token!"=="" (
+    call :GenerateHex 32 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%%RANDOM%%RANDOM%%RANDOM%"
+    set "session_observation_ingest_token=soi_!generated_hex!"
+    echo Generated session-observation ingestion token.
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVATION_INGEST_TOKEN" "!session_observation_ingest_token!"
 echo.
 
 echo Lab Manager Backend Allowlist

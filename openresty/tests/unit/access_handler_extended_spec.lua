@@ -11,6 +11,18 @@ runner.describe("Access handler one-time cookie policy", function()
         runner.assert.equals(nil, ngx.req.headers["Authorization"])
     end)
 
+    runner.it("rejects a reservation token when its JWT mapping is absent", function()
+        local ngx = ngx_factory.new({
+            cache = { ["guac_token:reservation-token"] = "dlabs-res-abc" },
+            var = { arg_token = "reservation-token" },
+            now = 100
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+    end)
+
     runner.it("propagates a valid JTI cookie", function()
         local ngx = ngx_factory.new({
             cache = { ["username:jti"] = "alice", ["exp:alice"] = "500" },

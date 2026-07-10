@@ -62,6 +62,24 @@ runner.describe("Body filter handler", function()
         runner.assert.equals(nil, cache["guac_manual_last_seen:jwt-token"])
     end)
 
+    runner.it("retains every JWT-derived mapping until expiration plus cleanup retention", function()
+        local ngx = ngx_factory.new({
+            header = { ["Content-Type"] = "application/json" },
+            cache = {},
+            ctx = { jwt_authenticated = true, jwt_jti = "jwt-jti", jwt_exp = 14500 },
+            now = 100
+        })
+
+        handler.run(ngx, '{"authToken":"long-token","username":"LongUser"}', true, { cjson = cjson })
+
+        local ttl = ngx.shared.cache._ttls["token:longuser"]
+        runner.assert.equals(14700, ttl)
+        runner.assert.equals(ttl, ngx.shared.cache._ttls["guac_token:long-token"])
+        runner.assert.equals(ttl, ngx.shared.cache._ttls["guac_jwt_exp:long-token"])
+        runner.assert.equals(ttl, ngx.shared.cache._ttls["guac_jwt_last_seen:long-token"])
+        runner.assert.equals(ttl, ngx.shared.cache._ttls["guac_jti:long-token"])
+    end)
+
     runner.it("handles chunked responses", function()
         local ngx = new_ngx()
         handler.run(ngx, '{"authToken":"abc",', false, { cjson = cjson })

@@ -33,58 +33,52 @@ local function sha256_hex(ngx, value, deps)
     return to_hex(ngx.sha256_bin(value))
 end
 
-local function enqueue_observation(ngx, payload, deps)
-    if deps and deps.outbox_enqueue then
-        return deps.outbox_enqueue(payload)
+local function deliver_observation(payload, deps)
+    if deps and deps.deliver then
+        return deps.deliver(payload)
     end
 
-    local mysql = require "resty.mysql"
-    local db = mysql:new()
-    db:set_timeout(1000)
-    local ok, err = db:connect({
-        host = os.getenv("MYSQL_HOSTNAME") or os.getenv("MYSQL_HOST") or "mysql",
-        port = tonumber(os.getenv("MYSQL_PORT")) or 3306,
-        database = os.getenv("BLOCKCHAIN_MYSQL_DATABASE") or "blockchain_services",
-        user = os.getenv("MYSQL_USER"),
-        password = os.getenv("MYSQL_PASSWORD"),
-        charset = "utf8mb4",
-        max_packet_size = 1024 * 1024,
-    })
-    if not ok then
-        ngx.log(ngx.WARN, "Access audit - observation outbox unavailable: " .. tostring(err))
-        return false
+    local token = os.getenv("SESSION_OBSERVATION_INGEST_TOKEN") or ""
+    if token == "" then
+        return false, "SESSION_OBSERVATION_INGEST_TOKEN is not configured"
     end
-
-    local quote = function(value)
-        return db:quote_sql_str(tostring(value))
-    end
-    local observed_at = tonumber(payload.observedAt) or ngx.time()
-    local sql = string.format([[
-        INSERT INTO gateway_session_observation_outbox (
-            dedup_key, reservation_key, jwt_jti, session_id, gateway_id,
-            access_type, observed_at, status, next_attempt_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%d), 'PENDING', CURRENT_TIMESTAMP)
-        ON DUPLICATE KEY UPDATE
-            status = IF(status = 'SENT', 'SENT', 'PENDING'),
-            next_attempt_at = IF(status = 'SENT', next_attempt_at, CURRENT_TIMESTAMP),
-            locked_at = IF(status = 'SENT', locked_at, NULL),
-            updated_at = CURRENT_TIMESTAMP
-    ]],
-        quote(payload.dedupKey),
-        quote(payload.reservationKey),
-        quote(payload.jwtJti),
-        quote(payload.sessionId),
-        quote(payload.gatewayId),
-        quote(payload.accessType),
-        observed_at
+    local http = require "resty.http"
+    local cjson = require "cjson.safe"
+    local httpc = http.new()
+    httpc:set_timeout(1000)
+    local res, err = httpc:request_uri(
+        os.getenv("OPS_SESSION_OBSERVATION_INGEST_URL") or "http://ops-worker:8081/internal/session-observations",
+        {
+            method = "POST",
+            body = cjson.encode(payload),
+            headers = {
+                ["Content-Type"] = "application/json",
+                ["X-Gateway-Observation-Token"] = token,
+            },
+        }
     )
-    local result, query_err = db:query(sql)
-    local keepalive_ok, keepalive_err = db:set_keepalive(10000, 5)
-    if not keepalive_ok then
-        ngx.log(ngx.DEBUG, "Access audit - unable to pool outbox connection: " .. tostring(keepalive_err))
+    if not res or res.status < 200 or res.status >= 300 then
+        return false, err or (res and ("status " .. res.status) or "no response")
     end
-    if not result then
-        ngx.log(ngx.WARN, "Access audit - observation outbox insert failed: " .. tostring(query_err))
+    httpc:set_keepalive(10000, 5)
+    return true
+end
+
+local function schedule_observation(ngx, payload, deps)
+    if deps and deps.schedule then
+        return deps.schedule(payload)
+    end
+    local ok, err = ngx.timer.at(0, function(premature)
+        if premature then
+            return
+        end
+        local delivered, delivery_err = deliver_observation(payload, deps)
+        if not delivered then
+            ngx.log(ngx.WARN, "Access audit - observation ingestion failed: " .. tostring(delivery_err))
+        end
+    end)
+    if not ok then
+        ngx.log(ngx.WARN, "Access audit - unable to schedule observation ingestion: " .. tostring(err))
         return false
     end
     return true
@@ -111,16 +105,15 @@ function _M.report_guacamole_session_observed(ngx_ctx, deps)
         return false
     end
 
-    local payload = {
+    return schedule_observation(ngx, {
         dedupKey = session_hash,
         reservationKey = reservation_key,
         jwtJti = jwt_jti,
         sessionId = "guac:" .. session_hash,
         gatewayId = (deps and deps.gateway_id) or os.getenv("GATEWAY_ID") or ngx.shared.config:get("server_name"),
         accessType = "guacamole",
-        observedAt = ngx.time()
-    }
-    return enqueue_observation(ngx, payload, deps)
+        observedAt = ngx.time(),
+    }, deps)
 end
 
 return _M

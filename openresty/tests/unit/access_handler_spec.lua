@@ -3,16 +3,18 @@ local ngx_factory = require "tests.helpers.ngx_stub"
 local handler = require "modules.access_handler"
 
 runner.describe("Access handler", function()
-    runner.it("ignores requests without cookies", function()
+    runner.it("removes client supplied Authorization without cookies", function()
         local ngx = ngx_factory.new()
+        ngx.req.set_header("Authorization", "guacadmin")
         handler.run(ngx)
-        runner.assert.equals(nil, ngx.req.headers["Authorization"], "Authorization header should not be set")
+        runner.assert.equals(nil, ngx.req.headers["Authorization"], "Client Authorization header must never reach Guacamole")
     end)
 
     runner.it("falls through silently for unknown JTI (stale cookie)", function()
         local ngx = ngx_factory.new({
             var = { http_cookie = "foo=bar; JTI=abc123" }
         })
+        ngx.req.set_header("Authorization", "guacadmin")
 
         handler.run(ngx)
         -- Stale cookie: no Authorization header set, no error status – falls through
@@ -26,6 +28,7 @@ runner.describe("Access handler", function()
             cache = cache,
             var = { http_cookie = "JTI=abc" }
         })
+        ngx.req.set_header("Authorization", "guacadmin")
 
         handler.run(ngx)
         -- Missing exp: falls through silently, no Authorization, no error status

@@ -20,12 +20,12 @@ local function new_ngx(opts)
 end
 
 runner.describe("Access audit reporter", function()
-    runner.it("persists Guacamole session observation with its websocket-open timestamp", function()
+    runner.it("schedules Guacamole session observation outside the header filter phase", function()
         local payloads = {}
         local ngx = new_ngx()
 
         local persisted = reporter.report_guacamole_session_observed(ngx, {
-            outbox_enqueue = function(payload)
+            schedule = function(payload)
                 payloads[#payloads + 1] = payload
                 return true
             end,
@@ -46,11 +46,11 @@ runner.describe("Access audit reporter", function()
         runner.assert.equals(1234, payload.observedAt)
     end)
 
-    runner.it("relies on the durable outbox deduplication key for repeated websocket signals", function()
+    runner.it("keeps a stable deduplication key for repeated websocket signals", function()
         local payloads = {}
         local ngx = new_ngx()
         local deps = {
-            outbox_enqueue = function(payload)
+            schedule = function(payload)
                 payloads[#payloads + 1] = payload
                 return true
             end,
@@ -71,7 +71,7 @@ runner.describe("Access audit reporter", function()
         local ngx = new_ngx({ cache = {} })
 
         local scheduled = reporter.report_guacamole_session_observed(ngx, {
-            outbox_enqueue = function(payload)
+            schedule = function(payload)
                 payloads[#payloads + 1] = payload
                 return true
             end,

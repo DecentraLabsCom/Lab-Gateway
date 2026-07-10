@@ -21,7 +21,6 @@ rate_limit_buckets = defaultdict(lambda: {
     "last_refill": time.time()
 })
 issued_session_tickets = {}
-issued_access_codes = {}
 
 
 def check_rate_limit(client_ip: str) -> bool:
@@ -208,26 +207,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, 200, {
                 "success": True,
-                "token": "mock-saml-jwt-token",
-                "labUrl": "https://localhost:18444/guacamole/"
+                "accessCode": "mock-access-code",
+                "labURL": "https://localhost:18444/guacamole/"
             })
-            return
-
-        if parsed.path == "/auth/access-code/issue":
-            if not self.check_rate_limit_and_respond():
-                return
-            if not self.headers.get("X-Marketplace-Authorization", "").startswith("Bearer "):
-                json_response(self, 403, {"error": "Marketplace authentication required"})
-                return
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(content_length) or b"{}")
-            code = f"mock-access-code-{int(time.time() * 1000)}"
-            issued_access_codes[code] = {
-                "token": body.get("token", "mock-saml-jwt-token"),
-                "labURL": "https://localhost:18444/guacamole/",
-                "expires": time.time() + 60,
-            }
-            json_response(self, 200, {"accessCode": code, "labURL": issued_access_codes[code]["labURL"]})
             return
 
         if parsed.path == "/auth/access-code/redeem":
@@ -236,11 +218,10 @@ class Handler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(content_length) or b"{}")
             code = body.get("accessCode")
-            record = issued_access_codes.pop(code, None)
-            if not record or record["expires"] <= time.time():
+            if code != "mock-access-code":
                 json_response(self, 401, {"error": "Invalid or expired access code"})
                 return
-            json_response(self, 200, {"token": record["token"], "labURL": record["labURL"]})
+            json_response(self, 200, {"token": "mock-saml-jwt-token", "labURL": "https://localhost:18444/guacamole/"})
             return
 
         if parsed.path == "/auth/fmu/session-ticket/issue":

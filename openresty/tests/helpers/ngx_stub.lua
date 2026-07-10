@@ -12,8 +12,9 @@ local function new_shared_dict(initial)
         return store[key]
     end
 
-    function dict:set(key, value)
+    function dict:set(key, value, ttl)
         store[key] = value
+        dict._ttls[key] = ttl
         return true
     end
 
@@ -42,6 +43,7 @@ local function new_shared_dict(initial)
     end
 
     dict._data = store
+    dict._ttls = {}
     return dict
 end
 

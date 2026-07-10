@@ -56,17 +56,6 @@ class AuthHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-        if self.path == "/auth/access-code/issue":
-            if self.headers.get("X-Marketplace-Authorization") != MARKETPLACE_AUTHORIZATION:
-                write_json(self, 403, {"error": "Marketplace authentication required"})
-                return
-            request = read_json(self)
-            if not isinstance(request.get("token"), str):
-                write_json(self, 400, {"error": "token is required"})
-                return
-            write_json(self, 200, {"accessCode": ACCESS_CODE, "labURL": "https://lab.test:18443/guacamole/"})
-            return
-
         if self.path == "/auth/access-code/redeem":
             request = read_json(self)
             global redeemed

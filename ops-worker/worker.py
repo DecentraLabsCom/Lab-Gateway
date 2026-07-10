@@ -4,6 +4,7 @@ Ops worker: WoL + WinRM wrapper + heartbeat poller for Lab Station hosts.
 Exposes a small Flask API and optional scheduler.
 """
 import json
+import hmac
 import logging
 import os
 import re
@@ -19,6 +20,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.engine import Engine, Connection
+from sqlalchemy.exc import IntegrityError
 from wakeonlan import send_magic_packet
 import requests
 import winrm
@@ -83,10 +85,19 @@ NOTIFICATION_SERVICE_ACCESS_TOKEN = (
 NOTIFICATION_SERVICE_ENABLED = os.getenv("NOTIFICATION_SERVICE_ENABLED", "true").strip().lower() not in ("false", "0", "no", "off")
 NOTIFICATION_SERVICE_RETRY_ATTEMPTS = max(0, int(os.getenv("NOTIFICATION_SERVICE_RETRY_ATTEMPTS", "3")))
 NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS = max(1, int(os.getenv("NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS", "5")))
-ACCESS_AUDIT_URL = os.getenv(
-    "ACCESS_AUDIT_URL",
-    "http://blockchain-services:8080/access-audit/internal/session-observed",
-)
+def _is_lite_gateway() -> bool:
+    issuer = (os.getenv("ISSUER") or "").strip().rstrip("/")
+    if not issuer:
+        return False
+    server_name = (os.getenv("SERVER_NAME") or "localhost").strip()
+    https_port = (os.getenv("HTTPS_PORT") or "443").strip()
+    local_issuer = f"https://{server_name}{'' if https_port == '443' else ':' + https_port}/auth"
+    return issuer != local_issuer.rstrip("/")
+
+
+ACCESS_AUDIT_URL = os.getenv("ACCESS_AUDIT_URL", "").strip()
+if not ACCESS_AUDIT_URL and not _is_lite_gateway():
+    ACCESS_AUDIT_URL = "http://blockchain-services:8080/access-audit/internal/session-observed"
 ACCESS_AUDIT_TOKEN = os.getenv("ADMIN_ACCESS_TOKEN") or ""
 ACCESS_AUDIT_TOKEN_HEADER = os.getenv("ADMIN_ACCESS_TOKEN_HEADER", "X-Access-Token")
 SESSION_OBSERVATION_OUTBOX_ENABLED = os.getenv(
@@ -104,6 +115,7 @@ SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS = max(
 SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS = max(
     1, int(os.getenv("SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS", "5"))
 )
+SESSION_OBSERVATION_INGEST_TOKEN = os.getenv("SESSION_OBSERVATION_INGEST_TOKEN", "")
 HEARTBEAT_SSE_INTERVAL_SECONDS = max(1, int(os.getenv("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")))
 DISCOVERY_TIMEOUT_SECONDS = max(0.2, float(os.getenv("OPS_DISCOVERY_TIMEOUT_SECONDS", "1.5")))
 DISCOVERY_WINRM_PORTS = [
@@ -3004,6 +3016,67 @@ def session_observation_retry_delay_seconds(attempts: int) -> int:
     return min(300, 5 * (2 ** min(max(0, attempts - 1), 6)))
 
 
+def enqueue_session_observation(payload: Mapping[str, Any]) -> bool:
+    """Persist an OpenResty WebSocket-open observation before it is delivered."""
+    if not DB_ENGINE:
+        return False
+    required_fields = (
+        "dedupKey", "reservationKey", "jwtJti", "sessionId", "gatewayId", "accessType", "observedAt",
+    )
+    if any(not str(payload.get(field) or "").strip() for field in required_fields):
+        return False
+    try:
+        observed_at = datetime.fromtimestamp(int(payload["observedAt"]), tz=timezone.utc).replace(tzinfo=None)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    try:
+        with DB_ENGINE.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO gateway_session_observation_outbox (
+                        dedup_key, reservation_key, jwt_jti, session_id, gateway_id,
+                        access_type, observed_at, status, next_attempt_at
+                    ) VALUES (
+                        :dedup_key, :reservation_key, :jwt_jti, :session_id, :gateway_id,
+                        :access_type, :observed_at, 'PENDING', CURRENT_TIMESTAMP
+                    )
+                    """
+                ),
+                {
+                    "dedup_key": str(payload["dedupKey"]).strip(),
+                    "reservation_key": str(payload["reservationKey"]).strip(),
+                    "jwt_jti": str(payload["jwtJti"]).strip(),
+                    "session_id": str(payload["sessionId"]).strip(),
+                    "gateway_id": str(payload["gatewayId"]).strip(),
+                    "access_type": str(payload["accessType"]).strip().lower(),
+                    "observed_at": observed_at,
+                },
+            )
+        return True
+    except IntegrityError:
+        # The WebSocket upgrade may be observed more than once; the unique
+        # deduplication key makes this a successful idempotent ingest.
+        return True
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Session observation outbox ingest failed: %s", exc)
+        return False
+
+
+@APP.route("/internal/session-observations", methods=["POST"])
+def ingest_session_observation():
+    """Accept observations only from the co-located OpenResty gateway."""
+    if not SESSION_OBSERVATION_INGEST_TOKEN:
+        return jsonify({"accepted": False, "error": "session observation ingestion is disabled"}), 503
+    provided = request.headers.get("X-Gateway-Observation-Token", "")
+    if not hmac.compare_digest(provided, SESSION_OBSERVATION_INGEST_TOKEN):
+        return jsonify({"accepted": False, "error": "unauthorized"}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not enqueue_session_observation(payload):
+        return jsonify({"accepted": False, "error": "invalid or unavailable observation"}), 400
+    return jsonify({"accepted": True}), 202
+
+
 def _claim_session_observation_outbox_rows() -> List[Dict[str, Any]]:
     if not DB_ENGINE:
         return []
@@ -3114,6 +3187,9 @@ def _session_observed_epoch(value: Any) -> int:
 def deliver_session_observation_outbox() -> int:
     """Deliver durable WebSocket-open observations to blockchain-services."""
     if not SESSION_OBSERVATION_OUTBOX_ENABLED or not DB_ENGINE:
+        return 0
+    if not ACCESS_AUDIT_URL:
+        logging.error("Session observation outbox is pending: ACCESS_AUDIT_URL must target the issuing Full gateway")
         return 0
     if not ACCESS_AUDIT_TOKEN:
         logging.error("Session observation outbox is pending: ADMIN_ACCESS_TOKEN is not configured")

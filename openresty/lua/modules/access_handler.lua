@@ -12,7 +12,14 @@ local function enforce_guac_timeout(ngx, dict)
     local token = ngx.var.arg_token
     if not token or token == "" then return false end
     local exp = tonumber(dict:get("guac_jwt_exp:" .. token))
-    if not exp then return false end
+    if not exp then
+        local username = dict:get("guac_token:" .. token)
+        if username and tostring(username):match("^dlabs%-res%-") then
+            reject(ngx, "Unauthorized: Guacamole access session is no longer valid")
+            return true
+        end
+        return false
+    end
     local now = ngx.time()
     if now > exp then
         reject(ngx, "Unauthorized: Guacamole JWT session expired")
@@ -24,13 +31,16 @@ local function enforce_guac_timeout(ngx, dict)
         reject(ngx, "Unauthorized: Guacamole JWT session expired")
         return true
     end
-    dict:set("guac_jwt_last_seen:" .. token, now, 7200)
+    dict:set("guac_jwt_last_seen:" .. token, now, math.max(1, exp - now + 300))
     return false
 end
 
 function _M.run(ngx_ctx)
     local ngx = ngx_ctx or ngx
     local dict = ngx.shared.cache
+    -- Guacamole's header authentication extension must only ever receive a
+    -- username selected by this trusted gateway. Never forward a client value.
+    ngx.req.clear_header("Authorization")
     if enforce_guac_timeout(ngx, dict) then return end
 
     local cookies = ngx.var.http_cookie

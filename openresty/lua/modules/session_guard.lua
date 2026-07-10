@@ -100,11 +100,12 @@ local function revoke_user_token(self, httpc, auth_token, username, success_mess
 
     if not res or res.status ~= 204 then
         ngx.log(ngx.ERR, "Worker - Error revoking Guacamole token for " .. username)
+        return false, user_token
     else
         ngx.log(ngx.INFO, string.format(success_message, username))
     end
 
-    return user_token
+    return true, user_token
 end
 
 function SessionGuard:check_expired_sessions()
@@ -159,13 +160,16 @@ function SessionGuard:check_expired_sessions()
             if not res or res.status ~= 204 then
                 ngx.log(ngx.ERR, "Worker - Error terminating connection for " .. username)
             else
-                dict:delete(enforcement_expiry_cache_key(username))
-                dict:delete("exp:" .. username)
                 ngx.log(ngx.INFO, "Worker - Connection terminated for " .. username)
+                local revoked, user_token = revoke_user_token(
+                    self, httpc, auth_token, username, "Worker - Session token revoked for %s"
+                )
+                if revoked or not user_token then
+                    dict:delete(enforcement_expiry_cache_key(username))
+                    dict:delete("exp:" .. username)
+                    clear_cached_user_token(dict, username, user_token)
+                end
             end
-
-            local user_token = revoke_user_token(self, httpc, auth_token, username, "Worker - Session token revoked for %s")
-            clear_cached_user_token(dict, username, user_token)
         end
     end
 end
@@ -205,18 +209,19 @@ function SessionGuard:check_tunnel_closures()
 
         if closed_time then
             ngx.log(ngx.INFO, "Worker - Processing tunnel closure for user: " .. username)
-            local user_token = revoke_user_token(
+            local revoked, user_token = revoke_user_token(
                 self,
                 httpc,
                 auth_token,
                 username,
                 "Worker - Session token revoked for %s after tunnel closure"
             )
-            clear_cached_user_token(dict, username, user_token)
-            dict:delete("tunnel_closed:" .. username)
+            if revoked or not user_token then
+                clear_cached_user_token(dict, username, user_token)
+                dict:delete("tunnel_closed:" .. username)
+                dict:delete("pending_user:" .. username)
+            end
         end
-
-        dict:delete("pending_user:" .. username)
     end
 
     if #iterate_pending_users(dict) == 0 then

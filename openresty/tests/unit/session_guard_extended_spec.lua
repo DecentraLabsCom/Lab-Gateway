@@ -194,8 +194,9 @@ runner.describe("Session guard extended tests", function()
         local guard, _, ngx = build_guard(cache, responses)
         guard:check_expired_sessions()
         
-        -- Termination failed, exp should NOT be deleted in failure case
-        -- Implementation may vary - depends on error handling
+        local store = ngx.shared.cache._data
+        runner.assert.equals("100", store["guac_enforcement_exp:user1"])
+        runner.assert.equals("token-1", store["token:user1"])
     end)
 
     -- Test: Token revocation failures
@@ -213,9 +214,10 @@ runner.describe("Session guard extended tests", function()
         local guard, _, ngx = build_guard(cache, responses)
         guard:check_expired_sessions()
         
-        -- Connection terminated, token revocation failed
+        -- Connection terminated, but the token and retry marker remain until revocation succeeds.
         local store = ngx.shared.cache._data
-        runner.assert.equals(nil, store["guac_enforcement_exp:user1"])
+        runner.assert.equals("100", store["guac_enforcement_exp:user1"])
+        runner.assert.equals("token-1", store["token:user1"])
     end)
 
     -- Test: Tunnel closures

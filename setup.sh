@@ -333,6 +333,13 @@ if [ -z "$access_code_redeemer_token" ] || [ "$access_code_redeemer_token" = "CH
 fi
 update_env_var "$ROOT_ENV_FILE" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$access_code_redeemer_token"
 
+session_observation_ingest_token=$(get_env_default "SESSION_OBSERVATION_INGEST_TOKEN" "$ROOT_ENV_FILE")
+if [ -z "$session_observation_ingest_token" ] || [ "$session_observation_ingest_token" = "CHANGE_ME" ]; then
+    session_observation_ingest_token="soi_$(openssl rand -hex 32 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated session-observation ingestion token."
+fi
+update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVATION_INGEST_TOKEN" "$session_observation_ingest_token"
+
 echo
 echo "Lab Manager Backend Allowlist"
 echo "============================="

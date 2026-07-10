@@ -1,4 +1,6 @@
 local _M = {}
+local SESSION_CLEANUP_RETENTION_SECONDS = 300
+local DEFAULT_MAPPING_TTL_SECONDS = 7200
 
 local function is_json_response(content_type)
     return content_type and content_type:match("application/json")
@@ -43,29 +45,36 @@ function _M.run(ngx_ctx, chunk, eof, deps)
 
     local dict = ngx.shared.cache
     local username_lower = string.lower(decoded.username)
+    local jwt_exp = nil
+    if ngx.ctx and ngx.ctx.jwt_authenticated then
+        jwt_exp = tonumber(ngx.ctx.jwt_exp) or tonumber(dict:get("exp:" .. username_lower))
+    end
+    local mapping_ttl = DEFAULT_MAPPING_TTL_SECONDS
+    if jwt_exp then
+        mapping_ttl = math.max(1, jwt_exp - ngx.time() + SESSION_CLEANUP_RETENTION_SECONDS)
+    end
 
-    local ok, err = dict:set("token:" .. username_lower, decoded.authToken, 7200)
+    local ok, err = dict:set("token:" .. username_lower, decoded.authToken, mapping_ttl)
     if not ok then
         ngx.log(ngx.ERR, "Body filter - Error storing token in shared dict: " .. tostring(err))
         return
     end
 
-    local ok_reverse, err_reverse = dict:set("guac_token:" .. decoded.authToken, username_lower, 7200)
+    local ok_reverse, err_reverse = dict:set("guac_token:" .. decoded.authToken, username_lower, mapping_ttl)
     if not ok_reverse then
         ngx.log(ngx.ERR, "Body filter - Error storing reverse token mapping: " .. tostring(err_reverse))
         return
     end
 
     if ngx.ctx and ngx.ctx.jwt_authenticated then
-        local jwt_exp = tonumber(ngx.ctx.jwt_exp) or tonumber(dict:get("exp:" .. username_lower))
         if jwt_exp then
-            dict:set("guac_jwt_exp:" .. decoded.authToken, jwt_exp, 7200)
-            dict:set("guac_jwt_last_seen:" .. decoded.authToken, ngx.time(), 7200)
+            dict:set("guac_jwt_exp:" .. decoded.authToken, jwt_exp, mapping_ttl)
+            dict:set("guac_jwt_last_seen:" .. decoded.authToken, ngx.time(), mapping_ttl)
             if ngx.ctx.jwt_jti then
-                dict:set("guac_jti:" .. decoded.authToken, ngx.ctx.jwt_jti, 7200)
+                dict:set("guac_jti:" .. decoded.authToken, ngx.ctx.jwt_jti, mapping_ttl)
             end
             if ngx.ctx.jwt_reservation_key then
-                dict:set("guac_reservation:" .. decoded.authToken, ngx.ctx.jwt_reservation_key, 7200)
+                dict:set("guac_reservation:" .. decoded.authToken, ngx.ctx.jwt_reservation_key, mapping_ttl)
             end
             ngx.log(ngx.INFO, "Body filter - JWT-backed session token marked for " .. decoded.username)
         end

@@ -66,8 +66,8 @@ sequenceDiagram
     Chain-->>Provider: ACCESS_AUTHORIZED
     Provider->>Chain: Final full reservation/window validation
     Provider->>Provider: Activate access and audit credential issuance
-    Provider-->>Marketplace: Access credential and laboratory URL
-    Marketplace->>Provider: Issue one-time code for Guacamole access
+    Provider->>Provider: Persist one-time code before DELIVERED
+    Provider-->>Marketplace: Opaque access code and laboratory URL
     Marketplace-->>User: Opaque access code and laboratory URL
     User->>Gateway: POST /auth/access with code
     Gateway->>Provider: Server-to-server code redemption
@@ -104,7 +104,7 @@ When the consumer and provider backend are the same deployment, Marketplace uses
 
 ### Guacamole
 
-The provider initially returns the signed lab-access JWT to Marketplace, not to the browser URL. Marketplace authenticates server-to-server to `POST /auth/access-code/issue`, exchanges that credential for a short-lived opaque one-time access code, and returns the code with the Guacamole URL.
+The provider keeps the signed lab-access JWT internal. After activation it persists a short-lived opaque one-time access code, then marks provisioning delivered and returns only that code with the Guacamole URL to Marketplace.
 
 The browser submits the code to the gateway with `POST /auth/access`. OpenResty redeems it server-to-server using its redeemer credential, validates the returned JWT, stores only the session mapping, sets a Secure, HttpOnly JTI cookie, and responds with a `303` redirect to a URL without credential material. A code can be redeemed once.
 
@@ -114,11 +114,11 @@ FMU access uses its own session-ticket flow. The Guacamole access-code handoff i
 
 ## Session observation and expiry enforcement
 
-The first successful Guacamole WebSocket upgrade (`101`) is recorded at handshake time in the local MySQL session-observation outbox. The ops worker delivers it to `blockchain-services` with retry and records success only after the backend confirms it. This makes the observation independent of WebSocket closure and durable after it has been written to the outbox.
+The first successful Guacamole WebSocket upgrade (`101`) is captured at handshake time by OpenResty, which schedules an authenticated internal delivery to the Ops Worker. The Ops Worker, not the public proxy, writes the local MySQL session-observation outbox. It delivers the event to `blockchain-services` with retry and marks it sent only after both the audit row and signed `SessionStarted` attestation are durable. This makes the observation independent of WebSocket closure, avoids database credentials in OpenResty, and preserves a retryable record after transient attestation failures.
 
 FMU access records its equivalent observation through session-ticket use. The provider correlates either observation with `access_credential_audit`, creates an EIP-712 `SessionStarted` attestation, persists it locally, and publishes it on chain asynchronously.
 
-For Guacamole, OpenResty also enforces JWT expiry while a remote desktop tunnel is active. It starts the active-connection check after 10 seconds and repeats every 10 seconds. A separate enforcement-expiry marker is retained for five minutes after `exp` only to allow tunnel cleanup; it never extends browser or Guacamole authorization.
+For Guacamole, OpenResty also enforces JWT expiry while a remote desktop tunnel is active. It starts the active-connection check after 10 seconds and repeats every 10 seconds. Every JWT-derived Guacamole mapping is retained until `exp` plus a five-minute cleanup margin. A reservation-scoped token without its mapping is rejected; the cleanup margin only lets the worker close and revoke an already expired tunnel, and never extends browser or Guacamole authorization.
 
 ## Settlement and audit consequences
 

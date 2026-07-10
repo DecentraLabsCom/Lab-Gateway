@@ -97,3 +97,52 @@ def test_retries_when_backend_does_not_confirm_the_observation(monkeypatch):
     assert row["status"] == "RETRY"
     assert row["attempts"] == 1
     assert "recorded=False" in row["last_error"]
+
+
+def test_ingest_requires_the_gateway_specific_token_and_is_idempotent(monkeypatch):
+    engine = create_outbox_engine()
+    monkeypatch.setattr(worker, "DB_ENGINE", engine)
+    monkeypatch.setattr(worker, "SESSION_OBSERVATION_INGEST_TOKEN", "gateway-token")
+    client = worker.APP.test_client()
+    payload = {
+        "dedupKey": "b" * 64,
+        "reservationKey": "0xreservation",
+        "jwtJti": "jwt-jti",
+        "sessionId": "guac:session-hash",
+        "gatewayId": "gateway-a",
+        "accessType": "guacamole",
+        "observedAt": 1767225600,
+    }
+
+    unauthorized = client.post("/internal/session-observations", json=payload)
+    accepted = client.post(
+        "/internal/session-observations",
+        json=payload,
+        headers={"X-Gateway-Observation-Token": "gateway-token"},
+    )
+    duplicate = client.post(
+        "/internal/session-observations",
+        json=payload,
+        headers={"X-Gateway-Observation-Token": "gateway-token"},
+    )
+
+    assert unauthorized.status_code == 401
+    assert accepted.status_code == 202
+    assert duplicate.status_code == 202
+    with engine.begin() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM gateway_session_observation_outbox")).scalar_one()
+    assert count == 1
+
+
+def test_does_not_deliver_lite_gateway_observations_without_the_issuer_audit_url(monkeypatch):
+    engine = create_outbox_engine()
+    insert_pending(engine)
+    monkeypatch.setattr(worker, "DB_ENGINE", engine)
+    monkeypatch.setattr(worker, "ACCESS_AUDIT_TOKEN", "internal-token")
+    monkeypatch.setattr(worker, "ACCESS_AUDIT_URL", "")
+    monkeypatch.setattr(worker, "SESSION_OBSERVATION_OUTBOX_ENABLED", True)
+
+    assert worker.deliver_session_observation_outbox() == 0
+    with engine.begin() as conn:
+        status = conn.execute(text("SELECT status FROM gateway_session_observation_outbox")).scalar_one()
+    assert status == "PENDING"
