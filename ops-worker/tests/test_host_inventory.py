@@ -5,7 +5,7 @@ import sys
 import tempfile
 from unittest.mock import patch
 
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine, text
+from sqlalchemy import Boolean, Column, DateTime, Integer, MetaData, String, Table, create_engine, text
 from sqlalchemy.engine import Engine
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -50,6 +50,7 @@ def make_guacamole_engine(rows):
         metadata,
         Column("entity_id", Integer, primary_key=True),
         Column("valid_until", DateTime, nullable=True),
+        Column("disabled", Boolean, nullable=False, server_default=text("0")),
     )
     Table(
         "guacamole_connection_permission",
@@ -252,6 +253,57 @@ def test_internal_guacamole_provision_creates_temp_user(client):
             ).mappings().all()
         assert rows[0]["connection_id"] == 42
         assert rows[0]["permission"] == "READ"
+
+
+def test_internal_guacamole_provision_can_stage_and_then_activate_temp_user(client):
+    guacamole = [{"id": 42, "name": "RDP Lab 42", "protocol": "rdp", "hostname": "lab-ws-42", "port": "3389"}]
+    with with_inventory_state([], guacamole):
+        staged = client.post(
+            "/internal/guacamole/provision",
+            json={"selector": "guac:id:42", "sessionId": "session-staged", "validUntilEpochSeconds": 1800000000, "activate": False},
+        )
+        assert staged.status_code == 200
+        with guacamole_engine().begin() as conn:
+            entity_id = conn.execute(text("SELECT entity_id FROM guacamole_entity WHERE name = 'dlabs-res-session-staged'")) .scalar()
+            assert conn.execute(text("SELECT disabled FROM guacamole_user WHERE entity_id = :entity_id"), {"entity_id": entity_id}).scalar() == 1
+            assert conn.execute(text("SELECT COUNT(*) FROM guacamole_connection_permission WHERE entity_id = :entity_id"), {"entity_id": entity_id}).scalar() == 0
+
+        activated = client.post(
+            "/internal/guacamole/provision",
+            json={"selector": "guac:id:42", "sessionId": "session-staged", "validUntilEpochSeconds": 1800000000, "activate": True},
+        )
+        assert activated.status_code == 200
+        with guacamole_engine().begin() as conn:
+            assert conn.execute(text("SELECT disabled FROM guacamole_user WHERE entity_id = :entity_id"), {"entity_id": entity_id}).scalar() == 0
+            assert conn.execute(text("SELECT COUNT(*) FROM guacamole_connection_permission WHERE entity_id = :entity_id"), {"entity_id": entity_id}).scalar() == 1
+
+
+def test_internal_guacamole_provision_rejects_non_boolean_activate(client):
+    with with_inventory_state([], [{"id": 42, "name": "RDP Lab 42", "protocol": "rdp", "hostname": "lab-ws-42", "port": "3389"}]):
+        response = client.post(
+            "/internal/guacamole/provision",
+            json={"selector": "guac:id:42", "sessionId": "session-invalid-activate", "validUntilEpochSeconds": 1800000000, "activate": "false"},
+        )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "activate must be a boolean"
+
+
+def test_internal_guacamole_delete_removes_temp_user(client):
+    guacamole = [{"id": 42, "name": "RDP Lab 42", "protocol": "rdp", "hostname": "lab-ws-42", "port": "3389"}]
+    with with_inventory_state([], guacamole):
+        provision = client.post(
+            "/internal/guacamole/provision",
+            json={"selector": "guac:id:42", "sessionId": "session-delete", "validUntilEpochSeconds": 1800000000},
+        )
+        assert provision.status_code == 200
+        deleted = client.delete("/internal/guacamole/provision/session-delete")
+        assert deleted.status_code == 200
+        assert deleted.get_json()["deleted"] is True
+        with guacamole_engine().begin() as conn:
+            remaining = conn.execute(text("SELECT COUNT(*) FROM guacamole_entity WHERE name = 'dlabs-res-session-delete'"))
+            assert remaining.scalar() == 0
+
 
 
 def test_internal_guacamole_provision_requires_token_when_configured(client):

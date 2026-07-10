@@ -28,10 +28,10 @@ sequenceDiagram
     Browser->>Marketplace: reservar lab / iniciar sesion
     Marketplace->>IdP: redireccion para login SAML
     IdP-->>Marketplace: asercion SAML
-    Marketplace-->>Browser: JWT firmado anclado a reserva
-    Browser->>Gateway: presentar JWT + asercion SAML
-    Gateway->>Gateway: validar JWT, asercion y reserva
-    Gateway-->>Guac: emitir JWT de sesion / abrir acceso
+    Marketplace->>Gateway: emitir access_code opaco de un solo uso
+    Browser->>Gateway: POST access_code
+    Gateway->>Gateway: canjear codigo y validar credencial firmada
+    Gateway-->>Browser: 303 a URL limpia + cookie JTI segura
 ```
 
 `blockchain-services` valida la aserción SAML para el cruce de identidad mediante
@@ -98,7 +98,7 @@ Envía una aserción SAML de prueba para un IdP conocido y comprueba la respuest
 En desarrollo puedes llamar al endpoint directamente:
 
 ```bash
-curl -k -X POST https://localhost/auth/saml-auth \
+curl -k -X POST https://localhost/auth/authorize-and-issue \
   -H "Content-Type: application/json" \
   -d '{
     "marketplaceToken": "<jwt-válido-del-marketplace>",

@@ -46,6 +46,8 @@ This remains the conservative policy because manual non-admin accounts are not r
 
 ## Reservation/JWT Users
 
+Browser hand-off uses a one-time opaque access code. The signed lab-access JWT is redeemed server-side by OpenResty and is never placed in the Guacamole URL; the browser receives only the Secure, HttpOnly JTI cookie.
+
 Reservation users are temporary users provisioned as `dlabs-res-...`.
 
 - Created by the gateway-local Guacamole provisioner for a specific reservation.

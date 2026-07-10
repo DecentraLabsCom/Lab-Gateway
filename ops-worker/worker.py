@@ -2155,7 +2155,12 @@ def safe_connection_response(connection: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def provision_guacamole_temporary_user(selector: str, session_id: str, valid_until_epoch: Optional[Any]) -> Dict[str, Any]:
+def provision_guacamole_temporary_user(
+    selector: str,
+    session_id: str,
+    valid_until_epoch: Optional[Any],
+    activate: bool = True,
+) -> Dict[str, Any]:
     if not GUACAMOLE_DB_ENGINE:
         raise RuntimeError("Guacamole database not configured")
     connection_id = parse_guacamole_selector(selector)
@@ -2205,32 +2210,24 @@ def provision_guacamole_temporary_user(selector: str, session_id: str, valid_unt
                 text(
                     """
                     INSERT INTO guacamole_user (entity_id, password_hash, password_date, disabled, expired, valid_until)
-                    VALUES (:entity_id, UNHEX(SHA2(UUID(), 256)), UTC_TIMESTAMP(), FALSE, FALSE, :valid_until)
-                    ON DUPLICATE KEY UPDATE disabled = FALSE, expired = FALSE, valid_until = VALUES(valid_until)
+                    VALUES (:entity_id, UNHEX(SHA2(UUID(), 256)), UTC_TIMESTAMP(), :disabled, FALSE, :valid_until)
+                    ON DUPLICATE KEY UPDATE disabled = VALUES(disabled), expired = FALSE, valid_until = VALUES(valid_until)
                     """
                 ),
-                {"entity_id": entity_id, "valid_until": valid_until_date},
-            )
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
-                    VALUES (:entity_id, :connection_id, 'READ')
-                    ON DUPLICATE KEY UPDATE permission = VALUES(permission)
-                    """
-                ),
-                {"entity_id": entity_id, "connection_id": connection_id},
+                {"entity_id": entity_id, "disabled": not activate, "valid_until": valid_until_date},
             )
         else:
             conn.execute(
                 text(
                     """
-                    INSERT OR REPLACE INTO guacamole_user (entity_id, valid_until)
-                    VALUES (:entity_id, :valid_until)
+                    INSERT OR REPLACE INTO guacamole_user (entity_id, valid_until, disabled)
+                    VALUES (:entity_id, :valid_until, :disabled)
                     """
                 ),
-                {"entity_id": entity_id, "valid_until": valid_until_date},
+                {"entity_id": entity_id, "disabled": not activate, "valid_until": valid_until_date},
             )
+
+        if activate:
             conn.execute(
                 text(
                     """
@@ -2240,14 +2237,39 @@ def provision_guacamole_temporary_user(selector: str, session_id: str, valid_unt
                 ),
                 {"entity_id": entity_id, "connection_id": connection_id},
             )
+        else:
+            conn.execute(
+                text("DELETE FROM guacamole_connection_permission WHERE entity_id = :entity_id"),
+                {"entity_id": entity_id},
+            )
 
-    logging.info("Provisioned temporary Guacamole user %s for connection %s", username, connection_id)
+    logging.info("Provisioned temporary Guacamole user %s for connection %s (active=%s)", username, connection_id, activate)
     return {
         "success": True,
         "sessionId": session_id,
         "username": username,
         "connection": safe_connection_response(connection),
     }
+
+
+def delete_guacamole_temporary_user(session_id: str) -> bool:
+    if not GUACAMOLE_DB_ENGINE:
+        raise RuntimeError("Guacamole database not configured")
+    if not session_id or not re.match(r"^[A-Za-z0-9_.-]{1,128}$", str(session_id)):
+        raise ValueError("sessionId is required and must be a safe identifier")
+    username = f"dlabs-res-{session_id}"
+    with GUACAMOLE_DB_ENGINE.begin() as conn:
+        entity_id = conn.execute(
+            text("SELECT entity_id FROM guacamole_entity WHERE name = :username AND type = 'USER'"),
+            {"username": username},
+        ).scalar()
+        if entity_id is None:
+            return False
+        conn.execute(text("DELETE FROM guacamole_connection_permission WHERE entity_id = :entity_id"), {"entity_id": entity_id})
+        conn.execute(text("DELETE FROM guacamole_user WHERE entity_id = :entity_id"), {"entity_id": entity_id})
+        conn.execute(text("DELETE FROM guacamole_entity WHERE entity_id = :entity_id"), {"entity_id": entity_id})
+    logging.info("Deleted temporary Guacamole user %s", username)
+    return True
 
 
 def cleanup_expired_guacamole_temp_users() -> int:
@@ -2368,16 +2390,35 @@ def api_internal_guacamole_provision():
         return auth_response
     payload = request.get_json(silent=True) or {}
     try:
+        activate = payload.get("activate", True)
+        if not isinstance(activate, bool):
+            raise ValueError("activate must be a boolean")
         result = provision_guacamole_temporary_user(
             str(payload.get("selector") or "").strip(),
             str(payload.get("sessionId") or "").strip(),
             payload.get("validUntilEpochSeconds"),
+            activate,
         )
         return jsonify(result)
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as exc:  # pylint: disable=broad-except
         logging.exception("Guacamole provisioning failed")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@APP.route("/internal/guacamole/provision/<session_id>", methods=["DELETE"])
+def api_internal_guacamole_delete(session_id: str):
+    auth_response = require_guacamole_provisioner_auth()
+    if auth_response:
+        return auth_response
+    try:
+        deleted = delete_guacamole_temporary_user(session_id)
+        return jsonify({"success": True, "deleted": deleted, "sessionId": session_id})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.exception("Guacamole temporary-user cleanup failed")
         return jsonify({"success": False, "error": str(exc)}), 500
 
 

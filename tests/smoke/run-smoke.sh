@@ -74,14 +74,16 @@ else
 fi
 
 # =================================================================
-# Test 2: JWT cookie validation
+# Test 2: one-time access-code exchange and cookie validation
 # =================================================================
-echo "Test 2: JWT cookie validation"
+echo "Test 2: one-time access-code exchange"
 JWT=$(cat "$JWT_FILE")
-curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$COOKIE_FILE" "https://lab.test:${PORT}/guacamole/?jwt=${JWT}" >/dev/null
+ACCESS_RESPONSE=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -X POST -H 'Content-Type: application/json' -d "{\"token\":\"${JWT}\",\"labURL\":\"https://lab.test:${PORT}/guacamole/\"}" https://lab.test:${PORT}/auth/access-code/issue)
+ACCESS_CODE=$(printf '%s' "$ACCESS_RESPONSE" | sed -n 's/.*"accessCode":"\([^"]*\)".*/\1/p')
+curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$COOKIE_FILE" -X POST --data-urlencode "access_code=${ACCESS_CODE}" https://lab.test:${PORT}/auth/access >/dev/null
 
 if grep -q "JTI.*smoke-jti-123" "$COOKIE_FILE"; then
-  log_pass "JWT processed and JTI cookie set"
+  log_pass "Access code redeemed and JTI cookie set"
 else
   log_fail "JTI cookie missing expected entry"
 fi
@@ -178,18 +180,15 @@ else
 fi
 
 # =================================================================
-# Test 10: Invalid JWT rejected
+# Test 10: Invalid access code rejected
 # =================================================================
-echo "Test 10: Invalid JWT rejected"
-INVALID_JWT="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.invalid.signature"
+echo "Test 10: Invalid access code rejected"
 rm -f "$INVALID_COOKIE_FILE"
-INVALID_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$INVALID_COOKIE_FILE" -o /dev/null -w "%{http_code}" "https://lab.test:${PORT}/guacamole/?jwt=${INVALID_JWT}")
-if { [ "$INVALID_STATUS" = "200" ] || [ "$INVALID_STATUS" = "302" ]; } && ! grep -q "JTI" "$INVALID_COOKIE_FILE" 2>/dev/null; then
-  log_pass "Invalid JWT is handled gracefully without creating session cookies"
-elif [ "$INVALID_STATUS" = "200" ] || [ "$INVALID_STATUS" = "302" ]; then
-  log_fail "Invalid JWT should not create session cookies"
+INVALID_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$INVALID_COOKIE_FILE" -o /dev/null -w "%{http_code}" -X POST --data-urlencode 'access_code=invalid-one-time-code' https://lab.test:${PORT}/auth/access)
+if [ "$INVALID_STATUS" = "401" ] && ! grep -q "JTI" "$INVALID_COOKIE_FILE" 2>/dev/null; then
+  log_pass "Invalid access code is handled gracefully without creating session cookies"
 else
-  log_fail "Invalid JWT caused error (status: $INVALID_STATUS)"
+  log_fail "Invalid access code caused error (status: $INVALID_STATUS)"
 fi
 
 # =================================================================

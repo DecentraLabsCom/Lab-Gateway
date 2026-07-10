@@ -33,10 +33,10 @@ sequenceDiagram
     Browser->>Marketplace: book lab / log in
     Marketplace->>IdP: redirect for SAML login
     IdP-->>Marketplace: SAML assertion
-    Marketplace-->>Browser: signed JWT anchored to reservation
-    Browser->>Gateway: present JWT + SAML assertion
-    Gateway->>Gateway: validate JWT, assertion, and booking
-    Gateway-->>Guac: issue session JWT / open access
+    Marketplace->>Gateway: issue opaque one-time access_code
+    Browser->>Gateway: POST access_code
+    Gateway->>Gateway: redeem code and validate signed credential
+    Gateway-->>Browser: 303 clean URL + secure JTI cookie
 ```
 
 ---
@@ -97,7 +97,7 @@ Send a test SAML assertion for a known IdP and check the response. In developmen
 can call the endpoint directly:
 
 ```bash
-curl -k -X POST https://localhost/auth/saml-auth \
+curl -k -X POST https://localhost/auth/authorize-and-issue \
   -H "Content-Type: application/json" \
   -d '{
     "marketplaceToken": "<valid-marketplace-jwt>",
@@ -107,8 +107,9 @@ curl -k -X POST https://localhost/auth/saml-auth \
   }'
 ```
 
-A successful response returns a signed JWT. A `401` means assertion validation failed;
-check logs for details:
+The endpoint returns a signed credential to the server-side Marketplace flow. The browser
+receives only a short-lived, one-time access code and is redirected to a clean URL. A `401`
+means assertion validation failed; check logs for details:
 
 ```bash
 docker compose logs blockchain-services | grep -i saml

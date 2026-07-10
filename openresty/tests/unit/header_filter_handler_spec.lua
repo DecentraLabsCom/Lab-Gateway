@@ -2,152 +2,25 @@ local runner = require "tests.helpers.runner"
 local ngx_factory = require "tests.helpers.ngx_stub"
 local handler = require "modules.header_filter_handler"
 
-local function default_config()
-    return {
-        issuer = "https://issuer.example",
-        https_port = "8443",
-        server_name = "gateway.local",
-        guac_uri = "/guacamole"
-    }
-end
-
-local function build_jwt_payload(overrides)
-    local payload = {
-        jti = "abc",
-        sub = "Alice",
-        iss = "https://issuer.example",
-        aud = "https://gateway.local:8443/guacamole",
-        exp = 200
-    }
-    if overrides then
-        for k, v in pairs(overrides) do
-            payload[k] = v
-        end
-    end
-    return payload
-end
-
-local function jwt_stub(payload, opts)
-    local stub_payload = payload or build_jwt_payload()
-    return {
-        load_jwt = function(_, token)
-            return { valid = true, payload = stub_payload, header = { kid = "1" } }
-        end,
-        verify_jwt_obj = function(_, _, object)
-            if opts and opts.fail_signature then
-                return { verified = false }
-            end
-            return { verified = true, payload = object.payload }
-        end
-    }
-end
-
-runner.describe("Header filter handler", function()
-    runner.it("stores username and cookie when JWT is valid", function()
+runner.describe("Header filter clean redirects", function()
+    runner.it("rewrites relative redirects to the gateway origin", function()
         local ngx = ngx_factory.new({
-            cache = { public_key = "pub" },
-            config = default_config(),
-            var = { arg_jwt = "token" },
-            now = 50,
-            header = {},
-            status = 200
+            config = { https_port = "8443", server_name = "gateway.local" },
+            status = 303,
+            header = { Location = "/guacamole/" }
         })
-
-        local payload = build_jwt_payload({ sub = "Bob", jti = "token123", exp = 150 })
-        handler.run(ngx, { jwt = jwt_stub(payload) })
-
-        local cache = ngx.shared.cache._data
-        runner.assert.equals("bob", cache["username:token123"])
-        runner.assert.equals(150, cache["exp:bob"])
-        runner.assert.truthy(ngx.header["Set-Cookie"]:find("JTI=token123"))
-        runner.assert.truthy(ngx.header["Set-Cookie"]:find("Path=/guacamole"))
+        handler.run(ngx)
+        runner.assert.equals("https://gateway.local:8443/guacamole/", ngx.header.Location)
     end)
 
-    runner.it("skips JWT processing if cookie JTI is valid in cache", function()
-        -- Cookie present AND JTI live in shared dict → skip processing
+    runner.it("does not process JWT query parameters", function()
         local ngx = ngx_factory.new({
-            cache = { public_key = "pub", ["username:existing"] = "alice" },
-            config = default_config(),
-            var = { cookie_JTI = "existing", arg_jwt = "token" }
+            status = 200,
+            var = { arg_jwt = "must-not-be-used" },
+            header = {}
         })
-
-        handler.run(ngx, { jwt = jwt_stub() })
-        -- New JWT's JTI "abc" must NOT be stored (processing was skipped)
-        local cache = ngx.shared.cache._data
-        runner.assert.equals(nil, cache["username:abc"])
-    end)
-
-    runner.it("processes JWT when cookie JTI is stale (not in cache)", function()
-        -- Cookie present but JTI NOT in shared dict → fall through and process JWT
-        local ngx = ngx_factory.new({
-            cache = { public_key = "pub" },  -- no username:stale-jti entry
-            config = default_config(),
-            var = { cookie_JTI = "stale-jti", arg_jwt = "token" },
-            now = 50,
-            header = {},
-            status = 200
-        })
-
-        handler.run(ngx, { jwt = jwt_stub() })
-        -- New JWT should have been processed and cookie set
-        runner.assert.truthy(ngx.header["Set-Cookie"])
-    end)
-
-    runner.it("rejects invalid audience without setting cookie", function()
-        local payload = build_jwt_payload({ aud = "https://wrong" })
-        local ngx = ngx_factory.new({
-            cache = { public_key = "pub" },
-            config = default_config(),
-            var = { arg_jwt = "token" }
-        })
-
-        handler.run(ngx, { jwt = jwt_stub(payload) })
+        handler.run(ngx)
         runner.assert.equals(nil, ngx.header["Set-Cookie"])
-    end)
-
-    runner.it("rejects invalid signature", function()
-        local ngx = ngx_factory.new({
-            cache = { public_key = "pub" },
-            config = default_config(),
-            var = { arg_jwt = "token" }
-        })
-
-        handler.run(ngx, { jwt = jwt_stub(nil, { fail_signature = true }) })
-        runner.assert.equals(nil, ngx.header["Set-Cookie"])
-    end)
-
-    runner.it("rejects expired JWT without storing cookie state", function()
-        local payload = build_jwt_payload({ exp = 49 })
-        local ngx = ngx_factory.new({
-            cache = { public_key = "pub" },
-            config = default_config(),
-            var = { arg_jwt = "token" },
-            now = 50,
-            header = {},
-            status = 200
-        })
-
-        handler.run(ngx, { jwt = jwt_stub(payload) })
-
-        runner.assert.equals(nil, ngx.header["Set-Cookie"])
-        runner.assert.equals(nil, ngx.shared.cache._data["username:abc"])
-    end)
-
-    runner.it("rejects not-yet-valid JWT without storing cookie state", function()
-        local payload = build_jwt_payload({ nbf = 51 })
-        local ngx = ngx_factory.new({
-            cache = { public_key = "pub" },
-            config = default_config(),
-            var = { arg_jwt = "token" },
-            now = 50,
-            header = {},
-            status = 200
-        })
-
-        handler.run(ngx, { jwt = jwt_stub(payload) })
-
-        runner.assert.equals(nil, ngx.header["Set-Cookie"])
-        runner.assert.equals(nil, ngx.shared.cache._data["username:abc"])
     end)
 end)
 

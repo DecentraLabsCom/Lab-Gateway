@@ -45,9 +45,9 @@ runner.describe("Access handler", function()
         })
 
         handler.run(ngx)
-        -- Expired: falls through silently, no Authorization, no error status
+        -- Expired sessions are rejected; a fresh access-code exchange is required.
         runner.assert.equals(nil, ngx.req.headers["Authorization"])
-        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
     end)
 
     runner.it("sets Authorization header for valid cookies", function()
