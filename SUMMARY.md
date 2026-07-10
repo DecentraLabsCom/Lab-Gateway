@@ -11,6 +11,13 @@
 * [Guacamole Session Policy](docs/guacamole-session-policy.md)
 * [Logging Configuration](LOGGING.md)
 
+## Workflows
+
+* [Institutional Reservation Workflow](docs/workflows/institutional-reservation-workflow.md)
+* [Institutional Check-in, Lab Access, and Session Workflow](docs/workflows/institutional-check-in-access-sessions.md)
+* [Laboratory Connectivity](docs/workflows/laboratory-connectivity.md)
+* [Lab Gateway and Lab Station Operations](docs/workflows/gateway-lab-station-operations.md)
+
 ## Installation
 
 * [Setup Script (EN)](docs/install/install-setup-script.md)
