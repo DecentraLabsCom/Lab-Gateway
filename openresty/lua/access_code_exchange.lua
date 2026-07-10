@@ -122,13 +122,13 @@ end
 
 local username_lower = string.lower(username)
 local remaining_lifetime = math.max(1, exp - ngx.time())
+local enforcement_lifetime = remaining_lifetime + ACTIVE_CONNECTION_EXPIRY_RETENTION_SECONDS
 ---@diagnostic disable-next-line: redundant-parameter
 cache:set("username:" .. jti, username_lower, remaining_lifetime)
 ---@diagnostic disable-next-line: redundant-parameter
 cache:set("exp:" .. username_lower, exp, remaining_lifetime)
 ---@diagnostic disable-next-line: redundant-parameter
-cache:set("guac_enforcement_exp:" .. username_lower, exp,
-    remaining_lifetime + ACTIVE_CONNECTION_EXPIRY_RETENTION_SECONDS)
+cache:set("guac_enforcement_exp:" .. username_lower, exp, enforcement_lifetime)
 if claims.reservationKey then
     ---@diagnostic disable-next-line: redundant-parameter
     cache:set("reservation:" .. jti, claims.reservationKey, remaining_lifetime)
