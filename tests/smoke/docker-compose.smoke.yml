@@ -1,7 +1,10 @@
 services:
   blockchain-services:
-    image: hashicorp/http-echo:0.2.3
-    command: ["-listen=:8080", "-text=ok"]
+    build:
+      context: ./mocks/blockchain-services
+      dockerfile: Dockerfile
+    volumes:
+      - ./jwt.txt:/data/jwt.txt:ro
 
   guacamole:
     build:

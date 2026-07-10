@@ -10,6 +10,7 @@ COOKIE_FILE="tests/smoke/cookie.txt"
 JWT_FILE="tests/smoke/jwt.txt"
 INVALID_COOKIE_FILE="tests/smoke/invalid-cookie.txt"
 INSTITUTION_COOKIE_FILE="tests/smoke/institution-cookie.txt"
+REPLAY_COOKIE_FILE="tests/smoke/replay-cookie.txt"
 PASSED=0
 FAILED=0
 
@@ -24,6 +25,7 @@ function cleanup {
   rm -f "$COOKIE_FILE"
   rm -f "$INVALID_COOKIE_FILE"
   rm -f "$INSTITUTION_COOKIE_FILE"
+  rm -f "$REPLAY_COOKIE_FILE"
 }
 
 function log_pass {
@@ -78,7 +80,7 @@ fi
 # =================================================================
 echo "Test 2: one-time access-code exchange"
 JWT=$(cat "$JWT_FILE")
-ACCESS_RESPONSE=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -X POST -H 'Content-Type: application/json' -d "{\"token\":\"${JWT}\",\"labURL\":\"https://lab.test:${PORT}/guacamole/\"}" https://lab.test:${PORT}/auth/access-code/issue)
+ACCESS_RESPONSE=$(printf '%s' "{\"token\":\"${JWT}\",\"labURL\":\"https://lab.test:${PORT}/guacamole/\"}" | curl -sk --resolve lab.test:${PORT}:127.0.0.1 -X POST -H 'Content-Type: application/json' --data-binary @- https://lab.test:${PORT}/auth/access-code/issue)
 ACCESS_CODE=$(printf '%s' "$ACCESS_RESPONSE" | sed -n 's/.*"accessCode":"\([^"]*\)".*/\1/p')
 curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$COOKIE_FILE" -X POST --data-urlencode "access_code=${ACCESS_CODE}" https://lab.test:${PORT}/auth/access >/dev/null
 
@@ -306,6 +308,19 @@ if [ "$AAS_ADMIN_WITH_TOKEN" = "200" ]; then
   log_pass "AAS admin accepts valid lab manager token"
 else
   log_fail "AAS admin should accept valid lab manager token (status: $AAS_ADMIN_WITH_TOKEN)"
+fi
+
+# =================================================================
+# Test 20: Access codes cannot be redeemed twice
+# =================================================================
+echo "Test 20: Access code replay rejected"
+rm -f "$REPLAY_COOKIE_FILE"
+REPLAY_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$REPLAY_COOKIE_FILE" -o /dev/null -w "%{http_code}" \
+  -X POST --data-urlencode "access_code=${ACCESS_CODE}" https://lab.test:${PORT}/auth/access)
+if [ "$REPLAY_STATUS" = "401" ] && ! grep -q "JTI" "$REPLAY_COOKIE_FILE" 2>/dev/null; then
+  log_pass "Redeeming an access code a second time is rejected without creating a session cookie"
+else
+  log_fail "Access-code replay was not rejected safely (status: $REPLAY_STATUS)"
 fi
 
 # =================================================================
