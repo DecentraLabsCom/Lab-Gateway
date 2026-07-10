@@ -13,7 +13,7 @@ stateDiagram-v2
     AdminActive --> AdminActive: close desktop or refresh
 
     Manual --> ManualActive: login
-    ManualActive --> ManualLogin: manual idle timeout
+    ManualActive --> ManualLogin: api-session-timeout expires
     ManualActive --> ManualLogin: close desktop when auto logout is enabled
     ManualActive --> ManualActive: refresh before revocation
 
@@ -29,7 +29,6 @@ The Guacamole admin user is `GUAC_ADMIN_USER`.
 
 - Intended for Guacamole administration.
 - Governed mainly by Guacamole's `api-session-timeout`.
-- Not subject to OpenResty manual idle timeout.
 - Not logged out automatically when a remote desktop tunnel closes.
 - Refreshing `/guacamole/` normally keeps the session while the Guacamole auth token is still valid.
 
@@ -38,7 +37,6 @@ The Guacamole admin user is `GUAC_ADMIN_USER`.
 Manual non-admin users are regular Guacamole users created outside the reservation/JWT flow.
 
 - Governed by Guacamole's `api-session-timeout`.
-- Additionally subject to `MANUAL_GUAC_IDLE_TIMEOUT_SECONDS` in OpenResty.
 - If `AUTO_LOGOUT_ON_DISCONNECT=true`, closing a remote desktop tunnel marks the session for token revocation.
 - After revocation, returning to `/guacamole/` or refreshing requires a new Guacamole login.
 
@@ -65,14 +63,16 @@ This policy treats a reservation as a time window rather than a single-use conne
 ```env
 AUTO_LOGOUT_ON_DISCONNECT=true
 API_SESSION_TIMEOUT=15
-MANUAL_GUAC_IDLE_TIMEOUT_SECONDS=60
 JWT_GUAC_IDLE_TIMEOUT_SECONDS=60
 LAB_ACCESS_JWT_MAX_TTL_SECONDS=14400
 ```
 
 - `API_SESSION_TIMEOUT`: Guacamole auth token timeout, in minutes.
-- `MANUAL_GUAC_IDLE_TIMEOUT_SECONDS`: OpenResty idle timeout for manual non-admin Guacamole tokens.
 - `JWT_GUAC_IDLE_TIMEOUT_SECONDS`: OpenResty idle timeout for reservation/JWT-backed Guacamole tokens on HTTP requests.
 - `LAB_ACCESS_JWT_MAX_TTL_SECONDS`: maximum lifetime of lab-access JWTs issued by `blockchain-services`.
 
-OpenResty enforces JWT expiration even while a remote desktop tunnel is active by periodically closing expired active connections.
+OpenResty enforces JWT expiration even while a remote desktop tunnel is active by starting its active-connection check after 10 seconds and repeating it every 10 seconds. It retains the expiry marker for five minutes after `exp` solely so the worker can complete that cleanup if the browser-facing JTI key has already expired; this retention never extends authorization.
+
+## Session-start Observation
+
+For reservation users, OpenResty records the successful `101` WebSocket upgrade as the session-open timestamp. The event is inserted into the local MySQL outbox before delivery to `blockchain-services`; the ops worker retries delivery with backoff and marks it sent only after the backend confirms `recorded=true`. This observation is therefore independent of tunnel closure and survives process restarts once enqueued.

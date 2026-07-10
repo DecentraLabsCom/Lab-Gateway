@@ -322,7 +322,6 @@ GUAC_ADMIN_PASS=secure_admin_password
 AUTO_LOGOUT_ON_DISCONNECT=true
 API_SESSION_TIMEOUT=15
 JWT_GUAC_IDLE_TIMEOUT_SECONDS=60
-MANUAL_GUAC_IDLE_TIMEOUT_SECONDS=60
 
 # OpenResty CORS allowlist (comma-separated, optional)
 CORS_ALLOWED_ORIGINS=https://your-frontend.com,https://marketplace-decentralabs.vercel.app

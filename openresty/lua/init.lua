@@ -108,11 +108,6 @@ if jwt_guac_idle_timeout_seconds < 1 then
     jwt_guac_idle_timeout_seconds = 60
 end
 
-local manual_guac_idle_timeout_seconds = tonumber(trim(os.getenv("MANUAL_GUAC_IDLE_TIMEOUT_SECONDS")) or "") or 60
-if manual_guac_idle_timeout_seconds < 1 then
-    manual_guac_idle_timeout_seconds = 60
-end
-
 config:set("server_name", server_name)
 config:set("guac_uri", "/guacamole")
 config:set("issuer", issuer)
@@ -123,7 +118,6 @@ config:set("admin_pass", admin_pass)
 config:set("https_port", https_port)
 config:set("auto_logout_on_disconnect", auto_logout:lower() == "true")
 config:set("jwt_guac_idle_timeout_seconds", jwt_guac_idle_timeout_seconds)
-config:set("manual_guac_idle_timeout_seconds", manual_guac_idle_timeout_seconds)
 if guac_api_url and guac_api_url ~= "" then
     config:set("guac_api_url", guac_api_url)
 else

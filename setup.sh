@@ -326,6 +326,13 @@ update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN" "$lab_manager_token"
 update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN_HEADER" "X-Lab-Manager-Token"
 update_env_var "$ROOT_ENV_FILE" "LAB_MANAGER_TOKEN_COOKIE" "lab_manager_token"
 
+access_code_redeemer_token=$(get_env_default "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$ROOT_ENV_FILE")
+if [ -z "$access_code_redeemer_token" ] || [ "$access_code_redeemer_token" = "CHANGE_ME" ]; then
+    access_code_redeemer_token="acr_$(openssl rand -hex 32 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated access-code redeemer token."
+fi
+update_env_var "$ROOT_ENV_FILE" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$access_code_redeemer_token"
+
 echo
 echo "Lab Manager Backend Allowlist"
 echo "============================="

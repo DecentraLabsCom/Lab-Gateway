@@ -1,7 +1,5 @@
 local _M = {}
 
-local DEFAULT_AUDIT_URL = "http://blockchain-services:8080/access-audit/internal/session-observed"
-
 local function has_text(value)
     return value ~= nil and tostring(value) ~= ""
 end
@@ -35,47 +33,58 @@ local function sha256_hex(ngx, value, deps)
     return to_hex(ngx.sha256_bin(value))
 end
 
-local function default_http_factory()
-    local resty_http = require "resty.http"
-    return resty_http.new()
-end
-
-local function default_cjson()
-    return require "cjson.safe"
-end
-
-local function post_observation(ngx, payload, deps)
-    local access_token = (deps and deps.access_token) or os.getenv("ADMIN_ACCESS_TOKEN") or ""
-    if access_token == "" then
-        ngx.log(ngx.DEBUG, "Access audit - ADMIN_ACCESS_TOKEN missing; session observation skipped")
-        return false
+local function enqueue_observation(ngx, payload, deps)
+    if deps and deps.outbox_enqueue then
+        return deps.outbox_enqueue(payload)
     end
 
-    local cjson = (deps and deps.cjson) or default_cjson()
-    local http_factory = (deps and deps.http_factory) or default_http_factory
-    local httpc = http_factory()
-    local url = (deps and deps.audit_url) or os.getenv("ACCESS_AUDIT_URL") or DEFAULT_AUDIT_URL
-    local header_name = (deps and deps.access_token_header) or os.getenv("ADMIN_ACCESS_TOKEN_HEADER") or "X-Access-Token"
-
-    local headers = {
-        ["Content-Type"] = "application/json"
-    }
-    headers[header_name] = access_token
-
-    local res, err = httpc:request_uri(url, {
-        method = "POST",
-        body = cjson.encode(payload),
-        headers = headers,
-        keepalive_timeout = 2000,
-        keepalive_pool = 5
+    local mysql = require "resty.mysql"
+    local db = mysql:new()
+    db:set_timeout(1000)
+    local ok, err = db:connect({
+        host = os.getenv("MYSQL_HOSTNAME") or os.getenv("MYSQL_HOST") or "mysql",
+        port = tonumber(os.getenv("MYSQL_PORT")) or 3306,
+        database = os.getenv("BLOCKCHAIN_MYSQL_DATABASE") or "blockchain_services",
+        user = os.getenv("MYSQL_USER"),
+        password = os.getenv("MYSQL_PASSWORD"),
+        charset = "utf8mb4",
+        max_packet_size = 1024 * 1024,
     })
-
-    if not res then
-        ngx.log(ngx.WARN, "Access audit - session observation post failed: " .. tostring(err))
+    if not ok then
+        ngx.log(ngx.WARN, "Access audit - observation outbox unavailable: " .. tostring(err))
         return false
     end
-    if tonumber(res.status) < 200 or tonumber(res.status) >= 300 then
-        ngx.log(ngx.WARN, "Access audit - session observation rejected with status " .. tostring(res.status))
+
+    local quote = function(value)
+        return db:quote_sql_str(tostring(value))
+    end
+    local observed_at = tonumber(payload.observedAt) or ngx.time()
+    local sql = string.format([[
+        INSERT INTO gateway_session_observation_outbox (
+            dedup_key, reservation_key, jwt_jti, session_id, gateway_id,
+            access_type, observed_at, status, next_attempt_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%d), 'PENDING', CURRENT_TIMESTAMP)
+        ON DUPLICATE KEY UPDATE
+            status = IF(status = 'SENT', 'SENT', 'PENDING'),
+            next_attempt_at = IF(status = 'SENT', next_attempt_at, CURRENT_TIMESTAMP),
+            locked_at = IF(status = 'SENT', locked_at, NULL),
+            updated_at = CURRENT_TIMESTAMP
+    ]],
+        quote(payload.dedupKey),
+        quote(payload.reservationKey),
+        quote(payload.jwtJti),
+        quote(payload.sessionId),
+        quote(payload.gatewayId),
+        quote(payload.accessType),
+        observed_at
+    )
+    local result, query_err = db:query(sql)
+    local keepalive_ok, keepalive_err = db:set_keepalive(10000, 5)
+    if not keepalive_ok then
+        ngx.log(ngx.DEBUG, "Access audit - unable to pool outbox connection: " .. tostring(keepalive_err))
+    end
+    if not result then
+        ngx.log(ngx.WARN, "Access audit - observation outbox insert failed: " .. tostring(query_err))
         return false
     end
     return true
@@ -102,13 +111,8 @@ function _M.report_guacamole_session_observed(ngx_ctx, deps)
         return false
     end
 
-    local once_key = "access_audit_observed:guacamole:" .. session_hash
-    if dict:get(once_key) then
-        return false
-    end
-    dict:set(once_key, true, 7200)
-
     local payload = {
+        dedupKey = session_hash,
         reservationKey = reservation_key,
         jwtJti = jwt_jti,
         sessionId = "guac:" .. session_hash,
@@ -116,24 +120,7 @@ function _M.report_guacamole_session_observed(ngx_ctx, deps)
         accessType = "guacamole",
         observedAt = ngx.time()
     }
-
-    local function send(premature)
-        if premature then
-            return
-        end
-        post_observation(ngx, payload, deps)
-    end
-
-    if ngx.timer and ngx.timer.at then
-        local ok, err = ngx.timer.at(0, send)
-        if not ok then
-            ngx.log(ngx.WARN, "Access audit - failed to schedule session observation: " .. tostring(err))
-            return post_observation(ngx, payload, deps)
-        end
-        return true
-    end
-
-    return post_observation(ngx, payload, deps)
+    return enqueue_observation(ngx, payload, deps)
 end
 
 return _M

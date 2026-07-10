@@ -99,6 +99,9 @@ services:
       - HTTP_PORT=${HTTP_PORT}
       - ISSUER=${ISSUER}
       - AUTH_ACCESS_CODE_REDEEM_URL=${AUTH_ACCESS_CODE_REDEEM_URL:-}
+      - AUTH_ACCESS_CODE_REDEEMER_TOKEN=${AUTH_ACCESS_CODE_REDEEMER_TOKEN}
+      - BLOCKCHAIN_MYSQL_DATABASE=${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
+      - MYSQL_HOSTNAME=mysql
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
@@ -124,7 +127,6 @@ services:
       - DEMO_USER=${DEMO_USER:-demo}
       - DEMO_LAB_ID=${DEMO_LAB_ID:-}
       - JWT_GUAC_IDLE_TIMEOUT_SECONDS=${JWT_GUAC_IDLE_TIMEOUT_SECONDS:-60}
-      - MANUAL_GUAC_IDLE_TIMEOUT_SECONDS=${MANUAL_GUAC_IDLE_TIMEOUT_SECONDS:-60}
     depends_on:
       guacamole:
         condition: service_healthy
@@ -436,6 +438,9 @@ services:
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
       - OPS_MYSQL_DATABASE=${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - ACCESS_AUDIT_URL=${ACCESS_AUDIT_URL:-http://blockchain-services:8080/access-audit/internal/session-observed}
+      - ADMIN_ACCESS_TOKEN=${ADMIN_ACCESS_TOKEN}
+      - ADMIN_ACCESS_TOKEN_HEADER=${ADMIN_ACCESS_TOKEN_HEADER:-X-Access-Token}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro

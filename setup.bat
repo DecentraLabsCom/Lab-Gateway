@@ -284,6 +284,15 @@ if "!lab_manager_token!"=="" (
 call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_TOKEN" "!lab_manager_token!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_TOKEN_HEADER" "X-Lab-Manager-Token"
 call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_MANAGER_TOKEN_COOKIE" "lab_manager_token"
+call :ReadEnvValue "%ROOT_ENV_FILE%" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" access_code_redeemer_token
+if /i "!access_code_redeemer_token!"=="CHANGE_ME" set "access_code_redeemer_token="
+if "!access_code_redeemer_token!"=="" (
+    call :GenerateHex 32 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%%RANDOM%%RANDOM%%RANDOM%"
+    set "access_code_redeemer_token=acr_!generated_hex!"
+    echo Generated access-code redeemer token.
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "!access_code_redeemer_token!"
 echo.
 
 echo Lab Manager Backend Allowlist

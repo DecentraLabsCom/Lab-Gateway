@@ -4,10 +4,6 @@ local function is_websocket_tunnel(uri)
     return uri and uri:match("/guacamole/websocket%-tunnel")
 end
 
-local function is_connection_active(status)
-    return status == "101"
-end
-
 local function is_auto_logout_enabled(config)
     return config and config:get("auto_logout_on_disconnect")
 end
@@ -31,11 +27,6 @@ function _M.run(ngx_ctx, deps)
     end
 
     local status = ngx.var.status
-    if is_connection_active(status) then
-        local reporter = (deps and deps.access_audit_reporter) or require "modules.access_audit_reporter"
-        reporter.report_guacamole_session_observed(ngx, deps and deps.access_audit)
-        return
-    end
 
     local config = ngx.shared.config
     if not is_auto_logout_enabled(config) then
@@ -67,7 +58,7 @@ function _M.run(ngx_ctx, deps)
         return
     end
 
-    if dict:get("exp:" .. username) then
+    if dict:get("exp:" .. username) or dict:get("guac_enforcement_exp:" .. username) then
         ngx.log(ngx.DEBUG, "Log - Skipping JWT-authenticated user: " .. username)
         return
     end

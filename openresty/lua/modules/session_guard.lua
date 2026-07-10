@@ -5,8 +5,8 @@ local SessionGuard = {}
 SessionGuard.__index = SessionGuard
 
 -- Timer and TTL constants in seconds
-local INITIAL_DELAY_SECONDS = 30
-local EXPIRED_CHECK_INTERVAL = 30
+local INITIAL_DELAY_SECONDS = 10
+local EXPIRED_CHECK_INTERVAL = 10
 local TUNNEL_CHECK_INTERVAL = 2
 local DEFAULT_GUAC_API = "http://guacamole:8080/guacamole/api"
 
@@ -47,6 +47,10 @@ end
 
 local function token_reverse_cache_key(token)
     return "guac_token:" .. token
+end
+
+local function enforcement_expiry_cache_key(username)
+    return "guac_enforcement_exp:" .. username
 end
 
 local function clear_cached_user_token(dict, username, user_token)
@@ -131,10 +135,11 @@ function SessionGuard:check_expired_sessions()
 
     local now = ngx.time()
 
-    -- Iterate over Guacamole's active connections and revoke those whose JWT payload expired.
+    -- The enforcement key outlives the JTI key briefly, so the worker can still
+    -- close an active tunnel after the browser-facing session key has expired.
     for identifier, conn in pairs(active_connections) do
         local username = string.lower(conn.username or "")
-        local exp = dict:get("exp:" .. username)
+        local exp = dict:get(enforcement_expiry_cache_key(username))
         if exp and now > tonumber(exp) then
             ngx.log(ngx.INFO, "Worker - Closing expired session (" .. identifier .. ") for " .. username)
 
@@ -154,6 +159,7 @@ function SessionGuard:check_expired_sessions()
             if not res or res.status ~= 204 then
                 ngx.log(ngx.ERR, "Worker - Error terminating connection for " .. username)
             else
+                dict:delete(enforcement_expiry_cache_key(username))
                 dict:delete("exp:" .. username)
                 ngx.log(ngx.INFO, "Worker - Connection terminated for " .. username)
             end

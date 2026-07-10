@@ -31,7 +31,7 @@ end
 runner.describe("Session guard", function()
     runner.it("terminates expired sessions and revokes tokens", function()
         local cache = {
-            ["exp:user1"] = "100",
+            ["guac_enforcement_exp:user1"] = "100",
             ["token:user1"] = "token-1"
         }
 
@@ -47,7 +47,7 @@ runner.describe("Session guard", function()
         guard:check_expired_sessions()
 
         local store = ngx.shared.cache._data
-        runner.assert.equals(nil, store["exp:user1"])
+        runner.assert.equals(nil, store["guac_enforcement_exp:user1"])
         runner.assert.equals(nil, store["token:user1"])
         runner.assert.equals(nil, store["guac_token:token-1"])
         runner.assert.equals(4, #http_stub.calls)
@@ -55,7 +55,7 @@ runner.describe("Session guard", function()
 
     runner.it("skips revocation when token is missing", function()
         local cache = {
-            ["exp:user1"] = "100"
+            ["guac_enforcement_exp:user1"] = "100"
         }
 
         local responses = {
@@ -67,7 +67,40 @@ runner.describe("Session guard", function()
         local guard, _, ngx = build_guard(cache, responses)
         guard:check_expired_sessions()
         local store = ngx.shared.cache._data
-        runner.assert.equals(nil, store["exp:user1"])
+        runner.assert.equals(nil, store["guac_enforcement_exp:user1"])
+    end)
+
+    runner.it("does not infer an active-session expiry from the short-lived request key", function()
+        local cache = {
+            ["exp:user1"] = "100",
+            ["token:user1"] = "token-1"
+        }
+
+        local responses = {
+            { status = 200, body = cjson.encode({ authToken = "admin-token", dataSource = "mysql" }) },
+            { status = 200, body = cjson.encode({ ["123"] = { username = "User1" } }) }
+        }
+
+        local guard, http_stub, ngx = build_guard(cache, responses)
+        guard:check_expired_sessions()
+
+        runner.assert.equals("100", ngx.shared.cache._data["exp:user1"])
+        runner.assert.equals("token-1", ngx.shared.cache._data["token:user1"])
+        runner.assert.equals(2, #http_stub.calls)
+    end)
+
+    runner.it("checks active-session expirations every ten seconds", function()
+        local responses = {
+            { status = 200, body = cjson.encode({ authToken = "admin-token", dataSource = "mysql" }) },
+            { status = 200, body = cjson.encode({}) }
+        }
+        local guard, _, ngx = build_guard({}, responses)
+
+        guard:start()
+        runner.assert.equals(10, ngx._timer_calls.at[1].delay)
+        ngx._timer_calls.at[1].callback(false)
+
+        runner.assert.equals(10, ngx._timer_calls.every[1].interval)
     end)
 
     runner.it("processes tunnel closures and cleans pending flags", function()

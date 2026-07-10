@@ -34,7 +34,7 @@ runner.describe("Body filter handler", function()
         runner.assert.equals("abc", cache["token:user"])
         runner.assert.equals("user", cache["guac_token:abc"])
         runner.assert.equals(nil, cache["guac_jwt_exp:abc"])
-        runner.assert.equals(0, cache["guac_manual_last_seen:abc"])
+        runner.assert.equals(nil, cache["guac_manual_last_seen:abc"])
     end)
 
     runner.it("marks JWT-backed Guacamole tokens with expiration and last-seen", function()

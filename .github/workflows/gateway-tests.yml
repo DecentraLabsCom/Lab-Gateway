@@ -169,6 +169,19 @@ jobs:
 
   ops-worker-tests:
     runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: test-root-password
+          MARIADB_DATABASE: guacamole_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     permissions:
       contents: read
     steps:
@@ -194,6 +207,8 @@ jobs:
         id: run_ops_worker_tests
         continue-on-error: true
         working-directory: ops-worker
+        env:
+          GUACAMOLE_MARIADB_TEST_URL: mysql+pymysql://root:test-root-password@127.0.0.1:3306/guacamole_test
         run: |
           set -o pipefail
           python -m pytest tests --junitxml=pytest-results.xml -q | tee pytest.log

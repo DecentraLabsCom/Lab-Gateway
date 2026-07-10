@@ -83,6 +83,27 @@ NOTIFICATION_SERVICE_ACCESS_TOKEN = (
 NOTIFICATION_SERVICE_ENABLED = os.getenv("NOTIFICATION_SERVICE_ENABLED", "true").strip().lower() not in ("false", "0", "no", "off")
 NOTIFICATION_SERVICE_RETRY_ATTEMPTS = max(0, int(os.getenv("NOTIFICATION_SERVICE_RETRY_ATTEMPTS", "3")))
 NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS = max(1, int(os.getenv("NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS", "5")))
+ACCESS_AUDIT_URL = os.getenv(
+    "ACCESS_AUDIT_URL",
+    "http://blockchain-services:8080/access-audit/internal/session-observed",
+)
+ACCESS_AUDIT_TOKEN = os.getenv("ADMIN_ACCESS_TOKEN") or ""
+ACCESS_AUDIT_TOKEN_HEADER = os.getenv("ADMIN_ACCESS_TOKEN_HEADER", "X-Access-Token")
+SESSION_OBSERVATION_OUTBOX_ENABLED = os.getenv(
+    "SESSION_OBSERVATION_OUTBOX_ENABLED", "true"
+).strip().lower() not in ("false", "0", "no", "off")
+SESSION_OBSERVATION_OUTBOX_INTERVAL_SECONDS = max(
+    1, int(os.getenv("SESSION_OBSERVATION_OUTBOX_INTERVAL_SECONDS", "5"))
+)
+SESSION_OBSERVATION_OUTBOX_BATCH_SIZE = max(
+    1, int(os.getenv("SESSION_OBSERVATION_OUTBOX_BATCH_SIZE", "20"))
+)
+SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS = max(
+    1, int(os.getenv("SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS", "20"))
+)
+SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS = max(
+    1, int(os.getenv("SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS", "5"))
+)
 HEARTBEAT_SSE_INTERVAL_SECONDS = max(1, int(os.getenv("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")))
 DISCOVERY_TIMEOUT_SECONDS = max(0.2, float(os.getenv("OPS_DISCOVERY_TIMEOUT_SECONDS", "1.5")))
 DISCOVERY_WINRM_PORTS = [
@@ -2228,15 +2249,27 @@ def provision_guacamole_temporary_user(
             )
 
         if activate:
-            conn.execute(
-                text(
-                    """
-                    INSERT OR REPLACE INTO guacamole_connection_permission (entity_id, connection_id, permission)
-                    VALUES (:entity_id, :connection_id, 'READ')
-                    """
-                ),
-                {"entity_id": entity_id, "connection_id": connection_id},
-            )
+            if conn.dialect.name == "mysql":
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
+                        VALUES (:entity_id, :connection_id, 'READ')
+                        ON DUPLICATE KEY UPDATE permission = VALUES(permission)
+                        """
+                    ),
+                    {"entity_id": entity_id, "connection_id": connection_id},
+                )
+            else:
+                conn.execute(
+                    text(
+                        """
+                        INSERT OR REPLACE INTO guacamole_connection_permission (entity_id, connection_id, permission)
+                        VALUES (:entity_id, :connection_id, 'READ')
+                        """
+                    ),
+                    {"entity_id": entity_id, "connection_id": connection_id},
+                )
         else:
             conn.execute(
                 text("DELETE FROM guacamole_connection_permission WHERE entity_id = :entity_id"),
@@ -2967,6 +3000,156 @@ class ReservationOrchestrator:
 RESERVATION_AUTOMATOR = ReservationOrchestrator(DB_ENGINE, HOSTS)
 
 
+def session_observation_retry_delay_seconds(attempts: int) -> int:
+    return min(300, 5 * (2 ** min(max(0, attempts - 1), 6)))
+
+
+def _claim_session_observation_outbox_rows() -> List[Dict[str, Any]]:
+    if not DB_ENGINE:
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+    try:
+        with DB_ENGINE.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE gateway_session_observation_outbox
+                    SET status = 'RETRY', next_attempt_at = CURRENT_TIMESTAMP,
+                        locked_at = NULL, updated_at = CURRENT_TIMESTAMP
+                    WHERE status = 'SENDING' AND locked_at < :cutoff
+                    """
+                ),
+                {"cutoff": cutoff},
+            )
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, reservation_key, jwt_jti, session_id, gateway_id,
+                           access_type, observed_at, attempts
+                    FROM gateway_session_observation_outbox
+                    WHERE status IN ('PENDING', 'RETRY')
+                      AND next_attempt_at <= CURRENT_TIMESTAMP
+                    ORDER BY next_attempt_at ASC, id ASC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": SESSION_OBSERVATION_OUTBOX_BATCH_SIZE},
+            ).mappings().all()
+            claimed = []
+            for row in rows:
+                updated = conn.execute(
+                    text(
+                        """
+                        UPDATE gateway_session_observation_outbox
+                        SET status = 'SENDING', locked_at = CURRENT_TIMESTAMP,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id AND status IN ('PENDING', 'RETRY')
+                        """
+                    ),
+                    {"id": row["id"]},
+                ).rowcount
+                if updated == 1:
+                    claimed.append(dict(row))
+            return claimed
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Session observation outbox claim failed: %s", exc)
+        return []
+
+
+def _mark_session_observation_delivered(record_id: int) -> None:
+    if not DB_ENGINE:
+        return
+    with DB_ENGINE.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE gateway_session_observation_outbox
+                SET status = 'SENT', delivered_at = CURRENT_TIMESTAMP,
+                    locked_at = NULL, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND status = 'SENDING'
+                """
+            ),
+            {"id": record_id},
+        )
+
+
+def _mark_session_observation_failure(record: Mapping[str, Any], error: str) -> None:
+    if not DB_ENGINE:
+        return
+    attempts = int(record.get("attempts") or 0) + 1
+    status = "FAILED" if attempts >= SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS else "RETRY"
+    next_attempt = datetime.now(timezone.utc) + timedelta(
+        seconds=session_observation_retry_delay_seconds(attempts)
+    )
+    with DB_ENGINE.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE gateway_session_observation_outbox
+                SET status = :status, attempts = :attempts,
+                    next_attempt_at = :next_attempt_at, locked_at = NULL,
+                    last_error = :last_error, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND status = 'SENDING'
+                """
+            ),
+            {
+                "id": record["id"],
+                "status": status,
+                "attempts": attempts,
+                "next_attempt_at": next_attempt,
+                "last_error": str(error)[:1024],
+            },
+        )
+
+
+def _session_observed_epoch(value: Any) -> int:
+    if isinstance(value, datetime):
+        return int((value if value.tzinfo else value.replace(tzinfo=timezone.utc)).timestamp())
+    parsed = to_utc(value)
+    if parsed:
+        return int(parsed.timestamp())
+    return int(time.time())
+
+
+def deliver_session_observation_outbox() -> int:
+    """Deliver durable WebSocket-open observations to blockchain-services."""
+    if not SESSION_OBSERVATION_OUTBOX_ENABLED or not DB_ENGINE:
+        return 0
+    if not ACCESS_AUDIT_TOKEN:
+        logging.error("Session observation outbox is pending: ADMIN_ACCESS_TOKEN is not configured")
+        return 0
+
+    delivered = 0
+    for record in _claim_session_observation_outbox_rows():
+        payload = {
+            "reservationKey": record["reservation_key"],
+            "jwtJti": record["jwt_jti"],
+            "sessionId": record["session_id"],
+            "gatewayId": record["gateway_id"],
+            "accessType": record["access_type"],
+            "observedAt": _session_observed_epoch(record["observed_at"]),
+        }
+        try:
+            response = requests.post(
+                ACCESS_AUDIT_URL,
+                json=payload,
+                headers={ACCESS_AUDIT_TOKEN_HEADER: ACCESS_AUDIT_TOKEN},
+                timeout=SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS,
+            )
+            body = response.json() if response.content else {}
+            if 200 <= response.status_code < 300 and body.get("recorded") is True:
+                _mark_session_observation_delivered(record["id"])
+                delivered += 1
+            else:
+                _mark_session_observation_failure(
+                    record,
+                    f"audit endpoint status={response.status_code} recorded={body.get('recorded')!r}",
+                )
+        except Exception as exc:  # pylint: disable=broad-except
+            _mark_session_observation_failure(record, f"audit delivery failed: {exc}")
+    return delivered
+
+
 def reload_hosts() -> Tuple[int, Optional[str]]:
     """Reload host catalog from CONFIG_PATH."""
     global HOSTS
@@ -3015,6 +3198,21 @@ def start_scheduler():
         logging.info(
             "Guacamole temporary user cleanup enabled (interval %ss)",
             GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS,
+        )
+
+    if SESSION_OBSERVATION_OUTBOX_ENABLED:
+        scheduler.add_job(
+            deliver_session_observation_outbox,
+            "interval",
+            seconds=SESSION_OBSERVATION_OUTBOX_INTERVAL_SECONDS,
+            next_run_time=datetime.now(timezone.utc),
+            id="session-observation-outbox",
+            replace_existing=True,
+        )
+        jobs += 1
+        logging.info(
+            "Session observation outbox enabled (interval %ss)",
+            SESSION_OBSERVATION_OUTBOX_INTERVAL_SECONDS,
         )
 
     if jobs == 0:

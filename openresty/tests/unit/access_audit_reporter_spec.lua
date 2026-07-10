@@ -1,7 +1,6 @@
 local runner = require "tests.helpers.runner"
 local ngx_factory = require "tests.helpers.ngx_stub"
 local reporter = require "modules.access_audit_reporter"
-local cjson = require "cjson.safe"
 
 local function new_ngx(opts)
     opts = opts or {}
@@ -20,43 +19,25 @@ local function new_ngx(opts)
     })
 end
 
-local function http_factory(calls, status)
-    return function()
-        return {
-            request_uri = function(_, url, request)
-                calls[#calls + 1] = { url = url, request = request }
-                return { status = status or 200, body = '{"recorded":true}' }, nil
-            end
-        }
-    end
-end
-
 runner.describe("Access audit reporter", function()
-    runner.it("posts Guacamole session observation with hashed session id", function()
-        local calls = {}
+    runner.it("persists Guacamole session observation with its websocket-open timestamp", function()
+        local payloads = {}
         local ngx = new_ngx()
 
-        local scheduled = reporter.report_guacamole_session_observed(ngx, {
-            access_token = "internal-token",
-            cjson = cjson,
-            http_factory = http_factory(calls),
+        local persisted = reporter.report_guacamole_session_observed(ngx, {
+            outbox_enqueue = function(payload)
+                payloads[#payloads + 1] = payload
+                return true
+            end,
             sha256_hex = function(value)
                 runner.assert.equals("guac-token", value)
                 return "abc123"
-            end,
-            audit_url = "http://backend/access-audit/internal/session-observed",
-            gateway_id = "gateway-a"
+            end
         })
 
-        runner.assert.truthy(scheduled)
-        runner.assert.equals(1, #ngx._timer_calls.at)
-        ngx._timer_calls.at[1].callback(false)
-
-        runner.assert.equals(1, #calls)
-        runner.assert.equals("http://backend/access-audit/internal/session-observed", calls[1].url)
-        runner.assert.equals("internal-token", calls[1].request.headers["X-Access-Token"])
-
-        local payload = cjson.decode(calls[1].request.body)
+        runner.assert.truthy(persisted)
+        runner.assert.equals(1, #payloads)
+        local payload = payloads[1]
         runner.assert.equals("0xabc", payload.reservationKey)
         runner.assert.equals("jwt-jti", payload.jwtJti)
         runner.assert.equals("guac:abc123", payload.sessionId)
@@ -65,13 +46,14 @@ runner.describe("Access audit reporter", function()
         runner.assert.equals(1234, payload.observedAt)
     end)
 
-    runner.it("does not report the same Guacamole token twice", function()
-        local calls = {}
+    runner.it("relies on the durable outbox deduplication key for repeated websocket signals", function()
+        local payloads = {}
         local ngx = new_ngx()
         local deps = {
-            access_token = "internal-token",
-            cjson = cjson,
-            http_factory = http_factory(calls),
+            outbox_enqueue = function(payload)
+                payloads[#payloads + 1] = payload
+                return true
+            end,
             sha256_hex = function()
                 return "abc123"
             end
@@ -80,26 +62,26 @@ runner.describe("Access audit reporter", function()
         reporter.report_guacamole_session_observed(ngx, deps)
         reporter.report_guacamole_session_observed(ngx, deps)
 
-        runner.assert.equals(1, #ngx._timer_calls.at)
-        ngx._timer_calls.at[1].callback(false)
-        runner.assert.equals(1, #calls)
+        runner.assert.equals(2, #payloads)
+        runner.assert.equals(payloads[1].dedupKey, payloads[2].dedupKey)
     end)
 
     runner.it("skips when reservation metadata is missing", function()
-        local calls = {}
+        local payloads = {}
         local ngx = new_ngx({ cache = {} })
 
         local scheduled = reporter.report_guacamole_session_observed(ngx, {
-            access_token = "internal-token",
-            cjson = cjson,
-            http_factory = http_factory(calls),
+            outbox_enqueue = function(payload)
+                payloads[#payloads + 1] = payload
+                return true
+            end,
             sha256_hex = function()
                 return "abc123"
             end
         })
 
         runner.assert.equals(false, scheduled)
-        runner.assert.equals(0, #calls)
+        runner.assert.equals(0, #payloads)
     end)
 end)
 

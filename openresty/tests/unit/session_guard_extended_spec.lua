@@ -38,7 +38,7 @@ end
 runner.describe("Session guard extended tests", function()
     -- Test: Guacamole authentication failures
     runner.it("handles Guacamole auth timeout", function()
-        local cache = { ["exp:user1"] = "100" }
+        local cache = { ["guac_enforcement_exp:user1"] = "100" }
         local responses = {
             { status = nil } -- Connection timeout
         }
@@ -46,11 +46,11 @@ runner.describe("Session guard extended tests", function()
         guard:check_expired_sessions()
         
         -- Should not crash, user data should remain
-        runner.assert.equals("100", ngx.shared.cache._data["exp:user1"])
+        runner.assert.equals("100", ngx.shared.cache._data["guac_enforcement_exp:user1"])
     end)
 
     runner.it("handles Guacamole auth 401 response", function()
-        local cache = { ["exp:user1"] = "100" }
+        local cache = { ["guac_enforcement_exp:user1"] = "100" }
         local responses = {
             { status = 401, body = '{"error":"Unauthorized"}' }
         }
@@ -58,45 +58,45 @@ runner.describe("Session guard extended tests", function()
         guard:check_expired_sessions()
         
         -- Auth failed, should not process
-        runner.assert.equals("100", ngx.shared.cache._data["exp:user1"])
+        runner.assert.equals("100", ngx.shared.cache._data["guac_enforcement_exp:user1"])
     end)
 
     runner.it("handles Guacamole auth 500 response", function()
-        local cache = { ["exp:user1"] = "100" }
+        local cache = { ["guac_enforcement_exp:user1"] = "100" }
         local responses = {
             { status = 500, body = '{"error":"Internal Server Error"}' }
         }
         local guard, _, ngx = build_guard(cache, responses)
         guard:check_expired_sessions()
         
-        runner.assert.equals("100", ngx.shared.cache._data["exp:user1"])
+        runner.assert.equals("100", ngx.shared.cache._data["guac_enforcement_exp:user1"])
     end)
 
     runner.it("handles malformed auth response JSON", function()
-        local cache = { ["exp:user1"] = "100" }
+        local cache = { ["guac_enforcement_exp:user1"] = "100" }
         local responses = {
             { status = 200, body = 'not json' }
         }
         local guard, _, ngx = build_guard(cache, responses)
         guard:check_expired_sessions()
         
-        runner.assert.equals("100", ngx.shared.cache._data["exp:user1"])
+        runner.assert.equals("100", ngx.shared.cache._data["guac_enforcement_exp:user1"])
     end)
 
     runner.it("handles auth response missing authToken", function()
-        local cache = { ["exp:user1"] = "100" }
+        local cache = { ["guac_enforcement_exp:user1"] = "100" }
         local responses = {
             { status = 200, body = cjson.encode({ dataSource = "mysql" }) }
         }
         local guard, _, ngx = build_guard(cache, responses)
         guard:check_expired_sessions()
         
-        runner.assert.equals("100", ngx.shared.cache._data["exp:user1"])
+        runner.assert.equals("100", ngx.shared.cache._data["guac_enforcement_exp:user1"])
     end)
 
     -- Test: Active connections retrieval failures
     runner.it("handles active connections 500 error", function()
-        local cache = { ["exp:user1"] = "100" }
+        local cache = { ["guac_enforcement_exp:user1"] = "100" }
         local responses = {
             { status = 200, body = cjson.encode({ authToken = "admin-token", dataSource = "mysql" }) },
             { status = 500, body = '{"error":"Error"}' }
@@ -105,11 +105,11 @@ runner.describe("Session guard extended tests", function()
         guard:check_expired_sessions()
         
         -- Connection list failed, user data remains
-        runner.assert.equals("100", ngx.shared.cache._data["exp:user1"])
+        runner.assert.equals("100", ngx.shared.cache._data["guac_enforcement_exp:user1"])
     end)
 
     runner.it("handles active connections malformed JSON", function()
-        local cache = { ["exp:user1"] = "100" }
+        local cache = { ["guac_enforcement_exp:user1"] = "100" }
         local responses = {
             { status = 200, body = cjson.encode({ authToken = "admin-token", dataSource = "mysql" }) },
             { status = 200, body = 'invalid json' }
@@ -117,7 +117,7 @@ runner.describe("Session guard extended tests", function()
         local guard, _, ngx = build_guard(cache, responses)
         guard:check_expired_sessions()
         
-        runner.assert.equals("100", ngx.shared.cache._data["exp:user1"])
+        runner.assert.equals("100", ngx.shared.cache._data["guac_enforcement_exp:user1"])
     end)
 
     runner.it("handles empty active connections", function()
@@ -136,8 +136,8 @@ runner.describe("Session guard extended tests", function()
     -- Test: Multiple expired sessions
     runner.it("terminates multiple expired sessions", function()
         local cache = {
-            ["exp:user1"] = "100",
-            ["exp:user2"] = "150",
+            ["guac_enforcement_exp:user1"] = "100",
+            ["guac_enforcement_exp:user2"] = "150",
             ["token:user1"] = "token-1",
             ["token:user2"] = "token-2"
         }
@@ -156,8 +156,8 @@ runner.describe("Session guard extended tests", function()
         guard:check_expired_sessions()
         
         local store = ngx.shared.cache._data
-        runner.assert.equals(nil, store["exp:user1"])
-        runner.assert.equals(nil, store["exp:user2"])
+        runner.assert.equals(nil, store["guac_enforcement_exp:user1"])
+        runner.assert.equals(nil, store["guac_enforcement_exp:user2"])
         runner.assert.equals(nil, store["token:user1"])
         runner.assert.equals(nil, store["token:user2"])
     end)
@@ -165,7 +165,7 @@ runner.describe("Session guard extended tests", function()
     -- Test: Non-expired sessions preserved
     runner.it("preserves non-expired sessions", function()
         local cache = {
-            ["exp:active"] = "500", -- Future expiration
+            ["guac_enforcement_exp:active"] = "500", -- Future expiration
             ["token:active"] = "active-token"
         }
         local responses = {
@@ -176,14 +176,14 @@ runner.describe("Session guard extended tests", function()
         guard:check_expired_sessions()
         
         local store = ngx.shared.cache._data
-        runner.assert.equals("500", store["exp:active"])
+        runner.assert.equals("500", store["guac_enforcement_exp:active"])
         runner.assert.equals("active-token", store["token:active"])
     end)
 
     -- Test: Connection termination failures
     runner.it("handles connection termination failure", function()
         local cache = {
-            ["exp:user1"] = "100",
+            ["guac_enforcement_exp:user1"] = "100",
             ["token:user1"] = "token-1"
         }
         local responses = {
@@ -201,7 +201,7 @@ runner.describe("Session guard extended tests", function()
     -- Test: Token revocation failures
     runner.it("handles token revocation failure gracefully", function()
         local cache = {
-            ["exp:user1"] = "100",
+            ["guac_enforcement_exp:user1"] = "100",
             ["token:user1"] = "token-1"
         }
         local responses = {
@@ -215,7 +215,7 @@ runner.describe("Session guard extended tests", function()
         
         -- Connection terminated, token revocation failed
         local store = ngx.shared.cache._data
-        runner.assert.equals(nil, store["exp:user1"])
+        runner.assert.equals(nil, store["guac_enforcement_exp:user1"])
     end)
 
     -- Test: Tunnel closures
@@ -308,7 +308,7 @@ runner.describe("Session guard extended tests", function()
     -- Test: Username case handling
     runner.it("matches usernames case-insensitively", function()
         local cache = {
-            ["exp:mixedcase"] = "100",
+            ["guac_enforcement_exp:mixedcase"] = "100",
             ["token:mixedcase"] = "mixed-token"
         }
         local responses = {
@@ -321,7 +321,7 @@ runner.describe("Session guard extended tests", function()
         guard:check_expired_sessions()
         
         local store = ngx.shared.cache._data
-        runner.assert.equals(nil, store["exp:mixedcase"])
+        runner.assert.equals(nil, store["guac_enforcement_exp:mixedcase"])
     end)
 end)
 

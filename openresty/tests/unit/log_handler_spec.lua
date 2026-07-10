@@ -29,7 +29,7 @@ runner.describe("Log handler", function()
         runner.assert.equals(nil, ngx.shared.cache._data["has_pending_closures"])
     end)
 
-    runner.it("reports active JWT-backed websocket connections without marking closures", function()
+    runner.it("does not report active websocket connections at tunnel closure", function()
         local ngx = base_env()
         ngx.var.status = "101"
         local reported = false
@@ -40,7 +40,7 @@ runner.describe("Log handler", function()
                 end
             }
         })
-        runner.assert.truthy(reported)
+        runner.assert.equals(false, reported)
         runner.assert.equals(nil, ngx.shared.cache._data["has_pending_closures"])
     end)
 
@@ -70,12 +70,22 @@ runner.describe("Log handler", function()
         runner.assert.equals(nil, ngx.shared.cache._data["pending_user:alice"])
     end)
 
+    runner.it("keeps expired JWT users out of manual-session cleanup during enforcement retention", function()
+        local ngx = base_env({
+            authorization = "alice",
+            cache = { ["guac_enforcement_exp:alice"] = 99 }
+        })
+        handler.run(ngx)
+        runner.assert.equals(nil, ngx.shared.cache._data["pending_user:alice"])
+    end)
+
     runner.it("marks manual sessions via token lookup", function()
         local ngx = base_env({
             args = "token=abc123",
             cache = { ["guac_token:abc123"] = "Alice" },
             now = 200
         })
+        ngx.var.status = "101"
         handler.run(ngx)
         local cache = ngx.shared.cache._data
         runner.assert.truthy(cache["pending_user:alice"])

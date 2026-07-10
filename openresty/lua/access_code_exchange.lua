@@ -2,6 +2,11 @@ local cjson = require "cjson.safe"
 local http = require "resty.http"
 local jwt = require "resty.jwt"
 
+-- Keep the absolute expiry available to the active-connection worker after
+-- the JTI session itself expires. This is only a cleanup retention window;
+-- it never extends browser or Guacamole authorization.
+local ACTIVE_CONNECTION_EXPIRY_RETENTION_SECONDS = 300
+
 local function fail(status, message)
     ngx.status = status
     ngx.header["Content-Type"] = "text/plain"
@@ -41,10 +46,17 @@ if not redeem_url then
 end
 local httpc = http.new()
 httpc:set_timeout(5000)
+local redeemer_token = os.getenv("AUTH_ACCESS_CODE_REDEEMER_TOKEN")
+if not redeemer_token or redeemer_token == "" or string.upper(redeemer_token) == "CHANGE_ME" then
+    return fail(503, "Access-code redemption is not configured")
+end
 local response, request_err = httpc:request_uri(redeem_url, {
     method = "POST",
     body = cjson.encode({ accessCode = access_code }),
-    headers = { ["Content-Type"] = "application/json" },
+    headers = {
+        ["Content-Type"] = "application/json",
+        ["X-Access-Code-Redeemer-Token"] = redeemer_token,
+    },
     ssl_verify = true,
 })
 if not response then
@@ -109,15 +121,19 @@ if not scheme or not host or (host ~= ngx.var.host and host ~= current_host) the
 end
 
 local username_lower = string.lower(username)
+local remaining_lifetime = math.max(1, exp - ngx.time())
 ---@diagnostic disable-next-line: redundant-parameter
-cache:set("username:" .. jti, username_lower, math.max(1, exp - ngx.time()))
+cache:set("username:" .. jti, username_lower, remaining_lifetime)
 ---@diagnostic disable-next-line: redundant-parameter
-cache:set("exp:" .. username_lower, exp, math.max(1, exp - ngx.time()))
+cache:set("exp:" .. username_lower, exp, remaining_lifetime)
+---@diagnostic disable-next-line: redundant-parameter
+cache:set("guac_enforcement_exp:" .. username_lower, exp,
+    remaining_lifetime + ACTIVE_CONNECTION_EXPIRY_RETENTION_SECONDS)
 if claims.reservationKey then
     ---@diagnostic disable-next-line: redundant-parameter
-    cache:set("reservation:" .. jti, claims.reservationKey, math.max(1, exp - ngx.time()))
+    cache:set("reservation:" .. jti, claims.reservationKey, remaining_lifetime)
 end
-ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=" .. math.max(1, exp - ngx.time()) .. "; Path=/guacamole; Secure; HttpOnly; SameSite=Lax"
+ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=" .. remaining_lifetime .. "; Path=/guacamole; Secure; HttpOnly; SameSite=Lax"
 ngx.header["Referrer-Policy"] = "no-referrer"
 
 ngx.status = 303

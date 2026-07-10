@@ -7,6 +7,7 @@ from threading import Lock
 
 
 ACCESS_CODE = "smoke-access-code"
+MARKETPLACE_AUTHORIZATION = "Bearer smoke-marketplace-token"
 JWT_PATH = "/data/jwt.txt"
 redeemed = False
 redeem_lock = Lock()
@@ -56,12 +57,14 @@ class AuthHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
         if self.path == "/auth/access-code/issue":
-            request = read_json(self)
-            lab_url = request.get("labURL")
-            if not isinstance(request.get("token"), str) or not isinstance(lab_url, str):
-                write_json(self, 400, {"error": "token and labURL are required"})
+            if self.headers.get("X-Marketplace-Authorization") != MARKETPLACE_AUTHORIZATION:
+                write_json(self, 403, {"error": "Marketplace authentication required"})
                 return
-            write_json(self, 200, {"accessCode": ACCESS_CODE, "labURL": lab_url})
+            request = read_json(self)
+            if not isinstance(request.get("token"), str):
+                write_json(self, 400, {"error": "token is required"})
+                return
+            write_json(self, 200, {"accessCode": ACCESS_CODE, "labURL": "https://lab.test:18443/guacamole/"})
             return
 
         if self.path == "/auth/access-code/redeem":

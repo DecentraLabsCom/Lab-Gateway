@@ -80,7 +80,7 @@ fi
 # =================================================================
 echo "Test 2: one-time access-code exchange"
 JWT=$(cat "$JWT_FILE")
-ACCESS_RESPONSE=$(printf '%s' "{\"token\":\"${JWT}\",\"labURL\":\"https://lab.test:${PORT}/guacamole/\"}" | curl -sk --resolve lab.test:${PORT}:127.0.0.1 -X POST -H 'Content-Type: application/json' --data-binary @- https://lab.test:${PORT}/auth/access-code/issue)
+ACCESS_RESPONSE=$(printf '%s' "{\"token\":\"${JWT}\"}" | curl -sk --resolve lab.test:${PORT}:127.0.0.1 -X POST -H 'Content-Type: application/json' -H 'X-Marketplace-Authorization: Bearer smoke-marketplace-token' --data-binary @- https://lab.test:${PORT}/auth/access-code/issue)
 ACCESS_CODE=$(printf '%s' "$ACCESS_RESPONSE" | sed -n 's/.*"accessCode":"\([^"]*\)".*/\1/p')
 curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$COOKIE_FILE" -X POST --data-urlencode "access_code=${ACCESS_CODE}" https://lab.test:${PORT}/auth/access >/dev/null
 

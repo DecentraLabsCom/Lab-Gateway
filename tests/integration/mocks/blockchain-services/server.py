@@ -216,12 +216,15 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/auth/access-code/issue":
             if not self.check_rate_limit_and_respond():
                 return
+            if not self.headers.get("X-Marketplace-Authorization", "").startswith("Bearer "):
+                json_response(self, 403, {"error": "Marketplace authentication required"})
+                return
             content_length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(content_length) or b"{}")
             code = f"mock-access-code-{int(time.time() * 1000)}"
             issued_access_codes[code] = {
                 "token": body.get("token", "mock-saml-jwt-token"),
-                "labURL": body.get("labURL", "https://localhost:18444/guacamole/"),
+                "labURL": "https://localhost:18444/guacamole/",
                 "expires": time.time() + 60,
             }
             json_response(self, 200, {"accessCode": code, "labURL": issued_access_codes[code]["labURL"]})
