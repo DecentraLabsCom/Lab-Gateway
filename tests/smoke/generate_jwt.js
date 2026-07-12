@@ -8,6 +8,7 @@ const payload = {
   jti: "smoke-jti-123",
   iss: "https://lab.test:18443/auth",
   aud: "https://lab.test:18443/guacamole",
+  resourceType: "lab",
   exp: 1893456000
 };
 

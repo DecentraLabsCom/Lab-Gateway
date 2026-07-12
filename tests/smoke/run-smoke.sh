@@ -22,6 +22,7 @@ NC='\033[0m'
 
 function cleanup {
   docker compose -f "$COMPOSE_FILE" down -v >/dev/null 2>&1 || true
+  rm -f "$JWT_FILE"
   rm -f "$COOKIE_FILE"
   rm -f "$INVALID_COOKIE_FILE"
   rm -f "$INSTITUTION_COOKIE_FILE"
@@ -44,6 +45,12 @@ echo "=================================================="
 echo "DecentraLabs Gateway Smoke Tests"
 echo "=================================================="
 echo ""
+
+if ! command -v node >/dev/null 2>&1; then
+  echo -e "${RED}Node.js is required to generate the smoke JWT${NC}"
+  exit 1
+fi
+node "${JWT_FILE%/*}/generate_jwt.js"
 
 echo -e "${YELLOW}Starting services...${NC}"
 docker compose -f "$COMPOSE_FILE" up --build -d
@@ -79,7 +86,6 @@ fi
 # Test 2: one-time access-code exchange and cookie validation
 # =================================================================
 echo "Test 2: one-time access-code exchange"
-JWT=$(cat "$JWT_FILE")
 ACCESS_CODE=smoke-access-code
 curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$COOKIE_FILE" -X POST --data-urlencode "access_code=${ACCESS_CODE}" https://lab.test:${PORT}/auth/access >/dev/null
 

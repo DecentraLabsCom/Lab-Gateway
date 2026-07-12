@@ -16,6 +16,13 @@ tests/integration/certs/*.pem
 *.log
 logs/
 
+# Smoke-test runtime files
+tests/smoke/jwt.txt
+tests/smoke/cookie.txt
+tests/smoke/invalid-cookie.txt
+tests/smoke/institution-cookie.txt
+tests/smoke/replay-cookie.txt
+
 # Certificates and keys (security)
 luacov.stats.out
 luacov.report.out
