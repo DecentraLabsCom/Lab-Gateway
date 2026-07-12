@@ -423,6 +423,18 @@ if "!issuer_value!"=="" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_TOKEN_HEADER" "X-Lab-Manager-Token"
     call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_ALLOW_INSECURE" "false"
     echo    * LAB_ADMIN_BACKEND_URL left empty ^(Full mode uses embedded blockchain-services^).
+    call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" session_observer_gateway_id
+    call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" session_observer_signing_secret
+    call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" session_observer_credentials_json
+    if not defined session_observer_gateway_id set "session_observer_gateway_id=full-!domain!"
+    if not defined session_observer_signing_secret call :GenerateObserverSecret session_observer_signing_secret
+    if not defined session_observer_credentials_json set "session_observer_credentials_json={}"
+    if "!session_observer_credentials_json!"=="{}" set "session_observer_credentials_json={^"!session_observer_gateway_id!^":^"!session_observer_signing_secret!^"}"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" "!session_observer_gateway_id!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" "!session_observer_signing_secret!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" "!session_observer_credentials_json!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_AUDIT_URL" ""
+    echo    * Configured a dedicated signed session-observer credential for this Full gateway.
 ) else (
     echo    * ISSUER set to: !issuer_value! ^(Lite mode^).
     echo.
@@ -454,6 +466,36 @@ if "!issuer_value!"=="" (
     )
     echo    * LAB_ADMIN_BACKEND_TOKEN_HEADER set to: X-Lab-Manager-Token
     echo    * LAB_ADMIN_BACKEND_ALLOW_INSECURE set to: false
+    echo.
+    echo Lite Gateway Trust Bundle
+    echo =========================
+    echo Import the bundle created on Full with scripts\Issue-LiteTrustBundle.ps1.
+    set "lite_trust_bundle="
+    set /p "lite_trust_bundle=Trust bundle path: "
+    if not exist "!lite_trust_bundle!" (
+        echo A Full-issued trust bundle is required in Lite mode.
+        exit /b 1
+    )
+    call :ReadEnvValue "!lite_trust_bundle!" "ISSUER" bundle_issuer
+    call :ReadEnvValue "!lite_trust_bundle!" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" bundle_redeemer
+    call :ReadEnvValue "!lite_trust_bundle!" "ACCESS_AUDIT_URL" bundle_audit_url
+    call :ReadEnvValue "!lite_trust_bundle!" "SESSION_OBSERVER_GATEWAY_ID" bundle_gateway_id
+    call :ReadEnvValue "!lite_trust_bundle!" "SESSION_OBSERVER_SIGNING_SECRET" bundle_observer_secret
+    if not defined bundle_issuer exit /b 1
+    if not defined bundle_redeemer exit /b 1
+    if not defined bundle_audit_url exit /b 1
+    if not defined bundle_gateway_id exit /b 1
+    if not defined bundle_observer_secret exit /b 1
+    if /i not "!bundle_issuer!"=="!issuer_value!" (
+        echo Trust bundle ISSUER does not match the configured Full issuer.
+        exit /b 1
+    )
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "!bundle_redeemer!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_AUDIT_URL" "!bundle_audit_url!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" "!bundle_gateway_id!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" "!bundle_observer_secret!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" "{}"
+    echo    * Imported redeem and least-privilege observation credentials for !bundle_gateway_id!.
 )
 echo.
 
@@ -604,6 +646,8 @@ if not exist fmu-proxy-runtime\binaries mkdir fmu-proxy-runtime\binaries
 if not exist fmu-proxy-runtime\binaries\linux64 mkdir fmu-proxy-runtime\binaries\linux64
 if not exist fmu-proxy-runtime\binaries\win64 mkdir fmu-proxy-runtime\binaries\win64
 if not exist fmu-proxy-runtime\binaries\darwin64 mkdir fmu-proxy-runtime\binaries\darwin64
+if not exist ops-data mkdir ops-data
+if not exist ops-data\guac-revocation-spool mkdir ops-data\guac-revocation-spool
 if not exist certs\.gitkeep type nul > certs\.gitkeep
 
 echo SSL Certificates
@@ -889,6 +933,12 @@ set "_bytes=%~1"
 if "%_bytes%"=="" set "_bytes=16"
 for /f %%H in ('powershell -NoLogo -NoProfile -Command "$bytes = New-Object byte[](%_bytes%); [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes); [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()"') do set "_hex=%%H"
 endlocal & set "%~2=%_hex%"
+exit /b
+
+:GenerateObserverSecret
+setlocal
+for /f %%H in ('powershell -NoLogo -NoProfile -Command "$bytes = New-Object byte[](32); [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes); [Convert]::ToBase64String($bytes).TrimEnd('=^').Replace('+','-').Replace('/','_')"') do set "_secret=%%H"
+endlocal & set "%~1=%_secret%"
 exit /b
 
 :IsPlaceholderSecret

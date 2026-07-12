@@ -54,11 +54,17 @@ local function enforcement_expiry_cache_key(username)
 end
 
 local function clear_cached_user_token(dict, username, user_token)
-    dict:delete(token_cache_key(username))
+    if username and username ~= "" then
+        dict:delete(token_cache_key(username))
+        dict:delete(enforcement_expiry_cache_key(username))
+        dict:delete("exp:" .. username)
+    end
     if user_token then
         dict:delete(token_reverse_cache_key(user_token))
         dict:delete("guac_jwt_exp:" .. user_token)
         dict:delete("guac_jwt_last_seen:" .. user_token)
+        dict:delete("guac_jti:" .. user_token)
+        dict:delete("guac_reservation:" .. user_token)
     end
 end
 
@@ -108,6 +114,34 @@ local function revoke_user_token(self, httpc, auth_token, username, success_mess
     return true, user_token
 end
 
+local function iterate_expired_jwt_tokens(dict, now)
+    local expired = {}
+    for _, key in ipairs(dict:get_keys(0)) do
+        if key:match("^guac_jwt_exp:") then
+            local token = key:sub(14)
+            local exp = tonumber(dict:get(key))
+            if token ~= "" and exp and now >= exp then
+                expired[#expired + 1] = token
+            end
+        end
+    end
+    return expired
+end
+
+local function revoke_explicit_token(self, httpc, auth_token, user_token, username)
+    local display_username = username or "unknown JWT user"
+    local res = httpc:request_uri(self.guac_api .. "/tokens/" .. user_token .. "?token=" .. auth_token, {
+        method = "DELETE",
+        headers = {}
+    })
+    if not res or res.status ~= 204 then
+        self.ngx.log(self.ngx.ERR, "Worker - Error revoking expired Guacamole token for " .. display_username)
+        return false
+    end
+    self.ngx.log(self.ngx.INFO, "Worker - Expired Guacamole token revoked for " .. display_username)
+    return true
+end
+
 function SessionGuard:check_expired_sessions()
     local ngx = self.ngx
     local dict = self.dict
@@ -136,12 +170,14 @@ function SessionGuard:check_expired_sessions()
 
     local now = ngx.time()
 
-    -- The enforcement key outlives the JTI key briefly, so the worker can still
-    -- close an active tunnel after the browser-facing session key has expired.
+    local jwt_connection_close_failed = {}
+
+    -- Close active tunnels first. JWT token revocation is handled below even
+    -- when no tunnel exists; manual mappings retain their existing cleanup path.
     for identifier, conn in pairs(active_connections) do
         local username = string.lower(conn.username or "")
         local exp = dict:get(enforcement_expiry_cache_key(username))
-        if exp and now > tonumber(exp) then
+        if exp and now >= tonumber(exp) then
             ngx.log(ngx.INFO, "Worker - Closing expired session (" .. identifier .. ") for " .. username)
 
             local patch_body = self.cjson.encode({
@@ -159,16 +195,30 @@ function SessionGuard:check_expired_sessions()
 
             if not res or res.status ~= 204 then
                 ngx.log(ngx.ERR, "Worker - Error terminating connection for " .. username)
+                jwt_connection_close_failed[username] = true
             else
                 ngx.log(ngx.INFO, "Worker - Connection terminated for " .. username)
-                local revoked, user_token = revoke_user_token(
-                    self, httpc, auth_token, username, "Worker - Session token revoked for %s"
-                )
-                if revoked or not user_token then
-                    dict:delete(enforcement_expiry_cache_key(username))
-                    dict:delete("exp:" .. username)
-                    clear_cached_user_token(dict, username, user_token)
+                local user_token = dict:get(token_cache_key(username))
+                if not user_token or not dict:get("guac_jwt_exp:" .. user_token) then
+                    local revoked
+                    revoked, user_token = revoke_user_token(
+                        self, httpc, auth_token, username, "Worker - Session token revoked for %s"
+                    )
+                    if revoked or not user_token then
+                        clear_cached_user_token(dict, username, user_token)
+                    end
                 end
+            end
+        end
+    end
+
+    -- guac_jwt_exp is the revocation queue: every expired auth token is
+    -- revoked even when Guacamole reports no active connection for its user.
+    for _, user_token in ipairs(iterate_expired_jwt_tokens(dict, now)) do
+        local username = dict:get(token_reverse_cache_key(user_token))
+        if not username or not jwt_connection_close_failed[username] then
+            if revoke_explicit_token(self, httpc, auth_token, user_token, username) then
+                clear_cached_user_token(dict, username, user_token)
             end
         end
     end

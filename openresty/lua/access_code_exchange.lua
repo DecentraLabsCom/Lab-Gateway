@@ -2,11 +2,6 @@ local cjson = require "cjson.safe"
 local http = require "resty.http"
 local jwt = require "resty.jwt"
 
--- Keep the absolute expiry available to the active-connection worker after
--- the JTI session itself expires. This is only a cleanup retention window;
--- it never extends browser or Guacamole authorization.
-local ACTIVE_CONNECTION_EXPIRY_RETENTION_SECONDS = 300
-
 local function fail(status, message)
     ngx.status = status
     ngx.header["Content-Type"] = "text/plain"
@@ -105,7 +100,9 @@ if nbf and ngx.time() < nbf then
 end
 local port = config:get("https_port") or "443"
 local port_suffix = port == "443" and "" or (":" .. port)
-local expected_audience = "https://" .. (config:get("server_name") or "localhost") .. port_suffix .. "/guacamole"
+local gateway_origin = "https://" .. (config:get("server_name") or "localhost") .. port_suffix
+local resource_type = tostring(claims.resourceType or "")
+local expected_audience = resource_type == "fmu" and lab_url or (gateway_origin .. "/guacamole")
 local function normalize_url(value)
     return value and tostring(value):gsub("/+$", "") or value
 end
@@ -119,10 +116,33 @@ local current_host = ngx.var.http_host or ngx.var.host
 if not scheme or not host or (host ~= ngx.var.host and host ~= current_host) then
     return fail(400, "Invalid lab redirect")
 end
+if resource_type == "fmu" and not path:match("^/fmu[/]?") then
+    return fail(400, "Invalid FMU destination")
+elseif resource_type ~= "fmu" and resource_type ~= "lab" then
+    return fail(400, "Unsupported access resource")
+end
 
 local username_lower = string.lower(username)
 local remaining_lifetime = math.max(1, exp - ngx.time())
-local enforcement_lifetime = remaining_lifetime + ACTIVE_CONNECTION_EXPIRY_RETENTION_SECONDS
+local token_security_retention = tonumber(config:get("guac_token_security_retention_seconds")) or 1200
+local enforcement_lifetime = remaining_lifetime + math.max(1, token_security_retention)
+if resource_type == "fmu" then
+    local origin = ngx.var.http_origin
+    local marketplace_origin = config:get("marketplace_url")
+    if not origin or normalize_url(origin) ~= normalize_url(marketplace_origin) then
+        return fail(403, "Invalid FMU handoff origin")
+    end
+    cache:set("fmu_access_token:" .. jti, token, remaining_lifetime)
+    cache:set("fmu_access_exp:" .. jti, exp, remaining_lifetime)
+    ngx.header["Set-Cookie"] = "FMU_SESSION=" .. jti
+        .. "; Max-Age=" .. remaining_lifetime
+        .. "; Path=/fmu; Secure; HttpOnly; SameSite=None"
+    ngx.header["Access-Control-Allow-Origin"] = origin
+    ngx.header["Access-Control-Allow-Credentials"] = "true"
+    ngx.header["Referrer-Policy"] = "no-referrer"
+    ngx.status = 204
+    return ngx.exit(204)
+end
 ---@diagnostic disable-next-line: redundant-parameter
 cache:set("username:" .. jti, username_lower, remaining_lifetime)
 ---@diagnostic disable-next-line: redundant-parameter

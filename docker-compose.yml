@@ -88,6 +88,7 @@ services:
       # In Lite mode this directory is empty/absent; init.lua falls back to
       # the key downloaded by init-ssl.sh into /etc/ssl/private/.
       - ./blockchain-data/keys:/etc/openresty/jwt-keys:ro
+      - ./ops-data/guac-revocation-spool:/var/spool/guac-revocations
     tmpfs:
       - /tmp:size=64M,mode=1777
       - /var/run:size=16M,mode=755
@@ -100,8 +101,11 @@ services:
       - ISSUER=${ISSUER}
       - AUTH_ACCESS_CODE_REDEEM_URL=${AUTH_ACCESS_CODE_REDEEM_URL:-}
       - AUTH_ACCESS_CODE_REDEEMER_TOKEN=${AUTH_ACCESS_CODE_REDEEMER_TOKEN}
+      - API_SESSION_TIMEOUT=${API_SESSION_TIMEOUT:-15}
       - SESSION_OBSERVATION_INGEST_TOKEN=${SESSION_OBSERVATION_INGEST_TOKEN:-}
       - OPS_SESSION_OBSERVATION_INGEST_URL=${OPS_SESSION_OBSERVATION_INGEST_URL:-http://ops-worker:8081/internal/session-observations}
+      - OPS_GUACAMOLE_TOKEN_INGEST_URL=${OPS_GUACAMOLE_TOKEN_INGEST_URL:-http://ops-worker:8081/internal/guacamole-token-revocations}
+      - GUAC_REVOCATION_SPOOL_DIR=/var/spool/guac-revocations
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
       - MARKETPLACE_URL=${MARKETPLACE_URL:-https://marketplace-decentralabs.vercel.app}
       - ADMIN_ACCESS_TOKEN=${ADMIN_ACCESS_TOKEN}
@@ -439,9 +443,13 @@ services:
       - OPS_MYSQL_DATABASE=${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - ACCESS_AUDIT_URL=${ACCESS_AUDIT_URL:-}
-      - ADMIN_ACCESS_TOKEN=${ADMIN_ACCESS_TOKEN}
-      - ADMIN_ACCESS_TOKEN_HEADER=${ADMIN_ACCESS_TOKEN_HEADER:-X-Access-Token}
+      - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
+      - SESSION_OBSERVER_SIGNING_SECRET=${SESSION_OBSERVER_SIGNING_SECRET:-}
       - SESSION_OBSERVATION_INGEST_TOKEN=${SESSION_OBSERVATION_INGEST_TOKEN:-}
+      - GUAC_ADMIN_USER=${GUAC_ADMIN_USER}
+      - GUAC_ADMIN_PASS=${GUAC_ADMIN_PASS}
+      - GUAC_API_URL=${GUAC_API_URL:-http://guacamole:8080/guacamole/api}
+      - GUAC_REVOCATION_SPOOL_DIR=/app/data/guac-revocation-spool
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro

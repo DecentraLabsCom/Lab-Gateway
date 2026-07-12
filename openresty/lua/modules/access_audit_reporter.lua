@@ -1,4 +1,12 @@
 local _M = {}
+local MAX_DELIVERY_ATTEMPTS = 3
+local RETRY_DELAYS_SECONDS = { 0.1, 0.5 }
+
+local function increment(dict, key)
+    if dict then
+        dict:incr(key, 1, 0)
+    end
+end
 
 local function has_text(value)
     return value ~= nil and tostring(value) ~= ""
@@ -72,12 +80,23 @@ local function schedule_observation(ngx, payload, deps)
         if premature then
             return
         end
-        local delivered, delivery_err = deliver_observation(payload, deps)
-        if not delivered then
-            ngx.log(ngx.WARN, "Access audit - observation ingestion failed: " .. tostring(delivery_err))
+        local delivery_err
+        for attempt = 1, MAX_DELIVERY_ATTEMPTS do
+            local delivered
+            delivered, delivery_err = deliver_observation(payload, deps)
+            if delivered then
+                increment(ngx.shared.cache, "metric:session_observation_ingest_success")
+                return
+            end
+            if attempt < MAX_DELIVERY_ATTEMPTS and ngx.sleep then
+                ngx.sleep(RETRY_DELAYS_SECONDS[attempt])
+            end
         end
+        increment(ngx.shared.cache, "metric:session_observation_ingest_failure")
+        ngx.log(ngx.WARN, "Access audit - observation ingestion failed after retries: " .. tostring(delivery_err))
     end)
     if not ok then
+        increment(ngx.shared.cache, "metric:session_observation_schedule_failure")
         ngx.log(ngx.WARN, "Access audit - unable to schedule observation ingestion: " .. tostring(err))
         return false
     end

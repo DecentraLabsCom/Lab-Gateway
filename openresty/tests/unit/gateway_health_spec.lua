@@ -254,7 +254,10 @@ local function healthy_gateway_health_opts()
             },
             ["/__health_guacamole"] = { status = 200, body = {} },
             ["/__health_guac_api"] = { status = 200, body = {} },
-            ["/__health_ops"] = { status = 200, body = { hosts = 3, polling_enabled = true } }
+            ["/__health_ops"] = {
+                status = 200,
+                body = { hosts = 3, polling_enabled = true, guacamole_schema = true }
+            }
         },
         dns = {
             ["blockchain-services"] = "10.0.0.2",
@@ -406,14 +409,14 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals("invalid public key payload", result.services.lite_auth.remote_public_key_status)
     end)
 
-    runner.it("does not require database credentials for gateway health", function()
+    runner.it("reports the Guacamole schema check delegated to Ops Worker", function()
         local opts = healthy_gateway_health_opts()
 
         local ngx = run_gateway_health(opts)
 
         local result = ngx._body
         runner.assert.equals("UP", result.status)
-        runner.assert.equals(nil, result.services.guacamole_schema)
+        runner.assert.equals(true, result.services.guacamole_schema.ok)
         runner.assert.equals(true, result.services.mysql.ok)
     end)
 

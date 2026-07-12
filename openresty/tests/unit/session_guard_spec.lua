@@ -53,6 +53,37 @@ runner.describe("Session guard", function()
         runner.assert.equals(4, #http_stub.calls)
     end)
 
+    runner.it("revokes an expired JWT token even without an active connection", function()
+        local cache = {
+            ["guac_enforcement_exp:user1"] = "100",
+            ["guac_jwt_exp:token-1"] = "100",
+            ["guac_jwt_last_seen:token-1"] = "90",
+            ["guac_jti:token-1"] = "jti-1",
+            ["guac_reservation:token-1"] = "0xabc",
+            ["guac_token:token-1"] = "user1",
+            ["token:user1"] = "token-1"
+        }
+
+        local responses = {
+            { status = 200, body = cjson.encode({ authToken = "admin-token", dataSource = "mysql" }) },
+            { status = 200, body = cjson.encode({}) },
+            { status = 204 }
+        }
+
+        local guard, http_stub, ngx = build_guard(cache, responses)
+
+        guard:check_expired_sessions()
+
+        local store = ngx.shared.cache._data
+        runner.assert.equals(nil, store["guac_enforcement_exp:user1"])
+        runner.assert.equals(nil, store["guac_jwt_exp:token-1"])
+        runner.assert.equals(nil, store["guac_jti:token-1"])
+        runner.assert.equals(nil, store["guac_reservation:token-1"])
+        runner.assert.equals(nil, store["guac_token:token-1"])
+        runner.assert.equals(nil, store["token:user1"])
+        runner.assert.equals(3, #http_stub.calls)
+    end)
+
     runner.it("skips revocation when token is missing", function()
         local cache = {
             ["guac_enforcement_exp:user1"] = "100"

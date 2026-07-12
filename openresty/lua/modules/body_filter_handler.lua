@@ -1,5 +1,6 @@
 local _M = {}
-local SESSION_CLEANUP_RETENTION_SECONDS = 300
+local token_revocation_reporter = require "modules.token_revocation_reporter"
+local DEFAULT_TOKEN_SECURITY_RETENTION_SECONDS = 1200
 local DEFAULT_MAPPING_TTL_SECONDS = 7200
 
 local function is_json_response(content_type)
@@ -51,7 +52,9 @@ function _M.run(ngx_ctx, chunk, eof, deps)
     end
     local mapping_ttl = DEFAULT_MAPPING_TTL_SECONDS
     if jwt_exp then
-        mapping_ttl = math.max(1, jwt_exp - ngx.time() + SESSION_CLEANUP_RETENTION_SECONDS)
+        local retention = tonumber(ngx.shared.config:get("guac_token_security_retention_seconds"))
+            or DEFAULT_TOKEN_SECURITY_RETENTION_SECONDS
+        mapping_ttl = math.max(1, jwt_exp - ngx.time() + math.max(1, retention))
     end
 
     local ok, err = dict:set("token:" .. username_lower, decoded.authToken, mapping_ttl)
@@ -76,6 +79,14 @@ function _M.run(ngx_ctx, chunk, eof, deps)
             if ngx.ctx.jwt_reservation_key then
                 dict:set("guac_reservation:" .. decoded.authToken, ngx.ctx.jwt_reservation_key, mapping_ttl)
             end
+            token_revocation_reporter.schedule(ngx, {
+                authToken = decoded.authToken,
+                username = username_lower,
+                reservationKey = ngx.ctx.jwt_reservation_key,
+                jwtJti = ngx.ctx.jwt_jti,
+                gatewayId = ngx.shared.config:get("server_name"),
+                expiresAt = jwt_exp,
+            }, deps and deps.revocation_reporter)
             ngx.log(ngx.INFO, "Body filter - JWT-backed session token marked for " .. decoded.username)
         end
     end

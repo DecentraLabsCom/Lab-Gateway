@@ -329,6 +329,7 @@ end
 
 -- Ops worker details (optional)
 local ops_body = ops.body or {}
+local guacamole_schema_ok = ops.ok and ops_body.guacamole_schema == true
 
 local status_checks = {
     { ok = guac.ok },
@@ -379,6 +380,10 @@ local result = {
             status = ops.status,
             hosts = ops_body.hosts or ops_body.host_count,
             poll_enabled = ops_body.polling_enabled or ops_body.polling
+        },
+        guacamole_schema = {
+            ok = guacamole_schema_ok,
+            checked_by = "ops-worker"
         },
         mysql = {
             ok = mysql_ok or false

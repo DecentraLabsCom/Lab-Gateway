@@ -5,6 +5,8 @@ Exposes a small Flask API and optional scheduler.
 """
 import json
 import hmac
+import hashlib
+import base64
 import logging
 import os
 import re
@@ -12,8 +14,10 @@ import socket
 import subprocess
 import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from urllib.parse import quote
 
 from cryptography.fernet import Fernet, InvalidToken
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -98,8 +102,8 @@ def _is_lite_gateway() -> bool:
 ACCESS_AUDIT_URL = os.getenv("ACCESS_AUDIT_URL", "").strip()
 if not ACCESS_AUDIT_URL and not _is_lite_gateway():
     ACCESS_AUDIT_URL = "http://blockchain-services:8080/access-audit/internal/session-observed"
-ACCESS_AUDIT_TOKEN = os.getenv("ADMIN_ACCESS_TOKEN") or ""
-ACCESS_AUDIT_TOKEN_HEADER = os.getenv("ADMIN_ACCESS_TOKEN_HEADER", "X-Access-Token")
+SESSION_OBSERVER_GATEWAY_ID = os.getenv("SESSION_OBSERVER_GATEWAY_ID", "").strip()
+SESSION_OBSERVER_SIGNING_SECRET = os.getenv("SESSION_OBSERVER_SIGNING_SECRET", "").strip()
 SESSION_OBSERVATION_OUTBOX_ENABLED = os.getenv(
     "SESSION_OBSERVATION_OUTBOX_ENABLED", "true"
 ).strip().lower() not in ("false", "0", "no", "off")
@@ -116,6 +120,18 @@ SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS = max(
     1, int(os.getenv("SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS", "5"))
 )
 SESSION_OBSERVATION_INGEST_TOKEN = os.getenv("SESSION_OBSERVATION_INGEST_TOKEN", "")
+GUAC_ADMIN_USER = os.getenv("GUAC_ADMIN_USER", "")
+GUAC_ADMIN_PASS = os.getenv("GUAC_ADMIN_PASS", "")
+GUAC_API_URL = os.getenv("GUAC_API_URL", "http://guacamole:8080/guacamole/api").rstrip("/")
+GUAC_REVOCATION_SPOOL_DIR = os.getenv(
+    "GUAC_REVOCATION_SPOOL_DIR", "/app/data/guac-revocation-spool"
+)
+GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS = max(
+    1, int(os.getenv("GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS", "10"))
+)
+GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS = max(
+    1, int(os.getenv("GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS", "20"))
+)
 HEARTBEAT_SSE_INTERVAL_SECONDS = max(1, int(os.getenv("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")))
 DISCOVERY_TIMEOUT_SECONDS = max(0.2, float(os.getenv("OPS_DISCOVERY_TIMEOUT_SECONDS", "1.5")))
 DISCOVERY_WINRM_PORTS = [
@@ -1164,13 +1180,39 @@ def poll_heartbeat(host: Dict[str, Any], include_events: bool = False) -> Dict[s
     return {"heartbeat": heartbeat, "last_event": last_event}
 
 
+def database_is_usable(engine: Optional[Engine], statement: str) -> bool:
+    if not engine:
+        return False
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(statement)).first()
+        return True
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Health database check failed: %s", exc)
+        return False
+
+
 @APP.route("/health", methods=["GET"])
 def health():
+    db_ok = database_is_usable(DB_ENGINE, "SELECT 1")
+    guacamole_schema_ok = database_is_usable(
+        GUACAMOLE_DB_ENGINE,
+        """
+        SELECT 1
+        FROM guacamole_entity e
+        LEFT JOIN guacamole_user u ON u.entity_id = e.entity_id
+        LEFT JOIN guacamole_connection_permission cp ON cp.entity_id = e.entity_id
+        LEFT JOIN guacamole_connection c ON c.connection_id = cp.connection_id
+        LIMIT 1
+        """,
+    )
+    healthy = db_ok and guacamole_schema_ok
     return jsonify({
-        "status": "ok",
+        "status": "ok" if healthy else "degraded",
         "hosts_loaded": len(HOSTS.all_hosts()),
-        "db": bool(DB_ENGINE)
-    })
+        "db": db_ok,
+        "guacamole_schema": guacamole_schema_ok,
+    }), 200 if healthy else 503
 
 
 @APP.route("/api/wol", methods=["POST"])
@@ -3016,6 +3058,239 @@ def session_observation_retry_delay_seconds(attempts: int) -> int:
     return min(300, 5 * (2 ** min(max(0, attempts - 1), 6)))
 
 
+def _encrypt_runtime_secret(value: str) -> str:
+    return _load_or_create_fernet().encrypt(value.encode("utf-8")).decode("ascii")
+
+
+def _decrypt_runtime_secret(value: str) -> str:
+    return _load_or_create_fernet().decrypt(value.encode("ascii")).decode("utf-8")
+
+
+def enqueue_guacamole_token_revocation(payload: Mapping[str, Any]) -> bool:
+    if not DB_ENGINE:
+        return False
+    required = ("authToken", "username", "reservationKey", "jwtJti", "gatewayId", "expiresAt")
+    if any(not str(payload.get(field) or "").strip() for field in required):
+        return False
+    token = str(payload["authToken"]).strip()
+    if len(token) > 512:
+        return False
+    try:
+        expires_at = datetime.fromtimestamp(int(payload["expiresAt"]), tz=timezone.utc).replace(tzinfo=None)
+        ciphertext = _encrypt_runtime_secret(token)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    values = {
+        "token_hash": token_hash,
+        "token_ciphertext": ciphertext,
+        "username": str(payload["username"]).strip().lower(),
+        "reservation_key": str(payload["reservationKey"]).strip(),
+        "jwt_jti": str(payload["jwtJti"]).strip(),
+        "gateway_id": str(payload["gatewayId"]).strip(),
+        "expires_at": expires_at,
+    }
+    try:
+        with DB_ENGINE.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO guacamole_token_revocation_queue (
+                    token_hash, token_ciphertext, username, reservation_key,
+                    jwt_jti, gateway_id, expires_at, status, next_attempt_at
+                ) VALUES (
+                    :token_hash, :token_ciphertext, :username, :reservation_key,
+                    :jwt_jti, :gateway_id, :expires_at, 'PENDING', CURRENT_TIMESTAMP
+                )
+            """), values)
+        return True
+    except IntegrityError:
+        try:
+            with DB_ENGINE.begin() as conn:
+                conn.execute(text("""
+                    UPDATE guacamole_token_revocation_queue
+                    SET token_ciphertext = :token_ciphertext,
+                        username = :username,
+                        reservation_key = :reservation_key,
+                        jwt_jti = :jwt_jti,
+                        gateway_id = :gateway_id,
+                        expires_at = :expires_at,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE token_hash = :token_hash AND status != 'REVOKED'
+                """), values)
+            return True
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.warning("Guacamole revocation duplicate recovery failed: %s", exc)
+            return False
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Guacamole revocation ingest failed: %s", exc)
+        return False
+
+
+def ingest_guacamole_revocation_spool() -> int:
+    """Move crash-safe Lua spool entries into the encrypted MySQL queue."""
+    spool = Path(GUAC_REVOCATION_SPOOL_DIR)
+    if not spool.is_dir():
+        return 0
+    ingested = 0
+    for entry in sorted(spool.glob("*.json")):
+        try:
+            if entry.stat().st_size > 16 * 1024:
+                logging.error("Deleting oversized Guacamole revocation spool entry %s", entry.name)
+                entry.unlink(missing_ok=True)
+                continue
+            payload = json.loads(entry.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and enqueue_guacamole_token_revocation(payload):
+                entry.unlink(missing_ok=True)
+                ingested += 1
+            elif not isinstance(payload, dict):
+                entry.unlink(missing_ok=True)
+        except (OSError, ValueError, TypeError) as exc:
+            logging.warning("Unable to ingest Guacamole revocation spool entry %s: %s", entry.name, exc)
+    return ingested
+
+
+@APP.route("/internal/guacamole-token-revocations", methods=["POST"])
+def ingest_guacamole_token_revocation():
+    if not SESSION_OBSERVATION_INGEST_TOKEN:
+        return jsonify({"accepted": False, "error": "Guacamole revocation ingestion is disabled"}), 503
+    provided = request.headers.get("X-Gateway-Observation-Token", "")
+    if not hmac.compare_digest(provided, SESSION_OBSERVATION_INGEST_TOKEN):
+        return jsonify({"accepted": False, "error": "unauthorized"}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not enqueue_guacamole_token_revocation(payload):
+        return jsonify({"accepted": False, "error": "invalid or unavailable revocation"}), 400
+    return jsonify({"accepted": True}), 202
+
+
+def _guacamole_admin_session() -> Optional[Tuple[str, str]]:
+    if not GUAC_ADMIN_USER or not GUAC_ADMIN_PASS:
+        return None
+    response = requests.post(
+        f"{GUAC_API_URL}/tokens",
+        data={"username": GUAC_ADMIN_USER, "password": GUAC_ADMIN_PASS},
+        timeout=5,
+    )
+    if response.status_code != 200:
+        return None
+    body = response.json()
+    token = str(body.get("authToken") or "").strip()
+    data_source = str(body.get("dataSource") or "mysql").strip()
+    return (token, data_source) if token else None
+
+
+def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> None:
+    if not DB_ENGINE:
+        return
+    response = requests.get(
+        f"{GUAC_API_URL}/session/data/{quote(data_source, safe='')}/activeConnections",
+        params={"token": admin_token},
+        timeout=5,
+    )
+    if response.status_code != 200:
+        return
+    active_users = {
+        str(connection.get("username") or "").strip().lower()
+        for connection in (response.json() or {}).values()
+        if isinstance(connection, dict)
+    }
+    if not active_users:
+        return
+    with DB_ENGINE.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT token_hash, reservation_key, jwt_jti, gateway_id, username
+            FROM guacamole_token_revocation_queue
+            WHERE status IN ('PENDING', 'RETRY')
+              AND observed_at IS NULL
+              AND expires_at > CURRENT_TIMESTAMP
+            ORDER BY created_at ASC
+            LIMIT 100
+        """)).mappings().all()
+    for row in rows:
+        if str(row["username"]).lower() not in active_users:
+            continue
+        accepted = enqueue_session_observation({
+            "dedupKey": row["token_hash"],
+            "reservationKey": row["reservation_key"],
+            "jwtJti": row["jwt_jti"],
+            "sessionId": f"guac:{row['token_hash']}",
+            "gatewayId": row["gateway_id"],
+            "accessType": "guacamole",
+            "observedAt": int(time.time()),
+        })
+        if accepted:
+            with DB_ENGINE.begin() as conn:
+                conn.execute(text("""
+                    UPDATE guacamole_token_revocation_queue
+                    SET observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                    WHERE token_hash = :token_hash AND observed_at IS NULL
+                """), {"token_hash": row["token_hash"]})
+
+
+def process_guacamole_token_revocations() -> int:
+    ingest_guacamole_revocation_spool()
+    if not DB_ENGINE:
+        return 0
+    session = _guacamole_admin_session()
+    if not session:
+        logging.warning("Guacamole token revocation deferred: admin session unavailable")
+        return 0
+    admin_token, data_source = session
+    try:
+        _reconcile_guacamole_observations(admin_token, data_source)
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Guacamole session observation reconciliation failed: %s", exc)
+    with DB_ENGINE.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT token_hash, token_ciphertext, attempts
+            FROM guacamole_token_revocation_queue
+            WHERE status IN ('PENDING', 'RETRY')
+              AND expires_at <= CURRENT_TIMESTAMP
+              AND next_attempt_at <= CURRENT_TIMESTAMP
+            ORDER BY expires_at ASC
+            LIMIT 100
+        """)).mappings().all()
+    revoked = 0
+    for row in rows:
+        attempts = int(row["attempts"] or 0) + 1
+        try:
+            user_token = _decrypt_runtime_secret(str(row["token_ciphertext"]))
+            response = requests.delete(
+                f"{GUAC_API_URL}/tokens/{quote(user_token, safe='')}",
+                params={"token": admin_token},
+                timeout=5,
+            )
+            if response.status_code not in (204, 404):
+                raise RuntimeError(f"Guacamole token delete returned {response.status_code}")
+            with DB_ENGINE.begin() as conn:
+                conn.execute(text("""
+                    UPDATE guacamole_token_revocation_queue
+                    SET status = 'REVOKED', attempts = :attempts,
+                        revoked_at = CURRENT_TIMESTAMP, last_error = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE token_hash = :token_hash
+                """), {"token_hash": row["token_hash"], "attempts": attempts})
+            revoked += 1
+        except Exception as exc:  # pylint: disable=broad-except
+            status = "FAILED" if attempts >= GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS else "RETRY"
+            next_attempt = datetime.now(timezone.utc) + timedelta(
+                seconds=session_observation_retry_delay_seconds(attempts)
+            )
+            with DB_ENGINE.begin() as conn:
+                conn.execute(text("""
+                    UPDATE guacamole_token_revocation_queue
+                    SET status = :status, attempts = :attempts,
+                        next_attempt_at = :next_attempt_at, last_error = :last_error,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE token_hash = :token_hash
+                """), {
+                    "status": status,
+                    "attempts": attempts,
+                    "next_attempt_at": next_attempt,
+                    "last_error": str(exc)[:1024],
+                    "token_hash": row["token_hash"],
+                })
+    return revoked
+
+
 def enqueue_session_observation(payload: Mapping[str, Any]) -> bool:
     """Persist an OpenResty WebSocket-open observation before it is delivered."""
     if not DB_ENGINE:
@@ -3055,9 +3330,32 @@ def enqueue_session_observation(payload: Mapping[str, Any]) -> bool:
             )
         return True
     except IntegrityError:
-        # The WebSocket upgrade may be observed more than once; the unique
-        # deduplication key makes this a successful idempotent ingest.
-        return True
+        # A repeated WebSocket observation is idempotent. A terminal delivery
+        # is reopened only when the trusted gateway observes the same session again.
+        try:
+            with DB_ENGINE.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE gateway_session_observation_outbox
+                        SET status = CASE WHEN status = 'FAILED' THEN 'RETRY' ELSE status END,
+                            attempts = CASE WHEN status = 'FAILED' THEN 0 ELSE attempts END,
+                            next_attempt_at = CASE
+                                WHEN status IN ('FAILED', 'RETRY') THEN CURRENT_TIMESTAMP
+                                ELSE next_attempt_at
+                            END,
+                            locked_at = CASE WHEN status = 'FAILED' THEN NULL ELSE locked_at END,
+                            last_error = CASE WHEN status = 'FAILED' THEN NULL ELSE last_error END,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE dedup_key = :dedup_key
+                        """
+                    ),
+                    {"dedup_key": str(payload["dedupKey"]).strip()},
+                )
+            return True
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.warning("Session observation duplicate recovery failed: %s", exc)
+            return False
     except Exception as exc:  # pylint: disable=broad-except
         logging.warning("Session observation outbox ingest failed: %s", exc)
         return False
@@ -3184,6 +3482,37 @@ def _session_observed_epoch(value: Any) -> int:
     return int(time.time())
 
 
+def _base64url_json(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(encoded).rstrip(b"=").decode("ascii")
+
+
+def _session_observer_authorization() -> str:
+    """Create a short-lived JWT scoped only to session-observation submission."""
+    if not SESSION_OBSERVER_GATEWAY_ID or not SESSION_OBSERVER_SIGNING_SECRET:
+        raise RuntimeError("session observer gateway credentials are not configured")
+    padding = "=" * (-len(SESSION_OBSERVER_SIGNING_SECRET) % 4)
+    key = base64.urlsafe_b64decode(SESSION_OBSERVER_SIGNING_SECRET + padding)
+    if len(key) < 32:
+        raise RuntimeError("session observer signing secret must contain at least 32 bytes")
+    now = int(time.time())
+    header = _base64url_json({"alg": "HS256", "typ": "JWT"})
+    payload = _base64url_json({
+        "iss": SESSION_OBSERVER_GATEWAY_ID,
+        "sub": SESSION_OBSERVER_GATEWAY_ID,
+        "aud": "session-observation",
+        "scope": "session-observation:submit",
+        "iat": now,
+        "exp": now + 60,
+        "jti": base64.urlsafe_b64encode(os.urandom(18)).rstrip(b"=").decode("ascii"),
+    })
+    signing_input = f"{header}.{payload}"
+    signature = base64.urlsafe_b64encode(
+        hmac.new(key, signing_input.encode("ascii"), hashlib.sha256).digest()
+    ).rstrip(b"=").decode("ascii")
+    return f"Bearer {signing_input}.{signature}"
+
+
 def deliver_session_observation_outbox() -> int:
     """Deliver durable WebSocket-open observations to blockchain-services."""
     if not SESSION_OBSERVATION_OUTBOX_ENABLED or not DB_ENGINE:
@@ -3191,8 +3520,8 @@ def deliver_session_observation_outbox() -> int:
     if not ACCESS_AUDIT_URL:
         logging.error("Session observation outbox is pending: ACCESS_AUDIT_URL must target the issuing Full gateway")
         return 0
-    if not ACCESS_AUDIT_TOKEN:
-        logging.error("Session observation outbox is pending: ADMIN_ACCESS_TOKEN is not configured")
+    if not SESSION_OBSERVER_GATEWAY_ID or not SESSION_OBSERVER_SIGNING_SECRET:
+        logging.error("Session observation outbox is pending: session observer credentials are not configured")
         return 0
 
     delivered = 0
@@ -3201,7 +3530,7 @@ def deliver_session_observation_outbox() -> int:
             "reservationKey": record["reservation_key"],
             "jwtJti": record["jwt_jti"],
             "sessionId": record["session_id"],
-            "gatewayId": record["gateway_id"],
+            "gatewayId": SESSION_OBSERVER_GATEWAY_ID,
             "accessType": record["access_type"],
             "observedAt": _session_observed_epoch(record["observed_at"]),
         }
@@ -3209,7 +3538,7 @@ def deliver_session_observation_outbox() -> int:
             response = requests.post(
                 ACCESS_AUDIT_URL,
                 json=payload,
-                headers={ACCESS_AUDIT_TOKEN_HEADER: ACCESS_AUDIT_TOKEN},
+                headers={"Authorization": _session_observer_authorization()},
                 timeout=SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS,
             )
             body = response.json() if response.content else {}
@@ -3290,6 +3619,20 @@ def start_scheduler():
             "Session observation outbox enabled (interval %ss)",
             SESSION_OBSERVATION_OUTBOX_INTERVAL_SECONDS,
         )
+
+    scheduler.add_job(
+        process_guacamole_token_revocations,
+        "interval",
+        seconds=GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS,
+        next_run_time=datetime.now(timezone.utc),
+        id="guacamole-token-revocation",
+        replace_existing=True,
+    )
+    jobs += 1
+    logging.info(
+        "Durable Guacamole token revocation enabled (interval %ss)",
+        GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS,
+    )
 
     if jobs == 0:
         logging.info("Scheduler not started (no jobs enabled)")

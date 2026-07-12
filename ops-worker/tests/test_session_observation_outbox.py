@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import base64
+import json
 
 from sqlalchemy import create_engine, text
 
@@ -44,11 +46,17 @@ def insert_pending(engine):
         """), {"observed_at": datetime(2026, 1, 1, tzinfo=timezone.utc)})
 
 
+def configure_observer(monkeypatch):
+    secret = base64.urlsafe_b64encode(b"a-32-byte-session-observer-secret!!").rstrip(b"=").decode()
+    monkeypatch.setattr(worker, "SESSION_OBSERVER_GATEWAY_ID", "gateway-a")
+    monkeypatch.setattr(worker, "SESSION_OBSERVER_SIGNING_SECRET", secret)
+
+
 def test_delivers_observation_and_marks_it_sent(monkeypatch):
     engine = create_outbox_engine()
     insert_pending(engine)
     monkeypatch.setattr(worker, "DB_ENGINE", engine)
-    monkeypatch.setattr(worker, "ACCESS_AUDIT_TOKEN", "internal-token")
+    configure_observer(monkeypatch)
     monkeypatch.setattr(worker, "SESSION_OBSERVATION_OUTBOX_ENABLED", True)
     captured = {}
 
@@ -68,7 +76,13 @@ def test_delivers_observation_and_marks_it_sent(monkeypatch):
 
     assert worker.deliver_session_observation_outbox() == 1
     assert captured["json"]["observedAt"] == 1767225600
-    assert captured["headers"][worker.ACCESS_AUDIT_TOKEN_HEADER] == "internal-token"
+    authorization = captured["headers"]["Authorization"]
+    assert authorization.startswith("Bearer ")
+    payload = authorization.removeprefix("Bearer ").split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    claims = json.loads(base64.urlsafe_b64decode(payload))
+    assert claims["iss"] == "gateway-a"
+    assert claims["scope"] == "session-observation:submit"
     with engine.begin() as conn:
         status = conn.execute(text("SELECT status FROM gateway_session_observation_outbox")).scalar_one()
     assert status == "SENT"
@@ -78,7 +92,7 @@ def test_retries_when_backend_does_not_confirm_the_observation(monkeypatch):
     engine = create_outbox_engine()
     insert_pending(engine)
     monkeypatch.setattr(worker, "DB_ENGINE", engine)
-    monkeypatch.setattr(worker, "ACCESS_AUDIT_TOKEN", "internal-token")
+    configure_observer(monkeypatch)
     monkeypatch.setattr(worker, "SESSION_OBSERVATION_OUTBOX_ENABLED", True)
 
     class Response:
@@ -134,11 +148,44 @@ def test_ingest_requires_the_gateway_specific_token_and_is_idempotent(monkeypatc
     assert count == 1
 
 
+def test_duplicate_ingest_reopens_a_failed_observation(monkeypatch):
+    engine = create_outbox_engine()
+    monkeypatch.setattr(worker, "DB_ENGINE", engine)
+    payload = {
+        "dedupKey": "c" * 64,
+        "reservationKey": "0xreservation",
+        "jwtJti": "jwt-jti",
+        "sessionId": "guac:session-hash",
+        "gatewayId": "gateway-a",
+        "accessType": "guacamole",
+        "observedAt": 1767225600,
+    }
+    assert worker.enqueue_session_observation(payload) is True
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE gateway_session_observation_outbox
+            SET status = 'FAILED', attempts = 8, last_error = 'temporary outage'
+            WHERE dedup_key = :dedup_key
+        """), {"dedup_key": payload["dedupKey"]})
+
+    assert worker.enqueue_session_observation(payload) is True
+
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT status, attempts, last_error
+            FROM gateway_session_observation_outbox
+            WHERE dedup_key = :dedup_key
+        """), {"dedup_key": payload["dedupKey"]}).mappings().one()
+    assert row["status"] == "RETRY"
+    assert row["attempts"] == 0
+    assert row["last_error"] is None
+
+
 def test_does_not_deliver_lite_gateway_observations_without_the_issuer_audit_url(monkeypatch):
     engine = create_outbox_engine()
     insert_pending(engine)
     monkeypatch.setattr(worker, "DB_ENGINE", engine)
-    monkeypatch.setattr(worker, "ACCESS_AUDIT_TOKEN", "internal-token")
+    configure_observer(monkeypatch)
     monkeypatch.setattr(worker, "ACCESS_AUDIT_URL", "")
     monkeypatch.setattr(worker, "SESSION_OBSERVATION_OUTBOX_ENABLED", True)
 

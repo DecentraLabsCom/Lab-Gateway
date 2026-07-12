@@ -3,6 +3,17 @@ local ngx_factory = require "tests.helpers.ngx_stub"
 local handler = require "modules.body_filter_handler"
 local cjson = require "cjson.safe"
 
+local function jwt_deps()
+    return {
+        cjson = cjson,
+        revocation_reporter = {
+            persist = function() return true, "/spool/revocation.json" end,
+            deliver = function() return true end,
+            remove_persisted = function() return true end,
+        }
+    }
+end
+
 local function new_ngx(opts)
     opts = opts or {}
     local ngx = ngx_factory.new({
@@ -50,7 +61,7 @@ runner.describe("Body filter handler", function()
             now = 100
         })
 
-        handler.run(ngx, '{"authToken":"jwt-token","username":"JwtUser"}', true, { cjson = cjson })
+        handler.run(ngx, '{"authToken":"jwt-token","username":"JwtUser"}', true, jwt_deps())
 
         local cache = ngx.shared.cache._data
         runner.assert.equals("jwt-token", cache["token:jwtuser"])
@@ -62,7 +73,7 @@ runner.describe("Body filter handler", function()
         runner.assert.equals(nil, cache["guac_manual_last_seen:jwt-token"])
     end)
 
-    runner.it("retains every JWT-derived mapping until expiration plus cleanup retention", function()
+    runner.it("retains every JWT-derived mapping beyond Guacamole's token lifetime", function()
         local ngx = ngx_factory.new({
             header = { ["Content-Type"] = "application/json" },
             cache = {},
@@ -70,10 +81,10 @@ runner.describe("Body filter handler", function()
             now = 100
         })
 
-        handler.run(ngx, '{"authToken":"long-token","username":"LongUser"}', true, { cjson = cjson })
+        handler.run(ngx, '{"authToken":"long-token","username":"LongUser"}', true, jwt_deps())
 
         local ttl = ngx.shared.cache._ttls["token:longuser"]
-        runner.assert.equals(14700, ttl)
+        runner.assert.equals(15600, ttl)
         runner.assert.equals(ttl, ngx.shared.cache._ttls["guac_token:long-token"])
         runner.assert.equals(ttl, ngx.shared.cache._ttls["guac_jwt_exp:long-token"])
         runner.assert.equals(ttl, ngx.shared.cache._ttls["guac_jwt_last_seen:long-token"])

@@ -466,6 +466,23 @@ if [ -z "$issuer_value" ]; then
     update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_TOKEN_HEADER" "X-Lab-Manager-Token"
     update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_ALLOW_INSECURE" "false"
     echo "   * LAB_ADMIN_BACKEND_URL left empty (Full mode uses embedded blockchain-services)."
+    session_observer_gateway_id="$(get_env_default "SESSION_OBSERVER_GATEWAY_ID" "$ROOT_ENV_FILE")"
+    session_observer_signing_secret="$(get_env_default "SESSION_OBSERVER_SIGNING_SECRET" "$ROOT_ENV_FILE")"
+    session_observer_credentials_json="$(get_env_default "SESSION_OBSERVER_CREDENTIALS_JSON" "$ROOT_ENV_FILE")"
+    if [ -z "$session_observer_gateway_id" ]; then
+        session_observer_gateway_id="full-$(printf '%s' "$domain" | tr -cd 'a-zA-Z0-9._-')"
+    fi
+    if [ -z "$session_observer_signing_secret" ]; then
+        session_observer_signing_secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
+    fi
+    if [ -z "$session_observer_credentials_json" ] || [ "$session_observer_credentials_json" = "{}" ]; then
+        session_observer_credentials_json="{\"${session_observer_gateway_id}\":\"${session_observer_signing_secret}\"}"
+    fi
+    update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_GATEWAY_ID" "$session_observer_gateway_id"
+    update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_SIGNING_SECRET" "$session_observer_signing_secret"
+    update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_CREDENTIALS_JSON" "$session_observer_credentials_json"
+    update_env_var "$ROOT_ENV_FILE" "ACCESS_AUDIT_URL" ""
+    echo "   * Configured a dedicated signed session-observer credential for this Full gateway."
 else
     echo "   * ISSUER set to: $issuer_value (Lite mode)."
     echo
@@ -495,6 +512,36 @@ else
     fi
     echo "   * LAB_ADMIN_BACKEND_TOKEN_HEADER set to: X-Lab-Manager-Token"
     echo "   * LAB_ADMIN_BACKEND_ALLOW_INSECURE set to: false"
+    echo
+    echo "Lite Gateway Trust Bundle"
+    echo "========================="
+    echo "Import the bundle created on Full with scripts/issue-lite-trust-bundle.sh."
+    read -p "Trust bundle path: " lite_trust_bundle
+    lite_trust_bundle=$(echo "$lite_trust_bundle" | tr -d '\r')
+    if [ -z "$lite_trust_bundle" ] || [ ! -f "$lite_trust_bundle" ]; then
+        echo "A Full-issued trust bundle is required in Lite mode." >&2
+        exit 1
+    fi
+    bundle_issuer="$(get_env_default "ISSUER" "$lite_trust_bundle")"
+    bundle_redeemer="$(get_env_default "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$lite_trust_bundle")"
+    bundle_audit_url="$(get_env_default "ACCESS_AUDIT_URL" "$lite_trust_bundle")"
+    bundle_gateway_id="$(get_env_default "SESSION_OBSERVER_GATEWAY_ID" "$lite_trust_bundle")"
+    bundle_observer_secret="$(get_env_default "SESSION_OBSERVER_SIGNING_SECRET" "$lite_trust_bundle")"
+    if [ -z "$bundle_issuer" ] || [ -z "$bundle_redeemer" ] || [ -z "$bundle_audit_url" ] \
+        || [ -z "$bundle_gateway_id" ] || [ -z "$bundle_observer_secret" ]; then
+        echo "Trust bundle is incomplete or invalid." >&2
+        exit 1
+    fi
+    if [ "$bundle_issuer" != "$issuer_value" ]; then
+        echo "Trust bundle ISSUER does not match the configured Full issuer." >&2
+        exit 1
+    fi
+    update_env_var "$ROOT_ENV_FILE" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$bundle_redeemer"
+    update_env_var "$ROOT_ENV_FILE" "ACCESS_AUDIT_URL" "$bundle_audit_url"
+    update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_GATEWAY_ID" "$bundle_gateway_id"
+    update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_SIGNING_SECRET" "$bundle_observer_secret"
+    update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_CREDENTIALS_JSON" "{}"
+    echo "   * Imported redeem and least-privilege observation credentials for ${bundle_gateway_id}."
 fi
 echo
 
@@ -618,6 +665,7 @@ mkdir -p fmu-data
 mkdir -p fmu-proxy-runtime/binaries/linux64
 mkdir -p fmu-proxy-runtime/binaries/win64
 mkdir -p fmu-proxy-runtime/binaries/darwin64
+mkdir -p ops-data/guac-revocation-spool
 chmod 700 certs 2>/dev/null || true
 chmod 700 blockchain-data 2>/dev/null || true
 chmod 755 lab-content 2>/dev/null || true
@@ -627,6 +675,7 @@ chmod 755 fmu-proxy-runtime/binaries 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/linux64 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/win64 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/darwin64 2>/dev/null || true
+chmod 700 ops-data/guac-revocation-spool 2>/dev/null || true
 
 echo
 echo "Host User Mapping"

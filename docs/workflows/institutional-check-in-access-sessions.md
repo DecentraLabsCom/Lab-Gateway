@@ -65,8 +65,8 @@ sequenceDiagram
     Provider->>Chain: Poll reservation status for ACCESS_AUTHORIZED
     Chain-->>Provider: ACCESS_AUTHORIZED
     Provider->>Chain: Final full reservation/window validation
-    Provider->>Provider: Activate access and audit credential issuance
-    Provider->>Provider: Persist one-time code before DELIVERED
+    Provider->>Provider: Activate access and persist one-time code
+    Provider->>Provider: Audit issuance and mark DELIVERED
     Provider-->>Marketplace: Opaque access code and laboratory URL
     Marketplace-->>User: Opaque access code and laboratory URL
     User->>Gateway: POST /auth/access with code
@@ -84,7 +84,7 @@ The SAML assertion itself is sent only to the consumer backend for check-in vali
 
 `POST /auth/checkin-institutional` validates the Marketplace JWT, SAML binding, PUC, payer institution, reservation state, and reservation window before submitting the on-chain authorization transaction. It acknowledges the submission with a transaction hash; it does not keep the browser flow blocked waiting for a receipt.
 
-The institutional check-in outbox separates transaction submission from receipt monitoring. Its lifecycle is `PENDING`, `SUBMITTING`, `SUBMITTED`, `MINED_SUCCESS`, `MINED_FAILED`, `RETRY`, and `FAILED`. The signing wallet's nonce reservation and transaction broadcast are serialized durably per wallet, while provisioning and status polling remain concurrent across reservations.
+The institutional check-in outbox separates transaction submission from receipt monitoring. Its lifecycle is `PENDING`, `SUBMITTING`, `SUBMITTED`, `MINED_SUCCESS`, `MINED_FAILED`, `RETRY`, and `FAILED`. The request that creates a local check-in immediately claims and broadcasts it before provider provisioning begins; the required scheduled worker handles retries and crash recovery. The signing wallet's nonce reservation and transaction broadcast are serialized durably per wallet, while provisioning and status polling remain concurrent across reservations.
 
 ### 3. Provider access is gated on chain
 
@@ -96,6 +96,8 @@ For a request that times out, the provider returns `503 ACCESS_AUTHORIZATION_PEN
 
 Provider coordination is fenced by `reservationKey`. A lease generation identifies the current owner of provisional state, so a stale request cannot roll back a user created or activated by a newer request.
 
+`DELIVERED` is also an idempotency boundary. The access-code row is linked to the reservation and lease generation. If the provider response is lost, a revalidated retry returns the same unconsumed code, or refreshes only that opaque code if its short TTL elapsed while the underlying credential is still valid. It does not reprovision the resource. Once the gateway consumes the code, it cannot be recovered as an unconsumed delivery.
+
 ### 4. Single deployment path
 
 When the consumer and provider backend are the same deployment, Marketplace uses `POST /auth/authorize-and-issue`. The backend submits the check-in and applies the same `ACCESS_AUTHORIZED` gate before returning access. The access and cleanup rules above remain the same.
@@ -104,27 +106,48 @@ When the consumer and provider backend are the same deployment, Marketplace uses
 
 ### Guacamole
 
-The provider keeps the signed lab-access JWT internal. After activation it persists a short-lived opaque one-time access code, then marks provisioning delivered and returns only that code with the Guacamole URL to Marketplace.
+The provider keeps the signed lab-access JWT internal. After activation it persists a short-lived opaque one-time access code, audits issuance, then marks provisioning delivered and returns only that code with the Guacamole URL to Marketplace. If either audit persistence or the fenced `DELIVERED` transition fails, the newly created code is revoked before rollback.
 
 The browser submits the code to the gateway with `POST /auth/access`. OpenResty redeems it server-to-server using its redeemer credential, validates the returned JWT, stores only the session mapping, sets a Secure, HttpOnly JTI cookie, and responds with a `303` redirect to a URL without credential material. A code can be redeemed once.
 
 ### FMU
 
-FMU access uses its own session-ticket flow. The Guacamole access-code handoff is deliberately not applied to FMU tickets, so the two resource types retain their respective gateway contracts.
+FMU uses the same opaque browser handoff without adopting the Guacamole session model. Marketplace exchanges the provider-issued code at `POST /auth/access`; OpenResty stores the technical FMU JWT server-side and gives the browser a Secure, HttpOnly `FMU_SESSION` cookie. Its FMU access handler validates that cookie and injects the bearer credential only on the internal hop to `fmu-runner`.
+
+Both supported consumer paths use this session: the Marketplace web simulation calls the gateway's `/fmu/api/v1/simulations/...` endpoints with credentials, and the proxy/stub FMU download calls `/fmu/api/v1/fmu/proxy/...` the same way. The technical JWT is not returned to Marketplace JavaScript in either path. FMU Runner still creates its narrower single-use runtime ticket where the simulation or generated proxy requires it.
 
 ## Session observation and expiry enforcement
 
-The first successful Guacamole WebSocket upgrade (`101`) is captured at handshake time by OpenResty, which schedules an authenticated internal delivery to the Ops Worker. The Ops Worker, not the public proxy, writes the local MySQL session-observation outbox. It delivers the event to `blockchain-services` with retry and marks it sent only after both the audit row and signed `SessionStarted` attestation are durable. This makes the observation independent of WebSocket closure, avoids database credentials in OpenResty, and preserves a retryable record after transient attestation failures.
+The first successful Guacamole WebSocket upgrade (`101`) is captured at handshake time by OpenResty, which schedules an authenticated internal delivery to the Ops Worker. That first in-memory hop uses three bounded attempts and exposes failure metrics; the Ops Worker, not the public proxy, writes the local MySQL session-observation outbox. It delivers the event to `blockchain-services` with retry and marks it sent only after both the audit row and signed `SessionStarted` attestation are durable. This makes the observation independent of WebSocket closure and avoids database credentials in OpenResty.
 
-FMU access records its equivalent observation through session-ticket use. The provider correlates either observation with `access_credential_audit`, creates an EIP-712 `SessionStarted` attestation, persists it locally, and publishes it on chain asynchronously.
+This is the deliberately pragmatic design: durability begins when Ops Worker accepts the event. A worker crash before all three OpenResty attempts complete can still lose the observation. A persistent local socket/sidecar ingress queue is future hardening if session evidence becomes a strict financial settlement prerequisite.
 
-For Guacamole, OpenResty also enforces JWT expiry while a remote desktop tunnel is active. It starts the active-connection check after 10 seconds and repeats every 10 seconds. Every JWT-derived Guacamole mapping is retained until `exp` plus a five-minute cleanup margin. A reservation-scoped token without its mapping is rejected; the cleanup margin only lets the worker close and revoke an already expired tunnel, and never extends browser or Guacamole authorization.
+FMU access records its equivalent observation through session-ticket use. The provider correlates either observation with `access_credential_audit`, creates an EIP-712 `SessionStarted` attestation and persists it locally. `SessionStarted` then uses the same durable institutional-wallet transaction dispatcher as check-in: nonce reservation, signing, broadcast and hash persistence are serialized briefly under the wallet row lock, while a separate monitor handles receipts and same-nonce gas replacements. It never blocks the observation worker waiting for mining.
+
+For Guacamole, OpenResty enforces JWT expiry every 10 seconds. At `exp`, it closes any active tunnel and revokes the Guacamole auth token even when no tunnel is open. JWT-derived security mappings remain until `exp + API_SESSION_TIMEOUT + 5 minutes`, longer than Guacamole can retain an inactive auth token. A reservation-scoped token without its mapping is rejected; retention supports cleanup and never extends browser or Guacamole authorization.
+
+The token-to-expiry revocation schedule is first written atomically to a gateway-local spool. Ops Worker encrypts the Guacamole token, inserts `guacamole_token_revocation_queue`, and deletes the spool entry only after the database accepts it. It also reconciles active connections for missed observation handoffs and retries token revocation through the Guacamole API until success or the configured terminal policy.
+
+In Lite mode, setup imports a trust bundle issued by Full. Session observations use a short-lived JWT signed with that Lite gateway's own secret and scoped only to `session-observation:submit`; the credential cannot authorize billing, wallet or other administrator routes. Removing the gateway from `SESSION_OBSERVER_CREDENTIALS_JSON` revokes future submissions.
+
+The provider provisioner route is still derived from `accessURI` when no explicit route is registered. Replacing that behavior with an explicit per-gateway registry and credential remains planned work; it is intentionally outside the current change set.
 
 ## Settlement and audit consequences
 
 Access issuance is audited locally with the reservation key, lab, PUC hash, access type, credential identifier, expiry, issuer, and credential hash. Session-start publication is asynchronous and does not delay the user's access response.
 
 For the normal provider settlement path, the on-chain reservation must be `ACCESS_AUTHORIZED` and the corresponding `SessionStarted` attestation must have been recorded on chain. A terminal reservation cleanup state alone is not evidence of a provider-deliverable session.
+
+## Deliberately deferred hardening
+
+The current implementation intentionally leaves these items for later work:
+
+- Marketplace surfaces `503 ACCESS_AUTHORIZATION_PENDING` to the user and does not consume `Retry-After` automatically. This affects user experience, not the on-chain access gate or transaction idempotency.
+- `lab_access_codes.access_token` still stores the technical JWT in plaintext until cleanup. OpenResty no longer has database credentials and the code is single-use, but encrypting this bearer with a key held outside MySQL remains desirable defense in depth.
+- The OpenResty-to-Ops-Worker observation handoff uses bounded retries and metrics rather than a persistent ingress queue. Durability starts when Ops Worker inserts the outbox row.
+- Provisioner endpoint fallback may still derive an origin from `accessURI`. Production hardening should replace it with an explicit per-gateway origin and credential registry.
+
+The 27-second wait for `ACCESS_AUTHORIZED` is not considered deferred hardening: it is the chosen strong-consistency contract. The provider deliberately does not grant access based only on an accepted or broadcast check-in transaction.
 
 ## Related implementation surfaces
 

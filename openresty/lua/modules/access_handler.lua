@@ -21,7 +21,7 @@ local function enforce_guac_timeout(ngx, dict)
         return false
     end
     local now = ngx.time()
-    if now > exp then
+    if now >= exp then
         reject(ngx, "Unauthorized: Guacamole JWT session expired")
         return true
     end
@@ -31,7 +31,8 @@ local function enforce_guac_timeout(ngx, dict)
         reject(ngx, "Unauthorized: Guacamole JWT session expired")
         return true
     end
-    dict:set("guac_jwt_last_seen:" .. token, now, math.max(1, exp - now + 300))
+    local retention = tonumber(ngx.shared.config:get("guac_token_security_retention_seconds")) or 1200
+    dict:set("guac_jwt_last_seen:" .. token, now, math.max(1, exp - now + math.max(1, retention)))
     return false
 end
 
@@ -50,7 +51,7 @@ function _M.run(ngx_ctx)
     local username = dict:get("username:" .. jti)
     local exp = username and tonumber(dict:get("exp:" .. username))
     if not username or not exp then return end
-    if ngx.time() > exp then
+    if ngx.time() >= exp then
         reject(ngx, "Unauthorized: access session expired")
         return
     end

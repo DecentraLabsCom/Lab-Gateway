@@ -107,6 +107,11 @@ local jwt_guac_idle_timeout_seconds = tonumber(trim(os.getenv("JWT_GUAC_IDLE_TIM
 if jwt_guac_idle_timeout_seconds < 1 then
     jwt_guac_idle_timeout_seconds = 60
 end
+local api_session_timeout_minutes = tonumber(trim(os.getenv("API_SESSION_TIMEOUT")) or "") or 15
+if api_session_timeout_minutes < 1 then
+    api_session_timeout_minutes = 15
+end
+local guac_token_security_retention_seconds = api_session_timeout_minutes * 60 + 300
 
 config:set("server_name", server_name)
 config:set("guac_uri", "/guacamole")
@@ -118,6 +123,7 @@ config:set("admin_pass", admin_pass)
 config:set("https_port", https_port)
 config:set("auto_logout_on_disconnect", auto_logout:lower() == "true")
 config:set("jwt_guac_idle_timeout_seconds", jwt_guac_idle_timeout_seconds)
+config:set("guac_token_security_retention_seconds", guac_token_security_retention_seconds)
 if guac_api_url and guac_api_url ~= "" then
     config:set("guac_api_url", guac_api_url)
 else

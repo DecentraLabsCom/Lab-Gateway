@@ -53,6 +53,22 @@ runner.describe("Access handler", function()
         runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
     end)
 
+    runner.it("rejects a session exactly at its expiration instant", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["username:abc"] = "alice",
+                ["exp:alice"] = "200"
+            },
+            var = { http_cookie = "JTI=abc" },
+            now = 200
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+    end)
+
     runner.it("sets Authorization header for valid cookies", function()
         local cache = {
             ["username:token123"] = "alice",
