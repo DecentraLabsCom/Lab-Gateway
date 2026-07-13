@@ -71,10 +71,15 @@ jobs:
             -e LUA_PATH="${LUA_PATH}" \
             -v "${{ github.workspace }}/openresty:/workspace" \
             -w /workspace \
-            openresty/openresty:alpine-fat sh -c \
-            "luarocks install luacov >/dev/null && \
+            openresty/openresty:1.31.1.1-1-alpine-fat sh -c \
+            "cp tests/luacov-ci.lua .luacov && \
+             apk add --no-cache build-base openssl openssl-dev git luarocks >/dev/null && \
+             luarocks install lua-cjson >/dev/null && \
+             luarocks install lua-resty-openssl >/dev/null && \
+             luarocks install luacov >/dev/null && \
              luajit -lluacov tests/run.lua; \
-             test_exit=\$?; luacov; exit \$test_exit" | tee .ci-logs/lua-unit.log
+             test_exit=\$?; luacov -c tests/luacov-ci.lua; report_exit=\$?; rm -f .luacov; \
+             test \$report_exit -eq 0 || exit \$report_exit; exit \$test_exit" | tee .ci-logs/lua-unit.log
 
       - name: Enforce consolidated coverage baseline
         run: |

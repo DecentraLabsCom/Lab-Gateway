@@ -50,6 +50,7 @@ if ! command -v node >/dev/null 2>&1; then
   echo -e "${RED}Node.js is required to generate the smoke JWT${NC}"
   exit 1
 fi
+node --test tests/smoke/check-websocket-upgrade.test.mjs
 node "${JWT_FILE%/*}/generate_jwt.js"
 
 echo -e "${YELLOW}Starting services...${NC}"
@@ -125,11 +126,15 @@ fi
 # Test 3c: reservation WebSocket observation runs before proxy upgrade
 # =================================================================
 echo "Test 3c: Reservation WebSocket observation"
-WEBSOCKET_STATUS=$(curl -sk --max-time 2 --resolve lab.test:${PORT}:127.0.0.1 \
-  -b "$COOKIE_FILE" -o /dev/null -w "%{http_code}" \
-  -H "Connection: Upgrade" -H "Upgrade: websocket" \
-  -H "Sec-WebSocket-Key: c21va2Uta2V5" -H "Sec-WebSocket-Version: 13" \
-  "https://lab.test:${PORT}/guacamole/websocket-tunnel?token=admin-token" || true)
+WEBSOCKET_COOKIE=$(awk -F '\t' '
+  /^#HttpOnly_/ { sub(/^#HttpOnly_/, "") }
+  !/^#/ && NF >= 7 {
+    printf "%s%s=%s", separator, $6, $7
+    separator = "; "
+  }
+' "$COOKIE_FILE")
+WEBSOCKET_STATUS=$(SMOKE_WEBSOCKET_COOKIE="$WEBSOCKET_COOKIE" \
+  node tests/smoke/check-websocket-upgrade.mjs 127.0.0.1 "$PORT" lab.test)
 if [ "$WEBSOCKET_STATUS" = "101" ]; then
   log_pass "Reservation WebSocket is observed durably before upgrade"
 else
