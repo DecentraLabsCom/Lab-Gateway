@@ -1,4 +1,6 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -10,7 +12,14 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "a
 
 
 def _fake_jwt(**claims):
-    merged = {"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu"}
+    merged = {
+        "sub": "test-user",
+        "labId": "1",
+        "accessKey": "test.fmu",
+        "resourceType": "fmu",
+        "reservationKey": "0xreservation",
+        "pucHash": "puc-test-user",
+    }
     merged.update(claims)
     merged = {k: v for k, v in merged.items() if v is not None}
 
@@ -22,6 +31,11 @@ def _fake_jwt(**claims):
 
 app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _stub_browser_session_observation(monkeypatch):
+    monkeypatch.setattr(main, "_record_browser_session_started", AsyncMock(return_value=True))
 
 
 class _StationBackendStub:

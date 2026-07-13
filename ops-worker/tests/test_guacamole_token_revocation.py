@@ -1,6 +1,5 @@
 from cryptography.fernet import Fernet
 from sqlalchemy import create_engine, text
-import json
 
 import worker
 
@@ -62,24 +61,25 @@ def test_ingest_encrypts_the_guacamole_token(monkeypatch):
     assert worker._decrypt_runtime_secret(ciphertext) == "guac-secret-token"
 
 
-def test_durable_spool_survives_until_encrypted_database_insert(monkeypatch, tmp_path):
+def test_duplicate_reopens_a_terminal_revocation(monkeypatch):
     engine = create_revocation_engine()
     monkeypatch.setattr(worker, "DB_ENGINE", engine)
     monkeypatch.setattr(worker, "_FERNET", Fernet(Fernet.generate_key()))
-    monkeypatch.setattr(worker, "GUAC_REVOCATION_SPOOL_DIR", str(tmp_path))
-    entry = tmp_path / "revocation.json"
-    entry.write_text(json.dumps(payload(1893456000)), encoding="utf-8")
-
-    assert worker.ingest_guacamole_revocation_spool() == 1
-    assert not entry.exists()
+    assert worker.enqueue_guacamole_token_revocation(payload(1893456000))
     with engine.begin() as conn:
-        ciphertext = conn.execute(text(
-            "SELECT token_ciphertext FROM guacamole_token_revocation_queue"
-        )).scalar_one()
-    assert "guac-secret-token" not in ciphertext
-    assert worker._decrypt_runtime_secret(ciphertext) == "guac-secret-token"
+        conn.execute(text(
+            "UPDATE guacamole_token_revocation_queue SET status = 'FAILED', attempts = 20, last_error = 'offline'"
+        ))
 
+    assert worker.enqueue_guacamole_token_revocation(payload(1893456000))
 
+    with engine.begin() as conn:
+        row = conn.execute(text(
+            "SELECT status, attempts, last_error FROM guacamole_token_revocation_queue"
+        )).mappings().one()
+    assert row["status"] == "RETRY"
+    assert row["attempts"] == 0
+    assert row["last_error"] is None
 def test_expired_token_is_revoked_after_restart_safe_lookup(monkeypatch):
     engine = create_revocation_engine()
     monkeypatch.setattr(worker, "DB_ENGINE", engine)

@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$GatewayId = $GatewayId.ToLowerInvariant()
 $root = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $root '.env'
 if (-not (Test-Path -LiteralPath $envFile)) {
@@ -15,14 +16,12 @@ $values = @{}
 Get-Content -LiteralPath $envFile | ForEach-Object {
     if ($_ -match '^([^#=]+)=(.*)$') { $values[$matches[1]] = $matches[2] }
 }
-$redeemer = $values['AUTH_ACCESS_CODE_REDEEMER_TOKEN']
-if ([string]::IsNullOrWhiteSpace($redeemer) -or $redeemer -eq 'CHANGE_ME') {
-    throw 'Full gateway access-code redeemer credential is not configured.'
-}
-
 $secretBytes = New-Object byte[](32)
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($secretBytes)
 $secret = [Convert]::ToBase64String($secretBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+$redeemerBytes = New-Object byte[](32)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($redeemerBytes)
+$redeemer = 'acr_' + [Convert]::ToHexString($redeemerBytes).ToLowerInvariant()
 $credentials = @{}
 if (-not [string]::IsNullOrWhiteSpace($values['SESSION_OBSERVER_CREDENTIALS_JSON'])) {
     $parsed = $values['SESSION_OBSERVER_CREDENTIALS_JSON'] | ConvertFrom-Json
@@ -43,6 +42,26 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
     }
 }
 if (-not $found) { $lines += $replacement }
+Set-Content -LiteralPath $envFile -Value $lines -Encoding Ascii
+
+$redeemerCredentials = @{}
+if (-not [string]::IsNullOrWhiteSpace($values['ACCESS_CODE_REDEEMER_CREDENTIALS_JSON'])) {
+    $parsed = $values['ACCESS_CODE_REDEEMER_CREDENTIALS_JSON'] | ConvertFrom-Json
+    if ($parsed) {
+        $parsed.PSObject.Properties | ForEach-Object { $redeemerCredentials[$_.Name] = [string]$_.Value }
+    }
+}
+$redeemerCredentials[$GatewayId.ToLowerInvariant()] = $redeemer
+$redeemerReplacement = 'ACCESS_CODE_REDEEMER_CREDENTIALS_JSON=' + ($redeemerCredentials | ConvertTo-Json -Compress)
+$lines = @(Get-Content -LiteralPath $envFile)
+$found = $false
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '^ACCESS_CODE_REDEEMER_CREDENTIALS_JSON=') {
+        $lines[$i] = $redeemerReplacement
+        $found = $true
+    }
+}
+if (-not $found) { $lines += $redeemerReplacement }
 Set-Content -LiteralPath $envFile -Value $lines -Encoding Ascii
 
 $origin = $FullPublicOrigin.TrimEnd('/')

@@ -51,6 +51,7 @@ local response, request_err = httpc:request_uri(redeem_url, {
     headers = {
         ["Content-Type"] = "application/json",
         ["X-Access-Code-Redeemer-Token"] = redeemer_token,
+        ["X-Gateway-ID"] = tostring(ngx.shared.config:get("server_name") or ""),
     },
     ssl_verify = true,
 })
@@ -127,18 +128,11 @@ local remaining_lifetime = math.max(1, exp - ngx.time())
 local token_security_retention = tonumber(config:get("guac_token_security_retention_seconds")) or 1200
 local enforcement_lifetime = remaining_lifetime + math.max(1, token_security_retention)
 if resource_type == "fmu" then
-    local origin = ngx.var.http_origin
-    local marketplace_origin = config:get("marketplace_url")
-    if not origin or normalize_url(origin) ~= normalize_url(marketplace_origin) then
-        return fail(403, "Invalid FMU handoff origin")
-    end
     cache:set("fmu_access_token:" .. jti, token, remaining_lifetime)
     cache:set("fmu_access_exp:" .. jti, exp, remaining_lifetime)
     ngx.header["Set-Cookie"] = "FMU_SESSION=" .. jti
         .. "; Max-Age=" .. remaining_lifetime
-        .. "; Path=/fmu; Secure; HttpOnly; SameSite=None"
-    ngx.header["Access-Control-Allow-Origin"] = origin
-    ngx.header["Access-Control-Allow-Credentials"] = "true"
+        .. "; Path=/fmu; Secure; HttpOnly; SameSite=Lax"
     ngx.header["Referrer-Policy"] = "no-referrer"
     ngx.status = 204
     return ngx.exit(204)

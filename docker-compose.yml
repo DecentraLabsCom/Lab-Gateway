@@ -72,6 +72,7 @@ services:
     build:
       context: ./openresty
       dockerfile: Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     ports:
       - "${OPENRESTY_BIND_ADDRESS:-127.0.0.1}:${OPENRESTY_BIND_HTTPS_PORT:-443}:443"
       - "${OPENRESTY_BIND_ADDRESS:-127.0.0.1}:${OPENRESTY_BIND_HTTP_PORT:-80}:80"
@@ -88,7 +89,6 @@ services:
       # In Lite mode this directory is empty/absent; init.lua falls back to
       # the key downloaded by init-ssl.sh into /etc/ssl/private/.
       - ./blockchain-data/keys:/etc/openresty/jwt-keys:ro
-      - ./ops-data/guac-revocation-spool:/var/spool/guac-revocations
     tmpfs:
       - /tmp:size=64M,mode=1777
       - /var/run:size=16M,mode=755
@@ -105,7 +105,6 @@ services:
       - SESSION_OBSERVATION_INGEST_TOKEN=${SESSION_OBSERVATION_INGEST_TOKEN:-}
       - OPS_SESSION_OBSERVATION_INGEST_URL=${OPS_SESSION_OBSERVATION_INGEST_URL:-http://ops-worker:8081/internal/session-observations}
       - OPS_GUACAMOLE_TOKEN_INGEST_URL=${OPS_GUACAMOLE_TOKEN_INGEST_URL:-http://ops-worker:8081/internal/guacamole-token-revocations}
-      - GUAC_REVOCATION_SPOOL_DIR=/var/spool/guac-revocations
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
       - MARKETPLACE_URL=${MARKETPLACE_URL:-https://marketplace-decentralabs.vercel.app}
       - ADMIN_ACCESS_TOKEN=${ADMIN_ACCESS_TOKEN}
@@ -155,11 +154,10 @@ services:
         max-size: "10m"
         max-file: "5"
         labels: "service=openresty"
-    # OpenResty needs to chown temporary files during startup, so do not drop all capabilities.
-    #security_opt:
-    #  - no-new-privileges:true
-    #cap_drop:
-    #  - ALL
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     cap_add:
       - NET_BIND_SERVICE
     restart: always
@@ -449,7 +447,6 @@ services:
       - GUAC_ADMIN_USER=${GUAC_ADMIN_USER}
       - GUAC_ADMIN_PASS=${GUAC_ADMIN_PASS}
       - GUAC_API_URL=${GUAC_API_URL:-http://guacamole:8080/guacamole/api}
-      - GUAC_REVOCATION_SPOOL_DIR=/app/data/guac-revocation-spool
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
@@ -504,10 +501,13 @@ services:
       - HISTORY_DB_PATH=/app/data/history.db
       - ISSUER=${ISSUER:-}
       - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}
+      - JWT_AUDIENCE=${FMU_JWT_AUDIENCE:?FMU_JWT_AUDIENCE must be the exact public FMU URL, e.g. https://gateway.example/fmu}
       - AUTH_SESSION_TICKET_ISSUE_URL=${AUTH_SESSION_TICKET_ISSUE_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/issue}
       - AUTH_SESSION_TICKET_REDEEM_URL=${AUTH_SESSION_TICKET_REDEEM_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/redeem}
       - AUTH_SESSION_TICKET_INTERNAL_TOKEN=${AUTH_SESSION_TICKET_INTERNAL_TOKEN:-}
-      - FMU_GATEWAY_ID=${FMU_GATEWAY_ID:-fmu-runner}
+      - FMU_GATEWAY_ID=${FMU_GATEWAY_ID:-}
+      - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
+      - SERVER_NAME=${SERVER_NAME}
       - MAX_SIMULATION_TIMEOUT=${FMU_MAX_SIMULATION_TIMEOUT:-300}
       - MAX_CONCURRENT_PER_MODEL=${FMU_MAX_CONCURRENT_PER_MODEL:-10}
       - PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE=${FMU_PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE:-20}

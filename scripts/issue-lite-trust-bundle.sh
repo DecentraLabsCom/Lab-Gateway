@@ -16,6 +16,7 @@ if ! [[ "$gateway_id" =~ ^[A-Za-z0-9._-]{3,128}$ ]]; then
     echo "gateway-id must contain only letters, digits, dot, underscore or hyphen" >&2
     exit 2
 fi
+gateway_id="$(printf '%s' "$gateway_id" | tr '[:upper:]' '[:lower:]')"
 if ! [[ "$full_origin" =~ ^https:// ]]; then
     echo "full-public-origin must use https" >&2
     exit 2
@@ -29,26 +30,26 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-redeemer="$(grep -E '^AUTH_ACCESS_CODE_REDEEMER_TOKEN=' "$env_file" | head -n1 | cut -d= -f2-)"
-if [ -z "$redeemer" ] || [ "$redeemer" = "CHANGE_ME" ]; then
-    echo "Full gateway access-code redeemer credential is not configured" >&2
-    exit 1
-fi
+redeemer="acr_$(openssl rand -hex 32)"
 secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
 
-python3 - "$env_file" "$gateway_id" "$secret" <<'PY'
+python3 - "$env_file" "$gateway_id" "$secret" "$redeemer" <<'PY'
 import json, pathlib, sys
 path = pathlib.Path(sys.argv[1])
-gateway_id, secret = sys.argv[2], sys.argv[3]
+gateway_id, secret, redeemer = sys.argv[2], sys.argv[3], sys.argv[4]
 lines = path.read_text(encoding="utf-8").splitlines()
-key = "SESSION_OBSERVER_CREDENTIALS_JSON"
-current = next((line.split("=", 1)[1] for line in lines if line.startswith(key + "=")), "{}")
-credentials = json.loads(current or "{}")
-credentials[gateway_id] = secret
-replacement = key + "=" + json.dumps(credentials, separators=(",", ":"), sort_keys=True)
-lines = [replacement if line.startswith(key + "=") else line for line in lines]
-if not any(line.startswith(key + "=") for line in path.read_text(encoding="utf-8").splitlines()):
-    lines.append(replacement)
+for key, value in (
+    ("SESSION_OBSERVER_CREDENTIALS_JSON", secret),
+    ("ACCESS_CODE_REDEEMER_CREDENTIALS_JSON", redeemer),
+):
+    current = next((line.split("=", 1)[1] for line in lines if line.startswith(key + "=")), "{}")
+    credentials = json.loads(current or "{}")
+    credentials[gateway_id.lower()] = value
+    replacement = key + "=" + json.dumps(credentials, separators=(",", ":"), sort_keys=True)
+    found = any(line.startswith(key + "=") for line in lines)
+    lines = [replacement if line.startswith(key + "=") else line for line in lines]
+    if not found:
+        lines.append(replacement)
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 

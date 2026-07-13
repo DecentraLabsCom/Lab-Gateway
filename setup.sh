@@ -333,6 +333,13 @@ if [ -z "$access_code_redeemer_token" ] || [ "$access_code_redeemer_token" = "CH
 fi
 update_env_var "$ROOT_ENV_FILE" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$access_code_redeemer_token"
 
+access_code_encryption_key=$(get_env_default "ACCESS_CODE_ENCRYPTION_KEY" "$ROOT_ENV_FILE")
+if [ -z "$access_code_encryption_key" ] || [ "$access_code_encryption_key" = "CHANGE_ME" ]; then
+    access_code_encryption_key="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
+    echo "Generated access-code encryption key."
+fi
+update_env_var "$ROOT_ENV_FILE" "ACCESS_CODE_ENCRYPTION_KEY" "$access_code_encryption_key"
+
 session_observation_ingest_token=$(get_env_default "SESSION_OBSERVATION_INGEST_TOKEN" "$ROOT_ENV_FILE")
 if [ -z "$session_observation_ingest_token" ] || [ "$session_observation_ingest_token" = "CHANGE_ME" ]; then
     session_observation_ingest_token="soi_$(openssl rand -hex 32 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM}${RANDOM})"
@@ -470,7 +477,7 @@ if [ -z "$issuer_value" ]; then
     session_observer_signing_secret="$(get_env_default "SESSION_OBSERVER_SIGNING_SECRET" "$ROOT_ENV_FILE")"
     session_observer_credentials_json="$(get_env_default "SESSION_OBSERVER_CREDENTIALS_JSON" "$ROOT_ENV_FILE")"
     if [ -z "$session_observer_gateway_id" ]; then
-        session_observer_gateway_id="full-$(printf '%s' "$domain" | tr -cd 'a-zA-Z0-9._-')"
+        session_observer_gateway_id="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-zA-Z0-9._-')"
     fi
     if [ -z "$session_observer_signing_secret" ]; then
         session_observer_signing_secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
@@ -481,6 +488,11 @@ if [ -z "$issuer_value" ]; then
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_GATEWAY_ID" "$session_observer_gateway_id"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_SIGNING_SECRET" "$session_observer_signing_secret"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_CREDENTIALS_JSON" "$session_observer_credentials_json"
+    access_code_redeemer_credentials_json="$(get_env_default "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" "$ROOT_ENV_FILE")"
+    if [ -z "$access_code_redeemer_credentials_json" ] || [ "$access_code_redeemer_credentials_json" = "{}" ]; then
+        access_code_redeemer_credentials_json="{\"${session_observer_gateway_id}\":\"${access_code_redeemer_token}\"}"
+    fi
+    update_env_var "$ROOT_ENV_FILE" "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" "$access_code_redeemer_credentials_json"
     update_env_var "$ROOT_ENV_FILE" "ACCESS_AUDIT_URL" ""
     echo "   * Configured a dedicated signed session-observer credential for this Full gateway."
 else

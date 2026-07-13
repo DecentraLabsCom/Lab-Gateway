@@ -17,7 +17,7 @@ def _reset_auth_state(monkeypatch):
     monkeypatch.setattr(auth, "_jwks_cache_time", 0.0)
     monkeypatch.setattr(auth, "AUTH_JWKS_URL", "https://issuer.example/auth/jwks")
     monkeypatch.setattr(auth, "JWT_ISSUER", None)
-    monkeypatch.setattr(auth, "JWT_AUDIENCE", None)
+    monkeypatch.setattr(auth, "JWT_AUDIENCE", "https://gateway.example/fmu")
     monkeypatch.setattr(auth, "JWKS_CACHE_TTL", 300)
 
 
@@ -85,7 +85,12 @@ def signing_material():
     jwk["kid"] = "test-kid"
 
     def _issue_token(*, claims=None, headers=None):
-        payload = {"sub": "user-1", "labId": "1", "exp": 4102444800}
+        payload = {
+            "sub": "user-1",
+            "labId": "1",
+            "aud": "https://gateway.example/fmu",
+            "exp": 4102444800,
+        }
         if claims:
             payload.update(claims)
         token_headers = {"kid": "test-kid"}

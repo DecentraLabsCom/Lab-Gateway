@@ -74,7 +74,12 @@ AUTH_SESSION_TICKET_REDEEM_URL = os.getenv(
     "http://blockchain-services:8080/auth/fmu/session-ticket/redeem",
 )
 AUTH_SESSION_TICKET_INTERNAL_TOKEN = os.getenv("AUTH_SESSION_TICKET_INTERNAL_TOKEN", "")
-FMU_GATEWAY_ID = os.getenv("FMU_GATEWAY_ID", os.getenv("GATEWAY_ID", "fmu-runner"))
+FMU_GATEWAY_ID = (
+    os.getenv("FMU_GATEWAY_ID")
+    or os.getenv("SESSION_OBSERVER_GATEWAY_ID")
+    or os.getenv("SERVER_NAME")
+    or ""
+).strip().lower()
 FMU_PROXY_RUNTIME_PATH = os.getenv("FMU_PROXY_RUNTIME_PATH", "/app/fmu-proxy-runtime")
 FMU_PROXY_GATEWAY_WS_URL = os.getenv("FMU_PROXY_GATEWAY_WS_URL", "")
 FMU_PROXY_SIGNING_KEY = os.getenv("FMU_PROXY_SIGNING_KEY", "")
@@ -115,6 +120,8 @@ _active_lock = Lock()
 
 _proxy_download_hits: dict[str, deque[float]] = defaultdict(deque)
 _proxy_download_lock = Lock()
+_browser_observed_credentials: set[str] = set()
+_browser_observation_lock = Lock()
 
 
 def _normalize_ticket_id(session_ticket: Optional[str]) -> Optional[str]:
@@ -174,13 +181,18 @@ _executor = _create_executor()
 # Running-simulation registry (for cancellation — #17)
 # ---------------------------------------------------------------------------
 
-_running_futures: dict[str, tuple[Future, str]] = {}
+_running_futures: dict[str, tuple[Future, str, str, str]] = {}
 _running_lock = Lock()
 
 
-def _track_running_future(sim_id: str, future: Future, lab_id: str):
+def _track_running_future(sim_id: str, future: Future, lab_id: str, claims: dict):
     with _running_lock:
-        _running_futures[sim_id] = (future, lab_id)
+        _running_futures[sim_id] = (
+            future,
+            lab_id,
+            str(claims.get("reservationKey") or "").strip().lower(),
+            str(claims.get("pucHash") or "").strip().lower(),
+        )
 
 
 def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = None):
@@ -189,7 +201,7 @@ def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = 
     with _running_lock:
         entry = _running_futures.pop(sim_id, None)
     if entry is not None:
-        _, lab_to_release = entry
+        _, lab_to_release, _, _ = entry
     if lab_to_release is not None:
         _release_slot(lab_to_release)
 
@@ -227,6 +239,9 @@ async def _init_db():
                 id TEXT PRIMARY KEY,
                 lab_id TEXT NOT NULL,
                 user_sub TEXT,
+                reservation_key TEXT,
+                puc_hash TEXT,
+                credential_hash TEXT,
                 fmu_filename TEXT,
                 fmi_type TEXT DEFAULT 'CoSimulation',
                 parameters TEXT,
@@ -237,17 +252,40 @@ async def _init_db():
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        cursor = await db.execute("PRAGMA table_info(simulation_history)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        for name in ("reservation_key", "puc_hash", "credential_hash"):
+            if name not in columns:
+                await db.execute(f"ALTER TABLE simulation_history ADD COLUMN {name} TEXT")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_history_lab ON simulation_history(lab_id)")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_history_reservation ON simulation_history(lab_id, reservation_key)"
+        )
         await db.commit()
 
 
-async def _save_history(sim_id, lab_id, user_sub, fmu_filename, fmi_type, params, options, result, elapsed):
+async def _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type, params, options, result, elapsed):
     """Persist a completed simulation to SQLite."""
     try:
         async with aiosqlite.connect(HISTORY_DB_PATH) as db:
             await db.execute(
-                "INSERT INTO simulation_history (id,lab_id,user_sub,fmu_filename,fmi_type,parameters,options,result,elapsed_seconds) VALUES (?,?,?,?,?,?,?,?,?)",
-                (sim_id, str(lab_id), user_sub, fmu_filename, fmi_type, json.dumps(params), json.dumps(options), json.dumps(result), elapsed),
+                "INSERT INTO simulation_history "
+                "(id,lab_id,user_sub,reservation_key,puc_hash,credential_hash,fmu_filename,fmi_type,parameters,options,result,elapsed_seconds) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    sim_id,
+                    str(lab_id),
+                    claims.get("sub"),
+                    claims.get("reservationKey"),
+                    claims.get("pucHash"),
+                    claims.get("_credentialHash"),
+                    fmu_filename,
+                    fmi_type,
+                    json.dumps(params),
+                    json.dumps(options),
+                    json.dumps(result),
+                    elapsed,
+                ),
             )
             await db.commit()
     except Exception as exc:
@@ -285,9 +323,26 @@ def _get_claim_lab_id(claims: dict) -> Optional[str]:
 
 
 def _enforce_fmu_claim(claims: dict):
-    resource_type = claims.get("resourceType")
-    if resource_type is not None and str(resource_type).lower() != "fmu":
+    if str(claims.get("resourceType") or "").lower() != "fmu":
         raise HTTPException(status_code=403, detail="Token is not authorised for FMU endpoints")
+    missing = [
+        name for name in ("labId", "accessKey", "reservationKey", "pucHash")
+        if not str(claims.get(name) or "").strip()
+    ]
+    if missing:
+        raise HTTPException(status_code=403, detail=f"Token is missing required FMU claims: {', '.join(missing)}")
+
+
+def _claim_reservation_key(claims: dict) -> str:
+    return str(claims.get("reservationKey") or "").strip().lower()
+
+
+def _enforce_requested_reservation(claims: dict, requested: Optional[str]) -> str:
+    claim_reservation = _claim_reservation_key(claims)
+    requested_reservation = str(requested or "").strip().lower()
+    if requested_reservation and requested_reservation != claim_reservation:
+        raise HTTPException(status_code=403, detail="Token is not authorised for requested reservationKey")
+    return claim_reservation
 
 
 def _coerce_epoch_seconds(value) -> Optional[int]:
@@ -1110,6 +1165,47 @@ async def _redeem_session_ticket(
     return claims
 
 
+async def _record_browser_session_started(request: Request, claims: dict, sim_id: str) -> bool:
+    """Durably observe the first successful browser run for one credential."""
+    puc_hash = str(claims.get("pucHash") or "").strip().lower()
+    reservation_key = str(claims.get("reservationKey") or "").strip().lower()
+    if not puc_hash or not reservation_key:
+        raise HTTPException(status_code=403, detail="Missing credential identity for session observation")
+    observation_key = f"{reservation_key}:{puc_hash}"
+    with _browser_observation_lock:
+        if observation_key in _browser_observed_credentials:
+            return False
+
+    authorization = _extract_authorization_header(request)
+    if not authorization:
+        for cookie_name in ("token", "jwt", "jti", "JTI"):
+            token = request.cookies.get(cookie_name)
+            if token:
+                authorization = f"Bearer {token}"
+                break
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing bearer token required for session observation")
+
+    lab_id = str(claims.get("labId") or "").strip()
+    session_id = f"browser:{puc_hash[:96]}"
+    ticket, _expires_at = await _issue_session_ticket(
+        authorization,
+        lab_id=lab_id,
+        reservation_key=reservation_key,
+        request_id=f"browser_{sim_id[:12]}",
+    )
+    await _redeem_session_ticket(
+        session_ticket=ticket,
+        lab_id=lab_id,
+        reservation_key=reservation_key,
+        session_id=session_id,
+        request_id=f"browser_{sim_id[:12]}",
+    )
+    with _browser_observation_lock:
+        _browser_observed_credentials.add(observation_key)
+    return True
+
+
 def _build_session_ticket_headers(*, authorization: Optional[str] = None) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
     if authorization:
@@ -1540,8 +1636,7 @@ async def download_proxy_fmu(
         raise HTTPException(status_code=403, detail="Token is not authorised for requested labId")
 
     claim_reservation_key = str(claims.get("reservationKey") or "").strip()
-    if reservationKey and claim_reservation_key and reservationKey.lower() != claim_reservation_key.lower():
-        raise HTTPException(status_code=403, detail="Token is not authorised for requested reservationKey")
+    _enforce_requested_reservation(claims, reservationKey)
     effective_reservation_key = reservationKey or claim_reservation_key
     if not effective_reservation_key:
         raise HTTPException(status_code=400, detail="Missing reservationKey")
@@ -1655,11 +1750,15 @@ async def run_simulation(
     """
     _enforce_fmu_claim(claims)
     if _fmu_backend.mode == "station":
-        return await _get_station_backend().run_authorized_simulation(
+        result = await _get_station_backend().run_authorized_simulation(
             claims=claims,
             request_payload=_simulation_request_payload(req),
             authorization=_extract_authorization_header(request),
         )
+        await _record_browser_session_started(
+            request, claims, str(result.get("simId") or uuid4().hex) if isinstance(result, dict) else uuid4().hex
+        )
+        return result
     _ensure_local_execution_backend("Simulation run endpoint")
 
     # Determine FMU filename from JWT claims or request
@@ -1669,6 +1768,7 @@ async def run_simulation(
     if claims_lab_id and request_lab_id and claims_lab_id != request_lab_id:
         raise HTTPException(status_code=403, detail="JWT not authorised for requested labId")
     lab_id = request_lab_id or claims_lab_id or "unknown"
+    _enforce_requested_reservation(claims, req.reservationKey)
 
     if req.labId is None and claims_lab_id:
         req.labId = claims_lab_id
@@ -1726,7 +1826,7 @@ async def run_simulation(
             fmi_type,
             solver_name,
         )
-        _track_running_future(sim_id, future, lab_id)
+        _track_running_future(sim_id, future, lab_id, claims)
         try:
             sim_result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
         except asyncio.TimeoutError as exc:
@@ -1747,8 +1847,10 @@ async def run_simulation(
     elapsed = round(time.monotonic() - t0, 3)
     logger.info("Simulation completed for lab %s in %.3fs", lab_id, elapsed)
 
+    await _record_browser_session_started(request, claims, sim_id)
+
     # Persist to history DB (#29)
-    await _save_history(sim_id, lab_id, claims.get("sub"), fmu_filename, fmi_type,
+    await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
                         req.parameters, req.options, sim_result, elapsed)
 
     return {
@@ -1776,14 +1878,21 @@ async def list_fmus(claims: dict = Depends(verify_jwt)):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/v1/simulations/{sim_id}/cancel")
-async def cancel_simulation(sim_id: str, _claims: dict = Depends(verify_jwt)):
+async def cancel_simulation(sim_id: str, claims: dict = Depends(verify_jwt)):
     """Attempt to cancel a running simulation by its ID."""
+    _enforce_fmu_claim(claims)
     _ensure_local_execution_backend("Simulation cancel endpoint")
     with _running_lock:
         entry = _running_futures.get(sim_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Simulation not found or already finished")
-    future, _lab_id = entry
+    future, lab_id, reservation_key, puc_hash = entry
+    if _get_claim_lab_id(claims) != _normalize_lab_id(lab_id):
+        raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
+    if _claim_reservation_key(claims) != reservation_key:
+        raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
+    if str(claims.get("pucHash") or "").strip().lower() != puc_hash:
+        raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
     cancelled = future.cancel()
     if not cancelled and future.running():
         return {"status": "running", "detail": "Cannot cancel - simulation already executing in worker process"}
@@ -1831,7 +1940,9 @@ async def stream_simulation(
     """
     _enforce_fmu_claim(claims)
     if _fmu_backend.mode == "station":
-        return await _stream_station_simulation(request, req, claims)
+        response = await _stream_station_simulation(request, req, claims)
+        await _record_browser_session_started(request, claims, uuid4().hex)
+        return response
     _ensure_local_execution_backend("Simulation stream endpoint")
 
     fmu_filename = claims.get("accessKey") or claims.get("fmuFileName")
@@ -1840,6 +1951,7 @@ async def stream_simulation(
     if claims_lab_id and request_lab_id and claims_lab_id != request_lab_id:
         raise HTTPException(status_code=403, detail="JWT not authorised for requested labId")
     lab_id = request_lab_id or claims_lab_id or "unknown"
+    _enforce_requested_reservation(claims, req.reservationKey)
     if req.labId is None and claims_lab_id:
         req.labId = claims_lab_id
     if not fmu_filename:
@@ -1885,7 +1997,7 @@ async def stream_simulation(
             _run_simulation, str(fmu_path), start_time, stop_time, step_size,
             req.parameters, timeout, fmi_type, solver_name,
         )
-        _track_running_future(sim_id, future, lab_id)
+        _track_running_future(sim_id, future, lab_id, claims)
 
         try:
             # Heartbeat while simulation runs
@@ -1917,6 +2029,7 @@ async def stream_simulation(
                 yield json.dumps(chunk) + "\n"
 
             elapsed = round(time.monotonic() - t0, 3)
+            await _record_browser_session_started(request, claims, sim_id)
             yield json.dumps({
                 "type": "completed",
                 "simId": sim_id,
@@ -1925,7 +2038,7 @@ async def stream_simulation(
                 "outputVariables": sim_result.get("outputVariables", []),
             }) + "\n"
 
-            await _save_history(sim_id, lab_id, claims.get("sub"), fmu_filename, fmi_type,
+            await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
                                 req.parameters, req.options, sim_result, elapsed)
 
         except Exception as exc:
@@ -1959,13 +2072,15 @@ async def get_history(
     if requested_lab_id and requested_lab_id != claim_lab_id:
         raise HTTPException(status_code=403, detail="Token is not authorised for requested labId")
     effective_lab_id = requested_lab_id or claim_lab_id
+    reservation_key = _claim_reservation_key(claims)
 
     async with aiosqlite.connect(HISTORY_DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT id, lab_id, user_sub, fmu_filename, fmi_type, elapsed_seconds, status, created_at "
-            "FROM simulation_history WHERE lab_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (effective_lab_id, limit, offset),
+            "FROM simulation_history WHERE lab_id = ? AND lower(reservation_key) = ? AND lower(puc_hash) = ? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (effective_lab_id, reservation_key, str(claims.get("pucHash") or "").strip().lower(), limit, offset),
         )
         rows = await cursor.fetchall()
         return {"simulations": [dict(row) for row in rows]}
@@ -1982,13 +2097,14 @@ async def get_simulation_result(sim_id: str, claims: dict = Depends(verify_jwt))
 
     async with aiosqlite.connect(HISTORY_DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM simulation_history WHERE id = ?", (sim_id,))
+        cursor = await db.execute(
+            "SELECT * FROM simulation_history WHERE id = ? AND lab_id = ? AND lower(reservation_key) = ? AND lower(puc_hash) = ?",
+            (sim_id, claim_lab_id, _claim_reservation_key(claims), str(claims.get("pucHash") or "").strip().lower()),
+        )
         row = await cursor.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Simulation not found")
     result = dict(row)
-    if _normalize_lab_id(result.get("lab_id")) != claim_lab_id:
-        raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation result")
     for key in ("parameters", "options", "result"):
         if result.get(key):
             result[key] = json.loads(result[key])

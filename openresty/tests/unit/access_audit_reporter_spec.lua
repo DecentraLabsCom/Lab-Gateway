@@ -20,12 +20,12 @@ local function new_ngx(opts)
 end
 
 runner.describe("Access audit reporter", function()
-    runner.it("schedules Guacamole session observation outside the header filter phase", function()
+    runner.it("durably ingests the Guacamole observation before accepting the websocket", function()
         local payloads = {}
         local ngx = new_ngx()
 
         local persisted = reporter.report_guacamole_session_observed(ngx, {
-            schedule = function(payload)
+            deliver = function(payload)
                 payloads[#payloads + 1] = payload
                 return true
             end,
@@ -50,7 +50,7 @@ runner.describe("Access audit reporter", function()
         local payloads = {}
         local ngx = new_ngx()
         local deps = {
-            schedule = function(payload)
+            deliver = function(payload)
                 payloads[#payloads + 1] = payload
                 return true
             end,
@@ -70,8 +70,8 @@ runner.describe("Access audit reporter", function()
         local payloads = {}
         local ngx = new_ngx({ cache = {} })
 
-        local scheduled = reporter.report_guacamole_session_observed(ngx, {
-            schedule = function(payload)
+        local persisted = reporter.report_guacamole_session_observed(ngx, {
+            deliver = function(payload)
                 payloads[#payloads + 1] = payload
                 return true
             end,
@@ -80,8 +80,24 @@ runner.describe("Access audit reporter", function()
             end
         })
 
-        runner.assert.equals(false, scheduled)
+        runner.assert.equals(false, persisted)
         runner.assert.equals(0, #payloads)
+    end)
+
+    runner.it("fails closed when the durable ingest endpoint is unavailable", function()
+        local ngx = new_ngx()
+
+        local persisted = reporter.report_guacamole_session_observed(ngx, {
+            deliver = function()
+                return false, "database unavailable"
+            end,
+            sha256_hex = function()
+                return "abc123"
+            end
+        })
+
+        runner.assert.equals(false, persisted)
+        runner.assert.equals(1, ngx.shared.cache:get("metric:session_observation_ingest_failure"))
     end)
 end)
 

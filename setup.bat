@@ -293,6 +293,13 @@ if "!access_code_redeemer_token!"=="" (
     echo Generated access-code redeemer token.
 )
 call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "!access_code_redeemer_token!"
+call :ReadEnvValue "%ROOT_ENV_FILE%" "ACCESS_CODE_ENCRYPTION_KEY" access_code_encryption_key
+if /i "!access_code_encryption_key!"=="CHANGE_ME" set "access_code_encryption_key="
+if "!access_code_encryption_key!"=="" (
+    call :GenerateObserverSecret access_code_encryption_key
+    echo Generated access-code encryption key.
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_CODE_ENCRYPTION_KEY" "!access_code_encryption_key!"
 call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVATION_INGEST_TOKEN" session_observation_ingest_token
 if /i "!session_observation_ingest_token!"=="CHANGE_ME" set "session_observation_ingest_token="
 if "!session_observation_ingest_token!"=="" (
@@ -426,13 +433,17 @@ if "!issuer_value!"=="" (
     call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" session_observer_gateway_id
     call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" session_observer_signing_secret
     call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" session_observer_credentials_json
-    if not defined session_observer_gateway_id set "session_observer_gateway_id=full-!domain!"
+    if not defined session_observer_gateway_id set "session_observer_gateway_id=!domain!"
     if not defined session_observer_signing_secret call :GenerateObserverSecret session_observer_signing_secret
     if not defined session_observer_credentials_json set "session_observer_credentials_json={}"
     if "!session_observer_credentials_json!"=="{}" set "session_observer_credentials_json={^"!session_observer_gateway_id!^":^"!session_observer_signing_secret!^"}"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" "!session_observer_gateway_id!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" "!session_observer_signing_secret!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" "!session_observer_credentials_json!"
+    call :ReadEnvValue "%ROOT_ENV_FILE%" "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" access_code_redeemer_credentials_json
+    if not defined access_code_redeemer_credentials_json set "access_code_redeemer_credentials_json={}"
+    if "!access_code_redeemer_credentials_json!"=="{}" set "access_code_redeemer_credentials_json={^"!session_observer_gateway_id!^":^"!access_code_redeemer_token!^"}"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" "!access_code_redeemer_credentials_json!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_AUDIT_URL" ""
     echo    * Configured a dedicated signed session-observer credential for this Full gateway.
 ) else (

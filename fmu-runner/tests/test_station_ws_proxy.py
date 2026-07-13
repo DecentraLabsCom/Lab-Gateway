@@ -12,7 +12,7 @@ from fmu_backend import StationFmuBackend
 from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession
 
 
-with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu"}):
+with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu", "reservationKey": "res-1", "pucHash": "puc-user-1"}):
     import main
     from main import app
 
@@ -26,6 +26,8 @@ def _claims():
         "labId": "1",
         "accessKey": "test.fmu",
         "resourceType": "fmu",
+        "reservationKey": "res-1",
+        "pucHash": "puc-user-1",
         "nbf": 0,
         "exp": 4102444800,
     }

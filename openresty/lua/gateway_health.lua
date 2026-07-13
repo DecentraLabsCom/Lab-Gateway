@@ -122,7 +122,21 @@ local function blockchain_reachable(check)
     end
     local body = check.body or {}
     local status = tostring(body.status or ""):upper()
-    return check.status == 503 and status == "DEGRADED"
+    if check.status ~= 503 or status ~= "DEGRADED" then
+        return false
+    end
+    local operational_count_keys = {
+        "nonce_backlog",
+        "access_deliveries_stuck",
+        "session_started_unknown"
+    }
+    for _, key in ipairs(operational_count_keys) do
+        local count = body[key]
+        if count ~= nil and tonumber(count) ~= 0 then
+            return false
+        end
+    end
+    return true
 end
 
 local function check_dns(host)
@@ -329,13 +343,14 @@ end
 
 -- Ops worker details (optional)
 local ops_body = ops.body or {}
-local guacamole_schema_ok = ops.ok and ops_body.guacamole_schema == true
+local guacamole_schema_ok = ops_body.guacamole_schema == true
 
 local status_checks = {
     { ok = guac.ok },
     { ok = guac_api_ok },
     { ok = guacd_ok },
     { ok = ops.ok },
+    { ok = guacamole_schema_ok },
     { ok = mysql_ok }
 }
 
@@ -427,4 +442,5 @@ local result = {
 }
 
 ngx.header["Content-Type"] = "application/json"
+ngx.status = result.status == "UP" and 200 or 503
 ngx.say(cjson.encode(result))

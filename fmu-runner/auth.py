@@ -12,6 +12,7 @@ issuer and its JWKS endpoint instead of the local blockchain-services one.
 import os
 import logging
 import time
+import hashlib
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -92,7 +93,7 @@ def _resolve_jwt_issuer() -> Optional[str]:
 AUTH_JWKS_URL = _resolve_auth_jwks_url()
 JWT_ALGORITHMS = ["RS256", "ES256"]
 JWT_ISSUER = _resolve_jwt_issuer()  # Optional issuer check
-JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", None)  # Optional audience check — set to gateway URL
+JWT_AUDIENCE = _normalize_issuer(os.getenv("JWT_AUDIENCE"))
 JWKS_CACHE_TTL = int(os.getenv("JWKS_CACHE_TTL", "300"))  # seconds
 
 _jwks_cache: Optional[dict] = None
@@ -148,6 +149,8 @@ def _extract_token(request: Request) -> str:
 
 async def verify_jwt_token(token: str) -> dict:
     """Verify a JWT and return decoded claims."""
+    if not JWT_AUDIENCE:
+        raise HTTPException(status_code=503, detail="JWT audience validation is not configured")
     jwks_data = await _fetch_jwks()
 
     try:
@@ -170,20 +173,15 @@ async def verify_jwt_token(token: str) -> dict:
         if JWT_ISSUER:
             decode_options["issuer"] = JWT_ISSUER
 
-        verify_options = {"verify_aud": False}
-        decode_kwargs = {}
-        if JWT_AUDIENCE:
-            verify_options["verify_aud"] = True
-            decode_kwargs["audience"] = JWT_AUDIENCE
-
         claims = jwt.decode(
             token,
             signing_key.key,
             algorithms=JWT_ALGORITHMS,
-            options=verify_options,
+            options={"verify_aud": True},
             **decode_options,
-            **decode_kwargs,
+            audience=JWT_AUDIENCE,
         )
+        claims["_credentialHash"] = hashlib.sha256(token.encode("utf-8")).hexdigest()
         return claims
 
     except jwt.ExpiredSignatureError:

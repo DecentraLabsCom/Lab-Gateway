@@ -284,6 +284,7 @@ runner.describe("OpenResty gateway_health.lua", function()
 
         local result = ngx._body
         runner.assert.equals("application/json", ngx.header["Content-Type"])
+        runner.assert.equals(200, ngx.status)
         runner.assert.equals("full", result.mode)
         runner.assert.equals("UP", result.status)
         runner.assert.equals(true, result.services.blockchain.ok)
@@ -418,6 +419,40 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals("UP", result.status)
         runner.assert.equals(true, result.services.guacamole_schema.ok)
         runner.assert.equals(true, result.services.mysql.ok)
+    end)
+
+    runner.it("does not report UP when the Guacamole schema is unavailable", function()
+        local opts = healthy_gateway_health_opts()
+        opts.captures["/__health_ops"] = {
+            status = 200,
+            body = { hosts = 3, polling_enabled = true, guacamole_schema = false }
+        }
+
+        local ngx = run_gateway_health(opts)
+        local result = ngx._body
+
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(false, result.services.guacamole_schema.ok)
+        runner.assert.equals(503, ngx.status)
+    end)
+
+    runner.it("does not hide a stuck blockchain durable queue behind DEGRADED reachability", function()
+        local opts = healthy_gateway_health_opts()
+        opts.captures["/__health_blockchain"] = {
+            status = 503,
+            body = {
+                status = "DEGRADED",
+                nonce_backlog = 1,
+                access_deliveries_stuck = 0,
+                session_started_unknown = 0,
+                version = "1.2.3"
+            }
+        }
+
+        local result = run_gateway_health(opts)._body
+
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(false, result.services.blockchain.ok)
     end)
 
     runner.it("includes FMU and AAS checks when enabled and marks PARTIAL if one fails", function()

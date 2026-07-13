@@ -123,9 +123,6 @@ SESSION_OBSERVATION_INGEST_TOKEN = os.getenv("SESSION_OBSERVATION_INGEST_TOKEN",
 GUAC_ADMIN_USER = os.getenv("GUAC_ADMIN_USER", "")
 GUAC_ADMIN_PASS = os.getenv("GUAC_ADMIN_PASS", "")
 GUAC_API_URL = os.getenv("GUAC_API_URL", "http://guacamole:8080/guacamole/api").rstrip("/")
-GUAC_REVOCATION_SPOOL_DIR = os.getenv(
-    "GUAC_REVOCATION_SPOOL_DIR", "/app/data/guac-revocation-spool"
-)
 GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS = max(
     1, int(os.getenv("GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS", "10"))
 )
@@ -1206,12 +1203,31 @@ def health():
         LIMIT 1
         """,
     )
-    healthy = db_ok and guacamole_schema_ok
+    failed_revocations = None
+    failed_observations = None
+    if db_ok:
+        try:
+            with DB_ENGINE.connect() as conn:
+                failed_revocations = int(conn.execute(text(
+                    "SELECT COUNT(*) FROM guacamole_token_revocation_queue WHERE status = 'FAILED'"
+                )).scalar_one())
+                failed_observations = int(conn.execute(text(
+                    "SELECT COUNT(*) FROM gateway_session_observation_outbox WHERE status = 'FAILED'"
+                )).scalar_one())
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.warning("Health durable queue check failed: %s", exc)
+    revocation_queue_ok = failed_revocations == 0
+    observation_outbox_ok = failed_observations == 0
+    healthy = db_ok and guacamole_schema_ok and revocation_queue_ok and observation_outbox_ok
     return jsonify({
         "status": "ok" if healthy else "degraded",
         "hosts_loaded": len(HOSTS.all_hosts()),
         "db": db_ok,
         "guacamole_schema": guacamole_schema_ok,
+        "guacamole_failed_revocations": failed_revocations,
+        "guacamole_revocation_queue": revocation_queue_ok,
+        "session_observation_failed": failed_observations,
+        "session_observation_outbox": observation_outbox_ok,
     }), 200 if healthy else 503
 
 
@@ -3113,6 +3129,13 @@ def enqueue_guacamole_token_revocation(payload: Mapping[str, Any]) -> bool:
                         jwt_jti = :jwt_jti,
                         gateway_id = :gateway_id,
                         expires_at = :expires_at,
+                        attempts = CASE WHEN status = 'FAILED' THEN 0 ELSE attempts END,
+                        next_attempt_at = CASE
+                            WHEN status = 'FAILED' THEN CURRENT_TIMESTAMP
+                            ELSE next_attempt_at
+                        END,
+                        last_error = CASE WHEN status = 'FAILED' THEN NULL ELSE last_error END,
+                        status = CASE WHEN status = 'FAILED' THEN 'RETRY' ELSE status END,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE token_hash = :token_hash AND status != 'REVOKED'
                 """), values)
@@ -3123,29 +3146,6 @@ def enqueue_guacamole_token_revocation(payload: Mapping[str, Any]) -> bool:
     except Exception as exc:  # pylint: disable=broad-except
         logging.warning("Guacamole revocation ingest failed: %s", exc)
         return False
-
-
-def ingest_guacamole_revocation_spool() -> int:
-    """Move crash-safe Lua spool entries into the encrypted MySQL queue."""
-    spool = Path(GUAC_REVOCATION_SPOOL_DIR)
-    if not spool.is_dir():
-        return 0
-    ingested = 0
-    for entry in sorted(spool.glob("*.json")):
-        try:
-            if entry.stat().st_size > 16 * 1024:
-                logging.error("Deleting oversized Guacamole revocation spool entry %s", entry.name)
-                entry.unlink(missing_ok=True)
-                continue
-            payload = json.loads(entry.read_text(encoding="utf-8"))
-            if isinstance(payload, dict) and enqueue_guacamole_token_revocation(payload):
-                entry.unlink(missing_ok=True)
-                ingested += 1
-            elif not isinstance(payload, dict):
-                entry.unlink(missing_ok=True)
-        except (OSError, ValueError, TypeError) as exc:
-            logging.warning("Unable to ingest Guacamole revocation spool entry %s: %s", entry.name, exc)
-    return ingested
 
 
 @APP.route("/internal/guacamole-token-revocations", methods=["POST"])
@@ -3196,7 +3196,7 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
         return
     with DB_ENGINE.begin() as conn:
         rows = conn.execute(text("""
-            SELECT token_hash, reservation_key, jwt_jti, gateway_id, username
+            SELECT token_hash, token_ciphertext, reservation_key, jwt_jti, gateway_id, username
             FROM guacamole_token_revocation_queue
             WHERE status IN ('PENDING', 'RETRY')
               AND observed_at IS NULL
@@ -3206,6 +3206,18 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
         """)).mappings().all()
     for row in rows:
         if str(row["username"]).lower() not in active_users:
+            continue
+        try:
+            user_token = _decrypt_runtime_secret(str(row["token_ciphertext"]))
+            token_response = requests.get(
+                f"{GUAC_API_URL}/session/data/{quote(data_source, safe='')}",
+                params={"token": user_token},
+                timeout=5,
+            )
+            if token_response.status_code != 200:
+                continue
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.warning("Unable to validate active Guacamole token: %s", exc)
             continue
         accepted = enqueue_session_observation({
             "dedupKey": row["token_hash"],
@@ -3226,7 +3238,6 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
 
 
 def process_guacamole_token_revocations() -> int:
-    ingest_guacamole_revocation_spool()
     if not DB_ENGINE:
         return 0
     session = _guacamole_admin_session()
@@ -3338,14 +3349,14 @@ def enqueue_session_observation(payload: Mapping[str, Any]) -> bool:
                     text(
                         """
                         UPDATE gateway_session_observation_outbox
-                        SET status = CASE WHEN status = 'FAILED' THEN 'RETRY' ELSE status END,
-                            attempts = CASE WHEN status = 'FAILED' THEN 0 ELSE attempts END,
+                        SET attempts = CASE WHEN status = 'FAILED' THEN 0 ELSE attempts END,
                             next_attempt_at = CASE
                                 WHEN status IN ('FAILED', 'RETRY') THEN CURRENT_TIMESTAMP
                                 ELSE next_attempt_at
                             END,
                             locked_at = CASE WHEN status = 'FAILED' THEN NULL ELSE locked_at END,
                             last_error = CASE WHEN status = 'FAILED' THEN NULL ELSE last_error END,
+                            status = CASE WHEN status = 'FAILED' THEN 'RETRY' ELSE status END,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE dedup_key = :dedup_key
                         """

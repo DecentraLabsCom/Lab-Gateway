@@ -7,9 +7,7 @@ local function jwt_deps()
     return {
         cjson = cjson,
         revocation_reporter = {
-            persist = function() return true, "/spool/revocation.json" end,
             deliver = function() return true end,
-            remove_persisted = function() return true end,
         }
     }
 end
@@ -93,9 +91,27 @@ runner.describe("Body filter handler", function()
 
     runner.it("handles chunked responses", function()
         local ngx = new_ngx()
-        handler.run(ngx, '{"authToken":"abc",', false, { cjson = cjson })
-        handler.run(ngx, '"username":"Bob"}', true, { cjson = cjson })
+        runner.assert.equals("", handler.run(ngx, '{"authToken":"abc",', false, { cjson = cjson }))
+        runner.assert.equals('{"authToken":"abc","username":"Bob"}', handler.run(ngx, '"username":"Bob"}', true, { cjson = cjson }))
         runner.assert.equals("abc", ngx.shared.cache._data["token:bob"])
+    end)
+
+    runner.it("withholds a JWT-backed token when durable revocation registration fails", function()
+        local ngx = ngx_factory.new({
+            header = { ["Content-Type"] = "application/json", ["Content-Length"] = "100" },
+            cache = {},
+            ctx = { jwt_authenticated = true, jwt_jti = "jwt-jti", jwt_reservation_key = "0xabc", jwt_exp = 500 },
+            now = 100,
+        })
+        local response = handler.run(ngx, '{"authToken":"jwt-token","username":"JwtUser"}', true, {
+            cjson = cjson,
+            revocation_reporter = { deliver = function() return false, "database offline" end },
+        })
+
+        runner.assert.truthy(response:match("SECURITY_ERROR"))
+        runner.assert.equals(nil, response:match("jwt%-token"))
+        runner.assert.equals(nil, ngx.shared.cache._data["token:jwtuser"])
+        runner.assert.equals(nil, ngx.header["Content-Length"])
     end)
 
     runner.it("skips when decode fails", function()

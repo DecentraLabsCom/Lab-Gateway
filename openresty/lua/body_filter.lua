@@ -9,4 +9,4 @@
 
 local handler = require "modules.body_filter_handler"
 
-handler.run(ngx, ngx.arg[1], ngx.arg[2])
+ngx.arg[1] = handler.run(ngx, ngx.arg[1], ngx.arg[2])

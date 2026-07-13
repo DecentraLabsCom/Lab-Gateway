@@ -6,9 +6,22 @@ function _M.run(ngx_ctx, deps)
     local ngx = ngx_ctx or ngx
     if ngx.status == 101 and ngx.var.uri and ngx.var.uri:match("/guacamole/websocket%-tunnel") then
         local reporter = (deps and deps.access_audit_reporter) or require "modules.access_audit_reporter"
-        local ok, err = pcall(reporter.report_guacamole_session_observed, ngx, deps and deps.access_audit)
-        if not ok then
-            ngx.log(ngx.WARN, "Access audit - unable to persist websocket observation: " .. tostring(err))
+        local ok, persisted, err = pcall(
+            reporter.report_guacamole_session_observed,
+            ngx,
+            deps and deps.access_audit
+        )
+        if not ok or not persisted then
+            ngx.log(
+                ngx.ERR,
+                "Access audit - refusing websocket without durable observation: " .. tostring(err or persisted)
+            )
+            ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE or 503
+            ngx.header["Upgrade"] = nil
+            ngx.header["Connection"] = nil
+            ngx.header["Sec-WebSocket-Accept"] = nil
+            ngx.header["Content-Length"] = nil
+            return
         end
     end
     local status = ngx.status

@@ -39,7 +39,14 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
 # Override FastAPI dependency so all endpoints skip real JWT validation
 def _fake_jwt(**claims):
     """Return a callable that FastAPI will use as the verify_jwt dependency."""
-    merged = {"sub": "test-user", "labId": 1, "accessKey": "test.fmu"}
+    merged = {
+        "sub": "test-user",
+        "labId": 1,
+        "accessKey": "test.fmu",
+        "resourceType": "fmu",
+        "reservationKey": "0xreservation",
+        "pucHash": "puc-test-user",
+    }
     merged.update(claims)
     # Remove keys explicitly set to None
     merged = {k: v for k, v in merged.items() if v is not None}
@@ -51,6 +58,13 @@ def _fake_jwt(**claims):
 app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _stub_browser_session_observation(monkeypatch):
+    observer = AsyncMock(return_value=True)
+    monkeypatch.setattr("main._record_browser_session_started", observer)
+    return observer
 
 
 class _FakeHttpxResponse:
@@ -99,7 +113,7 @@ def test_issue_session_ticket_uses_authorization_header_and_payload():
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client):
+    with patch("main.httpx.AsyncClient", return_value=fake_client), patch("main.FMU_GATEWAY_ID", "gateway.example"):
         ticket, expires_at = asyncio.run(
             _issue_session_ticket(
                 "Bearer token-123",
@@ -152,7 +166,7 @@ def test_redeem_session_ticket_returns_claims_payload():
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client):
+    with patch("main.httpx.AsyncClient", return_value=fake_client), patch("main.FMU_GATEWAY_ID", "gateway.example"):
         claims = asyncio.run(
             _redeem_session_ticket(
                 session_ticket="st_ticket_1",
@@ -170,7 +184,7 @@ def test_redeem_session_ticket_returns_claims_payload():
     assert fake_client.calls[0]["json"]["labId"] == "42"
     assert fake_client.calls[0]["json"]["reservationKey"] == "RES-1"
     assert fake_client.calls[0]["json"]["sessionId"] == "sess-fmu-1"
-    assert fake_client.calls[0]["json"]["gatewayId"] == "fmu-runner"
+    assert fake_client.calls[0]["json"]["gatewayId"] == "gateway.example"
     assert isinstance(fake_client.calls[0]["json"]["observedAt"], int)
 
 
@@ -857,7 +871,7 @@ def test_run_rejects_non_fmu_resource_type():
 
 
 def test_run_rejects_missing_access_key():
-    """When JWT has no accessKey, should return 400."""
+    """When JWT has no accessKey, fail before selecting a model."""
     # Temporarily override with claims missing accessKey
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(accessKey=None)
     try:
@@ -866,8 +880,8 @@ def test_run_rejects_missing_access_key():
             "parameters": {},
             "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.1},
         })
-        assert response.status_code == 400
-        assert "FMU file name" in response.json()["detail"]
+        assert response.status_code == 403
+        assert "required FMU claims" in response.json()["detail"]
     finally:
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
@@ -1304,6 +1318,16 @@ def test_run_persists_to_history(mock_md, mock_exec, mock_resolve, tmp_path, mon
     result_resp = client.get(f"/api/v1/simulations/{sim_id}/result")
     assert result_resp.status_code == 200
     assert "result" in result_resp.json()
+
+    # The same lab and reservation are still isolated by pseudonymous user.
+    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(pucHash="puc-other-user")
+    try:
+        other_history = client.get("/api/v1/simulations/history?labId=1")
+        assert other_history.status_code == 200
+        assert other_history.json()["simulations"] == []
+        assert client.get(f"/api/v1/simulations/{sim_id}/result").status_code == 404
+    finally:
+        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
 # ─── #31 — Model Exchange ───────────────────────────────────────────

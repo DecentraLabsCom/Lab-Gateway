@@ -1,6 +1,4 @@
 local _M = {}
-local MAX_DELIVERY_ATTEMPTS = 3
-local RETRY_DELAYS_SECONDS = { 0.1, 0.5 }
 
 local function increment(dict, key)
     if dict then
@@ -53,7 +51,7 @@ local function deliver_observation(payload, deps)
     local http = require "resty.http"
     local cjson = require "cjson.safe"
     local httpc = http.new()
-    httpc:set_timeout(1000)
+    httpc:set_timeout(1500)
     local res, err = httpc:request_uri(
         os.getenv("OPS_SESSION_OBSERVATION_INGEST_URL") or "http://ops-worker:8081/internal/session-observations",
         {
@@ -69,37 +67,6 @@ local function deliver_observation(payload, deps)
         return false, err or (res and ("status " .. res.status) or "no response")
     end
     httpc:set_keepalive(10000, 5)
-    return true
-end
-
-local function schedule_observation(ngx, payload, deps)
-    if deps and deps.schedule then
-        return deps.schedule(payload)
-    end
-    local ok, err = ngx.timer.at(0, function(premature)
-        if premature then
-            return
-        end
-        local delivery_err
-        for attempt = 1, MAX_DELIVERY_ATTEMPTS do
-            local delivered
-            delivered, delivery_err = deliver_observation(payload, deps)
-            if delivered then
-                increment(ngx.shared.cache, "metric:session_observation_ingest_success")
-                return
-            end
-            if attempt < MAX_DELIVERY_ATTEMPTS and ngx.sleep then
-                ngx.sleep(RETRY_DELAYS_SECONDS[attempt])
-            end
-        end
-        increment(ngx.shared.cache, "metric:session_observation_ingest_failure")
-        ngx.log(ngx.WARN, "Access audit - observation ingestion failed after retries: " .. tostring(delivery_err))
-    end)
-    if not ok then
-        increment(ngx.shared.cache, "metric:session_observation_schedule_failure")
-        ngx.log(ngx.WARN, "Access audit - unable to schedule observation ingestion: " .. tostring(err))
-        return false
-    end
     return true
 end
 
@@ -124,7 +91,7 @@ function _M.report_guacamole_session_observed(ngx_ctx, deps)
         return false
     end
 
-    return schedule_observation(ngx, {
+    local delivered, err = deliver_observation({
         dedupKey = session_hash,
         reservationKey = reservation_key,
         jwtJti = jwt_jti,
@@ -133,6 +100,13 @@ function _M.report_guacamole_session_observed(ngx_ctx, deps)
         accessType = "guacamole",
         observedAt = ngx.time(),
     }, deps)
+    if delivered then
+        increment(dict, "metric:session_observation_ingest_success")
+        return true
+    end
+    increment(dict, "metric:session_observation_ingest_failure")
+    ngx.log(ngx.ERR, "Access audit - durable observation ingestion failed: " .. tostring(err))
+    return false, err
 end
 
 return _M

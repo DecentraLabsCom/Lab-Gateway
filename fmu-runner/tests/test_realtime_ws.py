@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from realtime_ws import RealtimeWsManager, _RealtimeSession, _StreamSubscription, _WsConnection
 
 
-with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu"}):
+with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu", "reservationKey": "res-1", "pucHash": "puc-user-1"}):
     from main import app, _realtime_manager
 
 
@@ -24,6 +24,8 @@ def _claims():
         "labId": "1",
         "accessKey": "test.fmu",
         "resourceType": "fmu",
+        "reservationKey": "res-1",
+        "pucHash": "puc-user-1",
         "nbf": 0,
         "exp": 4102444800,  # 2100-01-01
     }
@@ -153,7 +155,9 @@ def _patch_realtime_manager(monkeypatch):
     ):
         if session_ticket != "st_valid":
             raise RuntimeError("invalid ticket")
-        return _claims()
+        claims = _claims()
+        claims["reservationKey"] = reservation_key or claims["reservationKey"]
+        return claims
 
     monkeypatch.setattr(_realtime_manager, "verify_jwt_token", _fake_verify)
     monkeypatch.setattr(_realtime_manager, "redeem_session_ticket", _fake_redeem)
