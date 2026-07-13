@@ -579,6 +579,7 @@ class RealtimeWsManager:
         acquire_slot,
         release_slot,
         redeem_session_ticket=None,
+        confirm_session_started=None,
         ws_session_queue_size: int = 64,
         ws_heartbeat_seconds: float = 15.0,
         ws_expiring_notice_seconds: int = 60,
@@ -597,6 +598,7 @@ class RealtimeWsManager:
         self.acquire_slot = acquire_slot
         self.release_slot = release_slot
         self.redeem_session_ticket = redeem_session_ticket
+        self.confirm_session_started = confirm_session_started
         self.ws_session_queue_size = ws_session_queue_size
         self.ws_heartbeat_seconds = ws_heartbeat_seconds
         self.ws_expiring_notice_seconds = ws_expiring_notice_seconds
@@ -926,9 +928,25 @@ class RealtimeWsManager:
                         self.acquire_slot(claim_lab_id or req_lab_id or "unknown")
                         session = _RealtimeSession(self, session_id, create_claims, fmu_path)
                         session.ensure_reservation_window()
-                        await session.attach(connection)
                         async with self._sessions_lock:
                             self._sessions[session_id] = session
+                        if session_ticket:
+                            if self.confirm_session_started is None:
+                                raise HTTPException(status_code=500, detail="Session observation is not configured")
+                            try:
+                                await self.confirm_session_started(
+                                    session_ticket=session_ticket,
+                                    claims=create_claims,
+                                    session_id=session_id,
+                                    reservation_key=reservation_key,
+                                    request_id=request_id,
+                                )
+                            except Exception:
+                                async with self._sessions_lock:
+                                    self._sessions.pop(session_id, None)
+                                await session.terminate(reason="observation_failed")
+                                raise
+                        await session.attach(connection)
                         current_session = session
                         response = {
                             "type": "session.created",

@@ -3,6 +3,8 @@ param(
     [string]$LabId = "lab-1",
     [string]$ReservationKey = "reservation-1",
     [string]$BearerToken = "",
+    [string]$SessionObserverGatewayId = "",
+    [string]$SessionObserverSigningSecret = "",
     [int]$ExpectedFmuCount = 1,
     [string]$ProxyOutputPath = "",
     [switch]$SkipProxyDownload
@@ -16,6 +18,21 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $RepoRoot = Split-Path (Split-Path $ScriptDir -Parent) -Parent
 $LiveComposeFile = Join-Path $RepoRoot "docker-compose.yml"
 $ArtifactsDir = Join-Path $ScriptDir "artifacts"
+
+function Read-EnvValue([string]$Path, [string]$Name) {
+    if (-not (Test-Path -LiteralPath $Path)) { return "" }
+    $line = Get-Content -LiteralPath $Path | Where-Object { $_ -match ('^' + [regex]::Escape($Name) + '=') } | Select-Object -First 1
+    if ($null -eq $line) { return "" }
+    return [string]($line -split '=', 2)[1]
+}
+
+$RootEnvFile = Join-Path $RepoRoot ".env"
+if ([string]::IsNullOrWhiteSpace($SessionObserverGatewayId)) {
+    $SessionObserverGatewayId = Read-EnvValue $RootEnvFile "SESSION_OBSERVER_GATEWAY_ID"
+}
+if ([string]::IsNullOrWhiteSpace($SessionObserverSigningSecret)) {
+    $SessionObserverSigningSecret = Read-EnvValue $RootEnvFile "SESSION_OBSERVER_SIGNING_SECRET"
+}
 
 if (-not $ProxyOutputPath) {
     $ProxyOutputPath = Join-Path $ArtifactsDir "fmu-proxy-lab-$LabId.fmu"
@@ -50,6 +67,44 @@ function Quote-CommandArg([string]$Value) {
     }
 
     return $Value
+}
+
+function ConvertTo-Base64Url([byte[]]$Bytes) {
+    return [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function ConvertFrom-Base64Url([string]$Value) {
+    $normalized = $Value.Replace('-', '+').Replace('_', '/')
+    switch ($normalized.Length % 4) {
+        2 { $normalized += '==' }
+        3 { $normalized += '=' }
+        1 { throw 'Invalid base64url observer secret' }
+    }
+    return [Convert]::FromBase64String($normalized)
+}
+
+function New-SessionObserverAuthorization([string]$GatewayId, [string]$EncodedSecret) {
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $header = @{ alg = 'HS256'; typ = 'JWT' } | ConvertTo-Json -Compress
+    $payload = @{
+        iss = $GatewayId
+        sub = $GatewayId
+        aud = 'session-observation'
+        scope = 'session-observation:submit'
+        iat = $now
+        exp = $now + 60
+        jti = [Guid]::NewGuid().ToString('N')
+    } | ConvertTo-Json -Compress
+    $encodedHeader = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($header))
+    $encodedPayload = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($payload))
+    $unsigned = "$encodedHeader.$encodedPayload"
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new((ConvertFrom-Base64Url $EncodedSecret))
+    try {
+        $signature = ConvertTo-Base64Url ($hmac.ComputeHash([Text.Encoding]::ASCII.GetBytes($unsigned)))
+    } finally {
+        $hmac.Dispose()
+    }
+    return "Bearer $unsigned.$signature"
 }
 
 function Invoke-HttpJson {
@@ -367,10 +422,10 @@ if ($issueWithoutAuth.StatusCode -eq 401 -and $issueWithoutAuthJson.code -eq "UN
 
 $redeemWithoutTicket = Invoke-HttpJson -Uri "$BaseUrl/auth/fmu/session-ticket/redeem" -Method "POST" -Body "{}"
 $redeemWithoutTicketJson = Parse-JsonOrNull $redeemWithoutTicket.Body
-if ($redeemWithoutTicket.StatusCode -eq 400 -and $redeemWithoutTicketJson.code -eq "SESSION_TICKET_INVALID") {
-    Log-Pass "Session ticket redeem endpoint is exposed and validates missing session tickets"
+if ($redeemWithoutTicket.StatusCode -in @(401, 403)) {
+    Log-Pass "Session ticket redeem rejects unauthenticated callers"
 } else {
-    Log-Fail "Unexpected redeem response without sessionTicket: status=$($redeemWithoutTicket.StatusCode) body=$($redeemWithoutTicket.Body)"
+    Log-Fail "Unauthenticated redeem should be rejected: status=$($redeemWithoutTicket.StatusCode) body=$($redeemWithoutTicket.Body)"
 }
 
 if ([string]::IsNullOrWhiteSpace($BearerToken)) {
@@ -391,14 +446,18 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
         Log-Fail "Session ticket issue failed: status=$($issueWithAuth.StatusCode) body=$($issueWithAuth.Body)"
     }
 
-    if ($SessionTicket) {
+    if ($SessionTicket -and -not [string]::IsNullOrWhiteSpace($SessionObserverGatewayId) -and
+        -not [string]::IsNullOrWhiteSpace($SessionObserverSigningSecret)) {
         $redeemBody = @{
             sessionTicket = $SessionTicket
             labId = $LabId
             reservationKey = $ReservationKey
         } | ConvertTo-Json -Compress
 
-        $redeemWithTicket = Invoke-HttpJson -Uri "$BaseUrl/auth/fmu/session-ticket/redeem" -Method "POST" -Body $redeemBody
+        $observerHeaders = @{
+            Authorization = New-SessionObserverAuthorization $SessionObserverGatewayId $SessionObserverSigningSecret
+        }
+        $redeemWithTicket = Invoke-HttpJson -Uri "$BaseUrl/auth/fmu/session-ticket/redeem" -Method "POST" -Headers $observerHeaders -Body $redeemBody
         $redeemWithTicketJson = Parse-JsonOrNull $redeemWithTicket.Body
         $redeemClaims = $redeemWithTicketJson.claims
 
@@ -412,6 +471,8 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
         } else {
             Log-Fail "Session ticket redeem failed: status=$($redeemWithTicket.StatusCode) body=$($redeemWithTicket.Body)"
         }
+    } elseif ($SessionTicket) {
+        Log-Skip "Direct redeem skipped because no session-observer credential was supplied or found in .env"
     }
 
     if ($SkipProxyDownload) {

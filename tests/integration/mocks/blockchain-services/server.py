@@ -264,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
                 "expiresAt": expires_at,
                 "labId": lab_id,
                 "reservationKey": reservation_key,
-                "oneTimeUse": True,
+                "oneTimeUse": False,
             })
             return
 
@@ -282,9 +282,9 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, 400, {"code": "SESSION_TICKET_INVALID", "error": "Missing sessionTicket"})
                 return
 
-            ticket = issued_session_tickets.pop(session_ticket, None)
+            ticket = issued_session_tickets.get(session_ticket)
             if not ticket:
-                json_response(self, 401, {"code": "SESSION_TICKET_INVALID", "error": "Unknown or already redeemed sessionTicket"})
+                json_response(self, 401, {"code": "SESSION_TICKET_INVALID", "error": "Unknown sessionTicket"})
                 return
 
             claims = dict(ticket["claims"])

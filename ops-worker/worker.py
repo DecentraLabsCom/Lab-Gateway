@@ -3303,7 +3303,7 @@ def process_guacamole_token_revocations() -> int:
 
 
 def enqueue_session_observation(payload: Mapping[str, Any]) -> bool:
-    """Persist an OpenResty WebSocket-open observation before it is delivered."""
+    """Persist evidence produced after a runtime confirms an active session."""
     if not DB_ENGINE:
         return False
     required_fields = (
@@ -3525,7 +3525,7 @@ def _session_observer_authorization() -> str:
 
 
 def deliver_session_observation_outbox() -> int:
-    """Deliver durable WebSocket-open observations to blockchain-services."""
+    """Deliver durable runtime-confirmed observations to blockchain-services."""
     if not SESSION_OBSERVATION_OUTBOX_ENABLED or not DB_ENGINE:
         return 0
     if not ACCESS_AUDIT_URL:

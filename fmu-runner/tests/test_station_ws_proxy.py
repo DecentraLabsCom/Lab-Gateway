@@ -151,6 +151,9 @@ def _build_manager():
         assert reservation_key == "res-1"
         return _claims()
 
+    async def _fake_confirm(**_kwargs):
+        return True
+
     return StationRealtimeWsProxyManager(
         logger=main.logger,
         station_backend=StationFmuBackend(
@@ -163,6 +166,7 @@ def _build_manager():
         normalize_lab_id=main._normalize_lab_id,
         coerce_epoch_seconds=main._coerce_epoch_seconds,
         redeem_session_ticket=_fake_redeem,
+        confirm_session_started=_fake_confirm,
         ws_cleanup_seconds=60,
         internal_ws_token="gateway-internal",
         ws_create_rate_limit_per_minute=30,
@@ -179,12 +183,18 @@ def test_station_ws_session_create_redeems_ticket_and_forwards_context(monkeypat
     manager = _build_manager()
     fake_station = _FakeStationConnection()
     captured = {}
+    confirmations = []
 
     async def _fake_connect(headers):
         captured["headers"] = headers
         return fake_station
 
+    async def _confirm(**kwargs):
+        confirmations.append(kwargs)
+        return True
+
     monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    manager.confirm_session_started = _confirm
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
     with client.websocket_connect("/api/v1/fmu/sessions") as ws:
@@ -204,6 +214,13 @@ def test_station_ws_session_create_redeems_ticket_and_forwards_context(monkeypat
     assert fake_station.sent_messages[0]["gatewayContext"]["reservationKey"] == "res-1"
     assert fake_station.sent_messages[0]["gatewayContext"]["claims"]["sub"] == "user-1"
     assert "sessionTicket" not in fake_station.sent_messages[0]
+    assert confirmations == [{
+        "session_ticket": "st_valid",
+        "claims": _claims(),
+        "session_id": "sess_station_1",
+        "reservation_key": "res-1",
+        "request_id": "req-create",
+    }]
 
 
 def test_station_ws_duplicate_ticket_session_create_reuses_local_cache_without_second_redeem(monkeypatch):

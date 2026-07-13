@@ -1,10 +1,6 @@
 local _M = {}
 local demo_guard = require "modules.demo_guard"
 
-local function is_websocket_tunnel(uri)
-    return uri and uri:match("/guacamole/websocket%-tunnel")
-end
-
 local function reject(ngx, message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
     ngx.header["Content-Type"] = "text/plain"
@@ -40,29 +36,6 @@ local function enforce_guac_timeout(ngx, dict)
     return false
 end
 
-local function observe_reservation_websocket(ngx, deps)
-    if not ngx.ctx.jwt_authenticated or not is_websocket_tunnel(ngx.var.uri) then
-        return true
-    end
-
-    local reporter = (deps and deps.access_audit_reporter) or require "modules.access_audit_reporter"
-    local ok, persisted, err = pcall(
-        reporter.report_guacamole_session_observed,
-        ngx,
-        deps and deps.access_audit
-    )
-    if ok and persisted then
-        return true
-    end
-
-    ngx.log(ngx.ERR, "Access audit - refusing websocket without durable observation: " .. tostring(err or persisted))
-    ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE or 503
-    ngx.header["Content-Type"] = "text/plain"
-    ngx.say("Session observation unavailable")
-    ngx.exit(ngx.status)
-    return false
-end
-
 function _M.run(ngx_ctx, deps)
     local ngx = ngx_ctx or ngx
     local dict = ngx.shared.cache
@@ -89,7 +62,6 @@ function _M.run(ngx_ctx, deps)
     ngx.ctx.jwt_reservation_key = dict:get("reservation:" .. jti)
     ngx.ctx.jwt_exp = exp
     demo_guard.run(ngx)
-    return observe_reservation_websocket(ngx, deps)
 end
 
 return _M

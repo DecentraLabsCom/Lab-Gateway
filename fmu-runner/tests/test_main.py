@@ -32,6 +32,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _build_proxy_model_description_xml,
         _issue_session_ticket,
         _redeem_session_ticket,
+        _confirm_fmu_session_started,
         _record_browser_session_started,
         _validate_proxy_generation_supported,
     )
@@ -166,14 +167,13 @@ def test_redeem_session_ticket_returns_claims_payload():
     fake_response = _FakeHttpxResponse(
         json_data={
             "claims": {"sub": "test-user", "labId": "42"},
-            "sessionObserved": True,
-            "auditRecorded": True,
-            "attestationRecorded": True,
         },
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client), patch("main.FMU_GATEWAY_ID", "gateway.example"):
+    with patch("main.httpx.AsyncClient", return_value=fake_client), \
+         patch("main.SESSION_OBSERVER_GATEWAY_ID", "gateway.example"), \
+         patch("main.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
         claims = asyncio.run(
             _redeem_session_ticket(
                 session_ticket="st_ticket_1",
@@ -186,27 +186,23 @@ def test_redeem_session_ticket_returns_claims_payload():
 
     assert claims == {"sub": "test-user", "labId": "42"}
     assert fake_client.calls[0]["url"] == "http://blockchain-services:8080/auth/fmu/session-ticket/redeem"
-    assert fake_client.calls[0]["headers"] == {"Content-Type": "application/json"}
+    assert fake_client.calls[0]["headers"]["Content-Type"] == "application/json"
+    assert fake_client.calls[0]["headers"]["Authorization"].startswith("Bearer ")
     assert fake_client.calls[0]["json"]["sessionTicket"] == "st_ticket_1"
     assert fake_client.calls[0]["json"]["labId"] == "42"
     assert fake_client.calls[0]["json"]["reservationKey"] == "RES-1"
-    assert fake_client.calls[0]["json"]["sessionId"] == "sess-fmu-1"
-    assert fake_client.calls[0]["json"]["gatewayId"] == "gateway.example"
-    assert isinstance(fake_client.calls[0]["json"]["observedAt"], int)
+    assert "sessionId" not in fake_client.calls[0]["json"]
+    assert "gatewayId" not in fake_client.calls[0]["json"]
+    assert "observedAt" not in fake_client.calls[0]["json"]
 
 
-def test_redeem_session_ticket_rejects_semantically_failed_observation():
-    fake_response = _FakeHttpxResponse(
-        json_data={
-            "claims": {"sub": "test-user", "labId": "42"},
-            "sessionObserved": False,
-            "auditRecorded": True,
-            "attestationRecorded": False,
-        },
-    )
+def test_redeem_session_ticket_fails_closed_without_gateway_credentials():
+    fake_response = _FakeHttpxResponse(json_data={"claims": {"sub": "test-user"}})
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client):
+    with patch("main.httpx.AsyncClient", return_value=fake_client), \
+         patch("main.SESSION_OBSERVER_GATEWAY_ID", ""), \
+         patch("main.SESSION_OBSERVER_SIGNING_SECRET", ""):
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(
                 _redeem_session_ticket(
@@ -217,12 +213,38 @@ def test_redeem_session_ticket_rejects_semantically_failed_observation():
             )
 
     assert exc_info.value.status_code == 503
-    assert exc_info.value.detail == {
-        "code": "SESSION_OBSERVATION_FAILED",
-        "error": "Session observation was not durably recorded",
+    assert exc_info.value.detail["code"] == "SESSION_OBSERVER_NOT_CONFIGURED"
+    assert fake_client.calls == []
+
+
+def test_confirm_fmu_session_started_uses_authenticated_gateway_and_hashed_ticket():
+    fake_response = _FakeHttpxResponse(json_data={
+        "recorded": True,
         "auditRecorded": True,
-        "attestationRecorded": False,
+        "attestationRecorded": True,
+    })
+    fake_client = _FakeAsyncClient(fake_response)
+
+    with patch("main.httpx.AsyncClient", return_value=fake_client), \
+         patch("main.ACCESS_AUDIT_URL", "https://full.example/access-audit/internal/session-observed"), \
+         patch("main.SESSION_OBSERVER_GATEWAY_ID", "lite-a"), \
+         patch("main.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
+        assert asyncio.run(_confirm_fmu_session_started(
+            session_ticket="st_secret-ticket",
+            claims={"reservationKey": "RES-1"},
+            session_id="sess-fmu-1",
+        )) is True
+
+    call = fake_client.calls[0]
+    assert call["headers"]["Authorization"].startswith("Bearer ")
+    assert call["json"] == {
+        "reservationKey": "RES-1",
+        "fmuTicketId": hashlib.sha256(b"st_secret-ticket").hexdigest(),
+        "sessionId": "sess-fmu-1",
+        "accessType": "fmu",
+        "observedAt": call["json"]["observedAt"],
     }
+    assert "gatewayId" not in call["json"]
 
 
 def test_redeem_session_ticket_preserves_json_error_payload():
@@ -233,7 +255,9 @@ def test_redeem_session_ticket_preserves_json_error_payload():
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client):
+    with patch("main.httpx.AsyncClient", return_value=fake_client), \
+         patch("main.SESSION_OBSERVER_GATEWAY_ID", "gateway.example"), \
+         patch("main.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(
                 _redeem_session_ticket(
@@ -247,7 +271,7 @@ def test_redeem_session_ticket_preserves_json_error_payload():
     assert exc_info.value.detail == {"code": "INVALID_TICKET", "error": "expired"}
 
 
-def test_browser_observation_retries_semantic_persistence_failure_before_caching():
+def test_browser_observation_retries_confirmation_failure_before_caching():
     request = Request({
         "type": "http",
         "headers": [(b"authorization", b"Bearer token-123")],
@@ -262,14 +286,17 @@ def test_browser_observation_retries_semantic_persistence_failure_before_caching
         detail={"code": "SESSION_OBSERVATION_FAILED", "error": "not persisted"},
     )
     issue = AsyncMock(return_value=("st_ticket_retry", int(time.time()) + 30))
-    redeem = AsyncMock(side_effect=[first_failure, claims])
+    redeem = AsyncMock(return_value=claims)
+    confirm = AsyncMock(side_effect=[first_failure, True])
 
     with patch("main._issue_session_ticket", issue), \
          patch("main._redeem_session_ticket", redeem), \
+         patch("main._confirm_fmu_session_started", confirm), \
          patch("main.asyncio.sleep", AsyncMock()):
         assert asyncio.run(_record_browser_session_started(request, claims, "sim-retry")) is True
 
-    assert redeem.await_count == 2
+    assert redeem.await_count == 1
+    assert confirm.await_count == 2
 
 
 # ─── /api/v1/simulations/describe ───────────────────────────────────
@@ -833,11 +860,17 @@ def test_effective_timeout_rejects_expired_jwt():
 @patch("main._resolve_fmu_path")
 @patch("main.read_model_description")
 @patch("main._executor")
-def test_run_executes_simulation(mock_exec, mock_md, mock_resolve):
+def test_run_executes_simulation(mock_exec, mock_md, mock_resolve, _stub_browser_session_observation):
     mock_resolve.return_value = "/fake/path/spring.fmu"
     md_obj = MagicMock(); md_obj.coSimulation = True; md_obj.modelExchange = False
     mock_md.return_value = md_obj
     mock_exec.submit.return_value = _make_future(_make_run_result())
+
+    async def _assert_worker_already_started(*_args, **_kwargs):
+        assert mock_exec.submit.called
+        return True
+
+    _stub_browser_session_observation.side_effect = _assert_worker_already_started
 
     response = client.post("/api/v1/simulations/run", json={
         "labId": "1",
@@ -853,6 +886,30 @@ def test_run_executes_simulation(mock_exec, mock_md, mock_resolve):
     assert "position" in data["outputs"]
     assert "simId" in data
     assert data["fmiType"] == "CoSimulation"
+
+
+@patch("main._resolve_fmu_path")
+@patch("main.read_model_description")
+@patch("main._executor")
+def test_run_does_not_observe_when_worker_submission_fails(
+    mock_exec,
+    mock_md,
+    mock_resolve,
+    _stub_browser_session_observation,
+):
+    mock_resolve.return_value = "/fake/path/spring.fmu"
+    md_obj = MagicMock(); md_obj.coSimulation = True; md_obj.modelExchange = False
+    mock_md.return_value = md_obj
+    mock_exec.submit.side_effect = RuntimeError("worker unavailable")
+
+    response = client.post("/api/v1/simulations/run", json={
+        "labId": "1",
+        "parameters": {},
+        "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
+    })
+
+    assert response.status_code == 500
+    _stub_browser_session_observation.assert_not_awaited()
 
 
 @patch("main._resolve_fmu_path")

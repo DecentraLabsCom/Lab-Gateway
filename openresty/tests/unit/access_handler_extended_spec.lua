@@ -33,7 +33,7 @@ runner.describe("Access handler one-time cookie policy", function()
         runner.assert.equals("alice", ngx.req.headers["Authorization"])
     end)
 
-    runner.it("persists a reservation websocket observation during access phase", function()
+    runner.it("does not turn an access-phase websocket request into SessionStarted evidence", function()
         local reported = false
         local ngx = ngx_factory.new({
             cache = {
@@ -60,11 +60,11 @@ runner.describe("Access handler one-time cookie policy", function()
             },
         })
 
-        runner.assert.truthy(reported)
+        runner.assert.equals(false, reported)
         runner.assert.equals(nil, ngx.status)
     end)
 
-    runner.it("fails a reservation websocket closed when durable observation is unavailable", function()
+    runner.it("does not fail a valid request because no real upstream session exists yet", function()
         local ngx = ngx_factory.new({
             cache = {
                 ["username:jti"] = "dlabs-res-user",
@@ -88,11 +88,11 @@ runner.describe("Access handler one-time cookie policy", function()
             },
         })
 
-        runner.assert.equals(503, ngx.status)
-        runner.assert.equals(503, ngx._exit_code)
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals(nil, ngx._exit_code)
     end)
 
-    runner.it("fails a reservation websocket closed when the reporter raises", function()
+    runner.it("never invokes the economic observation reporter during access phase", function()
         local ngx = ngx_factory.new({
             cache = {
                 ["username:jti"] = "dlabs-res-user",
@@ -115,7 +115,7 @@ runner.describe("Access handler one-time cookie policy", function()
             },
         })
 
-        runner.assert.equals(503, ngx.status)
+        runner.assert.equals(nil, ngx.status)
     end)
 
     runner.it("does not require reservation observation for manual websocket sessions", function()

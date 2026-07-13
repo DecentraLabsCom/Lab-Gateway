@@ -36,6 +36,7 @@ from uuid import uuid4
 
 import aiosqlite
 import httpx
+import jwt
 from fmpy import read_model_description, simulate_fmu
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
 from fastapi.responses import StreamingResponse, Response
@@ -74,9 +75,26 @@ AUTH_SESSION_TICKET_REDEEM_URL = os.getenv(
     "http://blockchain-services:8080/auth/fmu/session-ticket/redeem",
 )
 AUTH_SESSION_TICKET_INTERNAL_TOKEN = os.getenv("AUTH_SESSION_TICKET_INTERNAL_TOKEN", "")
+SESSION_OBSERVER_GATEWAY_ID = os.getenv("SESSION_OBSERVER_GATEWAY_ID", "").strip().lower()
+SESSION_OBSERVER_SIGNING_SECRET = os.getenv("SESSION_OBSERVER_SIGNING_SECRET", "").strip()
+
+
+def _default_access_audit_url() -> str:
+    redeem_url = urlparse(AUTH_SESSION_TICKET_REDEEM_URL)
+    if not redeem_url.scheme or not redeem_url.netloc:
+        return ""
+    return urlunparse(redeem_url._replace(
+        path="/access-audit/internal/session-observed",
+        params="",
+        query="",
+        fragment="",
+    ))
+
+
+ACCESS_AUDIT_URL = os.getenv("ACCESS_AUDIT_URL", "").strip() or _default_access_audit_url()
 FMU_GATEWAY_ID = (
     os.getenv("FMU_GATEWAY_ID")
-    or os.getenv("SESSION_OBSERVER_GATEWAY_ID")
+    or SESSION_OBSERVER_GATEWAY_ID
     or os.getenv("SERVER_NAME")
     or ""
 ).strip().lower()
@@ -1145,15 +1163,11 @@ async def _redeem_session_ticket(
         payload["labId"] = str(lab_id)
     if reservation_key:
         payload["reservationKey"] = str(reservation_key)
-    if session_id:
-        payload["sessionId"] = str(session_id)
-    if FMU_GATEWAY_ID:
-        payload["gatewayId"] = str(FMU_GATEWAY_ID)
-    payload["observedAt"] = int(time.time())
 
     response = await _post_session_ticket_request(
         AUTH_SESSION_TICKET_REDEEM_URL,
         payload=payload,
+        authorization=_session_observer_authorization(),
     )
 
     if response.status_code >= 400:
@@ -1163,28 +1177,112 @@ async def _redeem_session_ticket(
     claims = payload.get("claims") if isinstance(payload, dict) else None
     if not isinstance(claims, dict):
         raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "error": "Invalid ticket redeem response"})
-    audit_recorded = payload.get("auditRecorded") is True
-    attestation_recorded = payload.get("attestationRecorded") is True
-    if payload.get("sessionObserved") is not True or not audit_recorded or not attestation_recorded:
+    logger.info(
+        "Redeemed FMU session ticket request_id=%s session_id=%s lab_id=%s reservation_key=%s ticket_id=%s",
+        request_id or "-",
+        session_id or "-",
+        lab_id or "-",
+        reservation_key or "-",
+        _normalize_ticket_id(session_ticket) or "-",
+    )
+    return claims
+
+
+def _session_observer_authorization() -> str:
+    if not SESSION_OBSERVER_GATEWAY_ID or not SESSION_OBSERVER_SIGNING_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "SESSION_OBSERVER_NOT_CONFIGURED",
+                "error": "Session observer gateway credentials are not configured",
+            },
+        )
+    try:
+        padding = "=" * (-len(SESSION_OBSERVER_SIGNING_SECRET) % 4)
+        signing_key = base64.urlsafe_b64decode(SESSION_OBSERVER_SIGNING_SECRET + padding)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "SESSION_OBSERVER_NOT_CONFIGURED", "error": "Invalid session observer signing secret"},
+        ) from exc
+    if len(signing_key) < 32:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "SESSION_OBSERVER_NOT_CONFIGURED", "error": "Session observer signing secret is too short"},
+        )
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "iss": SESSION_OBSERVER_GATEWAY_ID,
+            "sub": SESSION_OBSERVER_GATEWAY_ID,
+            "aud": "session-observation",
+            "scope": "session-observation:submit",
+            "iat": now,
+            "exp": now + 60,
+            "jti": base64.urlsafe_b64encode(os.urandom(18)).rstrip(b"=").decode("ascii"),
+        },
+        signing_key,
+        algorithm="HS256",
+    )
+    return f"Bearer {token}"
+
+
+async def _confirm_fmu_session_started(
+    *,
+    session_ticket: str,
+    claims: dict,
+    session_id: str,
+    reservation_key: Optional[str] = None,
+    request_id: Optional[str] = None,
+) -> bool:
+    claim_reservation_key = str(claims.get("reservationKey") or "").strip()
+    if not claim_reservation_key:
+        raise HTTPException(status_code=403, detail="Redeemed FMU ticket has no reservationKey")
+    if reservation_key and claim_reservation_key.lower() != str(reservation_key).strip().lower():
+        raise HTTPException(status_code=403, detail="Redeemed FMU ticket reservation mismatch")
+    if not ACCESS_AUDIT_URL:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "SESSION_OBSERVATION_UNAVAILABLE", "error": "ACCESS_AUDIT_URL is not configured"},
+        )
+
+    body = {
+        "reservationKey": claim_reservation_key,
+        "fmuTicketId": hashlib.sha256(session_ticket.encode("utf-8")).hexdigest(),
+        "sessionId": session_id,
+        "accessType": "fmu",
+        "observedAt": int(time.time()),
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            ACCESS_AUDIT_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": _session_observer_authorization(),
+            },
+            json=body,
+        )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=_extract_response_error_payload(response))
+    payload = response.json()
+    if not isinstance(payload, dict) or payload.get("recorded") is not True:
         raise HTTPException(
             status_code=503,
             detail={
                 "code": "SESSION_OBSERVATION_FAILED",
                 "error": "Session observation was not durably recorded",
-                "auditRecorded": audit_recorded,
-                "attestationRecorded": attestation_recorded,
+                "auditRecorded": payload.get("auditRecorded") if isinstance(payload, dict) else False,
+                "attestationRecorded": payload.get("attestationRecorded") if isinstance(payload, dict) else False,
             },
         )
     logger.info(
-        "Redeemed FMU session ticket request_id=%s session_id=%s lab_id=%s reservation_key=%s ticket_id=%s observed=%s",
+        "Confirmed FMU session request_id=%s session_id=%s reservation_key=%s ticket_id=%s",
         request_id or "-",
-        session_id or payload.get("sessionId") or "-",
-        lab_id or "-",
-        reservation_key or "-",
+        session_id,
+        claim_reservation_key,
         _normalize_ticket_id(session_ticket) or "-",
-        payload.get("sessionObserved", False),
     )
-    return claims
+    return True
 
 
 async def _record_browser_session_started(request: Request, claims: dict, sim_id: str) -> bool:
@@ -1216,11 +1314,18 @@ async def _record_browser_session_started(request: Request, claims: dict, sim_id
         reservation_key=reservation_key,
         request_id=f"browser_{sim_id[:12]}",
     )
+    redeemed_claims = await _redeem_session_ticket(
+        session_ticket=ticket,
+        lab_id=lab_id,
+        reservation_key=reservation_key,
+        session_id=session_id,
+        request_id=f"browser_{sim_id[:12]}",
+    )
     for attempt in range(FMU_SESSION_OBSERVATION_MAX_ATTEMPTS):
         try:
-            await _redeem_session_ticket(
+            await _confirm_fmu_session_started(
                 session_ticket=ticket,
-                lab_id=lab_id,
+                claims=redeemed_claims,
                 reservation_key=reservation_key,
                 session_id=session_id,
                 request_id=f"browser_{sim_id[:12]}",
@@ -1321,6 +1426,7 @@ if _fmu_backend.supports_local_execution:
         acquire_slot=_acquire_slot,
         release_slot=_release_slot,
         redeem_session_ticket=_redeem_session_ticket,
+        confirm_session_started=_confirm_fmu_session_started,
         ws_session_queue_size=WS_SESSION_QUEUE_SIZE,
         ws_heartbeat_seconds=WS_HEARTBEAT_SECONDS,
         ws_expiring_notice_seconds=WS_EXPIRING_NOTICE_SECONDS,
@@ -1339,6 +1445,7 @@ elif _fmu_backend.mode == "station":
         normalize_lab_id=_normalize_lab_id,
         coerce_epoch_seconds=_coerce_epoch_seconds,
         redeem_session_ticket=_redeem_session_ticket,
+        confirm_session_started=_confirm_fmu_session_started,
         ws_cleanup_seconds=WS_CLEANUP_SECONDS,
         internal_ws_token=INTERNAL_WS_TOKEN,
         ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
@@ -1848,9 +1955,6 @@ async def run_simulation(
     future: Optional[Future] = None
     cleanup_deferred = False
     try:
-        # Persist the billable observation before accepting local execution.
-        # A failed observation therefore cannot leave an untracked simulation.
-        await _record_browser_session_started(request, claims, sim_id)
         future = _executor.submit(
             _run_simulation,
             str(fmu_path),
@@ -1863,6 +1967,14 @@ async def run_simulation(
             solver_name,
         )
         _track_running_future(sim_id, future, lab_id, claims)
+        try:
+            # Worker acceptance is the first runtime fact that can justify SessionStarted.
+            await _record_browser_session_started(request, claims, sim_id)
+        except Exception:
+            if not future.done() and not future.cancel():
+                cleanup_deferred = True
+                future.add_done_callback(lambda _f, sid=sim_id: _finalize_simulation_tracking(sid))
+            raise
         try:
             sim_result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
         except asyncio.TimeoutError as exc:
@@ -2025,13 +2137,19 @@ async def stream_simulation(
         cleanup_deferred = False
         _acquire_slot(lab_id)
         try:
-            # Persist before the worker is started or a success event is exposed.
-            await _record_browser_session_started(request, claims, sim_id)
             future = _executor.submit(
                 _run_simulation, str(fmu_path), start_time, stop_time, step_size,
                 req.parameters, timeout, fmi_type, solver_name,
             )
             _track_running_future(sim_id, future, lab_id, claims)
+            try:
+                # Do not expose "started" until both worker acceptance and durable observation exist.
+                await _record_browser_session_started(request, claims, sim_id)
+            except Exception:
+                if not future.done() and not future.cancel():
+                    cleanup_deferred = True
+                    future.add_done_callback(lambda _f, sid=sim_id: _finalize_simulation_tracking(sid))
+                raise
             yield json.dumps({"type": "started", "simId": sim_id}) + "\n"
 
             # Heartbeat while simulation runs

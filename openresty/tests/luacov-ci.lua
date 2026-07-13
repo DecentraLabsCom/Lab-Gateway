@@ -1,3 +1,4 @@
+---@diagnostic disable: lowercase-global
 statsfile = "luacov.stats.out"
 reportfile = "luacov.report.out"
 exclude = {

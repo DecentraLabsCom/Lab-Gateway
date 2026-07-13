@@ -129,7 +129,7 @@ Marketplace upload is disabled by design.
 - `session.terminate` is idempotent.
 - `sim.outputs` includes `seq` and `dropped` for backpressure visibility.
 - Keepalive/telemetry events: `session.pong`, `session.heartbeat`, `session.expiring`.
-- `session.create` accepts `sessionTicket` (one-shot) when no bearer token is provided.
+- `session.create` accepts a reservation-bounded, reusable `sessionTicket` when no bearer token is provided. Only the configured gateway runtime can redeem it, and redemption alone is not session-start evidence.
 - Explicit rate limits:
   - Proxy download endpoint (`PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE`, default `20`)
   - Realtime `session.create` (`WS_CREATE_RATE_LIMIT_PER_MINUTE`, default `30`)

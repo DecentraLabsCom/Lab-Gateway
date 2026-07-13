@@ -269,7 +269,7 @@ local function healthy_gateway_health_opts()
         http = {
             ["https://gateway.example/.well-known/public-key.pem"] = {
                 status = 200,
-                body = "-----BEGIN PUBLIC KEY-----\nremote\n-----END PUBLIC KEY-----"
+                body = "-----BEGIN PUBLIC KEY-----\nlocal\n-----END PUBLIC KEY-----"
             }
         },
         openssl_output = "notAfter=Jan 12 00:00:00 1970 GMT\n",
@@ -340,7 +340,7 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals(false, result.infra.mysql_up)
     end)
 
-    runner.it("treats blockchain DEGRADED health as reachable and keeps details", function()
+    runner.it("keeps blockchain reachable details but does not report readiness for DEGRADED", function()
         local opts = healthy_gateway_health_opts()
         opts.captures["/__health_blockchain"] = {
             status = 503,
@@ -368,8 +368,9 @@ runner.describe("OpenResty gateway_health.lua", function()
         local ngx = run_gateway_health(opts)
 
         local result = ngx._body
-        runner.assert.equals("UP", result.status)
-        runner.assert.equals(true, result.services.blockchain.ok)
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(false, result.services.blockchain.ok)
+        runner.assert.equals(true, result.services.blockchain.reachable)
         runner.assert.equals(503, result.services.blockchain.status)
         runner.assert.equals(false, result.services.blockchain.details.billing_configured)
         runner.assert.equals("1.2.3", result.version)
@@ -412,6 +413,26 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals(true, result.services.lite_auth.issuer_host_dns_ok)
         runner.assert.equals(false, result.services.lite_auth.remote_public_key_ok)
         runner.assert.equals("invalid public key payload", result.services.lite_auth.remote_public_key_status)
+    end)
+
+    runner.it("marks lite auth as degraded when local and remote public keys differ", function()
+        local opts = healthy_gateway_health_opts()
+        opts.config.lite_mode = 1
+        opts.config.issuer = "https://issuer.example/auth"
+        opts.dns["issuer.example"] = "10.0.0.11"
+        opts.http = {
+            ["https://issuer.example/.well-known/public-key.pem"] = {
+                status = 200,
+                body = "-----BEGIN PUBLIC KEY-----\nother\n-----END PUBLIC KEY-----"
+            }
+        }
+
+        local result = run_gateway_health(opts)._body
+
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(false, result.services.lite_auth.ok)
+        runner.assert.equals(false, result.services.lite_auth.public_key_matches)
+        runner.assert.equals("public key mismatch", result.services.lite_auth.remote_public_key_status)
     end)
 
     runner.it("reports the Guacamole schema check delegated to Ops Worker", function()

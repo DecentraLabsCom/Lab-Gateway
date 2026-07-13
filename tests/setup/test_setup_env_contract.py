@@ -8,6 +8,8 @@ SETUP_SH = ROOT / "setup.sh"
 SETUP_BAT = ROOT / "setup.bat"
 ISSUE_LITE_SH = ROOT / "scripts" / "issue-lite-trust-bundle.sh"
 ISSUE_LITE_PS1 = ROOT / "scripts" / "Issue-LiteTrustBundle.ps1"
+NGINX_CONF = ROOT / "openresty" / "nginx.conf"
+COMPOSE_FILE = ROOT / "docker-compose.yml"
 
 
 GATEWAY_MANAGED_BACKEND_KEYS = [
@@ -33,6 +35,8 @@ class SetupEnvContractTest(unittest.TestCase):
         cls.setup_bat = SETUP_BAT.read_text(encoding="utf-8")
         cls.issue_lite_sh = ISSUE_LITE_SH.read_text(encoding="utf-8")
         cls.issue_lite_ps1 = ISSUE_LITE_PS1.read_text(encoding="utf-8")
+        cls.nginx_conf = NGINX_CONF.read_text(encoding="utf-8")
+        cls.compose_file = COMPOSE_FILE.read_text(encoding="utf-8")
 
     def test_gateway_managed_backend_keys_are_removed_from_embedded_backend_env(self):
         for key in GATEWAY_MANAGED_BACKEND_KEYS:
@@ -184,6 +188,20 @@ class SetupEnvContractTest(unittest.TestCase):
             self.assertIn("AUTH_SESSION_TICKET_ISSUE_URL", script)
             self.assertIn("AUTH_SESSION_TICKET_REDEEM_URL", script)
 
+    def test_lite_bundle_registers_a_dedicated_guacamole_provisioner_route(self):
+        for script in (self.issue_lite_sh, self.issue_lite_ps1):
+            self.assertIn("GUACAMOLE_PROVISIONER_ROUTES_JSON", script)
+            self.assertIn("GUACAMOLE_PROVISIONER_TOKEN", script)
+            self.assertIn("X-Guacamole-Provisioner-Token", script)
+
+        for script in (self.setup_sh, self.setup_bat):
+            self.assertIn("bundle_guacamole_provisioner_token", script)
+            self.assertIn("GUACAMOLE_PROVISIONER_TOKEN", script)
+            self.assertIn("GUACAMOLE_PROVISIONER_TOKEN_HEADER", script)
+
+        self.assertIn("env GUACAMOLE_PROVISIONER_TOKEN;", self.nginx_conf)
+        self.assertIn("env GUACAMOLE_PROVISIONER_TOKEN_HEADER;", self.nginx_conf)
+        self.assertGreaterEqual(self.compose_file.count("GUACAMOLE_PROVISIONER_TOKEN="), 2)
 
 if __name__ == "__main__":
     unittest.main()

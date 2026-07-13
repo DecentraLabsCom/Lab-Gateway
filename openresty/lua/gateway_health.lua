@@ -49,6 +49,17 @@ local function looks_like_public_key_pem(value)
         and value:find("END PUBLIC KEY", 1, true) ~= nil
 end
 
+local function canonical_public_key(value)
+    if not looks_like_public_key_pem(value) then
+        return nil
+    end
+    local body = value:match("%-%-%-%-%-BEGIN PUBLIC KEY%-%-%-%-%-(.-)%-%-%-%-%-END PUBLIC KEY%-%-%-%-%-")
+    if not body then
+        return nil
+    end
+    return body:gsub("%s+", "")
+end
+
 local function parse_issuer_url(value)
     local raw = trim(value)
     if raw == "" then
@@ -113,35 +124,11 @@ local function capture(path)
     }
 end
 
-local function blockchain_reachable(check)
+local function blockchain_ready(check)
     if not check or not check.status then
         return false
     end
-    if check.status < 400 then
-        return true
-    end
-    local body = check.body or {}
-    local status = tostring(body.status or ""):upper()
-    if check.status ~= 503 or status ~= "DEGRADED" then
-        return false
-    end
-    local operational_count_keys = {
-        "nonce_backlog",
-        "access_deliveries_stuck",
-        "session_started_unknown"
-    }
-    local queue_health_errors = body.queue_health_errors
-    if queue_health_errors ~= nil then
-        if type(queue_health_errors) ~= "table" or next(queue_health_errors) ~= nil then
-            return false
-        end
-    end
-    for _, key in ipairs(operational_count_keys) do
-        if tonumber(body[key]) ~= 0 then
-            return false
-        end
-    end
-    return true
+    return check.status >= 200 and check.status < 400
 end
 
 local function check_dns(host)
@@ -242,6 +229,7 @@ local function check_lite_issuer_trust(issuer)
         local_public_key_present = file_exists(PUBLIC_KEY_PATH),
         local_public_key_valid = local_public_key_ok,
         remote_public_key_ok = false,
+        public_key_matches = false,
         remote_public_key_status = "not_checked",
         issuer_host_dns_ok = false
     }
@@ -282,14 +270,21 @@ local function check_lite_issuer_trust(issuer)
         return details
     end
 
-    details.remote_public_key_ok = looks_like_public_key_pem(res.body or "")
-    if details.remote_public_key_ok then
+    local remote_public_key = res.body or ""
+    details.remote_public_key_ok = looks_like_public_key_pem(remote_public_key)
+    details.public_key_matches = details.remote_public_key_ok
+        and canonical_public_key(local_public_key) == canonical_public_key(remote_public_key)
+    if details.remote_public_key_ok and details.public_key_matches then
         details.remote_public_key_status = "ok"
+    elseif details.remote_public_key_ok then
+        details.remote_public_key_status = "public key mismatch"
     else
         details.remote_public_key_status = "invalid public key payload"
     end
 
-    details.ok = details.local_public_key_valid and details.remote_public_key_ok
+    details.ok = details.local_public_key_valid
+        and details.remote_public_key_ok
+        and details.public_key_matches
     return details
 end
 
@@ -326,7 +321,8 @@ local block_body = blockchain.body or {}
 if block_body.billing_configured == nil and block_body.treasury_configured ~= nil then
     block_body.billing_configured = block_body.treasury_configured
 end
-local blockchain_ok = blockchain_reachable(blockchain)
+local blockchain_reachable = blockchain.status ~= nil
+local blockchain_ok = blockchain_ready(blockchain)
 
 -- DNS checks
 local dns_hosts = { "blockchain-services", "guacamole", "ops-worker", "mysql" }
@@ -379,6 +375,7 @@ local result = {
     services = {
         blockchain = {
             ok = blockchain_ok,
+            reachable = blockchain_reachable,
             status = blockchain.status,
             required = not lite_mode,
             details = block_body
@@ -418,6 +415,7 @@ local result = {
             local_public_key_present = lite_auth and lite_auth.local_public_key_present or file_exists(PUBLIC_KEY_PATH),
             local_public_key_valid = lite_auth and lite_auth.local_public_key_valid or false,
             remote_public_key_ok = lite_auth and lite_auth.remote_public_key_ok or false,
+            public_key_matches = lite_auth and lite_auth.public_key_matches or false,
             remote_public_key_status = lite_auth and lite_auth.remote_public_key_status or "not_applicable"
         },
         fmu_runner = {

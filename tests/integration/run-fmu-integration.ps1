@@ -8,7 +8,31 @@ param(
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey("UseBasicParsing")) {
+    $PSDefaultParameterValues["Invoke-WebRequest:UseBasicParsing"] = $true
+}
+if (-not ("DecentraLabsIntegrationCertificatePolicy" -as [type])) {
+    Add-Type @"
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public static class DecentraLabsIntegrationCertificatePolicy
+{
+    public static readonly RemoteCertificateValidationCallback Callback = Accept;
+
+    public static bool Accept(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors sslPolicyErrors)
+    {
+        return true;
+    }
+}
+"@
+}
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = `
+    [DecentraLabsIntegrationCertificatePolicy]::Callback
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $ComposeFile = Join-Path $ScriptDir "docker-compose.fmu-integration.yml"
 $CertsDir = Join-Path $ScriptDir "certs"
@@ -179,13 +203,11 @@ try {
     1..3 | ForEach-Object {
         $jobs += Start-Job -ScriptBlock {
             param($url, $body, $token)
-            try {
-                $headers = @{ Authorization = $token }
-                $r = Invoke-WebRequest -Uri $url -Method POST -Body $body -ContentType "application/json" -Headers $headers -ErrorAction Stop
-                return $r.StatusCode
-            } catch {
-                return $_.Exception.Response.StatusCode.value__
-            }
+            $status = $body | & curl.exe --silent --show-error --insecure `
+                --output NUL --write-out "%{http_code}" --max-time 30 `
+                --request POST --header "Content-Type: application/json" `
+                --header "Authorization: $token" --data-binary '@-' $url
+            return [int]$status
         } -ArgumentList "$BaseUrl/fmu/api/v1/simulations/run", $concBody, $authToken
     }
     $results = $jobs | Wait-Job | Receive-Job

@@ -40,6 +40,9 @@ $secret = [Convert]::ToBase64String($secretBytes).TrimEnd('=').Replace('+', '-')
 $redeemerBytes = New-Object byte[](32)
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($redeemerBytes)
 $redeemer = 'acr_' + [Convert]::ToHexString($redeemerBytes).ToLowerInvariant()
+$provisionerBytes = New-Object byte[](32)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($provisionerBytes)
+$provisioner = 'gpr_' + [Convert]::ToHexString($provisionerBytes).ToLowerInvariant()
 $credentials = @{}
 if (-not [string]::IsNullOrWhiteSpace($values['SESSION_OBSERVER_CREDENTIALS_JSON'])) {
     $parsed = $values['SESSION_OBSERVER_CREDENTIALS_JSON'] | ConvertFrom-Json
@@ -60,6 +63,31 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
     }
 }
 if (-not $found) { $lines += $replacement }
+Set-Content -LiteralPath $envFile -Value $lines -Encoding Ascii
+
+$provisionerRoutes = @{}
+if (-not [string]::IsNullOrWhiteSpace($values['GUACAMOLE_PROVISIONER_ROUTES_JSON'])) {
+    $parsed = $values['GUACAMOLE_PROVISIONER_ROUTES_JSON'] | ConvertFrom-Json
+    if ($parsed) {
+        $parsed.PSObject.Properties | ForEach-Object { $provisionerRoutes[$_.Name] = $_.Value }
+    }
+}
+$provisionerRoutes[$lite.Origin] = [ordered]@{
+    baseUrl = $lite.Origin
+    pathPrefix = '/gateway-provisioner/guacamole'
+    tokenHeader = 'X-Guacamole-Provisioner-Token'
+    token = $provisioner
+}
+$routesReplacement = 'GUACAMOLE_PROVISIONER_ROUTES_JSON=' + ($provisionerRoutes | ConvertTo-Json -Compress -Depth 5)
+$lines = @(Get-Content -LiteralPath $envFile)
+$found = $false
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '^GUACAMOLE_PROVISIONER_ROUTES_JSON=') {
+        $lines[$i] = $routesReplacement
+        $found = $true
+    }
+}
+if (-not $found) { $lines += $routesReplacement }
 Set-Content -LiteralPath $envFile -Value $lines -Encoding Ascii
 
 $redeemerCredentials = @{}
@@ -90,6 +118,8 @@ $origin = $full.Origin
     "ACCESS_AUDIT_URL=$origin/access-audit/internal/session-observed"
     "SESSION_OBSERVER_GATEWAY_ID=$GatewayId"
     "SESSION_OBSERVER_SIGNING_SECRET=$secret"
+    "GUACAMOLE_PROVISIONER_TOKEN=$provisioner"
+    "GUACAMOLE_PROVISIONER_TOKEN_HEADER=X-Guacamole-Provisioner-Token"
     "FMU_GATEWAY_ID=$GatewayId"
     "FMU_JWT_AUDIENCE=$($lite.Origin)/fmu"
     "AUTH_SESSION_TICKET_ISSUE_URL=$origin/auth/fmu/session-ticket/issue"

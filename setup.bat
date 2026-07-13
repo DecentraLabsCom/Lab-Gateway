@@ -495,6 +495,8 @@ if "!issuer_value!"=="" (
     call :ReadEnvValue "!lite_trust_bundle!" "SERVER_NAME" bundle_server_name
     call :ReadEnvValue "!lite_trust_bundle!" "SESSION_OBSERVER_GATEWAY_ID" bundle_gateway_id
     call :ReadEnvValue "!lite_trust_bundle!" "SESSION_OBSERVER_SIGNING_SECRET" bundle_observer_secret
+    call :ReadEnvValue "!lite_trust_bundle!" "GUACAMOLE_PROVISIONER_TOKEN" bundle_guacamole_provisioner_token
+    call :ReadEnvValue "!lite_trust_bundle!" "GUACAMOLE_PROVISIONER_TOKEN_HEADER" bundle_guacamole_provisioner_token_header
     call :ReadEnvValue "!lite_trust_bundle!" "FMU_GATEWAY_ID" bundle_fmu_gateway_id
     call :ReadEnvValue "!lite_trust_bundle!" "FMU_JWT_AUDIENCE" bundle_fmu_audience
     call :ReadEnvValue "!lite_trust_bundle!" "AUTH_SESSION_TICKET_ISSUE_URL" bundle_ticket_issue_url
@@ -505,6 +507,8 @@ if "!issuer_value!"=="" (
     if not defined bundle_server_name exit /b 1
     if not defined bundle_gateway_id exit /b 1
     if not defined bundle_observer_secret exit /b 1
+    if not defined bundle_guacamole_provisioner_token exit /b 1
+    if not defined bundle_guacamole_provisioner_token_header exit /b 1
     if not defined bundle_fmu_gateway_id exit /b 1
     if not defined bundle_fmu_audience exit /b 1
     if not defined bundle_ticket_issue_url exit /b 1
@@ -529,11 +533,13 @@ if "!issuer_value!"=="" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_AUDIT_URL" "!bundle_audit_url!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" "!bundle_gateway_id!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" "!bundle_observer_secret!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "GUACAMOLE_PROVISIONER_TOKEN" "!bundle_guacamole_provisioner_token!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "GUACAMOLE_PROVISIONER_TOKEN_HEADER" "!bundle_guacamole_provisioner_token_header!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_GATEWAY_ID" "!bundle_fmu_gateway_id!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_ISSUE_URL" "!bundle_ticket_issue_url!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_REDEEM_URL" "!bundle_ticket_redeem_url!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" "{}"
-    echo    * Imported redeem and least-privilege observation credentials for !bundle_gateway_id!.
+    echo    * Imported redeem, session-observation and Guacamole-provisioner credentials for !bundle_gateway_id!.
 )
 echo.
 

@@ -542,12 +542,15 @@ else
     bundle_server_name="$(get_env_default "SERVER_NAME" "$lite_trust_bundle")"
     bundle_gateway_id="$(get_env_default "SESSION_OBSERVER_GATEWAY_ID" "$lite_trust_bundle")"
     bundle_observer_secret="$(get_env_default "SESSION_OBSERVER_SIGNING_SECRET" "$lite_trust_bundle")"
+    bundle_guacamole_provisioner_token="$(get_env_default "GUACAMOLE_PROVISIONER_TOKEN" "$lite_trust_bundle")"
+    bundle_guacamole_provisioner_token_header="$(get_env_default "GUACAMOLE_PROVISIONER_TOKEN_HEADER" "$lite_trust_bundle")"
     bundle_fmu_gateway_id="$(get_env_default "FMU_GATEWAY_ID" "$lite_trust_bundle")"
     bundle_fmu_audience="$(get_env_default "FMU_JWT_AUDIENCE" "$lite_trust_bundle")"
     bundle_ticket_issue_url="$(get_env_default "AUTH_SESSION_TICKET_ISSUE_URL" "$lite_trust_bundle")"
     bundle_ticket_redeem_url="$(get_env_default "AUTH_SESSION_TICKET_REDEEM_URL" "$lite_trust_bundle")"
     if [ -z "$bundle_issuer" ] || [ -z "$bundle_redeemer" ] || [ -z "$bundle_audit_url" ] \
         || [ -z "$bundle_server_name" ] || [ -z "$bundle_gateway_id" ] || [ -z "$bundle_observer_secret" ] \
+        || [ -z "$bundle_guacamole_provisioner_token" ] || [ -z "$bundle_guacamole_provisioner_token_header" ] \
         || [ -z "$bundle_fmu_gateway_id" ] || [ -z "$bundle_fmu_audience" ] \
         || [ -z "$bundle_ticket_issue_url" ] || [ -z "$bundle_ticket_redeem_url" ]; then
         echo "Trust bundle is incomplete or invalid." >&2
@@ -568,11 +571,13 @@ else
     update_env_var "$ROOT_ENV_FILE" "ACCESS_AUDIT_URL" "$bundle_audit_url"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_GATEWAY_ID" "$bundle_gateway_id"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_SIGNING_SECRET" "$bundle_observer_secret"
+    update_env_var "$ROOT_ENV_FILE" "GUACAMOLE_PROVISIONER_TOKEN" "$bundle_guacamole_provisioner_token"
+    update_env_var "$ROOT_ENV_FILE" "GUACAMOLE_PROVISIONER_TOKEN_HEADER" "$bundle_guacamole_provisioner_token_header"
     update_env_var "$ROOT_ENV_FILE" "FMU_GATEWAY_ID" "$bundle_fmu_gateway_id"
     update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_ISSUE_URL" "$bundle_ticket_issue_url"
     update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_REDEEM_URL" "$bundle_ticket_redeem_url"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_CREDENTIALS_JSON" "{}"
-    echo "   * Imported redeem and least-privilege observation credentials for ${bundle_gateway_id}."
+    echo "   * Imported redeem, session-observation and Guacamole-provisioner credentials for ${bundle_gateway_id}."
 fi
 echo
 

@@ -116,21 +116,39 @@ The browser submits the code to the gateway with `POST /auth/access`. OpenResty 
 
 FMU uses the same opaque credential but exchanges it server-to-server through the Marketplace BFF. The BFF captures the gateway session identifier and stores up to six reservation-scoped contexts in one encrypted, HttpOnly, same-site Marketplace cookie. Browser simulation, history, result, and proxy-FMU requests remain same-origin; the BFF selects exactly one context by gateway, lab, and canonical reservation, then forwards only `FMU_SESSION=<selected id>` to the gateway.
 
-This removes the dependency on third-party cookies and prevents one tab from replacing another reservation's FMU session. The technical JWT and gateway session identifier are never returned to Marketplace JavaScript. A gateway `401` clears the runner's optimistic session state, performs one controlled reauthentication, and retries the failed operation once. FMU Runner still creates its narrower single-use runtime ticket where the simulation or generated proxy requires it.
+This removes the dependency on third-party cookies and prevents one tab from replacing another reservation's FMU session. The technical JWT and gateway session identifier are never returned to Marketplace JavaScript. A gateway `401` clears the runner's optimistic session state, performs one controlled reauthentication, and retries the failed operation once. FMU Runner creates a narrower runtime ticket for simulations and generated proxies. That ticket is reusable only within its reservation window so a proxy can reconnect; redemption requires the target gateway's short-lived observer JWT.
 
 ## Session observation and expiry enforcement
 
-The first Guacamole WebSocket upgrade (`101`) is captured at handshake time by OpenResty. Before accepting it, OpenResty makes one authenticated call to Ops Worker; Ops commits the local MySQL session-observation outbox before acknowledging. If the durable insert is unavailable, the WebSocket is rejected with `503`. The outbox then delivers to `blockchain-services` with retry and marks the item sent only after both the audit row and signed `SessionStarted` attestation are durable. This makes the observation independent of WebSocket closure and avoids database credentials in OpenResty.
+OpenResty never treats an access-phase WebSocket request as `SessionStarted`.
+Ops Worker polls Guacamole's `activeConnections`, matches an active temporary
+username to the encrypted auth-token record and verifies that exact token against
+Guacamole. Only this post-acceptance runtime fact enters the durable observation
+outbox. The outbox then delivers to `blockchain-services` with retry and marks an
+item sent only after both the audit row and signed `SessionStarted` attestation
+are durable. A rejected tunnel request, a failed Guacamole token or an unavailable
+remote desktop creates no economic evidence.
 
-FMU access records its equivalent observation through session-ticket use. The provider correlates either observation with `access_credential_audit`, creates an EIP-712 `SessionStarted` attestation and persists it locally. `SessionStarted` then uses the same durable institutional-wallet transaction dispatcher as check-in: nonce reservation, signing, broadcast and hash persistence are serialized briefly under the wallet row lock, while a separate monitor handles receipts and same-nonce gas replacements. It never blocks the observation worker waiting for mining.
+FMU ticket redemption only authenticates and resolves claims; it never records a
+session. The runner first obtains a real runtime acceptance signal: a local worker
+must accept the simulation, or the realtime/station component must return
+`session.created`. It then submits a separate authenticated observation whose
+gateway identity is derived from the observer JWT rather than request data. The
+provider correlates either Guacamole or FMU evidence with
+`access_credential_audit`, creates an EIP-712 `SessionStarted` attestation and
+persists it locally. `SessionStarted` and all other institutional-wallet senders
+reserve nonces through the same chain-scoped durable allocator. Receipt monitors
+handle mining and same-nonce replacements without blocking runtime startup.
 
 For Guacamole, OpenResty enforces JWT expiry every 10 seconds. At `exp`, it closes any active tunnel and revokes the Guacamole auth token even when no tunnel is open. JWT-derived security mappings remain until `exp + API_SESSION_TIMEOUT + 5 minutes`, longer than Guacamole can retain an inactive auth token. A reservation-scoped token without its mapping is rejected; retention supports cleanup and never extends browser or Guacamole authorization.
 
 Before OpenResty exposes a Guacamole token to the browser, Ops Worker encrypts it and inserts `guacamole_token_revocation_queue`; a failed durable insert therefore fails the login closed. Ops Worker also reconciles active connections using the exact encrypted token, retries revocation through the Guacamole API, and reports any terminal revocation failure through its degraded health response.
 
-In Lite mode, setup imports a trust bundle issued by Full. Session observations use a short-lived JWT signed with that Lite gateway's own secret and scoped only to `session-observation:submit`; the credential cannot authorize billing, wallet or other administrator routes. Removing the gateway from `SESSION_OBSERVER_CREDENTIALS_JSON` revokes future submissions.
+In Lite mode, setup imports a trust bundle issued by Full. Session observations and FMU ticket redemption use a short-lived JWT signed with that Lite gateway's own secret and scoped only to `session-observation:submit`; the credential cannot authorize billing, wallet or other administrator routes. Removing the gateway from `SESSION_OBSERVER_CREDENTIALS_JSON` revokes future submissions. The bundle also carries a distinct Guacamole provisioner credential, while the issuing script registers the Lite's exact origin and route in Full's `GUACAMOLE_PROVISIONER_ROUTES_JSON`.
 
-The provider provisioner route is still derived from `accessURI` when no explicit route is registered. Replacing that behavior with an explicit per-gateway registry and credential remains planned work; it is intentionally outside the current change set.
+An unmapped remote `accessURI` fails closed. Remote Guacamole provisioners are
+never derived from an untrusted origin and never share the Full gateway's local
+provisioner credential.
 
 ## Settlement and audit consequences
 
@@ -138,13 +156,19 @@ Access issuance is audited locally with the reservation key, lab, PUC hash, acce
 
 For the normal provider settlement path, the on-chain reservation must be `ACCESS_AUTHORIZED` and the corresponding `SessionStarted` attestation must have been recorded on chain. A terminal reservation cleanup state alone is not evidence of a provider-deliverable session.
 
-## Deliberately deferred hardening
+## Multiple sessions per reservation
 
-The current implementation intentionally leaves one item for later work:
+The current contract is `MULTI_SESSION` for one authorised reservation principal:
+reconnections and parallel runtime connections are permitted until reservation
+expiry. Credential regeneration affects future entry but does not pretend to
+terminate an already accepted Guacamole tunnel or FMU context. This does not
+weaken exclusive booking: a different reservation or principal remains barred.
+`SessionStarted` is unique per `reservationKey`, so reconnects cannot multiply
+settlement evidence.
 
-- Provisioner endpoint fallback may still derive an origin from `accessURI`. Production hardening should replace it with an explicit per-gateway origin and credential registry.
-
-The 27-second wait for `ACCESS_AUTHORIZED` is not considered deferred hardening: it is the chosen strong-consistency contract. The provider deliberately does not grant access based only on an accepted or broadcast check-in transaction.
+The 27-second wait for `ACCESS_AUTHORIZED` is the chosen strong-consistency
+contract. The provider deliberately does not grant access based only on an
+accepted or broadcast check-in transaction.
 
 ## Related implementation surfaces
 

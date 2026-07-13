@@ -2,7 +2,7 @@ import json
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -161,10 +161,12 @@ def _patch_realtime_manager(monkeypatch):
 
     monkeypatch.setattr(_realtime_manager, "verify_jwt_token", _fake_verify)
     monkeypatch.setattr(_realtime_manager, "redeem_session_ticket", _fake_redeem)
+    confirmation = AsyncMock(return_value=True)
+    monkeypatch.setattr(_realtime_manager, "confirm_session_started", confirmation, raising=False)
     monkeypatch.setattr(_realtime_manager, "resolve_fmu_path", lambda _name: Path("/tmp/test.fmu"))
     monkeypatch.setattr(_realtime_manager, "acquire_slot", lambda _lab_id: None)
     monkeypatch.setattr(_realtime_manager, "release_slot", lambda _lab_id: None)
-    yield
+    yield confirmation
     _realtime_manager._sessions.clear()
 
 
@@ -234,7 +236,14 @@ def test_ws_attach_and_terminate_idempotent():
         assert closed_2 == closed_1
 
 
-def test_ws_create_with_session_ticket_without_bearer():
+def test_ws_create_with_session_ticket_without_bearer(_patch_realtime_manager):
+    confirmation = _patch_realtime_manager
+
+    async def _assert_session_exists(**kwargs):
+        assert kwargs["session_id"] in _realtime_manager._sessions
+        return True
+
+    confirmation.side_effect = _assert_session_exists
     with client.websocket_connect("/api/v1/fmu/sessions") as ws:
         ws.send_text(json.dumps({
             "type": "session.create",
@@ -246,6 +255,10 @@ def test_ws_create_with_session_ticket_without_bearer():
         created = ws.receive_json()
         assert created["type"] == "session.created"
         assert created["sessionId"].startswith("sess_")
+
+    confirmation.assert_awaited_once()
+    assert confirmation.await_args.kwargs["session_ticket"] == "st_valid"
+    assert confirmation.await_args.kwargs["session_id"] == created["sessionId"]
 
 
 def test_ws_duplicate_ticket_session_create_reuses_local_cache_without_second_redeem(monkeypatch):

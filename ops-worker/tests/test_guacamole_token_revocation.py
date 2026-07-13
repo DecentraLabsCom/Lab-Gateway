@@ -115,3 +115,61 @@ def test_expired_token_is_revoked_after_restart_safe_lookup(monkeypatch):
             "SELECT status FROM guacamole_token_revocation_queue"
         )).scalar_one()
     assert status == "REVOKED"
+
+
+def test_reconciliation_emits_session_started_only_for_an_active_guacamole_connection(monkeypatch):
+    engine = create_revocation_engine()
+    monkeypatch.setattr(worker, "DB_ENGINE", engine)
+    monkeypatch.setattr(worker, "_FERNET", Fernet(Fernet.generate_key()))
+    assert worker.enqueue_guacamole_token_revocation(payload(1893456000))
+
+    class Response:
+        def __init__(self, status_code, body):
+            self.status_code = status_code
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    def get(url, params, timeout):
+        if url.endswith("/activeConnections"):
+            return Response(200, {
+                "connection-1": {"username": "dlabs-res-user"},
+            })
+        return Response(200, {"username": "dlabs-res-user"})
+
+    observed = []
+    monkeypatch.setattr(worker.requests, "get", get)
+    monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
+
+    worker._reconcile_guacamole_observations("admin-token", "mysql")
+
+    assert len(observed) == 1
+    assert observed[0]["reservationKey"] == "0xreservation"
+    assert observed[0]["accessType"] == "guacamole"
+    with engine.begin() as conn:
+        assert conn.execute(text(
+            "SELECT observed_at IS NOT NULL FROM guacamole_token_revocation_queue"
+        )).scalar_one() == 1
+
+
+def test_reconciliation_does_not_emit_evidence_for_a_rejected_or_inactive_tunnel(monkeypatch):
+    engine = create_revocation_engine()
+    monkeypatch.setattr(worker, "DB_ENGINE", engine)
+    monkeypatch.setattr(worker, "_FERNET", Fernet(Fernet.generate_key()))
+    assert worker.enqueue_guacamole_token_revocation(payload(1893456000))
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {}
+
+    observed = []
+    monkeypatch.setattr(worker.requests, "get", lambda *_, **__: Response())
+    monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
+
+    worker._reconcile_guacamole_observations("admin-token", "mysql")
+
+    assert observed == []

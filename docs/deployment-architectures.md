@@ -160,15 +160,16 @@ For physical Guacamole labs, `accessKey` must be `guac:id:<connection_id>`.
 When a reservation JWT is issued, `blockchain-services` chooses the provisioner route in this order:
 
 1. `GUACAMOLE_PROVISIONER_ROUTES_JSON` exact origin or host match.
-2. `GUACAMOLE_PROVISIONER_TOKEN`, deriving non-local URLs as `<accessURI-origin>/gateway-provisioner/guacamole`.
-3. Local default route: `http://ops-worker:8081/internal/guacamole`, only when
+2. Local default route: `http://ops-worker:8081/internal/guacamole`, only when
    `accessURI` has the backend gateway's own public origin (or no origin is
    available for a local administrative lookup).
 
 An unmapped remote origin fails closed. It is never provisioned through the
 backend's local `ops-worker` as a fallback.
 
-There is no `GUACAMOLE_PROVISIONER_DERIVE_FROM_ACCESS_URI` switch. Derivation is automatic only when an explicit shared `GUACAMOLE_PROVISIONER_TOKEN` is configured, and it is not used for the backend's own local gateway origin.
+There is no remote derivation fallback. `GUACAMOLE_PROVISIONER_TOKEN` protects
+the local default route; it does not authorize a URL inferred from a remote
+`accessURI`. Each Lite origin requires an explicit route and its own credential.
 
 ```mermaid
 flowchart TD
@@ -177,22 +178,18 @@ flowchart TD
     Exact -- "yes" --> RouteMap["Use mapped route"]
     Exact -- "no" --> Host{"ROUTES_JSON host match?"}
     Host -- "yes" --> RouteMap
-    Host -- "no" --> Shared{"Shared token configured and origin is non-local?"}
-    Shared -- "yes" --> Derived["Use accessURI origin + /gateway-provisioner/guacamole"]
-    Shared -- "no" --> IsLocal{"Backend's own origin?"}
+    Host -- "no" --> IsLocal{"Backend's own origin?"}
     IsLocal -- "yes" --> Local["Use local ops-worker route"]
     IsLocal -- "no" --> Reject["Reject unmapped remote origin"]
     RouteMap --> Provision["Provision dlabs-res-* user"]
-    Derived --> Provision
     Local --> Provision
 ```
 
 ## Configuration Notes
 
-- Root gateway `.env` does not need `GUACAMOLE_PROVISIONER_*` variables for normal Full or Lite gateway operation.
-- A Lite gateway's local provisioner is protected by that Lite gateway's `LAB_MANAGER_TOKEN`.
-- Use `GUACAMOLE_PROVISIONER_ROUTES_JSON` when several Lite gateways depend on one backend but have different `LAB_MANAGER_TOKEN` values.
-- Every remote `accessURI` must have either an exact route or an explicitly configured shared provisioner token.
+- Full setup configures its local provisioner token. A Full-issued Lite trust bundle carries a separate `GUACAMOLE_PROVISIONER_TOKEN` for that Lite.
+- Issuing a Lite trust bundle adds the Lite's exact origin, route and credential to Full's `GUACAMOLE_PROVISIONER_ROUTES_JSON`; restart `blockchain-services` after issuance.
+- Every remote `accessURI` must have an explicit route. There is no shared-token fallback.
 - Do not use the remote backend's Guacamole catalog for Lite labs. The catalog must come from the gateway that serves `accessURI`.
 - Physical Guacamole labs with unprefixed `accessKey` values are invalid.
 - Session timeout behavior is covered in [Guacamole Session Policy](guacamole-session-policy.md).

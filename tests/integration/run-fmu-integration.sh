@@ -241,10 +241,10 @@ fi
 REDEEM_REUSE_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/auth/fmu/session-ticket/redeem" \
   -H "Content-Type: application/json" \
   -d "{\"sessionTicket\":\"${SESSION_TICKET}\"}")
-if [ "$REDEEM_REUSE_STATUS" = "401" ]; then
-  log_pass "Session ticket redeem enforces one-time use"
+if [ "$REDEEM_REUSE_STATUS" = "200" ]; then
+  log_pass "Session ticket supports reservation-window reconnects"
 else
-  log_fail "Session ticket redeem should reject reused tickets, got: $REDEEM_REUSE_STATUS"
+  log_fail "Session ticket should remain reusable within its reservation window, got: $REDEEM_REUSE_STATUS"
 fi
 
 # =================================================================

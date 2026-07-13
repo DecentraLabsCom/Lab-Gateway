@@ -40,6 +40,7 @@ class StationRealtimeWsProxyManager:
         normalize_lab_id,
         coerce_epoch_seconds,
         redeem_session_ticket=None,
+        confirm_session_started=None,
         ws_cleanup_seconds: float = 15.0,
         internal_ws_token: str = "",
         ws_create_rate_limit_per_minute: int = 30,
@@ -52,6 +53,7 @@ class StationRealtimeWsProxyManager:
         self.normalize_lab_id = normalize_lab_id
         self.coerce_epoch_seconds = coerce_epoch_seconds
         self.redeem_session_ticket = redeem_session_ticket
+        self.confirm_session_started = confirm_session_started
         self.ws_cleanup_seconds = ws_cleanup_seconds
         self.internal_ws_token = internal_ws_token
         self.ws_create_rate_limit_per_minute = ws_create_rate_limit_per_minute
@@ -179,7 +181,7 @@ class StationRealtimeWsProxyManager:
         await websocket.accept()
         send_lock = asyncio.Lock()
         local_request_cache: dict[str, dict] = {}
-        pending_create_claims: dict[str, dict] = {}
+        pending_creates: dict[str, dict] = {}
         current_session_id: Optional[str] = None
         station_ws = None
         station_reader_task: Optional[asyncio.Task] = None
@@ -224,14 +226,46 @@ class StationRealtimeWsProxyManager:
                         )
 
                     request_id = str(payload.get("requestId") or "").strip()
-                    if request_id:
-                        local_request_cache[request_id] = payload
 
                     msg_type = str(payload.get("type") or "").strip()
                     if msg_type == "session.created":
                         session_id = str(payload.get("sessionId") or "").strip()
-                        session_claims = pending_create_claims.pop(request_id, claims or {})
+                        create_context = pending_creates.pop(request_id, {"claims": claims or {}})
+                        session_claims = create_context["claims"]
                         if session_id:
+                            session_ticket = str(create_context.get("session_ticket") or "").strip()
+                            if session_ticket:
+                                try:
+                                    if self.confirm_session_started is None:
+                                        raise HTTPException(status_code=500, detail="Session observation is not configured")
+                                    await self.confirm_session_started(
+                                        session_ticket=session_ticket,
+                                        claims=session_claims,
+                                        session_id=session_id,
+                                        reservation_key=create_context.get("reservation_key"),
+                                        request_id=request_id,
+                                    )
+                                except Exception as exc:
+                                    try:
+                                        await station_ws.send(json.dumps({
+                                            "type": "session.terminate",
+                                            "requestId": f"observation-failed-{request_id}",
+                                            "sessionId": session_id,
+                                        }))
+                                    except Exception:
+                                        pass
+                                    detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                                    payload = self.error_payload(
+                                        code="SESSION_OBSERVATION_FAILED",
+                                        message=str(detail),
+                                        request_id=request_id,
+                                        retryable=True,
+                                        session_id=session_id,
+                                    )
+                                    if request_id:
+                                        local_request_cache[request_id] = payload
+                                    await self._send_json(websocket, send_lock, payload)
+                                    continue
                             exp = self.coerce_epoch_seconds(payload.get("expiresAt"))
                             if exp is None:
                                 exp = self.coerce_epoch_seconds(session_claims.get("exp"))
@@ -258,6 +292,8 @@ class StationRealtimeWsProxyManager:
                             if current_session_id == session_id:
                                 current_session_id = None
 
+                    if request_id:
+                        local_request_cache[request_id] = payload
                     await self._send_json(websocket, send_lock, payload)
             except asyncio.CancelledError:
                 return
@@ -425,7 +461,11 @@ class StationRealtimeWsProxyManager:
                             requested_reservation_key=reservation_key,
                         )
                         forward_message.pop("sessionTicket", None)
-                        pending_create_claims[request_id] = create_claims
+                        pending_creates[request_id] = {
+                            "claims": create_claims,
+                            "session_ticket": session_ticket,
+                            "reservation_key": reservation_key,
+                        }
                         await station_ws.send(json.dumps(forward_message))
                         continue
                     except HTTPException as exc:
