@@ -494,6 +494,8 @@ if [ -z "$issuer_value" ]; then
     fi
     update_env_var "$ROOT_ENV_FILE" "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" "$access_code_redeemer_credentials_json"
     update_env_var "$ROOT_ENV_FILE" "ACCESS_AUDIT_URL" ""
+    update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_ISSUE_URL" "http://blockchain-services:8080/auth/fmu/session-ticket/issue"
+    update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_REDEEM_URL" "http://blockchain-services:8080/auth/fmu/session-ticket/redeem"
     echo "   * Configured a dedicated signed session-observer credential for this Full gateway."
 else
     echo "   * ISSUER set to: $issuer_value (Lite mode)."
@@ -537,10 +539,17 @@ else
     bundle_issuer="$(get_env_default "ISSUER" "$lite_trust_bundle")"
     bundle_redeemer="$(get_env_default "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$lite_trust_bundle")"
     bundle_audit_url="$(get_env_default "ACCESS_AUDIT_URL" "$lite_trust_bundle")"
+    bundle_server_name="$(get_env_default "SERVER_NAME" "$lite_trust_bundle")"
     bundle_gateway_id="$(get_env_default "SESSION_OBSERVER_GATEWAY_ID" "$lite_trust_bundle")"
     bundle_observer_secret="$(get_env_default "SESSION_OBSERVER_SIGNING_SECRET" "$lite_trust_bundle")"
+    bundle_fmu_gateway_id="$(get_env_default "FMU_GATEWAY_ID" "$lite_trust_bundle")"
+    bundle_fmu_audience="$(get_env_default "FMU_JWT_AUDIENCE" "$lite_trust_bundle")"
+    bundle_ticket_issue_url="$(get_env_default "AUTH_SESSION_TICKET_ISSUE_URL" "$lite_trust_bundle")"
+    bundle_ticket_redeem_url="$(get_env_default "AUTH_SESSION_TICKET_REDEEM_URL" "$lite_trust_bundle")"
     if [ -z "$bundle_issuer" ] || [ -z "$bundle_redeemer" ] || [ -z "$bundle_audit_url" ] \
-        || [ -z "$bundle_gateway_id" ] || [ -z "$bundle_observer_secret" ]; then
+        || [ -z "$bundle_server_name" ] || [ -z "$bundle_gateway_id" ] || [ -z "$bundle_observer_secret" ] \
+        || [ -z "$bundle_fmu_gateway_id" ] || [ -z "$bundle_fmu_audience" ] \
+        || [ -z "$bundle_ticket_issue_url" ] || [ -z "$bundle_ticket_redeem_url" ]; then
         echo "Trust bundle is incomplete or invalid." >&2
         exit 1
     fi
@@ -548,10 +557,20 @@ else
         echo "Trust bundle ISSUER does not match the configured Full issuer." >&2
         exit 1
     fi
+    expected_gateway_id="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]' | sed 's/\.$//')"
+    if [ "$bundle_server_name" != "$expected_gateway_id" ] \
+        || [ "$bundle_gateway_id" != "$expected_gateway_id" ] \
+        || [ "$bundle_fmu_gateway_id" != "$expected_gateway_id" ]; then
+        echo "Trust bundle gateway identity does not match SERVER_NAME ${expected_gateway_id}." >&2
+        exit 1
+    fi
     update_env_var "$ROOT_ENV_FILE" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$bundle_redeemer"
     update_env_var "$ROOT_ENV_FILE" "ACCESS_AUDIT_URL" "$bundle_audit_url"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_GATEWAY_ID" "$bundle_gateway_id"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_SIGNING_SECRET" "$bundle_observer_secret"
+    update_env_var "$ROOT_ENV_FILE" "FMU_GATEWAY_ID" "$bundle_fmu_gateway_id"
+    update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_ISSUE_URL" "$bundle_ticket_issue_url"
+    update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_REDEEM_URL" "$bundle_ticket_redeem_url"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_CREDENTIALS_JSON" "{}"
     echo "   * Imported redeem and least-privilege observation credentials for ${bundle_gateway_id}."
 fi
@@ -660,6 +679,19 @@ if [ "$enable_cf" = "y" ] || [ "$enable_cf" = "yes" ]; then
         update_env_var "$ROOT_ENV_FILE" "OPENRESTY_BIND_HTTP_PORT" "80"
     fi
 fi
+
+configured_https_port="$(get_env_default "HTTPS_PORT" "$ROOT_ENV_FILE")"
+gateway_public_origin="https://${domain}"
+if [ "${configured_https_port:-443}" != "443" ]; then
+    gateway_public_origin="${gateway_public_origin}:${configured_https_port}"
+fi
+expected_fmu_audience="${gateway_public_origin}/fmu"
+if [ -n "$issuer_value" ] && [ "${bundle_fmu_audience:-}" != "$expected_fmu_audience" ]; then
+    echo "Trust bundle FMU audience does not match this Lite gateway public URL (${expected_fmu_audience})." >&2
+    exit 1
+fi
+update_env_var "$ROOT_ENV_FILE" "FMU_JWT_AUDIENCE" "${gateway_public_origin}/fmu"
+echo "   * FMU JWT audience: ${expected_fmu_audience}"
 
 echo
 echo "Ops Worker configuration"

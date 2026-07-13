@@ -45,6 +45,14 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, 200, {"authorization": auth})
             return
 
+        if parsed.path == "/guacamole/websocket-tunnel":
+            self.send_response(101)
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", "smoke-accept")
+            self.end_headers()
+            return
+
         json_response(self, 404, {"error": "not found"})
 
     def do_POST(self):

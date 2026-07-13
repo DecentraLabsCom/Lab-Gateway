@@ -3,7 +3,7 @@ local ngx_factory = require "tests.helpers.ngx_stub"
 local handler = require "modules.header_filter_handler"
 
 runner.describe("Header filter clean redirects", function()
-    runner.it("enqueues JWT-backed Guacamole session observation when the websocket upgrade succeeds", function()
+    runner.it("does not perform websocket persistence in the header filter phase", function()
         local reported = false
         local ngx = ngx_factory.new({
             status = 101,
@@ -21,31 +21,8 @@ runner.describe("Header filter clean redirects", function()
             }
         })
 
-        runner.assert.truthy(reported)
-    end)
-
-    runner.it("refuses the websocket when its first observation is not durable", function()
-        local ngx = ngx_factory.new({
-            status = 101,
-            var = { uri = "/guacamole/websocket-tunnel", args = "token=guac-token" },
-            header = {
-                Upgrade = "websocket",
-                Connection = "upgrade",
-                ["Sec-WebSocket-Accept"] = "accept-value"
-            }
-        })
-
-        handler.run(ngx, {
-            access_audit_reporter = {
-                report_guacamole_session_observed = function()
-                    return false, "outbox unavailable"
-                end
-            }
-        })
-
-        runner.assert.equals(503, ngx.status)
-        runner.assert.equals(nil, ngx.header.Upgrade)
-        runner.assert.equals(nil, ngx.header["Sec-WebSocket-Accept"])
+        runner.assert.equals(false, reported)
+        runner.assert.equals(101, ngx.status)
     end)
 
     runner.it("rewrites relative redirects to the gateway origin", function()

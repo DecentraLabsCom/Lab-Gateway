@@ -16,8 +16,7 @@ openresty/tests/
 `- unit/
    |- access_handler_spec.lua
    |- access_handler_extended_spec.lua
-   |- body_filter_handler_spec.lua
-   |- body_filter_handler_extended_spec.lua
+   |- guacamole_token_handler_spec.lua
    |- header_filter_handler_spec.lua
    |- header_filter_handler_extended_spec.lua
    |- admin_access_spec.lua
@@ -56,7 +55,7 @@ luajit openresty/tests/run.lua
 
 - Access/session propagation (`access_handler`, `treasury_access`, `lab_manager_access`)
 - JWT validation and JWKS fetch (`jwt_handler`)
-- Header/body filters for Guacamole auth flow
+- Content-phase Guacamole token exchange and clean redirect filtering
 - Session cleanup and revocation (`log_handler`, `session_guard`)
 - Lite-mode JWT key synchronization from `ISSUER` origin (`run-jwt-key-sync-integration.*`)
 

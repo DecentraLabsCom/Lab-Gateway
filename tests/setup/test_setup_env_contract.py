@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SETUP_SH = ROOT / "setup.sh"
 SETUP_BAT = ROOT / "setup.bat"
+ISSUE_LITE_SH = ROOT / "scripts" / "issue-lite-trust-bundle.sh"
+ISSUE_LITE_PS1 = ROOT / "scripts" / "Issue-LiteTrustBundle.ps1"
 
 
 GATEWAY_MANAGED_BACKEND_KEYS = [
@@ -29,6 +31,8 @@ class SetupEnvContractTest(unittest.TestCase):
     def setUpClass(cls):
         cls.setup_sh = SETUP_SH.read_text(encoding="utf-8")
         cls.setup_bat = SETUP_BAT.read_text(encoding="utf-8")
+        cls.issue_lite_sh = ISSUE_LITE_SH.read_text(encoding="utf-8")
+        cls.issue_lite_ps1 = ISSUE_LITE_PS1.read_text(encoding="utf-8")
 
     def test_gateway_managed_backend_keys_are_removed_from_embedded_backend_env(self):
         for key in GATEWAY_MANAGED_BACKEND_KEYS:
@@ -143,6 +147,42 @@ class SetupEnvContractTest(unittest.TestCase):
         for snippet in expected_bat:
             with self.subTest(script="setup.bat", snippet=snippet):
                 self.assertIn(snippet, self.setup_bat)
+
+    def test_setup_derives_exact_fmu_audience_from_public_gateway_origin(self):
+        expected_shell = [
+            'update_env_var "$ROOT_ENV_FILE" "FMU_JWT_AUDIENCE" "${gateway_public_origin}/fmu"',
+            'gateway_public_origin="https://${domain}"',
+        ]
+        expected_bat = [
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_JWT_AUDIENCE" "!gateway_public_origin!/fmu"',
+            'set "gateway_public_origin=https://!domain!"',
+        ]
+        for snippet in expected_shell:
+            self.assertIn(snippet, self.setup_sh)
+        for snippet in expected_bat:
+            self.assertIn(snippet, self.setup_bat)
+
+    def test_lite_bundle_binds_technical_gateway_id_to_public_hostname(self):
+        self.assertIn("lite_public_origin", self.issue_lite_sh)
+        self.assertIn("read -r lite_public_origin full_origin gateway_id", self.issue_lite_sh)
+        self.assertIn('echo "SERVER_NAME=${gateway_id}"', self.issue_lite_sh)
+        self.assertNotIn("<gateway-id>", self.issue_lite_sh)
+
+        self.assertIn("LitePublicOrigin", self.issue_lite_ps1)
+        self.assertIn('"SERVER_NAME=$GatewayId"', self.issue_lite_ps1)
+        self.assertNotIn("[string]$GatewayId", self.issue_lite_ps1)
+
+    def test_lite_bundle_and_setup_wire_session_ticket_endpoints_to_full(self):
+        for script in (self.issue_lite_sh, self.issue_lite_ps1):
+            self.assertIn("AUTH_SESSION_TICKET_ISSUE_URL", script)
+            self.assertIn("AUTH_SESSION_TICKET_REDEEM_URL", script)
+
+        for script in (self.setup_sh, self.setup_bat):
+            self.assertIn("bundle_server_name", script)
+            self.assertIn("bundle_ticket_issue_url", script)
+            self.assertIn("bundle_ticket_redeem_url", script)
+            self.assertIn("AUTH_SESSION_TICKET_ISSUE_URL", script)
+            self.assertIn("AUTH_SESSION_TICKET_REDEEM_URL", script)
 
 
 if __name__ == "__main__":

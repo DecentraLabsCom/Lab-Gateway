@@ -10,6 +10,7 @@ local runner = require "tests.helpers.runner"
 local specs = {
     "tests.unit.access_handler_spec",
     "tests.unit.access_handler_extended_spec",
+    "tests.unit.guacamole_token_handler_spec",
     "tests.unit.header_filter_handler_spec",
     "tests.unit.header_filter_handler_extended_spec",
     "tests.unit.session_guard_spec",
@@ -18,8 +19,6 @@ local specs = {
     "tests.unit.fmu_access_handler_spec",
     "tests.unit.log_handler_spec",
     "tests.unit.log_handler_extended_spec",
-    "tests.unit.body_filter_handler_spec",
-    "tests.unit.body_filter_handler_extended_spec",
     "tests.unit.entrypoint_wrappers_spec",
     "tests.unit.init_spec",
     "tests.unit.gateway_health_spec",

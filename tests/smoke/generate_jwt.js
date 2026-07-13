@@ -9,6 +9,7 @@ const payload = {
   iss: "https://lab.test:18443/auth",
   aud: "https://lab.test:18443/guacamole",
   resourceType: "lab",
+  reservationKey: "0xsmoke-reservation",
   exp: 1893456000
 };
 

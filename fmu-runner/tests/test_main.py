@@ -18,6 +18,7 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
+from starlette.requests import Request
 from fmpy import read_model_description
 
 # Patch auth before importing main so the import doesn't fail
@@ -31,6 +32,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _build_proxy_model_description_xml,
         _issue_session_ticket,
         _redeem_session_ticket,
+        _record_browser_session_started,
         _validate_proxy_generation_supported,
     )
     from auth import verify_jwt as _original_verify_jwt
@@ -162,7 +164,12 @@ def test_issue_session_ticket_surfaces_json_error_message():
 
 def test_redeem_session_ticket_returns_claims_payload():
     fake_response = _FakeHttpxResponse(
-        json_data={"claims": {"sub": "test-user", "labId": "42"}},
+        json_data={
+            "claims": {"sub": "test-user", "labId": "42"},
+            "sessionObserved": True,
+            "auditRecorded": True,
+            "attestationRecorded": True,
+        },
     )
     fake_client = _FakeAsyncClient(fake_response)
 
@@ -188,6 +195,36 @@ def test_redeem_session_ticket_returns_claims_payload():
     assert isinstance(fake_client.calls[0]["json"]["observedAt"], int)
 
 
+def test_redeem_session_ticket_rejects_semantically_failed_observation():
+    fake_response = _FakeHttpxResponse(
+        json_data={
+            "claims": {"sub": "test-user", "labId": "42"},
+            "sessionObserved": False,
+            "auditRecorded": True,
+            "attestationRecorded": False,
+        },
+    )
+    fake_client = _FakeAsyncClient(fake_response)
+
+    with patch("main.httpx.AsyncClient", return_value=fake_client):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                _redeem_session_ticket(
+                    session_ticket="st_ticket_1",
+                    lab_id="42",
+                    reservation_key="RES-1",
+                )
+            )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == {
+        "code": "SESSION_OBSERVATION_FAILED",
+        "error": "Session observation was not durably recorded",
+        "auditRecorded": True,
+        "attestationRecorded": False,
+    }
+
+
 def test_redeem_session_ticket_preserves_json_error_payload():
     fake_response = _FakeHttpxResponse(
         status_code=400,
@@ -208,6 +245,31 @@ def test_redeem_session_ticket_preserves_json_error_payload():
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == {"code": "INVALID_TICKET", "error": "expired"}
+
+
+def test_browser_observation_retries_semantic_persistence_failure_before_caching():
+    request = Request({
+        "type": "http",
+        "headers": [(b"authorization", b"Bearer token-123")],
+    })
+    claims = {
+        "labId": "42",
+        "reservationKey": "0xretry-observation",
+        "pucHash": "puc-retry-user",
+    }
+    first_failure = HTTPException(
+        status_code=503,
+        detail={"code": "SESSION_OBSERVATION_FAILED", "error": "not persisted"},
+    )
+    issue = AsyncMock(return_value=("st_ticket_retry", int(time.time()) + 30))
+    redeem = AsyncMock(side_effect=[first_failure, claims])
+
+    with patch("main._issue_session_ticket", issue), \
+         patch("main._redeem_session_ticket", redeem), \
+         patch("main.asyncio.sleep", AsyncMock()):
+        assert asyncio.run(_record_browser_session_started(request, claims, "sim-retry")) is True
+
+    assert redeem.await_count == 2
 
 
 # ─── /api/v1/simulations/describe ───────────────────────────────────

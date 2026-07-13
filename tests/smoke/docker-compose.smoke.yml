@@ -17,6 +17,7 @@ services:
       dockerfile: Dockerfile
     environment:
       AUTH_ACCESS_CODE_REDEEMER_TOKEN: smoke-redeemer-token
+      SESSION_OBSERVATION_INGEST_TOKEN: smoke-observation-token
       GUAC_ADMIN_USER: admin
       GUAC_ADMIN_PASS: secret
       SERVER_NAME: lab.test

@@ -87,6 +87,9 @@ FMU_BACKEND_MODE = os.getenv("FMU_BACKEND_MODE", "local").strip().lower()
 FMU_STATION_BASE_URL = os.getenv("FMU_STATION_BASE_URL", "").strip()
 FMU_STATION_INTERNAL_TOKEN = os.getenv("FMU_STATION_INTERNAL_TOKEN", "").strip()
 FMU_STATION_REQUEST_TIMEOUT = float(os.getenv("FMU_STATION_REQUEST_TIMEOUT", "10"))
+FMU_SESSION_OBSERVATION_MAX_ATTEMPTS = max(
+    1, int(os.getenv("FMU_SESSION_OBSERVATION_MAX_ATTEMPTS", "3"))
+)
 PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE = int(os.getenv("PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE", "20"))
 WS_CREATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("WS_CREATE_RATE_LIMIT_PER_MINUTE", "30"))
 
@@ -823,6 +826,13 @@ async def _stream_station_simulation(request: Request, req: SimulationRequest, c
     )
     media_type = response.headers.get("content-type") or "application/x-ndjson"
 
+    try:
+        await _record_browser_session_started(request, claims, uuid4().hex)
+    except Exception:
+        await response.aclose()
+        await client.aclose()
+        raise
+
     async def _forward_stream():
         try:
             async for chunk in response.aiter_bytes():
@@ -1153,6 +1163,18 @@ async def _redeem_session_ticket(
     claims = payload.get("claims") if isinstance(payload, dict) else None
     if not isinstance(claims, dict):
         raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "error": "Invalid ticket redeem response"})
+    audit_recorded = payload.get("auditRecorded") is True
+    attestation_recorded = payload.get("attestationRecorded") is True
+    if payload.get("sessionObserved") is not True or not audit_recorded or not attestation_recorded:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "SESSION_OBSERVATION_FAILED",
+                "error": "Session observation was not durably recorded",
+                "auditRecorded": audit_recorded,
+                "attestationRecorded": attestation_recorded,
+            },
+        )
     logger.info(
         "Redeemed FMU session ticket request_id=%s session_id=%s lab_id=%s reservation_key=%s ticket_id=%s observed=%s",
         request_id or "-",
@@ -1166,7 +1188,7 @@ async def _redeem_session_ticket(
 
 
 async def _record_browser_session_started(request: Request, claims: dict, sim_id: str) -> bool:
-    """Durably observe the first successful browser run for one credential."""
+    """Durably observe the first accepted browser execution for one credential."""
     puc_hash = str(claims.get("pucHash") or "").strip().lower()
     reservation_key = str(claims.get("reservationKey") or "").strip().lower()
     if not puc_hash or not reservation_key:
@@ -1194,13 +1216,24 @@ async def _record_browser_session_started(request: Request, claims: dict, sim_id
         reservation_key=reservation_key,
         request_id=f"browser_{sim_id[:12]}",
     )
-    await _redeem_session_ticket(
-        session_ticket=ticket,
-        lab_id=lab_id,
-        reservation_key=reservation_key,
-        session_id=session_id,
-        request_id=f"browser_{sim_id[:12]}",
-    )
+    for attempt in range(FMU_SESSION_OBSERVATION_MAX_ATTEMPTS):
+        try:
+            await _redeem_session_ticket(
+                session_ticket=ticket,
+                lab_id=lab_id,
+                reservation_key=reservation_key,
+                session_id=session_id,
+                request_id=f"browser_{sim_id[:12]}",
+            )
+            break
+        except HTTPException as exc:
+            if exc.status_code < 500 or attempt + 1 >= FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:
+                raise
+            await asyncio.sleep(0.2 * (2 ** attempt))
+        except httpx.HTTPError:
+            if attempt + 1 >= FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:
+                raise
+            await asyncio.sleep(0.2 * (2 ** attempt))
     with _browser_observation_lock:
         _browser_observed_credentials.add(observation_key)
     return True
@@ -1815,6 +1848,9 @@ async def run_simulation(
     future: Optional[Future] = None
     cleanup_deferred = False
     try:
+        # Persist the billable observation before accepting local execution.
+        # A failed observation therefore cannot leave an untracked simulation.
+        await _record_browser_session_started(request, claims, sim_id)
         future = _executor.submit(
             _run_simulation,
             str(fmu_path),
@@ -1846,8 +1882,6 @@ async def run_simulation(
 
     elapsed = round(time.monotonic() - t0, 3)
     logger.info("Simulation completed for lab %s in %.3fs", lab_id, elapsed)
-
-    await _record_browser_session_started(request, claims, sim_id)
 
     # Persist to history DB (#29)
     await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
@@ -1941,7 +1975,6 @@ async def stream_simulation(
     _enforce_fmu_claim(claims)
     if _fmu_backend.mode == "station":
         response = await _stream_station_simulation(request, req, claims)
-        await _record_browser_session_started(request, claims, uuid4().hex)
         return response
     _ensure_local_execution_backend("Simulation stream endpoint")
 
@@ -1985,21 +2018,22 @@ async def stream_simulation(
         except Exception:
             fmi_type = "CoSimulation"
 
-    _acquire_slot(lab_id)
     sim_id = uuid4().hex
 
     async def _event_stream():
         t0 = time.monotonic()
         cleanup_deferred = False
-        yield json.dumps({"type": "started", "simId": sim_id}) + "\n"
-
-        future = _executor.submit(
-            _run_simulation, str(fmu_path), start_time, stop_time, step_size,
-            req.parameters, timeout, fmi_type, solver_name,
-        )
-        _track_running_future(sim_id, future, lab_id, claims)
-
+        _acquire_slot(lab_id)
         try:
+            # Persist before the worker is started or a success event is exposed.
+            await _record_browser_session_started(request, claims, sim_id)
+            future = _executor.submit(
+                _run_simulation, str(fmu_path), start_time, stop_time, step_size,
+                req.parameters, timeout, fmi_type, solver_name,
+            )
+            _track_running_future(sim_id, future, lab_id, claims)
+            yield json.dumps({"type": "started", "simId": sim_id}) + "\n"
+
             # Heartbeat while simulation runs
             while not future.done():
                 elapsed = round(time.monotonic() - t0, 1)
@@ -2029,7 +2063,6 @@ async def stream_simulation(
                 yield json.dumps(chunk) + "\n"
 
             elapsed = round(time.monotonic() - t0, 3)
-            await _record_browser_session_started(request, claims, sim_id)
             yield json.dumps({
                 "type": "completed",
                 "simId": sim_id,

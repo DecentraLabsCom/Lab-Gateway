@@ -66,6 +66,20 @@ runner.describe("Access audit reporter", function()
         runner.assert.equals(payloads[1].dedupKey, payloads[2].dedupKey)
     end)
 
+    runner.it("computes SHA-256 with the installed OpenSSL module when ngx has no helper", function()
+        local payload
+        local persisted = reporter.report_guacamole_session_observed(new_ngx(), {
+            deliver = function(value)
+                payload = value
+                return true
+            end,
+        })
+
+        runner.assert.truthy(persisted)
+        runner.assert.equals(64, #payload.dedupKey)
+        runner.assert.truthy(payload.dedupKey:match("^[0-9a-f]+$"))
+    end)
+
     runner.it("skips when reservation metadata is missing", function()
         local payloads = {}
         local ngx = new_ngx({ cache = {} })

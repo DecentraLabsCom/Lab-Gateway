@@ -130,9 +130,14 @@ local function blockchain_reachable(check)
         "access_deliveries_stuck",
         "session_started_unknown"
     }
+    local queue_health_errors = body.queue_health_errors
+    if queue_health_errors ~= nil then
+        if type(queue_health_errors) ~= "table" or next(queue_health_errors) ~= nil then
+            return false
+        end
+    end
     for _, key in ipairs(operational_count_keys) do
-        local count = body[key]
-        if count ~= nil and tonumber(count) ~= 0 then
+        if tonumber(body[key]) ~= 0 then
             return false
         end
     end

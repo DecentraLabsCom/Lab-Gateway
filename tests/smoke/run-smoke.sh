@@ -108,6 +108,35 @@ else
 fi
 
 # =================================================================
+# Test 3b: Guacamole token durability runs in a cosocket-compatible phase
+# =================================================================
+echo "Test 3b: Guacamole token durability"
+GUAC_TOKEN_RESPONSE=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -b "$COOKIE_FILE" \
+  -X POST -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "username=SmokeUser&password=unused" \
+  https://lab.test:${PORT}/guacamole/api/tokens)
+if echo "$GUAC_TOKEN_RESPONSE" | grep -Eq '"authToken"[[:space:]]*:[[:space:]]*"admin-token"'; then
+  log_pass "Guacamole token is returned after durable revocation registration"
+else
+  log_fail "Guacamole token was not secured in a compatible phase: $GUAC_TOKEN_RESPONSE"
+fi
+
+# =================================================================
+# Test 3c: reservation WebSocket observation runs before proxy upgrade
+# =================================================================
+echo "Test 3c: Reservation WebSocket observation"
+WEBSOCKET_STATUS=$(curl -sk --max-time 2 --resolve lab.test:${PORT}:127.0.0.1 \
+  -b "$COOKIE_FILE" -o /dev/null -w "%{http_code}" \
+  -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Key: c21va2Uta2V5" -H "Sec-WebSocket-Version: 13" \
+  "https://lab.test:${PORT}/guacamole/websocket-tunnel?token=admin-token" || true)
+if [ "$WEBSOCKET_STATUS" = "101" ]; then
+  log_pass "Reservation WebSocket is observed durably before upgrade"
+else
+  log_fail "Reservation WebSocket upgrade failed (status: $WEBSOCKET_STATUS)"
+fi
+
+# =================================================================
 # Test 4: Ops health works without token
 # =================================================================
 echo "Test 4: Ops health without token"

@@ -8,7 +8,7 @@ runner.describe("Guacamole token revocation reporter", function()
         local payload = { authToken = "secret", expiresAt = 500 }
         local calls = 0
 
-        local registered = reporter.schedule(ngx, payload, {
+        local registered = reporter.register(ngx, payload, {
             deliver = function(delivered)
                 runner.assert.equals(payload, delivered)
                 calls = calls + 1
@@ -24,7 +24,7 @@ runner.describe("Guacamole token revocation reporter", function()
 
     runner.it("fails closed immediately when durable registration is unavailable", function()
         local ngx = ngx_factory.new()
-        local registered = reporter.schedule(ngx, { authToken = "secret" }, {
+        local registered = reporter.register(ngx, { authToken = "secret" }, {
             deliver = function()
                 return false, "offline"
             end,

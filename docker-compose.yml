@@ -40,8 +40,8 @@ services:
       mysql:
         condition: service_healthy
     healthcheck:
-      # Accepts 200 (UP) or 503 (DEGRADED when wallet not yet configured)
-      test: ["CMD", "sh", "-c", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health) && ([ $$code -eq 200 ] || [ $$code -eq 503 ])"]
+      # Probe Spring readiness; /health remains the detailed operational status consumed by the Gateway.
+      test: ["CMD", "sh", "-c", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/actuator/health/readiness) && [ $$code -eq 200 ]"]
       timeout: 10s
       retries: 5
       interval: 30s
@@ -498,6 +498,7 @@ services:
       - FMU_STATION_BASE_URL=${FMU_STATION_BASE_URL:-}
       - FMU_STATION_INTERNAL_TOKEN=${FMU_STATION_INTERNAL_TOKEN:-}
       - FMU_STATION_REQUEST_TIMEOUT=${FMU_STATION_REQUEST_TIMEOUT:-10}
+      - FMU_SESSION_OBSERVATION_MAX_ATTEMPTS=${FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:-3}
       - HISTORY_DB_PATH=/app/data/history.db
       - ISSUER=${ISSUER:-}
       - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}

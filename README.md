@@ -361,7 +361,7 @@ environment. All authentication endpoints live under the fixed `/auth` base path
 - **Full mode**: leave `ISSUER` empty.
   This gateway exposes its own auth endpoints and validates its own locally generated JWT signing keys.
 - **Lite mode**: set `ISSUER=https://<full-gateway-or-external-issuer>/auth`.
-- Before running Lite setup, issue a trust bundle on Full with `scripts/issue-lite-trust-bundle.sh <gateway-id> <https://full-origin>` or `scripts\Issue-LiteTrustBundle.ps1`. The setup assistant imports the Full access-code redeemer, audit URL and a revocable per-gateway session-observer signing credential. Lite never receives `ADMIN_ACCESS_TOKEN`.
+- Before running Lite setup, issue a trust bundle on Full with `scripts/issue-lite-trust-bundle.sh <https://lite-public-origin> <https://full-origin>` or `scripts\Issue-LiteTrustBundle.ps1 -LitePublicOrigin <https://lite-public-origin> -FullPublicOrigin <https://full-origin>`. The gateway identity is derived from the Lite hostname; it is not free-form. The setup assistant imports the Full access-code redeemer, audit URL, FMU audience/ticket endpoints, and a revocable per-gateway session-observer signing credential. Lite never receives `ADMIN_ACCESS_TOKEN`.
   This gateway no longer acts as the JWT issuer. Instead, it trusts JWTs issued elsewhere and synchronizes the remote public key automatically.
 
 For Full-only, Full + Lite, and standalone `blockchain-services` + Lite topologies, see [Deployment Architectures](docs/deployment-architectures.md).

@@ -38,9 +38,9 @@ local function deliver(payload, deps)
 end
 
 -- The Ops endpoint persists the token encrypted before returning 202. Keeping
--- this operation synchronous lets the response filter withhold the Guacamole
+-- this operation synchronous lets the content handler withhold the Guacamole
 -- token unless its future revocation is durably registered.
-function _M.schedule(ngx_ctx, payload, deps)
+function _M.register(ngx_ctx, payload, deps)
     local ngx = ngx_ctx or ngx
     local delivered, err = deliver(payload, deps)
     if delivered then

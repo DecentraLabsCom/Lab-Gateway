@@ -445,6 +445,8 @@ if "!issuer_value!"=="" (
     if "!access_code_redeemer_credentials_json!"=="{}" set "access_code_redeemer_credentials_json={^"!session_observer_gateway_id!^":^"!access_code_redeemer_token!^"}"
     call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" "!access_code_redeemer_credentials_json!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_AUDIT_URL" ""
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_ISSUE_URL" "http://blockchain-services:8080/auth/fmu/session-ticket/issue"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_REDEEM_URL" "http://blockchain-services:8080/auth/fmu/session-ticket/redeem"
     echo    * Configured a dedicated signed session-observer credential for this Full gateway.
 ) else (
     echo    * ISSUER set to: !issuer_value! ^(Lite mode^).
@@ -490,21 +492,46 @@ if "!issuer_value!"=="" (
     call :ReadEnvValue "!lite_trust_bundle!" "ISSUER" bundle_issuer
     call :ReadEnvValue "!lite_trust_bundle!" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" bundle_redeemer
     call :ReadEnvValue "!lite_trust_bundle!" "ACCESS_AUDIT_URL" bundle_audit_url
+    call :ReadEnvValue "!lite_trust_bundle!" "SERVER_NAME" bundle_server_name
     call :ReadEnvValue "!lite_trust_bundle!" "SESSION_OBSERVER_GATEWAY_ID" bundle_gateway_id
     call :ReadEnvValue "!lite_trust_bundle!" "SESSION_OBSERVER_SIGNING_SECRET" bundle_observer_secret
+    call :ReadEnvValue "!lite_trust_bundle!" "FMU_GATEWAY_ID" bundle_fmu_gateway_id
+    call :ReadEnvValue "!lite_trust_bundle!" "FMU_JWT_AUDIENCE" bundle_fmu_audience
+    call :ReadEnvValue "!lite_trust_bundle!" "AUTH_SESSION_TICKET_ISSUE_URL" bundle_ticket_issue_url
+    call :ReadEnvValue "!lite_trust_bundle!" "AUTH_SESSION_TICKET_REDEEM_URL" bundle_ticket_redeem_url
     if not defined bundle_issuer exit /b 1
     if not defined bundle_redeemer exit /b 1
     if not defined bundle_audit_url exit /b 1
+    if not defined bundle_server_name exit /b 1
     if not defined bundle_gateway_id exit /b 1
     if not defined bundle_observer_secret exit /b 1
+    if not defined bundle_fmu_gateway_id exit /b 1
+    if not defined bundle_fmu_audience exit /b 1
+    if not defined bundle_ticket_issue_url exit /b 1
+    if not defined bundle_ticket_redeem_url exit /b 1
     if /i not "!bundle_issuer!"=="!issuer_value!" (
         echo Trust bundle ISSUER does not match the configured Full issuer.
+        exit /b 1
+    )
+    if /i not "!bundle_server_name!"=="!domain!" (
+        echo Trust bundle SERVER_NAME does not match this Lite gateway.
+        exit /b 1
+    )
+    if /i not "!bundle_gateway_id!"=="!domain!" (
+        echo Trust bundle gateway ID does not match this Lite gateway.
+        exit /b 1
+    )
+    if /i not "!bundle_fmu_gateway_id!"=="!domain!" (
+        echo Trust bundle FMU gateway ID does not match this Lite gateway.
         exit /b 1
     )
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "!bundle_redeemer!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_AUDIT_URL" "!bundle_audit_url!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" "!bundle_gateway_id!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" "!bundle_observer_secret!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_GATEWAY_ID" "!bundle_fmu_gateway_id!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_ISSUE_URL" "!bundle_ticket_issue_url!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_REDEEM_URL" "!bundle_ticket_redeem_url!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" "{}"
     echo    * Imported redeem and least-privilege observation credentials for !bundle_gateway_id!.
 )
@@ -626,6 +653,15 @@ if "!cf_enabled!"=="1" (
         set "http_port=80"
     )
 )
+set "gateway_public_origin=https://!domain!"
+if not "!https_port!"=="443" set "gateway_public_origin=!gateway_public_origin!:!https_port!"
+set "expected_fmu_audience=!gateway_public_origin!/fmu"
+if not "!issuer_value!"=="" if /i not "!bundle_fmu_audience!"=="!expected_fmu_audience!" (
+    echo Trust bundle FMU audience does not match this Lite gateway public URL ^(!expected_fmu_audience!^).
+    exit /b 1
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_JWT_AUDIENCE" "!gateway_public_origin!/fmu"
+echo    * FMU JWT audience: !expected_fmu_audience!
 if "!cf_enabled!"=="1" (
     if not "!cf_token!"=="" (
         set "cf_profile=cloudflare-token"

@@ -33,10 +33,30 @@ local function sha256_hex(ngx, value, deps)
     if deps and deps.sha256_hex then
         return deps.sha256_hex(value)
     end
-    if not ngx.sha256_bin then
+    if ngx.sha256_bin then
+        return to_hex(ngx.sha256_bin(value))
+    end
+
+    local loaded, digest = pcall(require, "resty.openssl.digest")
+    if not loaded then
         return nil
     end
-    return to_hex(ngx.sha256_bin(value))
+    local instance, new_err = digest.new("sha256")
+    if not instance then
+        ngx.log(ngx.WARN, "Access audit - cannot initialize SHA-256: " .. tostring(new_err))
+        return nil
+    end
+    local updated, update_err = instance:update(value)
+    if not updated then
+        ngx.log(ngx.WARN, "Access audit - cannot hash session token: " .. tostring(update_err))
+        return nil
+    end
+    local binary, final_err = instance:final()
+    if not binary then
+        ngx.log(ngx.WARN, "Access audit - cannot finalize session hash: " .. tostring(final_err))
+        return nil
+    end
+    return to_hex(binary)
 end
 
 local function deliver_observation(payload, deps)

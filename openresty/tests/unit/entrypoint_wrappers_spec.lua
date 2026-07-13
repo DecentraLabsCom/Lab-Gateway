@@ -80,24 +80,35 @@ runner.describe("OpenResty entrypoint wrappers", function()
         runner.assert.equals(ngx, captured.ngx)
     end)
 
-    runner.it("forwards body chunks and EOF flag to modules.body_filter_handler", function()
+    runner.it("secures Guacamole tokens in the content phase", function()
         local captured = {}
-        local ngx = ngx_factory.new()
-        ngx.arg = { "{\"type\":\"token\"}", true }
+        local upstream = {
+            status = 200,
+            body = "{\"type\":\"token\"}",
+            header = { ["Content-Type"] = "application/json" },
+        }
+        local ngx = ngx_factory.new({
+            method = "POST",
+            location_capture = function(uri)
+                captured.uri = uri
+                return upstream
+            end,
+        })
 
-        with_stubbed_module("modules.body_filter_handler", {
-            run = function(passed_ngx, chunk, eof)
+        with_stubbed_module("modules.guacamole_token_handler", {
+            handle_response = function(passed_ngx, response)
                 captured.ngx = passed_ngx
-                captured.chunk = chunk
-                captured.eof = eof
+                captured.response = response
+                return response
             end
         }, function()
-            run_entrypoint("body_filter.lua", ngx)
+            run_entrypoint("guacamole_token_exchange.lua", ngx)
         end)
 
         runner.assert.equals(ngx, captured.ngx)
-        runner.assert.equals("{\"type\":\"token\"}", captured.chunk)
-        runner.assert.equals(true, captured.eof)
+        runner.assert.equals("/__guacamole_tokens", captured.uri)
+        runner.assert.equals(upstream, captured.response)
+        runner.assert.equals("{\"type\":\"token\"}", ngx._print_output[1])
     end)
 
     runner.it("delegates header filtering to modules.header_filter_handler", function()

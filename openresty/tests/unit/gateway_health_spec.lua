@@ -357,6 +357,10 @@ runner.describe("OpenResty gateway_health.lua", function()
                 event_listener_enabled = true,
                 saml_validation_ready = true,
                 jwt_validation = "ready",
+                nonce_backlog = 0,
+                access_deliveries_stuck = 0,
+                session_started_unknown = 0,
+                queue_health_errors = {},
                 version = "1.2.3"
             }
         }
@@ -445,6 +449,27 @@ runner.describe("OpenResty gateway_health.lua", function()
                 nonce_backlog = 1,
                 access_deliveries_stuck = 0,
                 session_started_unknown = 0,
+                version = "1.2.3"
+            }
+        }
+
+        local result = run_gateway_health(opts)._body
+
+        runner.assert.equals("PARTIAL", result.status)
+        runner.assert.equals(false, result.services.blockchain.ok)
+    end)
+
+    runner.it("does not hide a blockchain durable queue query error behind DEGRADED reachability", function()
+        local opts = healthy_gateway_health_opts()
+        opts.captures["/__health_blockchain"] = {
+            status = 503,
+            body = {
+                status = "DEGRADED",
+                nonce_backlog = 0,
+                access_deliveries_stuck = 0,
+                queue_health_errors = {
+                    session_started_unknown = "MIGRATION_MISSING"
+                },
                 version = "1.2.3"
             }
         }

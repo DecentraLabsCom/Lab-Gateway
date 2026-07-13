@@ -66,6 +66,7 @@ local function new(opts)
         HTTP_UNAUTHORIZED = 401,
         HTTP_SERVICE_UNAVAILABLE = 503,
         HTTP_TOO_MANY_REQUESTS = 429,
+        HTTP_POST = 8,
         status = opts.status or nil,
         header = opts.header or {},
         var = opts.var or {},
@@ -76,6 +77,7 @@ local function new(opts)
             demo_sessions = opts.demo_sessions_dict or new_shared_dict(opts.demo_sessions or {})
         },
         req = {},
+        location = {},
         ctx = opts.ctx or {},
         timer = {}
     }
@@ -102,6 +104,21 @@ local function new(opts)
 
     ngx_stub.req.headers = req_headers
 
+    function ngx_stub.req.get_method()
+        return opts.method or "GET"
+    end
+
+    function ngx_stub.req.read_body()
+        ngx_stub._body_read = true
+    end
+
+    function ngx_stub.location.capture(uri, capture_opts)
+        if opts.location_capture then
+            return opts.location_capture(uri, capture_opts)
+        end
+        return nil
+    end
+
     function ngx_stub.log(_, level, message)
         logs[#logs + 1] = { level = level, message = tostring(message) }
     end
@@ -125,6 +142,12 @@ local function new(opts)
         say_output[#say_output + 1] = tostring(msg)
     end
     ngx_stub._say_output = say_output
+
+    local print_output = {}
+    function ngx_stub.print(msg)
+        print_output[#print_output + 1] = tostring(msg)
+    end
+    ngx_stub._print_output = print_output
 
     function ngx_stub.exit(code)
         ngx_stub._exit_code = code
