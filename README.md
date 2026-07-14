@@ -36,6 +36,9 @@ treat the embedded service as the Lite control plane.
 See [Deployment Architectures](docs/deployment-architectures.md) for the
 composite topology, trust-bundle, provisioner-routing and Station rules.
 
+The feature guides for the two digital-twin layers are [FMI/FMU Support](docs/fmi-fmu-support.md)
+and [AAS Support](docs/aas-support.md). They describe provider setup and user-facing workflows separately.
+
 ## 🏗️ Architecture
 
 ```mermaid

@@ -34,7 +34,10 @@ Start with [DecentraLabs Gateway](README.md) and [Deployment Architectures](docs
 - [Federación eduGAIN (ES)](docs/edugain/edugain-federacion.md)
 - [Ops Worker](ops-worker/README.md)
 
-## FMU and native proxy
+## Digital twins: FMI/FMU and AAS
+
+- [FMI/FMU support guide](docs/fmi-fmu-support.md)
+- [AAS support guide](docs/aas-support.md)
 
 - [FMU Runner](fmu-runner/README.md)
 - [FMU data layout](fmu-data/README.md)
