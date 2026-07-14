@@ -1,6 +1,6 @@
 # Documentation index
 
-Start with [DecentraLabs Gateway](README.md) and [Deployment Architectures](docs/deployment-architectures.md). The architecture guide is the reference for Full, Lite, Full + N Lite and standalone `blockchain-services` + N Lite deployments.
+Start with [DecentraLabs Gateway](README.md) and [Deployment Architectures](docs/deployment-architectures.md). The architecture guide is the reference for Full, Lite, Full + Lite and standalone `blockchain-services` + Lite deployments.
 
 ## Access and architecture
 
@@ -46,7 +46,3 @@ Start with [DecentraLabs Gateway](README.md) and [Deployment Architectures](docs
 
 - [OpenResty Lua unit tests](openresty/tests/README.md)
 - [Integration tests](tests/integration/README.md)
-
-English and Spanish guides should describe the same deployment contract. When
-they diverge, verify `docker-compose.yml`, `.env.example`, setup scripts and
-the executable service configuration before editing the prose.

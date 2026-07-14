@@ -1009,8 +1009,6 @@
             { trait_type: 'keywords', value: keywords },
             ...(bookingMode === 'slot' ? [{ trait_type: 'timeSlots', value: timeSlots }] : []),
             { trait_type: 'pricing', value: pricing },
-            { trait_type: 'pricingUnit', value: priceUnit },
-            { trait_type: 'pricingDisplayAmount', value: $('labPrice').value.trim() },
             { trait_type: 'bookingMode', value: bookingMode },
             ...(allowedDurationRange ? [{ trait_type: 'allowedDurationRange', value: allowedDurationRange }] : []),
             { trait_type: 'allowedDurations', value: allowedDurations },
@@ -1138,9 +1136,20 @@
         const result = {};
         if (terms.url) result.url = terms.url;
         if (terms.version) result.version = terms.version;
-        if (terms.effectiveDate) result.effectiveDate = terms.effectiveDate;
+        const effectiveDate = normalizeTermsEffectiveDate(terms.effectiveDate);
+        if (effectiveDate !== null) result.effectiveDate = effectiveDate;
         if (terms.sha256) result.sha256 = terms.sha256.toLowerCase();
         return result;
+    }
+
+    function normalizeTermsEffectiveDate(value) {
+        const text = String(value || '').trim();
+        if (!text) return null;
+        if (/^\d+$/.test(text)) {
+            const epoch = Number(text);
+            return Number.isSafeInteger(epoch) && epoch > 0 ? epoch : null;
+        }
+        return dateInputToUnix(text);
     }
 
     function ensureContentId() {
