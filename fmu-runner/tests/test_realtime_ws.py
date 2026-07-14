@@ -289,6 +289,32 @@ def test_ws_bearer_create_issues_ticket_and_confirms_before_session_created(_pat
     assert confirmation.await_args.kwargs["session_id"] == created["sessionId"]
 
 
+def test_ws_bearer_create_reports_ticket_issuance_failures_without_creating_session(_patch_realtime_manager, monkeypatch):
+    confirmation = _patch_realtime_manager
+    issue_ticket = AsyncMock(side_effect=[
+        HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "reservation denied"}),
+        RuntimeError("backend unavailable"),
+    ])
+    monkeypatch.setattr(_realtime_manager, "issue_session_ticket", issue_ticket, raising=False)
+
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        for request_id, expected_code in (("req-ticket-forbidden", "FORBIDDEN"), ("req-ticket-error", "INTERNAL_ERROR")):
+            ws.send_text(json.dumps({
+                "type": "session.create",
+                "requestId": request_id,
+                "labId": "1",
+                "reservationKey": "res-1",
+            }))
+            payload = ws.receive_json()
+            assert payload["type"] == "error"
+            assert payload["code"] == expected_code
+            assert payload["retryable"] is (expected_code == "INTERNAL_ERROR")
+
+    assert issue_ticket.await_count == 2
+    confirmation.assert_not_awaited()
+    assert _realtime_manager._sessions == {}
+
+
 def test_ws_duplicate_ticket_session_create_reuses_local_cache_without_second_redeem(monkeypatch):
     redeem_calls = []
 
