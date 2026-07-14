@@ -87,16 +87,20 @@ El script te guiará automáticamente por los siguientes pasos:
 docker compose ps
 ```
 
-Todos los contenedores deben mostrar `Up`. Comprueba el endpoint de salud del gateway:
+Los contenedores principales deben mostrar `Up`; perfiles opcionales como
+`fmu-runner`, `aas`, `certbot` o Cloudflare pueden no estar activos. Comprueba
+el endpoint de salud del gateway:
 
 ```bash
 curl -k https://localhost/health
 ```
 
-Respuesta esperada:
+La respuesta es el documento detallado de salud de `blockchain-services`. Un
+stack sano devuelve `status: "UP"`; `DEGRADED` indica que una cola, la base de
+datos o una dependencia necesita atención aunque el endpoint responda.
 
 ```json
-{"status":"ok"}
+{"status":"UP","service":"blockchain-services"}
 ```
 
 ## Paso 6 - Configurar la cartera institucional

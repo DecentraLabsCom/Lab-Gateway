@@ -1,195 +1,223 @@
-# Deployment Architectures
+# Deployment architectures
 
-This document describes the supported Lab Gateway deployment shapes and the configuration that changes between them.
+This is the source of truth for the Gateway topologies. The key distinction is
+between the control plane (JWT issuer, provider administration and on-chain
+operations) and the access plane (OpenResty, Guacamole, FMU and Station/ops
+traffic). `ISSUER` selects the JWT authority; the lab's on-chain `accessURI`
+selects the access plane that serves the user.
 
-## Terms
+## Components and boundaries
 
-- **Lab Gateway Full**: owns the access plane, embedded `blockchain-services`, local Guacamole, OpenResty, and `ops-worker`.
-- **Lab Gateway Lite**: owns its local access plane, Guacamole, OpenResty, and `ops-worker`, but trusts JWTs issued by a remote backend.
-- **Standalone blockchain-services**: remote backend that can publish labs and issue reservation JWTs without owning a local gateway access plane.
+| Component | Control-plane responsibility | Access-plane responsibility |
+| --- | --- | --- |
+| Full Gateway | Embedded `blockchain-services` issues/validates local credentials, handles provider operations and signs institutional transactions. | OpenResty, Guacamole, FMU Runner and Ops Worker serve local labs. |
+| Lite Gateway | Does not become the primary issuer. It validates credentials from the configured remote issuer and can delegate `/lab-admin`. | Owns its local OpenResty, Guacamole, FMU Runner and Ops Worker. |
+| Standalone `blockchain-services` | Can be the remote provider/consumer backend and JWT issuer without a local browser access plane. | No local Guacamole or Station plane. It provisions configured remote gateways. |
+| Lab Station | No public auth role. | Windows-side execution, WinRM commands, telemetry and optional FMU station backend. |
 
-`ISSUER` decides who signs and validates reservation JWTs. `accessURI` decides which gateway owns the Guacamole access plane for a lab.
+The root Compose file still starts the embedded `blockchain-services` container
+when a Gateway is Lite. In Lite mode OpenResty blocks the local `/auth` issuer
+surface and uses the remote issuer configured by `ISSUER`; the embedded service
+must not be mistaken for the authority of the deployment. Its local wallet,
+billing, health and internal services remain separate operational surfaces and
+must be protected accordingly.
 
-## Topology Overview
+## Topology matrix
+
+| Topology | JWT issuer / control plane | Access planes | Required relationship |
+| --- | --- | --- | --- |
+| Full only | Embedded `blockchain-services` in the Full Gateway | One Full Gateway | `ISSUER` empty; local provider features enabled. |
+| Lite only (with remote issuer) | External Full or standalone `blockchain-services` | One Lite Gateway | `ISSUER=<remote>/auth`; Lite trust bundle or equivalent remote key/config. |
+| Full + N Lite | One Full Gateway/backend | Full plus N Lite gateways | Each Lite has a unique origin/gateway ID and an explicit provisioner route in the Full backend. |
+| `blockchain-services` + N Lite | Standalone backend | N Lite gateways | Backend is the issuer/control plane; every Lite points to it and has an explicit route/credential. |
 
 ```mermaid
 flowchart LR
-    subgraph Full["Full Gateway"]
-        FullOpenResty["OpenResty"]
-        FullBackend["embedded blockchain-services"]
-        FullOps["ops-worker"]
-        FullGuac["Guacamole DB"]
-        FullOpenResty --> FullBackend
-        FullBackend --> FullOps
-        FullOps --> FullGuac
+    Marketplace["Marketplace / browser orchestration"]
+    Control["JWT issuer + blockchain-services<br/>Full embedded or standalone"]
+    Chain[("Smart contracts")]
+
+    subgraph Full["Full gateway"]
+        FEdge["OpenResty"]
+        FAccess["Guacamole / FMU / Ops"]
+        FEdge --> FAccess
+    end
+    subgraph LiteA["Lite gateway A"]
+        AEdge["OpenResty"]
+        AAccess["Guacamole / FMU / Ops"]
+        AEdge --> AAccess
+    end
+    subgraph LiteN["Lite gateway N"]
+        NEdge["OpenResty"]
+        NAccess["Guacamole / FMU / Ops"]
+        NEdge --> NAccess
     end
 
-    subgraph LiteA["Lite Gateway A"]
-        LiteAOpenResty["OpenResty"]
-        LiteAOps["ops-worker"]
-        LiteAGuac["Guacamole DB"]
-        LiteAOpenResty --> LiteAOps
-        LiteAOps --> LiteAGuac
-    end
-
-    subgraph LiteB["Lite Gateway B"]
-        LiteBOpenResty["OpenResty"]
-        LiteBOps["ops-worker"]
-        LiteBGuac["Guacamole DB"]
-        LiteBOpenResty --> LiteBOps
-        LiteBOps --> LiteBGuac
-    end
-
-    User["User browser"] --> FullOpenResty
-    User --> LiteAOpenResty
-    User --> LiteBOpenResty
-    FullBackend -- "JWT issuer / lab-admin backend" --> LiteAOpenResty
-    FullBackend -- "provision by accessURI" --> LiteAOpenResty
-    FullBackend -- "provision by accessURI" --> LiteBOpenResty
+    Marketplace --> Control
+    Control <--> Chain
+    Marketplace --> FEdge
+    Marketplace --> AEdge
+    Marketplace --> NEdge
+    Control -->|JWT / access-code / observation| FEdge
+    Control -->|JWT / access-code / observation| AEdge
+    Control -->|JWT / access-code / observation| NEdge
 ```
 
-## 1. Full Gateway Only
+The same diagram describes both composite deployments: in **Full + N Lite**,
+`Control` is the embedded Full backend; in **standalone backend + N Lite**, it
+is the separate `blockchain-services` deployment and the Full subgraph is absent.
 
-Use this when one gateway publishes and serves its own labs.
+## 1. Full Gateway only
 
-Gateway `.env`:
+Use this for an institution that publishes and serves its own laboratories.
 
 ```env
+# Gateway .env
 ISSUER=
-LAB_MANAGER_TOKEN=<local-admin-token>
 LAB_ADMIN_BACKEND_URL=
-```
+LAB_MANAGER_TOKEN=<strong-local-operator-token>
 
-`blockchain-services/.env`:
-
-```env
+# blockchain-services/.env
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
-GUACAMOLE_PROVISIONER_TOKEN=
-GUACAMOLE_PROVISIONER_ROUTES_JSON=
 ```
 
-Behavior:
+The local `/auth` endpoints are enabled through OpenResty, the local backend
+issues the reservation credential, and `accessURI` for local physical labs
+points at the Full public origin. Physical Guacamole labs use
+`accessKey=guac:id:<connection_id>`. Local FMU execution remains a development
+option; production FMUs should run in Station mode when a Station backend is
+available.
 
-- `/lab-admin` is handled by the embedded `blockchain-services`.
-- `lab-manager` selects local Guacamole connections and publishes `accessURI=https://<full-gateway>/guacamole`.
-- Physical labs store `accessKey=guac:id:<connection_id>`.
-- Reservation JWTs are issued locally.
-- Guacamole reservation users are provisioned through the local `ops-worker` route.
+## 2. Lite access gateway
 
-## 2. Full Gateway + N Lite Gateways
-
-Use this when a Full Gateway/backend signs JWTs and one or more Lite gateways serve additional local lab access planes.
-
-Each Lite gateway `.env`:
+Use this when another backend owns identity and provider control. The Lite
+gateway still owns its local Guacamole catalog, FMU facade and operations plane.
 
 ```env
-ISSUER=https://<full-gateway>/auth
-LAB_MANAGER_TOKEN=<token-for-this-lite>
-LAB_ADMIN_BACKEND_URL=https://<full-gateway>
-LAB_ADMIN_BACKEND_TOKEN=<token-accepted-by-remote-lab-admin>
+# Lite Gateway .env
+ISSUER=https://<issuer-origin>/auth
+LAB_MANAGER_TOKEN=<unique-token-for-this-lite>
+LAB_ADMIN_BACKEND_URL=https://<issuer-origin>       # optional but required for /lab-admin
+LAB_ADMIN_BACKEND_TOKEN=<remote-lab-admin-token>    # required when URL is set
 LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 ```
 
-Generate and import a Full-issued trust bundle rather than copying these values by hand:
+Use a Full-issued trust bundle whenever possible. It binds the Lite origin to
+`ISSUER`, `FMU_GATEWAY_ID`, `FMU_JWT_AUDIENCE`, the session-observer credential
+and the Guacamole provisioner credential. A Lite setup without a remote
+`LAB_ADMIN_BACKEND_URL` deliberately blocks on-chain lab administration.
+
+The local `/auth/**` surface is disabled in Lite mode. Access-code redemption,
+FMU ticket operations and session observations target the configured remote
+issuer/backend; browser access still terminates at the Lite origin.
+
+## 3. Full + N Lite gateways
+
+Use this when one Full gateway/backend controls several local access planes.
+Repeat the following for every Lite gateway; do not share gateway IDs or
+observer secrets:
+
+```env
+ISSUER=https://full.example.edu/auth
+LAB_MANAGER_TOKEN=<unique-lite-token>
+LAB_ADMIN_BACKEND_URL=https://full.example.edu
+LAB_ADMIN_BACKEND_TOKEN=<token-accepted-by-full-lab-admin>
+LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
+```
+
+Issue one trust bundle per public Lite origin:
 
 ```bash
-scripts/issue-lite-trust-bundle.sh https://lite-a.example.edu https://full.example.edu
+scripts/issue-lite-trust-bundle.sh \
+  https://lite-a.example.edu https://full.example.edu
 ```
 
-The bundle binds `SERVER_NAME`, `FMU_GATEWAY_ID`, and `FMU_JWT_AUDIENCE` to the
-Lite public origin and points FMU ticket issue/redeem at Full. Setup rejects a
-bundle whose hostname or audience does not match the configured Lite domain.
+The Full backend must have an explicit `GUACAMOLE_PROVISIONER_ROUTES_JSON`
+entry for every remote origin, or a single shared
+`GUACAMOLE_PROVISIONER_TOKEN` only when the same credential is intentionally
+used by all Lite provisioner routes. The route map is fail-closed: an
+unmapped remote `accessURI` is rejected and is never sent to the Full local
+ops-worker.
 
-Full gateway/backend `blockchain-services/.env`, only if all Lite gateways share the same provisioner token:
+```mermaid
+sequenceDiagram
+    participant M as Marketplace
+    participant F as Full backend
+    participant L as Lite gateway
+    participant G as Lite Guacamole
+    participant S as Lab Station
 
-```env
-GUACAMOLE_PROVISIONER_TOKEN=<shared-lite-lab-manager-token>
-GUACAMOLE_PROVISIONER_ROUTES_JSON=
+    M->>F: Reserve / check-in / request access credential
+    F->>F: Read lab accessURI and resolve explicit route
+    F->>L: Provision reservation user through protected route
+    L->>G: Create local Guacamole user/permission
+    F-->>M: Opaque access code and Lite accessURI
+    M->>L: POST /auth/access with code
+    L->>F: Redeem code and validate issuer/gateway claims
+    L-->>M: Secure cookie and clean local Guacamole URL
+    G->>S: RDP/WinRM/FMUs on private network
 ```
 
-If Lite gateways use different `LAB_MANAGER_TOKEN` values or need route overrides:
+Full-owned labs use the Full local provisioner; Lite-owned labs use the route
+selected from `accessURI`. The booking and `SessionStarted` evidence remain
+owned by the Full backend, even when the session runs on a Lite gateway.
+
+## 4. Standalone `blockchain-services` + N Lite gateways
+
+Use this when the control plane is deployed separately from the Gateway
+repository. Enable provider features in the standalone backend and configure
+each Lite as an access plane:
 
 ```env
-GUACAMOLE_PROVISIONER_TOKEN=
-GUACAMOLE_PROVISIONER_ROUTES_JSON={"https://lite-a.example.edu":{"token":"TOKEN_A"},"https://lite-b.example.edu":{"token":"TOKEN_B"}}
+# standalone blockchain-services/.env
+FEATURES_PROVIDERS_ENABLED=true
+FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ```
 
-Behavior:
-
-- Lite `lab-manager` still reads the Lite gateway's local Guacamole catalog.
-- Lite `/lab-admin` is delegated to the Full backend for on-chain publication.
-- Published Lite labs use `accessURI=https://<lite-gateway>/guacamole`.
-- The Full backend provisions reservation users on the gateway indicated by `accessURI`.
-- Full-owned labs still use the Full gateway's local provisioner.
-
-## 3. Standalone blockchain-services + N Lite Gateways
-
-Use this when `blockchain-services` runs outside a Full Gateway stack and Lite gateways provide the access planes.
-
-Each Lite gateway `.env`:
+Each Lite uses the standalone backend as issuer and lab-admin backend:
 
 ```env
-ISSUER=https://<standalone-backend-origin>/auth
-LAB_MANAGER_TOKEN=<token-for-this-lite>
-LAB_ADMIN_BACKEND_URL=https://<standalone-backend-origin>
-LAB_ADMIN_BACKEND_TOKEN=<token-accepted-by-remote-lab-admin>
+ISSUER=https://backend.example.edu/auth
+LAB_ADMIN_BACKEND_URL=https://backend.example.edu
+LAB_ADMIN_BACKEND_TOKEN=<backend-lab-admin-token>
 LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 ```
 
-Standalone backend `blockchain-services/.env`:
+Configure `GUACAMOLE_PROVISIONER_ROUTES_JSON` on the standalone backend with an
+explicit route and credential for every Lite origin. The standalone backend
+does not supply Guacamole, FMU Runner, Ops Worker or Station connectivity; each
+Lite must run and protect those local services itself.
 
-```env
-FEATURES_PROVIDERS_ENABLED=true
-FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
-GUACAMOLE_PROVISIONER_TOKEN=<shared-lite-lab-manager-token>
-# Or, for different Lite LAB_MANAGER_TOKEN values:
-# GUACAMOLE_PROVISIONER_ROUTES_JSON={"https://lite-a.example.edu":{"token":"TOKEN_A"}}
-```
+## Provisioner routing invariant
 
-Behavior:
+For physical Guacamole labs, `accessKey` is always
+`guac:id:<connection_id>`. The backend resolves a provisioner in this order:
 
-- The standalone backend publishes labs and issues reservation JWTs.
-- Each Lite gateway owns its local Guacamole database and connection catalog.
-- Runtime Guacamole provisioning is routed to the Lite gateway whose origin appears in `accessURI`.
+1. exact origin entry in `GUACAMOLE_PROVISIONER_ROUTES_JSON`;
+2. normalized host entry in the same map;
+3. local `http://ops-worker:8081/internal/guacamole` only when the origin is
+   the backend's own gateway origin or no remote origin is involved;
+4. reject the request.
 
-## Guacamole Provisioner Routing
+Never derive a remote route or credential from untrusted lab metadata. A Lite
+gateway's local Guacamole database is authoritative for its own access URI;
+the backend must not use a remote gateway's catalog as if it were local.
 
-For physical Guacamole labs, `accessKey` must be `guac:id:<connection_id>`.
+## Operational checks
 
-When a reservation JWT is issued, `blockchain-services` chooses the provisioner route in this order:
+For every composite deployment verify:
 
-1. `GUACAMOLE_PROVISIONER_ROUTES_JSON` exact origin or host match.
-2. Local default route: `http://ops-worker:8081/internal/guacamole`, only when
-   `accessURI` has the backend gateway's own public origin (or no origin is
-   available for a local administrative lookup).
+- the issuer/JWKS origin and `accessURI` are intentionally different where
+  required;
+- every Lite has a unique `FMU_GATEWAY_ID` and observer signing secret;
+- remote access-code, FMU ticket, observation and provisioner routes use HTTPS
+  or an explicitly controlled private link;
+- `GET /gateway/mode` reports the expected local edge mode and `/gateway/health`
+  shows the selected backend dependencies;
+- remote origins are present in the backend route map before publishing a lab;
+- Station WinRM, FMU internal HTTP/WSS and MySQL remain off the public edge.
 
-An unmapped remote origin fails closed. It is never provisioned through the
-backend's local `ops-worker` as a fallback.
-
-There is no remote derivation fallback. `GUACAMOLE_PROVISIONER_TOKEN` protects
-the local default route; it does not authorize a URL inferred from a remote
-`accessURI`. Each Lite origin requires an explicit route and its own credential.
-
-```mermaid
-flowchart TD
-    Start["Reservation JWT request"] --> AccessUri["Read lab accessURI"]
-    AccessUri --> Exact{"ROUTES_JSON exact origin?"}
-    Exact -- "yes" --> RouteMap["Use mapped route"]
-    Exact -- "no" --> Host{"ROUTES_JSON host match?"}
-    Host -- "yes" --> RouteMap
-    Host -- "no" --> IsLocal{"Backend's own origin?"}
-    IsLocal -- "yes" --> Local["Use local ops-worker route"]
-    IsLocal -- "no" --> Reject["Reject unmapped remote origin"]
-    RouteMap --> Provision["Provision dlabs-res-* user"]
-    Local --> Provision
-```
-
-## Configuration Notes
-
-- Full setup configures its local provisioner token. A Full-issued Lite trust bundle carries a separate `GUACAMOLE_PROVISIONER_TOKEN` for that Lite.
-- Issuing a Lite trust bundle adds the Lite's exact origin, route and credential to Full's `GUACAMOLE_PROVISIONER_ROUTES_JSON`; restart `blockchain-services` after issuance.
-- Every remote `accessURI` must have an explicit route. There is no shared-token fallback.
-- Do not use the remote backend's Guacamole catalog for Lite labs. The catalog must come from the gateway that serves `accessURI`.
-- Physical Guacamole labs with unprefixed `accessKey` values are invalid.
-- Session timeout behavior is covered in [Guacamole Session Policy](guacamole-session-policy.md).
+See [Guacamole Session Policy](guacamole-session-policy.md) for expiry and
+reconnect semantics, and [Laboratory Connectivity](workflows/laboratory-connectivity.md)
+for the private-network protocol matrix.

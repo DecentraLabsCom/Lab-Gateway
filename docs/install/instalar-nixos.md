@@ -25,7 +25,7 @@ nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
 ```bash
 sudo mkdir -p /srv
-sudo git clone --recurse-submodules https://github.com/DecentraLabsCom/lite-lab-gateway.git /srv/lab-gateway
+sudo git clone --recurse-submodules https://github.com/DecentraLabsCom/Lab-Gateway.git /srv/lab-gateway
 cd /srv/lab-gateway
 ```
 
@@ -55,6 +55,7 @@ LAB_MANAGER_ALLOWED_CIDRS=
 LAB_ADMIN_BACKEND_URL=
 LAB_ADMIN_BACKEND_TOKEN=
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
+FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
 
 ```env

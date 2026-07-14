@@ -11,7 +11,7 @@ The same `blockchain-services` software can operate in two roles:
 - **Consumer backend**: the backend of the user's paying institution. It validates the user identity and submits the on-chain check-in.
 - **Provider backend**: the backend of the institution that owns the laboratory. In a Full Lab Gateway deployment it coordinates provider access and the gateway.
 
-For a laboratory owned by the same institution that pays for it, these roles can be served by one deployment. For an external laboratory, they are normally separate deployments with separate institutional wallets.
+For a laboratory owned by the same institution that pays for it, these roles can be served by one deployment. For an external laboratory, they are normally separate deployments with separate institutional wallets. In **Full + N Lite**, the Full backend remains the provider/evidence authority while the selected Lite owns the browser access plane. In **standalone `blockchain-services` + N Lite**, the standalone backend remains the authority and every Lite supplies its own Guacamole/FMUs/Ops plane.
 
 Marketplace is the browser-facing orchestrator. Smart contracts remain the source of truth for reservation and access-authorization state. Gateway-local databases and caches hold operational state and audit records; they do not replace on-chain authorization.
 

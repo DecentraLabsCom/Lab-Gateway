@@ -5,7 +5,7 @@ Runs as a Docker container inside the Lab Gateway stack, protected by OpenResty 
 
 It exposes the public REST/WSS contract consumed by generated `proxy.fmu` artifacts.
 
-Target architecture:
+Deployment contract:
 
 - real `.fmu` files live on Lab Station
 - this service remains in the Gateway as the public FMU facade
@@ -15,7 +15,8 @@ Backend strategy:
 
 - this service keeps a permanent `local` backend that executes FMUs with [FMPy](https://github.com/CATIA-Systems/FMPy)
 - local `fmu-data` mounting remains useful for development, smoke tests and automated tests
-- production target is still to remove the need for real FMUs on the Gateway filesystem
+- `local` is a permanent development/test backend; `station` is the production
+  target when real FMUs must remain on Lab Station
 
 ```mermaid
 flowchart LR
@@ -30,6 +31,12 @@ flowchart LR
     Gateway <-- "internal WS/REST" --> Station
     Station --> FMU
 ```
+
+For Full + N Lite, the public facade and Station executor are local to the
+selected Lite while the Full backend supplies the ticket and observation
+authority. For standalone `blockchain-services` + N Lite, the same facade is
+local to each Lite and the standalone backend is remote. The public contract
+does not change between these topologies.
 
 ## Endpoints
 
@@ -151,11 +158,18 @@ Marketplace upload is disabled by design.
 - `session.create` and `session.attach` are forwarded with `gatewayContext` containing validated claims plus effective `accessKey`, `labId`, `reservationKey`, `pucHash`, and `targetGatewayId`.
 - `cancel`, `history` and `result` remain local-only endpoints for now; in `station` mode they return `501` until their internal contract exists.
 
-## Planned Refactor
+## Current limitations and operational contract
 
-The next architectural refactor for this service is:
-
-1. introduce a backend abstraction for FMU operations
-2. keep the existing `local` backend as a permanent development and test mode
-3. add a `station` backend for internal REST/WSS calls to Lab Station
-4. move real FMU loading and execution out of the Gateway
+- `FMU_BACKEND_MODE=station` forwards catalog, describe, run, stream and
+  realtime session operations to Lab Station. The Station executor is internal
+  and must not be exposed through OpenResty.
+- `cancel`, `history` and `result` remain local-only and return `501` in
+  station mode until their internal Station contract is implemented.
+- External realtime `session.create` always obtains a reservation-scoped ticket
+  and records the durable observation before `session.created`; a bearer or
+  `FMU_SESSION` is not a bypass.
+- `session.attach` checks the original subject, lab, access key,
+  `reservationKey`, `pucHash` and `targetGatewayId`.
+- A job is accepted and observed before the local executor or Station is
+  released. If release or execution fails, the accepted job remains visible in
+  history for retry/reconciliation.

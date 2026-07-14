@@ -16,6 +16,13 @@ flowchart LR
 
 After that, go to Settings on the top right.\
 
+When the connection is saved, record its numeric Guacamole connection ID. A
+physical lab published on chain must use `accessKey=guac:id:<connection_id>`.
+Set `accessURI` to the public origin of the Gateway that owns this Guacamole
+catalog. In a Full + N Lite or standalone-backend + N Lite deployment, the
+control-plane backend uses that origin to select the explicit remote
+provisioner route; it must not fall back to another Gateway's local catalog.
+
 
 <figure><img src="../.gitbook/assets/image (4).png" alt=""><figcaption></figcaption></figure>
 

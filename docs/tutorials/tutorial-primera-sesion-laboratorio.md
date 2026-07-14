@@ -103,7 +103,7 @@ Si usas una interfaz de red o VLAN separada, verifica que el enrutamiento está 
 2. Crea una cuenta de usuario de Windows dedicada para las sesiones de laboratorio
    (evita usar cuentas de administrador para el acceso diario al laboratorio).
 3. Anota la ruta exacta del fichero `AppControl.exe` de Lab Station y el nombre de la
-   clase de ventana de la aplicación de laboratorio. Consulta el [README de Lab Station](../../Lab%20Station/README.md)
+   clase de ventana de la aplicación de laboratorio. Consulta el [README de Lab Station](https://github.com/DecentraLabsCom/Lab-Station/blob/main/README.md)
    para saber cómo encontrar la clase de ventana.
 
 ### 2.3 Añadir una conexión en Guacamole
@@ -212,10 +212,14 @@ contrato inteligente registra la reserva y asigna una `reservationKey`.
 A la hora de inicio de su reserva, el usuario sigue el enlace **Acceder al laboratorio**.
 Esto inicia el flujo de autenticación:
 
-1. El Marketplace envía la firma del monedero del usuario y la clave de reserva al gateway.
-2. `blockchain-services` valida la firma contra la reserva registrada en la cadena.
-3. Si es válida, se emite un JWT firmado y se establece una cookie de sesión de Guacamole.
-4. El navegador redirige al visor de Guacamole, ya autenticado.
+1. El Marketplace envía al backend un JWT vinculado a la reserva y las pruebas
+   SAML/WebAuthn correspondientes.
+2. `blockchain-services` valida identidad, PUC, reserva, ventana temporal y el
+   estado on-chain `ACCESS_AUTHORIZED` cuando el flujo lo exige.
+3. El backend devuelve un código opaco de un solo uso; OpenResty lo canjea
+   servidor a servidor y solo conserva el mapeo de sesión JTI seguro.
+4. El navegador se redirige al Guacamole del gateway seleccionado sin incluir
+   el JWT en la URL.
 
 ### 4.3 El usuario llega al escritorio del laboratorio
 
@@ -239,12 +243,15 @@ docker compose ps
 curl -k https://lab.tu-institucion.edu/health
 ```
 
-### Comprobar los metadatos OIDC / JWKS (solo modo Full)
+### Comprobar los metadatos OIDC / JWKS (backend Full/plano de control)
 
 ```bash
 curl -k https://lab.tu-institucion.edu/auth/.well-known/openid-configuration
 curl -k https://lab.tu-institucion.edu/auth/jwks
 ```
+
+En modo Lite los endpoints locales `/auth` están bloqueados; comprueba el
+emisor remoto configurado.
 
 ### Seguir los logs de un servicio
 

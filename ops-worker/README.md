@@ -14,6 +14,22 @@ This service handles remote lab host operations for the gateway:
 - MySQL tables from `mysql/002-labstation-ops.sql`, stored in the `BLOCKCHAIN_MYSQL_DATABASE` schema alongside `lab_reservations`.
 - Guacamole observations use both the live `activeConnections` API and durable `guacamole_connection_history`, so a tunnel that opens and closes between polls can still produce evidence.
 
+```mermaid
+flowchart LR
+    Edge["OpenResty / Lab Manager"] --> Ops["ops-worker"]
+    Ops --> DB[("MySQL ops projections")]
+    Ops -->|WinRM / WoL| Station["Lab Station"]
+    Ops -->|Guacamole API| Guac["Guacamole"]
+    Ops -->|observer JWT| Backend["blockchain-services control plane"]
+```
+
+In a Full deployment the control plane is the embedded backend. In a Lite
+deployment the worker remains local to the access gateway, while session
+observation and provider-side evidence are delivered to the configured Full or
+standalone backend. The worker's `ACTIVE`/`COMPLETED` reservation projection is
+operational state; it is not the on-chain `ACCESS_AUTHORIZED` or `SETTLED`
+state.
+
 ## Quick start (dev)
 
 ```bash
@@ -83,6 +99,10 @@ New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and 
 - `POST /api/hosts/reload`
 - `POST /api/hosts/quarantine`
   - Body: `{ host, quarantined }`
+- `POST /api/hosts/local-mode`
+- `GET /api/operations/recent`
+- `POST /api/aas-sync`
+- `POST /aas-admin/lab/<lab_id>/sync`
 
 ## Scheduler
 

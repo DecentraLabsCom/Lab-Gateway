@@ -9,7 +9,7 @@ This document describes the production connectivity model between Marketplace, t
 | Marketplace | Public discovery and browser-facing orchestration of institutional reservation and access flows. |
 | Smart contracts | Shared source of truth for providers, laboratories, reservations, access authorization, and service-credit settlement. |
 | Full Lab Gateway | Local access plane plus embedded `blockchain-services`, Guacamole, OpenResty, ops worker, and optional FMU runner. |
-| Lite Lab Gateway | Local access plane with OpenResty, Guacamole, ops worker, and optional FMU runner; it trusts a remote JWT issuer. |
+| Lite Lab Gateway | Local access plane with OpenResty, Guacamole, ops worker, and optional FMU runner; it trusts a remote JWT issuer. The Compose stack may still start an embedded backend, but Lite OpenResty does not use it as the issuer. |
 | Standalone `blockchain-services` | Remote control plane that can issue access credentials and administer providers without a local Guacamole access plane. |
 | Lab Station | Windows host that runs the physical-lab control software and, when used, the internal FMU execution plane. |
 
@@ -20,8 +20,8 @@ This document describes the production connectivity model between Marketplace, t
 | Shape | Authentication/control plane | Browser access plane |
 | --- | --- | --- |
 | Full-only | Embedded `blockchain-services` in one Full gateway | The same Full gateway. |
-| Full plus Lite | Full gateway / embedded backend | Full gateway and one or more Lite gateways, selected per lab by `accessURI`. |
-| Standalone plus Lite | Standalone `blockchain-services` | One or more Lite gateways, selected per lab by `accessURI`. |
+| Full plus N Lite | Full gateway / embedded backend | Full gateway and N Lite gateways, selected per lab by `accessURI`. |
+| Standalone plus N Lite | Standalone `blockchain-services` | N Lite gateways, selected per lab by `accessURI`. |
 
 In Lite mode, the gateway validates JWTs against the remote issuer's JWKS. Lite mode does not mean that laboratory access, Guacamole, FMU, or station operations are disabled; it only removes the gateway as the primary credential issuer and provider control plane.
 
@@ -29,15 +29,15 @@ In Lite mode, the gateway validates JWTs against the remote issuer's JWKS. Lite 
 
 ```mermaid
 flowchart LR
-    User[User browser or FMI client]
+    User["User browser or FMI client"]
     Marketplace[Marketplace]
     Chain[Smart contracts]
     Edge[Full or Lite Lab Gateway]
-    Backend[Credential issuer\nFull or standalone backend]
+    Backend["Credential issuer<br/>Full or standalone backend"]
     Guac[Guacamole and guacd]
     Ops[ops-worker]
     Fmu[fmu-runner]
-    Station[Lab Station\nprivate lab network]
+    Station["Lab Station<br/>private lab network"]
 
     User -->|HTTPS/WSS| Marketplace
     Marketplace <-->|RPC| Chain
@@ -82,7 +82,12 @@ The gateway exposes the public FMU facade and generated proxy artifacts. The rea
 - `FMU_BACKEND_MODE=local` is the Gateway-local development and test path.
 - `FMU_BACKEND_MODE=station` is the production-target path: `fmu-runner` calls the Lab Station internal FMU executor at `FMU_STATION_BASE_URL` with `FMU_STATION_INTERNAL_TOKEN`.
 
-The station executor is an internal service. Do not publish it through the gateway's public edge or reuse browser access tokens as its internal authentication token.
+The station executor is an internal service. Do not publish it through the
+gateway's public edge or reuse browser access tokens as its internal
+authentication token. In **Full + N Lite**, the Full backend remains the
+authority while each Lite owns the local Station route. In **standalone
+`blockchain-services` + N Lite**, the standalone backend owns the authority and
+each Lite supplies its own Station/Guacamole/Ops plane.
 
 ## Station management plane
 

@@ -102,7 +102,7 @@ If using a separate network interface or VLAN, verify the routing is in place.
 2. Create a dedicated Windows user account for lab sessions (avoid using administrator
    accounts for day-to-day lab access).
 3. Note the exact path of the Lab Station `AppControl.exe` and the window class name
-   of the lab application. See the [Lab Station README](../../Lab%20Station/README.md)
+   of the lab application. See the [Lab Station README](https://github.com/DecentraLabsCom/Lab-Station/blob/main/README.md)
    for instructions on how to find the window class.
 
 ### 2.3 Add a Guacamole connection
@@ -208,10 +208,14 @@ records the reservation and assigns a `reservationKey`.
 At their booked start time, the user follows the **Access lab** link. This initiates the
 authentication flow:
 
-1. The Marketplace sends the user's wallet signature and reservation key to the gateway.
-2. `blockchain-services` validates the signature against the on-chain reservation.
-3. If valid, a signed JWT is issued and a Guacamole session cookie is set.
-4. The browser is redirected to the Guacamole viewer, already authenticated.
+1. The Marketplace sends a reservation-bound Marketplace JWT and SAML/WebAuthn
+   evidence to the consumer/provider backend.
+2. `blockchain-services` validates identity, PUC, reservation, time window and
+   on-chain `ACCESS_AUTHORIZED` state as required by the selected flow.
+3. The backend returns an opaque one-time access code; OpenResty redeems it
+   server-to-server and stores only the secure JTI session mapping.
+4. The browser is redirected to the selected gateway's Guacamole viewer without
+   a JWT in the URL.
 
 ### 4.3 User reaches the lab desktop
 
@@ -234,12 +238,15 @@ docker compose ps
 curl -k https://lab.your-institution.edu/health
 ```
 
-### Check OIDC / JWKS metadata (Full mode only)
+### Check OIDC / JWKS metadata (Full/control-plane backend)
 
 ```bash
 curl -k https://lab.your-institution.edu/auth/.well-known/openid-configuration
 curl -k https://lab.your-institution.edu/auth/jwks
 ```
+
+In Lite mode these local `/auth` endpoints are intentionally blocked; inspect
+the configured remote issuer instead.
 
 ### Tail logs for a service
 

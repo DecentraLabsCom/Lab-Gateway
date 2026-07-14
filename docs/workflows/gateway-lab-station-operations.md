@@ -17,6 +17,11 @@ For the network topology around these components, see [Laboratory Connectivity](
 
 The Gateway is the management client. Lab Station is never a public web endpoint: it belongs on the lab or management network and accepts only the minimum required management traffic from the gateway.
 
+In Full + N Lite, each Lite runs its own Ops Worker and Station link; the Full
+backend remains the reservation/evidence authority. In standalone
+`blockchain-services` + N Lite, the standalone backend has no Station link and
+each Lite owns the complete local management path.
+
 ## Access control
 
 `/lab-manager` and `/ops/` are protected by `LAB_MANAGER_TOKEN` and the configured dashboard/network policy. Use `X-Lab-Manager-Token` or the configured secure Lab Manager cookie for operations; do not place management tokens in operational URLs or host inventory files.
@@ -54,9 +59,14 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `GET /ops/api/hosts` | Read configured and discovered host information. |
 | `POST /ops/api/hosts/discover` | Probe a Guacamole connection candidate for managed-host signals. |
 | `POST /ops/api/hosts/provision` | Create or update a dynamic host after successful discovery. |
+| `POST /ops/api/hosts/winrm-credentials` | Store encrypted credentials for a host reference. |
+| `POST /ops/api/hosts/reload` | Reload the static/dynamic host catalog. |
+| `POST /ops/api/hosts/quarantine` | Quarantine or re-enable a host. |
+| `POST /ops/api/hosts/local-mode` | Set the station local-mode operational flag. |
 | `POST /ops/api/reservations/start` | Start the operational preparation for one reservation. |
 | `POST /ops/api/reservations/end` | Finish the operational cleanup for one reservation. |
 | `GET /ops/api/reservations/timeline` | Read operations, phases, and latest heartbeat for a reservation. |
+| `GET /ops/api/operations/recent` | Read recent operation records for diagnostics. |
 
 The WinRM wrapper accepts only commands configured in `OPS_ALLOWED_COMMANDS`. The default allowlist includes `prepare-session`, `release-session`, `power`, `session`, `energy`, `status-json`, `recovery`, `account`, `service`, `wol`, and `status`.
 

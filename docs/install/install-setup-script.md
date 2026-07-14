@@ -86,16 +86,20 @@ The script will guide you through the following steps automatically:
 docker compose ps
 ```
 
-All containers should show `Up`. Check the gateway health endpoint:
+Core containers should show `Up`; optional profiles such as `fmu-runner`,
+`aas`, `certbot` or Cloudflare may be intentionally absent. Check the gateway
+health endpoint:
 
 ```bash
 curl -k https://localhost/health
 ```
 
-Expected response:
+The response is the detailed `blockchain-services` health document. A healthy
+stack reports `status: "UP"`; `DEGRADED` means a queue, database or dependency
+check needs attention even though the HTTP endpoint is reachable.
 
 ```json
-{"status":"ok"}
+{"status":"UP","service":"blockchain-services"}
 ```
 
 ## Step 6 - Set up the institutional wallet

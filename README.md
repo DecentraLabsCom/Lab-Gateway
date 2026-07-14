@@ -1,32 +1,59 @@
 ﻿# 🚀 DecentraLabs Gateway
-[![Gateway Tests](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/gateway-tests.yml/badge.svg)](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/gateway-tests.yml)
-[![Security Scan](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/security.yml/badge.svg)](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/security.yml)
-[![Release](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/release.yml/badge.svg)](https://github.com/DecentraLabsCom/lite-lab-gateway/actions/workflows/release.yml)
+[![Gateway Tests](https://github.com/DecentraLabsCom/Lab-Gateway/actions/workflows/gateway-tests.yml/badge.svg)](https://github.com/DecentraLabsCom/Lab-Gateway/actions/workflows/gateway-tests.yml)
+[![Security Scan](https://github.com/DecentraLabsCom/Lab-Gateway/actions/workflows/security.yml/badge.svg)](https://github.com/DecentraLabsCom/Lab-Gateway/actions/workflows/security.yml)
+[![Release](https://github.com/DecentraLabsCom/Lab-Gateway/actions/workflows/release.yml/badge.svg)](https://github.com/DecentraLabsCom/Lab-Gateway/actions/workflows/release.yml)
 
 ## 🎯 Overview
 
 DecentraLabs Gateway provides a complete blockchain-based authentication system for laboratory access. It includes all components needed for a decentralized lab access solution with advanced features, wallet management, billing and service-credit operations, and remote FMU access through generated `proxy.fmu` artifacts.
 
-This repository corresponds to the `provider+consumer` deployment mode. In that mode, the institution can publish labs, expose authentication endpoints, and also fund reservation/access costs for its own users.
+This repository contains the Gateway access plane and the embedded canonical
+`blockchain-services` backend. A normal Full deployment uses
+`provider+consumer` mode: the institution can publish labs, expose
+authentication endpoints and fund reservation/access costs for its own users.
+The same repository can be configured as a Lite access plane whose issuer and
+provider backend are remote.
 
-If you need only a funding and cost-management backend for your own users, without publishing labs or exposing provider auth endpoints, use `blockchain-services` in standalone `consumer-only` mode instead.
+If you need only a funding and cost-management backend for your own users,
+without publishing labs or exposing provider auth endpoints, use
+`blockchain-services` in standalone `consumer-only` mode instead.
+
+## Deployment shapes
+
+| Shape | Control plane | Local access plane | Key setting |
+| --- | --- | --- | --- |
+| Full only | Embedded `blockchain-services` | One Full Gateway | `ISSUER` empty |
+| Lite | External Full or standalone backend | One Lite Gateway | `ISSUER=https://.../auth` |
+| Full + N Lite | Full backend | Full plus N Lite gateways | One trust bundle and route per Lite |
+| `blockchain-services` + N Lite | Standalone backend | N Lite gateways | Backend issues; each Lite serves local Guacamole/FMUs |
+
+`ISSUER` selects the JWT authority. The lab's `accessURI` selects the
+browser access gateway. They may intentionally be different. The root Compose
+file still starts the embedded backend in Lite deployments, but OpenResty
+disables its local `/auth` issuer surface and uses the remote issuer; do not
+treat the embedded service as the Lite control plane.
+
+See [Deployment Architectures](docs/deployment-architectures.md) for the
+composite topology, trust-bundle, provisioner-routing and Station rules.
 
 ## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
-    User["User wallet / JWT / FMI tool"]
+    User["User / FMI tool"]
     OpenResty["OpenResty"]
-    Blockchain["blockchain-services"]
+    Blockchain["blockchain-services<br/>issuer or local operational backend"]
+    RemoteBackend["Remote Full/standalone backend<br/>(Lite control plane)"]
     Guacamole["Guacamole"]
     FmuFacade["fmu-runner (public FMU facade)"]
     Ops["ops-worker"]
     Mysql[("MySQL")]
     Contracts["Smart contracts"]
-    Station["Lab Station"]
+    Station["Lab Station<br/>private execution plane"]
 
     User --> OpenResty
     OpenResty --> Blockchain
+    OpenResty -. Lite issuer/access-code/observation .-> RemoteBackend
     OpenResty --> Guacamole
     OpenResty --> FmuFacade
     OpenResty --> Ops
@@ -35,6 +62,10 @@ flowchart LR
     Guacamole --> Mysql
     FmuFacade -. target internal backend .-> Station
 ```
+
+In a composite deployment, repeat the OpenResty/Guacamole/FMU/Ops access plane
+for each Lite gateway while retaining one control-plane backend. See the
+[mode diagram](docs/deployment-architectures.md#topology-matrix).
 
 ### FMU Remote Architecture
 
@@ -63,6 +94,11 @@ FMU target model:
 - The Gateway keeps the public REST/WSS surface, proxy generation, auth and ticketing.
 - The generated `proxy.fmu` contains interface metadata, runtime binaries and reservation-scoped config, never the real model.
 - This repository keeps a local FMU execution path in `fmu-runner` as a permanent dev/test mode. That local path is not the intended production topology.
+
+When Compose is evaluated, `FMU_JWT_AUDIENCE` must be set to the exact public
+FMU origin (for example `https://gateway.example.edu/fmu`). Set
+`FMU_BACKEND_MODE=station` and the Station internal URL/token when real FMUs
+must remain on Lab Station; leave the local backend for development and tests.
 
 ## 🌟 Features
 
@@ -196,7 +232,7 @@ Complete host flow (real machine):
 ```bash
 # 1) Put this repo on the target NixOS host
 sudo mkdir -p /srv
-sudo git clone https://github.com/DecentraLabsCom/lite-lab-gateway.git /srv/lab-gateway
+sudo git clone https://github.com/DecentraLabsCom/Lab-Gateway.git /srv/lab-gateway
 cd /srv/lab-gateway
 
 # 2) Prepare env files
@@ -361,10 +397,10 @@ environment. All authentication endpoints live under the fixed `/auth` base path
 - **Full mode**: leave `ISSUER` empty.
   This gateway exposes its own auth endpoints and validates its own locally generated JWT signing keys.
 - **Lite mode**: set `ISSUER=https://<full-gateway-or-external-issuer>/auth`.
-- Before running Lite setup, issue a trust bundle on Full with `scripts/issue-lite-trust-bundle.sh <https://lite-public-origin> <https://full-origin>` or `scripts\Issue-LiteTrustBundle.ps1 -LitePublicOrigin <https://lite-public-origin> -FullPublicOrigin <https://full-origin>`. The gateway identity is derived from the Lite hostname; it is not free-form. The setup assistant imports the Full access-code redeemer, audit URL, FMU audience/ticket endpoints, and a revocable per-gateway session-observer signing credential. Lite never receives `ADMIN_ACCESS_TOKEN`.
+- Before running Lite setup, issue a trust bundle on Full with `scripts/issue-lite-trust-bundle.sh <https://lite-public-origin> <https://full-origin>` or `scripts\Issue-LiteTrustBundle.ps1 -LitePublicOrigin <https://lite-public-origin> -FullPublicOrigin <https://full-origin>`. The gateway identity is derived from the Lite hostname; it is not free-form. The setup assistant imports the Full access-code redeemer, audit URL, FMU audience/ticket endpoints, and a revocable per-gateway session-observer signing credential. The Full admin token is never placed in that trust bundle; any local Lite admin token is a separate operational secret.
   This gateway no longer acts as the JWT issuer. Instead, it trusts JWTs issued elsewhere and synchronizes the remote public key automatically.
 
-For Full-only, Full + Lite, and standalone `blockchain-services` + Lite topologies, see [Deployment Architectures](docs/deployment-architectures.md).
+For Full-only, Full + N Lite, and standalone `blockchain-services` + N Lite topologies, see [Deployment Architectures](docs/deployment-architectures.md).
 
 ##### Deployment modes: Direct vs Router forwarding
 

@@ -11,7 +11,7 @@ binary drop location mounted into `fmu-runner`.
 - Transport: `WSS` from proxy runtime to Gateway
 - FMI target: `FMI 2.0.x Co-Simulation` for the MVP, with current `win64`
   support extended to scalar/dimensioned `FMI 3.0 Co-Simulation`
-- Implementation language: `C++17` with a future C ABI export layer for FMI
+- Implementation language: `C++17` with the FMI C ABI export layer
 - Artifact model: generic runtime binaries plus reservation-specific
   `modelDescription.xml` and `resources/config.json`
 
@@ -52,8 +52,7 @@ What still is not finished:
 - FMI 3 support is still not validated across the full type matrix and tool matrix
 - FMI 3 Model Exchange and Scheduled Execution are not supported
 
-The future compiled binaries produced by this project are expected to be copied
-into:
+Promoted compiled binaries are copied into:
 
 - `../fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so`
 - `../fmu-proxy-runtime/binaries/win64/decentralabs_proxy.dll`
@@ -160,7 +159,7 @@ fmu-proxy-runtime-src/
    `- transport_linux.cpp
 ```
 
-## Next milestones
+## Remaining validation milestones
 
 1. Produce and validate a real `darwin64` binary
 2. Add dedicated automated regression coverage for FMI 2 and FMI 3 live proxy simulation

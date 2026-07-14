@@ -4,29 +4,20 @@ This folder contains unit tests for the Lua modules used by OpenResty.
 
 ## Test structure
 
-```text
-openresty/tests/
-|- run.lua
-|- run-lua-tests.sh
-|- run-lua-tests.ps1
-|- helpers/
-|  |- runner.lua
-|  |- ngx_stub.lua
-|  `- http_client_stub.lua
-`- unit/
-   |- access_handler_spec.lua
-   |- access_handler_extended_spec.lua
-   |- guacamole_token_handler_spec.lua
-   |- header_filter_handler_spec.lua
-   |- header_filter_handler_extended_spec.lua
-   |- admin_access_spec.lua
-   |- treasury_access_spec.lua
-   |- jwt_handler_spec.lua
-   |- lab_manager_access_spec.lua
-   |- log_handler_spec.lua
-   |- log_handler_extended_spec.lua
-   |- session_guard_spec.lua
-   `- session_guard_extended_spec.lua
+`run.lua` discovers/registers the Lua unit specs under `unit/` and the shared
+stubs under `helpers/`. The suite intentionally covers more than the original
+access/JWT modules: current specs include FMU access, gateway health, lab
+content, Lab Manager admin delegation, token revocation, session observation,
+initialisation and proxy configuration. Treat the directory contents and
+`run.lua` as the authoritative list rather than copying a static file list into
+this guide.
+
+```mermaid
+flowchart LR
+    Runner["run.lua / shell wrappers"] --> Specs["unit/*.lua"]
+    Specs --> Stubs["helpers / ngx HTTP stubs"]
+    Specs --> Modules["OpenResty Lua modules"]
+    Sync["JWT key-sync integration"] --> Mock["Docker mock issuer"]
 ```
 
 ## Run tests

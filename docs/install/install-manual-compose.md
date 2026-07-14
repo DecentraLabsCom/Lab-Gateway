@@ -15,7 +15,7 @@ the interactive setup script.
 ## Step 1 — Clone the repository
 
 ```bash
-git clone --recurse-submodules https://github.com/DecentraLabsCom/lite-lab-gateway.git /srv/lab-gateway
+git clone --recurse-submodules https://github.com/DecentraLabsCom/Lab-Gateway.git /srv/lab-gateway
 cd /srv/lab-gateway
 ```
 
@@ -56,6 +56,9 @@ LAB_MANAGER_TOKEN=change_to_random_token
 
 # Comma-separated origins allowed for CORS (your Marketplace URL)
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
+
+# Required by Compose interpolation; use the public FMU origin when FMU is enabled
+FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 ```
 
 #### Gateway mode
@@ -72,6 +75,13 @@ ISSUER=
 ```env
 ISSUER=https://auth-gateway.other-institution.edu/auth
 ```
+
+Lite is an access-plane mode, not a second issuer. The root Compose file may
+still start the embedded `blockchain-services` container, but OpenResty blocks
+its local `/auth` surface and uses the remote issuer for access-code, FMU and
+observation calls. For Full + N Lite or standalone `blockchain-services` + N
+Lite, configure one trust bundle, gateway ID and explicit provisioner route per
+Lite; see [Deployment Architectures](../deployment-architectures.md).
 
 #### Bind address
 

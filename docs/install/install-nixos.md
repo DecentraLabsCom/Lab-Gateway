@@ -11,7 +11,9 @@ declaratively through systemd.
 
 ## Prerequisites
 
-- A machine or VM running **NixOS 23.05+** with flakes enabled.
+- A machine or VM running a current NixOS release compatible with the flake's
+  `nixos-unstable` input, with flakes enabled. Pin the input for reproducible
+  production rollouts instead of relying on an unpinned channel.
 - Internet access from the target host (to pull flake inputs and container images).
 - `git` available on the target host.
 
@@ -25,7 +27,7 @@ nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
 ```bash
 sudo mkdir -p /srv
-sudo git clone --recurse-submodules https://github.com/DecentraLabsCom/lite-lab-gateway.git /srv/lab-gateway
+sudo git clone --recurse-submodules https://github.com/DecentraLabsCom/Lab-Gateway.git /srv/lab-gateway
 cd /srv/lab-gateway
 ```
 
@@ -60,6 +62,7 @@ LAB_MANAGER_ALLOWED_CIDRS=
 LAB_ADMIN_BACKEND_URL=
 LAB_ADMIN_BACKEND_TOKEN=
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
+FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 ```
 
 ```env
@@ -73,6 +76,12 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-kno
 ```
 
 Keep Gateway/OpenResty orchestration values only in `.env`. The root `docker-compose.yml` injects those values into the embedded backend from `.env`.
+
+In Lite mode, the embedded backend is not the local JWT authority: OpenResty
+blocks its `/auth` issuer routes and trusts the remote `ISSUER`. For composite
+Full + N Lite or standalone-backend + N Lite deployments, provision each Lite
+with its own trust bundle and remote provisioner route. See
+[Deployment Architectures](../deployment-architectures.md).
 
 For a standalone `blockchain-services` deployment not managed by this Gateway compose stack, configure that standalone service's own `.env` with its `LAB_MANAGER_TOKEN` and, if desired, `LAB_MANAGER_ALLOWED_CIDRS`.
 

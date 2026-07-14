@@ -1,44 +1,53 @@
-# Table of contents
+# Documentation index
 
-## Introduction
+Start with [DecentraLabs Gateway](README.md) and [Deployment Architectures](docs/deployment-architectures.md). The architecture guide is the reference for Full, Lite, Full + N Lite and standalone `blockchain-services` + N Lite deployments.
 
-* [DecentraLabs Gateway](README.md)
+## Access and architecture
 
-## Configuration
+- [Deployment Architectures](docs/deployment-architectures.md)
+- [Laboratory Connectivity](docs/workflows/laboratory-connectivity.md)
+- [Guacamole Session Policy](docs/guacamole-session-policy.md)
+- [Guacamole Connections](configuring-lab-connections/guacamole-connections.md)
+- [Logging Configuration](LOGGING.md)
 
-* [Guacamole Connections](configuring-lab-connections/guacamole-connections.md)
-* [Deployment Architectures](docs/deployment-architectures.md)
-* [Guacamole Session Policy](docs/guacamole-session-policy.md)
-* [Logging Configuration](LOGGING.md)
+## End-to-end workflows
 
-## Workflows
-
-* [Institutional Reservation Workflow](docs/workflows/institutional-reservation-workflow.md)
-* [Institutional Check-in, Lab Access, and Session Workflow](docs/workflows/institutional-check-in-access-sessions.md)
-* [Laboratory Connectivity](docs/workflows/laboratory-connectivity.md)
-* [Lab Gateway and Lab Station Operations](docs/workflows/gateway-lab-station-operations.md)
+- [Institutional Reservation Workflow](docs/workflows/institutional-reservation-workflow.md)
+- [Institutional Check-in, Lab Access, and Session Workflow](docs/workflows/institutional-check-in-access-sessions.md)
+- [Lab Gateway and Lab Station Operations](docs/workflows/gateway-lab-station-operations.md)
+- [First Lab Session tutorial (EN)](docs/tutorials/tutorial-first-lab-session.md)
+- [Tutorial de primera sesión (ES)](docs/tutorials/tutorial-primera-sesion-laboratorio.md)
 
 ## Installation
 
-* [Setup Script (EN)](docs/install/install-setup-script.md)
-* [Setup Script (ES)](docs/install/instalar-setup-script.md)
-* [Manual Docker Compose (EN)](docs/install/install-manual-compose.md)
-* [Manual Docker Compose (ES)](docs/install/instalar-compose-manual.md)
-* [NixOS (EN)](docs/install/install-nixos.md)
-* [NixOS (ES)](docs/install/instalar-nixos.md)
+- [Setup Script (EN)](docs/install/install-setup-script.md)
+- [Setup Script (ES)](docs/install/instalar-setup-script.md)
+- [Manual Docker Compose (EN)](docs/install/install-manual-compose.md)
+- [Docker Compose manual (ES)](docs/install/instalar-compose-manual.md)
+- [NixOS (EN)](docs/install/install-nixos.md)
+- [NixOS (ES)](docs/install/instalar-nixos.md)
+- [Certbot / ACME](certbot/README.md)
 
-## Tutorials
+## Federation and backend services
 
-* [First Lab Session (EN)](docs/tutorials/tutorial-first-lab-session.md)
-* [First Lab Session (ES)](docs/tutorials/tutorial-primera-sesion-laboratorio.md)
+- [eduGAIN Federation (EN)](docs/edugain/edugain-federation.md)
+- [Federación eduGAIN (ES)](docs/edugain/edugain-federacion.md)
+- [Canonical blockchain-services documentation](blockchain-services/SUMMARY.md)
+- [Ops Worker](ops-worker/README.md)
 
-## eduGAIN Federation
+## FMU and native proxy
 
-* [eduGAIN Guide (EN)](docs/edugain/edugain-federation.md)
-* [Guía eduGAIN (ES)](docs/edugain/edugain-federacion.md)
+- [FMU Runner](fmu-runner/README.md)
+- [FMU data layout](fmu-data/README.md)
+- [FMU proxy runtime](fmu-proxy-runtime/README.md)
+- [FMU proxy runtime source](fmu-proxy-runtime-src/README.md)
+- [FMU proxy runtime architecture](fmu-proxy-runtime-src/ARCHITECTURE.md)
 
-## Services
+## Verification
 
-* [Blockchain Services](blockchain-services/SUMMARY.md)
-* [Ops Worker](ops-worker/README.md)
-* [Certbot Setup](certbot/README.md)
+- [OpenResty Lua unit tests](openresty/tests/README.md)
+- [Integration tests](tests/integration/README.md)
+
+English and Spanish guides should describe the same deployment contract. When
+they diverge, verify `docker-compose.yml`, `.env.example`, setup scripts and
+the executable service configuration before editing the prose.

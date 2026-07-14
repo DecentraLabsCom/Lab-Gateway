@@ -1,220 +1,89 @@
-# FMU Proxy Runtime Architecture
+# FMU proxy runtime architecture
 
-## Goal
+This directory contains the native runtime packaged into generated `proxy.fmu`
+artifacts. The runtime always connects to the Gateway public WSS facade; it
+does not connect directly to Lab Station.
 
-Build a native runtime that allows a generated `proxy.fmu` to behave like a
-standard `FMI 2 Co-Simulation` FMU while delegating execution to the existing
-Gateway WSS session protocol.
-
-The runtime talks to the Gateway public facade, not directly to Lab Station.
-The Gateway is then responsible for routing execution to the Station backend.
-
-## Target topology
+## Current topology
 
 ```mermaid
 flowchart LR
-    Tool["FMI master tool"]
-    Proxy["proxy.fmu runtime"]
-    Gateway["Lab Gateway\n(public REST/WSS facade)"]
-    Station["Lab Station\n(internal backend)"]
-    RealFMU["real provider .fmu"]
-
-    Tool --> Proxy
-    Proxy <-- "WSS" --> Gateway
-    Gateway <-- "internal WS/REST" --> Station
-    Station --> RealFMU
+    Tool["FMI master tool"] --> Proxy["proxy.fmu native runtime"]
+    Proxy <-->|WSS| Gateway["Lab Gateway FMU facade"]
+    Gateway -->|local backend| Local["FMPy / fmu-data"]
+    Gateway -->|station backend| Station["Lab Station internal executor"]
+    Station --> FMU["real provider FMU"]
 ```
 
-## Current vs target execution location
+`FMU_BACKEND_MODE=local` is the permanent development/test path. In
+`FMU_BACKEND_MODE=station`, the Gateway keeps authentication, ticketing and
+the public REST/WSS contract while Station owns model loading and execution.
+The same proxy artifact works in both modes.
 
-- Permanent dev/test path: the Gateway keeps a `local` FMPy-based execution backend for development and automated testing.
-- Target production path: the Gateway keeps the public protocol only, while Lab Station owns real FMU loading and execution.
-- The runtime project in this directory is already aligned with the target path, because it only depends on the Gateway public surface.
+## Responsibilities
 
-## Why this project exists
+| Layer | Responsibility |
+| --- | --- |
+| FMI exports | Expose FMI 2 Co-Simulation and the implemented FMI 3 Co-Simulation ABI. |
+| Runtime core | Parse `modelDescription.xml` and `resources/config.json`, keep local state and cached values. |
+| Protocol client | Correlate `requestId`, encode Gateway messages and map errors to FMI status/log callbacks. |
+| WSS transport | TLS, socket lifecycle, reconnect where safe, backpressure and response correlation. |
+| Gateway | Validate reservation claims, redeem a reusable session ticket, record observation and route to local or Station backend. |
+| Lab Station | Load/execute real FMUs and expose only internal describe/run/stream/session APIs. |
 
-The Gateway already generates:
-
-- `modelDescription.xml`
-- `resources/config.json`
-- a short-lived reservation-scoped `sessionTicket`
-
-What is still missing is the native runtime inside `binaries/<platform>/`
-that:
-
-1. reads the generated config
-2. opens `wss://.../fmu/api/v1/fmu/sessions`
-3. redeems the `sessionTicket`
-4. translates FMI calls into Gateway protocol messages
-
-## MVP constraints
-
-- FMI: `2.0.x Co-Simulation`
-- No Model Exchange support in the MVP
-- Generic runtime binary per platform
-- Reservation-specific behavior only through generated config and metadata
-- One FMU instance maps to one remote Gateway session, and that Gateway session maps to one Station-side execution session
-
-## Component responsibilities
-
-### Proxy runtime
-
-- expose the FMI 2 ABI to the FMI master
-- keep local runtime state and cached outputs
-- read `resources/config.json`
-- open `WSS` to the Gateway
-
-### Gateway
-
-- authenticate and authorize the reservation
-- redeem the one-shot `sessionTicket`
-- expose the stable public FMU contract
-- route to the selected backend (`local` during transition, `station` as target)
-
-### Lab Station
-
-- own the real `.fmu`
-- load and execute the model
-- expose internal describe and realtime execution APIs to the Gateway
-
-## Runtime layers
-
-### 1. FMI export layer
-
-Responsibility:
-
-- expose the FMI 2 ABI expected by FMI tools
-- maintain the FMU instance handle
-- map FMI states to internal runtime states
-
-Expected later functions:
-
-- `fmi2Instantiate`
-- `fmi2SetupExperiment`
-- `fmi2EnterInitializationMode`
-- `fmi2ExitInitializationMode`
-- `fmi2SetReal`, `fmi2SetInteger`, `fmi2SetBoolean`, `fmi2SetString`
-- `fmi2GetReal`, `fmi2GetInteger`, `fmi2GetBoolean`, `fmi2GetString`
-- `fmi2DoStep`
-- `fmi2Terminate`
-- `fmi2Reset`
-- `fmi2FreeInstance`
-
-### 2. Runtime core
-
-Responsibility:
-
-- hold parsed config
-- store current session state
-- cache last known outputs
-- track initialization, running, paused and terminated states
-- provide deterministic behavior for masters calling FMI APIs
-
-### 3. Protocol adapter
-
-Responsibility:
-
-- encode and decode the existing Gateway messages
-- correlate `requestId`
-- map Gateway errors to FMI statuses and log output
-
-Messages needed in the MVP:
-
-- `session.create`
-- `session.ping`
-- `model.describe`
-- `sim.initialize`
-- `sim.setInputs`
-- `sim.step`
-- `sim.getOutputs`
-- `session.terminate`
-
-### 4. WSS transport
-
-Responsibility:
-
-- TLS validation
-- socket lifecycle
-- reconnect policy where safe
-- backpressure handling
-- request/response correlation on a long-lived session
-
-Important boundary:
-
-- the WSS transport terminates at the Gateway
-- the runtime does not need to know whether the Gateway uses a `local` or `station` backend internally
-
-## FMI to Gateway mapping
+## FMI-to-Gateway mapping
 
 | FMI call | Gateway action |
-|---|---|
-| `fmi2Instantiate` | Load config, create local runtime object |
-| `fmi2SetupExperiment` | Store start/stop/tolerance locally |
-| `fmi2EnterInitializationMode` | Open WSS, send `session.create` |
-| `fmi2ExitInitializationMode` | Send `sim.initialize` |
-| `fmi2Set*` | Buffer and/or send `sim.setInputs` |
-| `fmi2DoStep` | Send `sim.step` with `deltaT` |
-| `fmi2Get*` | Read cached outputs from last `sim.step` or `sim.getOutputs` |
-| `fmi2Terminate` | Send `session.terminate`, close socket |
-| `fmi2Reset` | Local reset plus remote `sim.reset` |
+| --- | --- |
+| `fmi2Instantiate` | Load generated config and create local runtime state. |
+| `fmi2EnterInitializationMode` | Open WSS and send `session.create`. |
+| `fmi2ExitInitializationMode` | Send `sim.initialize`. |
+| `fmi2Set*` | Buffer/send `sim.setInputs`. |
+| `fmi2DoStep` | Send `sim.step` with `deltaT`. |
+| `fmi2Get*` | Read cached outputs from the latest step/get response. |
+| `fmi2Terminate` | Send `session.terminate` and close WSS. |
+| `fmi2Reset` | Reset local state and request remote reset where supported. |
 
-## State model
+Realtime `session.create` is reservation-bound and must complete durable
+observation before `session.created` is returned. `session.attach` must match
+the original subject, lab, access key, reservation key, PUC hash and target
+gateway. Internal Station hops carry the validated `gatewayContext`; they do
+not create a second external ticket or observation.
 
-The runtime should track at least:
+## Runtime state and errors
 
-- `unconfigured`
-- `instantiated`
-- `socket_connecting`
-- `socket_ready`
-- `session_created`
-- `initialized`
-- `running`
-- `paused`
-- `terminated`
-- `error`
+```mermaid
+stateDiagram-v2
+    [*] --> unconfigured
+    unconfigured --> instantiated
+    instantiated --> socket_connecting
+    socket_connecting --> socket_ready
+    socket_ready --> session_created
+    session_created --> initialized
+    initialized --> running
+    running --> paused
+    paused --> running
+    running --> terminated
+    socket_connecting --> error
+    socket_ready --> error
+    running --> error
+```
 
-## Error mapping principles
+Invalid local lifecycle use, expired reservation/ticket and unrecoverable
+transport failures surface as FMI errors. Retryable network failures should
+first be reported through the FMI logger; do not silently duplicate a step.
 
-- invalid local lifecycle usage -> `fmi2Error`
-- transport interruption before remote session creation -> `fmi2Error`
-- reservation/session expiry from Gateway -> `fmi2Error`
-- unsupported optional FMI capability -> `fmi2Error` or `fmi2Fatal`
-- retryable network failures should be surfaced through logger callbacks first
+## Platform status and release
 
-## Dependency strategy
+- `win64` runtime is implemented and built.
+- `linux64` runtime is reproducibly built and promoted to the runtime drop path.
+- `darwin64` build support exists, but a real binary still needs end-to-end validation.
+- FMI 3 scalar/dimensioned Co-Simulation is implemented; Model Exchange and
+  Scheduled Execution are not supported.
+- `Binary` and `Clock`, and the full external tool/type matrix, still need
+  validation against real sample FMUs.
 
-Keep the MVP conservative:
-
-- core and protocol code in the repository
-- pick one WSS/TLS dependency later, after a dedicated comparison
-- avoid heavyweight runtime assumptions such as JVM or Python
-
-## Build and release strategy
-
-The source project should eventually output:
-
-- `linux64/decentralabs_proxy.so`
-- `win64/decentralabs_proxy.dll`
-- `darwin64/decentralabs_proxy.dylib`
-
-Those binaries will then be copied into `../fmu-proxy-runtime/binaries/...`
-for packaging by `fmu-runner`.
-
-## Gateway refactor dependency
-
-This runtime can be implemented against the current public Gateway protocol,
-but production readiness depends on the Gateway refactor below:
-
-1. introduce a backend interface for `list`, `describe`, `run` and realtime sessions
-2. keep `local` as a permanent dev/test mode
-3. add `station` as the target backend over internal REST/WSS
-4. remove production dependency on local `FMU_DATA_PATH` in the Gateway
-
-## Acceptance criteria for first functional iteration
-
-1. Generated `proxy.fmu` loads in at least one FMI 2 compatible tool
-2. Runtime reads `resources/config.json`
-3. Runtime opens WSS and completes `session.create`
-4. `fmi2EnterInitializationMode`, `fmi2ExitInitializationMode`,
-   `fmi2SetReal`, `fmi2DoStep`, `fmi2GetReal`, `fmi2Terminate` work end-to-end
-5. Errors from expired or invalid tickets are surfaced clearly
+After changing source, build and promote the platform binary into
+`fmu-proxy-runtime/binaries/<platform>/`, then restart the `fmu-runner`
+container so the read-only runtime volume sees the new binary. Validate with
+the integration scripts under `tests/integration/` before release.

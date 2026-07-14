@@ -15,7 +15,7 @@ el script interactivo de configuración.
 ## Paso 1 — Clonar el repositorio
 
 ```bash
-git clone --recurse-submodules https://github.com/DecentraLabsCom/lite-lab-gateway.git /srv/lab-gateway
+git clone --recurse-submodules https://github.com/DecentraLabsCom/Lab-Gateway.git /srv/lab-gateway
 cd /srv/lab-gateway
 ```
 
@@ -56,6 +56,9 @@ LAB_MANAGER_TOKEN=cambia_a_token_aleatorio
 
 # Orígenes permitidos para CORS (URL de tu Marketplace)
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
+
+# Obligatorio para la interpolación de Compose; usa el origen FMU público
+FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
 
 #### Modo del gateway
