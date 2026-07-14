@@ -579,6 +579,7 @@ class RealtimeWsManager:
         acquire_slot,
         release_slot,
         redeem_session_ticket=None,
+        issue_session_ticket=None,
         confirm_session_started=None,
         ws_session_queue_size: int = 64,
         ws_heartbeat_seconds: float = 15.0,
@@ -598,6 +599,7 @@ class RealtimeWsManager:
         self.acquire_slot = acquire_slot
         self.release_slot = release_slot
         self.redeem_session_ticket = redeem_session_ticket
+        self.issue_session_ticket = issue_session_ticket
         self.confirm_session_started = confirm_session_started
         self.ws_session_queue_size = ws_session_queue_size
         self.ws_heartbeat_seconds = ws_heartbeat_seconds
@@ -659,6 +661,13 @@ class RealtimeWsManager:
             if token:
                 return token
         raise HTTPException(status_code=401, detail="Missing authentication token")
+
+    def extract_ws_authorization(self, websocket: WebSocket) -> str:
+        """Return the bearer form needed for server-side ticket issuance."""
+        authorization = websocket.headers.get("authorization", "")
+        if authorization.startswith("Bearer "):
+            return authorization
+        return f"Bearer {self.extract_ws_token(websocket)}"
 
     @staticmethod
     def error_payload(
@@ -852,6 +861,112 @@ class RealtimeWsManager:
                             await self._send_direct(connection, response)
                             local_request_cache[request_id] = response
                             continue
+
+                    # Every external realtime session must carry a durable
+                    # observation credential.  When the generated FMU runtime
+                    # already has a bearer (normally injected from
+                    # FMU_SESSION), issue the reservation-scoped ticket
+                    # server-side before creating the local session.
+                    if not internal and not session_ticket:
+                        claim_lab_id = self.get_claim_lab_id(create_claims)
+                        if claim_lab_id and req_lab_id and claim_lab_id != req_lab_id:
+                            response = self.error_payload(
+                                code="LAB_MISMATCH",
+                                message="JWT not authorised for requested labId",
+                                request_id=request_id,
+                                retryable=False,
+                            )
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
+                        claim_reservation_key = str(create_claims.get("reservationKey") or "").strip()
+                        if reservation_key and claim_reservation_key and reservation_key.lower() != claim_reservation_key.lower():
+                            response = self.error_payload(
+                                code="FORBIDDEN",
+                                message="JWT not authorised for requested reservationKey",
+                                request_id=request_id,
+                                retryable=False,
+                            )
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
+                        if not (create_claims.get("accessKey") or create_claims.get("fmuFileName")):
+                            response = self.error_payload(
+                                code="FORBIDDEN",
+                                message="Token has no authorised FMU file",
+                                request_id=request_id,
+                                retryable=False,
+                            )
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
+                        now = time.time()
+                        nbf = self.coerce_epoch_seconds(create_claims.get("nbf"))
+                        exp = self.coerce_epoch_seconds(create_claims.get("exp"))
+                        if nbf is not None and now < nbf:
+                            response = self.error_payload(
+                                code="RESERVATION_NOT_ACTIVE",
+                                message="Reservation is not active yet",
+                                request_id=request_id,
+                                retryable=False,
+                            )
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
+                        if exp is not None and now >= exp:
+                            response = self.error_payload(
+                                code="SESSION_EXPIRED",
+                                message="Reservation window expired",
+                                request_id=request_id,
+                                retryable=False,
+                            )
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
+                        if self.issue_session_ticket is None:
+                            response = self.error_payload(
+                                code="INTERNAL_ERROR",
+                                message="Session ticket issuance is not configured",
+                                request_id=request_id,
+                                retryable=False,
+                            )
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
+                        try:
+                            session_ticket, _ticket_expiry = await self.issue_session_ticket(
+                                authorization=self.extract_ws_authorization(websocket),
+                                lab_id=req_lab_id or self.get_claim_lab_id(create_claims),
+                                reservation_key=reservation_key or create_claims.get("reservationKey"),
+                                request_id=request_id,
+                            )
+                            session_ticket = str(session_ticket or "").strip()
+                            if not session_ticket:
+                                raise HTTPException(status_code=500, detail="Session ticket issuance returned no ticket")
+                        except HTTPException as exc:
+                            detail = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
+                            response = self.error_payload(
+                                code=detail.get("code") or ("FORBIDDEN" if exc.status_code == 403 else "INTERNAL_ERROR"),
+                                message=detail.get("error") or detail.get("message") or str(exc.detail),
+                                request_id=request_id,
+                                retryable=exc.status_code >= 500,
+                            )
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
+                        except Exception as exc:
+                            response = self.error_payload(
+                                code="INTERNAL_ERROR",
+                                message="Unable to issue session ticket",
+                                request_id=request_id,
+                                retryable=True,
+                            )
+                            self.logger.warning("session.create ticket issue failed request_id=%s error=%s", request_id, exc)
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
+
+                    if not internal and session_ticket:
                         if self.redeem_session_ticket is None:
                             response = self.error_payload(
                                 code="INTERNAL_ERROR",
@@ -874,32 +989,27 @@ class RealtimeWsManager:
                             claims = create_claims
                         except HTTPException as exc:
                             detail = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
-                            code = detail.get("code")
-                            if not code:
-                                if exc.status_code == 401:
-                                    code = "SESSION_TICKET_INVALID"
-                                elif exc.status_code == 403:
-                                    code = "FORBIDDEN"
-                                else:
-                                    code = "INTERNAL_ERROR"
+                            code = detail.get("code") or ("SESSION_TICKET_INVALID" if exc.status_code == 401 else ("FORBIDDEN" if exc.status_code == 403 else "INTERNAL_ERROR"))
                             response = self.error_payload(
                                 code=code,
                                 message=detail.get("error") or detail.get("message") or str(exc.detail),
                                 request_id=request_id,
                                 retryable=exc.status_code >= 500,
                             )
-                            self.logger.warning(
-                                "session.create ticket redeem failed request_id=%s lab_id=%s reservation_key=%s ticket_id=%s code=%s",
-                                request_id,
-                                req_lab_id or "-",
-                                reservation_key or "-",
-                                self._normalize_ticket_id(session_ticket) or "-",
-                                code,
-                            )
                             await self._send_direct(connection, response)
                             local_request_cache[request_id] = response
                             continue
-
+                        except Exception as exc:
+                            response = self.error_payload(
+                                code="SESSION_TICKET_INVALID",
+                                message="Unable to redeem session ticket",
+                                request_id=request_id,
+                                retryable=True,
+                            )
+                            self.logger.warning("session.create ticket redeem failed request_id=%s error=%s", request_id, exc)
+                            await self._send_direct(connection, response)
+                            local_request_cache[request_id] = response
+                            continue
                     claim_lab_id = self.get_claim_lab_id(create_claims)
                     if claim_lab_id and req_lab_id and claim_lab_id != req_lab_id:
                         response = self.error_payload(

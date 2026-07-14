@@ -813,13 +813,16 @@ def _get_station_backend() -> StationFmuBackend:
     raise HTTPException(status_code=500, detail="Active FMU backend is not station")
 
 
-def _simulation_request_payload(req: SimulationRequest) -> dict:
-    return {
+def _simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = None) -> dict:
+    payload = {
         "reservationKey": req.reservationKey,
         "labId": req.labId,
         "parameters": req.parameters,
         "options": req.options,
     }
+    if sim_id:
+        payload["simId"] = sim_id
+    return payload
 
 
 def _ensure_local_execution_backend(feature_name: str):
@@ -837,19 +840,22 @@ def _ensure_local_execution_backend(feature_name: str):
 async def _stream_station_simulation(request: Request, req: SimulationRequest, claims: dict):
     station_backend = _get_station_backend()
     authorization = _extract_authorization_header(request)
+    station_backend.build_authorized_context(
+        claims=claims,
+        requested_lab_id=req.labId,
+        requested_reservation_key=req.reservationKey,
+    )
+    sim_id = uuid4().hex
+    # The gateway records the accepted job before releasing it to the Station.
+    # A failed Station call is therefore an accepted-but-not-released job, not
+    # work that ran without durable evidence.
+    await _record_browser_session_started(request, claims, sim_id)
     client, response = await station_backend.open_authorized_simulation_stream(
         claims=claims,
-        request_payload=_simulation_request_payload(req),
+        request_payload=_simulation_request_payload(req, sim_id),
         authorization=authorization,
     )
     media_type = response.headers.get("content-type") or "application/x-ndjson"
-
-    try:
-        await _record_browser_session_started(request, claims, uuid4().hex)
-    except Exception:
-        await response.aclose()
-        await client.aclose()
-        raise
 
     async def _forward_stream():
         try:
@@ -1426,6 +1432,7 @@ if _fmu_backend.supports_local_execution:
         acquire_slot=_acquire_slot,
         release_slot=_release_slot,
         redeem_session_ticket=_redeem_session_ticket,
+        issue_session_ticket=_issue_session_ticket,
         confirm_session_started=_confirm_fmu_session_started,
         ws_session_queue_size=WS_SESSION_QUEUE_SIZE,
         ws_heartbeat_seconds=WS_HEARTBEAT_SECONDS,
@@ -1445,6 +1452,7 @@ elif _fmu_backend.mode == "station":
         normalize_lab_id=_normalize_lab_id,
         coerce_epoch_seconds=_coerce_epoch_seconds,
         redeem_session_ticket=_redeem_session_ticket,
+        issue_session_ticket=_issue_session_ticket,
         confirm_session_started=_confirm_fmu_session_started,
         ws_cleanup_seconds=WS_CLEANUP_SECONDS,
         internal_ws_token=INTERNAL_WS_TOKEN,
@@ -1890,14 +1898,25 @@ async def run_simulation(
     """
     _enforce_fmu_claim(claims)
     if _fmu_backend.mode == "station":
-        result = await _get_station_backend().run_authorized_simulation(
+        station_backend = _get_station_backend()
+        station_backend.build_authorized_context(
             claims=claims,
-            request_payload=_simulation_request_payload(req),
+            requested_lab_id=req.labId,
+            requested_reservation_key=req.reservationKey,
+        )
+        sim_id = uuid4().hex
+        await _record_browser_session_started(request, claims, sim_id)
+        result = await station_backend.run_authorized_simulation(
+            claims=claims,
+            request_payload=_simulation_request_payload(req, sim_id),
             authorization=_extract_authorization_header(request),
         )
-        await _record_browser_session_started(
-            request, claims, str(result.get("simId") or uuid4().hex) if isinstance(result, dict) else uuid4().hex
-        )
+        if isinstance(result, dict):
+            result = dict(result)
+            # The gateway id is the durable observation key. A legacy Station
+            # response may contain its own executor id, but exposing it would
+            # make the evidence refer to a different job.
+            result["simId"] = sim_id
         return result
     _ensure_local_execution_backend("Simulation run endpoint")
 
@@ -1955,6 +1974,10 @@ async def run_simulation(
     future: Optional[Future] = None
     cleanup_deferred = False
     try:
+        # Durable observation is the acceptance gate. The executor is not
+        # released until it succeeds, so a failed observation cannot race with
+        # work that has already started.
+        await _record_browser_session_started(request, claims, sim_id)
         future = _executor.submit(
             _run_simulation,
             str(fmu_path),
@@ -1967,14 +1990,6 @@ async def run_simulation(
             solver_name,
         )
         _track_running_future(sim_id, future, lab_id, claims)
-        try:
-            # Worker acceptance is the first runtime fact that can justify SessionStarted.
-            await _record_browser_session_started(request, claims, sim_id)
-        except Exception:
-            if not future.done() and not future.cancel():
-                cleanup_deferred = True
-                future.add_done_callback(lambda _f, sid=sim_id: _finalize_simulation_tracking(sid))
-            raise
         try:
             sim_result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
         except asyncio.TimeoutError as exc:
@@ -2135,21 +2150,17 @@ async def stream_simulation(
     async def _event_stream():
         t0 = time.monotonic()
         cleanup_deferred = False
+        future: Optional[Future] = None
         _acquire_slot(lab_id)
         try:
+            # Observation is the durable acceptance gate; only then is the
+            # worker released and the `started` event exposed.
+            await _record_browser_session_started(request, claims, sim_id)
             future = _executor.submit(
                 _run_simulation, str(fmu_path), start_time, stop_time, step_size,
                 req.parameters, timeout, fmi_type, solver_name,
             )
             _track_running_future(sim_id, future, lab_id, claims)
-            try:
-                # Do not expose "started" until both worker acceptance and durable observation exist.
-                await _record_browser_session_started(request, claims, sim_id)
-            except Exception:
-                if not future.done() and not future.cancel():
-                    cleanup_deferred = True
-                    future.add_done_callback(lambda _f, sid=sim_id: _finalize_simulation_tracking(sid))
-                raise
             yield json.dumps({"type": "started", "simId": sim_id}) + "\n"
 
             # Heartbeat while simulation runs

@@ -159,8 +159,12 @@ def _patch_realtime_manager(monkeypatch):
         claims["reservationKey"] = reservation_key or claims["reservationKey"]
         return claims
 
+    async def _fake_issue(*, authorization: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
+        return "st_valid", _claims()["exp"]
+
     monkeypatch.setattr(_realtime_manager, "verify_jwt_token", _fake_verify)
     monkeypatch.setattr(_realtime_manager, "redeem_session_ticket", _fake_redeem)
+    monkeypatch.setattr(_realtime_manager, "issue_session_ticket", _fake_issue, raising=False)
     confirmation = AsyncMock(return_value=True)
     monkeypatch.setattr(_realtime_manager, "confirm_session_started", confirmation, raising=False)
     monkeypatch.setattr(_realtime_manager, "resolve_fmu_path", lambda _name: Path("/tmp/test.fmu"))
@@ -256,6 +260,30 @@ def test_ws_create_with_session_ticket_without_bearer(_patch_realtime_manager):
         assert created["type"] == "session.created"
         assert created["sessionId"].startswith("sess_")
 
+    confirmation.assert_awaited_once()
+    assert confirmation.await_args.kwargs["session_ticket"] == "st_valid"
+    assert confirmation.await_args.kwargs["session_id"] == created["sessionId"]
+
+
+def test_ws_bearer_create_issues_ticket_and_confirms_before_session_created(_patch_realtime_manager, monkeypatch):
+    confirmation = _patch_realtime_manager
+    issue_ticket = AsyncMock(return_value=("st_valid", _claims()["exp"]))
+    monkeypatch.setattr(_realtime_manager, "issue_session_ticket", issue_ticket, raising=False)
+
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        ws.send_text(json.dumps({
+            "type": "session.create",
+            "requestId": "req-bearer-ticket",
+            "labId": "1",
+            "reservationKey": "res-1",
+        }))
+        created = ws.receive_json()
+
+    assert created["type"] == "session.created"
+    issue_ticket.assert_awaited_once()
+    assert issue_ticket.await_args.kwargs["authorization"] == "Bearer test-token"
+    assert issue_ticket.await_args.kwargs["lab_id"] == "1"
+    assert issue_ticket.await_args.kwargs["reservation_key"] == "res-1"
     confirmation.assert_awaited_once()
     assert confirmation.await_args.kwargs["session_ticket"] == "st_valid"
     assert confirmation.await_args.kwargs["session_id"] == created["sessionId"]

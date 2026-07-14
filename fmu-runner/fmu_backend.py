@@ -106,6 +106,7 @@ class StationFmuBackend(BaseFmuBackend):
         access_key: str,
         lab_id: Optional[str],
         reservation_key: Optional[str],
+        sim_id: Optional[str] = None,
         parameters: Optional[dict[str, Any]] = None,
         options: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
@@ -115,6 +116,8 @@ class StationFmuBackend(BaseFmuBackend):
             "parameters": parameters or {},
             "options": options or {},
         }
+        if sim_id:
+            payload["simId"] = sim_id
         if lab_id:
             payload["labId"] = lab_id
         if reservation_key:
@@ -287,6 +290,7 @@ class StationFmuBackend(BaseFmuBackend):
             access_key=access_key,
             lab_id=context["labId"],
             reservation_key=context["reservationKey"],
+            sim_id=request_payload.get("simId"),
             parameters=request_payload.get("parameters"),
             options=request_payload.get("options"),
         )
@@ -331,6 +335,7 @@ class StationFmuBackend(BaseFmuBackend):
             access_key=access_key,
             lab_id=context["labId"],
             reservation_key=context["reservationKey"],
+            sim_id=request_payload.get("simId"),
             parameters=request_payload.get("parameters"),
             options=request_payload.get("options"),
         )

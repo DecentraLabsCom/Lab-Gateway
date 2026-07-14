@@ -866,11 +866,11 @@ def test_run_executes_simulation(mock_exec, mock_md, mock_resolve, _stub_browser
     mock_md.return_value = md_obj
     mock_exec.submit.return_value = _make_future(_make_run_result())
 
-    async def _assert_worker_already_started(*_args, **_kwargs):
-        assert mock_exec.submit.called
+    async def _assert_worker_not_started_yet(*_args, **_kwargs):
+        assert not mock_exec.submit.called
         return True
 
-    _stub_browser_session_observation.side_effect = _assert_worker_already_started
+    _stub_browser_session_observation.side_effect = _assert_worker_not_started_yet
 
     response = client.post("/api/v1/simulations/run", json={
         "labId": "1",
@@ -909,7 +909,7 @@ def test_run_does_not_observe_when_worker_submission_fails(
     })
 
     assert response.status_code == 500
-    _stub_browser_session_observation.assert_not_awaited()
+    _stub_browser_session_observation.assert_awaited_once()
 
 
 @patch("main._resolve_fmu_path")

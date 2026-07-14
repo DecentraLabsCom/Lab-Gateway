@@ -84,7 +84,7 @@ The SAML assertion itself is sent only to the consumer backend for check-in vali
 
 `POST /auth/checkin-institutional` validates the Marketplace JWT, SAML binding, PUC, payer institution, reservation state, and reservation window before submitting the on-chain authorization transaction. It acknowledges the submission with a transaction hash; it does not keep the browser flow blocked waiting for a receipt.
 
-The institutional check-in outbox separates transaction submission from receipt monitoring. Its lifecycle is `PENDING`, `SUBMITTING`, `SUBMITTED`, `MINED_SUCCESS`, `MINED_FAILED`, `RETRY`, and `FAILED`. The request that creates a local check-in immediately claims and broadcasts it before provider provisioning begins; the required scheduled worker handles retries and crash recovery. The signing wallet's nonce reservation and transaction broadcast are serialized durably per wallet, while provisioning and status polling remain concurrent across reservations.
+The institutional check-in outbox separates transaction submission from receipt monitoring. Its lifecycle is `PENDING`, `SUBMITTING`, `SUBMITTED`, `MINED_SUCCESS`, `MINED_FAILED`, `RETRY`, and `FAILED`. The request that creates a local check-in immediately claims and dispatches it before provider provisioning begins; the required scheduled worker handles retries and crash recovery. The signing wallet persists the signed raw transaction and its locally computed hash before the first RPC, so a later SQL failure cannot lose the broadcast identity. The signing wallet's nonce reservation and transaction broadcast are serialized durably per wallet, while provisioning and status polling remain concurrent across reservations.
 
 ### 3. Provider access is gated on chain
 
@@ -130,15 +130,31 @@ are durable. A rejected tunnel request, a failed Guacamole token or an unavailab
 remote desktop creates no economic evidence.
 
 FMU ticket redemption only authenticates and resolves claims; it never records a
-session. The runner first obtains a real runtime acceptance signal: a local worker
-must accept the simulation, or the realtime/station component must return
-`session.created`. It then submits a separate authenticated observation whose
+session. The runner first durably records the accepted job, and only then
+releases local or station execution. Realtime `session.created` is emitted only
+after the separate authenticated observation succeeds; that observation's
 gateway identity is derived from the observer JWT rather than request data. The
 provider correlates either Guacamole or FMU evidence with
 `access_credential_audit`, creates an EIP-712 `SessionStarted` attestation and
 persists it locally. `SessionStarted` and all other institutional-wallet senders
-reserve nonces through the same chain-scoped durable allocator. Receipt monitors
-handle mining and same-nonce replacements without blocking runtime startup.
+reserve nonces through the same chain-scoped durable allocator. Generic intent,
+lab-admin and event-listener sends persist their signed attempt before broadcast,
+reuse the same nonce for replacements and block later allocations until an
+uncertain attempt is reconciled. Receipt monitors handle mining and same-nonce
+replacements without blocking runtime startup.
+
+FMU one-shot and streaming jobs use the same release gate: the gateway first
+validates the request and durably records the accepted job, then releases the
+local executor or Station POST. A failed observation never starts work; a
+subsequent Station failure is an accepted-but-not-released job that remains
+visible for reconciliation rather than an unobserved execution.
+
+Realtime `session.create` follows the same invariant: an external bearer is not
+an alternative to the ticket. If the generated runtime arrives with only the
+`FMU_SESSION` bearer, the runner issues and redeems a reservation-scoped ticket
+server-side and records the observation before returning `session.created`. The
+Station proxy confirms only after the Station backend accepts the forwarded
+session, while the internal Station hop never creates a second observation.
 
 For Guacamole, OpenResty enforces JWT expiry every 10 seconds. At `exp`, it closes any active tunnel and revokes the Guacamole auth token even when no tunnel is open. JWT-derived security mappings remain until `exp + API_SESSION_TIMEOUT + 5 minutes`, longer than Guacamole can retain an inactive auth token. A reservation-scoped token without its mapping is rejected; retention supports cleanup and never extends browser or Guacamole authorization.
 

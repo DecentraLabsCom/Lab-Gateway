@@ -39,6 +39,9 @@ def _stub_browser_session_observation(monkeypatch):
 
 
 class _StationBackendStub:
+    def build_authorized_context(self, *, claims, requested_lab_id=None, requested_reservation_key=None):
+        return {"claims": claims, "labId": requested_lab_id, "reservationKey": requested_reservation_key}
+
     async def run_authorized_simulation(self, *, claims, request_payload, authorization=None):
         self.run_call = {
             "claims": claims,
@@ -95,9 +98,52 @@ def test_run_station_mode_forwards_request(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["simId"] == "sim-station-1"
+    assert response.json()["simId"]
     assert station_backend.run_call["authorization"] == "Bearer station-token"
     assert station_backend.run_call["request_payload"]["reservationKey"] == "res-1"
+
+
+def test_run_station_records_observation_before_releasing_job(monkeypatch):
+    station_backend = _StationBackendStub()
+    events = []
+
+    async def observe(*_args, **_kwargs):
+        events.append("observed")
+
+    async def run(*, claims, request_payload, authorization=None):
+        events.append("released")
+        return {"status": "completed"}
+
+    station_backend.run_authorized_simulation = run
+    monkeypatch.setattr(main, "_record_browser_session_started", observe)
+    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(main, "_get_station_backend", lambda: station_backend)
+
+    response = client.post("/api/v1/simulations/run", json={"labId": "1"})
+
+    assert response.status_code == 200
+    assert events == ["observed", "released"]
+
+
+def test_station_observation_failure_never_releases_job(monkeypatch):
+    station_backend = _StationBackendStub()
+    released = []
+
+    async def observe(*_args, **_kwargs):
+        raise RuntimeError("observation unavailable")
+
+    async def run(*, claims, request_payload, authorization=None):
+        released.append(True)
+        return {"status": "completed"}
+
+    station_backend.run_authorized_simulation = run
+    monkeypatch.setattr(main, "_record_browser_session_started", observe)
+    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(main, "_get_station_backend", lambda: station_backend)
+
+    with pytest.raises(RuntimeError, match="observation unavailable"):
+        client.post("/api/v1/simulations/run", json={"labId": "1"})
+    assert released == []
 
 
 def test_stream_station_mode_forwards_request(monkeypatch):

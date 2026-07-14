@@ -166,6 +166,7 @@ async def test_station_backend_forwards_run_request(monkeypatch):
         request_payload={
             "labId": "1",
             "reservationKey": "res-1",
+            "simId": "sim-gateway-1",
             "parameters": {"u": 1.0},
             "options": {"stopTime": 2.0},
         },
@@ -177,6 +178,7 @@ async def test_station_backend_forwards_run_request(monkeypatch):
     assert captured["authorization"] == "Bearer abc"
     assert captured["payload"]["claims"]["accessKey"] == "demo.fmu"
     assert captured["payload"]["reservationKey"] == "res-1"
+    assert captured["payload"]["simId"] == "sim-gateway-1"
 
 
 def test_station_backend_builds_internal_session_message():

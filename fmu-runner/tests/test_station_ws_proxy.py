@@ -147,9 +147,17 @@ def _build_manager():
 
     async def _fake_redeem(*, session_ticket: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
         assert session_ticket == "st_valid"
-        assert lab_id == "1"
-        assert reservation_key == "res-1"
-        return _claims()
+        if lab_id is not None:
+            assert lab_id == "1"
+        if reservation_key is not None:
+            assert reservation_key == "res-1"
+        claims = _claims()
+        claims["reservationKey"] = reservation_key or claims["reservationKey"]
+        return claims
+
+    async def _fake_issue(*, authorization: str, lab_id: str | None, reservation_key: str | None, request_id: str | None = None):
+        assert authorization == "Bearer test-token"
+        return "st_valid", 4102444800
 
     async def _fake_confirm(**_kwargs):
         return True
@@ -166,6 +174,7 @@ def _build_manager():
         normalize_lab_id=main._normalize_lab_id,
         coerce_epoch_seconds=main._coerce_epoch_seconds,
         redeem_session_ticket=_fake_redeem,
+        issue_session_ticket=_fake_issue,
         confirm_session_started=_fake_confirm,
         ws_cleanup_seconds=60,
         internal_ws_token="gateway-internal",
@@ -220,6 +229,53 @@ def test_station_ws_session_create_redeems_ticket_and_forwards_context(monkeypat
         "session_id": "sess_station_1",
         "reservation_key": "res-1",
         "request_id": "req-create",
+    }]
+
+
+def test_station_bearer_create_issues_ticket_and_confirms_after_station_created(monkeypatch):
+    manager = _build_manager()
+    fake_station = _FakeStationConnection()
+    confirmations = []
+    issued = []
+
+    async def _fake_connect(_headers):
+        return fake_station
+
+    async def _issue_ticket(**kwargs):
+        issued.append(kwargs)
+        return "st_valid", 4102444800
+
+    async def _confirm(**kwargs):
+        confirmations.append(kwargs)
+        return True
+
+    monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    manager.issue_session_ticket = _issue_ticket
+    manager.confirm_session_started = _confirm
+    monkeypatch.setattr(main, "_realtime_manager", manager)
+
+    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+        ws.send_text(json.dumps({
+            "type": "session.create",
+            "requestId": "req-bearer-ticket",
+            "labId": "1",
+            "reservationKey": "res-1",
+        }))
+        payload = ws.receive_json()
+
+    assert payload["type"] == "session.created"
+    assert issued == [{
+        "authorization": "Bearer test-token",
+        "lab_id": "1",
+        "reservation_key": "res-1",
+        "request_id": "req-bearer-ticket",
+    }]
+    assert confirmations == [{
+        "session_ticket": "st_valid",
+        "claims": _claims(),
+        "session_id": "sess_station_1",
+        "reservation_key": "res-1",
+        "request_id": "req-bearer-ticket",
     }]
 
 
