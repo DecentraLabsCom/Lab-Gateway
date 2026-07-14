@@ -89,6 +89,13 @@ runner.describe("Lab content OpenResty configuration", function()
         runner.assert.truthy(block:find("proxy_ssl_server_name on;", 1, true))
         runner.assert.truthy(block:find("proxy_pass $backend_lab_admin;", 1, true))
     end)
+
+    runner.it("overwrites forwarded client headers before proxying", function()
+        local conf = resolve_conf_path()
+
+        runner.assert.equals(nil, conf:find("proxy_add_x_forwarded_for", 1, true))
+        runner.assert.truthy(conf:find("proxy_set_header X-Forwarded-For $remote_addr;", 1, true))
+    end)
 end)
 
 return runner

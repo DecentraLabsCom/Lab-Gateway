@@ -82,9 +82,10 @@ The SAML assertion itself is sent only to the consumer backend for check-in vali
 
 ### 2. Consumer check-in is asynchronous with respect to mining
 
-`POST /auth/checkin-institutional` validates the Marketplace JWT, SAML binding, PUC, payer institution, reservation state, and reservation window before submitting the on-chain authorization transaction. It acknowledges the submission with a transaction hash; it does not keep the browser flow blocked waiting for a receipt.
+`POST /auth/checkin-institutional` validates the Marketplace JWT, SAML binding, PUC, payer institution, reservation state, and reservation window before submitting the on-chain authorization transaction. It normally acknowledges the submission with a transaction hash; it does not keep the browser flow blocked waiting for a receipt. If the institutional wallet is temporarily occupied by another durable transaction, it returns `202 CHECKIN_QUEUED` with `Retry-After` instead of turning nonce contention into a `500`. Marketplace treats that response as an accepted check-in and continues to the provider flow; it does not create a second check-in operation.
 
 The institutional check-in outbox separates transaction submission from receipt monitoring. Its lifecycle is `PENDING`, `SUBMITTING`, `SUBMITTED`, `MINED_SUCCESS`, `MINED_FAILED`, `RETRY`, and `FAILED`. The request that creates a local check-in immediately claims and dispatches it before provider provisioning begins; the required scheduled worker handles retries and crash recovery. The signing wallet persists the signed raw transaction and its locally computed hash before the first RPC, so a later SQL failure cannot lose the broadcast identity. The signing wallet's nonce reservation and transaction broadcast are serialized durably per wallet, while provisioning and status polling remain concurrent across reservations.
+If a pre-broadcast failure occurs after nonce reservation, `FAILED` remains a wallet barrier and a validated user retry reuses that nonce. Only `MINED_FAILED`, whose nonce was consumed on-chain, starts a new nonce generation.
 
 ### 3. Provider access is gated on chain
 

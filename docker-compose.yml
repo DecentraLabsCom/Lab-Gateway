@@ -81,6 +81,7 @@ services:
       - ./certbot/www:/var/www/certbot
       - ./openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
+      - ./openresty/real_ip.d:/etc/openresty/real_ip.d:ro
       - ./openresty/lua:/etc/openresty/lua:ro
       - ./web:/var/www/html:ro
       - ./lab-content:/var/www/lab-content:ro
