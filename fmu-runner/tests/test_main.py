@@ -116,7 +116,7 @@ def test_issue_session_ticket_uses_authorization_header_and_payload():
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client), patch("main.FMU_GATEWAY_ID", "gateway.example"):
+    with patch("main.httpx.AsyncClient", return_value=fake_client):
         ticket, expires_at = asyncio.run(
             _issue_session_ticket(
                 "Bearer token-123",

@@ -76,6 +76,7 @@ def test_delivers_observation_and_marks_it_sent(monkeypatch):
 
     assert worker.deliver_session_observation_outbox() == 1
     assert captured["json"]["observedAt"] == 1767225600
+    assert captured["json"]["reportedAt"] >= int(datetime.now(timezone.utc).timestamp()) - 2
     authorization = captured["headers"]["Authorization"]
     assert authorization.startswith("Bearer ")
     payload = authorization.removeprefix("Bearer ").split(".")[1]

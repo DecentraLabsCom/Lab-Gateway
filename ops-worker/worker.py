@@ -3189,8 +3189,8 @@ def _guacamole_admin_session() -> Optional[Tuple[str, str]]:
     return (token, data_source) if token else None
 
 
-def _guacamole_connection_history_observed(row: Mapping[str, Any]) -> bool:
-    """Return whether Guacamole durably recorded a connection for this token user.
+def _guacamole_connection_history_observed(row: Mapping[str, Any]) -> Optional[datetime]:
+    """Return the real Guacamole connection start for this token user.
 
     ``activeConnections`` is only a point-in-time view.  The history table keeps
     a row after a short-lived tunnel closes, which closes the polling gap while
@@ -3198,20 +3198,20 @@ def _guacamole_connection_history_observed(row: Mapping[str, Any]) -> bool:
     session from the same user.
     """
     if not GUACAMOLE_DB_ENGINE:
-        return False
+        return None
     username = str(row.get("username") or "").strip().lower()
     if not username:
-        return False
+        return None
     issued_at = to_utc(row.get("created_at"))
     expires_at = to_utc(row.get("expires_at"))
     if not issued_at or not expires_at:
-        return False
+        return None
     window_start = issued_at - timedelta(seconds=GUACAMOLE_HISTORY_LOOKBACK_SECONDS)
     try:
         with GUACAMOLE_DB_ENGINE.connect() as conn:
             found = conn.execute(
                 text("""
-                    SELECT 1
+                    SELECT start_date
                     FROM guacamole_connection_history
                     WHERE LOWER(username) = :username
                       AND start_date >= :window_start
@@ -3226,12 +3226,12 @@ def _guacamole_connection_history_observed(row: Mapping[str, Any]) -> bool:
                     "expires_at": expires_at.replace(tzinfo=None),
                 },
             ).first()
-            return found is not None
+            return to_utc(found[0]) if found is not None else None
     except Exception as exc:  # pylint: disable=broad-except
         # Older Guacamole schemas may not expose connection history.  The
         # activeConnections path remains a valid fallback in that case.
         logging.debug("Unable to query Guacamole connection history: %s", exc)
-        return False
+        return None
 
 
 def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> None:
@@ -3257,16 +3257,16 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
             SELECT token_hash, token_ciphertext, reservation_key, jwt_jti, gateway_id,
                    username, created_at, expires_at
             FROM guacamole_token_revocation_queue
-            WHERE status IN ('PENDING', 'RETRY')
+            WHERE status IN ('PENDING', 'RETRY', 'REVOKED')
               AND observed_at IS NULL
               AND expires_at > :evidence_cutoff
             ORDER BY created_at ASC
             LIMIT 100
         """), {"evidence_cutoff": evidence_cutoff}).mappings().all()
     for row in rows:
-        history_observed = _guacamole_connection_history_observed(row)
+        history_started_at = _guacamole_connection_history_observed(row)
         active_observed = str(row["username"]).lower() in active_users
-        if not active_observed and not history_observed:
+        if not active_observed and history_started_at is None:
             continue
         try:
             user_token = _decrypt_runtime_secret(str(row["token_ciphertext"]))
@@ -3282,6 +3282,7 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
         except Exception as exc:  # pylint: disable=broad-except
             logging.warning("Unable to validate Guacamole token: %s", exc)
             continue
+        observed_at = history_started_at or datetime.now(timezone.utc)
         accepted = enqueue_session_observation({
             "dedupKey": row["token_hash"],
             "reservationKey": row["reservation_key"],
@@ -3289,7 +3290,7 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
             "sessionId": f"guac:{row['token_hash']}",
             "gatewayId": row["gateway_id"],
             "accessType": "guacamole",
-            "observedAt": int(time.time()),
+            "observedAt": int(observed_at.timestamp()),
         })
         if accepted:
             with DB_ENGINE.begin() as conn:
@@ -3600,6 +3601,12 @@ def deliver_session_observation_outbox() -> int:
 
     delivered = 0
     for record in _claim_session_observation_outbox_rows():
+        try:
+            authorization = _session_observer_authorization()
+        except Exception as exc:  # pylint: disable=broad-except
+            _mark_session_observation_failure(record, f"observer authorization failed: {exc}")
+            continue
+        reported_at = int(time.time())
         payload = {
             "reservationKey": record["reservation_key"],
             "jwtJti": record["jwt_jti"],
@@ -3607,12 +3614,13 @@ def deliver_session_observation_outbox() -> int:
             "gatewayId": SESSION_OBSERVER_GATEWAY_ID,
             "accessType": record["access_type"],
             "observedAt": _session_observed_epoch(record["observed_at"]),
+            "reportedAt": reported_at,
         }
         try:
             response = requests.post(
                 ACCESS_AUDIT_URL,
                 json=payload,
-                headers={"Authorization": _session_observer_authorization()},
+                headers={"Authorization": authorization},
                 timeout=SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS,
             )
             body = response.json() if response.content else {}

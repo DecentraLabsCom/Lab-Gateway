@@ -92,12 +92,6 @@ def _default_access_audit_url() -> str:
 
 
 ACCESS_AUDIT_URL = os.getenv("ACCESS_AUDIT_URL", "").strip() or _default_access_audit_url()
-FMU_GATEWAY_ID = (
-    os.getenv("FMU_GATEWAY_ID")
-    or SESSION_OBSERVER_GATEWAY_ID
-    or os.getenv("SERVER_NAME")
-    or ""
-).strip().lower()
 FMU_PROXY_RUNTIME_PATH = os.getenv("FMU_PROXY_RUNTIME_PATH", "/app/fmu-proxy-runtime")
 FMU_PROXY_GATEWAY_WS_URL = os.getenv("FMU_PROXY_GATEWAY_WS_URL", "")
 FMU_PROXY_SIGNING_KEY = os.getenv("FMU_PROXY_SIGNING_KEY", "")

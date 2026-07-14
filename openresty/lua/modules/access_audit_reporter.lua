@@ -111,6 +111,7 @@ function _M.report_guacamole_session_observed(ngx_ctx, deps)
         return false
     end
 
+    local reported_at = ngx.time()
     local delivered, err = deliver_observation({
         dedupKey = session_hash,
         reservationKey = reservation_key,
@@ -118,7 +119,8 @@ function _M.report_guacamole_session_observed(ngx_ctx, deps)
         sessionId = "guac:" .. session_hash,
         gatewayId = (deps and deps.gateway_id) or os.getenv("GATEWAY_ID") or ngx.shared.config:get("server_name"),
         accessType = "guacamole",
-        observedAt = ngx.time(),
+        observedAt = reported_at,
+        reportedAt = reported_at,
     }, deps)
     if delivered then
         increment(dict, "metric:session_observation_ingest_success")

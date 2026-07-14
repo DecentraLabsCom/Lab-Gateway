@@ -44,6 +44,7 @@ runner.describe("Access audit reporter", function()
         runner.assert.equals("gateway-a", payload.gatewayId)
         runner.assert.equals("guacamole", payload.accessType)
         runner.assert.equals(1234, payload.observedAt)
+        runner.assert.equals(1234, payload.reportedAt)
     end)
 
     runner.it("keeps a stable deduplication key for repeated websocket signals", function()
