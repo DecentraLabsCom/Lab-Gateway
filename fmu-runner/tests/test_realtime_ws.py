@@ -26,6 +26,7 @@ def _claims():
         "resourceType": "fmu",
         "reservationKey": "res-1",
         "pucHash": "puc-user-1",
+        "targetGatewayId": "gateway-a",
         "nbf": 0,
         "exp": 4102444800,  # 2100-01-01
     }
@@ -1205,6 +1206,9 @@ def test_realtime_session_matches_claims_and_reservation_window(monkeypatch):
 
     assert session.matches_claims(_claims()) is True
     assert session.matches_claims(_claims_with(sub="other")) is False
+    assert session.matches_claims(_claims_with(reservationKey="res-other")) is False
+    assert session.matches_claims(_claims_with(pucHash="puc-other")) is False
+    assert session.matches_claims(_claims_with(targetGatewayId="other-gateway")) is False
 
     monkeypatch.setattr("realtime_ws.time.time", lambda: 5)
     session.nbf = 10

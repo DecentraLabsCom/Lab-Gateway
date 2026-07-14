@@ -12,6 +12,10 @@ from typing import Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 
+def _normalize_binding(value) -> str:
+    return str(value or "").strip().lower()
+
+
 @dataclass
 class _GatewayStationSession:
     session_id: str
@@ -25,6 +29,15 @@ class _GatewayStationSession:
             str(claims.get("sub") or "") == str(self.claims.get("sub") or "")
             and get_claim_lab_id(claims) == self.lab_id
             and str(claims.get("accessKey") or claims.get("fmuFileName") or "") == self.access_key
+            and _normalize_binding(claims.get("reservationKey")) == _normalize_binding(
+                self.claims.get("reservationKey")
+            )
+            and _normalize_binding(claims.get("pucHash")) == _normalize_binding(
+                self.claims.get("pucHash")
+            )
+            and _normalize_binding(claims.get("targetGatewayId")) == _normalize_binding(
+                self.claims.get("targetGatewayId")
+            )
         )
 
 

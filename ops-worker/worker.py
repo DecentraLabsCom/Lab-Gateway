@@ -129,6 +129,9 @@ GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS = max(
 GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS = max(
     1, int(os.getenv("GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS", "20"))
 )
+GUACAMOLE_HISTORY_LOOKBACK_SECONDS = max(
+    0, int(os.getenv("GUACAMOLE_HISTORY_LOOKBACK_SECONDS", "30"))
+)
 HEARTBEAT_SSE_INTERVAL_SECONDS = max(1, int(os.getenv("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")))
 DISCOVERY_TIMEOUT_SECONDS = max(0.2, float(os.getenv("OPS_DISCOVERY_TIMEOUT_SECONDS", "1.5")))
 DISCOVERY_WINRM_PORTS = [
@@ -3177,6 +3180,51 @@ def _guacamole_admin_session() -> Optional[Tuple[str, str]]:
     return (token, data_source) if token else None
 
 
+def _guacamole_connection_history_observed(row: Mapping[str, Any]) -> bool:
+    """Return whether Guacamole durably recorded a connection for this token user.
+
+    ``activeConnections`` is only a point-in-time view.  The history table keeps
+    a row after a short-lived tunnel closes, which closes the polling gap while
+    retaining the token-issued-at boundary needed to avoid matching an older
+    session from the same user.
+    """
+    if not GUACAMOLE_DB_ENGINE:
+        return False
+    username = str(row.get("username") or "").strip().lower()
+    if not username:
+        return False
+    issued_at = to_utc(row.get("created_at"))
+    expires_at = to_utc(row.get("expires_at"))
+    if not issued_at or not expires_at:
+        return False
+    window_start = issued_at - timedelta(seconds=GUACAMOLE_HISTORY_LOOKBACK_SECONDS)
+    try:
+        with GUACAMOLE_DB_ENGINE.connect() as conn:
+            found = conn.execute(
+                text("""
+                    SELECT 1
+                    FROM guacamole_connection_history
+                    WHERE LOWER(username) = :username
+                      AND start_date >= :window_start
+                      AND start_date <= :expires_at
+                      AND (end_date IS NULL OR end_date >= :window_start)
+                    ORDER BY start_date ASC
+                    LIMIT 1
+                """),
+                {
+                    "username": username,
+                    "window_start": window_start.replace(tzinfo=None),
+                    "expires_at": expires_at.replace(tzinfo=None),
+                },
+            ).first()
+            return found is not None
+    except Exception as exc:  # pylint: disable=broad-except
+        # Older Guacamole schemas may not expose connection history.  The
+        # activeConnections path remains a valid fallback in that case.
+        logging.debug("Unable to query Guacamole connection history: %s", exc)
+        return False
+
+
 def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> None:
     if not DB_ENGINE:
         return
@@ -3192,11 +3240,10 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
         for connection in (response.json() or {}).values()
         if isinstance(connection, dict)
     }
-    if not active_users:
-        return
     with DB_ENGINE.begin() as conn:
         rows = conn.execute(text("""
-            SELECT token_hash, token_ciphertext, reservation_key, jwt_jti, gateway_id, username
+            SELECT token_hash, token_ciphertext, reservation_key, jwt_jti, gateway_id,
+                   username, created_at, expires_at
             FROM guacamole_token_revocation_queue
             WHERE status IN ('PENDING', 'RETRY')
               AND observed_at IS NULL
@@ -3205,7 +3252,9 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
             LIMIT 100
         """)).mappings().all()
     for row in rows:
-        if str(row["username"]).lower() not in active_users:
+        history_observed = _guacamole_connection_history_observed(row)
+        active_observed = str(row["username"]).lower() in active_users
+        if not active_observed and not history_observed:
             continue
         try:
             user_token = _decrypt_runtime_secret(str(row["token_ciphertext"]))
@@ -3214,10 +3263,12 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
                 params={"token": user_token},
                 timeout=5,
             )
+            # History is durable evidence of a closed tunnel, but it must not
+            # bypass validation of the exact auth token that opened it.
             if token_response.status_code != 200:
                 continue
         except Exception as exc:  # pylint: disable=broad-except
-            logging.warning("Unable to validate active Guacamole token: %s", exc)
+            logging.warning("Unable to validate Guacamole token: %s", exc)
             continue
         accepted = enqueue_session_observation({
             "dedupKey": row["token_hash"],

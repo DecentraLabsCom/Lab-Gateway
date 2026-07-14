@@ -121,13 +121,16 @@ This removes the dependency on third-party cookies and prevents one tab from rep
 ## Session observation and expiry enforcement
 
 OpenResty never treats an access-phase WebSocket request as `SessionStarted`.
-Ops Worker polls Guacamole's `activeConnections`, matches an active temporary
-username to the encrypted auth-token record and verifies that exact token against
-Guacamole. Only this post-acceptance runtime fact enters the durable observation
-outbox. The outbox then delivers to `blockchain-services` with retry and marks an
-item sent only after both the audit row and signed `SessionStarted` attestation
-are durable. A rejected tunnel request, a failed Guacamole token or an unavailable
-remote desktop creates no economic evidence.
+Ops Worker correlates the encrypted auth-token record with both Guacamole's
+point-in-time `activeConnections` view and the durable
+`guacamole_connection_history` table. The history fallback closes the polling
+gap for a tunnel that opens and closes between two polls while retaining the
+reservation-scoped token window. Only this post-acceptance runtime fact enters
+the durable observation outbox. The outbox then delivers to
+`blockchain-services` with retry and marks an item sent only after both the audit
+row and signed `SessionStarted` attestation are durable. A rejected tunnel
+request, a failed Guacamole token or an unavailable remote desktop creates no
+economic evidence.
 
 FMU ticket redemption only authenticates and resolves claims; it never records a
 session. The runner first durably records the accepted job, and only then

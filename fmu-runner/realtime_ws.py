@@ -15,6 +15,10 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from fmpy import extract, instantiate_fmu, read_model_description
 
 
+def _normalize_binding(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 @dataclass
 class _StreamSubscription:
     variables: Optional[list[str]] = None
@@ -52,6 +56,9 @@ class _RealtimeSession:
         self.sub = str(claims.get("sub") or "")
         self.lab_id = manager.get_claim_lab_id(claims) or "unknown"
         self.access_key = str(claims.get("accessKey") or claims.get("fmuFileName") or "")
+        self.reservation_key = _normalize_binding(claims.get("reservationKey"))
+        self.puc_hash = _normalize_binding(claims.get("pucHash"))
+        self.target_gateway_id = _normalize_binding(claims.get("targetGatewayId"))
         self.nbf = manager.coerce_epoch_seconds(claims.get("nbf"))
         self.exp = manager.coerce_epoch_seconds(claims.get("exp"))
         self.fmu_path = fmu_path
@@ -92,8 +99,13 @@ class _RealtimeSession:
         return self._closed
 
     def matches_claims(self, claims: dict) -> bool:
-        return str(claims.get("sub") or "") == self.sub and self.manager.get_claim_lab_id(claims) == self.lab_id and (
-            str(claims.get("accessKey") or claims.get("fmuFileName") or "") == self.access_key
+        return (
+            str(claims.get("sub") or "") == self.sub
+            and self.manager.get_claim_lab_id(claims) == self.lab_id
+            and str(claims.get("accessKey") or claims.get("fmuFileName") or "") == self.access_key
+            and _normalize_binding(claims.get("reservationKey")) == self.reservation_key
+            and _normalize_binding(claims.get("pucHash")) == self.puc_hash
+            and _normalize_binding(claims.get("targetGatewayId")) == self.target_gateway_id
         )
 
     def ensure_reservation_window(self):

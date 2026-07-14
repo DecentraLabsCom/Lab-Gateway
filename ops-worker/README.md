@@ -12,6 +12,7 @@ This service handles remote lab host operations for the gateway:
 - `worker.py`: Flask API and scheduler.
 - `hosts.json` (`OPS_CONFIG`): host inventory and credentials references.
 - MySQL tables from `mysql/002-labstation-ops.sql`, stored in the `BLOCKCHAIN_MYSQL_DATABASE` schema alongside `lab_reservations`.
+- Guacamole observations use both the live `activeConnections` API and durable `guacamole_connection_history`, so a tunnel that opens and closes between polls can still produce evidence.
 
 ## Quick start (dev)
 

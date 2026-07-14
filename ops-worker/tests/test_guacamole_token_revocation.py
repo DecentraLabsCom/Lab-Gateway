@@ -173,3 +173,57 @@ def test_reconciliation_does_not_emit_evidence_for_a_rejected_or_inactive_tunnel
     worker._reconcile_guacamole_observations("admin-token", "mysql")
 
     assert observed == []
+
+
+def test_reconciliation_uses_guacamole_connection_history_for_short_sessions(monkeypatch):
+    engine = create_revocation_engine()
+    history_engine = create_engine("sqlite:///:memory:", future=True)
+    with history_engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE guacamole_connection_history (
+                history_id INTEGER PRIMARY KEY,
+                username VARCHAR(128) NOT NULL,
+                start_date DATETIME NOT NULL,
+                end_date DATETIME NULL
+            )
+        """))
+    monkeypatch.setattr(worker, "DB_ENGINE", engine)
+    monkeypatch.setattr(worker, "GUACAMOLE_DB_ENGINE", history_engine)
+    monkeypatch.setattr(worker, "_FERNET", Fernet(Fernet.generate_key()))
+    assert worker.enqueue_guacamole_token_revocation(payload(1893456000))
+
+    with engine.begin() as conn:
+        issued_at = conn.execute(text(
+            "SELECT created_at FROM guacamole_token_revocation_queue"
+        )).scalar_one()
+    with history_engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO guacamole_connection_history (history_id, username, start_date, end_date) "
+            "VALUES (1, :username, :start_date, :end_date)"
+        ), {
+            "username": "dlabs-res-user",
+            "start_date": issued_at,
+            "end_date": issued_at,
+        })
+
+    with engine.begin() as conn:
+        queue_row = conn.execute(text(
+            "SELECT username, created_at, expires_at FROM guacamole_token_revocation_queue"
+        )).mappings().one()
+    assert worker._guacamole_connection_history_observed(queue_row) is True
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {}
+
+    observed = []
+    monkeypatch.setattr(worker.requests, "get", lambda *_, **__: Response())
+    monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
+
+    worker._reconcile_guacamole_observations("admin-token", "mysql")
+
+    assert len(observed) == 1
+    assert observed[0]["sessionId"].startswith("guac:")

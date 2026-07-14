@@ -130,6 +130,7 @@ Marketplace upload is disabled by design.
 - `sim.outputs` includes `seq` and `dropped` for backpressure visibility.
 - Keepalive/telemetry events: `session.pong`, `session.heartbeat`, `session.expiring`.
 - External `session.create` always passes through a reservation-bounded, reusable `sessionTicket`. Ticket-only clients provide it directly; when a bearer is already present (for example from `FMU_SESSION`), the runner issues and redeems the ticket server-side. The durable session observation is recorded before `session.created` is returned. Internal Station hops do not issue a second ticket; the gateway proxy confirms the observation after Station accepts the session.
+- `session.attach` is bound to the original `sub`, lab, FMU access key, `reservationKey`, `pucHash`, and `targetGatewayId`; a bearer for another overlapping reservation cannot reattach to the session.
 - Explicit rate limits:
   - Proxy download endpoint (`PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE`, default `20`)
   - Realtime `session.create` (`WS_CREATE_RATE_LIMIT_PER_MINUTE`, default `30`)
@@ -147,7 +148,7 @@ Marketplace upload is disabled by design.
   - `POST /internal/fmu/simulations/stream/{accessKey}`
 - Internal realtime target:
   - `WS /internal/fmu/sessions`
-- `session.create` and `session.attach` are forwarded with `gatewayContext` containing validated claims plus effective `accessKey`, `labId` and `reservationKey`.
+- `session.create` and `session.attach` are forwarded with `gatewayContext` containing validated claims plus effective `accessKey`, `labId`, `reservationKey`, `pucHash`, and `targetGatewayId`.
 - `cancel`, `history` and `result` remain local-only endpoints for now; in `station` mode they return `501` until their internal contract exists.
 
 ## Planned Refactor

@@ -28,6 +28,7 @@ def _claims():
         "resourceType": "fmu",
         "reservationKey": "res-1",
         "pucHash": "puc-user-1",
+        "targetGatewayId": "gateway-a",
         "nbf": 0,
         "exp": 4102444800,
     }
@@ -180,6 +181,22 @@ def _build_manager():
         internal_ws_token="gateway-internal",
         ws_create_rate_limit_per_minute=30,
     )
+
+
+def test_station_session_matches_reservation_puc_and_gateway_claims():
+    session = _GatewayStationSession(
+        session_id="sess-1",
+        claims=_claims(),
+        lab_id="1",
+        access_key="test.fmu",
+        exp=4102444800,
+    )
+    manager = _build_manager()
+
+    assert session.matches_claims(_claims(), manager.get_claim_lab_id) is True
+    assert session.matches_claims(_claims_with(reservationKey="res-other"), manager.get_claim_lab_id) is False
+    assert session.matches_claims(_claims_with(pucHash="puc-other"), manager.get_claim_lab_id) is False
+    assert session.matches_claims(_claims_with(targetGatewayId="gateway-other"), manager.get_claim_lab_id) is False
 
 
 def _claims_with(**updates):
