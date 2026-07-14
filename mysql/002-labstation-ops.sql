@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS reservation_operations (
 CREATE TABLE IF NOT EXISTS guacamole_token_revocation_queue (
     token_hash CHAR(64) NOT NULL,
     token_ciphertext TEXT NOT NULL,
+    token_validated_at DATETIME NULL,
     username VARCHAR(128) NOT NULL,
     reservation_key VARCHAR(128) NOT NULL,
     jwt_jti VARCHAR(128) NOT NULL,

@@ -3122,10 +3122,10 @@ def enqueue_guacamole_token_revocation(payload: Mapping[str, Any]) -> bool:
         with DB_ENGINE.begin() as conn:
             conn.execute(text("""
                 INSERT INTO guacamole_token_revocation_queue (
-                    token_hash, token_ciphertext, username, reservation_key,
+                    token_hash, token_ciphertext, token_validated_at, username, reservation_key,
                     jwt_jti, gateway_id, expires_at, status, next_attempt_at
                 ) VALUES (
-                    :token_hash, :token_ciphertext, :username, :reservation_key,
+                    :token_hash, :token_ciphertext, CURRENT_TIMESTAMP, :username, :reservation_key,
                     :jwt_jti, :gateway_id, :expires_at, 'PENDING', CURRENT_TIMESTAMP
                 )
             """), values)
@@ -3136,6 +3136,7 @@ def enqueue_guacamole_token_revocation(payload: Mapping[str, Any]) -> bool:
                 conn.execute(text("""
                     UPDATE guacamole_token_revocation_queue
                     SET token_ciphertext = :token_ciphertext,
+                        token_validated_at = COALESCE(token_validated_at, CURRENT_TIMESTAMP),
                         username = :username,
                         reservation_key = :reservation_key,
                         jwt_jti = :jwt_jti,
@@ -3202,7 +3203,7 @@ def _guacamole_connection_history_observed(row: Mapping[str, Any]) -> Optional[d
     username = str(row.get("username") or "").strip().lower()
     if not username:
         return None
-    issued_at = to_utc(row.get("created_at"))
+    issued_at = to_utc(row.get("token_validated_at") or row.get("created_at"))
     expires_at = to_utc(row.get("expires_at"))
     if not issued_at or not expires_at:
         return None
@@ -3254,8 +3255,8 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
     )
     with DB_ENGINE.begin() as conn:
         rows = conn.execute(text("""
-            SELECT token_hash, token_ciphertext, reservation_key, jwt_jti, gateway_id,
-                   username, created_at, expires_at
+            SELECT token_hash, token_ciphertext, token_validated_at, reservation_key,
+                   jwt_jti, gateway_id, username, created_at, expires_at, status
             FROM guacamole_token_revocation_queue
             WHERE status IN ('PENDING', 'RETRY', 'REVOKED')
               AND observed_at IS NULL
@@ -3268,20 +3269,27 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
         active_observed = str(row["username"]).lower() in active_users
         if not active_observed and history_started_at is None:
             continue
-        try:
-            user_token = _decrypt_runtime_secret(str(row["token_ciphertext"]))
-            token_response = requests.get(
-                f"{GUAC_API_URL}/session/data/{quote(data_source, safe='')}",
-                params={"token": user_token},
-                timeout=5,
-            )
-            # History is durable evidence of a closed tunnel, but it must not
-            # bypass validation of the exact auth token that opened it.
-            if token_response.status_code != 200:
+        historical_after_revocation = (
+            str(row.get("status") or "").upper() == "REVOKED"
+            and history_started_at is not None
+            and row.get("token_validated_at") is not None
+        )
+        if not historical_after_revocation:
+            try:
+                user_token = _decrypt_runtime_secret(str(row["token_ciphertext"]))
+                token_response = requests.get(
+                    f"{GUAC_API_URL}/session/data/{quote(data_source, safe='')}",
+                    params={"token": user_token},
+                    timeout=5,
+                )
+                # Before revocation, the exact token must still be accepted.
+                # After revocation, a pre-revocation validation marker plus a
+                # matching historical connection is the durable proof.
+                if token_response.status_code != 200:
+                    continue
+            except Exception as exc:  # pylint: disable=broad-except
+                logging.warning("Unable to validate Guacamole token: %s", exc)
                 continue
-        except Exception as exc:  # pylint: disable=broad-except
-            logging.warning("Unable to validate Guacamole token: %s", exc)
-            continue
         observed_at = history_started_at or datetime.now(timezone.utc)
         accepted = enqueue_session_observation({
             "dedupKey": row["token_hash"],

@@ -11,6 +11,7 @@ def create_revocation_engine():
             CREATE TABLE guacamole_token_revocation_queue (
                 token_hash VARCHAR(64) PRIMARY KEY,
                 token_ciphertext TEXT NOT NULL,
+                token_validated_at DATETIME NULL,
                 username VARCHAR(128) NOT NULL,
                 reservation_key VARCHAR(80) NOT NULL,
                 jwt_jti VARCHAR(128) NOT NULL,
@@ -57,8 +58,12 @@ def test_ingest_encrypts_the_guacamole_token(monkeypatch):
         ciphertext = conn.execute(text(
             "SELECT token_ciphertext FROM guacamole_token_revocation_queue"
         )).scalar_one()
+        validated_at = conn.execute(text(
+            "SELECT token_validated_at FROM guacamole_token_revocation_queue"
+        )).scalar_one()
     assert "guac-secret-token" not in ciphertext
     assert worker._decrypt_runtime_secret(ciphertext) == "guac-secret-token"
+    assert validated_at is not None
 
 
 def test_duplicate_reopens_a_terminal_revocation(monkeypatch):
@@ -253,7 +258,8 @@ def test_reconciliation_keeps_recently_expired_tokens_in_the_evidence_window(mon
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE guacamole_token_revocation_queue
-            SET created_at = datetime('now', '-120 seconds'),
+            SET token_validated_at = datetime('now', '-120 seconds'),
+                created_at = datetime('now', '-120 seconds'),
                 expires_at = datetime('now', '-10 seconds')
         """))
         queue_row = conn.execute(text(
@@ -304,7 +310,8 @@ def test_reconciliation_keeps_revoked_rows_eligible_until_evidence_retention_exp
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE guacamole_token_revocation_queue
-            SET status = 'REVOKED', created_at = datetime('now', '-120 seconds'),
+            SET status = 'REVOKED', token_validated_at = datetime('now', '-120 seconds'),
+                created_at = datetime('now', '-120 seconds'),
                 expires_at = datetime('now', '-10 seconds')
         """))
         row = conn.execute(text(
@@ -331,3 +338,61 @@ def test_reconciliation_keeps_revoked_rows_eligible_until_evidence_retention_exp
     worker._reconcile_guacamole_observations("admin-token", "mysql")
 
     assert len(observed) == 1
+
+
+def test_revoked_historical_evidence_does_not_require_the_revoked_token(monkeypatch):
+    engine = create_revocation_engine()
+    history_engine = create_engine("sqlite:///:memory:", future=True)
+    with history_engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE guacamole_connection_history (
+                history_id INTEGER PRIMARY KEY,
+                username VARCHAR(128) NOT NULL,
+                start_date DATETIME NOT NULL,
+                end_date DATETIME NULL
+            )
+        """))
+    monkeypatch.setattr(worker, "DB_ENGINE", engine)
+    monkeypatch.setattr(worker, "GUACAMOLE_DB_ENGINE", history_engine)
+    monkeypatch.setattr(worker, "_FERNET", Fernet(Fernet.generate_key()))
+    assert worker.enqueue_guacamole_token_revocation(payload(1893456000))
+
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE guacamole_token_revocation_queue
+            SET status = 'REVOKED', token_validated_at = datetime('now', '-120 seconds'),
+                created_at = datetime('now', '-120 seconds'),
+                expires_at = datetime('now', '-10 seconds')
+        """))
+    with history_engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO guacamole_connection_history "
+            "(history_id, username, start_date, end_date) "
+            "VALUES (1, :username, datetime('now', '-60 seconds'), datetime('now', '-20 seconds'))"
+        ), {"username": "dlabs-res-user"})
+
+    class Response:
+        def __init__(self, status_code, body=None):
+            self.status_code = status_code
+            self._body = body or {}
+
+        def json(self):
+            return self._body
+
+    requests_seen = []
+
+    def get(url, params, timeout):
+        requests_seen.append(url)
+        if url.endswith("/activeConnections"):
+            return Response(200, {})
+        return Response(401)
+
+    observed = []
+    monkeypatch.setattr(worker.requests, "get", get)
+    monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
+
+    worker._reconcile_guacamole_observations("admin-token", "mysql")
+
+    assert len(observed) == 1
+    assert observed[0]["reservationKey"] == "0xreservation"
+    assert not any(url.endswith("/session/data/mysql") for url in requests_seen)
