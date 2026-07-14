@@ -32,7 +32,6 @@ Start with [DecentraLabs Gateway](README.md) and [Deployment Architectures](docs
 
 - [eduGAIN Federation (EN)](docs/edugain/edugain-federation.md)
 - [Federación eduGAIN (ES)](docs/edugain/edugain-federacion.md)
-- [Canonical blockchain-services documentation](blockchain-services/SUMMARY.md)
 - [Ops Worker](ops-worker/README.md)
 
 ## FMU and native proxy

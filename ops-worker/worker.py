@@ -132,6 +132,9 @@ GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS = max(
 GUACAMOLE_HISTORY_LOOKBACK_SECONDS = max(
     0, int(os.getenv("GUACAMOLE_HISTORY_LOOKBACK_SECONDS", "30"))
 )
+GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS = max(
+    0, int(os.getenv("GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS", "300"))
+)
 HEARTBEAT_SSE_INTERVAL_SECONDS = max(1, int(os.getenv("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")))
 DISCOVERY_TIMEOUT_SECONDS = max(0.2, float(os.getenv("OPS_DISCOVERY_TIMEOUT_SECONDS", "1.5")))
 DISCOVERY_WINRM_PORTS = [
@@ -428,7 +431,13 @@ def to_utc(ts: Any) -> Optional[datetime]:
     try:
         # Handle trailing Z
         value = str(ts).replace("Z", "+00:00")
-        return datetime.fromisoformat(value).astimezone(timezone.utc)
+        parsed = datetime.fromisoformat(value)
+        # MySQL/SQLite rows are stored as UTC but are commonly returned as
+        # naive datetimes.  Treating them as local time shifts expiry windows
+        # on hosts outside UTC and can drop evidence near token expiration.
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
     except Exception:
         return None
 
@@ -3240,6 +3249,9 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
         for connection in (response.json() or {}).values()
         if isinstance(connection, dict)
     }
+    evidence_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        seconds=GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS
+    )
     with DB_ENGINE.begin() as conn:
         rows = conn.execute(text("""
             SELECT token_hash, token_ciphertext, reservation_key, jwt_jti, gateway_id,
@@ -3247,10 +3259,10 @@ def _reconcile_guacamole_observations(admin_token: str, data_source: str) -> Non
             FROM guacamole_token_revocation_queue
             WHERE status IN ('PENDING', 'RETRY')
               AND observed_at IS NULL
-              AND expires_at > CURRENT_TIMESTAMP
+              AND expires_at > :evidence_cutoff
             ORDER BY created_at ASC
             LIMIT 100
-        """)).mappings().all()
+        """), {"evidence_cutoff": evidence_cutoff}).mappings().all()
     for row in rows:
         history_observed = _guacamole_connection_history_observed(row)
         active_observed = str(row["username"]).lower() in active_users

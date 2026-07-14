@@ -452,6 +452,7 @@ services:
       - GUAC_ADMIN_PASS=${GUAC_ADMIN_PASS}
       - GUAC_API_URL=${GUAC_API_URL:-http://guacamole:8080/guacamole/api}
       - GUACAMOLE_HISTORY_LOOKBACK_SECONDS=${GUACAMOLE_HISTORY_LOOKBACK_SECONDS:-30}
+      - GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS=${GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS:-300}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
