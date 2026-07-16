@@ -31,7 +31,7 @@ The files here now implement a functional `win64` runtime:
 - native `WSS` transport on Windows via WinHTTP
 - native `WSS` transport on Linux via OpenSSL + raw sockets/WebSocket framing
 - native POSIX/OpenSSL `WSS` source path shared by Linux and Darwin
-- loopback/self-signed TLS tolerance for local Gateway development
+- certificate-chain and hostname validation for every WSS connection (including loopback)
 - a compiled `win64` DLL build in `build-win64/`
 - a reproducible `linux64` build in `build-linux64/`
 - end-to-end validation against the live Lab Gateway stack with `fmpy`

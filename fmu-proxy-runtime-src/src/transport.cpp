@@ -29,7 +29,6 @@ struct ParsedGatewayUrl {
     std::string path;
     INTERNET_PORT port = 0;
     bool secure = false;
-    bool allow_insecure_tls = false;
 };
 
 std::string ToLowerCopy(std::string value) {
@@ -37,11 +36,6 @@ std::string ToLowerCopy(std::string value) {
         return static_cast<char>(std::tolower(ch));
     });
     return value;
-}
-
-bool IsLoopbackHost(const std::string& host) {
-    const std::string normalized = ToLowerCopy(host);
-    return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1" || normalized == "[::1]";
 }
 
 ValueResult<ParsedGatewayUrl> ParseGatewayUrl(const std::string& url) {
@@ -149,7 +143,6 @@ ValueResult<ParsedGatewayUrl> ParseGatewayUrl(const std::string& url) {
             "Gateway URL host is empty");
     }
 
-    parsed.allow_insecure_tls = parsed.secure && IsLoopbackHost(parsed.host);
     return ValueResult<ParsedGatewayUrl>::Success(std::move(parsed));
 }
 
@@ -291,16 +284,6 @@ public:
                 return FailureFromLastError(
                     "TRANSPORT_CONNECT_FAILED",
                     "Failed to disable client certificate selection for secure websocket request");
-            }
-        }
-
-        if (parsed.value.allow_insecure_tls) {
-            DWORD security_flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA
-                | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
-                | SECURITY_FLAG_IGNORE_CERT_CN_INVALID
-                | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
-            if (!WinHttpSetOption(request_, WINHTTP_OPTION_SECURITY_FLAGS, &security_flags, sizeof(security_flags))) {
-                return FailureFromLastError("TRANSPORT_CONNECT_FAILED", "Failed to relax loopback TLS validation");
             }
         }
 
@@ -456,7 +439,6 @@ struct ParsedGatewayUrl {
     std::string path;
     std::uint16_t port = 0;
     bool secure = false;
-    bool allow_insecure_tls = false;
 };
 
 std::string ToLowerCopy(std::string value) {
@@ -464,11 +446,6 @@ std::string ToLowerCopy(std::string value) {
         return static_cast<char>(std::tolower(ch));
     });
     return value;
-}
-
-bool IsLoopbackHost(const std::string& host) {
-    const std::string normalized = ToLowerCopy(host);
-    return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1" || normalized == "[::1]";
 }
 
 ValueResult<ParsedGatewayUrl> ParseGatewayUrl(const std::string& url) {
@@ -576,7 +553,6 @@ ValueResult<ParsedGatewayUrl> ParseGatewayUrl(const std::string& url) {
             "Gateway URL host is empty");
     }
 
-    parsed.allow_insecure_tls = parsed.secure && IsLoopbackHost(parsed.host);
     return ValueResult<ParsedGatewayUrl>::Success(std::move(parsed));
 }
 
@@ -656,11 +632,6 @@ public:
         curl_easy_setopt(curl_, CURLOPT_HTTP_VERSION, static_cast<long>(CURL_HTTP_VERSION_1_1));
         curl_easy_setopt(curl_, CURLOPT_TIMEOUT_MS, 15000L);
         curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
-
-        if (parsed.value.allow_insecure_tls) {
-            curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 0L);
-            curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 0L);
-        }
 
         const CURLcode result = curl_easy_perform(curl_);
         if (result != CURLE_OK) {

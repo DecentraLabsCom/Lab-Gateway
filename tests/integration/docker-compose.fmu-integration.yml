@@ -51,6 +51,7 @@ services:
       GUAC_API_URL: http://guacamole:8080/guacamole/api
       AUTH_SERVICE_URL: http://blockchain-services:8080
       OPS_API_URL: http://ops-worker:5001
+      FMU_RUNNER_ENABLED: "true"
       LAB_MANAGER_TOKEN: integration-test-secret
       OPS_INTERNAL_AUTH_TOKEN: integration-ops-internal-secret
       OPS_INTERNAL_AUTH_HEADER: X-Ops-Internal-Token

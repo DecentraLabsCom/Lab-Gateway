@@ -38,7 +38,6 @@ struct ParsedGatewayUrl {
     std::string path;
     std::uint16_t port = 0;
     bool secure = false;
-    bool allow_insecure_tls = false;
 };
 
 std::string ToLowerCopy(std::string value) {
@@ -46,11 +45,6 @@ std::string ToLowerCopy(std::string value) {
         return static_cast<char>(std::tolower(ch));
     });
     return value;
-}
-
-bool IsLoopbackHost(const std::string& host) {
-    const std::string normalized = ToLowerCopy(host);
-    return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1" || normalized == "[::1]";
 }
 
 std::string TrimTrailingWhitespace(std::string value) {
@@ -282,7 +276,6 @@ ValueResult<ParsedGatewayUrl> ParseGatewayUrl(const std::string& url) {
             "Gateway URL host is empty");
     }
 
-    parsed.allow_insecure_tls = parsed.secure && IsLoopbackHost(parsed.host);
     return ValueResult<ParsedGatewayUrl>::Success(std::move(parsed));
 }
 
@@ -590,15 +583,11 @@ private:
                 "Failed to create OpenSSL context: " + FormatOpenSslError());
         }
 
-        if (parsed.allow_insecure_tls) {
-            SSL_CTX_set_verify(ssl_context_, SSL_VERIFY_NONE, nullptr);
-        } else {
-            SSL_CTX_set_verify(ssl_context_, SSL_VERIFY_PEER, nullptr);
-            if (SSL_CTX_set_default_verify_paths(ssl_context_) != 1) {
-                return OperationResult::Failure(
-                    "TRANSPORT_CONNECT_FAILED",
-                    "Failed to load default TLS trust store: " + FormatOpenSslError());
-            }
+        SSL_CTX_set_verify(ssl_context_, SSL_VERIFY_PEER, nullptr);
+        if (SSL_CTX_set_default_verify_paths(ssl_context_) != 1) {
+            return OperationResult::Failure(
+                "TRANSPORT_CONNECT_FAILED",
+                "Failed to load default TLS trust store: " + FormatOpenSslError());
         }
 
         ssl_ = SSL_new(ssl_context_);
@@ -617,6 +606,11 @@ private:
             return OperationResult::Failure(
                 "TRANSPORT_CONNECT_FAILED",
                 "Failed to configure TLS SNI for gateway host: " + FormatOpenSslError());
+        }
+        if (SSL_set1_host(ssl_, parsed.host.c_str()) != 1) {
+            return OperationResult::Failure(
+                "TRANSPORT_CONNECT_FAILED",
+                "Failed to configure TLS hostname verification: " + FormatOpenSslError());
         }
         SSL_set_connect_state(ssl_);
 
