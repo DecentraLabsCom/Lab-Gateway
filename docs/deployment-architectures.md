@@ -15,12 +15,11 @@ selects the access plane that serves the user.
 | Standalone `blockchain-services` | Can be the remote provider/consumer backend and JWT issuer without a local browser access plane. | No local Guacamole or Station plane. It provisions configured remote gateways. |
 | Lab Station | No public auth role. | Windows-side execution, WinRM commands, telemetry and optional FMU station backend. |
 
-The root Compose file still starts the embedded `blockchain-services` container
-when a Gateway is Lite. In Lite mode OpenResty blocks the local `/auth` issuer
-surface and uses the remote issuer configured by `ISSUER`; the embedded service
-must not be mistaken for the authority of the deployment. Its local wallet,
-billing, health and internal services remain separate operational surfaces and
-must be protected accordingly.
+The root Compose project keeps the embedded `blockchain-services` container
+dormant when a Gateway is Lite (`BLOCKCHAIN_SERVICES_ENABLED=false` or the
+`auto`/external-`ISSUER` rule). No Java process or local JWT key is started.
+OpenResty selects the remote issuer configured by `ISSUER`; the dormant service
+must not be mistaken for the authority of the deployment.
 
 ## Topology matrix
 

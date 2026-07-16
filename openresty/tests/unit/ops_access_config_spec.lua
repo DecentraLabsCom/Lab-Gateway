@@ -59,7 +59,7 @@ runner.describe("Ops access configuration", function()
         local block = extract_location_block(conf, "= /ops/health")
 
         runner.assert.equals(nil, block:find("access_by_lua_", 1, true))
-        runner.assert.truthy(block:find("proxy_pass $ops_health_upstream", 1, true))
+        runner.assert.truthy(block:find("content_by_lua_file /etc/openresty/lua/public_health.lua", 1, true))
     end)
 
     runner.it("uses the Lab Manager UI guard and config policy instead of a fixed network ACL", function()

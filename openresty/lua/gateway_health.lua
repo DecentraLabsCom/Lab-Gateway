@@ -220,13 +220,25 @@ local function overall_status(services)
 end
 
 local function check_lite_issuer_trust(issuer)
-    local local_public_key = read_file(PUBLIC_KEY_PATH)
+    -- init.lua stores the exact mode-selected key in shared memory. Use that
+    -- active value for trust checks so a stale certs/ key cannot mask a
+    -- failed remote-key sync (the file fallback keeps unit tests and early
+    -- startup diagnostics useful before init.lua has populated the cache).
+    local config = ngx.shared and ngx.shared.config
+    local cache = ngx.shared and ngx.shared.cache
+    local local_public_key = cache and cache:get("public_key") or nil
+    local active_public_key_source = config and config:get("jwt_public_key_path") or nil
+    if not local_public_key then
+        active_public_key_source = active_public_key_source or PUBLIC_KEY_PATH
+        local_public_key = read_file(active_public_key_source)
+    end
     local local_public_key_ok = looks_like_public_key_pem(local_public_key)
     local parsed = parse_issuer_url(issuer)
     local details = {
         issuer = issuer,
         issuer_url_valid = parsed ~= nil,
-        local_public_key_present = file_exists(PUBLIC_KEY_PATH),
+        active_public_key_source = active_public_key_source or "shared-cache",
+        local_public_key_present = local_public_key ~= nil and local_public_key ~= "",
         local_public_key_valid = local_public_key_ok,
         remote_public_key_ok = false,
         public_key_matches = false,
@@ -412,6 +424,7 @@ local result = {
             external_issuer = lite_auth and lite_auth.external_issuer or false,
             issuer_url_valid = lite_auth and lite_auth.issuer_url_valid or false,
             issuer_host_dns_ok = lite_auth and lite_auth.issuer_host_dns_ok or false,
+            active_public_key_source = lite_auth and lite_auth.active_public_key_source or nil,
             local_public_key_present = lite_auth and lite_auth.local_public_key_present or file_exists(PUBLIC_KEY_PATH),
             local_public_key_valid = lite_auth and lite_auth.local_public_key_valid or false,
             remote_public_key_ok = lite_auth and lite_auth.remote_public_key_ok or false,

@@ -183,7 +183,7 @@ runner.describe("Lab manager access guard", function()
         runner.assert.equals("secret-token", ngx.req.headers["X-Lab-Manager-Token"])
     end)
 
-    runner.it("accepts token from query for lab-manager path and redirects to clean URL", function()
+    runner.it("rejects query-string tokens for lab-manager", function()
         local ngx = run_lab_manager_access({
             env = {
                 LAB_MANAGER_TOKEN = "secret-token",
@@ -192,18 +192,17 @@ runner.describe("Lab manager access guard", function()
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/lab-manager/",
-                args = "token=secret-token"
+                args = "token=secret-token",
+                arg_token = "secret-token"
             },
             uri_args = { token = "secret-token" }
         })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("lab_manager_token=secret-token; Path=/; HttpOnly; Secure; SameSite=Lax", ngx.header["Set-Cookie"])
-        runner.assert.equals("/lab-manager/", ngx._redirect_target)
-        runner.assert.equals(302, ngx._redirect_code)
+        runner.assert.equals(400, ngx.status)
+        runner.assert.equals(400, ngx._exit)
     end)
 
-    runner.it("preserves non-token query args when redirecting lab-manager bootstrap", function()
+    runner.it("rejects query-string tokens even with additional arguments", function()
         local ngx = run_lab_manager_access({
             env = {
                 LAB_MANAGER_TOKEN = "secret-token",
@@ -212,7 +211,8 @@ runner.describe("Lab manager access guard", function()
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/lab-manager/",
-                args = "token=secret-token&tab=stations"
+                args = "token=secret-token&tab=stations",
+                arg_token = "secret-token"
             },
             uri_args = {
                 token = "secret-token",
@@ -220,10 +220,8 @@ runner.describe("Lab manager access guard", function()
             }
         })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("lab_manager_token=secret-token; Path=/; HttpOnly; Secure; SameSite=Lax", ngx.header["Set-Cookie"])
-        runner.assert.equals("/lab-manager/?tab=stations", ngx._redirect_target)
-        runner.assert.equals(302, ngx._redirect_code)
+        runner.assert.equals(400, ngx.status)
+        runner.assert.equals(400, ngx._exit)
     end)
 
     runner.it("rejects external clients forwarded through X-Real-IP when no token configured", function()

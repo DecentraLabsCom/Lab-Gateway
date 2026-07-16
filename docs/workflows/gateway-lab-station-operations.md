@@ -26,7 +26,7 @@ each Lite owns the complete local management path.
 
 `/lab-manager` and `/ops/` are protected by `LAB_MANAGER_TOKEN` and the configured dashboard/network policy. Use `X-Lab-Manager-Token` or the configured secure Lab Manager cookie for operations; do not place management tokens in operational URLs or host inventory files.
 
-`/ops/health` remains available for service readiness. Every other Ops route is gateway-proxied and subject to the Lab Manager access policy. The ops worker itself should not be published directly outside the container network.
+`/ops/health` remains available for service readiness. Every other Ops route is gateway-proxied and subject to the Lab Manager access policy. OpenResty injects the separate `OPS_INTERNAL_AUTH_TOKEN` only after that edge check; the worker rejects direct `/api/*` and `/aas-admin/*` calls without it. The ops worker itself should not be published directly outside the container network.
 
 WinRM credentials are deliberately separate from `hosts.json`. A host refers to a `credential_ref`; the ops worker encrypts the corresponding credentials using `OPS_SECRETS_KEY` in production. The local fallback key at `OPS_SECRETS_KEY_PATH` is appropriate only for single-node pilots and must be backed up with the protected ops data.
 

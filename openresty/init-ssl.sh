@@ -95,10 +95,32 @@ sync_jwt_public_key_from_issuer() {
         return 0
     fi
 
+    if [ -f "$JWT_PUBLIC_KEY" ]; then
+        atomic_copy "$JWT_PUBLIC_KEY" "$JWT_PREVIOUS_PUBLIC_KEY"
+        date +%s > "$JWT_PREVIOUS_ISSUED_MARKER" 2>/dev/null || true
+    fi
     mv "$tmp_key" "$JWT_PUBLIC_KEY"
     chmod 644 "$JWT_PUBLIC_KEY"
+    atomic_copy "$JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"
     echo "JWT public key updated from issuer"
     return 10
+}
+
+atomic_copy() {
+    source_path="$1"
+    target_path="$2"
+    target_tmp="${target_path}.tmp.$$"
+    if ! cp "$source_path" "$target_tmp"; then
+        rm -f "$target_tmp"
+        return 1
+    fi
+    chmod 644 "$target_tmp" 2>/dev/null || true
+    mv -f "$target_tmp" "$target_path"
+}
+
+is_valid_public_key() {
+    [ -f "$1" ] && grep -q "BEGIN PUBLIC KEY" "$1" \
+        && openssl pkey -pubin -in "$1" -noout >/dev/null 2>&1
 }
 
 generate_self_signed() {
@@ -279,8 +301,18 @@ else
     fi
 fi
 
-# Bootstrap JWT public key (local generation in Full mode or remote sync in Lite mode)
-JWT_PUBLIC_KEY="$SSL_DIR/public_key.pem"
+# Bootstrap JWT public key (local generation in Full mode or remote sync in Lite mode).
+# Full mode reads the backend-generated key from the dedicated read-only mount;
+# Lite mode owns the certs/ copy downloaded from the external issuer.
+REMOTE_JWT_PUBLIC_KEY="$SSL_DIR/public_key.pem"
+JWT_PREVIOUS_PUBLIC_KEY="$SSL_DIR/previous_public_key.pem"
+JWT_PREVIOUS_ISSUED_MARKER="$SSL_DIR/.previous_public_key_issued"
+JWT_ACTIVE_SNAPSHOT="$SSL_DIR/.active_public_key.pem"
+JWT_KEY_OVERLAP_SECONDS="${JWT_KEY_OVERLAP_SECONDS:-14400}"
+JWT_KEY_REFRESH_INTERVAL_SECONDS="${JWT_KEY_REFRESH_INTERVAL_SECONDS:-300}"
+JWT_KEY_CONTEXT="$SSL_DIR/.jwt-key-context"
+FULL_JWT_PUBLIC_KEY="/etc/openresty/jwt-keys/public_key.pem"
+JWT_PUBLIC_KEY="$REMOTE_JWT_PUBLIC_KEY"
 LOCAL_ISSUER="$(build_local_issuer)"
 ISSUER_OVERRIDE="$(trim "${ISSUER:-}" | sed 's:/*$::')"
 EFFECTIVE_ISSUER="$LOCAL_ISSUER"
@@ -288,14 +320,34 @@ jwt_key_sync_mode="local"
 if [ -n "$ISSUER_OVERRIDE" ]; then
     EFFECTIVE_ISSUER="$ISSUER_OVERRIDE"
 fi
+if [ -n "$ISSUER_OVERRIDE" ] && [ "$EFFECTIVE_ISSUER" != "$LOCAL_ISSUER" ]; then
+    jwt_key_sync_mode="remote"
+    JWT_PUBLIC_KEY="$REMOTE_JWT_PUBLIC_KEY"
+fi
 
 echo "=== JWT Public Key Bootstrap ==="
-echo "Expected key file: $JWT_PUBLIC_KEY"
+echo "Remote issuer key file: $REMOTE_JWT_PUBLIC_KEY"
+echo "Full-mode backend key file: $FULL_JWT_PUBLIC_KEY"
 echo "Local issuer: $LOCAL_ISSUER"
 echo "Effective issuer: $EFFECTIVE_ISSUER"
 
+# A mode/issuer change is a trust-boundary change.  Never carry an overlap
+# key from the previous issuer into the new one, and force Lite to download
+# the new active key instead of treating a stale file as current.
+context_value="${jwt_key_sync_mode}|${EFFECTIVE_ISSUER}"
+context_hash="$(printf '%s' "$context_value" | (sha256sum 2>/dev/null || shasum -a 256) | awk '{print $1}')"
+stored_context="$(cat "$JWT_KEY_CONTEXT" 2>/dev/null || true)"
+if [ "$stored_context" != "$context_hash" ]; then
+    echo "JWT issuer/mode changed; clearing rotation overlap state"
+    rm -f "$JWT_PREVIOUS_PUBLIC_KEY" "$JWT_PREVIOUS_ISSUED_MARKER" "$JWT_ACTIVE_SNAPSHOT"
+    if [ "$jwt_key_sync_mode" = "remote" ]; then
+        rm -f "$REMOTE_JWT_PUBLIC_KEY"
+    fi
+    printf '%s\n' "$context_hash" > "${JWT_KEY_CONTEXT}.tmp"
+    mv -f "${JWT_KEY_CONTEXT}.tmp" "$JWT_KEY_CONTEXT"
+fi
+
 if [ -n "$ISSUER_OVERRIDE" ] && [ "$EFFECTIVE_ISSUER" != "$LOCAL_ISSUER" ]; then
-    jwt_key_sync_mode="remote"
     echo "Detected external issuer mode (Lite): syncing JWT public key from issuer origin"
 
     wait_count=0
@@ -319,6 +371,7 @@ if [ -n "$ISSUER_OVERRIDE" ] && [ "$EFFECTIVE_ISSUER" != "$LOCAL_ISSUER" ]; then
         echo "WARNING: JWT public key sync failed after ${max_wait}s - JWT validation will fail until next refresh"
     fi
 else
+    JWT_PUBLIC_KEY="$FULL_JWT_PUBLIC_KEY"
     echo "Detected local issuer mode (Full): waiting for blockchain-services to generate JWT keys"
     wait_count=0
     max_wait=60
@@ -333,6 +386,12 @@ else
     else
         echo "WARNING: JWT public key not found after ${max_wait}s - JWT validation will fail until key is available"
         echo "blockchain-services should generate it on startup"
+    fi
+fi
+
+if [ "$jwt_key_sync_mode" = "local" ] && is_valid_public_key "$FULL_JWT_PUBLIC_KEY"; then
+    if [ ! -f "$JWT_ACTIVE_SNAPSHOT" ]; then
+        atomic_copy "$FULL_JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"
     fi
 fi
 
@@ -359,6 +418,60 @@ watch_certs() {
 }
 
 watch_certs &
+
+retire_previous_jwt_key() {
+    issued_ts="$(cat "$JWT_PREVIOUS_ISSUED_MARKER" 2>/dev/null || echo 0)"
+    now_ts="$(date +%s)"
+    case "$issued_ts" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    if [ "$issued_ts" -gt 0 ] && [ $((now_ts - issued_ts)) -ge "$JWT_KEY_OVERLAP_SECONDS" ]; then
+        rm -f "$JWT_PREVIOUS_PUBLIC_KEY" "$JWT_PREVIOUS_ISSUED_MARKER"
+        echo "Expired previous JWT public key overlap"
+        return 0
+    fi
+    return 1
+}
+
+# blockchain-services rotates the Full-mode key in-place.  Keep the last
+# complete key in the writable cert volume and reload only after the new PEM
+# validates, giving OpenResty a bounded current/previous overlap window.
+watch_full_jwt_public_key() {
+    if [ "$jwt_key_sync_mode" != "local" ]; then
+        return
+    fi
+    while true; do
+        sleep 60
+        if retire_previous_jwt_key; then
+            /usr/local/openresty/bin/openresty -s reload || true
+        fi
+        if ! is_valid_public_key "$FULL_JWT_PUBLIC_KEY"; then
+            echo "WARNING: Full-mode JWT public key is missing or invalid; retaining current key"
+            continue
+        fi
+        if [ ! -f "$JWT_ACTIVE_SNAPSHOT" ]; then
+            atomic_copy "$FULL_JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"
+            echo "Full-mode JWT public key became available; reloading OpenResty"
+            /usr/local/openresty/bin/openresty -s reload || true
+            continue
+        fi
+        if ! cmp -s "$FULL_JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"; then
+            if ! atomic_copy "$JWT_ACTIVE_SNAPSHOT" "$JWT_PREVIOUS_PUBLIC_KEY"; then
+                echo "WARNING: Could not preserve previous JWT key; deferring rotation"
+                continue
+            fi
+            date +%s > "$JWT_PREVIOUS_ISSUED_MARKER" 2>/dev/null || true
+            if ! atomic_copy "$FULL_JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"; then
+                echo "WARNING: Could not snapshot new JWT key; deferring rotation"
+                continue
+            fi
+            echo "Full-mode JWT public key changed; reloading OpenResty with overlap key"
+            /usr/local/openresty/bin/openresty -s reload || true
+        fi
+    done
+}
+
+watch_full_jwt_public_key &
 
 auto_rotate_self_signed() {
     # Only rotate self-signed certs when ACME is not configured
@@ -411,7 +524,10 @@ auto_refresh_jwt_public_key() {
         return
     fi
     while true; do
-        sleep 86400  # 24h between routine refreshes
+        sleep "$JWT_KEY_REFRESH_INTERVAL_SECONDS"
+        if retire_previous_jwt_key; then
+            /usr/local/openresty/bin/openresty -s reload || true
+        fi
         sync_jwt_public_key_from_issuer "$EFFECTIVE_ISSUER"
         sync_result=$?
         if [ $sync_result -eq 10 ]; then

@@ -69,21 +69,73 @@ reject_if_default() {
 
 reject_if_default "GUAC_ADMIN_PASS" "$GUAC_ADMIN_PASS"
 reject_if_default "MYSQL_ROOT_PASSWORD" "$MYSQL_ROOT_PASSWORD"
-reject_if_default "MYSQL_PASSWORD" "$MYSQL_PASSWORD"
+# MYSQL_USER/MYSQL_PASSWORD are legacy migration inputs and may remain as
+# CHANGE_ME once all runtime containers use the dedicated principals below.
 
-escaped_mysql_user="$(escape_sql "$MYSQL_USER")"
-escaped_mysql_password="$(escape_sql "$MYSQL_PASSWORD")"
+# The compose file supplies these values with a legacy fallback so existing
+# installations can be upgraded without hand-editing the container command.
+# They are nevertheless required here: every runtime principal must be
+# explicit before grants are reconciled.
+require_env "GUACAMOLE_MYSQL_USER"
+require_env "GUACAMOLE_MYSQL_PASSWORD"
+require_env "BLOCKCHAIN_MYSQL_USER"
+require_env "BLOCKCHAIN_MYSQL_PASSWORD"
+require_env "OPS_BACKEND_MYSQL_USER"
+require_env "OPS_BACKEND_MYSQL_PASSWORD"
+require_env "OPS_GUACAMOLE_MYSQL_USER"
+require_env "OPS_GUACAMOLE_MYSQL_PASSWORD"
+
+reject_if_default "GUACAMOLE_MYSQL_PASSWORD" "$GUACAMOLE_MYSQL_PASSWORD"
+reject_if_default "BLOCKCHAIN_MYSQL_PASSWORD" "$BLOCKCHAIN_MYSQL_PASSWORD"
+reject_if_default "OPS_BACKEND_MYSQL_PASSWORD" "$OPS_BACKEND_MYSQL_PASSWORD"
+reject_if_default "OPS_GUACAMOLE_MYSQL_PASSWORD" "$OPS_GUACAMOLE_MYSQL_PASSWORD"
+
+escaped_legacy_mysql_user="$(escape_sql "${MYSQL_USER:-}")"
+escaped_guacamole_mysql_user="$(escape_sql "$GUACAMOLE_MYSQL_USER")"
+escaped_guacamole_mysql_password="$(escape_sql "$GUACAMOLE_MYSQL_PASSWORD")"
+escaped_blockchain_mysql_user="$(escape_sql "$BLOCKCHAIN_MYSQL_USER")"
+escaped_blockchain_mysql_password="$(escape_sql "$BLOCKCHAIN_MYSQL_PASSWORD")"
+escaped_ops_backend_mysql_user="$(escape_sql "$OPS_BACKEND_MYSQL_USER")"
+escaped_ops_backend_mysql_password="$(escape_sql "$OPS_BACKEND_MYSQL_PASSWORD")"
+escaped_ops_guacamole_mysql_user="$(escape_sql "$OPS_GUACAMOLE_MYSQL_USER")"
+escaped_ops_guacamole_mysql_password="$(escape_sql "$OPS_GUACAMOLE_MYSQL_PASSWORD")"
 escaped_guac_admin_user="$(escape_sql "$GUAC_ADMIN_USER")"
 escaped_guac_admin_pass="$(escape_sql "$GUAC_ADMIN_PASS")"
 blockchain_db="${BLOCKCHAIN_MYSQL_DATABASE:-}"
-blockchain_sql=""
-if [ -n "$blockchain_db" ]; then
-    escaped_blockchain_db="$(escape_sql "$blockchain_db")"
-    blockchain_sql="
-    CREATE DATABASE IF NOT EXISTS \`${escaped_blockchain_db}\`;
-    GRANT ALL PRIVILEGES ON \`${escaped_blockchain_db}\`.* TO '${escaped_mysql_user}'@'%';
-    "
-fi
+escaped_mysql_database="$(escape_sql "$MYSQL_DATABASE")"
+escaped_blockchain_db="$(escape_sql "$blockchain_db")"
+
+drop_user_definitions() {
+    local escaped_user="$1"
+    [ -n "$escaped_user" ] || return 0
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
+        SET @drop_stmt = (
+            SELECT GROUP_CONCAT(CONCAT('DROP USER IF EXISTS ''', user, '''@''', host, ''';') SEPARATOR ' ')
+            FROM mysql.user
+            WHERE user = '${escaped_user}'
+        );
+        SET @drop_stmt = IFNULL(@drop_stmt, 'SELECT "No existing definitions to drop";');
+        PREPARE drop_users FROM @drop_stmt;
+        EXECUTE drop_users;
+        DEALLOCATE PREPARE drop_users;
+EOSQL
+}
+
+grant_guacamole_worker_tables() {
+    local table
+    for table in guacamole_entity guacamole_user guacamole_connection_permission guacamole_connection guacamole_connection_parameter; do
+        exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='${table}' LIMIT 1" || true)"
+        if [ "$exists" = "1" ]; then
+            mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT SELECT, INSERT, UPDATE, DELETE ON \`${escaped_mysql_database}\`.\`${table}\` TO '${escaped_ops_guacamole_mysql_user}'@'%';"
+        fi
+    done
+
+    # History is evidence only; the worker must never mutate it.
+    exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='guacamole_connection_history' LIMIT 1" || true)"
+    if [ "$exists" = "1" ]; then
+        mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT SELECT ON \`${escaped_mysql_database}\`.\`guacamole_connection_history\` TO '${escaped_ops_guacamole_mysql_user}'@'%';"
+    fi
+}
 
 echo "=== Ensuring MySQL user has proper remote access ==="
 
@@ -95,34 +147,40 @@ done
 
 echo "MySQL is ready. Configuring user permissions..."
 
-# Reconcile the user definition on every run so we do not depend on init-only scripts
+# Reconcile each principal on every run so we do not depend on init-only
+# scripts. The legacy account is removed once the dedicated accounts exist.
+for user in \
+    "$GUACAMOLE_MYSQL_USER" \
+    "$BLOCKCHAIN_MYSQL_USER" \
+    "$OPS_BACKEND_MYSQL_USER" \
+    "$OPS_GUACAMOLE_MYSQL_USER"; do
+    drop_user_definitions "$(escape_sql "$user")"
+done
+if [ -n "${MYSQL_USER:-}" ] && \
+   [ "$MYSQL_USER" != "$GUACAMOLE_MYSQL_USER" ] && \
+   [ "$MYSQL_USER" != "$BLOCKCHAIN_MYSQL_USER" ] && \
+   [ "$MYSQL_USER" != "$OPS_BACKEND_MYSQL_USER" ] && \
+   [ "$MYSQL_USER" != "$OPS_GUACAMOLE_MYSQL_USER" ]; then
+    drop_user_definitions "$escaped_legacy_mysql_user"
+fi
+
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
-    -- Remove any users for this account regardless of host
-    SET @drop_stmt = (
-        SELECT GROUP_CONCAT(CONCAT('DROP USER IF EXISTS ''', user, '''@''', host, ''';') SEPARATOR ' ')
-        FROM mysql.user
-        WHERE user = '${escaped_mysql_user}'
-    );
-    SET @drop_stmt = IFNULL(@drop_stmt, 'SELECT "No existing definitions to drop" AS info;');
-    PREPARE drop_users FROM @drop_stmt;
-    EXECUTE drop_users;
-    DEALLOCATE PREPARE drop_users;
-    
-    -- Create the user with remote access and ensure credentials are up to date
-    CREATE USER IF NOT EXISTS '${escaped_mysql_user}'@'%' IDENTIFIED BY '${escaped_mysql_password}';
-    ALTER USER '${escaped_mysql_user}'@'%' IDENTIFIED BY '${escaped_mysql_password}';
-    
-    -- Grant all privileges on the database
-    GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${escaped_mysql_user}'@'%';
-${blockchain_sql}
-    
-    -- Ensure privileges are applied
+    CREATE DATABASE IF NOT EXISTS \`${escaped_mysql_database}\`;
+    CREATE DATABASE IF NOT EXISTS \`${escaped_blockchain_db}\`;
+
+    CREATE USER '${escaped_guacamole_mysql_user}'@'%' IDENTIFIED BY '${escaped_guacamole_mysql_password}';
+    CREATE USER '${escaped_blockchain_mysql_user}'@'%' IDENTIFIED BY '${escaped_blockchain_mysql_password}';
+    CREATE USER '${escaped_ops_backend_mysql_user}'@'%' IDENTIFIED BY '${escaped_ops_backend_mysql_password}';
+    CREATE USER '${escaped_ops_guacamole_mysql_user}'@'%' IDENTIFIED BY '${escaped_ops_guacamole_mysql_password}';
+
+    -- Application principals are scoped to their own schema.
+    GRANT ALL PRIVILEGES ON \`${escaped_mysql_database}\`.* TO '${escaped_guacamole_mysql_user}'@'%';
+    GRANT ALL PRIVILEGES ON \`${escaped_blockchain_db}\`.* TO '${escaped_blockchain_mysql_user}'@'%';
+
+    -- Ops backend requires DML for scheduler/outbox/reservation tables but
+    -- never DDL, GRANT, or access to the Guacamole schema.
+    GRANT SELECT, INSERT, UPDATE, DELETE ON \`${escaped_blockchain_db}\`.* TO '${escaped_ops_backend_mysql_user}'@'%';
     FLUSH PRIVILEGES;
-    
-    -- Verify the user was created correctly
-    SELECT CONCAT('User ${escaped_mysql_user} configured with host: ', host) AS status 
-    FROM mysql.user 
-    WHERE user = '${escaped_mysql_user}';
 EOSQL
 
 waited=0
@@ -163,6 +221,10 @@ while true; do
     sleep 2
     waited=$((waited + 2))
 done
+
+# Apply table-level grants after the Guacamole schema exists. Missing optional
+# tables (for example on an older Guacamole image) are skipped safely.
+grant_guacamole_worker_tables
 
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     -- Ensure Guacamole admin user matches configured credentials

@@ -29,7 +29,7 @@ except ImportError:
     posix_resource = None  # Not available on Windows
 from pathlib import Path
 from typing import Any, Optional
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, Future
+from concurrent.futures import ProcessPoolExecutor, Future
 from collections import defaultdict, deque
 from threading import Lock
 from uuid import uuid4
@@ -95,7 +95,13 @@ ACCESS_AUDIT_URL = os.getenv("ACCESS_AUDIT_URL", "").strip() or _default_access_
 FMU_PROXY_RUNTIME_PATH = os.getenv("FMU_PROXY_RUNTIME_PATH", "/app/fmu-proxy-runtime")
 FMU_PROXY_GATEWAY_WS_URL = os.getenv("FMU_PROXY_GATEWAY_WS_URL", "")
 FMU_PROXY_SIGNING_KEY = os.getenv("FMU_PROXY_SIGNING_KEY", "")
-FMU_BACKEND_MODE = os.getenv("FMU_BACKEND_MODE", "local").strip().lower()
+FMU_BACKEND_MODE = os.getenv("FMU_BACKEND_MODE", "station").strip().lower()
+FMU_LOCAL_DEV_MODE = os.getenv("FMU_LOCAL_DEV_MODE", "false").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+FMU_LOCAL_REALTIME_ENABLED = os.getenv("FMU_LOCAL_REALTIME_ENABLED", "false").strip().lower() in (
+    "1", "true", "yes", "on",
+)
 FMU_STATION_BASE_URL = os.getenv("FMU_STATION_BASE_URL", "").strip()
 FMU_STATION_INTERNAL_TOKEN = os.getenv("FMU_STATION_INTERNAL_TOKEN", "").strip()
 FMU_STATION_REQUEST_TIMEOUT = float(os.getenv("FMU_STATION_REQUEST_TIMEOUT", "10"))
@@ -186,8 +192,11 @@ def _create_executor():
     try:
         return ProcessPoolExecutor(max_workers=4)
     except (PermissionError, OSError) as exc:
-        logger.warning("ProcessPoolExecutor unavailable, falling back to ThreadPoolExecutor: %s", exc)
-        return ThreadPoolExecutor(max_workers=4)
+        # Never run native FMU code in an ASGI thread. A thread cannot be
+        # force-terminated when an FMU blocks in a native call, so fail closed
+        # and let the API report that local execution is unavailable.
+        logger.error("ProcessPoolExecutor unavailable; local FMU execution disabled: %s", exc)
+        return None
 
 
 _executor = _create_executor()
@@ -196,27 +205,78 @@ _executor = _create_executor()
 # Running-simulation registry (for cancellation — #17)
 # ---------------------------------------------------------------------------
 
-_running_futures: dict[str, tuple[Future, str, str, str]] = {}
+_running_futures: dict[str, tuple[Future, str, str, str, Optional[ProcessPoolExecutor]]] = {}
 _running_lock = Lock()
 
 
-def _track_running_future(sim_id: str, future: Future, lab_id: str, claims: dict):
+def _track_running_future(
+    sim_id: str,
+    future: Future,
+    lab_id: str,
+    claims: dict,
+    executor: Optional[ProcessPoolExecutor] = None,
+):
     with _running_lock:
         _running_futures[sim_id] = (
             future,
             lab_id,
             str(claims.get("reservationKey") or "").strip().lower(),
             str(claims.get("pucHash") or "").strip().lower(),
+            executor,
         )
+
+
+def _shutdown_simulation_executor(executor: Any, *, force: bool = False) -> None:
+    """Stop one isolated worker pool, killing native workers on cancellation."""
+    if not isinstance(executor, ProcessPoolExecutor):
+        return
+    if force:
+        processes = getattr(executor, "_processes", {}) or {}
+        for process in list(processes.values()):
+            try:
+                if process.is_alive():
+                    killer = getattr(process, "kill", None) or process.terminate
+                    killer()
+            except Exception as exc:
+                logger.warning("Unable to terminate FMU worker process: %s", exc)
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except TypeError:  # Python < 3.9 compatibility for embedded deployments
+        executor.shutdown(wait=False)
+
+
+def _submit_simulation(*args):
+    """Submit work to a fresh one-process pool in production.
+
+    Tests and embedders may replace ``_executor`` with a compatible fake; in
+    that case the replacement is used directly so the contract remains easy
+    to exercise without spawning processes.
+    """
+    if _executor is None:
+        raise RuntimeError("isolated FMU worker pool is unavailable")
+    if isinstance(_executor, ProcessPoolExecutor):
+        try:
+            executor = ProcessPoolExecutor(max_workers=1)
+        except (PermissionError, OSError) as exc:
+            raise RuntimeError("isolated FMU worker pool is unavailable") from exc
+        try:
+            future = executor.submit(_run_simulation, *args)
+        except Exception:
+            _shutdown_simulation_executor(executor, force=True)
+            raise
+        return executor, future
+    return _executor, _executor.submit(_run_simulation, *args)
 
 
 def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = None):
     """Remove simulation from registry and release one concurrency slot."""
     lab_to_release = lab_id_fallback
+    executor = None
     with _running_lock:
         entry = _running_futures.pop(sim_id, None)
     if entry is not None:
-        _, lab_to_release, _, _ = entry
+        _, lab_to_release, _, _, executor = entry
+        _shutdown_simulation_executor(executor)
     if lab_to_release is not None:
         _release_slot(lab_to_release)
 
@@ -234,6 +294,7 @@ async def _lifespan(_app: FastAPI):
     finally:
         if _realtime_manager is not None:
             await _realtime_manager.stop()
+        _shutdown_simulation_executor(_executor)
         await _cleanup_temp_files()
 
 
@@ -743,7 +804,10 @@ def _local_backend_health_payload() -> dict:
     checks["fmuDataPath"] = base.is_dir()
     fmu_count = sum(1 for _ in base.rglob("*.fmu")) if checks["fmuDataPath"] else 0
     try:
-        checks["executor"] = not _executor._broken if hasattr(_executor, "_broken") else True
+        checks["executor"] = (
+            _executor is not None
+            and (not _executor._broken if hasattr(_executor, "_broken") else True)
+        )
     except Exception:
         checks["executor"] = False
     overall = all(checks.values())
@@ -761,7 +825,7 @@ def _load_local_model_metadata(fmu_filename: str) -> dict:
         md = read_model_description(str(fmu_path))
     except Exception as exc:
         logger.error("Failed to read model description for %s: %s", fmu_filename, exc)
-        raise HTTPException(status_code=422, detail=f"Cannot parse FMU: {exc}") from exc
+        raise HTTPException(status_code=422, detail="Cannot parse FMU") from exc
     return _model_metadata_from_model_description(md)
 
 
@@ -791,13 +855,23 @@ def _build_fmu_backend():
         )
 
     if FMU_BACKEND_MODE != "local":
-        logger.warning("Unknown FMU_BACKEND_MODE=%s, falling back to local", FMU_BACKEND_MODE)
+        logger.error(
+            "Unknown FMU_BACKEND_MODE=%s; local execution remains disabled",
+            FMU_BACKEND_MODE,
+        )
+
+    if FMU_BACKEND_MODE == "local" and not FMU_LOCAL_DEV_MODE:
+        logger.error(
+            "FMU_BACKEND_MODE=local requires FMU_LOCAL_DEV_MODE=true; "
+            "native FMU execution is disabled",
+        )
 
     logger.info("FMU backend mode selected: local")
     return LocalFmuBackend(
         health_loader=_local_backend_health_payload,
         model_metadata_loader=_load_local_model_metadata,
         list_loader=_list_local_fmus_payload,
+        allow_execution=FMU_BACKEND_MODE == "local" and FMU_LOCAL_DEV_MODE,
     )
 
 
@@ -826,7 +900,8 @@ def _ensure_local_execution_backend(feature_name: str):
         status_code=501,
         detail=(
             f"{feature_name} is not wired for FMU_BACKEND_MODE={_fmu_backend.mode}. "
-            "Use FMU_BACKEND_MODE=local for dev/test until the Station execution backend is implemented."
+            "Use FMU_BACKEND_MODE=station in production, or explicitly set "
+            "FMU_BACKEND_MODE=local and FMU_LOCAL_DEV_MODE=true for isolated development."
         ),
     )
 
@@ -1298,12 +1373,6 @@ async def _record_browser_session_started(request: Request, claims: dict, sim_id
 
     authorization = _extract_authorization_header(request)
     if not authorization:
-        for cookie_name in ("token", "jwt", "jti", "JTI"):
-            token = request.cookies.get(cookie_name)
-            if token:
-                authorization = f"Bearer {token}"
-                break
-    if not authorization:
         raise HTTPException(status_code=401, detail="Missing bearer token required for session observation")
 
     lab_id = str(claims.get("labId") or "").strip()
@@ -1393,6 +1462,9 @@ _fmu_backend = _build_fmu_backend()
 
 
 class _UnsupportedRealtimeManager:
+    def __init__(self, reason: Optional[str] = None):
+        self.reason = reason
+
     async def start(self):
         return
 
@@ -1401,9 +1473,10 @@ class _UnsupportedRealtimeManager:
 
     async def handle_websocket(self, websocket: WebSocket, *, internal: bool):
         await websocket.accept()
-        message = (
+        message = self.reason or (
             f"Realtime FMU sessions are not wired for FMU_BACKEND_MODE={_fmu_backend.mode}. "
-            "Use FMU_BACKEND_MODE=local for dev/test until the Station execution backend is implemented."
+            "Use FMU_BACKEND_MODE=station in production, or explicitly set "
+            "FMU_BACKEND_MODE=local and FMU_LOCAL_DEV_MODE=true for isolated development."
         )
         await websocket.send_json({
             "type": "error",
@@ -1414,7 +1487,7 @@ class _UnsupportedRealtimeManager:
         await websocket.close(code=1013)
 
 
-if _fmu_backend.supports_local_execution:
+if _fmu_backend.supports_local_execution and FMU_LOCAL_REALTIME_ENABLED:
     _realtime_manager = RealtimeWsManager(
         logger=logger,
         verify_jwt_token=verify_jwt_token,
@@ -1453,7 +1526,16 @@ elif _fmu_backend.mode == "station":
         ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
     )
 else:
-    _realtime_manager = _UnsupportedRealtimeManager()
+    _realtime_manager = _UnsupportedRealtimeManager(
+        reason=(
+            "Local realtime FMU execution is disabled by default because native "
+            "doStep calls cannot be force-terminated inside the ASGI process. "
+            "Use FMU_BACKEND_MODE=station in production, or explicitly set "
+            "FMU_LOCAL_REALTIME_ENABLED=true only for isolated development."
+        )
+        if _fmu_backend.supports_local_execution
+        else None
+    )
 
 
 def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_size: float,
@@ -1563,7 +1645,7 @@ async def aas_sync_fmu(access_key: str, request: Request):
             md = read_model_description(str(fmu_path))
         except Exception as exc:
             logger.error("AAS sync: cannot read FMU %s: %s", access_key, exc)
-            raise HTTPException(status_code=422, detail=f"Cannot read FMU model description: {exc}") from exc
+            raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
         metadata = _model_metadata_from_model_description(md)
 
         # Use FMU-embedded description/license as fallback when the provider
@@ -1603,7 +1685,8 @@ async def aas_hints_fmu(access_key: str):
     try:
         md = read_model_description(str(fmu_path))
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Cannot read FMU model description: {exc}") from exc
+        logger.error("Cannot read FMU model description for %s: %s", access_key, exc)
+        raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
     hints: dict = {}
     for field_name, attr in (
         ("description", "description"),
@@ -1966,14 +2049,13 @@ async def run_simulation(
     sim_id = uuid4().hex
     t0 = time.monotonic()
     future: Optional[Future] = None
-    cleanup_deferred = False
+    job_executor: Any = None
     try:
         # Durable observation is the acceptance gate. The executor is not
         # released until it succeeds, so a failed observation cannot race with
         # work that has already started.
         await _record_browser_session_started(request, claims, sim_id)
-        future = _executor.submit(
-            _run_simulation,
+        job_executor, future = _submit_simulation(
             str(fmu_path),
             start_time,
             stop_time,
@@ -1983,23 +2065,25 @@ async def run_simulation(
             fmi_type,
             solver_name,
         )
-        _track_running_future(sim_id, future, lab_id, claims)
+        _track_running_future(sim_id, future, lab_id, claims, job_executor)
         try:
             sim_result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
         except asyncio.TimeoutError as exc:
             if not future.done():
                 future.cancel()
-                cleanup_deferred = True
-                future.add_done_callback(lambda _f, sid=sim_id: _finalize_simulation_tracking(sid))
+            # Future.cancel() cannot stop a process that already entered FMPy.
+            # Kill this simulation's private worker and release its slot now.
+            _shutdown_simulation_executor(job_executor, force=True)
             raise HTTPException(status_code=504, detail="Simulation timed out") from exc
     except HTTPException:
         raise
     except Exception as exc:
+        if future is None and job_executor is not None:
+            _shutdown_simulation_executor(job_executor, force=True)
         logger.error("Simulation failed for lab %s: %s", lab_id, exc)
-        raise HTTPException(status_code=500, detail=f"Simulation error: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Simulation failed") from exc
     finally:
-        if not cleanup_deferred:
-            _finalize_simulation_tracking(sim_id, lab_id)
+        _finalize_simulation_tracking(sim_id, lab_id)
 
     elapsed = round(time.monotonic() - t0, 3)
     logger.info("Simulation completed for lab %s in %.3fs", lab_id, elapsed)
@@ -2041,16 +2125,15 @@ async def cancel_simulation(sim_id: str, claims: dict = Depends(verify_jwt)):
         entry = _running_futures.get(sim_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Simulation not found or already finished")
-    future, lab_id, reservation_key, puc_hash = entry
+    future, lab_id, reservation_key, puc_hash, job_executor = entry
     if _get_claim_lab_id(claims) != _normalize_lab_id(lab_id):
         raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
     if _claim_reservation_key(claims) != reservation_key:
         raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
     if str(claims.get("pucHash") or "").strip().lower() != puc_hash:
         raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
-    cancelled = future.cancel()
-    if not cancelled and future.running():
-        return {"status": "running", "detail": "Cannot cancel - simulation already executing in worker process"}
+    future.cancel()
+    _shutdown_simulation_executor(job_executor, force=True)
     _finalize_simulation_tracking(sim_id)
     return {"status": "cancelled"}
 
@@ -2143,18 +2226,18 @@ async def stream_simulation(
 
     async def _event_stream():
         t0 = time.monotonic()
-        cleanup_deferred = False
         future: Optional[Future] = None
+        job_executor: Any = None
         _acquire_slot(lab_id)
         try:
             # Observation is the durable acceptance gate; only then is the
             # worker released and the `started` event exposed.
             await _record_browser_session_started(request, claims, sim_id)
-            future = _executor.submit(
-                _run_simulation, str(fmu_path), start_time, stop_time, step_size,
+            job_executor, future = _submit_simulation(
+                str(fmu_path), start_time, stop_time, step_size,
                 req.parameters, timeout, fmi_type, solver_name,
             )
-            _track_running_future(sim_id, future, lab_id, claims)
+            _track_running_future(sim_id, future, lab_id, claims, job_executor)
             yield json.dumps({"type": "started", "simId": sim_id}) + "\n"
 
             # Heartbeat while simulation runs
@@ -2162,8 +2245,7 @@ async def stream_simulation(
                 elapsed = round(time.monotonic() - t0, 1)
                 if elapsed >= timeout:
                     future.cancel()
-                    cleanup_deferred = True
-                    future.add_done_callback(lambda _f, sid=sim_id: _finalize_simulation_tracking(sid))
+                    _shutdown_simulation_executor(job_executor, force=True)
                     yield json.dumps({"type": "error", "simId": sim_id, "detail": "Simulation timed out"}) + "\n"
                     return
                 yield json.dumps({"type": "progress", "elapsedSeconds": elapsed}) + "\n"
@@ -2199,10 +2281,9 @@ async def stream_simulation(
 
         except Exception as exc:
             logger.error("Streaming simulation failed for lab %s: %s", lab_id, exc)
-            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+            yield json.dumps({"type": "error", "detail": "Simulation failed"}) + "\n"
         finally:
-            if not cleanup_deferred:
-                _finalize_simulation_tracking(sim_id, lab_id)
+            _finalize_simulation_tracking(sim_id, lab_id)
 
     return StreamingResponse(_event_stream(), media_type="application/x-ndjson")
 

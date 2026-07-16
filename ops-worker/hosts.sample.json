@@ -7,6 +7,8 @@
       "winrm_user": "env:WINRM_USER_LAB_WS_01",
       "winrm_pass": "env:WINRM_PASS_LAB_WS_01",
       "winrm_transport": "ntlm",
+      "winrm_use_ssl": true,
+      "winrm_port": 5986,
       "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
       "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl",
       "labs": ["1"]

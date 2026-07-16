@@ -48,8 +48,17 @@ the full description of each variable):
 SERVER_NAME=lab.your-institution.edu
 # Leave ISSUER empty for Full mode. Set it to https://<full-gateway>/auth for Lite mode.
 ISSUER=
+BLOCKCHAIN_SERVICES_ENABLED=auto
 MYSQL_ROOT_PASSWORD=strong_password
-MYSQL_PASSWORD=strong_password
+MYSQL_PASSWORD=legacy_migration_password
+GUACAMOLE_MYSQL_PASSWORD=strong_password
+BLOCKCHAIN_MYSQL_PASSWORD=strong_password
+OPS_BACKEND_MYSQL_PASSWORD=strong_password
+OPS_GUACAMOLE_MYSQL_PASSWORD=strong_password
+GUACAMOLE_MYSQL_USER=guacamole_app
+BLOCKCHAIN_MYSQL_USER=blockchain_app
+OPS_BACKEND_MYSQL_USER=ops_backend
+OPS_GUACAMOLE_MYSQL_USER=ops_guac
 GUAC_ADMIN_USER=admin
 GUAC_ADMIN_PASS=strong_password
 ADMIN_ACCESS_TOKEN=random_token

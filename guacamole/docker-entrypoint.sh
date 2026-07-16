@@ -37,6 +37,12 @@ guacd-port: ${GUACD_PORT:-4822}
 # API session timeout for manual Guacamole logins (minutes).
 # Marketplace/JWT sessions are additionally limited by OpenResty.
 api-session-timeout: ${API_SESSION_TIMEOUT:-15}
+
+# Official Guacamole brute-force protection (failed attempts are tracked by
+# client IP and temporarily banned after the threshold).
+ban-max-invalid-attempts: ${BAN_MAX_INVALID_ATTEMPTS:-5}
+ban-address-duration: ${BAN_ADDRESS_DURATION:-300}
+ban-max-addresses: ${BAN_MAX_ADDRESSES:-10485670}
 EOF
 
 echo "✔ Generated ${PROPERTIES_FILE}"

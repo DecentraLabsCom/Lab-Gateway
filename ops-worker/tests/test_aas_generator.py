@@ -215,7 +215,7 @@ class TestSyncLabToBasyxDegradation:
 
     def test_error_when_basyx_unreachable(self):
         original = _mod.BASYX_AAS_URL
-        _mod.BASYX_AAS_URL = "http://127.0.0.1:19999"  # nothing listening
+        _mod.BASYX_AAS_URL = "https://127.0.0.1:19999"  # nothing listening
         try:
             result = _mod.sync_lab_to_basyx("42", SAMPLE_HOST, SAMPLE_HEARTBEAT)
             assert "error" in result
@@ -227,7 +227,7 @@ class TestSyncLabToBasyxDegradation:
     def test_success_path(self):
         """Happy path: all BaSyx calls return 201."""
         original = _mod.BASYX_AAS_URL
-        _mod.BASYX_AAS_URL = "http://basyx-mock:8081"
+        _mod.BASYX_AAS_URL = "https://basyx-mock:8081"
         try:
             mock_resp = MagicMock()
             mock_resp.status_code = 201
@@ -250,7 +250,7 @@ class TestSyncLabToBasyxDegradation:
     def test_error_propagated_on_bad_response(self):
         """If BaSyx returns 500 for nameplate PUT and 404 POST fallback, sync returns error."""
         original = _mod.BASYX_AAS_URL
-        _mod.BASYX_AAS_URL = "http://basyx-mock:8081"
+        _mod.BASYX_AAS_URL = "https://basyx-mock:8081"
         try:
             mock_put = MagicMock()
             mock_put.status_code = 500

@@ -25,6 +25,16 @@ GATEWAY_MANAGED_BACKEND_KEYS = [
     "LAB_MANAGER_TOKEN_HEADER",
     "LAB_MANAGER_TOKEN_COOKIE",
     "LAB_MANAGER_ALLOWED_CIDRS",
+    "OPS_INTERNAL_AUTH_TOKEN",
+    "OPS_INTERNAL_AUTH_HEADER",
+    "GUACAMOLE_MYSQL_USER",
+    "GUACAMOLE_MYSQL_PASSWORD",
+    "BLOCKCHAIN_MYSQL_USER",
+    "BLOCKCHAIN_MYSQL_PASSWORD",
+    "OPS_BACKEND_MYSQL_USER",
+    "OPS_BACKEND_MYSQL_PASSWORD",
+    "OPS_GUACAMOLE_MYSQL_USER",
+    "OPS_GUACAMOLE_MYSQL_PASSWORD",
 ]
 
 
@@ -37,6 +47,7 @@ class SetupEnvContractTest(unittest.TestCase):
         cls.issue_lite_ps1 = ISSUE_LITE_PS1.read_text(encoding="utf-8")
         cls.nginx_conf = NGINX_CONF.read_text(encoding="utf-8")
         cls.compose_file = COMPOSE_FILE.read_text(encoding="utf-8")
+        cls.init_ssl = (ROOT / "openresty" / "init-ssl.sh").read_text(encoding="utf-8")
 
     def test_gateway_managed_backend_keys_are_removed_from_embedded_backend_env(self):
         for key in GATEWAY_MANAGED_BACKEND_KEYS:
@@ -202,6 +213,52 @@ class SetupEnvContractTest(unittest.TestCase):
         self.assertIn("env GUACAMOLE_PROVISIONER_TOKEN;", self.nginx_conf)
         self.assertIn("env GUACAMOLE_PROVISIONER_TOKEN_HEADER;", self.nginx_conf)
         self.assertGreaterEqual(self.compose_file.count("GUACAMOLE_PROVISIONER_TOKEN="), 2)
+
+    def test_ops_worker_has_a_separate_gateway_internal_credential(self):
+        for script in (self.setup_sh, self.setup_bat):
+            self.assertIn("OPS_INTERNAL_AUTH_TOKEN", script)
+            self.assertIn("X-Ops-Internal-Token", script)
+
+        self.assertIn("env OPS_INTERNAL_AUTH_TOKEN;", self.nginx_conf)
+        self.assertIn("env OPS_INTERNAL_AUTH_HEADER;", self.nginx_conf)
+        self.assertGreaterEqual(self.compose_file.count("OPS_INTERNAL_AUTH_TOKEN="), 2)
+
+    def test_database_principals_are_separated_in_compose(self):
+        mysql_script = (ROOT / "mysql" / "000-ensure-user.sh").read_text()
+        for key in (
+            "GUACAMOLE_MYSQL_USER",
+            "BLOCKCHAIN_MYSQL_USER",
+            "OPS_BACKEND_MYSQL_USER",
+            "OPS_GUACAMOLE_MYSQL_USER",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, self.compose_file)
+        self.assertIn("GRANT ALL PRIVILEGES ON \\`${escaped_mysql_database}\\`.* TO '${escaped_guacamole_mysql_user}'", mysql_script)
+        self.assertIn("GRANT ALL PRIVILEGES ON \\`${escaped_blockchain_db}\\`.* TO '${escaped_blockchain_mysql_user}'", mysql_script)
+        self.assertIn("GRANT SELECT, INSERT, UPDATE, DELETE ON", mysql_script)
+        self.assertIn("grant_guacamole_worker_tables", mysql_script)
+        self.assertIsNone(re.search(r"GRANT ALL PRIVILEGES ON .*escaped_ops_", mysql_script))
+        for key in ("MYSQL_PASSWORD", "GUACAMOLE_MYSQL_PASSWORD", "OPS_BACKEND_MYSQL_PASSWORD", "OPS_GUACAMOLE_MYSQL_PASSWORD"):
+            self.assertIn(f"- {key}=", self.compose_file)
+
+    def test_lite_does_not_start_embedded_backend_or_cross_fallback_jwt_keys(self):
+        self.assertIn("BLOCKCHAIN_SERVICES_ENABLED", self.compose_file)
+        self.assertIn("Embedded blockchain-services disabled (Lite mode)", self.compose_file)
+        init_lua = (ROOT / "openresty" / "lua" / "init.lua").read_text()
+        self.assertIn('active_key_path = "/etc/ssl/private/public_key.pem"', init_lua)
+        self.assertIn('active_key_path = "/etc/openresty/jwt-keys/public_key.pem"', init_lua)
+        self.assertIn('config:set("jwt_public_key_path", active_key_path)', init_lua)
+        self.assertIn('FULL_JWT_PUBLIC_KEY="/etc/openresty/jwt-keys/public_key.pem"', self.init_ssl)
+        self.assertIn('JWT_PUBLIC_KEY="$FULL_JWT_PUBLIC_KEY"', self.init_ssl)
+
+    def test_optional_fmu_profile_and_openresty_runtime_defaults_are_explicit(self):
+        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+        self.assertIn("FMU_RUNNER_ENABLED=false", env_example)
+        self.assertIn('FMU_RUNNER_ENABLED=${FMU_RUNNER_ENABLED:-false}', self.compose_file)
+        self.assertIn('AUTO_LOGOUT_ON_DISCONNECT=${AUTO_LOGOUT_ON_DISCONNECT:-true}', self.compose_file)
+        self.assertIn('ADMIN_TRUST_FORWARDED_IP=${ADMIN_TRUST_FORWARDED_IP:-true}', self.compose_file)
+        init_lua = (ROOT / "openresty" / "lua" / "init.lua").read_text(encoding="utf-8")
+        self.assertIn("fmu_runner_enabled = false", init_lua)
 
 if __name__ == "__main__":
     unittest.main()

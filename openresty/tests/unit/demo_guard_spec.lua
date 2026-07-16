@@ -20,6 +20,10 @@ local function build_ngx(opts)
         config             = config,
         demo_sessions      = opts.demo_sessions or {},
         demo_sessions_dict = opts.demo_sessions_dict,
+        ctx                = opts.ctx or {
+            jwt_jti = opts.jti or "demo-jti",
+            jwt_exp = opts.exp or 1000,
+        },
     })
     if opts.auth ~= nil then
         ngx.req.headers["Authorization"] = opts.auth
@@ -75,38 +79,38 @@ runner.describe("Demo guard", function()
         runner.assert.equals(503, ngx._exit_code)
     end)
 
-    runner.it("allows demo user when HTTP availability check returns a network error (fail-open)", function()
+    runner.it("rejects demo user when HTTP availability check returns a network error", function()
         local ngx = build_ngx({ auth = "demo" })
         run(ngx, HttpClientStub.new({}))  -- empty → "no response" error
-        runner.assert.equals(nil, ngx._exit_code)
+        runner.assert.equals(503, ngx._exit_code)
     end)
 
-    runner.it("allows demo user when availability endpoint returns a non-200 status (fail-open)", function()
+    runner.it("rejects demo user when availability endpoint returns a non-200 status", function()
         local ngx = build_ngx({ auth = "demo" })
         run(ngx, HttpClientStub.new({ { status = 503, body = "" } }))
-        runner.assert.equals(nil, ngx._exit_code)
+        runner.assert.equals(503, ngx._exit_code)
     end)
 
-    runner.it("allows demo user when availability response body is invalid JSON (fail-open)", function()
+    runner.it("rejects demo user when availability response body is invalid JSON", function()
         local ngx = build_ngx({ auth = "demo" })
         run(ngx, HttpClientStub.new({ { status = 200, body = "not-json" } }))
-        runner.assert.equals(nil, ngx._exit_code)
+        runner.assert.equals(503, ngx._exit_code)
     end)
 
-    runner.it("skips busy check and allows when marketplace_url is not configured (fail-open)", function()
+    runner.it("rejects when marketplace_url is not configured", function()
         local ngx = build_ngx({ auth = "demo", marketplace_url = "" })
         run(ngx, HttpClientStub.new({}))
-        runner.assert.equals(nil, ngx._exit_code)
+        runner.assert.equals(503, ngx._exit_code)
     end)
 
-    runner.it("skips busy check and allows when demo_lab_id is not configured", function()
+    runner.it("rejects when demo_lab_id is not configured", function()
         local ngx = build_ngx({ auth = "demo", lab_id = "" })
         run(ngx, HttpClientStub.new({}))
-        runner.assert.equals(nil, ngx._exit_code)
+        runner.assert.equals(503, ngx._exit_code)
     end)
 
     runner.it("rejects demo user with 503 when a concurrent demo session is already active", function()
-        local ngx = build_ngx({ auth = "demo", demo_sessions = { count = 1 } })
+        local ngx = build_ngx({ auth = "demo", demo_sessions = { active = 1, ["session:other-jti"] = "1" } })
         run(ngx, make_http_stub(true))
         runner.assert.equals(503, ngx.status)
         runner.assert.equals(503, ngx._exit_code)
@@ -120,14 +124,34 @@ runner.describe("Demo guard", function()
         runner.assert.equals(1, ngx.shared.demo_sessions:get("count"))
     end)
 
-    runner.it("allows demo user and continues (fail-open) when session counter incr errors", function()
+    runner.it("rejects demo user when the session counter cannot be updated", function()
         local bad_sessions = ngx_factory.new_shared_dict()
         function bad_sessions:incr(_key, _amount, _default, _ttl)
             return nil, "simulated incr error"
         end
         local ngx = build_ngx({ auth = "demo", demo_sessions_dict = bad_sessions })
         run(ngx, make_http_stub(true))
-        runner.assert.equals(nil, ngx._exit_code)
+        runner.assert.equals(503, ngx._exit_code)
+    end)
+
+    runner.it("registers a demo JTI once even when assets trigger repeated requests", function()
+        local sessions = ngx_factory.new_shared_dict()
+        local first = build_ngx({ auth = "demo", demo_sessions_dict = sessions, jti = "same-jti" })
+        run(first, make_http_stub(true))
+        local second = build_ngx({ auth = "demo", demo_sessions_dict = sessions, jti = "same-jti" })
+        run(second, HttpClientStub.new({}))
+        runner.assert.equals(nil, second._exit_code)
+        runner.assert.equals(1, sessions:get("active"))
+        runner.assert.equals("1", sessions:get("session:same-jti"))
+    end)
+
+    runner.it("releases a registered demo JTI without making the active count negative", function()
+        local sessions = ngx_factory.new_shared_dict({ active = 1, ["session:demo-jti"] = "1" })
+        local ngx = build_ngx({ auth = "demo", demo_sessions_dict = sessions })
+        runner.assert.truthy(DemoGuard.release(ngx, "demo-jti"))
+        runner.assert.equals(nil, sessions:get("session:demo-jti"))
+        runner.assert.equals(0, sessions:get("active"))
+        runner.assert.equals(false, DemoGuard.release(ngx, "demo-jti"))
     end)
 
 end)

@@ -47,6 +47,21 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (statusVal === 'PARTIAL') setStatus('Partial', 'partial');
         else setStatus('System Unavailable', 'offline');
 
+        // Public health deliberately omits service and infrastructure details.
+        // Keep the page useful without inventing a false per-service status.
+        if (data.public === true) {
+            if (topGrid) {
+                topGrid.innerHTML = `<div class="health-row"><span>Public readiness</span><span class="tag ${statusVal === 'UP' ? 'ok' : 'bad'}">${statusVal === 'UP' ? 'OK' : 'Issue'}</span></div>`;
+            }
+            if (serviceGrid) {
+                serviceGrid.innerHTML = '<div class="health-row">Detailed service diagnostics require Lab Manager authentication.</div>';
+            }
+            if (infraSection) {
+                infraSection.innerHTML = '<div class="health-row">Infrastructure diagnostics require Lab Manager authentication.</div>';
+            }
+            return;
+        }
+
         const liteMode = data.lite === true || (data.mode || '').toLowerCase() === 'lite';
         renderTop(data, liteMode);
         renderServices(data.services || {}, liteMode);
@@ -138,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="tag ok">N/A</span>
                 </div>
                 <div class="keyval">
-                    <div class="key" style="grid-column:1/-1;color:var(--muted,#888)">Not required in Lite mode</div>
+                    <div class="key lite-note">Not required in Lite mode</div>
                 </div>
             `;
             serviceGrid.appendChild(liteAuthCard);

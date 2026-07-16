@@ -78,6 +78,15 @@ def test_resolve_jwt_issuer_uses_issuer_when_present(monkeypatch):
     assert auth._resolve_jwt_issuer() == "https://issuer.example/auth"
 
 
+def test_resolve_jwt_issuer_derives_full_mode_issuer(monkeypatch):
+    monkeypatch.delenv("JWT_ISSUER", raising=False)
+    monkeypatch.delenv("ISSUER", raising=False)
+    monkeypatch.setenv("SERVER_NAME", "gateway.example")
+    monkeypatch.setenv("HTTPS_PORT", "8443")
+
+    assert auth._resolve_jwt_issuer() == "https://gateway.example:8443/auth"
+
+
 @pytest.fixture
 def signing_material():
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -88,7 +97,9 @@ def signing_material():
         payload = {
             "sub": "user-1",
             "labId": "1",
+            "iss": "https://issuer.example/auth",
             "aud": "https://gateway.example/fmu",
+            "iat": 1700000000,
             "exp": 4102444800,
         }
         if claims:
@@ -113,10 +124,13 @@ def test_extract_token_prefers_bearer_header():
     assert auth._extract_token(request) == "header-token"
 
 
-def test_extract_token_falls_back_to_legacy_cookie_names():
+def test_extract_token_rejects_cookie_fallback():
     request = SimpleNamespace(headers={}, cookies={"jti": "legacy-cookie-token"})
 
-    assert auth._extract_token(request) == "legacy-cookie-token"
+    with pytest.raises(HTTPException) as exc:
+        auth._extract_token(request)
+
+    assert exc.value.status_code == 401
 
 
 def test_extract_token_rejects_missing_credentials():
@@ -193,7 +207,7 @@ async def test_fetch_jwks_returns_503_when_upstream_fails(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_verify_jwt_token_accepts_valid_rs256_token(monkeypatch, signing_material):
-    async def _fake_fetch():
+    async def _fake_fetch(*, force=False):
         return signing_material["jwks"]
 
     monkeypatch.setattr(auth, "_fetch_jwks", _fake_fetch)
@@ -207,7 +221,7 @@ async def test_verify_jwt_token_accepts_valid_rs256_token(monkeypatch, signing_m
 
 @pytest.mark.asyncio
 async def test_verify_jwt_token_enforces_issuer_and_audience(monkeypatch, signing_material):
-    async def _fake_fetch():
+    async def _fake_fetch(*, force=False):
         return signing_material["jwks"]
 
     monkeypatch.setattr(auth, "_fetch_jwks", _fake_fetch)
@@ -229,7 +243,7 @@ async def test_verify_jwt_token_enforces_issuer_and_audience(monkeypatch, signin
 
 @pytest.mark.asyncio
 async def test_verify_jwt_token_rejects_unknown_signing_key(monkeypatch, signing_material):
-    async def _fake_fetch():
+    async def _fake_fetch(*, force=False):
         return signing_material["jwks"]
 
     monkeypatch.setattr(auth, "_fetch_jwks", _fake_fetch)
@@ -243,8 +257,27 @@ async def test_verify_jwt_token_rejects_unknown_signing_key(monkeypatch, signing
 
 
 @pytest.mark.asyncio
+async def test_verify_jwt_token_refreshes_jwks_for_rotated_kid(monkeypatch, signing_material):
+    calls = []
+    stale_jwk = dict(signing_material["jwks"]["keys"][0])
+    stale_jwk["kid"] = "old-kid"
+
+    async def _fake_fetch(*, force=False):
+        calls.append(force)
+        return signing_material["jwks"] if force else {"keys": [stale_jwk]}
+
+    monkeypatch.setattr(auth, "_fetch_jwks", _fake_fetch)
+    token = signing_material["issue_token"]()
+
+    claims = await auth.verify_jwt_token(token)
+
+    assert claims["sub"] == "user-1"
+    assert calls == [False, True]
+
+
+@pytest.mark.asyncio
 async def test_verify_jwt_token_rejects_expired_tokens(monkeypatch, signing_material):
-    async def _fake_fetch():
+    async def _fake_fetch(*, force=False):
         return signing_material["jwks"]
 
     monkeypatch.setattr(auth, "_fetch_jwks", _fake_fetch)
@@ -259,7 +292,7 @@ async def test_verify_jwt_token_rejects_expired_tokens(monkeypatch, signing_mate
 
 @pytest.mark.asyncio
 async def test_verify_jwt_token_rejects_invalid_audience(monkeypatch, signing_material):
-    async def _fake_fetch():
+    async def _fake_fetch(*, force=False):
         return signing_material["jwks"]
 
     monkeypatch.setattr(auth, "_fetch_jwks", _fake_fetch)
@@ -270,7 +303,7 @@ async def test_verify_jwt_token_rejects_invalid_audience(monkeypatch, signing_ma
         await auth.verify_jwt_token(token)
 
     assert exc.value.status_code == 401
-    assert exc.value.detail.startswith("Invalid token:")
+    assert exc.value.detail == "Invalid token"
 
 
 @pytest.mark.asyncio

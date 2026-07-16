@@ -18,6 +18,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
+from uuid import uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -25,6 +26,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.exc import IntegrityError
+from werkzeug.exceptions import HTTPException as WerkzeugHTTPException
 from wakeonlan import send_magic_packet
 import requests
 import winrm
@@ -32,6 +34,41 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import aas_generator
 
 APP = Flask(__name__)
+
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _request_id() -> str:
+    """Return a bounded correlation id without echoing arbitrary header data."""
+    candidate = str(request.headers.get("X-Request-ID") or "").strip()
+    return candidate if _REQUEST_ID_RE.fullmatch(candidate) else uuid4().hex
+
+
+def internal_error_response(
+    context: str,
+    exc: BaseException,
+    *,
+    success: Optional[bool] = None,
+    status: int = 500,
+):
+    """Log the detailed exception and expose only a stable public error contract."""
+    request_id = _request_id()
+    logging.exception("%s request_id=%s", context, request_id)
+    payload: Dict[str, Any] = {
+        "error": "Internal server error",
+        "code": "INTERNAL_ERROR",
+        "requestId": request_id,
+    }
+    if success is not None:
+        payload["success"] = success
+    return jsonify(payload), status
+
+
+@APP.errorhandler(Exception)
+def handle_unexpected_exception(exc: Exception):
+    if isinstance(exc, WerkzeugHTTPException):
+        return exc
+    return internal_error_response("Unhandled Ops Worker request", exc)
 
 CONFIG_PATH = os.getenv("OPS_CONFIG", os.path.join(os.path.dirname(__file__), "hosts.json"))
 DYNAMIC_CONFIG_PATH = os.getenv("OPS_DYNAMIC_CONFIG", "/app/data/hosts.json")
@@ -43,6 +80,13 @@ OPS_MYSQL_DATABASE = os.getenv("OPS_MYSQL_DATABASE") or os.getenv("BLOCKCHAIN_MY
 GUACAMOLE_MYSQL_DATABASE = os.getenv("GUACAMOLE_MYSQL_DATABASE") or os.getenv("MYSQL_DATABASE")
 MYSQL_HOSTNAME = os.getenv("MYSQL_HOSTNAME") or os.getenv("MYSQL_HOST") or "mysql"
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+# Database principals are deliberately separate: the worker needs DML on the
+# backend schema and a narrower DML principal on Guacamole's schema.  Keep the
+# legacy variables as a migration fallback for existing installations.
+OPS_MYSQL_USER = os.getenv("OPS_BACKEND_MYSQL_USER") or os.getenv("MYSQL_USER")
+OPS_MYSQL_PASSWORD = os.getenv("OPS_BACKEND_MYSQL_PASSWORD") or os.getenv("MYSQL_PASSWORD")
+GUACAMOLE_MYSQL_USER = os.getenv("OPS_GUACAMOLE_MYSQL_USER") or os.getenv("MYSQL_USER")
+GUACAMOLE_MYSQL_PASSWORD = os.getenv("OPS_GUACAMOLE_MYSQL_PASSWORD") or os.getenv("MYSQL_PASSWORD")
 MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 GUACAMOLE_TEMP_USER_CLEANUP_ENABLED = os.getenv(
@@ -65,6 +109,24 @@ GUACAMOLE_PROVISIONER_TOKEN_HEADER = os.getenv(
 DEFAULT_LABSTATION_EXE = r"C:\LabStation\LabStation.exe"
 WINRM_READ_TIMEOUT = int(os.getenv("OPS_WINRM_READ_TIMEOUT", "30"))
 WINRM_OPERATION_TIMEOUT = int(os.getenv("OPS_WINRM_OPERATION_TIMEOUT", "20"))
+WINRM_REQUIRE_SSL = os.getenv("WINRM_REQUIRE_SSL", "true").strip().lower() not in (
+    "false", "0", "no", "off"
+)
+WINRM_ALLOWED_TRANSPORTS = {
+    value.strip().lower()
+    for value in os.getenv("WINRM_ALLOWED_TRANSPORTS", "ntlm,kerberos,credssp").split(",")
+    if value.strip()
+}
+WINRM_ALLOWED_SSL_PORTS = {
+    int(value.strip())
+    for value in os.getenv("WINRM_ALLOWED_SSL_PORTS", "5986").split(",")
+    if value.strip().isdigit()
+}
+WINRM_ALLOWED_PLAINTEXT_PORTS = {
+    int(value.strip())
+    for value in os.getenv("WINRM_ALLOWED_PLAINTEXT_PORTS", "5985").split(",")
+    if value.strip().isdigit()
+}
 ALLOWED_WINRM_COMMANDS = {
     cmd.strip()
     for cmd in os.getenv(
@@ -120,6 +182,16 @@ SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS = max(
     1, int(os.getenv("SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS", "5"))
 )
 SESSION_OBSERVATION_INGEST_TOKEN = os.getenv("SESSION_OBSERVATION_INGEST_TOKEN", "")
+# The Ops Worker is intentionally not a public API.  OpenResty authenticates
+# the operator at the edge and injects this separate, gateway-local credential
+# before proxying to the worker.  Direct callers (including other containers)
+# must still present it; an absent configuration fails closed rather than
+# silently reverting to network-based trust.
+OPS_INTERNAL_AUTH_TOKEN = os.getenv("OPS_INTERNAL_AUTH_TOKEN", "").strip()
+OPS_INTERNAL_AUTH_HEADER = os.getenv(
+    "OPS_INTERNAL_AUTH_HEADER",
+    "X-Ops-Internal-Token",
+).strip()
 GUAC_ADMIN_USER = os.getenv("GUAC_ADMIN_USER", "")
 GUAC_ADMIN_PASS = os.getenv("GUAC_ADMIN_PASS", "")
 GUAC_API_URL = os.getenv("GUAC_API_URL", "http://guacamole:8080/guacamole/api").rstrip("/")
@@ -161,12 +233,37 @@ DISCOVERY_HEARTBEAT_PATHS = [
     if path.strip()
 ]
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+HTTP_HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 HOST_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$")
 GUAC_SELECTOR_RE = re.compile(r"^guac:id:([1-9][0-9]*)$")
 ENOUGH_DISCOVERY_SIGNALS = {"labstation-detected", "winrm-reachable"}
 HOSTS_LOCK = RLock()
 _FERNET: Optional[Fernet] = None
+
+if not HTTP_HEADER_NAME_RE.fullmatch(OPS_INTERNAL_AUTH_HEADER):
+    logging.error("Invalid OPS_INTERNAL_AUTH_HEADER; using X-Ops-Internal-Token")
+    OPS_INTERNAL_AUTH_HEADER = "X-Ops-Internal-Token"
+
+
+def _requires_ops_internal_auth(path: str) -> bool:
+    """Return whether *path* is an Ops API that only OpenResty may invoke."""
+    return path.startswith("/api/") or path.startswith("/aas-admin/")
+
+
+@APP.before_request
+def require_ops_internal_auth():
+    if not _requires_ops_internal_auth(request.path):
+        return None
+
+    if not OPS_INTERNAL_AUTH_TOKEN:
+        logging.error("OPS_INTERNAL_AUTH_TOKEN is not configured; rejecting Ops API request")
+        return jsonify({"success": False, "error": "Ops internal authentication is not configured"}), 503
+
+    provided = request.headers.get(OPS_INTERNAL_AUTH_HEADER, "")
+    if not provided or not hmac.compare_digest(provided, OPS_INTERNAL_AUTH_TOKEN):
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    return None
 
 
 def read_hosts_config(path: str, missing_ok: bool = True) -> Dict[str, Any]:
@@ -382,11 +479,11 @@ HOSTS = HostRegistry(load_config())
 def build_ops_dsn() -> Optional[str]:
     if MYSQL_DSN:
         return MYSQL_DSN
-    if MYSQL_USER and MYSQL_PASSWORD and OPS_MYSQL_DATABASE:
+    if OPS_MYSQL_USER and OPS_MYSQL_PASSWORD and OPS_MYSQL_DATABASE:
         return URL.create(
             "mysql+pymysql",
-            username=MYSQL_USER,
-            password=MYSQL_PASSWORD,
+            username=OPS_MYSQL_USER,
+            password=OPS_MYSQL_PASSWORD,
             host=MYSQL_HOSTNAME,
             port=MYSQL_PORT,
             database=OPS_MYSQL_DATABASE,
@@ -401,11 +498,11 @@ DB_ENGINE: Optional[Engine] = create_engine(OPS_DSN, pool_pre_ping=True) if OPS_
 def build_guacamole_dsn() -> Optional[str]:
     if GUACAMOLE_MYSQL_DSN:
         return GUACAMOLE_MYSQL_DSN
-    if MYSQL_USER and MYSQL_PASSWORD and GUACAMOLE_MYSQL_DATABASE:
+    if GUACAMOLE_MYSQL_USER and GUACAMOLE_MYSQL_PASSWORD and GUACAMOLE_MYSQL_DATABASE:
         return URL.create(
             "mysql+pymysql",
-            username=MYSQL_USER,
-            password=MYSQL_PASSWORD,
+            username=GUACAMOLE_MYSQL_USER,
+            password=GUACAMOLE_MYSQL_PASSWORD,
             host=MYSQL_HOSTNAME,
             port=MYSQL_PORT,
             database=GUACAMOLE_MYSQL_DATABASE,
@@ -469,9 +566,70 @@ def host_is_up(target: str, timeout: float) -> bool:
     return False
 
 
+def _coerce_bool(value: Any) -> Optional[bool]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in ("true", "1", "yes", "on"):
+        return True
+    if normalized in ("false", "0", "no", "off"):
+        return False
+    raise ValueError("WinRM use_ssl must be a boolean")
+
+
+def _winrm_connection_policy(
+    host: Dict[str, Any],
+    use_ssl: Optional[bool],
+    port: Optional[int],
+    transport: Optional[str],
+) -> Tuple[bool, int, str]:
+    configured_ssl = _coerce_bool(host.get("winrm_use_ssl"))
+    effective_ssl = WINRM_REQUIRE_SSL if configured_ssl is None else configured_ssl
+    if WINRM_REQUIRE_SSL and not effective_ssl:
+        raise ValueError("WinRM HTTPS is required by gateway policy")
+
+    requested_ssl = _coerce_bool(use_ssl)
+    if requested_ssl is not None and requested_ssl != effective_ssl:
+        raise ValueError("request use_ssl does not match the host WinRM policy")
+
+    configured_port = host.get("winrm_port")
+    if configured_port not in (None, ""):
+        try:
+            configured_port = int(configured_port)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("host winrm_port is invalid") from exc
+
+    requested_port = None
+    if port not in (None, ""):
+        try:
+            requested_port = int(port)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("request port is invalid") from exc
+    if configured_port is not None and requested_port is not None and requested_port != configured_port:
+        raise ValueError("request port does not match the host WinRM policy")
+
+    effective_port = requested_port or configured_port or (5986 if effective_ssl else 5985)
+    allowed_ports = WINRM_ALLOWED_SSL_PORTS if effective_ssl else WINRM_ALLOWED_PLAINTEXT_PORTS
+    if effective_port not in allowed_ports:
+        raise ValueError("WinRM port is not allowed by gateway policy")
+
+    configured_transport = str(host.get("winrm_transport") or "ntlm").strip().lower()
+    effective_transport = str(transport or configured_transport).strip().lower()
+    if transport not in (None, "") and effective_transport != configured_transport:
+        raise ValueError("request transport does not match the host WinRM policy")
+    if effective_transport not in WINRM_ALLOWED_TRANSPORTS:
+        raise ValueError("WinRM transport is not allowed by gateway policy")
+    return effective_ssl, effective_port, effective_transport
+
+
 def winrm_endpoint(host: Dict[str, Any], use_ssl: Optional[bool], port: Optional[int]) -> str:
-    scheme = "https" if use_ssl else "http"
-    return f"{scheme}://{host.get('address')}:{port or host.get('winrm_port', 5985)}/wsman"
+    effective_ssl, effective_port, _ = _winrm_connection_policy(host, use_ssl, port, None)
+    scheme = "https" if effective_ssl else "http"
+    return f"{scheme}://{host.get('address')}:{effective_port}/wsman"
 
 
 def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[list],
@@ -483,8 +641,8 @@ def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[li
     if not user or not password:
         raise ValueError("WinRM credentials are required")
 
-    endpoint = winrm_endpoint(host, use_ssl, port)
-    transport = transport or host.get("winrm_transport", "ntlm")
+    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
     exe = host.get("labstation_exe", DEFAULT_LABSTATION_EXE)
     args = args or []
 
@@ -515,8 +673,8 @@ def run_remote_powershell(host: Dict[str, Any], script: str, user: Optional[str]
     if not user or not password:
         raise ValueError("WinRM credentials are required")
 
-    endpoint = winrm_endpoint(host, use_ssl, port)
-    transport = transport or host.get("winrm_transport", "ntlm")
+    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
     session = winrm.Session(endpoint, auth=(user, password), transport=transport)
     result = session.run_ps(script)
     if result.status_code != 0:
@@ -531,8 +689,8 @@ def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], passw
     if not user or not password:
         raise ValueError("WinRM credentials are required")
 
-    endpoint = winrm_endpoint(host, use_ssl, port)
-    transport = transport or host.get("winrm_transport", "ntlm")
+    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
     ps = f"Get-Content -LiteralPath '{path}' -Raw -Encoding UTF8"
 
     session = winrm.Session(endpoint, auth=(user, password), transport=transport)
@@ -550,8 +708,8 @@ def write_remote_file(host: Dict[str, Any], path: str, contents: str,
     if not user or not password:
         raise ValueError("WinRM credentials are required")
 
-    endpoint = winrm_endpoint(host, use_ssl, port)
-    transport = transport or host.get("winrm_transport", "ntlm")
+    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
     escaped_path = path.replace("'", "''")
     escaped_contents = contents.replace("'", "''")
     ps = f"Set-Content -LiteralPath '{escaped_path}' -Value '{escaped_contents}' -Encoding UTF8"
@@ -570,8 +728,8 @@ def remove_remote_file(host: Dict[str, Any], path: str,
     if not user or not password:
         raise ValueError("WinRM credentials are required")
 
-    endpoint = winrm_endpoint(host, use_ssl, port)
-    transport = transport or host.get("winrm_transport", "ntlm")
+    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
     escaped_path = path.replace("'", "''")
     ps = (
         f"if (Test-Path -LiteralPath '{escaped_path}') {{ Remove-Item -LiteralPath '{escaped_path}' -Force }}"
@@ -1006,10 +1164,10 @@ def notify_critical_failure(
             "failureAction": action,
             "notificationUrl": NOTIFICATION_SERVICE_URL,
             "attempts": attempt,
-            "response": resp_text,
+            "response": "Notification service did not accept the request",
         }
         if last_exception is not None:
-            error_details["exception"] = str(last_exception)
+            logging.warning("Notification delivery failed for %s/%s: %s", reservation_id, action, last_exception)
         record_reservation_operation(
             reservation_id,
             lab_id,
@@ -1020,9 +1178,7 @@ def notify_critical_failure(
             response_code=status_code,
             duration_ms=duration_ms,
             payload=error_details,
-            message=(
-                f"Notification failed after {attempt} attempt(s): {resp_text or last_exception}"
-            ),
+            message=f"Notification failed after {attempt} attempt(s)",
         )
 
 
@@ -1069,7 +1225,8 @@ def perform_wake_step(
         success, used_attempts = wol_and_wait(mac, broadcast, port, ping_target, attempts, wait_seconds)
         message = "Host reachable" if success else "Host did not respond to ping"
     except Exception as exc:
-        message = str(exc)
+        logging.exception("Wake operation failed for %s", host.get("name"))
+        message = "Wake operation failed"
     duration_ms = int((time.time() - start) * 1000)
     status = "completed" if success else "failed"
     details = {
@@ -1122,7 +1279,8 @@ def perform_command_step(
         success = result.get("exit_code", 1) == 0
         message = "Exit code {}".format(result.get("exit_code"))
     except Exception as exc:
-        message = str(exc)
+        logging.exception("Lab Station command failed for %s", host.get("name"))
+        message = "Lab Station command failed"
         result = {"error": message}
     duration_ms = result.get("duration_ms", int((time.time() - start) * 1000))
     status = "completed" if success else "failed"
@@ -1264,8 +1422,7 @@ def api_wol():
     try:
         up, used_attempts = wol_and_wait(mac, broadcast, port, ping_target, attempts, wait_seconds)
     except Exception as exc:
-        logging.exception("WOL failed")
-        return jsonify({"error": str(exc)}), 500
+        return internal_error_response("WOL failed", exc)
 
     return jsonify({
         "success": up,
@@ -1301,8 +1458,7 @@ def api_winrm():
         )
         return jsonify(result)
     except Exception as exc:
-        logging.exception("WinRM exec failed")
-        return jsonify({"error": str(exc)}), 500
+        return internal_error_response("WinRM exec failed", exc)
 
 
 @APP.route("/api/heartbeat/poll", methods=["POST"])
@@ -1322,8 +1478,7 @@ def api_poll_heartbeat():
         data["host"] = host_name
         return jsonify(data)
     except Exception as exc:
-        logging.exception("Heartbeat poll failed")
-        return jsonify({"error": str(exc)}), 500
+        return internal_error_response("Heartbeat poll failed", exc)
 
 
 def _format_sse_event(event: str, data: str) -> str:
@@ -1337,7 +1492,17 @@ def generate_heartbeat_stream(host: Dict[str, Any], include_events: bool):
             data["host"] = host.get("name")
             yield _format_sse_event("heartbeat", json.dumps(data))
         except Exception as exc:
-            yield _format_sse_event("error", json.dumps({"error": str(exc), "host": host.get("name")}))
+            request_id = _request_id()
+            logging.exception("Heartbeat stream failed request_id=%s", request_id)
+            yield _format_sse_event(
+                "error",
+                json.dumps({
+                    "error": "Internal server error",
+                    "code": "INTERNAL_ERROR",
+                    "requestId": request_id,
+                    "host": host.get("name"),
+                }),
+            )
         time.sleep(HEARTBEAT_SSE_INTERVAL_SECONDS)
 
 
@@ -1723,8 +1888,7 @@ def api_reservation_timeline():
     except LookupError:
         return jsonify({"error": "Reservation not found"}), 404
     except RuntimeError as exc:
-        logging.error("Timeline error: %s", exc)
-        return jsonify({"error": str(exc)}), 500
+        return internal_error_response("Timeline error", exc)
     return jsonify(data)
 
 
@@ -1926,7 +2090,8 @@ def discover_heartbeat_hint(hostname: str) -> Dict[str, Any]:
             detected_path = path
             break
         except Exception as exc:  # pylint: disable=broad-except
-            errors.append({"path": path, "error": str(exc)})
+            logging.debug("Unable to read heartbeat candidate %s: %s", path, exc)
+            errors.append({"path": path, "error": "Remote heartbeat read failed"})
 
     if heartbeat is None:
         return {"checked": True, "detected": False, "status": "read-failed", "errors": errors}
@@ -2016,6 +2181,8 @@ def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
         "name": connection.get("hostname"),
         "address": connection.get("hostname"),
         "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
         "heartbeat_path": heartbeat_hint.get("path") or DISCOVERY_HEARTBEAT_PATHS[0],
         "events_path": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
         "labs": [],
@@ -2127,6 +2294,8 @@ def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) 
         "address": address,
         "credential_ref": credential_ref,
         "winrm_transport": str(payload.get("winrmTransport") or "ntlm").strip() or "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
         "heartbeat_path": str(
             payload.get("heartbeatPath")
             or r"C:\LabStation\labstation\data\telemetry\heartbeat.json"
@@ -2203,7 +2372,7 @@ def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
                 user_rows = []
     except Exception as exc:
         logging.warning("Unable to load Guacamole connections: %s", exc)
-        return [], str(exc)
+        return [], "Guacamole connection inventory unavailable"
 
     users_by_connection: Dict[Any, List[str]] = {}
     for row in user_rows:
@@ -2518,8 +2687,7 @@ def api_internal_guacamole_provision():
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as exc:  # pylint: disable=broad-except
-        logging.exception("Guacamole provisioning failed")
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return internal_error_response("Guacamole provisioning failed", exc, success=False)
 
 
 @APP.route("/internal/guacamole/provision/<session_id>", methods=["DELETE"])
@@ -2533,8 +2701,7 @@ def api_internal_guacamole_delete(session_id: str):
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as exc:  # pylint: disable=broad-except
-        logging.exception("Guacamole temporary-user cleanup failed")
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return internal_error_response("Guacamole temporary-user cleanup failed", exc, success=False)
 
 
 @APP.route("/api/hosts/discover", methods=["POST"])
@@ -2590,8 +2757,7 @@ def api_hosts_provision():
         upsert_dynamic_host(host_config)
         count, reload_error = reload_hosts()
     except Exception as exc:
-        logging.exception("Failed to provision ops host")
-        return jsonify({"error": str(exc)}), 500
+        return internal_error_response("Failed to provision ops host", exc)
 
     if reload_error:
         return jsonify({"error": reload_error}), 500
@@ -2616,8 +2782,7 @@ def api_save_winrm_credentials():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:  # pylint: disable=broad-except
-        logging.exception("Failed to save WinRM credentials")
-        return jsonify({"error": str(exc)}), 500
+        return internal_error_response("Failed to save WinRM credentials", exc)
     if reload_error:
         return jsonify({"error": reload_error}), 500
     return jsonify({
@@ -2663,7 +2828,8 @@ def api_aas_sync():
             result = aas_generator.sync_lab_to_basyx(str(lab_id), host)
             results.append({"labId": str(lab_id), **result})
         except Exception as exc:  # pylint: disable=broad-except
-            results.append({"labId": str(lab_id), "error": str(exc)})
+            logging.exception("AAS sync failed for lab %s", lab_id)
+            results.append({"labId": str(lab_id), "error": "AAS synchronization failed"})
     return jsonify({"host": host_name, "labs": results}), 200
 
 
@@ -2703,8 +2869,7 @@ def api_hosts_local_mode():
         else:
             remove_remote_file(host, flag_path, None, None, None, None, None)
     except Exception as exc:
-        logging.exception("Local mode toggle failed for %s", host_name)
-        return jsonify({"error": str(exc)}), 500
+        return internal_error_response(f"Local mode toggle failed for {host_name}", exc)
 
     return jsonify({"host": host_name, "localModeEnabled": enabled}), 200
 
@@ -2760,8 +2925,7 @@ def api_operations_recent():
         }
         return jsonify({"operations": _rows_to_operations([dict(row) for row in rows]), "pagination": pagination})
     except Exception as exc:
-        logging.exception("Failed to load recent operations")
-        return jsonify({"error": str(exc)}), 500
+        return internal_error_response("Failed to load recent operations", exc)
 
 
 @APP.route("/aas-admin/lab/<lab_id>/sync", methods=["POST"])
@@ -3354,6 +3518,7 @@ def process_guacamole_token_revocations() -> int:
             revoked += 1
         except Exception as exc:  # pylint: disable=broad-except
             status = "FAILED" if attempts >= GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS else "RETRY"
+            logging.warning("Guacamole token revocation failed for %s: %s", row["token_hash"], exc)
             next_attempt = datetime.now(timezone.utc) + timedelta(
                 seconds=session_observation_retry_delay_seconds(attempts)
             )
@@ -3368,7 +3533,7 @@ def process_guacamole_token_revocations() -> int:
                     "status": status,
                     "attempts": attempts,
                     "next_attempt_at": next_attempt,
-                    "last_error": str(exc)[:1024],
+                    "last_error": "Guacamole token revocation failed",
                     "token_hash": row["token_hash"],
                 })
     return revoked
@@ -3612,7 +3777,8 @@ def deliver_session_observation_outbox() -> int:
         try:
             authorization = _session_observer_authorization()
         except Exception as exc:  # pylint: disable=broad-except
-            _mark_session_observation_failure(record, f"observer authorization failed: {exc}")
+            logging.warning("Observer authorization failed: %s", exc)
+            _mark_session_observation_failure(record, "Observer authorization failed")
             continue
         reported_at = int(time.time())
         payload = {
@@ -3641,7 +3807,8 @@ def deliver_session_observation_outbox() -> int:
                     f"audit endpoint status={response.status_code} recorded={body.get('recorded')!r}",
                 )
         except Exception as exc:  # pylint: disable=broad-except
-            _mark_session_observation_failure(record, f"audit delivery failed: {exc}")
+            logging.warning("Audit delivery failed: %s", exc)
+            _mark_session_observation_failure(record, "Audit delivery failed")
     return delivered
 
 
@@ -3658,7 +3825,7 @@ def reload_hosts() -> Tuple[int, Optional[str]]:
         return registry.count(), None
     except Exception as exc:
         logging.error("Failed to reload hosts: %s", exc)
-        return 0, str(exc)
+        return 0, "Host catalog reload failed"
 
 
 def start_scheduler():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Any, Callable, Optional
 from urllib.parse import quote, urlparse, urlunparse
 
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 
 
 ModelMetadata = dict[str, Any]
+logger = logging.getLogger("fmu-runner.backend")
 
 
 class BaseFmuBackend:
@@ -51,12 +53,23 @@ class LocalFmuBackend(BaseFmuBackend):
     health_loader: Callable[[], dict]
     model_metadata_loader: Callable[[str], ModelMetadata]
     list_loader: Callable[[str], dict]
+    allow_execution: bool = True
 
     mode = "local"
-    supports_local_execution = True
+
+    @property
+    def supports_local_execution(self) -> bool:
+        return self.allow_execution
 
     async def health(self) -> dict:
-        return self.health_loader()
+        payload = dict(self.health_loader())
+        if not self.allow_execution:
+            checks = dict(payload.get("checks") or {})
+            checks["localExecutionEnabled"] = False
+            payload["checks"] = checks
+            payload["status"] = "DEGRADED"
+            payload["backendMode"] = "local-disabled"
+        return payload
 
     async def get_authorized_model_metadata(self, *, claims: dict, requested_fmu_filename: Optional[str] = None) -> ModelMetadata:
         fmu_filename = self.ensure_requested_access_key(claims, requested_fmu_filename)
@@ -126,14 +139,9 @@ class StationFmuBackend(BaseFmuBackend):
 
     @staticmethod
     def _response_error_detail(response: httpx.Response) -> str:
-        detail_text = response.text
-        try:
-            payload = response.json()
-            if isinstance(payload, dict):
-                detail_text = payload.get("error") or payload.get("message") or detail_text
-        except Exception:
-            pass
-        return detail_text
+        # Do not relay Station's body: it may contain filesystem paths,
+        # upstream URLs or framework diagnostics. Preserve only the status.
+        return f"Station backend rejected request ({response.status_code})"
 
     def build_authorized_context(
         self,
@@ -219,7 +227,8 @@ class StationFmuBackend(BaseFmuBackend):
             async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 response = await client.get(url, headers=self._headers())
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=503, detail=f"Station backend unavailable: {exc}") from exc
+            logger.warning("Station backend GET failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Station backend unavailable") from exc
 
         if response.status_code >= 400:
             detail_text = response.text
@@ -234,10 +243,11 @@ class StationFmuBackend(BaseFmuBackend):
         try:
             payload = response.json()
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Station backend returned invalid JSON for {path}") from exc
+            logger.warning("Station backend returned invalid JSON for %s: %s", path, exc)
+            raise HTTPException(status_code=502, detail="Station backend returned invalid JSON") from exc
 
         if not isinstance(payload, dict):
-            raise HTTPException(status_code=502, detail=f"Station backend returned invalid payload for {path}")
+            raise HTTPException(status_code=502, detail="Station backend returned invalid payload")
         return payload
 
     async def _post_json(
@@ -259,7 +269,8 @@ class StationFmuBackend(BaseFmuBackend):
                     json=payload,
                 )
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=503, detail=f"Station backend unavailable: {exc}") from exc
+            logger.warning("Station backend POST failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Station backend unavailable") from exc
 
         if response.status_code >= 400:
             raise HTTPException(status_code=response.status_code, detail=self._response_error_detail(response))
@@ -267,9 +278,10 @@ class StationFmuBackend(BaseFmuBackend):
         try:
             response_payload = response.json()
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Station backend returned invalid JSON for {path}") from exc
+            logger.warning("Station backend returned invalid JSON for %s: %s", path, exc)
+            raise HTTPException(status_code=502, detail="Station backend returned invalid JSON") from exc
         if not isinstance(response_payload, dict):
-            raise HTTPException(status_code=502, detail=f"Station backend returned invalid payload for {path}")
+            raise HTTPException(status_code=502, detail="Station backend returned invalid payload")
         return response_payload
 
     async def open_authorized_simulation_stream(
@@ -306,7 +318,8 @@ class StationFmuBackend(BaseFmuBackend):
             response = await client.send(request, stream=True)
         except httpx.HTTPError as exc:
             await client.aclose()
-            raise HTTPException(status_code=503, detail=f"Station backend unavailable: {exc}") from exc
+            logger.warning("Station backend stream failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Station backend unavailable") from exc
 
         if response.status_code >= 400:
             try:

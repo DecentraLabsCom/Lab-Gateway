@@ -229,6 +229,10 @@ if not provided or provided == "" then
     provided = ngx.var[cookie_var]
 end
 
+if provided and provided ~= "" and ngx.shared.cache then
+    provided = ngx.shared.cache:get("admin_session:lab:" .. provided) or provided
+end
+
 if not provided or provided == "" then
     return deny(ngx.HTTP_UNAUTHORIZED, "Unauthorized: lab manager token required.")
 end
@@ -264,3 +268,16 @@ if backend_header_name ~= header_name then
     ngx.req.clear_header(header_name)
 end
 ngx.req.set_header(backend_header_name, backend_token)
+
+-- `/aas-admin/lab/*` is also served by ops-worker.  Use the same dedicated
+-- service credential after the administrator has been authenticated above.
+local ops_internal_token = os.getenv("OPS_INTERNAL_AUTH_TOKEN") or ""
+local ops_internal_header = os.getenv("OPS_INTERNAL_AUTH_HEADER") or "X-Ops-Internal-Token"
+if ops_internal_token == "" then
+    return deny(ngx.HTTP_SERVICE_UNAVAILABLE, "Service unavailable: OPS_INTERNAL_AUTH_TOKEN is not configured.")
+end
+ngx.req.clear_header("Authorization")
+ngx.req.clear_header("Cookie")
+ngx.req.clear_header(header_name)
+ngx.req.clear_header("X-Ops-Internal-Token")
+ngx.req.set_header(ops_internal_header, ops_internal_token)

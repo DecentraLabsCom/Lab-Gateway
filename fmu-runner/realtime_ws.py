@@ -15,6 +15,17 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from fmpy import extract, instantiate_fmu, read_model_description
 
 
+def _public_http_detail(exc: HTTPException, fallback: str) -> str:
+    """Keep validation feedback while hiding upstream/internal exception text."""
+    if exc.status_code >= 500:
+        return fallback
+    if isinstance(exc.detail, dict):
+        detail = exc.detail.get("error") or exc.detail.get("message")
+    else:
+        detail = exc.detail
+    return detail if isinstance(detail, str) and len(detail) <= 256 else fallback
+
+
 def _normalize_binding(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -321,7 +332,7 @@ class _RealtimeSession:
                         ],
                     )
                 except Exception as exc:
-                    raise HTTPException(status_code=400, detail=f"Binary inputs must be base64 strings: {exc}") from exc
+                    raise HTTPException(status_code=400, detail="Binary inputs must be valid base64 strings") from exc
             elif variable_type == "Clock":
                 setter(list(refs), [bool(v) for v in vals])
             else:
@@ -647,39 +658,18 @@ class RealtimeWsManager:
             token = token[3:]
         return token[:10] if token else None
 
-    @staticmethod
-    def parse_cookie_header(cookie_header: str) -> dict[str, str]:
-        cookies: dict[str, str] = {}
-        if not cookie_header:
-            return cookies
-        for chunk in cookie_header.split(";"):
-            if "=" not in chunk:
-                continue
-            name, value = chunk.split("=", 1)
-            cookies[name.strip()] = value.strip()
-        return cookies
-
     def extract_ws_token(self, websocket: WebSocket) -> str:
         auth_header = websocket.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            return auth_header[7:]
-        token_param = websocket.query_params.get("token")
-        if token_param:
-            return token_param
-        cookie_header = websocket.headers.get("cookie", "")
-        cookies = self.parse_cookie_header(cookie_header)
-        for cookie_name in ("token", "jwt", "jti", "JTI"):
-            token = cookies.get(cookie_name)
-            if token:
-                return token
+        if auth_header.startswith("Bearer ") and auth_header[7:].strip():
+            return auth_header[7:].strip()
         raise HTTPException(status_code=401, detail="Missing authentication token")
 
     def extract_ws_authorization(self, websocket: WebSocket) -> str:
         """Return the bearer form needed for server-side ticket issuance."""
         authorization = websocket.headers.get("authorization", "")
-        if authorization.startswith("Bearer "):
-            return authorization
-        return f"Bearer {self.extract_ws_token(websocket)}"
+        if authorization.startswith("Bearer ") and authorization[7:].strip():
+            return f"Bearer {authorization[7:].strip()}"
+        raise HTTPException(status_code=401, detail="Missing bearer token")
 
     @staticmethod
     def error_payload(
@@ -956,10 +946,10 @@ class RealtimeWsManager:
                             if not session_ticket:
                                 raise HTTPException(status_code=500, detail="Session ticket issuance returned no ticket")
                         except HTTPException as exc:
-                            detail = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
+                            detail = exc.detail if isinstance(exc.detail, dict) else {}
                             response = self.error_payload(
                                 code=detail.get("code") or ("FORBIDDEN" if exc.status_code == 403 else "INTERNAL_ERROR"),
-                                message=detail.get("error") or detail.get("message") or str(exc.detail),
+                                message=_public_http_detail(exc, "Unable to issue session ticket"),
                                 request_id=request_id,
                                 retryable=exc.status_code >= 500,
                             )
@@ -1000,11 +990,11 @@ class RealtimeWsManager:
                             self.enforce_fmu_claim(create_claims)
                             claims = create_claims
                         except HTTPException as exc:
-                            detail = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
+                            detail = exc.detail if isinstance(exc.detail, dict) else {}
                             code = detail.get("code") or ("SESSION_TICKET_INVALID" if exc.status_code == 401 else ("FORBIDDEN" if exc.status_code == 403 else "INTERNAL_ERROR"))
                             response = self.error_payload(
                                 code=code,
-                                message=detail.get("error") or detail.get("message") or str(exc.detail),
+                                message=_public_http_detail(exc, "Unable to redeem session ticket"),
                                 request_id=request_id,
                                 retryable=exc.status_code >= 500,
                             )
@@ -1090,7 +1080,7 @@ class RealtimeWsManager:
                     except HTTPException as exc:
                         response = self.error_payload(
                             code="RESERVATION_NOT_ACTIVE" if exc.status_code == 403 else ("SESSION_EXPIRED" if exc.status_code == 401 else "INTERNAL_ERROR"),
-                            message=str(exc.detail),
+                            message=_public_http_detail(exc, "Unable to create session"),
                             request_id=request_id,
                             retryable=exc.status_code >= 500,
                         )
@@ -1332,7 +1322,7 @@ class RealtimeWsManager:
                         code = "INVALID_COMMAND"
                     response = self.error_payload(
                         code=code,
-                        message=str(exc.detail),
+                        message=_public_http_detail(exc, "Command failed"),
                         request_id=request_id,
                         retryable=exc.status_code >= 500,
                         session_id=current_session.session_id,
@@ -1341,7 +1331,7 @@ class RealtimeWsManager:
                     self.logger.error("Realtime WS command failed: %s", exc)
                     response = self.error_payload(
                         code="INTERNAL_ERROR",
-                        message=str(exc),
+                        message="Internal server error",
                         request_id=request_id,
                         retryable=False,
                         session_id=current_session.session_id,
@@ -1357,7 +1347,7 @@ class RealtimeWsManager:
                 connection,
                 self.error_payload(
                     code="UNAUTHORIZED" if exc.status_code == 401 else "FORBIDDEN",
-                    message=str(exc.detail),
+                    message=_public_http_detail(exc, "Authentication failed"),
                     retryable=False,
                 ),
             )

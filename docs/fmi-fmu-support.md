@@ -104,7 +104,13 @@ FMU_BACKEND_MODE=station
 FMU_JWT_AUDIENCE=https://<public-gateway-origin>/fmu
 ~~~
 
-Keep `FMU_BACKEND_MODE=local` for local development and tests. The internal Station channel is private and authenticated with an internal token or mTLS; the public booking JWT is not the sole protection of the internal channel.
+For isolated local development/tests, set both `FMU_BACKEND_MODE=local` and
+`FMU_LOCAL_DEV_MODE=true`. Local batch requests use one killable worker process
+per simulation. Native local realtime requires the additional explicit switch
+`FMU_LOCAL_REALTIME_ENABLED=true`; keep it false outside an isolated test
+environment. The internal Station channel is private and
+authenticated with an internal token or mTLS; the public booking JWT is not
+the sole protection of the internal channel.
 
 ### 4. Manage interface disclosure
 
@@ -264,5 +270,3 @@ Use these documents when the work is implementation- or deployment-specific:
 - [ ] The proxy was imported as an FMI Co-Simulation FMU.
 - [ ] The FMI tool uses the intended simulation time mode and step size.
 - [ ] The session is terminated when the simulation is complete.
-
-

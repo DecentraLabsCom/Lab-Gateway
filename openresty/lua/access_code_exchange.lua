@@ -79,8 +79,20 @@ local parsed = jwt:load_jwt(token)
 if not parsed.valid then
     return fail(401, "Invalid access credential")
 end
-local verified = jwt:verify_jwt_obj(public_key, parsed)
-if not verified or not verified.verified then
+-- Key rotation keeps the previous public key available for the maximum JWT
+-- lifetime.  Verify against the active key first, then the overlap key so a
+-- token issued immediately before rotation remains redeemable.
+local verified
+for _, candidate in ipairs({ public_key, cache:get("public_key_previous") }) do
+    if candidate then
+        local result = jwt:verify_jwt_obj(candidate, parsed)
+        if result and result.verified then
+            verified = result
+            break
+        end
+    end
+end
+if not verified then
     return fail(401, "Invalid access credential")
 end
 local claims = verified.payload or {}

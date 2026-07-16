@@ -39,6 +39,8 @@ services:
       AUTH_ACCESS_CODE_REDEEMER_TOKEN: integration-redeemer-token
       OPS_API_URL: http://ops-worker:5001
       LAB_MANAGER_TOKEN: integration-test-secret
+      OPS_INTERNAL_AUTH_TOKEN: integration-ops-internal-secret
+      OPS_INTERNAL_AUTH_HEADER: X-Ops-Internal-Token
       ADMIN_DASHBOARD_ALLOW_PRIVATE: "true"
       SECURITY_ALLOW_PRIVATE_NETWORKS: "true"
       CORS_ALLOWED_ORIGINS: http://localhost:3000

@@ -271,7 +271,7 @@ def test_station_bearer_create_issues_ticket_and_confirms_after_station_created(
     manager.confirm_session_started = _confirm
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.create",
             "requestId": "req-bearer-ticket",
@@ -370,7 +370,7 @@ def test_station_ws_attach_forwards_when_session_owned(monkeypatch):
         exp=4102444800,
     )
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.attach",
             "requestId": "req-attach",
@@ -383,12 +383,14 @@ def test_station_ws_attach_forwards_when_session_owned(monkeypatch):
     assert fake_station.sent_messages[0]["gatewayContext"]["claims"]["accessKey"] == "test.fmu"
 
 
-def test_station_proxy_extract_ws_token_supports_query_and_cookie():
+def test_station_proxy_extract_ws_token_rejects_query_and_cookie_credentials():
     websocket_from_query = SimpleNamespace(headers={}, query_params={"token": "query-token"})
     websocket_from_cookie = SimpleNamespace(headers={"cookie": "foo=bar; jti=cookie-token"}, query_params={})
 
-    assert StationRealtimeWsProxyManager.extract_ws_token(websocket_from_query) == "query-token"
-    assert StationRealtimeWsProxyManager.extract_ws_token(websocket_from_cookie) == "cookie-token"
+    for websocket in (websocket_from_query, websocket_from_cookie):
+        with pytest.raises(HTTPException) as exc:
+            StationRealtimeWsProxyManager.extract_ws_token(websocket)
+        assert exc.value.status_code == 401
 
 
 def test_station_proxy_extract_ws_token_requires_credentials():
@@ -405,12 +407,6 @@ def test_station_proxy_extract_ws_token_supports_bearer_header():
     websocket = SimpleNamespace(headers={"authorization": "Bearer bearer-token"}, query_params={})
 
     assert StationRealtimeWsProxyManager.extract_ws_token(websocket) == "bearer-token"
-
-
-def test_station_proxy_parse_cookie_header_ignores_invalid_chunks():
-    cookies = StationRealtimeWsProxyManager.parse_cookie_header("foo=bar; invalid; jwt=abc; spaced = value ")
-
-    assert cookies == {"foo": "bar", "jwt": "abc", "spaced": "value"}
 
 
 def test_station_proxy_normalize_ticket_id_and_error_payload():
@@ -608,7 +604,7 @@ def test_station_ws_session_create_rejects_when_claim_lab_does_not_match(monkeyp
     manager = _build_manager()
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.create",
             "requestId": "req-create",
@@ -628,7 +624,7 @@ def test_station_ws_session_create_rejects_when_claim_reservation_key_does_not_m
     monkeypatch.setattr(manager, "verify_jwt_token", _verify_with_reservation)
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.create",
             "requestId": "req-create",
@@ -648,7 +644,7 @@ def test_station_ws_session_create_returns_internal_error_when_station_connect_f
     monkeypatch.setattr(manager, "_connect_station", _fail_connect)
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.create",
             "requestId": "req-create",
@@ -672,7 +668,7 @@ def test_station_ws_attach_rejects_expired_session(monkeypatch):
     monkeypatch.setattr(main, "_realtime_manager", manager)
     monkeypatch.setattr("station_ws_proxy.time.time", lambda: 100)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.attach",
             "requestId": "req-attach",
@@ -701,7 +697,7 @@ def test_station_ws_attach_rejects_session_ownership_mismatch(monkeypatch):
     monkeypatch.setattr(manager, "verify_jwt_token", _verify_other)
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.attach",
             "requestId": "req-attach",
@@ -716,7 +712,7 @@ def test_station_ws_attach_requires_session_id(monkeypatch):
     manager = _build_manager()
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.attach",
             "requestId": "req-attach",
@@ -730,7 +726,7 @@ def test_station_ws_attach_rejects_unknown_session(monkeypatch):
     manager = _build_manager()
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.attach",
             "requestId": "req-attach",
@@ -757,7 +753,7 @@ def test_station_ws_attach_returns_internal_error_when_station_connect_fails(mon
     monkeypatch.setattr(manager, "_connect_station", _fail_connect)
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/api/v1/fmu/sessions?token=test-token") as ws:
+    with client.websocket_connect("/api/v1/fmu/sessions", headers={"Authorization": "Bearer test-token"}) as ws:
         ws.send_text(json.dumps({
             "type": "session.attach",
             "requestId": "req-attach",
@@ -773,7 +769,7 @@ def test_station_ws_internal_endpoint_rejects_invalid_internal_token(monkeypatch
     manager = _build_manager()
     monkeypatch.setattr(main, "_realtime_manager", manager)
 
-    with client.websocket_connect("/internal/fmu/sessions?token=test-token", headers={"X-Internal-Session-Token": "wrong-token"}) as ws:
+    with client.websocket_connect("/internal/fmu/sessions", headers={"X-Internal-Session-Token": "wrong-token", "Authorization": "Bearer test-token"}) as ws:
         payload = ws.receive_json()
         assert payload["type"] == "error"
         assert payload["code"] == "FORBIDDEN"

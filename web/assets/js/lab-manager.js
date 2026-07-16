@@ -7,28 +7,10 @@ function escapeHtml(str) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const BILLING_TOKEN_STORAGE_KEY = 'dlabs_billing_token';
-
-    function isUsableToken(value) {
-        if (typeof value !== 'string') return false;
-        const token = value.trim();
-        if (!token || token === '=') return false;
-        const lower = token.toLowerCase();
-        return lower !== 'change_me' && lower !== 'changeme';
-    }
-
-    function hasBillingToken() {
-        try {
-            return isUsableToken(localStorage.getItem(BILLING_TOKEN_STORAGE_KEY));
-        } catch (_) {
-            return false;
-        }
-    }
-
     let billingAccessReady = false;
 
     function hasBillingAccess() {
-        return billingAccessReady || hasBillingToken();
+        return billingAccessReady;
     }
 
     const driverEl = $('#driver');
@@ -538,7 +520,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!config) {
             config = {
-                key: BILLING_TOKEN_STORAGE_KEY,
+                key: 'billing',
+                login: '/admin/login',
                 header: 'X-Access-Token',
                 cookie: 'access_token',
                 title: 'Wallet & Billing Access Token',
@@ -1997,7 +1980,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const opsHint = $('#opsHint');
         if (opsHint) {
             opsHint.innerHTML = `
-                <i class="fas fa-exclamation-triangle" style="color: #856404; margin-right: 8px;"></i>
+                <i class="fas fa-exclamation-triangle warning-icon"></i>
                 <strong>Access policy:</strong> Lab Station operations require an allowed Lab Manager network scope and a valid Lab Manager token.
                 Check ADMIN_DASHBOARD_LOCAL_ONLY, ADMIN_DASHBOARD_ALLOW_PRIVATE, SECURITY_ALLOW_PRIVATE_NETWORKS, and ADMIN_ALLOWED_CIDRS.
             `;

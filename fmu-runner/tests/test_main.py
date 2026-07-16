@@ -16,6 +16,7 @@ from collections import defaultdict, deque
 from xml.etree import ElementTree as ET
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
+from concurrent.futures import ProcessPoolExecutor
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -35,6 +36,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _confirm_fmu_session_started,
         _record_browser_session_started,
         _validate_proxy_generation_supported,
+        _shutdown_simulation_executor,
     )
     from auth import verify_jwt as _original_verify_jwt
 
@@ -61,6 +63,28 @@ def _fake_jwt(**claims):
 app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 client = TestClient(app)
+
+
+def test_native_worker_is_killed_when_isolated_executor_is_forced_to_stop():
+    """Cancellation must terminate the process, not only cancel its Future."""
+    killed = []
+
+    class FakeProcess:
+        def is_alive(self):
+            return True
+
+        def kill(self):
+            killed.append(True)
+
+    executor = object.__new__(ProcessPoolExecutor)
+    executor._processes = {1: FakeProcess()}
+    shutdown_calls = []
+    executor.shutdown = lambda **kwargs: shutdown_calls.append(kwargs)
+
+    _shutdown_simulation_executor(executor, force=True)
+
+    assert killed == [True]
+    assert shutdown_calls == [{"wait": False, "cancel_futures": True}]
 
 
 @pytest.fixture(autouse=True)

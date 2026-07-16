@@ -45,7 +45,9 @@ luajit openresty/tests/run.lua
 ## Coverage focus
 
 - Access/session propagation (`access_handler`, `treasury_access`, `lab_manager_access`)
-- JWT validation and JWKS fetch (`jwt_handler`)
+- JWT validation is covered by the access-code exchange and the active access
+  modules; the former `jwt_handler` compatibility module was removed because
+  it did not perform cryptographic verification.
 - Content-phase Guacamole token exchange and clean redirect filtering
 - Session cleanup and revocation (`log_handler`, `session_guard`)
 - Lite-mode JWT key synchronization from `ISSUER` origin (`run-jwt-key-sync-integration.*`)

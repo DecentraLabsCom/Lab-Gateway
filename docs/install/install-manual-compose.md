@@ -42,7 +42,15 @@ SERVER_NAME=lab.your-institution.edu
 
 # Strong passwords — do not leave defaults
 MYSQL_ROOT_PASSWORD=change_to_strong_password
-MYSQL_PASSWORD=change_to_strong_password
+MYSQL_PASSWORD=legacy_migration_password
+GUACAMOLE_MYSQL_PASSWORD=change_to_strong_password
+BLOCKCHAIN_MYSQL_PASSWORD=change_to_strong_password
+OPS_BACKEND_MYSQL_PASSWORD=change_to_strong_password
+OPS_GUACAMOLE_MYSQL_PASSWORD=change_to_strong_password
+GUACAMOLE_MYSQL_USER=guacamole_app
+BLOCKCHAIN_MYSQL_USER=blockchain_app
+OPS_BACKEND_MYSQL_USER=ops_backend
+OPS_GUACAMOLE_MYSQL_USER=ops_guac
 
 # Guacamole admin (do not use 'guacadmin' in production)
 GUAC_ADMIN_USER=admin
@@ -74,12 +82,13 @@ ISSUER=
 
 ```env
 ISSUER=https://auth-gateway.other-institution.edu/auth
+BLOCKCHAIN_SERVICES_ENABLED=false
 ```
 
-Lite is an access-plane mode, not a second issuer. The root Compose file may
-still start the embedded `blockchain-services` container, but OpenResty blocks
-its local `/auth` surface and uses the remote issuer for access-code, FMU and
-observation calls. For Full + N Lite or standalone `blockchain-services` + N
+Lite is an access-plane mode, not a second issuer. The root Compose file keeps
+the embedded `blockchain-services` container dormant
+(`BLOCKCHAIN_SERVICES_ENABLED=false`) and OpenResty uses the remote issuer for
+access-code, FMU and observation calls. For Full + N Lite or standalone `blockchain-services` + N
 Lite, configure one trust bundle, gateway ID and explicit provisioner route per
 Lite; see [Deployment Architectures](../deployment-architectures.md).
 
@@ -192,7 +201,7 @@ curl -k https://localhost/health
 curl -k https://localhost/auth/.well-known/openid-configuration
 ```
 
-Both should return JSON without errors.
+Both should return JSON without errors. The public health response is intentionally redacted; Lab Manager operators can use `/health/details` with the configured `LAB_MANAGER_TOKEN` for backend diagnostics.
 
 ## Step 9 — Create the institutional wallet
 

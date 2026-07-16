@@ -84,12 +84,23 @@ on-chain `SessionStarted`.
 
 ```env
 AUTO_LOGOUT_ON_DISCONNECT=true
+# OpenResty manual-login limit per source IP + username per minute
+GUACAMOLE_LOGIN_RATE_LIMIT_PER_MINUTE=10
 API_SESSION_TIMEOUT=15
+# Guacamole 1.6 anti-brute-force extension (source-IP failed-login bans)
+BAN_MAX_INVALID_ATTEMPTS=5
+BAN_ADDRESS_DURATION=300
+BAN_MAX_ADDRESSES=10485670
 JWT_GUAC_IDLE_TIMEOUT_SECONDS=60
 LAB_ACCESS_JWT_MAX_TTL_SECONDS=14400
 ```
 
 - `API_SESSION_TIMEOUT`: Guacamole auth token timeout, in minutes.
+- `GUACAMOLE_LOGIN_RATE_LIMIT_PER_MINUTE`: OpenResty manual username/password
+  attempt limit per source IP and username in a 60-second window.
+- `BAN_MAX_INVALID_ATTEMPTS`, `BAN_ADDRESS_DURATION`, `BAN_MAX_ADDRESSES`:
+  limits for the pinned Guacamole anti-brute-force extension; they default to
+  five failures, a 300-second ban, and 10,485,670 tracked addresses.
 - `JWT_GUAC_IDLE_TIMEOUT_SECONDS`: OpenResty idle timeout for reservation/JWT-backed Guacamole tokens on HTTP requests.
 - `LAB_ACCESS_JWT_MAX_TTL_SECONDS`: maximum lifetime of lab-access JWTs issued by `blockchain-services`.
 

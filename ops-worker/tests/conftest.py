@@ -3,6 +3,7 @@ import sys
 from datetime import datetime
 
 import pytest
+from flask.testing import FlaskClient
 from sqlalchemy import (
     Boolean,
     Column,
@@ -19,7 +20,35 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+# The production worker requires a gateway-injected credential on every
+# operational API call.  Keep the existing direct test-client calls concise by
+# injecting the test-only equivalent unless a test explicitly supplies a
+# value (including an empty value to exercise rejection paths).
+os.environ.setdefault("OPS_INTERNAL_AUTH_TOKEN", "test-ops-internal-token")
+os.environ.setdefault("OPS_INTERNAL_AUTH_HEADER", "X-Ops-Internal-Token")
+# AAS sync tests use HTTPS-shaped mock endpoints so the production endpoint
+# policy is exercised without contacting a real external service.
+os.environ.setdefault("AAS_ALLOWED_HOSTS", "127.0.0.1,basyx-mock,basyx-test")
+os.environ.setdefault("AAS_SERVICE_TOKEN", "test-aas-service-token")
+
 import worker
+
+
+class OpsAuthenticatedTestClient(FlaskClient):
+    def open(self, *args, **kwargs):
+        headers = kwargs.get("headers")
+        if headers is None:
+            headers = {}
+        else:
+            headers = headers.copy()
+        header_name = worker.OPS_INTERNAL_AUTH_HEADER
+        if not any(str(key).lower() == header_name.lower() for key in headers):
+            headers[header_name] = worker.OPS_INTERNAL_AUTH_TOKEN
+        kwargs["headers"] = headers
+        return super().open(*args, **kwargs)
+
+
+worker.APP.test_client_class = OpsAuthenticatedTestClient
 
 
 @pytest.fixture(scope="function")

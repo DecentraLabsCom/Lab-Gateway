@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -26,11 +26,53 @@ logger = logging.getLogger("fmu-runner.aas")
 # Empty default: if not configured (e.g. Lite mode gateways without --profile aas),
 # sync_fmu_to_basyx returns a disabled result instead of attempting a connection.
 BASYX_AAS_URL = os.getenv("BASYX_AAS_URL", "")
+AAS_ALLOWED_HOSTS = os.getenv("AAS_ALLOWED_HOSTS", "")
+AAS_SERVICE_TOKEN = os.getenv("AAS_SERVICE_TOKEN", "")
+AAS_SERVICE_TOKEN_HEADER = os.getenv("AAS_SERVICE_TOKEN_HEADER", "Authorization")
+_BUNDLED_AAS_URL = "http://basyx-aas-server:8081"
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
 
 _SEMANTIC_ID_IDTA_02006 = "https://admin-shell.io/idta/SimulationModels/SimulationModels/1/0"
 _SEMANTIC_ID_SIMULATION_MODEL = "https://admin-shell.io/idta/SimulationModels/SimulationModel/1/0"
 _SEMANTIC_ID_SIMULATION_MODEL_PORT = "https://admin-shell.io/idta/SimulationModels/PortsInformation/Port/1/0"
+
+
+def _aas_request_headers() -> dict[str, str]:
+    """Return the dedicated AAS credential, rejecting unsafe external URLs."""
+    endpoint = BASYX_AAS_URL.rstrip("/")
+    if endpoint == _BUNDLED_AAS_URL:
+        return {}
+
+    parsed = urlsplit(endpoint)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("external AAS endpoint must use HTTPS")
+    if parsed.username or parsed.password:
+        raise ValueError("external AAS endpoint must not contain userinfo")
+
+    allowed = {
+        value.strip().lower()
+        for value in AAS_ALLOWED_HOSTS.split(",")
+        if value.strip()
+    }
+    if parsed.hostname.lower() not in allowed:
+        raise ValueError("external AAS hostname is not allowlisted")
+    if not AAS_SERVICE_TOKEN or AAS_SERVICE_TOKEN.strip().lower() in {
+        "change_me",
+        "changeme",
+        "password",
+        "test",
+    }:
+        raise ValueError("AAS_SERVICE_TOKEN is missing")
+
+    header_name = (AAS_SERVICE_TOKEN_HEADER or "Authorization").strip()
+    if not header_name or not all(
+        (char.isalnum() or char == "-") for char in header_name
+    ) or not header_name[0].isalpha():
+        raise ValueError("invalid AAS_SERVICE_TOKEN_HEADER")
+    value = AAS_SERVICE_TOKEN
+    if header_name.lower() == "authorization":
+        value = f"Bearer {value}"
+    return {header_name: value}
 
 
 def _aas_id_for_lab(lab_id: str) -> str:
@@ -521,7 +563,11 @@ async def sync_fmu_to_basyx(
         return result
 
     try:
-        async with httpx.AsyncClient(base_url=BASYX_AAS_URL, timeout=15.0) as client:
+        async with httpx.AsyncClient(
+            base_url=BASYX_AAS_URL,
+            headers=_aas_request_headers(),
+            timeout=15.0,
+        ) as client:
             if aasx_bytes:
                 # ── AASX path: parse package and upload contained resources ──
                 env = _parse_aasx(aasx_bytes)
@@ -689,7 +735,11 @@ async def sync_fmu_to_basyx(
 
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         logger.warning("BaSyx unreachable at %s: %s", BASYX_AAS_URL, exc)
-        result["error"] = f"BaSyx unreachable: {exc}"
+        result["error"] = "BaSyx unreachable"
+        return result
+    except ValueError as exc:
+        logger.error("AAS endpoint policy rejected %s: %s", BASYX_AAS_URL, exc)
+        result["error"] = "AAS endpoint policy rejected"
         return result
 
     result["synced"] = True

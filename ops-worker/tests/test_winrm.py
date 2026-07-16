@@ -63,3 +63,39 @@ def test_run_labstation_command_requires_credentials():
         assert False, "Expected ValueError when credentials are missing"
     except ValueError as exc:
         assert "WinRM credentials are required" in str(exc)
+
+
+def test_winrm_defaults_to_https_and_rejects_plaintext():
+    host = {"name": "lab-ws-01", "address": "192.168.1.50", "winrm_transport": "ntlm"}
+    original = worker.WINRM_REQUIRE_SSL
+    worker.WINRM_REQUIRE_SSL = True
+    try:
+        endpoint = worker.winrm_endpoint(host, None, None)
+        assert endpoint == "https://192.168.1.50:5986/wsman"
+        try:
+            worker.winrm_endpoint(host, False, 5985)
+            assert False, "Expected plaintext WinRM to be rejected"
+        except ValueError as exc:
+            assert "HTTPS" in str(exc) or "use_ssl" in str(exc)
+    finally:
+        worker.WINRM_REQUIRE_SSL = original
+
+
+def test_winrm_request_cannot_override_host_transport_or_port():
+    host = {
+        "name": "lab-ws-01",
+        "address": "192.168.1.50",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }
+    try:
+        worker._winrm_connection_policy(host, True, 5985, "ntlm")
+        assert False, "Expected host port policy rejection"
+    except ValueError as exc:
+        assert "port" in str(exc)
+    try:
+        worker._winrm_connection_policy(host, True, 5986, "kerberos")
+        assert False, "Expected host transport policy rejection"
+    except ValueError as exc:
+        assert "transport" in str(exc)

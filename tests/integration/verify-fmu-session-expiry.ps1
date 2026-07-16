@@ -39,8 +39,9 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
 $token = $token.Trim()
 
 $ws = [System.Net.WebSockets.ClientWebSocket]::new()
+$ws.Options.SetRequestHeader("Authorization", "Bearer $token")
 
-$uri = [Uri]("wss://127.0.0.1:$Port/fmu/api/v1/fmu/sessions?token=$([Uri]::EscapeDataString($token))")
+$uri = [Uri]("wss://127.0.0.1:$Port/fmu/api/v1/fmu/sessions")
 $cts = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds))
 
 function Send-Json([System.Net.WebSockets.ClientWebSocket]$Socket, [hashtable]$Payload, [System.Threading.CancellationToken]$CancellationToken) {

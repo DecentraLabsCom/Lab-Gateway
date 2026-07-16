@@ -51,6 +51,14 @@ def _normalize_issuer(value: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
+def _build_local_issuer() -> str:
+    """Build the same Full-mode issuer used by OpenResty's TLS bootstrap."""
+    server_name = (os.getenv("SERVER_NAME") or "localhost").strip() or "localhost"
+    https_port = (os.getenv("HTTPS_PORT") or "443").strip() or "443"
+    port_suffix = "" if https_port == "443" else f":{https_port}"
+    return f"https://{server_name}{port_suffix}/auth"
+
+
 def _build_jwks_url_from_issuer(issuer: str) -> str:
     """Derive the JWKS URL from an issuer string.
 
@@ -87,12 +95,12 @@ def _resolve_jwt_issuer() -> Optional[str]:
     explicit = _normalize_issuer(os.getenv("JWT_ISSUER"))
     if explicit:
         return explicit
-    return _normalize_issuer(os.getenv("ISSUER"))
+    return _normalize_issuer(os.getenv("ISSUER")) or _build_local_issuer()
 
 
 AUTH_JWKS_URL = _resolve_auth_jwks_url()
 JWT_ALGORITHMS = ["RS256", "ES256"]
-JWT_ISSUER = _resolve_jwt_issuer()  # Optional issuer check
+JWT_ISSUER = _resolve_jwt_issuer()
 JWT_AUDIENCE = _normalize_issuer(os.getenv("JWT_AUDIENCE"))
 JWKS_CACHE_TTL = int(os.getenv("JWKS_CACHE_TTL", "300"))  # seconds
 
@@ -100,10 +108,10 @@ _jwks_cache: Optional[dict] = None
 _jwks_cache_time: float = 0.0
 
 
-async def _fetch_jwks() -> dict:
-    """Fetch JWKS from Blockchain-Services (cached with TTL)."""
+async def _fetch_jwks(*, force: bool = False) -> dict:
+    """Fetch JWKS (cached with TTL, or immediately when a new kid appears)."""
     global _jwks_cache, _jwks_cache_time
-    if _jwks_cache is not None and (time.time() - _jwks_cache_time) < JWKS_CACHE_TTL:
+    if not force and _jwks_cache is not None and (time.time() - _jwks_cache_time) < JWKS_CACHE_TTL:
         return _jwks_cache
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -119,31 +127,15 @@ async def _fetch_jwks() -> dict:
 
 
 def _extract_token(request: Request) -> str:
-    """Extract Bearer token from Authorization header or cookie.
+    """Extract the FMU credential from the explicit Bearer header only.
 
-    Resolution order (first match wins):
-      1. ``Authorization: Bearer <token>`` header — **preferred, used in production**.
-         The Marketplace proxy forwards this header after obtaining a JWT via
-         the SSO or wallet-signing flow in ``labAuth.js``.
-      2. Cookie fallback — only for backward-compatible / legacy browser clients
-         that set the token as a cookie.  Checked names:
-           - ``token``  — default name used by the Marketplace session layer
-           - ``jwt``    — alternative set by some SSO providers
-           - ``jti``    — legacy Blockchain-Services cookie (lowercase)
-           - ``JTI``    — legacy Blockchain-Services cookie (uppercase)
-         In a standard deployment only ``token`` is expected; the others are
-         kept for transition periods or third-party integrations.
+    Query-string and cookie JWTs are deliberately not accepted: both can leak
+    through browser history, access logs, referrers, and ambient same-origin
+    requests.  Browser runtimes use an opaque session ticket for WebSockets.
     """
     auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        return auth_header[7:]
-    # Fallback: cookie-based token for legacy / same-origin clients.
-    # In production the Bearer header path above is the standard mechanism.
-    for cookie_name in ("token", "jwt", "jti", "JTI"):
-        token = request.cookies.get(cookie_name)
-        if token:
-            logger.debug("Using token from cookie '%s' (legacy fallback)", cookie_name)
-            return token
+    if auth_header.startswith("Bearer ") and auth_header[7:].strip():
+        return auth_header[7:].strip()
     raise HTTPException(status_code=401, detail="Missing authentication token")
 
 
@@ -167,18 +159,27 @@ async def verify_jwt_token(token: str) -> dict:
                 break
 
         if signing_key is None:
-            raise HTTPException(status_code=401, detail="No matching signing key found")
-
-        decode_options = {}
-        if JWT_ISSUER:
-            decode_options["issuer"] = JWT_ISSUER
+            # A signing-key rotation can legitimately happen before the
+            # normal cache TTL.  Refresh once so both current and overlap JWKS
+            # entries are observed without making every request uncached.
+            jwks_data = await _fetch_jwks(force=True)
+            jwk_client_keys = jwt.PyJWKSet.from_dict(jwks_data)
+            for key in jwk_client_keys.keys:
+                if kid and key.key_id == kid:
+                    signing_key = key
+                    break
+            if signing_key is None:
+                raise HTTPException(status_code=401, detail="No matching signing key found")
 
         claims = jwt.decode(
             token,
             signing_key.key,
             algorithms=JWT_ALGORITHMS,
-            options={"verify_aud": True},
-            **decode_options,
+            options={
+                "verify_aud": True,
+                "require": ["exp", "iat", "iss"],
+            },
+            issuer=JWT_ISSUER,
             audience=JWT_AUDIENCE,
         )
         claims["_credentialHash"] = hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -188,7 +189,7 @@ async def verify_jwt_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError as exc:
         logger.warning("Invalid JWT: %s", exc)
-        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 async def verify_jwt(request: Request) -> dict:

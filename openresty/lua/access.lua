@@ -10,3 +10,12 @@
 local handler = require "modules.access_handler"
 
 handler.run(ngx)
+
+-- The public Guacamole token endpoint also accepts manual username/password
+-- logins.  Apply its credential-attempt guard after the normal session-cookie
+-- handling, while leaving the private /__guacamole_tokens subrequest
+-- untouched (that location is internal-only and never reaches this file).
+if ngx.var.uri == "/guacamole/api/tokens" then
+    local login_guard = require "modules.guacamole_login_guard"
+    login_guard.run(ngx)
+end

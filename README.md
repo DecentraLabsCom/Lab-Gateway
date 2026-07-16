@@ -28,10 +28,10 @@ without publishing labs or exposing provider auth endpoints, use
 | `blockchain-services` + N Lite | Standalone backend | N Lite gateways | Backend issues; each Lite serves local Guacamole/FMUs |
 
 `ISSUER` selects the JWT authority. The lab's `accessURI` selects the
-browser access gateway. They may intentionally be different. The root Compose
-file still starts the embedded backend in Lite deployments, but OpenResty
-disables its local `/auth` issuer surface and uses the remote issuer; do not
-treat the embedded service as the Lite control plane.
+browser access gateway. They may intentionally be different. Lite deployments
+keep the embedded backend container dormant (no Java process or local key
+generation). OpenResty selects the remote issuer key exclusively; the dormant
+service is not the Lite control plane.
 
 See [Deployment Architectures](docs/deployment-architectures.md) for the
 composite topology, trust-bundle, provisioner-routing and Station rules.
@@ -96,12 +96,17 @@ FMU target model:
 - The real `.fmu` remains on Lab Station.
 - The Gateway keeps the public REST/WSS surface, proxy generation, auth and ticketing.
 - The generated `proxy.fmu` contains interface metadata, runtime binaries and reservation-scoped config, never the real model.
-- This repository keeps a local FMU execution path in `fmu-runner` as a permanent dev/test mode. That local path is not the intended production topology.
+- This repository keeps a local FMU execution path in `fmu-runner` for isolated
+  development/tests only (`FMU_BACKEND_MODE=local` plus
+  `FMU_LOCAL_DEV_MODE=true`). Production uses the Station backend.
 
 When Compose is evaluated, `FMU_JWT_AUDIENCE` must be set to the exact public
 FMU origin (for example `https://gateway.example.edu/fmu`). Set
 `FMU_BACKEND_MODE=station` and the Station internal URL/token when real FMUs
 must remain on Lab Station; leave the local backend for development and tests.
+The `fmu-runner` service is an optional Compose profile and is disabled by
+default. Enable it explicitly with `FMU_RUNNER_ENABLED=true docker compose
+--profile fmu-runner up -d`; otherwise `/fmu` routes return `503`.
 
 ## 🌟 Features
 
@@ -131,6 +136,20 @@ must remain on Lab Station; leave the local backend for development and tests.
 - **Permanent dev/test backend**: Local FMU execution in `fmu-runner` remains available for development, smoke tests and automated tests
 
 ## 🚀 Quick Deployment
+
+### Administrative sessions
+
+Gateway administrative pages use a short-lived, path-scoped HttpOnly cookie.
+Submit the configured token to `POST /lab-manager/login` or `POST /admin/login`
+as `application/x-www-form-urlencoded` (`token=...`), then open the dashboard.
+Tokens in query strings and browser storage are rejected; `POST /admin/logout`
+clears all administrative session cookies.
+
+Manual Guacamole username/password logins remain available for operations but
+are rate-limited at `/guacamole/api/tokens` by source IP and source IP+username
+(defaults: 30 and 10 attempts per minute respectively). Prefer the opaque
+reservation hand-off for end users; keep manual Guacamole administration behind
+the deployment's VPN/allowlist and rotate its credentials.
 
 ### Choose an Installation Mode
 
@@ -330,6 +349,13 @@ The gateway uses **modular configuration** with separate `.env` files:
 
 This separation keeps concerns isolated and makes the blockchain service independently configurable.
 
+The setup scripts protect these files as deployment secrets: Unix uses
+`umask 077`, `.env`/`blockchain-services/.env` mode `0600`, and `0700` state
+directories; Windows removes inherited ACLs and grants only the operator,
+SYSTEM, and Administrators. Keep the files outside source control and back up
+the Ops Worker Fernet key (`OPS_SECRETS_KEY` or its protected key path) before
+rotating or rebuilding the host.
+
 #### Gateway Configuration (`.env`)
 
 ```env
@@ -351,15 +377,29 @@ HOST_GID=1000
 # Database Configuration
 MYSQL_ROOT_PASSWORD=secure_password
 MYSQL_DATABASE=guacamole_db
-MYSQL_USER=guacamole_user
-MYSQL_PASSWORD=db_password
+MYSQL_USER=legacy_migration_user
+MYSQL_PASSWORD=legacy_migration_password
 BLOCKCHAIN_MYSQL_DATABASE=blockchain_services
+GUACAMOLE_MYSQL_USER=guacamole_app
+GUACAMOLE_MYSQL_PASSWORD=guacamole_app_password
+BLOCKCHAIN_MYSQL_USER=blockchain_app
+BLOCKCHAIN_MYSQL_PASSWORD=blockchain_app_password
+OPS_BACKEND_MYSQL_USER=ops_backend
+OPS_BACKEND_MYSQL_PASSWORD=ops_backend_password
+OPS_GUACAMOLE_MYSQL_USER=ops_guac
+OPS_GUACAMOLE_MYSQL_PASSWORD=ops_guac_password
 
 # Guacamole
 GUAC_ADMIN_USER=guacadmin
 GUAC_ADMIN_PASS=secure_admin_password
 AUTO_LOGOUT_ON_DISCONNECT=true
+# Manual login attempts per source IP + username per minute
+GUACAMOLE_LOGIN_RATE_LIMIT_PER_MINUTE=10
 API_SESSION_TIMEOUT=15
+# Official Guacamole anti-brute-force extension (failed-login bans by source IP)
+BAN_MAX_INVALID_ATTEMPTS=5
+BAN_ADDRESS_DURATION=300
+BAN_MAX_ADDRESSES=10485670
 JWT_GUAC_IDLE_TIMEOUT_SECONDS=60
 
 # OpenResty CORS allowlist (comma-separated, optional)
@@ -388,9 +428,17 @@ CERTBOT_STAGING=0
 
 See [Guacamole Session Policy](docs/guacamole-session-policy.md) for the different timeout and logout behavior of admin, manual non-admin, and reservation/JWT users.
 
-Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` loopback-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/billing endpoints exposed through OpenResty for remote access.
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and each dedicated database password (defaults like `CHANGE_ME` will stop MySQL from initializing). `MYSQL_USER`/`MYSQL_PASSWORD` are retained only for migration of old volumes. Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` loopback-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/billing endpoints exposed through OpenResty for remote access.
 
-In the full Lab Gateway compose stack, `blockchain-services` uses the root MySQL credentials and a dedicated schema named `blockchain_services` by default. If you run `blockchain-services` with its own compose file, configure its `BLOCKCHAIN_MYSQL_*` keys in `blockchain-services/.env`.
+Manual Guacamole logins are protected at both layers: OpenResty limits attempts by source IP and username, while the pinned `guacamole-auth-ban` extension blocks repeated authentication failures by source IP (five failures, five-minute ban by default). Keep the three `BAN_*` values at their defaults unless the operational threat model requires a stricter policy; pair them with an allowlist/VPN and unique administrator credentials for internet-facing deployments.
+
+In the full Lab Gateway compose stack, Guacamole, the embedded backend, and the Ops Worker use separate MySQL principals. `ops_backend` has DML-only access to `blockchain_services`; `ops_guac` has table-scoped DML/SELECT access to Guacamole and cannot cross into the backend schema. If you run `blockchain-services` with its own compose file, configure its datasource credentials there.
+
+The bundled AAS profile isolates BaSyx and Mongo on internal `fmu_aas`/`aas_data`
+networks. MongoDB authentication is enabled and the init script creates only the
+`basyx` database application user. For an external AAS server, configure an
+`https://` URL, its exact hostname in `AAS_ALLOWED_HOSTS`, and a dedicated
+`AAS_SERVICE_TOKEN`; requests otherwise fail closed.
 
 OpenResty and blockchain-services derive public URLs (issuer, OpenID metadata, etc.) from `SERVER_NAME` and `HTTPS_PORT`. If you ever need to override that computed value, set `BASE_DOMAIN` inside `blockchain-services/.env` or export it in the container's
 environment. All authentication endpoints live under the fixed `/auth` base path to match both services.
@@ -453,16 +501,16 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-kno
 
 - `/wallet-dashboard`, `/wallet`, `/billing`: follow the dashboard network policy (`ADMIN_DASHBOARD_LOCAL_ONLY`, `ADMIN_DASHBOARD_ALLOW_PRIVATE`, `SECURITY_ALLOW_PRIVATE_NETWORKS`, `ADMIN_ALLOWED_CIDRS`). Any non-loopback client must present `ADMIN_ACCESS_TOKEN`; private-network access only widens the allowed network scope, it does not replace the token. If the token is unset, access is loopback-only.
 - `/billing/admin/**`: follows the same dashboard network policy and uses `ADMIN_ACCESS_TOKEN` only (header/cookie). Any non-loopback client must present the token. If the token is unset, access is loopback-only.
-- Health endpoints such as `/health`, `/gateway/health`, `/wallet/health`, and `/ops/health` remain available without admin tokens for readiness checks.
+- Public health endpoints (`/health`, `/gateway/health`, and `/ops/health`) expose only aggregate readiness (`UP`/`DOWN`). Detailed diagnostics are available at `/health/details`, `/gateway/health/details`, and `/ops/health/details` to authenticated Lab Manager operators.
 - `/billing/admin/execute`: additionally requires an EIP-712 signature from the institutional wallet, including a fresh timestamp.
-- **Initial setup**: Click "Wallet & Treasury→" from the homepage, enter your `ADMIN_ACCESS_TOKEN` when prompted. The token will be stored in your browser and automatically included in all requests.
+- **Initial setup**: Click "Wallet & Treasury→" from the homepage and use the short-lived administrative login form. The reusable token is never stored in browser storage or placed in a URL.
 - Strict localhost-only mode for the wallet dashboard and related wallet/billing routes:
   `ADMIN_DASHBOARD_LOCAL_ONLY=true`, `ADMIN_DASHBOARD_ALLOW_PRIVATE=false`, `SECURITY_ALLOW_PRIVATE_NETWORKS=false`
 - Private-network mode for those routes:
   `ADMIN_DASHBOARD_LOCAL_ONLY=true`, `ADMIN_DASHBOARD_ALLOW_PRIVATE=true`, `SECURITY_ALLOW_PRIVATE_NETWORKS=true`, and keep `ADMIN_ACCESS_TOKEN_REQUIRED=true`
 - To limit private-network mode to specific subnets, set `ADMIN_ALLOWED_CIDRS`:
   `ADMIN_ALLOWED_CIDRS=10.20.0.0/16,192.168.50.0/24`
-- `/lab-manager`: follows the same dashboard network policy. Any non-loopback client must present `LAB_MANAGER_TOKEN`, and private-network access only widens the allowed network scope. Click "Lab Manager→" from the homepage and enter your token when prompted. The bootstrap `?token=...` is stripped from the browser URL after the cookie is set.
+- `/lab-manager`: follows the same dashboard network policy. Any non-loopback client must present `LAB_MANAGER_TOKEN`, and private-network access only widens the allowed network scope. Click "Lab Manager→" from the homepage and use the short-lived login form; bootstrap query tokens are rejected.
 - `/ops`: follows the same Lab Manager UI guard and dashboard network policy, so the Lab Manager page can load its ops inventory from any network scope allowed by `ADMIN_DASHBOARD_*` settings. Any non-loopback client still needs `LAB_MANAGER_TOKEN`.
 - `/aas-admin/**`: always requires `LAB_MANAGER_TOKEN` via header/cookie, even from private networks. This keeps AAS write operations aligned with explicit admin auth instead of LAN-only trust.
 - If wallet actions return `JSON.parse` errors in the browser, ensure `CORS_ALLOWED_ORIGINS` includes your gateway origin.

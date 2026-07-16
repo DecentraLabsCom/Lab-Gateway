@@ -211,6 +211,10 @@ if not provided or provided == "" then
     provided = ngx.var[cookie_var]
 end
 
+if provided and provided ~= "" and ngx.shared.cache then
+    provided = ngx.shared.cache:get("admin_session:billing:" .. provided) or provided
+end
+
 if not provided or provided == "" then
     return deny("Unauthorized: Access token required. Provide " .. header_name .. " header or " .. cookie_name .. " cookie.")
 end

@@ -6,6 +6,10 @@
 # =================================================================
 
 set -euo pipefail
+# Configuration, key material, and generated credentials are private host
+# state.  New files therefore start with owner-only permissions; the explicit
+# chmod calls below also repair permissions on files from older installations.
+umask 077
 
 ROOT_ENV_FILE=".env"
 BLOCKCHAIN_ENV_FILE="blockchain-services/.env"
@@ -15,9 +19,17 @@ compose_profiles=""
 cf_enabled=false
 certbot_enabled=false
 aas_bundled=false
-fmu_runner_enabled=true
+fmu_runner_enabled=false
 existing_mysql_root_password=""
 existing_mysql_password=""
+existing_guacamole_mysql_password=""
+existing_blockchain_mysql_password=""
+existing_ops_backend_mysql_password=""
+existing_ops_guacamole_mysql_password=""
+existing_basyx_mongo_root_password=""
+existing_basyx_mongo_password=""
+existing_aas_allowed_hosts=""
+existing_aas_service_token=""
 db_credentials_changed=false
 reset_mysql_volume=false
 mysql_volume_name=""
@@ -35,6 +47,41 @@ update_env_var() {
         sed -i "s|^${key}=.*|${key}=${value}|" "$file"
     else
         echo "${key}=${value}" >> "$file"
+    fi
+}
+
+secure_gateway_state() {
+    # The first invocation happens before state directories are created, so
+    # skip absent paths; once a path exists, a failed permission repair is a
+    # hard error rather than a silently weakened deployment.
+    if [ -f "$ROOT_ENV_FILE" ] && [ -f "$BLOCKCHAIN_ENV_FILE" ]; then
+        chmod 600 "$ROOT_ENV_FILE" "$BLOCKCHAIN_ENV_FILE" || {
+            echo "Unable to restrict gateway environment files to mode 0600." >&2
+            return 1
+        }
+    fi
+    for state_dir in certs blockchain-data ops-data; do
+        if [ -d "$state_dir" ]; then
+            chmod 700 "$state_dir" || {
+                echo "Unable to restrict state directory permissions: $state_dir" >&2
+                return 1
+            }
+        fi
+    done
+    # Private keys, Fernet/observer material, and credential spools must never
+    # be readable by other local users.  Public certificates remain readable
+    # by the gateway process through its owner/group mapping.
+    local existing_dirs=()
+    for state_dir in certs blockchain-data ops-data; do
+        [ -d "$state_dir" ] && existing_dirs+=("$state_dir")
+    done
+    if [ "${#existing_dirs[@]}" -gt 0 ] && ! find "${existing_dirs[@]}" -type f \
+        \( -name '*.key' -o -name 'privkey.pem' -o -name 'private_key.pem' \
+           -o -name 'previous_private_key.pem' -o -name '*secret*' \
+           -o -name '*credential*' -o -name '*.json' \) \
+        -exec chmod 600 {} +; then
+        echo "Unable to restrict private key and credential file permissions." >&2
+        return 1
     fi
 }
 
@@ -108,6 +155,16 @@ remove_gateway_managed_backend_env() {
     remove_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_MANAGER_TOKEN_HEADER"
     remove_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_MANAGER_TOKEN_COOKIE"
     remove_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_MANAGER_ALLOWED_CIDRS"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_INTERNAL_AUTH_TOKEN"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_INTERNAL_AUTH_HEADER"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "GUACAMOLE_MYSQL_USER"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "GUACAMOLE_MYSQL_PASSWORD"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "BLOCKCHAIN_MYSQL_USER"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "BLOCKCHAIN_MYSQL_PASSWORD"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_BACKEND_MYSQL_USER"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_BACKEND_MYSQL_PASSWORD"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_GUACAMOLE_MYSQL_USER"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_GUACAMOLE_MYSQL_PASSWORD"
 }
 
 # Check prerequisites
@@ -139,6 +196,14 @@ echo
 
 existing_mysql_root_password="$(get_env_default "MYSQL_ROOT_PASSWORD" "$ROOT_ENV_FILE")"
 existing_mysql_password="$(get_env_default "MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
+existing_guacamole_mysql_password="$(get_env_default "GUACAMOLE_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
+existing_blockchain_mysql_password="$(get_env_default "BLOCKCHAIN_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
+existing_ops_backend_mysql_password="$(get_env_default "OPS_BACKEND_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
+existing_ops_guacamole_mysql_password="$(get_env_default "OPS_GUACAMOLE_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
+existing_basyx_mongo_root_password="$(get_env_default "BASYX_MONGO_ROOT_PASSWORD" "$ROOT_ENV_FILE")"
+existing_basyx_mongo_password="$(get_env_default "BASYX_MONGO_PASSWORD" "$ROOT_ENV_FILE")"
+existing_aas_allowed_hosts="$(get_env_default "AAS_ALLOWED_HOSTS" "$ROOT_ENV_FILE")"
+existing_aas_service_token="$(get_env_default "AAS_SERVICE_TOKEN" "$ROOT_ENV_FILE")"
 
 # Check if .env already exists
 if [ -f "$ROOT_ENV_FILE" ]; then
@@ -195,12 +260,60 @@ if [ -z "$mysql_password" ]; then
     fi
 fi
 
-# Update passwords only in gateway env (.env). The embedded blockchain-services
-# compose file has its own BLOCKCHAIN_MYSQL_* defaults in blockchain-services/.env.
+# Generate independent runtime credentials. They are intentionally not
+# prompted individually: operators only need to protect the resulting .env,
+# while each container receives the minimum principal it requires.
+guacamole_mysql_password="$existing_guacamole_mysql_password"
+blockchain_mysql_password="$existing_blockchain_mysql_password"
+ops_backend_mysql_password="$existing_ops_backend_mysql_password"
+ops_guacamole_mysql_password="$existing_ops_guacamole_mysql_password"
+if [ -z "$guacamole_mysql_password" ] || is_placeholder_secret "$guacamole_mysql_password"; then
+    guacamole_mysql_password="GuacApp_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
+fi
+if [ -z "$blockchain_mysql_password" ] || is_placeholder_secret "$blockchain_mysql_password"; then
+    blockchain_mysql_password="ChainApp_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
+fi
+if [ -z "$ops_backend_mysql_password" ] || is_placeholder_secret "$ops_backend_mysql_password"; then
+    ops_backend_mysql_password="OpsBackend_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
+fi
+if [ -z "$ops_guacamole_mysql_password" ] || is_placeholder_secret "$ops_guacamole_mysql_password"; then
+    ops_guacamole_mysql_password="OpsGuac_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
+fi
+
+# Bundled BaSyx/Mongo uses separate alphanumeric credentials so they are safe
+# in the Mongo URI and cannot be reused for MySQL or application principals.
+basyx_mongo_root_password="$existing_basyx_mongo_root_password"
+basyx_mongo_password="$existing_basyx_mongo_password"
+if [ -z "$basyx_mongo_root_password" ] || is_placeholder_secret "$basyx_mongo_root_password"; then
+    basyx_mongo_root_password="AasRoot_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
+fi
+if [ -z "$basyx_mongo_password" ] || is_placeholder_secret "$basyx_mongo_password"; then
+    basyx_mongo_password="AasApp_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
+fi
+
+# Update database credentials only in the gateway root env (.env). The
+# blockchain-services submodule env is kept free of gateway-managed secrets.
 update_env_var "$ROOT_ENV_FILE" "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
 update_env_var "$ROOT_ENV_FILE" "MYSQL_PASSWORD" "$mysql_password"
+update_env_var "$ROOT_ENV_FILE" "GUACAMOLE_MYSQL_USER" "guacamole_app"
+update_env_var "$ROOT_ENV_FILE" "GUACAMOLE_MYSQL_PASSWORD" "$guacamole_mysql_password"
+update_env_var "$ROOT_ENV_FILE" "BLOCKCHAIN_MYSQL_USER" "blockchain_app"
+update_env_var "$ROOT_ENV_FILE" "BLOCKCHAIN_MYSQL_PASSWORD" "$blockchain_mysql_password"
+update_env_var "$ROOT_ENV_FILE" "OPS_BACKEND_MYSQL_USER" "ops_backend"
+update_env_var "$ROOT_ENV_FILE" "OPS_BACKEND_MYSQL_PASSWORD" "$ops_backend_mysql_password"
+update_env_var "$ROOT_ENV_FILE" "OPS_GUACAMOLE_MYSQL_USER" "ops_guac"
+update_env_var "$ROOT_ENV_FILE" "OPS_GUACAMOLE_MYSQL_PASSWORD" "$ops_guacamole_mysql_password"
+update_env_var "$ROOT_ENV_FILE" "BASYX_MONGO_ROOT_USER" "basyx_root"
+update_env_var "$ROOT_ENV_FILE" "BASYX_MONGO_ROOT_PASSWORD" "$basyx_mongo_root_password"
+update_env_var "$ROOT_ENV_FILE" "BASYX_MONGO_USER" "aas_app"
+update_env_var "$ROOT_ENV_FILE" "BASYX_MONGO_PASSWORD" "$basyx_mongo_password"
 
-if [ "$mysql_root_password" != "$existing_mysql_root_password" ] || [ "$mysql_password" != "$existing_mysql_password" ]; then
+if [ "$mysql_root_password" != "$existing_mysql_root_password" ] || \
+   [ "$mysql_password" != "$existing_mysql_password" ] || \
+   [ "$guacamole_mysql_password" != "$existing_guacamole_mysql_password" ] || \
+   [ "$blockchain_mysql_password" != "$existing_blockchain_mysql_password" ] || \
+   [ "$ops_backend_mysql_password" != "$existing_ops_backend_mysql_password" ] || \
+   [ "$ops_guacamole_mysql_password" != "$existing_ops_guacamole_mysql_password" ]; then
     db_credentials_changed=true
 fi
 
@@ -223,6 +336,7 @@ echo
 echo "IMPORTANT: Save these passwords securely!"
 echo "   Root password: $mysql_root_password"
 echo "   Database password: $mysql_password"
+echo "   Dedicated database principals: guacamole_app, blockchain_app, ops_backend, ops_guac"
 echo
 
 # Guacamole Admin Credentials
@@ -347,6 +461,14 @@ if [ -z "$session_observation_ingest_token" ] || [ "$session_observation_ingest_
 fi
 update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVATION_INGEST_TOKEN" "$session_observation_ingest_token"
 
+ops_internal_auth_token=$(get_env_default "OPS_INTERNAL_AUTH_TOKEN" "$ROOT_ENV_FILE")
+if [ -z "$ops_internal_auth_token" ] || [ "$ops_internal_auth_token" = "CHANGE_ME" ]; then
+    ops_internal_auth_token="ops_$(openssl rand -hex 32 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated dedicated Ops Worker internal-auth token."
+fi
+update_env_var "$ROOT_ENV_FILE" "OPS_INTERNAL_AUTH_TOKEN" "$ops_internal_auth_token"
+update_env_var "$ROOT_ENV_FILE" "OPS_INTERNAL_AUTH_HEADER" "X-Ops-Internal-Token"
+
 echo
 echo "Lab Manager Backend Allowlist"
 echo "============================="
@@ -467,7 +589,9 @@ read -p "ISSUER [empty->Full, https://full/auth->Lite]: " issuer_value
 issuer_value=$(echo "$issuer_value" | tr -d ' ')
 update_env_var "$ROOT_ENV_FILE" "ISSUER" "$issuer_value"
 if [ -z "$issuer_value" ]; then
+    update_env_var "$ROOT_ENV_FILE" "BLOCKCHAIN_SERVICES_ENABLED" "true"
     echo "   * ISSUER left empty (Full mode)."
+    echo "   * Embedded blockchain-services enabled."
     update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_URL" ""
     update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_TOKEN" ""
     update_env_var "$ROOT_ENV_FILE" "LAB_ADMIN_BACKEND_TOKEN_HEADER" "X-Lab-Manager-Token"
@@ -498,7 +622,9 @@ if [ -z "$issuer_value" ]; then
     update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_REDEEM_URL" "http://blockchain-services:8080/auth/fmu/session-ticket/redeem"
     echo "   * Configured a dedicated signed session-observer credential for this Full gateway."
 else
+    update_env_var "$ROOT_ENV_FILE" "BLOCKCHAIN_SERVICES_ENABLED" "false"
     echo "   * ISSUER set to: $issuer_value (Lite mode)."
+    echo "   * Embedded blockchain-services kept dormant (Lite mode)."
     echo
     echo "Lite /lab-admin Remote Backend"
     echo "=============================="
@@ -586,10 +712,10 @@ echo "FMU Runner Integration"
 echo "======================"
 echo "Controls whether /fmu and FMU AAS sync routes are active on this gateway."
 echo "When disabled, OpenResty starts without requiring the fmu-runner container and those routes return 503."
-echo "FMU runner is started unless FMU_RUNNER_ENABLED is explicitly set to false."
+echo "FMU runner is optional and disabled unless FMU_RUNNER_ENABLED is explicitly enabled."
 current_fmu_runner_enabled="$(get_env_default "FMU_RUNNER_ENABLED" "$ROOT_ENV_FILE")"
 if [ -z "$current_fmu_runner_enabled" ]; then
-    current_fmu_runner_enabled="true"
+    current_fmu_runner_enabled="false"
 else
     case "${current_fmu_runner_enabled,,}" in
         false|0|no)
@@ -628,6 +754,8 @@ echo "========================================="
 if [ -n "$issuer_value" ]; then
     echo "Lite Gateway detected — AAS is only available on Full Gateway instances. Skipping."
     update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
+    update_env_var "$ROOT_ENV_FILE" "AAS_ALLOWED_HOSTS" ""
+    update_env_var "$ROOT_ENV_FILE" "AAS_SERVICE_TOKEN" ""
 else
     echo "AAS enables publishing Digital Twin descriptions (IDTA 02006) for FMUs and physical labs."
     echo "  1) Bundled BaSyx  — Deploy the included BaSyx AAS Server container (recommended)"
@@ -638,7 +766,7 @@ else
     case "$aas_option" in
         2)
             echo "External AAS server selected."
-            read -p "External AAS API base URL (e.g. http://192.168.1.10:8081 or https://my-aas.example.com): " external_aas_url
+            read -p "External AAS API base URL (HTTPS only, e.g. https://my-aas.example.com): " external_aas_url
             external_aas_url=$(echo "$external_aas_url" | tr -d ' ')
             if [ -z "$external_aas_url" ]; then
                 echo "No URL provided. AAS support disabled."
@@ -647,15 +775,35 @@ else
                 echo "   * External AAS server: $external_aas_url"
                 echo "   * Bundled basyx-aas-server / basyx-mongo containers will NOT be started."
                 update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" "$external_aas_url"
+                read -p "Exact allowlisted AAS hostname (without port, e.g. my-aas.example.com): " aas_allowed_hosts
+                aas_allowed_hosts=$(echo "$aas_allowed_hosts" | tr -d ' ')
+                if [ -z "$aas_allowed_hosts" ]; then
+                    aas_allowed_hosts="$existing_aas_allowed_hosts"
+                fi
+                read -s -p "Dedicated AAS service token (leave empty to generate): " aas_service_token
+                echo
+                if [ -z "$aas_service_token" ]; then
+                    aas_service_token="$existing_aas_service_token"
+                fi
+                if [ -z "$aas_service_token" ] || is_placeholder_secret "$aas_service_token"; then
+                    aas_service_token="aas_$(openssl rand -hex 32 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM}${RANDOM})"
+                fi
+                update_env_var "$ROOT_ENV_FILE" "AAS_ALLOWED_HOSTS" "$aas_allowed_hosts"
+                update_env_var "$ROOT_ENV_FILE" "AAS_SERVICE_TOKEN" "$aas_service_token"
+                update_env_var "$ROOT_ENV_FILE" "AAS_SERVICE_TOKEN_HEADER" "Authorization"
             fi
             ;;
         3)
             echo "AAS support disabled."
             update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
+            update_env_var "$ROOT_ENV_FILE" "AAS_ALLOWED_HOSTS" ""
+            update_env_var "$ROOT_ENV_FILE" "AAS_SERVICE_TOKEN" ""
             ;;
         *)
             echo "Bundled BaSyx selected."
             update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
+            update_env_var "$ROOT_ENV_FILE" "AAS_ALLOWED_HOSTS" ""
+            update_env_var "$ROOT_ENV_FILE" "AAS_SERVICE_TOKEN" ""
             aas_bundled=true
             ;;
     esac
@@ -698,6 +846,10 @@ fi
 update_env_var "$ROOT_ENV_FILE" "FMU_JWT_AUDIENCE" "${gateway_public_origin}/fmu"
 echo "   * FMU JWT audience: ${expected_fmu_audience}"
 
+# Repair modes after all generated values have been written.  This is also
+# executed when the operator chooses not to start Docker services.
+secure_gateway_state
+
 echo
 echo "Ops Worker configuration"
 echo "------------------------"
@@ -725,6 +877,7 @@ chmod 755 fmu-proxy-runtime/binaries/linux64 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/win64 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/darwin64 2>/dev/null || true
 chmod 700 ops-data/guac-revocation-spool 2>/dev/null || true
+secure_gateway_state
 
 echo
 echo "Host User Mapping"
@@ -919,8 +1072,8 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Admin access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
-echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
+echo "   * Admin dashboard: ${token_host}/wallet-dashboard (login required)"
+echo "   * Lab Manager: ${token_host}/lab-manager (login required)"
 echo "   * Guacamole: /guacamole/"
 echo "   * Blockchain Services API: /auth"
 echo
@@ -981,8 +1134,8 @@ else
         token_host="${token_host}:${https_port}"
     fi
 fi
-echo "   * Admin access token cookie: ${token_host}/wallet-dashboard?token=${access_token}"
-echo "   * Lab Manager token cookie: ${token_host}/lab-manager?token=${lab_manager_token}"
+echo "   * Admin dashboard: ${token_host}/wallet-dashboard (login required)"
+echo "   * Lab Manager: ${token_host}/lab-manager (login required)"
 echo "   * Guacamole: /guacamole/ ($guac_admin_user / $guac_admin_pass)"
 echo "   * Blockchain Services API: /auth"
     if [ "$cf_enabled" = true ]; then

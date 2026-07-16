@@ -9,7 +9,7 @@ This document describes the production connectivity model between Marketplace, t
 | Marketplace | Public discovery and browser-facing orchestration of institutional reservation and access flows. |
 | Smart contracts | Shared source of truth for providers, laboratories, reservations, access authorization, and service-credit settlement. |
 | Full Lab Gateway | Local access plane plus embedded `blockchain-services`, Guacamole, OpenResty, ops worker, and optional FMU runner. |
-| Lite Lab Gateway | Local access plane with OpenResty, Guacamole, ops worker, and optional FMU runner; it trusts a remote JWT issuer. The Compose stack may still start an embedded backend, but Lite OpenResty does not use it as the issuer. |
+| Lite Lab Gateway | Local access plane with OpenResty, Guacamole, ops worker, and optional FMU runner; it trusts a remote JWT issuer. The embedded backend remains dormant and is not used as the issuer. |
 | Standalone `blockchain-services` | Remote control plane that can issue access credentials and administer providers without a local Guacamole access plane. |
 | Lab Station | Windows host that runs the physical-lab control software and, when used, the internal FMU execution plane. |
 
@@ -79,7 +79,9 @@ For a Guacamole laboratory, `accessURI` identifies the gateway that owns the loc
 
 The gateway exposes the public FMU facade and generated proxy artifacts. The real FMU stays in the designated execution environment:
 
-- `FMU_BACKEND_MODE=local` is the Gateway-local development and test path.
+- `FMU_BACKEND_MODE=local` together with `FMU_LOCAL_DEV_MODE=true` is the
+  Gateway-local development and test path; local native execution is disabled
+  unless both settings are explicit.
 - `FMU_BACKEND_MODE=station` is the production-target path: `fmu-runner` calls the Lab Station internal FMU executor at `FMU_STATION_BASE_URL` with `FMU_STATION_INTERNAL_TOKEN`.
 
 The station executor is an internal service. Do not publish it through the

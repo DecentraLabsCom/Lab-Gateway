@@ -185,7 +185,7 @@ curl -k https://localhost/health
 curl -k https://localhost/auth/.well-known/openid-configuration
 ```
 
-Ambos deben devolver JSON sin errores.
+Ambos deben devolver JSON sin errores. La respuesta pública de salud está deliberadamente reducida; los operadores de Lab Manager pueden usar `/health/details` con el `LAB_MANAGER_TOKEN` configurado para obtener el diagnóstico detallado.
 
 ## Paso 9 — Crear la cartera institucional
 

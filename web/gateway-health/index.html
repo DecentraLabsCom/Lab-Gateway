@@ -5,43 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gateway Health - DecentraLabs</title>
     <link rel="stylesheet" href="../assets/css/styles.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
-        integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA=="
-        crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
-    <style>
-        .health-page { max-width: 1100px; margin: 0 auto; padding: 20px; }
-        .health-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .health-header h1 { font-family: 'Orbitron', monospace; color: var(--primary-color); }
-        .health-card { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-        .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-        .services-grid { display: flex; gap: 16px; flex-wrap: wrap; }
-        .service-column { flex: 1 1 45%; min-width: 260px; }
-        .health-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
-        .health-row:last-child { border-bottom: none; }
-        .tag { padding: 4px 10px; border-radius: 8px; font-size: 0.85rem; }
-        .tag.ok { background: var(--success-bg); color: var(--success-color); border: 1px solid var(--success-color); }
-        .tag.bad { background: var(--secondary-bg); color: var(--secondary-color); border: 1px solid var(--secondary-color); }
-        .tag.warn { background: var(--warning-bg-1a); color: #ffa500; border: 1px solid #ffa500; }
-        .section-title { margin: 16px 0 8px; font-size: 1rem; color: var(--text-secondary); }
-        .keyval { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
-        .key { color: var(--text-secondary); }
-        .val { text-align: right; }
-        .ghost-btn {
-            border: 1px solid #1f2940;
-            border-radius: 999px;
-            padding: 10px 16px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            color: #e6ecf5;
-            background: transparent;
-            box-shadow: none;
-        }
-        .ghost-btn:hover { transform: translateY(-2px); border-color: #4de1ff; color: #4de1ff; }
-    </style>
+    <link rel="stylesheet" href="../assets/css/gateway-health.css">
 </head>
 <body>
     <div class="stars"></div>

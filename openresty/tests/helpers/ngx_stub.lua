@@ -42,6 +42,10 @@ local function new_shared_dict(initial)
         return store[key], nil
     end
 
+    function dict:decr(key, amount, default, ttl)
+        return dict:incr(key, -(amount or 1), default, ttl)
+    end
+
     dict._data = store
     dict._ttls = {}
     return dict

@@ -81,7 +81,7 @@ function showFmuAccessPanel(claims, rawJwt) {
                     <i class="fas fa-download"></i>
                     <span>Download proxy.fmu</span>
                 </button>
-                <div id="fmu-download-status" class="fmu-download-status" style="display:none;"></div>
+                <div id="fmu-download-status" class="fmu-download-status" hidden></div>
             </div>
 
             <div class="fmu-instructions">

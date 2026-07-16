@@ -15,10 +15,12 @@ flowchart LR
     Station --> FMU["real provider FMU"]
 ```
 
-`FMU_BACKEND_MODE=local` is the permanent development/test path. In
-`FMU_BACKEND_MODE=station`, the Gateway keeps authentication, ticketing and
-the public REST/WSS contract while Station owns model loading and execution.
-The same proxy artifact works in both modes.
+`FMU_BACKEND_MODE=station` is the production path. `FMU_BACKEND_MODE=local`
+is available only for isolated development/test deployments and must be paired
+with `FMU_LOCAL_DEV_MODE=true`; otherwise native execution is disabled. In
+station mode, the Gateway keeps authentication, ticketing and the public
+REST/WSS contract while Station owns model loading and execution. The same
+proxy artifact works in both modes.
 
 ## Responsibilities
 

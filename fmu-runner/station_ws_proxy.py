@@ -12,6 +12,16 @@ from typing import Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 
+def _public_http_detail(exc: HTTPException, fallback: str) -> str:
+    if exc.status_code >= 500:
+        return fallback
+    if isinstance(exc.detail, dict):
+        detail = exc.detail.get("error") or exc.detail.get("message")
+    else:
+        detail = exc.detail
+    return detail if isinstance(detail, str) and len(detail) <= 256 else fallback
+
+
 def _normalize_binding(value) -> str:
     return str(value or "").strip().lower()
 
@@ -119,40 +129,19 @@ class StationRealtimeWsProxyManager:
             token = token[3:]
         return token[:10] if token else None
 
-    @staticmethod
-    def parse_cookie_header(cookie_header: str) -> dict[str, str]:
-        cookies: dict[str, str] = {}
-        if not cookie_header:
-            return cookies
-        for chunk in cookie_header.split(";"):
-            if "=" not in chunk:
-                continue
-            name, value = chunk.split("=", 1)
-            cookies[name.strip()] = value.strip()
-        return cookies
-
     @classmethod
     def extract_ws_token(cls, websocket: WebSocket) -> str:
         auth_header = websocket.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            return auth_header[7:]
-        token_param = websocket.query_params.get("token")
-        if token_param:
-            return token_param
-        cookie_header = websocket.headers.get("cookie", "")
-        cookies = cls.parse_cookie_header(cookie_header)
-        for cookie_name in ("token", "jwt", "jti", "JTI"):
-            token = cookies.get(cookie_name)
-            if token:
-                return token
+        if auth_header.startswith("Bearer ") and auth_header[7:].strip():
+            return auth_header[7:].strip()
         raise HTTPException(status_code=401, detail="Missing authentication token")
 
     @classmethod
     def extract_ws_authorization(cls, websocket: WebSocket) -> str:
         authorization = websocket.headers.get("authorization", "")
-        if authorization.startswith("Bearer "):
-            return authorization
-        return f"Bearer {cls.extract_ws_token(websocket)}"
+        if authorization.startswith("Bearer ") and authorization[7:].strip():
+            return f"Bearer {authorization[7:].strip()}"
+        raise HTTPException(status_code=401, detail="Missing bearer token")
 
     @staticmethod
     def error_payload(
@@ -276,10 +265,10 @@ class StationRealtimeWsProxyManager:
                                         }))
                                     except Exception:
                                         pass
-                                    detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                                    detail = _public_http_detail(exc, "Session observation failed") if isinstance(exc, HTTPException) else "Session observation failed"
                                     payload = self.error_payload(
                                         code="SESSION_OBSERVATION_FAILED",
-                                        message=str(detail),
+                                        message=detail,
                                         request_id=request_id,
                                         retryable=True,
                                         session_id=session_id,
@@ -461,10 +450,10 @@ class StationRealtimeWsProxyManager:
                             if not session_ticket:
                                 raise HTTPException(status_code=500, detail="Session ticket issuance returned no ticket")
                         except HTTPException as exc:
-                            detail = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
+                            detail = exc.detail if isinstance(exc.detail, dict) else {}
                             response = self.error_payload(
                                 code=detail.get("code") or ("FORBIDDEN" if exc.status_code == 403 else "INTERNAL_ERROR"),
-                                message=detail.get("error") or detail.get("message") or str(exc.detail),
+                                message=_public_http_detail(exc, "Unable to issue session ticket"),
                                 request_id=request_id,
                                 retryable=exc.status_code >= 500,
                             )
@@ -504,11 +493,11 @@ class StationRealtimeWsProxyManager:
                             self.enforce_fmu_claim(create_claims)
                             claims = create_claims
                         except HTTPException as exc:
-                            detail = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
+                            detail = exc.detail if isinstance(exc.detail, dict) else {}
                             code = detail.get("code") or ("SESSION_TICKET_INVALID" if exc.status_code == 401 else ("FORBIDDEN" if exc.status_code == 403 else "INTERNAL_ERROR"))
                             response = self.error_payload(
                                 code=code,
-                                message=detail.get("error") or detail.get("message") or str(exc.detail),
+                                message=_public_http_detail(exc, "Unable to redeem session ticket"),
                                 request_id=request_id,
                                 retryable=exc.status_code >= 500,
                             )
@@ -532,7 +521,7 @@ class StationRealtimeWsProxyManager:
                             requested_reservation_key=reservation_key,
                         )
                     except HTTPException as exc:
-                        detail_text = str(exc.detail)
+                        detail_text = _public_http_detail(exc, "Unable to authorize station session")
                         code = "INTERNAL_ERROR"
                         if exc.status_code == 403:
                             code = "LAB_MISMATCH" if "labId" in detail_text else "FORBIDDEN"
@@ -565,7 +554,7 @@ class StationRealtimeWsProxyManager:
                     except HTTPException as exc:
                         response = self.error_payload(
                             code="INTERNAL_ERROR",
-                            message=str(exc.detail),
+                            message=_public_http_detail(exc, "Station realtime channel unavailable"),
                             request_id=request_id,
                             retryable=exc.status_code >= 500,
                         )
@@ -621,7 +610,7 @@ class StationRealtimeWsProxyManager:
                     except HTTPException as exc:
                         response = self.error_payload(
                             code="INTERNAL_ERROR",
-                            message=str(exc.detail),
+                            message=_public_http_detail(exc, "Station realtime channel unavailable"),
                             request_id=request_id,
                             retryable=exc.status_code >= 500,
                         )

@@ -41,7 +41,12 @@ pip install -r requirements.txt
 export OPS_BIND=0.0.0.0
 export OPS_PORT=8081
 export OPS_CONFIG=hosts.json
-export MYSQL_DSN="mysql+pymysql://user:pass@mysql:3306/blockchain_services"
+export OPS_BACKEND_MYSQL_USER=ops_backend
+export OPS_BACKEND_MYSQL_PASSWORD='strong-backend-password'
+export OPS_GUACAMOLE_MYSQL_USER=ops_guac
+export OPS_GUACAMOLE_MYSQL_PASSWORD='strong-guacamole-password'
+export OPS_MYSQL_DATABASE=blockchain_services
+export GUACAMOLE_MYSQL_DATABASE=guacamole_db
 export OPS_POLL_ENABLED=true
 export OPS_POLL_INTERVAL=60
 
@@ -71,12 +76,15 @@ New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and 
 
 ## API (internal)
 
+Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
+`requestId`; stack traces and dependency messages remain in worker logs only.
+
 - `GET /health`
 - `POST /api/wol`
   - Body: `{ host, mac?, broadcast?, port?, ping_target?, ping_timeout?, attempts? }`
 - `POST /api/winrm`
   - Body: `{ host, command, args?, user?, password?, transport?, use_ssl?, port? }`
-  - Runs `C:\LabStation\LabStation.exe <command> <args>` via WinRM.
+  - Runs `C:\LabStation\LabStation.exe <command> <args>` via WinRM. Transport, TLS and port are constrained by the host catalog and gateway policy; HTTPS on port 5986 is the default and request values cannot downgrade or override that policy.
 - `POST /api/heartbeat/poll`
   - Body: `{ host, include_events? }`
 - `GET /api/hosts`
@@ -134,6 +142,12 @@ Discovery knobs:
 - `OPS_DISCOVERY_LABSTATION_PORTS` (default `8765,8088`)
 - `OPS_DISCOVERY_LABSTATION_PATHS` (default `/labstation/health,/health`)
 
+WinRM execution policy knobs:
+
+- `WINRM_REQUIRE_SSL` (default `true`); set to `false` only for an explicitly isolated legacy network.
+- `WINRM_ALLOWED_TRANSPORTS` (default `ntlm,kerberos,credssp`).
+- `WINRM_ALLOWED_SSL_PORTS` (default `5986`) and `WINRM_ALLOWED_PLAINTEXT_PORTS` (default `5985`).
+
 Credential storage knobs:
 
 - `OPS_CREDENTIALS_PATH` (compose default: `/app/data/winrm-credentials.json`)
@@ -145,11 +159,16 @@ Credential storage knobs:
 
 - OpenResty proxies `/ops/` to this service.
 - `/ops/` requires `LAB_MANAGER_TOKEN` via `X-Lab-Manager-Token` header or `lab_manager_token` cookie.
+- The worker additionally requires `OPS_INTERNAL_AUTH_TOKEN` on every `/api/*` and
+  `/aas-admin/*` request. OpenResty injects it after validating the operator;
+  direct upstream calls fail closed. Guacamole provisioning and session
+  observation ingestion retain their separate dedicated credentials.
 - **Network restriction**: OpenResty allows `/ops/` only from loopback and RFC1918 private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) before token validation.
   - Lab Manager UI (`/lab-manager`) works from any network with valid token.
   - Lab Station operations (`/ops` API) require access from gateway server or private networks.
   - When accessing Lab Manager remotely, ops features will show a network restriction warning.
 - Container runtime uses `waitress` instead of the Flask development server.
+- The Compose image runs as the dedicated `opsworker` UID/GID (matched from `HOST_UID`/`HOST_GID`), with a read-only root filesystem, a small `/tmp` tmpfs, dropped Linux capabilities and Docker's default seccomp profile. Keep the `ops-data` bind mount writable only by that UID/GID.
 - Prefer the Lab Manager `WinRM Credentials` modal for new hosts. It stores encrypted credentials in `OPS_CREDENTIALS_PATH`, keyed by host address.
 - Legacy `env:VAR_NAME` references in `hosts.json` are still supported for static catalogs.
 - `OPS_CONFIG` is the base, usually read-only host catalog.

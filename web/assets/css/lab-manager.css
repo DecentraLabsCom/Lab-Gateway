@@ -965,3 +965,4 @@ body {
     .header-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
     .primary-btn, .ghost-btn { width: auto; }
 }
+.warning-icon { color: #856404; margin-right: 8px; }

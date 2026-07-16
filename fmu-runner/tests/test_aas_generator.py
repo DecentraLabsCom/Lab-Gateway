@@ -616,7 +616,7 @@ class TestSyncFmuToBasyxDegradation:
     async def test_error_when_basyx_unreachable(self):
         """If BaSyx host is unreachable, sync returns an error dict instead of raising."""
         original = _aas_mod.BASYX_AAS_URL
-        _aas_mod.BASYX_AAS_URL = "http://127.0.0.1:19999"  # nothing listening here
+        _aas_mod.BASYX_AAS_URL = "https://127.0.0.1:19999"  # nothing listening here
         try:
             result = await _aas_mod.sync_fmu_to_basyx("42", "motor.fmu", SAMPLE_METADATA)
             assert "error" in result
@@ -715,7 +715,7 @@ class TestSyncFmuToBasyxAasx:
         """Empty AASX (no shells, no submodels) returns an error without uploading anything."""
         pkg = _make_aasx(shells=[], submodels=[])
         original = _aas_mod.BASYX_AAS_URL
-        _aas_mod.BASYX_AAS_URL = "http://basyx-test:8081"
+        _aas_mod.BASYX_AAS_URL = "https://basyx-test:8081"
         try:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -743,7 +743,7 @@ class TestSyncFmuToBasyxAasx:
         pkg = _make_aasx(shells=[shell], submodels=[submodel])
 
         original = _aas_mod.BASYX_AAS_URL
-        _aas_mod.BASYX_AAS_URL = "http://basyx-test:8081"
+        _aas_mod.BASYX_AAS_URL = "https://basyx-test:8081"
         try:
             mock_resp = MagicMock()
             mock_resp.status_code = 201
@@ -772,7 +772,7 @@ class TestSyncFmuToBasyxAasx:
         pkg = _make_aasx(shells=[shell], submodels=[submodel])
 
         original = _aas_mod.BASYX_AAS_URL
-        _aas_mod.BASYX_AAS_URL = "http://basyx-test:8081"
+        _aas_mod.BASYX_AAS_URL = "https://basyx-test:8081"
         try:
             mock_resp = MagicMock()
             mock_resp.status_code = 200

@@ -55,6 +55,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     applyGatewayMode();
+
+    document.querySelectorAll('[data-external-url]').forEach(button => {
+        button.addEventListener('click', () => window.open(button.dataset.externalUrl, '_blank', 'noopener,noreferrer'));
+    });
     
     // Entry animation for elements
     const observerOptions = {
@@ -142,6 +146,29 @@ document.addEventListener('DOMContentLoaded', function() {
                     data = body ? JSON.parse(body) : {};
                 } catch (e) {
                     data = { parseError: e.message };
+                }
+
+                // The public endpoint is intentionally aggregate-only. Do not
+                // mark every hidden service as failed when details are redacted.
+                if (data.public === true) {
+                    const publicStatus = (data.status || '').toString().toUpperCase();
+                    if (publicStatus === 'UP') {
+                        statusIndicator.className = 'status-indicator online';
+                        statusText.textContent = 'System Online';
+                    } else if (publicStatus === 'PARTIAL') {
+                        statusIndicator.className = 'status-indicator partial';
+                        statusText.textContent = 'Partial';
+                    } else {
+                        statusIndicator.className = 'status-indicator offline';
+                        statusText.textContent = 'System Unavailable';
+                    }
+                    statusIndicator.setAttribute('title', 'Click for status details');
+                    lastStatusDetails = {
+                        status: statusText.textContent,
+                        ok: publicStatus === 'UP' ? ['Public readiness operative'] : [],
+                        missing: publicStatus === 'UP' ? [] : ['Detailed diagnostics require operator authentication']
+                    };
+                    return;
                 }
 
                 const services = data.services || {};
@@ -343,7 +370,7 @@ function showAuthServiceInfo() {
         <div class="auth-modal-content">
             <div class="auth-modal-header">
                 <h3>🔐 Authentication Service</h3>
-                <button class="close-modal" onclick="closeAuthModal()">&times;</button>
+                <button class="close-modal" data-close-auth type="button">&times;</button>
             </div>
             <div class="auth-modal-body">
                 <div class="auth-info">
@@ -392,10 +419,11 @@ function showAuthServiceInfo() {
                 </div>
             </div>
         </div>
-        <div class="auth-modal-overlay" onclick="closeAuthModal()"></div>
+        <div class="auth-modal-overlay" data-close-auth></div>
     `;
     
     document.body.appendChild(modal);
+    modal.querySelectorAll('[data-close-auth]').forEach(node => node.addEventListener('click', closeAuthModal));
     document.body.style.overflow = 'hidden';
     
     // Animation
@@ -424,7 +452,7 @@ function showVersionInfo() {
         <div class="version-modal-content">
             <div class="version-modal-header">
                 <h3>📋 Version Information</h3>
-                <button class="close-modal" onclick="closeVersionModal()">&times;</button>
+                <button class="close-modal" data-close-version type="button">&times;</button>
             </div>
             <div class="version-modal-body">
                 <div class="version-info-modal">
@@ -453,10 +481,11 @@ function showVersionInfo() {
                 </div>
             </div>
         </div>
-        <div class="version-modal-overlay" onclick="closeVersionModal()"></div>
+        <div class="version-modal-overlay" data-close-version></div>
     `;
     
     document.body.appendChild(modal);
+    modal.querySelectorAll('[data-close-version]').forEach(node => node.addEventListener('click', closeVersionModal));
     document.body.style.overflow = 'hidden';
     
     // Animation

@@ -11,6 +11,38 @@ updates:
       prefix: "ci"
       include: "scope"
 
+  # Python runtime dependencies
+  - package-ecosystem: "pip"
+    directory: "/fmu-runner"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  - package-ecosystem: "pip"
+    directory: "/ops-worker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  # Compose image references, including the pinned Guacamole/Certbot/AAS images
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    commit-message:
+      prefix: "docker"
+      include: "scope"
+
   # Dockerfiles (OpenResty gateway)
   - package-ecosystem: "docker"
     directory: "/openresty"

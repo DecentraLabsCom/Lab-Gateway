@@ -53,7 +53,7 @@ Lite Gateways delegate identity and control-plane responsibilities to a Full Gat
 
 ### External AAS server
 
-Set `BASYX_AAS_URL` to use a provider-managed BaSyx or another compatible AAS REST server instead of the bundled service. The same provider-side sync endpoints remain in use. An empty value disables AAS synchronization cleanly.
+Set `BASYX_AAS_URL` to use a provider-managed BaSyx or another compatible AAS REST server instead of the bundled service. External URLs must use `https://`, have an exact hostname in `AAS_ALLOWED_HOSTS`, and be protected with a dedicated `AAS_SERVICE_TOKEN` (optionally under `AAS_SERVICE_TOKEN_HEADER`). The Gateway strips caller JWTs before proxying and injects only this service credential. The same provider-side sync endpoints remain in use. An empty value disables AAS synchronization cleanly.
 
 ## Provider guide
 
@@ -177,7 +177,8 @@ The administration routes require `LAB_MANAGER_TOKEN` through the shared lab-man
 
 The provider should also:
 
-- protect the AAS server and admin routes with the Gateway network policy;
+- protect the AAS server and admin routes with the Gateway network policy; the bundled profile keeps BaSyx/Mongo on the internal `fmu_aas`/`aas_data` networks and enables Mongo authentication;
+- configure an exact `AAS_ALLOWED_HOSTS` entry and dedicated `AAS_SERVICE_TOKEN` for every external AAS endpoint; caller JWTs are stripped at the Gateway;
 - avoid putting secrets or bearer tokens in shell properties;
 - validate and sanitize external URLs, especially documentation and AAS link targets;
 - keep AAS data and BaSyx storage backed up according to provider policy; and
@@ -223,6 +224,4 @@ These items are not prerequisites for the current AAS MVP. Shell generation, pub
 - [ ] Check physical-lab technical data separately from live availability.
 - [ ] Follow the normal Marketplace reservation and access flow.
 - [ ] Use raw JSON/AASX only as an additional integration artifact and validate it against the provider's published terms.
-
-
 

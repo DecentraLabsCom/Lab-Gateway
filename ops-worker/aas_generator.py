@@ -11,6 +11,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 import requests
 
@@ -19,8 +20,50 @@ logger = logging.getLogger("ops-worker.aas")
 # Empty default: if not configured (e.g. Lite mode gateways without --profile aas),
 # sync_lab_to_basyx returns a disabled result instead of attempting a connection.
 BASYX_AAS_URL = os.getenv("BASYX_AAS_URL", "")
+AAS_ALLOWED_HOSTS = os.getenv("AAS_ALLOWED_HOSTS", "")
+AAS_SERVICE_TOKEN = os.getenv("AAS_SERVICE_TOKEN", "")
+AAS_SERVICE_TOKEN_HEADER = os.getenv("AAS_SERVICE_TOKEN_HEADER", "Authorization")
+_BUNDLED_AAS_URL = "http://basyx-aas-server:8081"
 
 _BASYX_TIMEOUT = int(os.getenv("BASYX_AAS_TIMEOUT", "15"))
+
+
+def _aas_request_headers() -> Dict[str, str]:
+    """Return the dedicated AAS credential, rejecting unsafe external URLs."""
+    endpoint = BASYX_AAS_URL.rstrip("/")
+    if endpoint == _BUNDLED_AAS_URL:
+        return {}
+
+    parsed = urlsplit(endpoint)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("external AAS endpoint must use HTTPS")
+    if parsed.username or parsed.password:
+        raise ValueError("external AAS endpoint must not contain userinfo")
+
+    allowed = {
+        value.strip().lower()
+        for value in AAS_ALLOWED_HOSTS.split(",")
+        if value.strip()
+    }
+    if parsed.hostname.lower() not in allowed:
+        raise ValueError("external AAS hostname is not allowlisted")
+    if not AAS_SERVICE_TOKEN or AAS_SERVICE_TOKEN.strip().lower() in {
+        "change_me",
+        "changeme",
+        "password",
+        "test",
+    }:
+        raise ValueError("AAS_SERVICE_TOKEN is missing")
+
+    header_name = (AAS_SERVICE_TOKEN_HEADER or "Authorization").strip()
+    if not header_name or not all(
+        (char.isalnum() or char == "-") for char in header_name
+    ) or not header_name[0].isalpha():
+        raise ValueError("invalid AAS_SERVICE_TOKEN_HEADER")
+    value = AAS_SERVICE_TOKEN
+    if header_name.lower() == "authorization":
+        value = f"Bearer {value}"
+    return {header_name: value}
 
 
 def _aas_id_for_lab(lab_id: str) -> str:
@@ -179,8 +222,10 @@ def _put_or_post(session: requests.Session, url_base: str, put_path: str, post_p
         resp2 = session.post(f"{url_base}{post_path}", json=payload, timeout=_BASYX_TIMEOUT)
         if resp2.status_code in (200, 201):
             return {"status": resp2.status_code, "created": True}
-        return {"error": f"POST failed: {resp2.status_code}", "body": resp2.text[:500]}
-    return {"error": f"PUT failed: {resp.status_code}", "body": resp.text[:500]}
+        logger.warning("BaSyx POST failed with status %s: %s", resp2.status_code, resp2.text[:500])
+        return {"error": f"POST failed: {resp2.status_code}"}
+    logger.warning("BaSyx PUT failed with status %s: %s", resp.status_code, resp.text[:500])
+    return {"error": f"PUT failed: {resp.status_code}"}
 
 
 def sync_lab_to_basyx(
@@ -224,13 +269,13 @@ def sync_lab_to_basyx(
 
     try:
         session = requests.Session()
-        session.headers.update({"Content-Type": "application/json"})
+        session.headers.update({"Content-Type": "application/json", **_aas_request_headers()})
 
         # --- Nameplate submodel ---
         np_result = _put_or_post(session, BASYX_AAS_URL, f"/submodels/{np_id_enc}", "/submodels", nameplate_payload)
         if "error" in np_result:
             logger.error("Failed to sync Nameplate submodel for lab %s: %s", lab_id, np_result["error"])
-            result["error"] = f"nameplate sync failed: {np_result['error']}"
+            result["error"] = "nameplate sync failed"
             return result
         if np_result.get("created"):
             result["created"] = True
@@ -242,7 +287,7 @@ def sync_lab_to_basyx(
         td_result = _put_or_post(session, BASYX_AAS_URL, f"/submodels/{td_id_enc}", "/submodels", technical_payload)
         if "error" in td_result:
             logger.error("Failed to sync TechnicalData submodel for lab %s: %s", lab_id, td_result["error"])
-            result["error"] = f"technicalData sync failed: {td_result['error']}"
+            result["error"] = "technicalData sync failed"
             return result
         logger.info("TechnicalData submodel synced for lab %s (status=%s)", lab_id, td_result.get("status"))
 
@@ -250,17 +295,21 @@ def sync_lab_to_basyx(
         shell_result = _put_or_post(session, BASYX_AAS_URL, f"/shells/{aas_id_enc}", "/shells", shell_payload)
         if "error" in shell_result:
             logger.error("Failed to sync AAS shell for lab %s: %s", lab_id, shell_result["error"])
-            result["error"] = f"shell sync failed: {shell_result['error']}"
+            result["error"] = "shell sync failed"
             return result
         logger.info("AAS shell synced for lab %s (status=%s)", lab_id, shell_result.get("status"))
 
     except requests.exceptions.ConnectionError as exc:
         logger.warning("BaSyx unreachable at %s: %s", BASYX_AAS_URL, exc)
-        result["error"] = f"BaSyx unreachable: {exc}"
+        result["error"] = "BaSyx unreachable"
         return result
     except requests.exceptions.Timeout as exc:
         logger.warning("BaSyx timeout at %s: %s", BASYX_AAS_URL, exc)
-        result["error"] = f"BaSyx timeout: {exc}"
+        result["error"] = "BaSyx timeout"
+        return result
+    except ValueError as exc:
+        logger.error("AAS endpoint policy rejected %s: %s", BASYX_AAS_URL, exc)
+        result["error"] = "AAS endpoint policy rejected"
         return result
 
     result["synced"] = True

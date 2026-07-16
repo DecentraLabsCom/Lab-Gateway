@@ -1,4 +1,5 @@
 local _M = {}
+local demo_guard = require "modules.demo_guard"
 
 local function is_websocket_tunnel(uri)
     return uri and uri:match("/guacamole/websocket%-tunnel")
@@ -27,6 +28,14 @@ function _M.run(ngx_ctx, deps)
     end
 
     local status = ngx.var.status
+
+    -- Demo sessions are keyed by the authenticated JWT, not by the number of
+    -- HTTP requests.  Release the JTI when the tunnel handshake had succeeded;
+    -- the shared-dict TTL remains the hard fallback for unclean disconnects.
+    local demo_jti = ngx.ctx and ngx.ctx.demo_session_jti
+    if demo_jti and (not status or tonumber(status) == 101) then
+        demo_guard.release(ngx, demo_jti)
+    end
 
     local config = ngx.shared.config
     if not is_auto_logout_enabled(config) then

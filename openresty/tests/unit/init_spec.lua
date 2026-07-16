@@ -94,7 +94,8 @@ runner.describe("OpenResty init.lua", function()
                 AUTO_LOGOUT_ON_DISCONNECT = "true"
             },
             files = {
-                ["/etc/ssl/private/public_key.pem"] = public_key
+                ["/etc/openresty/jwt-keys/public_key.pem"] = public_key,
+                ["/etc/ssl/private/previous_public_key.pem"] = "previous-key"
             }
         })
 
@@ -110,6 +111,7 @@ runner.describe("OpenResty init.lua", function()
         runner.assert.equals(1200, ngx.shared.config:get("guac_token_security_retention_seconds"))
         runner.assert.equals("http://guacamole:8080/guacamole/api", ngx.shared.config:get("guac_api_url"))
         runner.assert.equals(public_key, ngx.shared.cache:get("public_key"))
+        runner.assert.equals("previous-key", ngx.shared.cache:get("public_key_previous"))
     end)
 
     runner.it("stores custom JWT Guacamole idle timeout", function()
@@ -139,7 +141,7 @@ runner.describe("OpenResty init.lua", function()
                 API_SESSION_TIMEOUT = "30"
             },
             files = {
-                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+                ["/etc/openresty/jwt-keys/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
             }
         })
 
@@ -157,7 +159,7 @@ runner.describe("OpenResty init.lua", function()
                 GUAC_API_URL = "http://guac.internal/guacamole/api"
             },
             files = {
-                ["/etc/ssl/private/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+                ["/etc/openresty/jwt-keys/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
             }
         })
 
@@ -166,7 +168,7 @@ runner.describe("OpenResty init.lua", function()
         runner.assert.equals("http://guac.internal/guacamole/api", ngx.shared.config:get("guac_api_url"))
     end)
 
-    runner.it("defaults FMU runner to enabled even in lite mode when FMU_RUNNER_ENABLED is empty", function()
+    runner.it("defaults FMU runner to disabled even in lite mode when FMU_RUNNER_ENABLED is empty", function()
         local ngx = run_init({
             env = {
                 GUAC_ADMIN_USER = "admin",
@@ -181,10 +183,10 @@ runner.describe("OpenResty init.lua", function()
         })
 
         runner.assert.equals(1, ngx.shared.config:get("lite_mode"))
-        runner.assert.equals(1, ngx.shared.config:get("fmu_runner_enabled"))
+        runner.assert.equals(0, ngx.shared.config:get("fmu_runner_enabled"))
     end)
 
-    runner.it("disables FMU runner only when FMU_RUNNER_ENABLED is explicitly false", function()
+    runner.it("keeps FMU runner disabled when explicitly false", function()
         local ngx = run_init({
             env = {
                 GUAC_ADMIN_USER = "admin",
@@ -199,6 +201,23 @@ runner.describe("OpenResty init.lua", function()
         })
 
         runner.assert.equals(0, ngx.shared.config:get("fmu_runner_enabled"))
+    end)
+
+    runner.it("enables FMU runner only when explicitly requested", function()
+        local ngx = run_init({
+            env = {
+                GUAC_ADMIN_USER = "admin",
+                GUAC_ADMIN_PASS = "really-strong-secret",
+                SERVER_NAME = "gateway.example",
+                HTTPS_PORT = "443",
+                FMU_RUNNER_ENABLED = "true"
+            },
+            files = {
+                ["/etc/openresty/jwt-keys/public_key.pem"] = "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"
+            }
+        })
+
+        runner.assert.equals(1, ngx.shared.config:get("fmu_runner_enabled"))
     end)
 
     runner.it("enables AAS when AAS_ENABLED is true", function()

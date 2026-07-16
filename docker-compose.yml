@@ -6,22 +6,41 @@ services:
       dockerfile: Dockerfile
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     env_file:
-      - .env  # Main gateway configuration
       - ./blockchain-services/.env  # Blockchain-specific configuration (optional overrides)
     environment:
+      # auto => Full when ISSUER is empty, Lite when ISSUER points to an
+      # external issuer. Set true/false explicitly for unattended deployments.
+      - BLOCKCHAIN_SERVICES_ENABLED=${BLOCKCHAIN_SERVICES_ENABLED:-auto}
       # Server name for URL resolution (WebAuthn rpId, issuer URLs, etc.)
       - SERVER_NAME=${SERVER_NAME}
       - HTTPS_PORT=${HTTPS_PORT:-443}
       # MySQL datasource for persistence (lab_reservations, auth_users)
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
-      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER}
-      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD}
+      - SPRING_DATASOURCE_USERNAME=${BLOCKCHAIN_MYSQL_USER:-blockchain_app}
+      - SPRING_DATASOURCE_PASSWORD=${BLOCKCHAIN_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      # Keep unrelated database/Guacamole principals absent from the backend;
+      # this service receives only the explicit credentials above and its own
+      # blockchain-services/.env file.
+      - MYSQL_ROOT_PASSWORD=
+      - MYSQL_USER=
+      - MYSQL_PASSWORD=
+      - GUACAMOLE_MYSQL_USER=
+      - GUACAMOLE_MYSQL_PASSWORD=
+      - OPS_BACKEND_MYSQL_USER=
+      - OPS_BACKEND_MYSQL_PASSWORD=
+      - OPS_GUACAMOLE_MYSQL_USER=
+      - OPS_GUACAMOLE_MYSQL_PASSWORD=
+      - GUAC_ADMIN_USER=
+      - GUAC_ADMIN_PASS=
       - PROVIDER_CONFIG_PATH=/app/data/provider.properties
       - ADMIN_ACCESS_TOKEN=${ADMIN_ACCESS_TOKEN}
       - ADMIN_ACCESS_TOKEN_HEADER=${ADMIN_ACCESS_TOKEN_HEADER:-X-Access-Token}
       - ADMIN_ACCESS_TOKEN_COOKIE=${ADMIN_ACCESS_TOKEN_COOKIE:-access_token}
       - ADMIN_ACCESS_TOKEN_REQUIRED=${ADMIN_ACCESS_TOKEN_REQUIRED:-true}
       - LAB_MANAGER_TOKEN=${LAB_MANAGER_TOKEN}
+      # Do not expose the gateway-to-Ops credential to the backend.
+      - OPS_INTERNAL_AUTH_TOKEN=
+      - OPS_INTERNAL_AUTH_HEADER=
       - LAB_MANAGER_TOKEN_HEADER=${LAB_MANAGER_TOKEN_HEADER:-X-Lab-Manager-Token}
       - ADMIN_DASHBOARD_LOCAL_ONLY=${ADMIN_DASHBOARD_LOCAL_ONLY:-true}
       - ADMIN_DASHBOARD_ALLOW_PRIVATE=${ADMIN_DASHBOARD_ALLOW_PRIVATE:-true}
@@ -39,9 +58,21 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    # In Lite mode keep the optional container dormant so the same compose
+    # project can be used for upgrades, but never start the Java backend or
+    # generate a local JWT key. OpenResty selects the remote key exclusively.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mode="$${BLOCKCHAIN_SERVICES_ENABLED:-auto}"
+        if [ "$$mode" = "false" ] || { [ "$$mode" = "auto" ] && [ -n "$${ISSUER:-}" ]; }; then
+          echo "Embedded blockchain-services disabled (Lite mode); container is dormant."
+          while :; do sleep 86400; done
+        fi
+        exec /app/entrypoint.sh
     healthcheck:
       # Probe Spring readiness; /health remains the detailed operational status consumed by the Gateway.
-      test: ["CMD", "sh", "-c", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/actuator/health/readiness) && [ $$code -eq 200 ]"]
+      test: ["CMD", "sh", "-c", "mode=$${BLOCKCHAIN_SERVICES_ENABLED:-auto}; if [ \"$$mode\" = \"false\" ] || { [ \"$$mode\" = \"auto\" ] && [ -n \"$${ISSUER:-}\" ]; }; then exit 0; fi; code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/actuator/health/readiness) && [ $$code -eq 200 ]"]
       timeout: 10s
       retries: 5
       interval: 30s
@@ -67,6 +98,7 @@ services:
     restart: always
     networks:
       - guacnet
+      - fmu_control
 
   openresty:
     build:
@@ -85,10 +117,9 @@ services:
       - ./openresty/lua:/etc/openresty/lua:ro
       - ./web:/var/www/html:ro
       - ./lab-content:/var/www/lab-content:ro
-      # Full mode: expose blockchain-services JWT public key to OpenResty so
-      # /.well-known/public-key.pem and init.lua always use the correct key.
-      # In Lite mode this directory is empty/absent; init.lua falls back to
-      # the key downloaded by init-ssl.sh into /etc/ssl/private/.
+      # Full mode: expose blockchain-services JWT public key to OpenResty.
+      # Lite mode may still have a stale file here, but mode-specific Lua
+      # selection never reads it; Lite uses only certs/public_key.pem.
       - ./blockchain-data/keys:/etc/openresty/jwt-keys:ro
     tmpfs:
       - /tmp:size=64M,mode=1777
@@ -96,6 +127,7 @@ services:
     environment:
       - GUAC_ADMIN_USER=${GUAC_ADMIN_USER}
       - GUAC_ADMIN_PASS=${GUAC_ADMIN_PASS}
+      - GUACAMOLE_LOGIN_RATE_LIMIT_PER_MINUTE=${GUACAMOLE_LOGIN_RATE_LIMIT_PER_MINUTE:-10}
       - SERVER_NAME=${SERVER_NAME}
       - HTTPS_PORT=${HTTPS_PORT}
       - HTTP_PORT=${HTTP_PORT}
@@ -107,6 +139,7 @@ services:
       - OPS_SESSION_OBSERVATION_INGEST_URL=${OPS_SESSION_OBSERVATION_INGEST_URL:-http://ops-worker:8081/internal/session-observations}
       - OPS_GUACAMOLE_TOKEN_INGEST_URL=${OPS_GUACAMOLE_TOKEN_INGEST_URL:-http://ops-worker:8081/internal/guacamole-token-revocations}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+      - AUTO_LOGOUT_ON_DISCONNECT=${AUTO_LOGOUT_ON_DISCONNECT:-true}
       - MARKETPLACE_URL=${MARKETPLACE_URL:-https://marketplace-decentralabs.vercel.app}
       - ADMIN_ACCESS_TOKEN=${ADMIN_ACCESS_TOKEN}
       - ADMIN_ACCESS_TOKEN_HEADER=${ADMIN_ACCESS_TOKEN_HEADER:-X-Access-Token}
@@ -115,7 +148,10 @@ services:
       - ADMIN_DASHBOARD_ALLOW_PRIVATE=${ADMIN_DASHBOARD_ALLOW_PRIVATE:-true}
       - SECURITY_ALLOW_PRIVATE_NETWORKS=${SECURITY_ALLOW_PRIVATE_NETWORKS:-true}
       - ADMIN_ALLOWED_CIDRS=${ADMIN_ALLOWED_CIDRS:-}
+      - ADMIN_TRUST_FORWARDED_IP=${ADMIN_TRUST_FORWARDED_IP:-true}
       - LAB_MANAGER_TOKEN=${LAB_MANAGER_TOKEN}
+      - OPS_INTERNAL_AUTH_TOKEN=${OPS_INTERNAL_AUTH_TOKEN:?OPS_INTERNAL_AUTH_TOKEN must be configured}
+      - OPS_INTERNAL_AUTH_HEADER=${OPS_INTERNAL_AUTH_HEADER:-X-Ops-Internal-Token}
       - LAB_MANAGER_TOKEN_HEADER=${LAB_MANAGER_TOKEN_HEADER}
       - LAB_MANAGER_TOKEN_COOKIE=${LAB_MANAGER_TOKEN_COOKIE}
       - GUACAMOLE_PROVISIONER_TOKEN=${GUACAMOLE_PROVISIONER_TOKEN:-}
@@ -124,17 +160,22 @@ services:
       - LAB_ADMIN_BACKEND_TOKEN=${LAB_ADMIN_BACKEND_TOKEN:-}
       - LAB_ADMIN_BACKEND_TOKEN_HEADER=${LAB_ADMIN_BACKEND_TOKEN_HEADER:-X-Lab-Manager-Token}
       - LAB_ADMIN_BACKEND_ALLOW_INSECURE=${LAB_ADMIN_BACKEND_ALLOW_INSECURE:-false}
-      - FMU_RUNNER_ENABLED=${FMU_RUNNER_ENABLED:-}
+      - FMU_RUNNER_ENABLED=${FMU_RUNNER_ENABLED:-false}
       - AAS_ENABLED=${AAS_ENABLED:-}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-}
+      - AAS_ALLOWED_HOSTS=${AAS_ALLOWED_HOSTS:-}
+      - AAS_SERVICE_TOKEN=${AAS_SERVICE_TOKEN:-}
+      - AAS_SERVICE_TOKEN_HEADER=${AAS_SERVICE_TOKEN_HEADER:-Authorization}
       - DEMO_USER=${DEMO_USER:-demo}
       - DEMO_LAB_ID=${DEMO_LAB_ID:-}
       - JWT_GUAC_IDLE_TIMEOUT_SECONDS=${JWT_GUAC_IDLE_TIMEOUT_SECONDS:-60}
+      - JWT_KEY_OVERLAP_SECONDS=${JWT_KEY_OVERLAP_SECONDS:-14400}
+      - JWT_KEY_REFRESH_INTERVAL_SECONDS=${JWT_KEY_REFRESH_INTERVAL_SECONDS:-300}
     depends_on:
       guacamole:
         condition: service_healthy
       blockchain-services:
-        condition: service_healthy  # Wait for keys to be generated
+        condition: service_healthy  # Full waits for its JWT key; Lite is dormant/ready
       ops-worker:
         condition: service_started
     healthcheck:
@@ -166,6 +207,8 @@ services:
     restart: always
     networks:
       - guacnet
+      - fmu_edge
+      - fmu_aas
 
   cloudflared:
     image: cloudflare/cloudflared:2024.11.0
@@ -244,7 +287,7 @@ services:
       - guacnet
 
   certbot:
-    image: certbot/certbot
+    image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
     entrypoint: ["sh", "-c", "certbot --version"]
     volumes:
@@ -254,7 +297,7 @@ services:
     # docker compose run --rm --profile certbot certbot certonly --webroot -w /var/www/certbot -d your.domain --email you@example.com --agree-tos --no-eff-email
 
   certbot-renew:
-    image: certbot/certbot
+    image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
     restart: unless-stopped
     entrypoint: ["sh", "-c", "while true; do certbot renew --webroot -w /var/www/certbot --quiet || true; sleep 12h; done"]
@@ -263,7 +306,7 @@ services:
       - ./certbot/www:/var/www/certbot
 
   certbot-init:
-    image: certbot/certbot
+    image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
     restart: "no"
     entrypoint: >
@@ -298,9 +341,19 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
+      # Legacy names are passed only so 000-ensure-user.sh can reconcile old
+      # installations; application containers use the dedicated principals.
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       BLOCKCHAIN_MYSQL_DATABASE: ${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
+      GUACAMOLE_MYSQL_USER: ${GUACAMOLE_MYSQL_USER:-guacamole_app}
+      GUACAMOLE_MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      BLOCKCHAIN_MYSQL_USER: ${BLOCKCHAIN_MYSQL_USER:-blockchain_app}
+      BLOCKCHAIN_MYSQL_PASSWORD: ${BLOCKCHAIN_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      OPS_BACKEND_MYSQL_USER: ${OPS_BACKEND_MYSQL_USER:-ops_backend}
+      OPS_BACKEND_MYSQL_PASSWORD: ${OPS_BACKEND_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      OPS_GUACAMOLE_MYSQL_USER: ${OPS_GUACAMOLE_MYSQL_USER:-ops_guac}
+      OPS_GUACAMOLE_MYSQL_PASSWORD: ${OPS_GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
       GUAC_ADMIN_USER: ${GUAC_ADMIN_USER}
       GUAC_ADMIN_PASS: ${GUAC_ADMIN_PASS}
       DEMO_USER: ${DEMO_USER:-demo}
@@ -311,7 +364,7 @@ services:
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
       - ./mysql/002-labstation-ops.sql:/docker-entrypoint-initdb.d/002-labstation-ops.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$${MYSQL_ROOT_PASSWORD}\" && mysql -h localhost -u\"$${MYSQL_USER}\" -p\"$${MYSQL_PASSWORD}\" \"$${BLOCKCHAIN_MYSQL_DATABASE}\" -e \"SELECT 1\""]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$${MYSQL_ROOT_PASSWORD}\" && mysql -h localhost -u\"$${BLOCKCHAIN_MYSQL_USER}\" -p\"$${BLOCKCHAIN_MYSQL_PASSWORD}\" \"$${BLOCKCHAIN_MYSQL_DATABASE}\" -e \"SELECT 1\""]
       timeout: 20s
       retries: 10
       interval: 30s
@@ -350,10 +403,13 @@ services:
     environment:
       GUACD_HOSTNAME: guacd
       MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_USER: ${GUACAMOLE_MYSQL_USER:-guacamole_app}
+      MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
       MYSQL_HOSTNAME: mysql
       API_SESSION_TIMEOUT: ${API_SESSION_TIMEOUT:-15}
+      BAN_MAX_INVALID_ATTEMPTS: ${BAN_MAX_INVALID_ATTEMPTS:-5}
+      BAN_ADDRESS_DURATION: ${BAN_ADDRESS_DURATION:-300}
+      BAN_MAX_ADDRESSES: ${BAN_MAX_ADDRESSES:-10485670}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/guacamole/"]
       timeout: 10s
@@ -383,7 +439,7 @@ services:
     networks:
       - guacnet
   guacd:
-    image: guacamole/guacd:1.5.5
+    image: guacamole/guacd:1.6.0
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "4822"]
       timeout: 10s
@@ -420,6 +476,9 @@ services:
     build:
       context: ./ops-worker
       dockerfile: Dockerfile
+      args:
+        OPS_UID: ${HOST_UID:-1000}
+        OPS_GID: ${HOST_GID:-1000}
     environment:
       - OPS_BIND=0.0.0.0
       - OPS_PORT=8081
@@ -438,13 +497,20 @@ services:
       - HTTPS_PORT=${HTTPS_PORT}
       - ISSUER=${ISSUER}
       - LAB_MANAGER_TOKEN=${LAB_MANAGER_TOKEN}
+      - OPS_INTERNAL_AUTH_TOKEN=${OPS_INTERNAL_AUTH_TOKEN:?OPS_INTERNAL_AUTH_TOKEN must be configured}
+      - OPS_INTERNAL_AUTH_HEADER=${OPS_INTERNAL_AUTH_HEADER:-X-Ops-Internal-Token}
       - GUACAMOLE_PROVISIONER_TOKEN=${GUACAMOLE_PROVISIONER_TOKEN:-}
       - GUACAMOLE_PROVISIONER_TOKEN_HEADER=${GUACAMOLE_PROVISIONER_TOKEN_HEADER:-X-Guacamole-Provisioner-Token}
       - MYSQL_HOSTNAME=mysql
-      - MYSQL_USER=${MYSQL_USER}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_USER=${OPS_BACKEND_MYSQL_USER:-${MYSQL_USER}}
+      - MYSQL_PASSWORD=${OPS_BACKEND_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      - OPS_BACKEND_MYSQL_USER=${OPS_BACKEND_MYSQL_USER:-ops_backend}
+      - OPS_BACKEND_MYSQL_PASSWORD=${OPS_BACKEND_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      - OPS_GUACAMOLE_MYSQL_USER=${OPS_GUACAMOLE_MYSQL_USER:-ops_guac}
+      - OPS_GUACAMOLE_MYSQL_PASSWORD=${OPS_GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
       - OPS_MYSQL_DATABASE=${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - GUACAMOLE_MYSQL_DATABASE=${MYSQL_DATABASE}
       - ACCESS_AUDIT_URL=${ACCESS_AUDIT_URL:-}
       - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
       - SESSION_OBSERVER_SIGNING_SECRET=${SESSION_OBSERVER_SIGNING_SECRET:-}
@@ -454,7 +520,14 @@ services:
       - GUAC_API_URL=${GUAC_API_URL:-http://guacamole:8080/guacamole/api}
       - GUACAMOLE_HISTORY_LOOKBACK_SECONDS=${GUACAMOLE_HISTORY_LOOKBACK_SECONDS:-30}
       - GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS=${GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS:-300}
+      - WINRM_REQUIRE_SSL=${WINRM_REQUIRE_SSL:-true}
+      - WINRM_ALLOWED_TRANSPORTS=${WINRM_ALLOWED_TRANSPORTS:-ntlm,kerberos,credssp}
+      - WINRM_ALLOWED_SSL_PORTS=${WINRM_ALLOWED_SSL_PORTS:-5986}
+      - WINRM_ALLOWED_PLAINTEXT_PORTS=${WINRM_ALLOWED_PLAINTEXT_PORTS:-5985}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
+      - AAS_ALLOWED_HOSTS=${AAS_ALLOWED_HOSTS:-}
+      - AAS_SERVICE_TOKEN=${AAS_SERVICE_TOKEN:-}
+      - AAS_SERVICE_TOKEN_HEADER=${AAS_SERVICE_TOKEN_HEADER:-Authorization}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
       - ./ops-data:/app/data
@@ -486,11 +559,13 @@ services:
         labels: "service=ops-worker"
     security_opt:
       - no-new-privileges:true
+      # Keep Docker's default seccomp profile; do not override it.
     cap_drop:
       - ALL
     restart: always
     networks:
       - guacnet
+      - fmu_aas
 
   # FMU Runner - FMI Co-Simulation execution service
   fmu-runner:
@@ -499,7 +574,9 @@ services:
       context: ./fmu-runner
       dockerfile: Dockerfile
     environment:
-      - FMU_BACKEND_MODE=${FMU_BACKEND_MODE:-local}
+      - FMU_BACKEND_MODE=${FMU_BACKEND_MODE:-station}
+      - FMU_LOCAL_DEV_MODE=${FMU_LOCAL_DEV_MODE:-false}
+      - FMU_LOCAL_REALTIME_ENABLED=${FMU_LOCAL_REALTIME_ENABLED:-false}
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
       - FMU_STATION_BASE_URL=${FMU_STATION_BASE_URL:-}
@@ -508,6 +585,7 @@ services:
       - FMU_SESSION_OBSERVATION_MAX_ATTEMPTS=${FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:-3}
       - HISTORY_DB_PATH=/app/data/history.db
       - ISSUER=${ISSUER:-}
+      - JWT_ISSUER=${JWT_ISSUER:-}
       - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}
       - JWT_AUDIENCE=${FMU_JWT_AUDIENCE:?FMU_JWT_AUDIENCE must be the exact public FMU URL, e.g. https://gateway.example/fmu}
       - AUTH_SESSION_TICKET_ISSUE_URL=${AUTH_SESSION_TICKET_ISSUE_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/issue}
@@ -525,11 +603,16 @@ services:
       - FMU_PROXY_GATEWAY_WS_URL=${FMU_PROXY_GATEWAY_WS_URL:-}
       - FMU_PROXY_SIGNING_KEY=${FMU_PROXY_SIGNING_KEY:-}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
+      - AAS_ALLOWED_HOSTS=${AAS_ALLOWED_HOSTS:-}
+      - AAS_SERVICE_TOKEN=${AAS_SERVICE_TOKEN:-}
+      - AAS_SERVICE_TOKEN_HEADER=${AAS_SERVICE_TOKEN_HEADER:-Authorization}
     volumes:
       - ./fmu-data:/app/fmu-data:ro
       - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
       - fmu-history:/app/data
-      - ./certs:/app/config/keys:ro
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+    read_only: true
     depends_on:
       blockchain-services:
         condition: service_healthy
@@ -559,7 +642,9 @@ services:
       - ALL
     restart: always
     networks:
-      - guacnet
+      - fmu_edge
+      - fmu_control
+      - fmu_aas
 
   # BaSyx AAS Server - Asset Administration Shell registry & repository
   # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_admin_access.lua)
@@ -571,7 +656,7 @@ services:
     environment:
       - BASYX_AASREPOSITORY_FEATURE_MQTT_ENABLED=false
       - BASYX_BACKEND=MongoDB
-      - SPRING_DATA_MONGODB_URI=mongodb://basyx-mongo:27017/basyx
+      - SPRING_DATA_MONGODB_URI=mongodb://${BASYX_MONGO_USER:-aas_app}:${BASYX_MONGO_PASSWORD:-CHANGE_ME}@basyx-mongo:27017/basyx?authSource=basyx
       - SERVER_PORT=8081
     depends_on:
       basyx-mongo:
@@ -604,18 +689,25 @@ services:
       - ALL
     restart: always
     networks:
-      - guacnet
+      - fmu_aas
+      - aas_data
 
   # MongoDB backend for BaSyx AAS Server — persists shells/submodels across restarts.
   # Only used when the 'aas' profile is active.
   basyx-mongo:
-    image: mongo:7
+    image: mongo:7.0.14
     profiles: ["aas"]
-    command: mongod --quiet --logpath /dev/null
+    command: mongod --auth --quiet --logpath /dev/null
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${BASYX_MONGO_ROOT_USER:-basyx_root}
+      MONGO_INITDB_ROOT_PASSWORD: ${BASYX_MONGO_ROOT_PASSWORD:-CHANGE_ME}
+      BASYX_MONGO_USER: ${BASYX_MONGO_USER:-aas_app}
+      BASYX_MONGO_PASSWORD: ${BASYX_MONGO_PASSWORD:-CHANGE_ME}
     volumes:
       - basyx_mongo_data:/data/db
+      - ./basyx-mongo/init-user.js:/docker-entrypoint-initdb.d/01-create-aas-user.js:ro
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD-SHELL", "test \"$${MONGO_INITDB_ROOT_PASSWORD}\" != CHANGE_ME && test \"$${BASYX_MONGO_PASSWORD}\" != CHANGE_ME && mongosh --quiet --host localhost -u \"$${MONGO_INITDB_ROOT_USERNAME}\" -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q true && mongosh --quiet --host localhost -u \"$${BASYX_MONGO_USER}\" -p \"$${BASYX_MONGO_PASSWORD}\" --authenticationDatabase basyx --eval \"db.adminCommand('ping').ok\" | grep -q true"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -627,17 +719,29 @@ services:
           cpus: '0.5'
         reservations:
           memory: 64M
-    #security_opt:
-    #  - no-new-privileges:true
-    #cap_drop:
-    #  - ALL
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64M,mode=1777
     restart: always
     networks:
-      - guacnet
+      - aas_data
 
 networks:
   guacnet:
     driver: bridge
+  fmu_edge:
+    driver: bridge
+  fmu_control:
+    driver: bridge
+  fmu_aas:
+    driver: bridge
+    internal: true
+  aas_data:
+    driver: bridge
+    internal: true
 
 volumes:
   mysql_data:

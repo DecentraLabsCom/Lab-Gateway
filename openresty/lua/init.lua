@@ -97,8 +97,9 @@ end
 local fmu_runner_env = (trim(os.getenv("FMU_RUNNER_ENABLED")) or ""):lower()
 local fmu_runner_enabled
 if fmu_runner_env == "" then
-    -- Default to enabled unless explicitly disabled.
-    fmu_runner_enabled = true
+    -- The runner is an optional profile.  An empty value must keep a plain
+    -- `docker compose up` deployment coherent (no runner container).
+    fmu_runner_enabled = false
 else
     fmu_runner_enabled = not (fmu_runner_env == "0" or fmu_runner_env == "false" or fmu_runner_env == "no")
 end
@@ -174,31 +175,54 @@ else
     ngx.log(ngx.INFO, "FMU runner integration disabled: /fmu and FMU AAS sync endpoints will return 503")
 end
 
--- Read the public key from a file.
--- Full mode:  blockchain-services writes keys to ./blockchain-data/keys/,
---             which is mounted at /etc/openresty/jwt-keys (read-only).
--- Lite mode:  init-ssl.sh downloads the issuer's public key to
---             /etc/ssl/private/public_key.pem (= ./certs/).
--- Try the Full-mode path first so the correct key is always used.
-local key_paths = {
-    "/etc/openresty/jwt-keys/public_key.pem",
-    "/etc/ssl/private/public_key.pem",
-}
+-- Read exactly one mode-specific public-key source.  Falling back across
+-- these paths is unsafe: a stale local Full key must never be accepted by a
+-- Lite gateway, and a downloaded remote key must never override Full mode.
+local active_key_path
+if lite_mode then
+    active_key_path = "/etc/ssl/private/public_key.pem"
+else
+    active_key_path = "/etc/openresty/jwt-keys/public_key.pem"
+end
+local previous_key_path
+if lite_mode then
+    previous_key_path = "/etc/ssl/private/previous_public_key.pem"
+else
+    -- The backend key mount is read-only; the overlap copy is maintained by
+    -- init-ssl.sh in the writable cert volume for both deployment modes.
+    previous_key_path = "/etc/ssl/private/previous_public_key.pem"
+end
+local key_paths = { active_key_path, previous_key_path }
+config:set("jwt_public_key_path", active_key_path)
+config:set("jwt_previous_public_key_path", previous_key_path)
+config:set("jwt_public_key_mode", lite_mode and "remote" or "local")
 local public_key_loaded = false
-for _, path in ipairs(key_paths) do
+local previous_key_loaded = false
+for index, path in ipairs(key_paths) do
     local file = io.open(path, "r")
     if file then
         local public_key = file:read("*all")
         file:close()
         if public_key and public_key ~= "" then
-            ngx.shared.cache:set("public_key", public_key)
-            public_key_loaded = true
-            ngx.log(ngx.INFO, "Loaded JWT public key from: " .. path)
-            break
+            local cache_key = index == 1 and "public_key" or "public_key_previous"
+            ngx.shared.cache:set(cache_key, public_key)
+            if index == 1 then
+                public_key_loaded = true
+                ngx.log(ngx.INFO, "Loaded active JWT public key from: " .. path)
+            else
+                previous_key_loaded = true
+                ngx.log(ngx.INFO, "Loaded previous JWT public key for rotation overlap from: " .. path)
+            end
         end
     end
 end
 if not public_key_loaded then
+    ngx.shared.cache:delete("public_key")
+end
+if not previous_key_loaded then
+    ngx.shared.cache:delete("public_key_previous")
+end
+if not public_key_loaded then
     ---@diagnostic disable-next-line: param-type-mismatch
-    ngx.log(ngx.ERR, "Unable to read public key file from any known path")
+    ngx.log(ngx.ERR, "Unable to read active JWT public key file: " .. active_key_path)
 end

@@ -13,10 +13,18 @@ set "compose_full="
 set "cf_enabled=0"
 set "certbot_enabled=0"
 set "aas_enabled=0"
-set "fmu_runner_enabled=1"
+set "fmu_runner_enabled=0"
 set "external_aas_url="
 set "existing_mysql_root_password="
 set "existing_mysql_password="
+set "existing_guacamole_mysql_password="
+set "existing_blockchain_mysql_password="
+set "existing_ops_backend_mysql_password="
+set "existing_ops_guacamole_mysql_password="
+set "existing_basyx_mongo_root_password="
+set "existing_basyx_mongo_password="
+set "existing_aas_allowed_hosts="
+set "existing_aas_service_token="
 set "db_credentials_changed=0"
 set "reset_mysql_volume=0"
 set "mysql_volume_name="
@@ -64,6 +72,14 @@ echo.
 
 call :ReadEnvValue "%ROOT_ENV_FILE%" "MYSQL_ROOT_PASSWORD" existing_mysql_root_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "MYSQL_PASSWORD" existing_mysql_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "GUACAMOLE_MYSQL_PASSWORD" existing_guacamole_mysql_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "BLOCKCHAIN_MYSQL_PASSWORD" existing_blockchain_mysql_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD" existing_ops_backend_mysql_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD" existing_ops_guacamole_mysql_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "BASYX_MONGO_ROOT_PASSWORD" existing_basyx_mongo_root_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "BASYX_MONGO_PASSWORD" existing_basyx_mongo_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" existing_aas_allowed_hosts
+call :ReadEnvValue "%ROOT_ENV_FILE%" "AAS_SERVICE_TOKEN" existing_aas_service_token
 REM Check if .env already exists
 if exist "%ROOT_ENV_FILE%" (
     echo .env file already exists!
@@ -139,12 +155,52 @@ if "!mysql_password!"=="" (
     echo Generated database password: !mysql_password!
 )
 
+REM Generate independent runtime credentials. These principals are written
+REM to .env without being reused by any other schema or service.
+set "guacamole_mysql_password=!existing_guacamole_mysql_password!"
+set "blockchain_mysql_password=!existing_blockchain_mysql_password!"
+set "ops_backend_mysql_password=!existing_ops_backend_mysql_password!"
+set "ops_guacamole_mysql_password=!existing_ops_guacamole_mysql_password!"
+if defined guacamole_mysql_password call :IsPlaceholderSecret "!guacamole_mysql_password!" && set "guacamole_mysql_password="
+if defined blockchain_mysql_password call :IsPlaceholderSecret "!blockchain_mysql_password!" && set "blockchain_mysql_password="
+if defined ops_backend_mysql_password call :IsPlaceholderSecret "!ops_backend_mysql_password!" && set "ops_backend_mysql_password="
+if defined ops_guacamole_mysql_password call :IsPlaceholderSecret "!ops_guacamole_mysql_password!" && set "ops_guacamole_mysql_password="
+if "!guacamole_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "guacamole_mysql_password=GuacApp_!generated_hex!"
+if "!blockchain_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "blockchain_mysql_password=ChainApp_!generated_hex!"
+if "!ops_backend_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "ops_backend_mysql_password=OpsBackend_!generated_hex!"
+if "!ops_guacamole_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "ops_guacamole_mysql_password=OpsGuac_!generated_hex!"
+
+REM Bundled BaSyx/Mongo credentials are separate and alphanumeric so they are
+REM safe in the Mongo URI and never reused by MySQL or application principals.
+set "basyx_mongo_root_password=!existing_basyx_mongo_root_password!"
+set "basyx_mongo_password=!existing_basyx_mongo_password!"
+if defined basyx_mongo_root_password call :IsPlaceholderSecret "!basyx_mongo_root_password!" && set "basyx_mongo_root_password="
+if defined basyx_mongo_password call :IsPlaceholderSecret "!basyx_mongo_password!" && set "basyx_mongo_password="
+if "!basyx_mongo_root_password!"=="" call :GenerateHex 16 generated_hex & set "basyx_mongo_root_password=AasRoot_!generated_hex!"
+if "!basyx_mongo_password!"=="" call :GenerateHex 16 generated_hex & set "basyx_mongo_password=AasApp_!generated_hex!"
+
 call :UpdateEnv "%ROOT_ENV_FILE%" "MYSQL_ROOT_PASSWORD" "!mysql_root_password!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "MYSQL_PASSWORD" "!mysql_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "GUACAMOLE_MYSQL_USER" "guacamole_app"
+call :UpdateEnv "%ROOT_ENV_FILE%" "GUACAMOLE_MYSQL_PASSWORD" "!guacamole_mysql_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "BLOCKCHAIN_MYSQL_USER" "blockchain_app"
+call :UpdateEnv "%ROOT_ENV_FILE%" "BLOCKCHAIN_MYSQL_PASSWORD" "!blockchain_mysql_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_BACKEND_MYSQL_USER" "ops_backend"
+call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD" "!ops_backend_mysql_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_USER" "ops_guac"
+call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD" "!ops_guacamole_mysql_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_MONGO_ROOT_USER" "basyx_root"
+call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_MONGO_ROOT_PASSWORD" "!basyx_mongo_root_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_MONGO_USER" "aas_app"
+call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_MONGO_PASSWORD" "!basyx_mongo_password!"
 
 set "db_credentials_changed=0"
 if not "!mysql_root_password!"=="!existing_mysql_root_password!" set "db_credentials_changed=1"
 if not "!mysql_password!"=="!existing_mysql_password!" set "db_credentials_changed=1"
+if not "!guacamole_mysql_password!"=="!existing_guacamole_mysql_password!" set "db_credentials_changed=1"
+if not "!blockchain_mysql_password!"=="!existing_blockchain_mysql_password!" set "db_credentials_changed=1"
+if not "!ops_backend_mysql_password!"=="!existing_ops_backend_mysql_password!" set "db_credentials_changed=1"
+if not "!ops_guacamole_mysql_password!"=="!existing_ops_guacamole_mysql_password!" set "db_credentials_changed=1"
 
 for /f %%V in ('powershell -NoLogo -NoProfile -Command "$p=$env:COMPOSE_PROJECT_NAME; if (-not $p) { $p=[IO.Path]::GetFileName((Get-Location).Path).ToLowerInvariant() -replace '[^a-z0-9]','' }; $vol=docker volume ls -q --filter \"label=com.docker.compose.project=$p\" --filter \"label=com.docker.compose.volume=mysql_data\" | Select-Object -First 1; if (-not $vol) { $fallback=($p + '_mysql_data'); docker volume inspect $fallback *> $null; if ($LASTEXITCODE -eq 0) { $vol=$fallback } }; if ($vol) { $vol }"') do set "mysql_volume_name=%%V"
 
@@ -169,6 +225,7 @@ echo.
 echo IMPORTANT: Save these passwords securely!
 echo    Root password: !mysql_root_password!
 echo    Database password: !mysql_password!
+echo    Dedicated database principals: guacamole_app, blockchain_app, ops_backend, ops_guac
 echo.
 
 REM Guacamole Admin Credentials
@@ -309,6 +366,16 @@ if "!session_observation_ingest_token!"=="" (
     echo Generated session-observation ingestion token.
 )
 call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVATION_INGEST_TOKEN" "!session_observation_ingest_token!"
+call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_INTERNAL_AUTH_TOKEN" ops_internal_auth_token
+if /i "!ops_internal_auth_token!"=="CHANGE_ME" set "ops_internal_auth_token="
+if "!ops_internal_auth_token!"=="" (
+    call :GenerateHex 32 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%%RANDOM%%RANDOM%%RANDOM%"
+    set "ops_internal_auth_token=ops_!generated_hex!"
+    echo Generated dedicated Ops Worker internal-auth token.
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_INTERNAL_AUTH_TOKEN" "!ops_internal_auth_token!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_INTERNAL_AUTH_HEADER" "X-Ops-Internal-Token"
 echo.
 
 echo Lab Manager Backend Allowlist
@@ -424,7 +491,9 @@ set /p "issuer_value=ISSUER [empty->Full, https://full/auth->Lite]: "
 if defined issuer_value set "issuer_value=!issuer_value: =!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "ISSUER" "!issuer_value!"
 if "!issuer_value!"=="" (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "BLOCKCHAIN_SERVICES_ENABLED" "true"
     echo    * ISSUER left empty ^(Full mode^).
+    echo    * Embedded blockchain-services enabled.
     call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_URL" ""
     call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_TOKEN" ""
     call :UpdateEnv "%ROOT_ENV_FILE%" "LAB_ADMIN_BACKEND_TOKEN_HEADER" "X-Lab-Manager-Token"
@@ -449,7 +518,9 @@ if "!issuer_value!"=="" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_REDEEM_URL" "http://blockchain-services:8080/auth/fmu/session-ticket/redeem"
     echo    * Configured a dedicated signed session-observer credential for this Full gateway.
 ) else (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "BLOCKCHAIN_SERVICES_ENABLED" "false"
     echo    * ISSUER set to: !issuer_value! ^(Lite mode^).
+    echo    * Embedded blockchain-services kept dormant ^(Lite mode^).
     echo.
     echo Lite /lab-admin Remote Backend
     echo ==============================
@@ -547,11 +618,11 @@ echo FMU Runner Integration
 echo ======================
 echo Controls whether /fmu and FMU AAS sync routes are active on this gateway.
 echo When disabled, OpenResty starts without requiring the fmu-runner container and those routes return 503.
-echo FMU runner is started unless FMU_RUNNER_ENABLED is explicitly set to false.
+echo FMU runner is optional and disabled unless FMU_RUNNER_ENABLED is explicitly enabled.
 set "current_fmu_runner_enabled="
 call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_RUNNER_ENABLED" current_fmu_runner_enabled
 if not defined current_fmu_runner_enabled (
-    set "current_fmu_runner_enabled=true"
+    set "current_fmu_runner_enabled=false"
 ) else (
     if /i "!current_fmu_runner_enabled!"=="false" (
         set "current_fmu_runner_enabled=false"
@@ -602,6 +673,8 @@ echo ==========================================
 if not "!issuer_value!"=="" (
     echo Lite Gateway detected - AAS is only available on Full Gateway instances. Skipping.
     call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" ""
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_SERVICE_TOKEN" ""
 ) else (
     echo AAS enables publishing Digital Twin descriptions ^(IDTA 02006^) for FMUs and physical labs.
     echo   1^) Bundled BaSyx  - Deploy the included BaSyx AAS Server container ^(recommended^)
@@ -611,7 +684,7 @@ if not "!issuer_value!"=="" (
     if defined aas_option set "aas_option=!aas_option: =!"
     if "!aas_option!"=="2" (
         echo External AAS server selected.
-        set /p "external_aas_url=External AAS API base URL ^(e.g. http://192.168.1.10:8081 or https://my-aas.example.com^): "
+        set /p "external_aas_url=External AAS API base URL ^(HTTPS only, e.g. https://my-aas.example.com^): "
         if defined external_aas_url set "external_aas_url=!external_aas_url: =!"
         if "!external_aas_url!"=="" (
             echo No URL provided. AAS support disabled.
@@ -620,13 +693,29 @@ if not "!issuer_value!"=="" (
             echo    * External AAS server: !external_aas_url!
             echo    * Bundled basyx-aas-server / basyx-mongo containers will NOT be started.
             call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" "!external_aas_url!"
+            set "aas_allowed_hosts=!existing_aas_allowed_hosts!"
+            set /p "aas_allowed_hosts=Exact allowlisted AAS hostname ^(without port^): "
+            if not defined aas_allowed_hosts set "aas_allowed_hosts=!existing_aas_allowed_hosts!"
+            set "aas_service_token=!existing_aas_service_token!"
+            set /p "aas_service_token=Dedicated AAS service token ^(leave empty to generate^): "
+            if not defined aas_service_token (
+                call :GenerateHex 32 generated_hex
+                set "aas_service_token=aas_!generated_hex!"
+            )
+            call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" "!aas_allowed_hosts!"
+            call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_SERVICE_TOKEN" "!aas_service_token!"
+            call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_SERVICE_TOKEN_HEADER" "Authorization"
         )
     ) else if "!aas_option!"=="3" (
         echo AAS support disabled.
         call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
+        call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" ""
+        call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_SERVICE_TOKEN" ""
     ) else (
         echo Bundled BaSyx selected.
         call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
+        call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" ""
+        call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_SERVICE_TOKEN" ""
         set "aas_enabled=1"
     )
 )
@@ -702,6 +791,11 @@ if not exist fmu-proxy-runtime\binaries\darwin64 mkdir fmu-proxy-runtime\binarie
 if not exist ops-data mkdir ops-data
 if not exist ops-data\guac-revocation-spool mkdir ops-data\guac-revocation-spool
 if not exist certs\.gitkeep type nul > certs\.gitkeep
+call :SecureEnvFile "%ROOT_ENV_FILE%"
+call :SecureEnvFile "%BLOCKCHAIN_ENV_FILE%"
+call :SecureSecretTree "certs"
+call :SecureSecretTree "blockchain-data"
+call :SecureSecretTree "ops-data"
 
 echo SSL Certificates
 echo ================
@@ -830,8 +924,8 @@ if /i "!domain!"=="localhost" (
         set "token_host=https://!domain!:!https_port!"
     )
 )
-echo    * Admin access token cookie: !token_host!/wallet-dashboard?token=!access_token!
-echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
+echo    * Admin dashboard: !token_host!/wallet-dashboard ^(login required^)
+echo    * Lab Manager: !token_host!/lab-manager ^(login required^)
 echo    * Guacamole: /guacamole/
 echo    * Blockchain Services API: /auth
 echo.
@@ -895,8 +989,8 @@ if /i "!domain!"=="localhost" (
         set "token_host=https://!domain!:!https_port!"
     )
 )
-echo    * Admin access token cookie: !token_host!/wallet-dashboard?token=!access_token!
-echo    * Lab Manager token cookie: !token_host!/lab-manager?token=!lab_manager_token!
+echo    * Admin dashboard: !token_host!/wallet-dashboard ^(login required^)
+echo    * Lab Manager: !token_host!/lab-manager ^(login required^)
     echo    * Guacamole: /guacamole/ ^(!guac_admin_user! / !guac_admin_pass!^)
     echo    * Blockchain Services API: /auth
     if "!cf_enabled!"=="1" (
@@ -951,6 +1045,16 @@ call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_MANAGER_TOKEN"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_MANAGER_TOKEN_HEADER"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_MANAGER_TOKEN_COOKIE"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_MANAGER_ALLOWED_CIDRS"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_INTERNAL_AUTH_TOKEN"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_INTERNAL_AUTH_HEADER"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "GUACAMOLE_MYSQL_USER"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "GUACAMOLE_MYSQL_PASSWORD"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "BLOCKCHAIN_MYSQL_USER"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "BLOCKCHAIN_MYSQL_PASSWORD"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_BACKEND_MYSQL_USER"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_USER"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD"
 exit /b
 
 :RemoveEnv
@@ -978,6 +1082,20 @@ if exist "%read_file%" (
 )
 :read_done
 if "%~3" NEQ "" set "%~3=%read_result%"
+exit /b
+
+:SecureEnvFile
+set "secure_env_file=%~1"
+if not exist "%secure_env_file%" exit /b
+icacls "%secure_env_file%" /inheritance:r /grant:r "%USERNAME%:F" *S-1-5-18:F *S-1-5-32-544:F >nul 2>&1
+if errorlevel 1 echo Warning: unable to restrict ACLs on %secure_env_file%.
+exit /b
+
+:SecureSecretTree
+set "secure_tree=%~1"
+if not exist "%secure_tree%" exit /b
+icacls "%secure_tree%" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F" *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F /T /C >nul 2>&1
+if errorlevel 1 echo Warning: unable to restrict ACLs on %secure_tree%.
 exit /b
 
 :GenerateHex

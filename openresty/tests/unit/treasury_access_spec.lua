@@ -204,7 +204,7 @@ end)
         runner.assert.equals("secret-token", ngx.req.headers["X-Access-Token"])
     end)
 
-    runner.it("accepts bootstrap query on tokenized dashboard paths and redirects cleanly", function()
+    runner.it("rejects bootstrap query on tokenized dashboard paths", function()
         local ngx = run_treasury_access({
             env = {
                 ADMIN_ACCESS_TOKEN = "secret-token",
@@ -213,18 +213,17 @@ end)
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/wallet-dashboard/",
-                args = "token=secret-token"
+                args = "token=secret-token",
+                arg_token = "secret-token"
             },
             uri_args = { token = "secret-token" }
         })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("access_token=secret-token; Path=/; HttpOnly; Secure; SameSite=Lax", ngx.header["Set-Cookie"])
-        runner.assert.equals("/wallet-dashboard/", ngx._redirect_target)
-        runner.assert.equals(302, ngx._redirect_code)
+        runner.assert.equals(400, ngx.status)
+        runner.assert.equals(400, ngx._exit)
     end)
 
-    runner.it("lets dashboard bootstrap query replace a stale access cookie", function()
+    runner.it("does not let a query token replace a stale access cookie", function()
         local ngx = run_treasury_access({
             env = {
                 ADMIN_ACCESS_TOKEN = "new-secret-token",
@@ -234,18 +233,17 @@ end)
                 remote_addr = "8.8.8.8",
                 uri = "/wallet-dashboard",
                 args = "token=new-secret-token",
+                arg_token = "new-secret-token",
                 cookie_access_token = "old-secret-token"
             },
             uri_args = { token = "new-secret-token" }
         })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("access_token=new-secret-token; Path=/; HttpOnly; Secure; SameSite=Lax", ngx.header["Set-Cookie"])
-        runner.assert.equals("/wallet-dashboard/", ngx._redirect_target)
-        runner.assert.equals(302, ngx._redirect_code)
+        runner.assert.equals(400, ngx.status)
+        runner.assert.equals(400, ngx._exit)
     end)
 
-    runner.it("preserves non-token query args when redirecting institution-config bootstrap", function()
+    runner.it("rejects institution-config query tokens", function()
         local ngx = run_treasury_access({
             env = {
                 ADMIN_ACCESS_TOKEN = "secret-token",
@@ -254,7 +252,8 @@ end)
             var = {
                 remote_addr = "8.8.8.8",
                 uri = "/institution-config/",
-                args = "token=secret-token&section=providers"
+                args = "token=secret-token&section=providers",
+                arg_token = "secret-token"
             },
             uri_args = {
                 token = "secret-token",
@@ -262,10 +261,8 @@ end)
             }
         })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals("access_token=secret-token; Path=/; HttpOnly; Secure; SameSite=Lax", ngx.header["Set-Cookie"])
-        runner.assert.equals("/institution-config/?section=providers", ngx._redirect_target)
-        runner.assert.equals(302, ngx._redirect_code)
+        runner.assert.equals(400, ngx.status)
+        runner.assert.equals(400, ngx._exit)
     end)
 
     runner.it("rejects external clients forwarded through private proxies by dashboard policy", function()
