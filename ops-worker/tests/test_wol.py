@@ -72,8 +72,15 @@ def test_api_wol_rejects_command_injection_in_ping_target(client):
     mock_wol.assert_not_called()
 
 
-def test_host_is_up_does_not_execute_ping_for_invalid_target():
-    with patch("worker.subprocess.run") as mock_run:
+def test_host_is_up_does_not_open_socket_for_invalid_target():
+    with patch("worker.socket.create_connection") as mock_connect:
         assert worker.host_is_up("127.0.0.1 && whoami", 1) is False
 
-    mock_run.assert_not_called()
+    mock_connect.assert_not_called()
+
+
+def test_host_is_up_probes_configured_winrm_port_without_shell():
+    with patch("worker.socket.create_connection") as mock_connect:
+        assert worker.host_is_up("lab-ws-01", 1, probe_port=5986) is True
+
+    mock_connect.assert_called_once_with(("lab-ws-01", 5986), timeout=1.0)

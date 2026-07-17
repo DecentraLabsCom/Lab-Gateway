@@ -11,7 +11,6 @@ import logging
 import os
 import re
 import socket
-import subprocess
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -544,33 +543,37 @@ def to_utc(ts: Any) -> Optional[datetime]:
 
 
 def wol_and_wait(mac: str, broadcast: Optional[str], port: int, ping_target: str,
-                 attempts: int, wait_seconds: float) -> Tuple[bool, int]:
+                 attempts: int, wait_seconds: float, probe_port: Optional[int] = None) -> Tuple[bool, int]:
     for attempt in range(1, attempts + 1):
         send_magic_packet(mac, ip_address=broadcast or "255.255.255.255", port=port)
         time.sleep(wait_seconds)
-        if host_is_up(ping_target, wait_seconds):
+        if host_is_up(ping_target, wait_seconds, probe_port=probe_port):
             return True, attempt
     return False, attempts
 
 
-def host_is_up(target: str, timeout: float) -> bool:
+def host_is_up(target: str, timeout: float, probe_port: Optional[int] = None) -> bool:
     if not target:
         return False
     target = str(target).strip()
     if _PING_TARGET_RE.fullmatch(target) is None:
-        logging.warning("Invalid ping target rejected")
+        logging.warning("Invalid reachability target rejected")
         return False
-    cmd = []
-    if os.name == "nt":
-        cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), target]
-    else:
-        cmd = ["ping", "-c", "1", "-W", str(int(timeout)), target]
+
+    # The worker runs in a container and the Lab Station exposes WinRM.  A
+    # direct TCP probe keeps the reachability check in-process and avoids
+    # passing request data to a shell command.  The port is controlled by the
+    # host configuration; the default follows the gateway's WinRM policy.
+    if probe_port is None:
+        probe_port = 5986 if WINRM_REQUIRE_SSL else 5985
+    if probe_port not in WINRM_ALLOWED_SSL_PORTS | WINRM_ALLOWED_PLAINTEXT_PORTS:
+        logging.warning("Invalid reachability port rejected")
+        return False
     try:
-        result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        if result.returncode == 0:
+        with socket.create_connection((target, probe_port), timeout=max(float(timeout), 0.1)):
             return True
-    except FileNotFoundError:
-        logging.warning("ping command not found; skipping reachability check")
+    except (OSError, ValueError, TypeError):
+        pass
     return False
 
 
@@ -1224,13 +1227,20 @@ def perform_wake_step(
     wait_seconds = float(options.get("ping_timeout", 10))
     broadcast = options.get("broadcast") or host.get("broadcast")
     port = int(options.get("port", host.get("wol_port", 9)))
+    configured_probe_port = host.get("winrm_port")
+    try:
+        probe_port = int(configured_probe_port) if configured_probe_port not in (None, "") else None
+    except (TypeError, ValueError):
+        probe_port = None
 
     start = time.time()
     success = False
     used_attempts = 0
     message = ""
     try:
-        success, used_attempts = wol_and_wait(mac, broadcast, port, ping_target, attempts, wait_seconds)
+        success, used_attempts = wol_and_wait(
+            mac, broadcast, port, ping_target, attempts, wait_seconds, probe_port=probe_port
+        )
         message = "Host reachable" if success else "Host did not respond to ping"
     except Exception as exc:
         logging.exception("Wake operation failed for %s", host.get("name"))
@@ -1427,10 +1437,17 @@ def api_wol():
     wait_seconds = float(payload.get("ping_timeout", 10))
     broadcast = payload.get("broadcast")
     port = int(payload.get("port", 9))
+    configured_probe_port = (host or {}).get("winrm_port")
+    try:
+        probe_port = int(configured_probe_port) if configured_probe_port not in (None, "") else None
+    except (TypeError, ValueError):
+        probe_port = None
 
     start = time.time()
     try:
-        up, used_attempts = wol_and_wait(mac, broadcast, port, ping_target, attempts, wait_seconds)
+        up, used_attempts = wol_and_wait(
+            mac, broadcast, port, ping_target, attempts, wait_seconds, probe_port=probe_port
+        )
     except Exception as exc:
         return internal_error_response("WOL failed", exc)
 

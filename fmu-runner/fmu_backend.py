@@ -14,6 +14,10 @@ ModelMetadata = dict[str, Any]
 logger = logging.getLogger("fmu-runner.backend")
 
 _FMU_ACCESS_KEY_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_FMU_ACCESS_KEY_PATH_RE = re.compile(
+    r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*"
+    r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu"
+)
 
 
 class BaseFmuBackend:
@@ -233,14 +237,23 @@ class StationFmuBackend(BaseFmuBackend):
         path = f"{base_path}/internal/fmu/sessions" if base_path else "/internal/fmu/sessions"
         return urlunparse((ws_scheme, parsed.netloc, path, "", "", ""))
 
-    async def _request_json(self, path: str) -> dict[str, Any]:
+    async def _request_json(self, operation: str, *, access_key: Optional[str] = None) -> dict[str, Any]:
         if not self.base_url:
             raise HTTPException(status_code=503, detail="Station backend is not configured")
 
-        url = f"{self.base_url}{path}"
+        if operation == "health":
+            path = "/internal/health"
+        elif operation in {"describe", "catalog"}:
+            if access_key is None or _FMU_ACCESS_KEY_PATH_RE.fullmatch(str(access_key)) is None:
+                raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
+            route = "describe" if operation == "describe" else "catalog"
+            path = f"/internal/fmu/{route}/{quote(str(access_key), safe='')}"
+        else:
+            raise ValueError("Unsupported Station GET operation")
+
         try:
-            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
-                response = await client.get(url, headers=self._headers())
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
+                response = await client.get(path, headers=self._headers())
         except httpx.HTTPError as exc:
             logger.warning("Station backend GET failed: %s", exc)
             raise HTTPException(status_code=503, detail="Station backend unavailable") from exc
@@ -258,7 +271,7 @@ class StationFmuBackend(BaseFmuBackend):
         try:
             payload = response.json()
         except Exception as exc:
-            logger.warning("Station backend returned invalid JSON for %s: %s", path, exc)
+            logger.warning("Station backend returned invalid JSON for %s: %s", operation, exc)
             raise HTTPException(status_code=502, detail="Station backend returned invalid JSON") from exc
 
         if not isinstance(payload, dict):
@@ -267,19 +280,22 @@ class StationFmuBackend(BaseFmuBackend):
 
     async def _post_json(
         self,
-        path: str,
+        operation: str,
         *,
+        access_key: str,
         payload: dict[str, Any],
         authorization: Optional[str] = None,
     ) -> dict[str, Any]:
         if not self.base_url:
             raise HTTPException(status_code=503, detail="Station backend is not configured")
 
-        url = f"{self.base_url}{path}"
+        if operation != "run" or _FMU_ACCESS_KEY_PATH_RE.fullmatch(str(access_key)) is None:
+            raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
+        path = f"/internal/fmu/simulations/run/{quote(str(access_key), safe='')}"
         try:
-            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
                 response = await client.post(
-                    url,
+                    path,
                     headers=self._headers_for(authorization=authorization),
                     json=payload,
                 )
@@ -293,7 +309,7 @@ class StationFmuBackend(BaseFmuBackend):
         try:
             response_payload = response.json()
         except Exception as exc:
-            logger.warning("Station backend returned invalid JSON for %s: %s", path, exc)
+            logger.warning("Station backend returned invalid JSON for %s: %s", operation, exc)
             raise HTTPException(status_code=502, detail="Station backend returned invalid JSON") from exc
         if not isinstance(response_payload, dict):
             raise HTTPException(status_code=502, detail="Station backend returned invalid payload")
@@ -321,11 +337,13 @@ class StationFmuBackend(BaseFmuBackend):
             parameters=request_payload.get("parameters"),
             options=request_payload.get("options"),
         )
-        url = f"{self.base_url}/internal/fmu/simulations/stream/{quote(access_key, safe='')}"
-        client = httpx.AsyncClient(timeout=None)
+        if _FMU_ACCESS_KEY_PATH_RE.fullmatch(str(access_key)) is None:
+            raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
+        path = f"/internal/fmu/simulations/stream/{quote(str(access_key), safe='')}"
+        client = httpx.AsyncClient(base_url=self.base_url, timeout=None)
         request = client.build_request(
             "POST",
-            url,
+            path,
             headers=self._headers_for(accept="application/x-ndjson", authorization=authorization),
             json=payload,
         )
@@ -368,7 +386,8 @@ class StationFmuBackend(BaseFmuBackend):
             options=request_payload.get("options"),
         )
         return await self._post_json(
-            f"/internal/fmu/simulations/run/{quote(access_key, safe='')}",
+            "run",
+            access_key=access_key,
             payload=payload,
             authorization=authorization,
         )
@@ -461,7 +480,7 @@ class StationFmuBackend(BaseFmuBackend):
             }
 
         try:
-            payload = await self._request_json("/internal/health")
+            payload = await self._request_json("health")
             checks["stationHealth"] = str(payload.get("status") or "").upper() == "UP"
             try:
                 fmu_count = int(payload.get("fmuCount") or 0)
@@ -479,13 +498,13 @@ class StationFmuBackend(BaseFmuBackend):
 
     async def get_authorized_model_metadata(self, *, claims: dict, requested_fmu_filename: Optional[str] = None) -> ModelMetadata:
         access_key = self.ensure_requested_access_key(claims, requested_fmu_filename)
-        payload = await self._request_json(f"/internal/fmu/describe/{quote(access_key, safe='')}")
+        payload = await self._request_json("describe", access_key=access_key)
         return self._normalize_model_metadata(payload)
 
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
         access_key = self.authorized_access_key(claims)
         try:
-            payload = await self._request_json(f"/internal/fmu/catalog/{quote(access_key, safe='')}")
+            payload = await self._request_json("catalog", access_key=access_key)
         except HTTPException as exc:
             if exc.status_code != 404:
                 raise

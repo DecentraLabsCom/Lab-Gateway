@@ -228,11 +228,31 @@ def _put_or_post(session: requests.Session, url_base: str, put_path: str, post_p
     """PUT to create-or-replace; fall back to POST if server returns 404."""
     if _AAS_RESOURCE_PATH_RE.fullmatch(put_path) is None or post_path not in ("/shells", "/submodels"):
         raise ValueError("AAS resource path is invalid")
-    resp = session.put(f"{url_base}{put_path}", json=payload, timeout=_BASYX_TIMEOUT)
+
+    endpoint = str(url_base).rstrip("/")
+    if endpoint == _BUNDLED_AAS_URL:
+        pass
+    else:
+        parsed = urlsplit(endpoint)
+        allowed_hosts = {
+            value.strip().lower()
+            for value in AAS_ALLOWED_HOSTS.split(",")
+            if value.strip()
+        }
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.hostname.lower() not in allowed_hosts
+        ):
+            raise ValueError("external AAS endpoint is not allowlisted")
+
+    resp = session.put(f"{endpoint}{put_path}", json=payload, timeout=_BASYX_TIMEOUT)
     if resp.status_code in (200, 201, 204):
         return {"status": resp.status_code, "created": resp.status_code == 201}
     if resp.status_code == 404:
-        resp2 = session.post(f"{url_base}{post_path}", json=payload, timeout=_BASYX_TIMEOUT)
+        resp2 = session.post(f"{endpoint}{post_path}", json=payload, timeout=_BASYX_TIMEOUT)
         if resp2.status_code in (200, 201):
             return {"status": resp2.status_code, "created": True}
         logger.warning("BaSyx POST failed with status %s: %s", resp2.status_code, resp2.text[:500])

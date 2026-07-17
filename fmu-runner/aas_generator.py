@@ -606,8 +606,10 @@ async def sync_fmu_to_basyx(
 
                 for shell in all_shells:
                     shell_enc = _encode_id(shell.get("id", ""))
+                    if _AAS_ENCODED_ID_RE.fullmatch(shell_enc) is None:
+                        raise ValueError("AAS shell resource ID is invalid")
                     r = await client.put(
-                        _aas_resource_path("shells", shell_enc),
+                        f"/shells/{shell_enc}",
                         json=shell,
                         headers={"Content-Type": "application/json"},
                     )
@@ -626,8 +628,10 @@ async def sync_fmu_to_basyx(
 
                 for submodel in all_submodels:
                     sm_enc = _encode_id(submodel.get("id", ""))
+                    if _AAS_ENCODED_ID_RE.fullmatch(sm_enc) is None:
+                        raise ValueError("AAS submodel resource ID is invalid")
                     r = await client.put(
-                        _aas_resource_path("submodels", sm_enc),
+                        f"/submodels/{sm_enc}",
                         json=submodel,
                         headers={"Content-Type": "application/json"},
                     )
@@ -669,8 +673,10 @@ async def sync_fmu_to_basyx(
                 submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info, fmu_path=fmu_path)
 
                 # --- Submodel: PUT (create or replace) ---
+                if _AAS_ENCODED_ID_RE.fullmatch(submodel_id_encoded) is None:
+                    raise ValueError("AAS submodel resource ID is invalid")
                 sm_resp = await client.put(
-                    _aas_resource_path("submodels", submodel_id_encoded),
+                    f"/submodels/{submodel_id_encoded}",
                     json=submodel_payload,
                     headers={"Content-Type": "application/json"},
                 )
@@ -703,8 +709,10 @@ async def sync_fmu_to_basyx(
                 # --- UnitDefinitions submodel: PUT when FMU declares physical units ---
                 if _unit_sm_payload and _unit_sm_id:
                     _usm_enc = _encode_id(_unit_sm_id)
+                    if _AAS_ENCODED_ID_RE.fullmatch(_usm_enc) is None:
+                        raise ValueError("AAS unit definitions resource ID is invalid")
                     _usm_resp = await client.put(
-                        _aas_resource_path("submodels", _usm_enc),
+                        f"/submodels/{_usm_enc}",
                         json=_unit_sm_payload,
                         headers={"Content-Type": "application/json"},
                     )
@@ -729,8 +737,10 @@ async def sync_fmu_to_basyx(
                         )
 
                 # --- Shell: PUT (create or replace) ---
+                if _AAS_ENCODED_ID_RE.fullmatch(aas_id_encoded) is None:
+                    raise ValueError("AAS shell resource ID is invalid")
                 shell_resp = await client.put(
-                    _aas_resource_path("shells", aas_id_encoded),
+                    f"/shells/{aas_id_encoded}",
                     json=shell_payload,
                     headers={"Content-Type": "application/json"},
                 )

@@ -251,6 +251,20 @@ class TestSyncLabToBasyxDegradation:
 
         session.put.assert_not_called()
 
+    def test_put_or_post_rejects_untrusted_endpoint(self):
+        session = MagicMock()
+
+        with pytest.raises(ValueError):
+            _mod._put_or_post(
+                session,
+                "https://evil.example",
+                "/submodels/abc",
+                "/submodels",
+                {},
+            )
+
+        session.put.assert_not_called()
+
     def test_success_path(self):
         """Happy path: all BaSyx calls return 201."""
         original = _mod.BASYX_AAS_URL

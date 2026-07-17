@@ -1,4 +1,5 @@
 import pytest
+import httpx
 from fastapi import HTTPException
 
 from fmu_backend import LocalFmuBackend, StationFmuBackend
@@ -54,8 +55,9 @@ async def test_station_health_is_degraded_when_not_configured():
 async def test_station_backend_normalizes_model_metadata(monkeypatch):
     backend = StationFmuBackend(base_url="https://station.internal")
 
-    async def _fake_request(path: str):
-        assert path == "/internal/fmu/describe/demo.fmu"
+    async def _fake_request(operation: str, *, access_key: str | None = None):
+        assert operation == "describe"
+        assert access_key == "demo.fmu"
         return {
             "modelName": "DemoPlant",
             "guid": "demo-guid",
@@ -103,10 +105,10 @@ async def test_station_backend_normalizes_model_metadata(monkeypatch):
 async def test_station_catalog_404_falls_back_to_describe(monkeypatch):
     backend = StationFmuBackend(base_url="https://station.internal")
 
-    async def _fake_request(path: str):
-        if path == "/internal/fmu/catalog/demo.fmu":
+    async def _fake_request(operation: str, *, access_key: str | None = None):
+        if operation == "catalog" and access_key == "demo.fmu":
             raise HTTPException(status_code=404, detail="missing")
-        if path == "/internal/fmu/describe/demo.fmu":
+        if operation == "describe" and access_key == "demo.fmu":
             return {
                 "modelName": "DemoPlant",
                 "fmiVersion": "2.0",
@@ -114,7 +116,7 @@ async def test_station_catalog_404_falls_back_to_describe(monkeypatch):
                 "supportsModelExchange": False,
                 "modelVariables": [{"name": "y", "type": "Real", "valueReference": 1}],
             }
-        raise AssertionError(f"Unexpected path: {path}")
+        raise AssertionError(f"Unexpected operation: {operation} {access_key}")
 
     monkeypatch.setattr(backend, "_request_json", _fake_request)
 
@@ -134,8 +136,9 @@ async def test_station_catalog_404_falls_back_to_describe(monkeypatch):
 async def test_station_catalog_preserves_entries_and_defaults_source(monkeypatch):
     backend = StationFmuBackend(base_url="https://station.internal")
 
-    async def _fake_request(path: str):
-        assert path == "/internal/fmu/catalog/demo.fmu"
+    async def _fake_request(operation: str, *, access_key: str | None = None):
+        assert operation == "catalog"
+        assert access_key == "demo.fmu"
         return {
             "fmus": [
                 {"filename": "demo.fmu", "path": "provider/demo.fmu"},
@@ -167,8 +170,9 @@ async def test_station_backend_forwards_run_request(monkeypatch):
     backend = StationFmuBackend(base_url="https://station.internal")
     captured: dict = {}
 
-    async def _fake_post(path: str, *, payload: dict, authorization: str | None = None):
-        captured["path"] = path
+    async def _fake_post(operation: str, *, access_key: str, payload: dict, authorization: str | None = None):
+        captured["operation"] = operation
+        captured["access_key"] = access_key
         captured["payload"] = payload
         captured["authorization"] = authorization
         return {"status": "completed", "simId": "sim-station-1"}
@@ -188,11 +192,62 @@ async def test_station_backend_forwards_run_request(monkeypatch):
     )
 
     assert result["status"] == "completed"
-    assert captured["path"] == "/internal/fmu/simulations/run/demo.fmu"
+    assert captured["operation"] == "run"
+    assert captured["access_key"] == "demo.fmu"
     assert captured["authorization"] == "Bearer abc"
     assert captured["payload"]["claims"]["accessKey"] == "demo.fmu"
     assert captured["payload"]["reservationKey"] == "res-1"
     assert captured["payload"]["simId"] == "sim-gateway-1"
+
+
+@pytest.mark.asyncio
+async def test_station_backend_rejects_untrusted_route_key_before_httpx(monkeypatch):
+    backend = StationFmuBackend(base_url="https://station.internal")
+
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("HTTP client must not be constructed for an invalid key")
+
+    monkeypatch.setattr("fmu_backend.httpx.AsyncClient", UnexpectedClient)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await backend._request_json("describe", access_key="../etc/passwd.fmu")
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_station_backend_uses_fixed_relative_routes(monkeypatch):
+    backend = StationFmuBackend(base_url="https://station.internal/base")
+    calls: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            assert kwargs["base_url"] == "https://station.internal/base"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, path, **kwargs):
+            calls.append(("GET", path))
+            return httpx.Response(200, json={"status": "UP"})
+
+        async def post(self, path, **kwargs):
+            calls.append(("POST", path))
+            return httpx.Response(200, json={"status": "completed"})
+
+    monkeypatch.setattr("fmu_backend.httpx.AsyncClient", FakeClient)
+
+    assert await backend._request_json("describe", access_key="provider/demo.fmu") == {"status": "UP"}
+    assert await backend._post_json(
+        "run", access_key="provider/demo.fmu", payload={}
+    ) == {"status": "completed"}
+    assert calls == [
+        ("GET", "/internal/fmu/describe/provider%2Fdemo.fmu"),
+        ("POST", "/internal/fmu/simulations/run/provider%2Fdemo.fmu"),
+    ]
 
 
 def test_station_backend_builds_internal_session_message():
