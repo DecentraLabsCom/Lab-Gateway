@@ -64,7 +64,6 @@ JsonValue ToJsonValueArray(const std::vector<T>& values) {
 // ToJsonValue is reached through ToJsonObject from GatewayClient::Initialize
 // and GatewayClient::SetInputs; the analyzer does not follow that call chain.
 // codeql[cpp/unused-static-function]
-
 JsonValue ToJsonValue(const ScalarValue& value) {
     return std::visit(
         [](const auto& typed) -> JsonValue {

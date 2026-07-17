@@ -109,7 +109,6 @@ _jwks_cache: Optional[dict] = None
 # Used by _fetch_jwks to enforce the configured cache TTL. CodeQL does not
 # connect the global read in the cache check with this write through `global`.
 # codeql[py/unused-global-variable]
-
 _jwks_cache_time: float = 0.0
 
 

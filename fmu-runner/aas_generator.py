@@ -112,13 +112,10 @@ def _fmu_digest(fmu_path: Path) -> str:
         # fmu_path is supplied by the runner only after it has been resolved
         # and checked to remain under FMU_DATA_PATH.
         # codeql[py/path-injection]
-
         candidate = Path(fmu_path).resolve()
         # codeql[py/path-injection]
-
         candidate.relative_to(base)
         # codeql[py/path-injection]
-
         if not candidate.is_file():
             return ""
         return hashlib.sha256(candidate.read_bytes()).hexdigest()
@@ -272,7 +269,6 @@ def build_simulation_submodel(
     # fmu_path is resolved by the FMU runner and _fmu_digest enforces the same
     # configured root before reading it.
     # codeql[py/path-injection]
-
     _fmu_sha256 = _fmu_digest(fmu_path) if fmu_path is not None else ""
     _model_file: dict = {
         "idShort": "ModelFile",
