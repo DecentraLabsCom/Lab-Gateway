@@ -4,6 +4,7 @@ Mock blockchain-services for integration testing.
 Simulates auth endpoints with rate limiting.
 """
 import json
+import re
 import os
 import time
 from collections import defaultdict
@@ -111,7 +112,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         """Handle CORS preflight."""
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin", "*"))
+        origin = self.headers.get("Origin", "")
+        safe_origin = origin if re.fullmatch(
+            r"https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?", origin
+        ) else "*"
+        self.send_header("Access-Control-Allow-Origin", safe_origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Max-Age", "1728000")

@@ -968,7 +968,7 @@ class RealtimeWsManager:
                                 request_id=request_id,
                                 retryable=True,
                             )
-                            self.logger.warning("session.create ticket issue failed request_id=%s error=%s", request_id, exc)
+                            self.logger.warning("session.create ticket issue failed request_id=%s", request_id)
                             await self._send_direct(connection, response)
                             local_request_cache[request_id] = response
                             continue
@@ -1013,7 +1013,7 @@ class RealtimeWsManager:
                                 request_id=request_id,
                                 retryable=True,
                             )
-                            self.logger.warning("session.create ticket redeem failed request_id=%s error=%s", request_id, exc)
+                            self.logger.warning("session.create ticket redeem failed request_id=%s", request_id)
                             await self._send_direct(connection, response)
                             local_request_cache[request_id] = response
                             continue
@@ -1074,14 +1074,7 @@ class RealtimeWsManager:
                             "reservationWindow": {"nbf": session.nbf, "exp": session.exp},
                             "capabilities": session.capabilities,
                         }
-                        self.logger.info(
-                            "session.create success request_id=%s session_id=%s lab_id=%s reservation_key=%s ticket_id=%s",
-                            request_id,
-                            session_id,
-                            claim_lab_id or req_lab_id or "-",
-                            reservation_key or "-",
-                            self._normalize_ticket_id(session_ticket) or "-",
-                        )
+                        self.logger.info("session.create success request_id=%s", request_id)
                     except HTTPException as exc:
                         response = self.error_payload(
                             code="RESERVATION_NOT_ACTIVE" if exc.status_code == 403 else ("SESSION_EXPIRED" if exc.status_code == 401 else "INTERNAL_ERROR"),

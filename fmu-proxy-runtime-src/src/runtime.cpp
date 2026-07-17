@@ -15,18 +15,20 @@ namespace {
 std::string PercentDecode(const std::string_view text) {
     std::string output;
     output.reserve(text.size());
-    for (std::size_t index = 0; index < text.size(); ++index) {
+    std::size_t index = 0;
+    while (index < text.size()) {
         if (text[index] == '%' && index + 2 < text.size()) {
             const std::string hex = std::string(text.substr(index + 1, 2));
             char* end = nullptr;
             const long value = std::strtol(hex.c_str(), &end, 16);
             if (end != nullptr && *end == '\0') {
                 output.push_back(static_cast<char>(value));
-                index += 2;
+                index += 3;
                 continue;
             }
         }
         output.push_back(text[index] == '+' ? ' ' : text[index]);
+        ++index;
     }
     return output;
 }
@@ -112,7 +114,10 @@ std::optional<std::int64_t> ParseSignedIntegerJsonValue(const JsonValue& value) 
         }
         if (value.IsNumber()) {
             const double number = value.AsNumber();
-            if (!std::isfinite(number) || std::trunc(number) != number) {
+            double integral_part = 0.0;
+            const double fractional_part = std::modf(number, &integral_part);
+            if (!std::isfinite(number)
+                || std::abs(fractional_part) > std::numeric_limits<double>::epsilon()) {
                 return std::nullopt;
             }
             if (number < static_cast<double>(std::numeric_limits<std::int64_t>::min()) ||
@@ -134,7 +139,11 @@ std::optional<std::uint64_t> ParseUnsignedIntegerJsonValue(const JsonValue& valu
         }
         if (value.IsNumber()) {
             const double number = value.AsNumber();
-            if (!std::isfinite(number) || std::trunc(number) != number || number < 0.0) {
+            double integral_part = 0.0;
+            const double fractional_part = std::modf(number, &integral_part);
+            if (!std::isfinite(number)
+                || std::abs(fractional_part) > std::numeric_limits<double>::epsilon()
+                || number < 0.0) {
                 return std::nullopt;
             }
             if (number > static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
@@ -251,6 +260,52 @@ bool TryCastStoredInteger(const VariableInfo& variable, const ScalarValue& store
     return true;
 }
 
+std::optional<ScalarValue> ConvertIntegerArrayValue(
+    const JsonArray& items,
+    const VariableInfo& variable
+) {
+    const auto bounds = BoundsForDeclaredType(variable.declared_type);
+    if (bounds.unsigned_only) {
+        UnsignedIntegerArray values;
+        values.reserve(items.size());
+        for (const auto& item : items) {
+            const auto parsed = ParseUnsignedIntegerJsonValue(item);
+            if (!parsed.has_value()) {
+                return std::nullopt;
+            }
+            ScalarValue normalized;
+            if (!TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
+                return std::nullopt;
+            }
+            const auto* integer = std::get_if<std::uint64_t>(&normalized);
+            if (integer == nullptr) {
+                return std::nullopt;
+            }
+            values.push_back(*integer);
+        }
+        return ScalarValue(std::move(values));
+    }
+
+    IntegerArray values;
+    values.reserve(items.size());
+    for (const auto& item : items) {
+        const auto parsed = ParseSignedIntegerJsonValue(item);
+        if (!parsed.has_value()) {
+            return std::nullopt;
+        }
+        ScalarValue normalized;
+        if (!TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
+            return std::nullopt;
+        }
+        const auto* integer = std::get_if<std::int64_t>(&normalized);
+        if (integer == nullptr) {
+            return std::nullopt;
+        }
+        values.push_back(*integer);
+    }
+    return ScalarValue(std::move(values));
+}
+
 std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const VariableInfo& variable) {
     if (value.IsArray()) {
         const JsonArray* items = value.AsArray();
@@ -270,48 +325,8 @@ std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const Variab
                 return ScalarValue(std::move(values));
             }
             case ScalarType::kInteger:
-            case ScalarType::kEnumeration: {
-                const auto bounds = BoundsForDeclaredType(variable.declared_type);
-                if (bounds.unsigned_only) {
-                    UnsignedIntegerArray values;
-                    values.reserve(items->size());
-                    for (const auto& item : *items) {
-                        const auto parsed = ParseUnsignedIntegerJsonValue(item);
-                        if (!parsed.has_value()) {
-                            return std::nullopt;
-                        }
-                        ScalarValue normalized;
-                        if (!TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
-                            return std::nullopt;
-                        }
-                        const auto* integer = std::get_if<std::uint64_t>(&normalized);
-                        if (integer == nullptr) {
-                            return std::nullopt;
-                        }
-                        values.push_back(*integer);
-                    }
-                    return ScalarValue(std::move(values));
-                }
-
-                IntegerArray values;
-                values.reserve(items->size());
-                for (const auto& item : *items) {
-                    const auto parsed = ParseSignedIntegerJsonValue(item);
-                    if (!parsed.has_value()) {
-                        return std::nullopt;
-                    }
-                    ScalarValue normalized;
-                    if (!TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
-                        return std::nullopt;
-                    }
-                    const auto* integer = std::get_if<std::int64_t>(&normalized);
-                    if (integer == nullptr) {
-                        return std::nullopt;
-                    }
-                    values.push_back(*integer);
-                }
-                return ScalarValue(std::move(values));
-            }
+            case ScalarType::kEnumeration:
+                return ConvertIntegerArrayValue(*items, variable);
             case ScalarType::kBoolean: {
                 BooleanArray values;
                 values.reserve(items->size());

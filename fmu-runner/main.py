@@ -20,6 +20,7 @@ import io
 import zipfile
 import hashlib
 import hmac
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
 from contextlib import asynccontextmanager
@@ -454,7 +455,7 @@ def _effective_timeout_seconds(requested_timeout: int, claims: dict) -> int:
 
 def _resolve_fmu_path(fmu_filename: str) -> Path:
     """Search *FMU_DATA_PATH* for a .fmu file matching *fmu_filename*."""
-    # Basic validation: must end with .fmu (#19)
+    fmu_filename = _validate_storage_key(fmu_filename, "FMU filename")
     if not fmu_filename.lower().endswith(".fmu"):
         raise HTTPException(status_code=400, detail="Only .fmu files are accepted")
     base = Path(FMU_DATA_PATH).resolve()
@@ -1713,9 +1714,23 @@ async def aas_hints_fmu(access_key: str):
 
 # ── AAS Link: map a lab/FMU to an externally-managed AAS ─────────────
 
+def _validate_storage_key(value: str, field_name: str) -> str:
+    """Validate a user-controlled key before using it as a storage filename."""
+    text = str(value or "").strip()
+    if (
+        not text
+        or len(text) > 255
+        or text in {".", ".."}
+        or Path(text).name != text
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", text)
+    ):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+    return text
+
+
 def _aas_link_path(access_key: str) -> Path:
     """Return the filesystem path for an AAS link override file."""
-    safe = Path(access_key).name  # strip directory traversal
+    safe = _validate_storage_key(access_key, "AAS link key")
     return _AAS_LINK_DATA_PATH / f"{safe}.aas-link.json"
 
 

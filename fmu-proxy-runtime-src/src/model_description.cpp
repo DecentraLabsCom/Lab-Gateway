@@ -24,18 +24,6 @@ std::string ReadFileText(const std::string& path) {
     return buffer.str();
 }
 
-std::string Trim(const std::string_view text) {
-    std::size_t start = 0;
-    std::size_t end = text.size();
-    while (start < end && std::isspace(static_cast<unsigned char>(text[start]))) {
-        ++start;
-    }
-    while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1]))) {
-        --end;
-    }
-    return std::string(text.substr(start, end - start));
-}
-
 std::string DecodeXmlEntities(std::string text) {
     const std::pair<std::string_view, std::string_view> replacements[] = {
         {"&quot;", "\""},
@@ -333,6 +321,7 @@ ScalarType ParseScalarType(const std::string_view tag_name) {
     return ScalarType::kReal;
 }
 
+/** Parse one ScalarVariable XML block into the runtime variable model. */
 bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
     if (block.rfind("<ScalarVariable", 0) != 0) {
         const std::size_t open_end = block.find('>');
@@ -477,6 +466,7 @@ const char* ToString(const ScalarType type) {
     return "Real";
 }
 
+/** Parse FMI model-description XML without relying on a general-purpose XML DOM. */
 ValueResult<ModelDescription> ParseModelDescriptionXml(const std::string& xml) {
     ModelDescription model;
 

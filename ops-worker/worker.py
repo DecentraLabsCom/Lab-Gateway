@@ -36,6 +36,11 @@ APP = Flask(__name__)
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
+def _sanitize_log_value(value: Any) -> str:
+    """Keep request-derived values on one physical log line."""
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
 def _is_valid_ping_target(target: str) -> bool:
     """Validate a DNS name without a backtracking-prone regular expression."""
     if not target or len(target) > 253:
@@ -66,8 +71,11 @@ def internal_error_response(
 ):
     """Log the detailed exception and expose only a stable public error contract."""
     request_id = _request_id()
-    safe_context = str(context).replace("\r", "\\r").replace("\n", "\\n")
-    logging.exception("%s request_id=%s", safe_context, request_id)
+    logging.exception(
+        "Ops Worker request failed context=%s request_id=%s",
+        _sanitize_log_value(context),
+        request_id,
+    )
     payload: Dict[str, Any] = {
         "error": "Internal server error",
         "code": "INTERNAL_ERROR",
@@ -2596,12 +2604,7 @@ def provision_guacamole_temporary_user(
                 {"entity_id": entity_id},
             )
 
-    logging.info(
-        "Provisioned temporary Guacamole user %s for connection %s (active=%s)",
-        str(username).replace("\r", "\\r").replace("\n", "\\n"),
-        str(connection_id).replace("\r", "\\r").replace("\n", "\\n"),
-        activate,
-    )
+    logging.info("Provisioned temporary Guacamole user")
     return {
         "success": True,
         "sessionId": session_id,
@@ -2762,7 +2765,12 @@ def api_internal_guacamole_provision():
         )
         return jsonify(result)
     except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        error = (
+            "activate must be a boolean"
+            if str(exc) == "activate must be a boolean"
+            else "Invalid Guacamole provisioning request"
+        )
+        return jsonify({"success": False, "error": error}), 400
     except Exception as exc:  # pylint: disable=broad-except
         return internal_error_response("Guacamole provisioning failed", exc, success=False)
 
@@ -2776,7 +2784,7 @@ def api_internal_guacamole_delete(session_id: str):
         deleted = delete_guacamole_temporary_user(session_id)
         return jsonify({"success": True, "deleted": deleted, "sessionId": session_id})
     except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": "Invalid Guacamole cleanup request"}), 400
     except Exception as exc:  # pylint: disable=broad-except
         return internal_error_response("Guacamole temporary-user cleanup failed", exc, success=False)
 
@@ -2837,7 +2845,7 @@ def api_hosts_provision():
         return internal_error_response("Failed to provision ops host", exc)
 
     if reload_error:
-        return jsonify({"error": reload_error}), 500
+        return jsonify({"error": "Hosts configuration reload failed"}), 500
 
     return jsonify({
         "provisioned": True,
@@ -2857,11 +2865,11 @@ def api_save_winrm_credentials():
         save_winrm_credentials(str(credential_ref or ""), str(user or ""), str(password or ""))
         count, reload_error = reload_hosts()
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": "Invalid WinRM credentials request"}), 400
     except Exception as exc:  # pylint: disable=broad-except
         return internal_error_response("Failed to save WinRM credentials", exc)
     if reload_error:
-        return jsonify({"error": reload_error}), 500
+        return jsonify({"error": "Hosts configuration reload failed"}), 500
     return jsonify({
         "saved": True,
         "credentialRef": normalize_credential_ref(credential_ref),
@@ -2873,7 +2881,7 @@ def api_save_winrm_credentials():
 def api_hosts_reload():
     count, error = reload_hosts()
     if error:
-        return jsonify({"error": error}), 500
+        return jsonify({"error": "Hosts configuration reload failed"}), 500
     return jsonify({"reloaded": True, "hosts": count})
 
 

@@ -254,9 +254,9 @@ def _put_or_post(session: requests.Session, url_base: str, put_path: str, post_p
         resp2 = session.post(f"{endpoint}{post_path}", json=payload, timeout=_BASYX_TIMEOUT)
         if resp2.status_code in (200, 201):
             return {"status": resp2.status_code, "created": True}
-        logger.warning("BaSyx POST failed with status %s: %s", resp2.status_code, resp2.text[:500])
+        logger.warning("BaSyx POST failed with status=%s", resp2.status_code)
         return {"error": f"POST failed: {resp2.status_code}"}
-    logger.warning("BaSyx PUT failed with status %s: %s", resp.status_code, resp.text[:500])
+    logger.warning("BaSyx PUT failed with status=%s", resp.status_code)
     return {"error": f"PUT failed: {resp.status_code}"}
 
 
@@ -311,30 +311,30 @@ def sync_lab_to_basyx(
         # --- Nameplate submodel ---
         np_result = _put_or_post(session, BASYX_AAS_URL, f"/submodels/{np_id_enc}", "/submodels", nameplate_payload)
         if "error" in np_result:
-            logger.error("Failed to sync Nameplate submodel for lab %s: %s", lab_id, np_result["error"])
+            logger.error("Failed to sync Nameplate submodel")
             result["error"] = "nameplate sync failed"
             return result
         if np_result.get("created"):
             result["created"] = True
         else:
             result["updated"] = True
-        logger.info("Nameplate submodel synced for lab %s (status=%s)", lab_id, np_result.get("status"))
+        logger.info("Nameplate submodel synced (status=%s)", np_result.get("status"))
 
         # --- TechnicalData submodel ---
         td_result = _put_or_post(session, BASYX_AAS_URL, f"/submodels/{td_id_enc}", "/submodels", technical_payload)
         if "error" in td_result:
-            logger.error("Failed to sync TechnicalData submodel for lab %s: %s", lab_id, td_result["error"])
+            logger.error("Failed to sync TechnicalData submodel")
             result["error"] = "technicalData sync failed"
             return result
-        logger.info("TechnicalData submodel synced for lab %s (status=%s)", lab_id, td_result.get("status"))
+        logger.info("TechnicalData submodel synced (status=%s)", td_result.get("status"))
 
         # --- AAS Shell ---
         shell_result = _put_or_post(session, BASYX_AAS_URL, f"/shells/{aas_id_enc}", "/shells", shell_payload)
         if "error" in shell_result:
-            logger.error("Failed to sync AAS shell for lab %s: %s", lab_id, shell_result["error"])
+            logger.error("Failed to sync AAS shell")
             result["error"] = "shell sync failed"
             return result
-        logger.info("AAS shell synced for lab %s (status=%s)", lab_id, shell_result.get("status"))
+        logger.info("AAS shell synced (status=%s)", shell_result.get("status"))
 
     except requests.exceptions.ConnectionError as exc:
         logger.warning("BaSyx unreachable at %s: %s", BASYX_AAS_URL, exc)

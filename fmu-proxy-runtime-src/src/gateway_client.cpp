@@ -60,6 +60,7 @@ JsonValue ToJsonValueArray(const std::vector<T>& values) {
     return JsonValue(std::move(items));
 }
 
+/** Convert a runtime scalar/array value into the gateway JSON representation. */
 JsonValue ToJsonValue(const ScalarValue& value) {
     return std::visit(
         [](const auto& typed) -> JsonValue {

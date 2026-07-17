@@ -684,10 +684,10 @@ async def sync_fmu_to_basyx(
                 )
                 if sm_resp.status_code == 201:
                     result["created"] = True
-                    logger.info("Created submodel %s for lab %s", submodel_id, lab_id)
+                    logger.info("Created simulation submodel")
                 elif sm_resp.status_code in (200, 204):
                     result["updated"] = True
-                    logger.info("Updated submodel %s for lab %s", submodel_id, lab_id)
+                    logger.info("Updated simulation submodel")
                 else:
                     # Try POST if PUT-to-create isn't supported
                     if sm_resp.status_code == 404:
@@ -698,13 +698,13 @@ async def sync_fmu_to_basyx(
                         )
                         if sm_post.status_code in (200, 201):
                             result["created"] = True
-                            logger.info("Created submodel %s via POST for lab %s", submodel_id, lab_id)
+                            logger.info("Created simulation submodel via POST")
                         else:
-                            logger.error("Failed to create submodel %s: %s %s", submodel_id, sm_post.status_code, sm_post.text[:500])
+                            logger.error("Failed to create simulation submodel: status=%s", sm_post.status_code)
                             result["error"] = f"submodel creation failed: {sm_post.status_code}"
                             return result
                     else:
-                        logger.error("Failed to PUT submodel %s: %s %s", submodel_id, sm_resp.status_code, sm_resp.text[:500])
+                        logger.error("Failed to update simulation submodel: status=%s", sm_resp.status_code)
                         result["error"] = f"submodel sync failed: {sm_resp.status_code}"
                         return result
 
@@ -719,21 +719,21 @@ async def sync_fmu_to_basyx(
                         headers={"Content-Type": "application/json"},
                     )
                     if _usm_resp.status_code in (200, 201, 204):
-                        logger.info("UnitDefinitions submodel synced for lab %s", lab_id)
+                        logger.info("UnitDefinitions submodel synced")
                     elif _usm_resp.status_code == 404:
                         _usm_post = await client.post(
                             "/submodels", json=_unit_sm_payload,
                             headers={"Content-Type": "application/json"},
                         )
                         if _usm_post.status_code in (200, 201):
-                            logger.info("UnitDefinitions submodel created via POST for lab %s", lab_id)
+                            logger.info("UnitDefinitions submodel created via POST")
                         else:
                             logger.warning(
                                 "Failed to create UnitDefinitions submodel for lab %s: %s",
-                                lab_id, _usm_post.status_code,
+                                _usm_post.status_code,
                             )
                     else:
-                        logger.warning("Failed to PUT UnitDefinitions submodel for lab %s", str(lab_id).replace("\r", "\\r").replace("\n", "\\n"))
+                        logger.warning("Failed to update UnitDefinitions submodel")
 
                 # --- Shell: PUT (create or replace) ---
                 if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", aas_id_encoded):
@@ -744,9 +744,9 @@ async def sync_fmu_to_basyx(
                     headers={"Content-Type": "application/json"},
                 )
                 if shell_resp.status_code == 201:
-                    logger.info("Created AAS shell %s for lab %s", aas_id, lab_id)
+                    logger.info("Created AAS shell")
                 elif shell_resp.status_code in (200, 204):
-                    logger.info("Updated AAS shell %s for lab %s", aas_id, lab_id)
+                    logger.info("Updated AAS shell")
                 else:
                     if shell_resp.status_code == 404:
                         shell_post = await client.post(
@@ -755,13 +755,13 @@ async def sync_fmu_to_basyx(
                             headers={"Content-Type": "application/json"},
                         )
                         if shell_post.status_code in (200, 201):
-                            logger.info("Created AAS shell %s via POST for lab %s", aas_id, lab_id)
+                            logger.info("Created AAS shell via POST")
                         else:
-                            logger.error("Failed to create shell %s: %s %s", aas_id, shell_post.status_code, shell_post.text[:500])
+                            logger.error("Failed to create AAS shell: status=%s", shell_post.status_code)
                             result["error"] = f"shell creation failed: {shell_post.status_code}"
                             return result
                     else:
-                        logger.error("Failed to PUT shell %s: %s %s", aas_id, shell_resp.status_code, shell_resp.text[:500])
+                        logger.error("Failed to update AAS shell: status=%s", shell_resp.status_code)
                         result["error"] = f"shell sync failed: {shell_resp.status_code}"
                         return result
 

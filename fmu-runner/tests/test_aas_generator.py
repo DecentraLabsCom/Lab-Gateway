@@ -6,8 +6,8 @@ endpoint with mocked BaSyx and FMU reading.
 """
 
 import pytest
+import sys
 from unittest.mock import patch, MagicMock, AsyncMock
-import aas_generator as _aas_mod
 
 # ── Pure generator tests ─────────────────────────────────────────────
 
@@ -25,6 +25,8 @@ from aas_generator import (
     build_unit_definitions_submodel,
     build_aas_shell,
 )
+
+_aas_mod = sys.modules["aas_generator"]
 
 
 class TestAasIdGeneration:
@@ -932,6 +934,17 @@ class TestAasLinkEndpoints:
                 headers={"Content-Type": "application/json"},
             )
         assert resp.status_code == 400
+
+    def test_create_link_rejects_path_traversal_in_lab_id(self, tmp_path):
+        """A lab index must never be able to select a file outside the link store."""
+        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+            client = self._client()
+            resp = client.post(
+                "/aas-admin/fmu/test.fmu/aas-link",
+                json={"aasId": "urn:example:aas:test", "labId": "../outside"},
+            )
+        assert resp.status_code == 400
+        assert not (tmp_path.parent / "outside.aas-link.json").exists()
 
     # ── GET: read link ────────────────────────────────────────────────
 

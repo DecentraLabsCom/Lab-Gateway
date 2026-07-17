@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import tls from 'node:tls';
 
 const [host, portValue, servername] = process.argv.slice(2);
@@ -12,6 +13,7 @@ let socket;
 let timeout;
 let completed = false;
 let response = '';
+const testCa = fs.readFileSync(new URL('./certs/fullchain.pem', import.meta.url));
 
 function finish(status) {
   if (completed) return;
@@ -22,7 +24,7 @@ function finish(status) {
 }
 
 socket = tls.connect(
-  { host, port, servername, rejectUnauthorized: false },
+  { host, port, servername, ca: testCa, rejectUnauthorized: true },
   () => {
     const cookie = process.env.SMOKE_WEBSOCKET_COOKIE;
     const request = [
