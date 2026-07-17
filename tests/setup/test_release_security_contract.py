@@ -21,9 +21,9 @@ def test_release_emits_sbom_and_provenance_attestation():
     assert "sbom.cdx.json.sha256" in release
 
 
-def test_security_workflow_covers_python_cpp_and_pip_audit():
+def test_security_workflow_covers_actions_python_cpp_and_pip_audit():
     security = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
-    assert "java,javascript,python,cpp" in security
+    assert "actions,java,javascript,python,cpp" in security
     assert "pip-audit -r fmu-runner/requirements.txt" in security
     assert "pip-audit -r ops-worker/requirements.txt" in security
     assert "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0" in security
