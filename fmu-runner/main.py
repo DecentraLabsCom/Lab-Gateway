@@ -465,6 +465,8 @@ def _resolve_fmu_path(fmu_filename: str) -> Path:
     # The filename has been reduced to one validated storage segment above.
     # codeql[py/path-injection]
     direct = (base / fmu_filename).resolve()
+    # direct is normalized and checked against the trusted FMU_DATA_PATH root.
+    # codeql[py/path-injection]
     if _is_within_base(base, direct) and direct.is_file():
         return direct
     # Search in provider sub-directories (fmu-data/<provider-wallet>/file.fmu)

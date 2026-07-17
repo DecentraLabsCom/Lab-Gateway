@@ -118,6 +118,8 @@ def _fmu_digest(fmu_path: Path) -> str:
         # codeql[py/path-injection]
         if not candidate.is_file():
             return ""
+        # candidate was resolved and constrained to FMU_DATA_PATH above.
+        # codeql[py/path-injection]
         return hashlib.sha256(candidate.read_bytes()).hexdigest()
     except (OSError, ValueError):
         return ""

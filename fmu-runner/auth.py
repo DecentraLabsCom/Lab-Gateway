@@ -106,9 +106,6 @@ JWT_AUDIENCE = _normalize_issuer(os.getenv("JWT_AUDIENCE"))
 JWKS_CACHE_TTL = int(os.getenv("JWKS_CACHE_TTL", "300"))  # seconds
 
 _jwks_cache: Optional[dict] = None
-# Used by _fetch_jwks to enforce the configured cache TTL. CodeQL does not
-# connect the global read in the cache check with this write through `global`.
-# codeql[py/unused-global-variable]
 _jwks_cache_time: float = 0.0
 
 
@@ -122,6 +119,8 @@ async def _fetch_jwks(*, force: bool = False) -> dict:
             resp = await client.get(AUTH_JWKS_URL)
             resp.raise_for_status()
             _jwks_cache = resp.json()
+            # Used by the cache check above to enforce JWKS_CACHE_TTL.
+            # codeql[py/unused-global-variable]
             _jwks_cache_time = time.time()
             logger.info("Fetched JWKS from %s (%d keys)", AUTH_JWKS_URL, len(_jwks_cache.get("keys", [])))
             return _jwks_cache
