@@ -116,6 +116,46 @@ runner.describe("Lab manager strict admin guard", function()
         runner.assert.equals("http://blockchain-services:8080", ngx.var.backend_lab_admin)
     end)
 
+    runner.it("forwards the dedicated Ops credential for AAS lab routes", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                OPS_INTERNAL_AUTH_TOKEN = "ops-token",
+                OPS_INTERNAL_AUTH_HEADER = "X-Ops-Internal-Token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            headers = { ["X-Lab-Manager-Token"] = "browser-token" },
+            var = {
+                remote_addr = "172.17.0.2",
+                uri = "/aas-admin/lab/lab-1/sync"
+            }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("ops-token", ngx.req.headers["X-Ops-Internal-Token"])
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.req.headers["Cookie"])
+    end)
+
+    runner.it("fails AAS lab routes when the Ops credential is not configured", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            headers = { ["X-Lab-Manager-Token"] = "browser-token" },
+            var = {
+                remote_addr = "172.17.0.2",
+                uri = "/aas-admin/lab/lab-1/sync"
+            }
+        })
+
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx.status)
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit)
+    end)
+
     runner.it("blocks lab admin in Lite mode without explicit remote backend", function()
         local ngx = run_guard({
             env = {

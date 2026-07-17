@@ -21,6 +21,7 @@ local specs = {
     "tests.unit.log_handler_extended_spec",
     "tests.unit.entrypoint_wrappers_spec",
     "tests.unit.init_spec",
+    "tests.unit.public_health_spec",
     "tests.unit.gateway_health_spec",
     "tests.unit.treasury_access_spec",
     "tests.unit.admin_access_spec",
