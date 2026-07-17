@@ -261,7 +261,7 @@ class StationFmuBackend(BaseFmuBackend):
             async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
                 request_kwargs = {"headers": self._headers()}
                 if operation in {"describe", "catalog"}:
-                    request_kwargs["params"] = {"accessKey": key}
+                    request_kwargs["headers"]["X-FMU-Access-Key"] = key
                 response = await client.get(path, **request_kwargs)
         except httpx.HTTPError as exc:
             logger.warning("Station backend GET failed: %s", exc)

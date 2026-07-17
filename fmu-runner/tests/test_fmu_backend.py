@@ -248,7 +248,12 @@ async def test_station_backend_uses_fixed_relative_routes(monkeypatch):
         (
             "GET",
             "/internal/fmu/describe",
-            {"headers": {"Accept": "application/json"}, "params": {"accessKey": "provider/demo.fmu"}},
+            {
+                "headers": {
+                    "Accept": "application/json",
+                    "X-FMU-Access-Key": "provider/demo.fmu",
+                },
+            },
         ),
         (
             "POST",

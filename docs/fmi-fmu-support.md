@@ -74,8 +74,8 @@ Internal Station operations include:
 
 ~~~text
 GET  /internal/health
-GET  /internal/fmu/catalog?accessKey=...
-GET  /internal/fmu/describe?accessKey=...
+GET  /internal/fmu/catalog  (X-FMU-Access-Key header)
+GET  /internal/fmu/describe  (X-FMU-Access-Key header)
 POST /internal/fmu/validate/{accessKey}?auto_quarantine=true
 POST /internal/fmu/quarantine/{accessKey}
 DELETE /internal/fmu/quarantine/{accessKey}
@@ -196,8 +196,8 @@ The private Station API includes:
 
 ~~~text
 GET  /internal/health
-GET  /internal/fmu/catalog?accessKey=...
-GET  /internal/fmu/describe?accessKey=...
+GET  /internal/fmu/catalog  (X-FMU-Access-Key header)
+GET  /internal/fmu/describe  (X-FMU-Access-Key header)
 POST /internal/fmu/simulations/run       (JSON body: accessKey)
 POST /internal/fmu/simulations/stream    (JSON body: accessKey)
 WSS  /internal/fmu/sessions

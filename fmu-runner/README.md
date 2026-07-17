@@ -156,8 +156,8 @@ Marketplace upload is disabled by design.
 - `FMU_BACKEND_MODE=station` keeps the public API on Gateway and forwards execution to Lab Station (the production-safe default).
 - `FMU_BACKEND_MODE=local` is an explicit development mode and also requires `FMU_LOCAL_DEV_MODE=true`; without both settings native FMU execution is disabled.
 - Internal REST targets:
-  - `GET /internal/fmu/catalog?accessKey=...`
-  - `GET /internal/fmu/describe?accessKey=...`
+  - `GET /internal/fmu/catalog` (header `X-FMU-Access-Key`)
+  - `GET /internal/fmu/describe` (header `X-FMU-Access-Key`)
   - `POST /internal/fmu/simulations/run` (the JSON body contains `accessKey`)
   - `POST /internal/fmu/simulations/stream` (the JSON body contains `accessKey`)
 - Internal realtime target:
