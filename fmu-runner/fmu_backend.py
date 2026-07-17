@@ -244,10 +244,16 @@ class StationFmuBackend(BaseFmuBackend):
         if operation == "health":
             path = "/internal/health"
         elif operation in {"describe", "catalog"}:
-            if access_key is None or _FMU_ACCESS_KEY_PATH_RE.fullmatch(str(access_key)) is None:
+            if access_key is None:
+                raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
+            key = str(access_key)
+            if re.fullmatch(
+                r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu",
+                key,
+            ) is None:
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
             route = "describe" if operation == "describe" else "catalog"
-            path = f"/internal/fmu/{route}/{quote(str(access_key), safe='')}"
+            path = f"/internal/fmu/{route}/{quote(key, safe='')}"
         else:
             raise ValueError("Unsupported Station GET operation")
 
@@ -289,9 +295,13 @@ class StationFmuBackend(BaseFmuBackend):
         if not self.base_url:
             raise HTTPException(status_code=503, detail="Station backend is not configured")
 
-        if operation != "run" or _FMU_ACCESS_KEY_PATH_RE.fullmatch(str(access_key)) is None:
+        key = str(access_key)
+        if operation != "run" or re.fullmatch(
+            r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu",
+            key,
+        ) is None:
             raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
-        path = f"/internal/fmu/simulations/run/{quote(str(access_key), safe='')}"
+        path = f"/internal/fmu/simulations/run/{quote(key, safe='')}"
         try:
             async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
                 response = await client.post(
@@ -337,9 +347,13 @@ class StationFmuBackend(BaseFmuBackend):
             parameters=request_payload.get("parameters"),
             options=request_payload.get("options"),
         )
-        if _FMU_ACCESS_KEY_PATH_RE.fullmatch(str(access_key)) is None:
+        key = str(access_key)
+        if re.fullmatch(
+            r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu",
+            key,
+        ) is None:
             raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
-        path = f"/internal/fmu/simulations/stream/{quote(str(access_key), safe='')}"
+        path = f"/internal/fmu/simulations/stream/{quote(key, safe='')}"
         client = httpx.AsyncClient(base_url=self.base_url, timeout=None)
         request = client.build_request(
             "POST",

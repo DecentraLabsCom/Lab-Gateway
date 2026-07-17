@@ -226,7 +226,7 @@ def build_aas_shell(lab_id: str, host: Dict[str, Any]) -> Dict[str, Any]:
 
 def _put_or_post(session: requests.Session, url_base: str, put_path: str, post_path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """PUT to create-or-replace; fall back to POST if server returns 404."""
-    if _AAS_RESOURCE_PATH_RE.fullmatch(put_path) is None or post_path not in ("/shells", "/submodels"):
+    if re.fullmatch(r"/(?:shells|submodels)/[A-Za-z0-9_-]{1,1024}", put_path) is None or post_path not in ("/shells", "/submodels"):
         raise ValueError("AAS resource path is invalid")
 
     endpoint = str(url_base).rstrip("/")
