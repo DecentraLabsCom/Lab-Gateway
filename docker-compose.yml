@@ -719,10 +719,9 @@ services:
           cpus: '0.5'
         reservations:
           memory: 64M
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    # The official MongoDB entrypoint starts as root and uses gosu to drop
+    # privileges to the mongodb user. no-new-privileges and cap_drop: ALL
+    # prevent that transition and cause the container to restart endlessly.
     tmpfs:
       - /tmp:size=64M,mode=1777
     restart: always
