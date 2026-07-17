@@ -15,6 +15,7 @@ from aas_generator import (
     _submodel_id_for_fmu,
     _unit_submodel_id_for_lab,
     _encode_id,
+    _aas_resource_path,
     _fmi_type_to_idta,
     _causality_to_port_type,
     _sanitize_idshort,
@@ -44,6 +45,11 @@ class TestAasIdGeneration:
         import base64
         decoded = base64.urlsafe_b64decode(encoded + "==").decode()
         assert decoded == raw
+
+    @pytest.mark.parametrize("encoded_id", ["../etc/passwd", "urn:test/id", "shell?id=1"])
+    def test_resource_path_rejects_untrusted_id(self, encoded_id):
+        with pytest.raises(ValueError):
+            _aas_resource_path("shells", encoded_id)
 
 
 class TestTypeMapping:
@@ -622,6 +628,20 @@ class TestSyncFmuToBasyxDegradation:
             assert "error" in result
             assert "BaSyx unreachable" in result["error"]
             assert result.get("synced") is None
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("lab_id", ["../etc/passwd", "lab?id=1", "urn:decentralabs:lab:1"])
+    async def test_rejects_invalid_lab_id_before_network(self, lab_id):
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "https://basyx-test:8081"
+        try:
+            with patch("httpx.AsyncClient") as mock_client:
+                result = await _aas_mod.sync_fmu_to_basyx(lab_id, "motor.fmu", SAMPLE_METADATA)
+
+            assert result == {"error": "AAS lab ID rejected", "created": False, "updated": False}
+            mock_client.assert_not_called()
         finally:
             _aas_mod.BASYX_AAS_URL = original
 

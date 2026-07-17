@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import re
 from typing import Any, Callable, Optional
 from urllib.parse import quote, urlparse, urlunparse
 
@@ -12,24 +13,38 @@ from fastapi import HTTPException
 ModelMetadata = dict[str, Any]
 logger = logging.getLogger("fmu-runner.backend")
 
+_FMU_ACCESS_KEY_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
 
 class BaseFmuBackend:
     mode = "unknown"
     supports_local_execution = False
 
     @staticmethod
-    def authorized_access_key(claims: dict) -> str:
+    def validate_access_key(access_key: Any) -> str:
+        access_key = str(access_key)
+        segments = access_key.split("/")
+        if (
+            not access_key.lower().endswith(".fmu")
+            or not segments
+            or any(_FMU_ACCESS_KEY_SEGMENT_RE.fullmatch(segment) is None for segment in segments)
+        ):
+            raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
+        return access_key
+
+    @classmethod
+    def authorized_access_key(cls, claims: dict) -> str:
         access_key = claims.get("accessKey") or claims.get("fmuFileName")
         if not access_key:
             raise HTTPException(status_code=403, detail="Token has no authorised FMU file")
-        return str(access_key)
+        return cls.validate_access_key(access_key)
 
     @classmethod
     def ensure_requested_access_key(cls, claims: dict, requested_fmu_filename: Optional[str]) -> str:
         access_key = cls.authorized_access_key(claims)
         if requested_fmu_filename and access_key != requested_fmu_filename:
             raise HTTPException(status_code=403, detail="Token is not authorised for requested FMU file")
-        return requested_fmu_filename or access_key
+        return cls.validate_access_key(requested_fmu_filename or access_key)
 
     @staticmethod
     def normalize_optional_string(value: Any) -> Optional[str]:

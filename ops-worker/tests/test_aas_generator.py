@@ -224,6 +224,33 @@ class TestSyncLabToBasyxDegradation:
         finally:
             _mod.BASYX_AAS_URL = original
 
+    @pytest.mark.parametrize("lab_id", ["../etc/passwd", "lab?id=1", "urn:decentralabs:lab:1"])
+    def test_rejects_invalid_lab_id_before_network(self, lab_id):
+        original = _mod.BASYX_AAS_URL
+        _mod.BASYX_AAS_URL = "https://basyx-mock:8081"
+        try:
+            with patch("aas_generator.requests.Session") as mock_session:
+                result = _mod.sync_lab_to_basyx(lab_id, SAMPLE_HOST, SAMPLE_HEARTBEAT)
+
+            assert result == {"error": "AAS lab ID rejected", "created": False, "updated": False}
+            mock_session.assert_not_called()
+        finally:
+            _mod.BASYX_AAS_URL = original
+
+    def test_put_or_post_rejects_untrusted_resource_path(self):
+        session = MagicMock()
+
+        with pytest.raises(ValueError):
+            _mod._put_or_post(
+                session,
+                "https://basyx-mock:8081",
+                "/submodels/../etc/passwd",
+                "/submodels",
+                {},
+            )
+
+        session.put.assert_not_called()
+
     def test_success_path(self):
         """Happy path: all BaSyx calls return 201."""
         original = _mod.BASYX_AAS_URL

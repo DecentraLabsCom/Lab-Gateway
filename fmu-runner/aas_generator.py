@@ -31,6 +31,9 @@ AAS_SERVICE_TOKEN = os.getenv("AAS_SERVICE_TOKEN", "")
 AAS_SERVICE_TOKEN_HEADER = os.getenv("AAS_SERVICE_TOKEN_HEADER", "Authorization")
 _BUNDLED_AAS_URL = "http://basyx-aas-server:8081"
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
+_AAS_LAB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+_AAS_ENCODED_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,1024}")
+_AAS_COLLECTIONS = frozenset({"shells", "submodels"})
 
 _SEMANTIC_ID_IDTA_02006 = "https://admin-shell.io/idta/SimulationModels/SimulationModels/1/0"
 _SEMANTIC_ID_SIMULATION_MODEL = "https://admin-shell.io/idta/SimulationModels/SimulationModel/1/0"
@@ -73,6 +76,21 @@ def _aas_request_headers() -> dict[str, str]:
     if header_name.lower() == "authorization":
         value = f"Bearer {value}"
     return {header_name: value}
+
+
+def _validate_lab_id(lab_id: str) -> str:
+    """Return a lab identifier safe to embed in an AAS resource identifier."""
+    value = str(lab_id).strip()
+    if _AAS_LAB_ID_RE.fullmatch(value) is None:
+        raise ValueError("AAS lab ID is invalid")
+    return value
+
+
+def _aas_resource_path(collection: str, encoded_id: str) -> str:
+    """Build a BaSyx resource path from an encoded, single-segment ID."""
+    if collection not in _AAS_COLLECTIONS or _AAS_ENCODED_ID_RE.fullmatch(encoded_id) is None:
+        raise ValueError("AAS resource path is invalid")
+    return f"/{collection}/{encoded_id}"
 
 
 def _aas_id_for_lab(lab_id: str) -> str:
@@ -552,6 +570,11 @@ async def sync_fmu_to_basyx(
 
     Returns a summary dict with ids and status.
     """
+    try:
+        lab_id = _validate_lab_id(lab_id)
+    except ValueError:
+        return {"error": "AAS lab ID rejected", "created": False, "updated": False}
+
     aas_id = _aas_id_for_lab(lab_id)
     submodel_id = _submodel_id_for_fmu(lab_id)
 
@@ -584,7 +607,7 @@ async def sync_fmu_to_basyx(
                 for shell in all_shells:
                     shell_enc = _encode_id(shell.get("id", ""))
                     r = await client.put(
-                        f"/shells/{shell_enc}",
+                        _aas_resource_path("shells", shell_enc),
                         json=shell,
                         headers={"Content-Type": "application/json"},
                     )
@@ -604,7 +627,7 @@ async def sync_fmu_to_basyx(
                 for submodel in all_submodels:
                     sm_enc = _encode_id(submodel.get("id", ""))
                     r = await client.put(
-                        f"/submodels/{sm_enc}",
+                        _aas_resource_path("submodels", sm_enc),
                         json=submodel,
                         headers={"Content-Type": "application/json"},
                     )
@@ -647,7 +670,7 @@ async def sync_fmu_to_basyx(
 
                 # --- Submodel: PUT (create or replace) ---
                 sm_resp = await client.put(
-                    f"/submodels/{submodel_id_encoded}",
+                    _aas_resource_path("submodels", submodel_id_encoded),
                     json=submodel_payload,
                     headers={"Content-Type": "application/json"},
                 )
@@ -681,7 +704,7 @@ async def sync_fmu_to_basyx(
                 if _unit_sm_payload and _unit_sm_id:
                     _usm_enc = _encode_id(_unit_sm_id)
                     _usm_resp = await client.put(
-                        f"/submodels/{_usm_enc}",
+                        _aas_resource_path("submodels", _usm_enc),
                         json=_unit_sm_payload,
                         headers={"Content-Type": "application/json"},
                     )
@@ -707,7 +730,7 @@ async def sync_fmu_to_basyx(
 
                 # --- Shell: PUT (create or replace) ---
                 shell_resp = await client.put(
-                    f"/shells/{aas_id_encoded}",
+                    _aas_resource_path("shells", aas_id_encoded),
                     json=shell_payload,
                     headers={"Content-Type": "application/json"},
                 )

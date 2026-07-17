@@ -55,3 +55,25 @@ def test_wol_and_wait_retries():
     assert attempts == 2
     assert mock_packet.call_count == 2
     assert mock_up.call_count == 2
+
+
+def test_api_wol_rejects_command_injection_in_ping_target(client):
+    with patch("worker.wol_and_wait") as mock_wol:
+        response = client.post(
+            "/api/wol",
+            json={
+                "mac": "00:11:22:33:44:55",
+                "ping_target": "127.0.0.1; whoami",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "ping_target" in response.get_data(as_text=True)
+    mock_wol.assert_not_called()
+
+
+def test_host_is_up_does_not_execute_ping_for_invalid_target():
+    with patch("worker.subprocess.run") as mock_run:
+        assert worker.host_is_up("127.0.0.1 && whoami", 1) is False
+
+    mock_run.assert_not_called()

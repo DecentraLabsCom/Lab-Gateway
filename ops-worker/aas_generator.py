@@ -9,6 +9,7 @@ for current operational status derived from the Lab Station heartbeat.
 import base64
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
@@ -26,6 +27,8 @@ AAS_SERVICE_TOKEN_HEADER = os.getenv("AAS_SERVICE_TOKEN_HEADER", "Authorization"
 _BUNDLED_AAS_URL = "http://basyx-aas-server:8081"
 
 _BASYX_TIMEOUT = int(os.getenv("BASYX_AAS_TIMEOUT", "15"))
+_AAS_LAB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+_AAS_RESOURCE_PATH_RE = re.compile(r"/(?:shells|submodels)/[A-Za-z0-9_-]{1,1024}")
 
 
 def _aas_request_headers() -> Dict[str, str]:
@@ -64,6 +67,14 @@ def _aas_request_headers() -> Dict[str, str]:
     if header_name.lower() == "authorization":
         value = f"Bearer {value}"
     return {header_name: value}
+
+
+def _validate_lab_id(lab_id: str) -> str:
+    """Return a lab identifier safe to embed in an AAS resource identifier."""
+    value = str(lab_id).strip()
+    if _AAS_LAB_ID_RE.fullmatch(value) is None:
+        raise ValueError("AAS lab ID is invalid")
+    return value
 
 
 def _aas_id_for_lab(lab_id: str) -> str:
@@ -215,6 +226,8 @@ def build_aas_shell(lab_id: str, host: Dict[str, Any]) -> Dict[str, Any]:
 
 def _put_or_post(session: requests.Session, url_base: str, put_path: str, post_path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """PUT to create-or-replace; fall back to POST if server returns 404."""
+    if _AAS_RESOURCE_PATH_RE.fullmatch(put_path) is None or post_path not in ("/shells", "/submodels"):
+        raise ValueError("AAS resource path is invalid")
     resp = session.put(f"{url_base}{put_path}", json=payload, timeout=_BASYX_TIMEOUT)
     if resp.status_code in (200, 201, 204):
         return {"status": resp.status_code, "created": resp.status_code == 201}
@@ -242,6 +255,11 @@ def sync_lab_to_basyx(
     - {"error": "..."}    if BaSyx is unreachable or returns an error
     - {"synced": True, ...} on success
     """
+    try:
+        lab_id = _validate_lab_id(lab_id)
+    except ValueError:
+        return {"error": "AAS lab ID rejected", "created": False, "updated": False}
+
     aas_id = _aas_id_for_lab(lab_id)
     nameplate_id = _submodel_id_nameplate(lab_id)
     technical_id = _submodel_id_technical(lab_id)

@@ -24,6 +24,20 @@ async def test_local_backend_delegates_to_loaders():
     assert listing["fmus"][0]["filename"] == "demo.fmu"
 
 
+@pytest.mark.parametrize(
+    "access_key",
+    ["../etc/passwd", "provider/../../etc/passwd", "provider\\demo.fmu", "demo.fmu?redirect=1"],
+)
+def test_fmu_access_key_rejects_path_injection(access_key):
+    with pytest.raises(HTTPException) as exc_info:
+        StationFmuBackend.ensure_requested_access_key(
+            {"accessKey": access_key},
+            None,
+        )
+
+    assert exc_info.value.status_code == 400
+
+
 @pytest.mark.asyncio
 async def test_station_health_is_degraded_when_not_configured():
     backend = StationFmuBackend(base_url="")

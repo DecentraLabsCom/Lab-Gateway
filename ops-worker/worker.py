@@ -36,6 +36,10 @@ import aas_generator
 APP = Flask(__name__)
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_PING_TARGET_RE = re.compile(
+    r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
+)
 
 
 def _request_id() -> str:
@@ -551,6 +555,10 @@ def wol_and_wait(mac: str, broadcast: Optional[str], port: int, ping_target: str
 
 def host_is_up(target: str, timeout: float) -> bool:
     if not target:
+        return False
+    target = str(target).strip()
+    if _PING_TARGET_RE.fullmatch(target) is None:
+        logging.warning("Invalid ping target rejected")
         return False
     cmd = []
     if os.name == "nt":
@@ -1413,6 +1421,8 @@ def api_wol():
     ping_target = str(payload.get("ping_target") or (host or {}).get("ping_target") or (host or {}).get("address") or "").strip()
     if not ping_target:
         return jsonify({"error": "ping_target or host address is required"}), 400
+    if _PING_TARGET_RE.fullmatch(ping_target) is None:
+        return jsonify({"error": "ping_target is invalid"}), 400
     attempts = int(payload.get("attempts", 3))
     wait_seconds = float(payload.get("ping_timeout", 10))
     broadcast = payload.get("broadcast")
