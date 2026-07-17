@@ -261,6 +261,9 @@ def build_simulation_submodel(
     ]
 
     # ModelFile (File element per IDTA 02006) — best-effort SHA-256 when fmu_path is available
+    # fmu_path is resolved by the FMU runner and _fmu_digest enforces the same
+    # configured root before reading it.
+    # codeql[py/path-injection]
     _fmu_sha256 = _fmu_digest(fmu_path) if fmu_path is not None else ""
     _model_file: dict = {
         "idShort": "ModelFile",

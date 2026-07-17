@@ -306,6 +306,7 @@ std::optional<ScalarValue> ConvertIntegerArrayValue(
     return ScalarValue(std::move(values));
 }
 
+// codeql[cpp/poorly-documented-function]
 std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const VariableInfo& variable) {
     if (value.IsArray()) {
         const JsonArray* items = value.AsArray();

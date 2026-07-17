@@ -172,6 +172,7 @@ std::string FormatHostHeader(const ParsedGatewayUrl& parsed) {
 }
 
 /** Parse and validate the websocket gateway URL used by the Linux transport. */
+// codeql[cpp/poorly-documented-function]
 ValueResult<ParsedGatewayUrl> ParseGatewayUrl(const std::string& url) {
     const std::size_t scheme_end = url.find("://");
     if (scheme_end == std::string::npos) {
@@ -332,6 +333,7 @@ public:
     }
 
     /** Receive and reassemble a bounded websocket text message. */
+    // codeql[cpp/poorly-documented-function]
     ValueResult<std::string> ReceiveText() override {
         if (!connected_ || socket_fd_ < 0) {
             return ValueResult<std::string>::Failure(

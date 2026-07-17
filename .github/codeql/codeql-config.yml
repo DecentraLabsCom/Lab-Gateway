@@ -1,0 +1,15 @@
+name: Lab Gateway CodeQL
+
+queries:
+  - security-extended
+  - security-and-quality
+
+# The monorepo scan covers multiple languages, so suppression queries must be
+# configured here instead of through the init action's single-language input.
+# They only turn reviewed `codeql[...]` comments into SARIF suppressions; they
+# do not disable any security query.
+packs:
+  - codeql/java-queries:AlertSuppression.ql
+  - codeql/javascript-queries:AlertSuppression.ql
+  - codeql/python-queries:AlertSuppression.ql
+  - codeql/cpp-queries:AlertSuppression.ql

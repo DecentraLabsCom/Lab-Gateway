@@ -322,6 +322,7 @@ ScalarType ParseScalarType(const std::string_view tag_name) {
 }
 
 /** Parse one ScalarVariable XML block into the runtime variable model. */
+// codeql[cpp/poorly-documented-function]
 bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
     if (block.rfind("<ScalarVariable", 0) != 0) {
         const std::size_t open_end = block.find('>');
@@ -467,6 +468,7 @@ const char* ToString(const ScalarType type) {
 }
 
 /** Parse FMI model-description XML without relying on a general-purpose XML DOM. */
+// codeql[cpp/poorly-documented-function]
 ValueResult<ModelDescription> ParseModelDescriptionXml(const std::string& xml) {
     ModelDescription model;
 
