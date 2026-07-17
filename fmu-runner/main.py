@@ -464,6 +464,7 @@ def _resolve_fmu_path(fmu_filename: str) -> Path:
     # Direct match
     # The filename has been reduced to one validated storage segment above.
     # codeql[py/path-injection]
+
     direct = (base / fmu_filename).resolve()
     if _is_within_base(base, direct) and direct.is_file():
         return direct
@@ -471,6 +472,7 @@ def _resolve_fmu_path(fmu_filename: str) -> Path:
     for child in base.iterdir():
         if child.is_dir():
             # codeql[py/path-injection]
+
             candidate = (child / fmu_filename).resolve()
             if not _is_within_base(base, candidate):
                 continue
@@ -1737,6 +1739,10 @@ def _aas_link_path(access_key: str) -> Path:
     """Return the filesystem path for an AAS link override file."""
     safe = _validate_storage_key(access_key, "AAS link key")
     base = _AAS_LINK_DATA_PATH.resolve()
+    # `safe` is a single validated filename segment and the containment check
+    # below also protects against unexpected filesystem/symlink behavior.
+    # codeql[py/path-injection]
+
     candidate = (base / f"{safe}.aas-link.json").resolve()
     if not _is_within_base(base, candidate):
         raise HTTPException(status_code=400, detail="Invalid AAS link key")
@@ -1776,14 +1782,17 @@ async def create_aas_link(access_key: str, request: Request):
         link["submodelIds"] = [s.strip() for s in submodel_ids if isinstance(s, str) and s.strip()]
     fp = _aas_link_path(access_key)
     # codeql[py/path-injection]
+
     fp.parent.mkdir(parents=True, exist_ok=True)  # /app/data/aas-links/ (writable volume)
     # codeql[py/path-injection]
+
     fp.write_text(json.dumps(link, indent=2), encoding="utf-8")
     # When labId is provided, also write a labId-indexed file so the resolver
     # can find the override for the conventional urn:decentralabs:lab:{labId}.
     if lab_id and lab_id != access_key:
         fp_lab = _aas_link_path(lab_id)
         # codeql[py/path-injection]
+
         fp_lab.write_text(json.dumps(link, indent=2), encoding="utf-8")
     return {"linked": True, "accessKey": access_key, **link}
 
@@ -1793,10 +1802,12 @@ async def get_aas_link(access_key: str):
     """Return the current AAS link for a given access key, or 404."""
     fp = _aas_link_path(access_key)
     # codeql[py/path-injection]
+
     if not fp.is_file():
         raise HTTPException(status_code=404, detail="No AAS link configured for this access key")
     try:
         # codeql[py/path-injection]
+
         link = json.loads(fp.read_text(encoding="utf-8"))
     except Exception:
         raise HTTPException(status_code=500, detail="Corrupt AAS link file")
@@ -1808,22 +1819,27 @@ async def delete_aas_link(access_key: str):
     """Remove the AAS link for a given access key."""
     fp = _aas_link_path(access_key)
     # codeql[py/path-injection]
+
     if not fp.is_file():
         raise HTTPException(status_code=404, detail="No AAS link configured for this access key")
     # Read labId from the stored file so we can clean up the labId-indexed file too
     try:
         # codeql[py/path-injection]
+
         stored = json.loads(fp.read_text(encoding="utf-8"))
         lab_id = stored.get("labId", "")
     except Exception:
         lab_id = ""
     # codeql[py/path-injection]
+
     fp.unlink()
     if lab_id and lab_id != access_key:
         fp_lab = _aas_link_path(lab_id)
         # codeql[py/path-injection]
+
         if fp_lab.is_file():
             # codeql[py/path-injection]
+
             fp_lab.unlink()
     return {"unlinked": True, "accessKey": access_key}
 
@@ -1852,9 +1868,11 @@ async def resolve_aas_id(shellId: str = Query(...)):
     # Check if there's a link file for this lab key (which may be an access key)
     fp = _aas_link_path(lab_key)
     # codeql[py/path-injection]
+
     if fp.is_file():
         try:
             # codeql[py/path-injection]
+
             link = json.loads(fp.read_text(encoding="utf-8"))
             target = link.get("aasId", "").strip()
             if target:
@@ -1866,9 +1884,11 @@ async def resolve_aas_id(shellId: str = Query(...)):
     # Also check with .fmu extension (access keys are typically "file.fmu")
     fp_fmu = _aas_link_path(f"{lab_key}.fmu")
     # codeql[py/path-injection]
+
     if fp_fmu.is_file():
         try:
             # codeql[py/path-injection]
+
             link = json.loads(fp_fmu.read_text(encoding="utf-8"))
             target = link.get("aasId", "").strip()
             if target:

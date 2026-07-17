@@ -4,7 +4,6 @@ Mock blockchain-services for integration testing.
 Simulates auth endpoints with rate limiting.
 """
 import json
-import re
 import os
 import time
 from collections import defaultdict
