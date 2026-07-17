@@ -6,7 +6,9 @@ local cjson = require "cjson.safe"
 
 local function probe(path)
     local response = ngx.location.capture(path)
-    return response and response.status and response.status < 400
+    -- A health probe only needs to distinguish an unavailable upstream from
+    -- one that is reachable but requires a method/body/authentication.
+    return response and response.status and response.status < 500
 end
 
 local uri = ngx.var.uri or "/health"

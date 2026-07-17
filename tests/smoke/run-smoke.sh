@@ -257,44 +257,46 @@ else
 fi
 
 # =================================================================
-# Test 13: Institution-config rejects invalid token
+# Test 13: Institution-config rejects query-string token
 # =================================================================
-echo "Test 13: Institution-config rejects invalid token"
+echo "Test 13: Institution-config rejects query-string token"
 INSTITUTION_BAD_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -o /dev/null -w "%{http_code}" \
   "https://lab.test:${PORT}/institution-config/status?token=wrong-token")
-if [ "$INSTITUTION_BAD_TOKEN" = "401" ] || [ "$INSTITUTION_BAD_TOKEN" = "403" ]; then
-  log_pass "Institution config rejects invalid token (status: $INSTITUTION_BAD_TOKEN)"
+if [ "$INSTITUTION_BAD_TOKEN" = "400" ]; then
+  log_pass "Institution config rejects query-string token (status: $INSTITUTION_BAD_TOKEN)"
 else
-  log_fail "Institution config should reject invalid token (status: $INSTITUTION_BAD_TOKEN)"
+  log_fail "Institution config should reject query-string token (status: $INSTITUTION_BAD_TOKEN)"
 fi
 
 # =================================================================
-# Test 14: Institution-config accepts valid token
+# Test 14: Institution-config accepts valid POST login and cookie
 # =================================================================
-echo "Test 14: Institution-config accepts valid token"
+echo "Test 14: Institution-config accepts valid POST login and cookie"
 rm -f "$INSTITUTION_COOKIE_FILE"
-INSTITUTION_WITH_TOKEN=$(curl -skL --resolve lab.test:${PORT}:127.0.0.1 \
-  -c "$INSTITUTION_COOKIE_FILE" -b "$INSTITUTION_COOKIE_FILE" \
-  -o /dev/null -w "%{http_code}" \
-  "https://lab.test:${PORT}/institution-config/status?token=${ACCESS_TOKEN}")
-if [ "$INSTITUTION_WITH_TOKEN" = "200" ]; then
-  log_pass "Institution config accepts valid token (status: $INSTITUTION_WITH_TOKEN)"
+INSTITUTION_LOGIN_STATUS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 \
+  -c "$INSTITUTION_COOKIE_FILE" -o /dev/null -w "%{http_code}" \
+  -X POST --data-urlencode "token=${ACCESS_TOKEN}" \
+  "https://lab.test:${PORT}/institution-config/login")
+INSTITUTION_WITH_TOKEN=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 \
+  -b "$INSTITUTION_COOKIE_FILE" -o /dev/null -w "%{http_code}" \
+  "https://lab.test:${PORT}/institution-config/status")
+if [ "$INSTITUTION_LOGIN_STATUS" = "204" ] && [ "$INSTITUTION_WITH_TOKEN" = "200" ]; then
+  log_pass "Institution config accepts POST login and session cookie"
 else
-  log_fail "Institution config rejected valid token (status: $INSTITUTION_WITH_TOKEN)"
+  log_fail "Institution config login/session failed: login=$INSTITUTION_LOGIN_STATUS status=$INSTITUTION_WITH_TOKEN"
 fi
 
 # =================================================================
-# Test 15: Institution-config bootstrap at exact path strips token and sets cookie
+# Test 15: Institution-config bootstrap redirects to the secure login page
 # =================================================================
 echo "Test 15: Institution-config bootstrap redirect"
 INSTITUTION_BOOTSTRAP_HEADERS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -D - -o /dev/null \
-  "https://lab.test:${PORT}/institution-config?token=${ACCESS_TOKEN}&section=providers")
+  "https://lab.test:${PORT}/institution-config")
 if echo "$INSTITUTION_BOOTSTRAP_HEADERS" | grep -Eq "^HTTP/.* 302" \
-  && echo "$INSTITUTION_BOOTSTRAP_HEADERS" | grep -Eqi "^location: /institution-config/\\?section=providers" \
-  && echo "$INSTITUTION_BOOTSTRAP_HEADERS" | grep -qi "^set-cookie: access_token=${ACCESS_TOKEN};"; then
-  log_pass "Institution-config exact path bootstraps cookie and strips token"
+  && echo "$INSTITUTION_BOOTSTRAP_HEADERS" | grep -Eqi "^location: /admin-login.html\\?scope=billing"; then
+  log_pass "Institution config redirects to secure login page"
 else
-  log_fail "Institution-config bootstrap redirect/cookie mismatch: $INSTITUTION_BOOTSTRAP_HEADERS"
+  log_fail "Institution config bootstrap redirect mismatch: $INSTITUTION_BOOTSTRAP_HEADERS"
 fi
 
 # =================================================================
@@ -311,17 +313,16 @@ else
 fi
 
 # =================================================================
-# Test 17: Lab-manager bootstrap strips token and preserves other params
+# Test 17: Lab-manager bootstrap redirects to the secure login page
 # =================================================================
 echo "Test 17: Lab-manager bootstrap redirect"
 LAB_MANAGER_BOOTSTRAP_HEADERS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -D - -o /dev/null \
-  "https://lab.test:${PORT}/lab-manager?token=test-ops-secret-123&tab=stations")
+  "https://lab.test:${PORT}/lab-manager")
 if echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -Eq "^HTTP/.* 302" \
-  && echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -Eqi "^location: /lab-manager/\\?tab=stations" \
-  && echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -qi "^set-cookie: lab_manager_token=test-ops-secret-123;"; then
-  log_pass "Lab-manager exact path bootstraps cookie and strips token"
+  && echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -Eqi "^location: /admin-login.html\\?scope=lab-manager"; then
+  log_pass "Lab-manager redirects to secure login page"
 else
-  log_fail "Lab-manager bootstrap redirect/cookie mismatch: $LAB_MANAGER_BOOTSTRAP_HEADERS"
+  log_fail "Lab-manager bootstrap redirect mismatch: $LAB_MANAGER_BOOTSTRAP_HEADERS"
 fi
 
 # =================================================================

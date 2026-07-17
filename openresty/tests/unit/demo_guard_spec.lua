@@ -69,7 +69,7 @@ runner.describe("Demo guard", function()
         local ngx = build_ngx({ auth = "demo" })
         run(ngx, make_http_stub(true))
         runner.assert.equals(nil, ngx._exit_code)
-        runner.assert.equals(1, ngx.shared.demo_sessions:get("count"))
+        runner.assert.equals(1, ngx.shared.demo_sessions:get("active"))
     end)
 
     runner.it("rejects demo user with 503 when lab has an active reservation", function()
@@ -121,7 +121,7 @@ runner.describe("Demo guard", function()
         run(ngx, make_http_stub(true))
         -- Falls into the demo path; lab free and no session → allowed
         runner.assert.equals(nil, ngx._exit_code)
-        runner.assert.equals(1, ngx.shared.demo_sessions:get("count"))
+        runner.assert.equals(1, ngx.shared.demo_sessions:get("active"))
     end)
 
     runner.it("rejects demo user when the session counter cannot be updated", function()

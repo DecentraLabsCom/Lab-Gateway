@@ -26,11 +26,13 @@ services:
       LAB_MANAGER_TOKEN: test-ops-secret-123
       OPS_INTERNAL_AUTH_TOKEN: test-ops-internal-secret
       OPS_INTERNAL_AUTH_HEADER: X-Ops-Internal-Token
+      FMU_RUNNER_ENABLED: "true"
       ADMIN_ACCESS_TOKEN: smoke-access-token
       ADMIN_DASHBOARD_ALLOW_PRIVATE: "true"
       SECURITY_ALLOW_PRIVATE_NETWORKS: "true"
     volumes:
       - ./certs:/etc/ssl/private
+      - ./certs/public_key.pem:/etc/openresty/jwt-keys/public_key.pem:ro
       - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
       - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ../../openresty/lua:/etc/openresty/lua:ro

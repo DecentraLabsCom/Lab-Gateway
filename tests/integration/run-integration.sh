@@ -92,7 +92,7 @@ fi
 # =================================================================
 echo "Test 2: Gateway aggregated health"
 GW_HEALTH=$(curl -sk "${BASE_URL}/gateway/health" || echo "error")
-if echo "$GW_HEALTH" | grep -qE '"status"\s*:\s*"(ok|degraded)"'; then
+if echo "$GW_HEALTH" | grep -qE '"status"\s*:\s*"UP"'; then
   log_pass "Gateway health endpoint returns aggregated status"
 else
   log_fail "Gateway health endpoint failed: $GW_HEALTH"
