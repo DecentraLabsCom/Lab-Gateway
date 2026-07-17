@@ -707,7 +707,7 @@ services:
       - basyx_mongo_data:/data/db
       - ./basyx-mongo/init-user.js:/docker-entrypoint-initdb.d/01-create-aas-user.js:ro
     healthcheck:
-      test: ["CMD-SHELL", "test \"$${MONGO_INITDB_ROOT_PASSWORD}\" != CHANGE_ME && test \"$${BASYX_MONGO_PASSWORD}\" != CHANGE_ME && mongosh --quiet --host localhost -u \"$${MONGO_INITDB_ROOT_USERNAME}\" -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q true && mongosh --quiet --host localhost -u \"$${BASYX_MONGO_USER}\" -p \"$${BASYX_MONGO_PASSWORD}\" --authenticationDatabase basyx --eval \"db.adminCommand('ping').ok\" | grep -q true"]
+      test: ["CMD-SHELL", "test \"$${MONGO_INITDB_ROOT_PASSWORD}\" != CHANGE_ME && test \"$${BASYX_MONGO_PASSWORD}\" != CHANGE_ME && mongosh --quiet --host localhost -u \"$${MONGO_INITDB_ROOT_USERNAME}\" -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q '^1$' && mongosh --quiet --host localhost -u \"$${BASYX_MONGO_USER}\" -p \"$${BASYX_MONGO_PASSWORD}\" --authenticationDatabase basyx --eval \"db.adminCommand('ping').ok\" | grep -q '^1$'"]
       interval: 15s
       timeout: 5s
       retries: 5
