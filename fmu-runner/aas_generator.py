@@ -628,7 +628,7 @@ async def sync_fmu_to_basyx(
 
                 for submodel in all_submodels:
                     sm_enc = _encode_id(submodel.get("id", ""))
-                    if re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", sm_enc) is None:
+                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", sm_enc):
                         raise ValueError("AAS submodel resource ID is invalid")
                     r = await client.put(
                         f"/submodels/{sm_enc}",
@@ -673,7 +673,7 @@ async def sync_fmu_to_basyx(
                 submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info, fmu_path=fmu_path)
 
                 # --- Submodel: PUT (create or replace) ---
-                if re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", submodel_id_encoded) is None:
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", submodel_id_encoded):
                     raise ValueError("AAS submodel resource ID is invalid")
                 sm_resp = await client.put(
                     f"/submodels/{submodel_id_encoded}",
@@ -709,7 +709,7 @@ async def sync_fmu_to_basyx(
                 # --- UnitDefinitions submodel: PUT when FMU declares physical units ---
                 if _unit_sm_payload and _unit_sm_id:
                     _usm_enc = _encode_id(_unit_sm_id)
-                    if re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _usm_enc) is None:
+                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _usm_enc):
                         raise ValueError("AAS unit definitions resource ID is invalid")
                     _usm_resp = await client.put(
                         f"/submodels/{_usm_enc}",
@@ -737,7 +737,7 @@ async def sync_fmu_to_basyx(
                         )
 
                 # --- Shell: PUT (create or replace) ---
-                if re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", aas_id_encoded) is None:
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", aas_id_encoded):
                     raise ValueError("AAS shell resource ID is invalid")
                 shell_resp = await client.put(
                     f"/shells/{aas_id_encoded}",

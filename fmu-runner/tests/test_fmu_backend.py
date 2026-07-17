@@ -218,7 +218,7 @@ async def test_station_backend_rejects_untrusted_route_key_before_httpx(monkeypa
 @pytest.mark.asyncio
 async def test_station_backend_uses_fixed_relative_routes(monkeypatch):
     backend = StationFmuBackend(base_url="https://station.internal/base")
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, dict]] = []
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -231,11 +231,11 @@ async def test_station_backend_uses_fixed_relative_routes(monkeypatch):
             return False
 
         async def get(self, path, **kwargs):
-            calls.append(("GET", path))
+            calls.append(("GET", path, kwargs))
             return httpx.Response(200, json={"status": "UP"})
 
         async def post(self, path, **kwargs):
-            calls.append(("POST", path))
+            calls.append(("POST", path, kwargs))
             return httpx.Response(200, json={"status": "completed"})
 
     monkeypatch.setattr("fmu_backend.httpx.AsyncClient", FakeClient)
@@ -245,8 +245,19 @@ async def test_station_backend_uses_fixed_relative_routes(monkeypatch):
         "run", access_key="provider/demo.fmu", payload={}
     ) == {"status": "completed"}
     assert calls == [
-        ("GET", "/internal/fmu/describe/provider%2Fdemo.fmu"),
-        ("POST", "/internal/fmu/simulations/run/provider%2Fdemo.fmu"),
+        (
+            "GET",
+            "/internal/fmu/describe",
+            {"headers": {"Accept": "application/json"}, "params": {"accessKey": "provider/demo.fmu"}},
+        ),
+        (
+            "POST",
+            "/internal/fmu/simulations/run",
+            {
+                "headers": {"Accept": "application/json"},
+                "json": {"accessKey": "provider/demo.fmu"},
+            },
+        ),
     ]
 
 

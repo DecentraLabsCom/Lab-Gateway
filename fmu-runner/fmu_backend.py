@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import logging
 import re
 from typing import Any, Callable, Optional
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from fastapi import HTTPException
@@ -247,19 +247,22 @@ class StationFmuBackend(BaseFmuBackend):
             if access_key is None:
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
             key = str(access_key)
-            if re.fullmatch(
+            if not re.fullmatch(
                 r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu",
                 key,
-            ) is None:
+            ):
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
             route = "describe" if operation == "describe" else "catalog"
-            path = f"/internal/fmu/{route}/{quote(key, safe='')}"
+            path = f"/internal/fmu/{route}"
         else:
             raise ValueError("Unsupported Station GET operation")
 
         try:
             async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
-                response = await client.get(path, headers=self._headers())
+                request_kwargs = {"headers": self._headers()}
+                if operation in {"describe", "catalog"}:
+                    request_kwargs["params"] = {"accessKey": key}
+                response = await client.get(path, **request_kwargs)
         except httpx.HTTPError as exc:
             logger.warning("Station backend GET failed: %s", exc)
             raise HTTPException(status_code=503, detail="Station backend unavailable") from exc
@@ -296,18 +299,20 @@ class StationFmuBackend(BaseFmuBackend):
             raise HTTPException(status_code=503, detail="Station backend is not configured")
 
         key = str(access_key)
-        if operation != "run" or re.fullmatch(
+        if operation != "run" or not re.fullmatch(
             r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu",
             key,
-        ) is None:
+        ):
             raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
-        path = f"/internal/fmu/simulations/run/{quote(key, safe='')}"
+        path = "/internal/fmu/simulations/run"
+        station_payload = dict(payload)
+        station_payload["accessKey"] = key
         try:
             async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
                 response = await client.post(
                     path,
                     headers=self._headers_for(authorization=authorization),
-                    json=payload,
+                    json=station_payload,
                 )
         except httpx.HTTPError as exc:
             logger.warning("Station backend POST failed: %s", exc)
@@ -348,12 +353,12 @@ class StationFmuBackend(BaseFmuBackend):
             options=request_payload.get("options"),
         )
         key = str(access_key)
-        if re.fullmatch(
+        if not re.fullmatch(
             r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu",
             key,
-        ) is None:
+        ):
             raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
-        path = f"/internal/fmu/simulations/stream/{quote(key, safe='')}"
+        path = "/internal/fmu/simulations/stream"
         client = httpx.AsyncClient(base_url=self.base_url, timeout=None)
         request = client.build_request(
             "POST",
