@@ -31,15 +31,8 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
-          languages: actions,java,javascript,python,cpp
+          languages: actions,javascript,python,cpp
           config-file: .github/codeql/codeql-config.yml
-
-      - name: Set up Temurin JDK 21
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: maven
 
       - name: Build native proxy for CodeQL
         run: |
@@ -47,10 +40,6 @@ jobs:
           sudo apt-get install --no-install-recommends -y libssl-dev ninja-build
           cmake -S fmu-proxy-runtime-src -B fmu-proxy-runtime-src/build-codeql -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build fmu-proxy-runtime-src/build-codeql --parallel 2
-
-      - name: Build blockchain-services submodule
-        run: mvn -B -ntp package -DskipTests
-        working-directory: blockchain-services
 
       - name: Perform CodeQL Analysis
         id: analyze
