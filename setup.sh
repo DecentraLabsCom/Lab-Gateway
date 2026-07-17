@@ -743,6 +743,7 @@ fi
 update_env_var "$ROOT_ENV_FILE" "FMU_RUNNER_ENABLED" "$fmu_runner_enabled"
 if [ "$fmu_runner_enabled" = "true" ]; then
     echo "   * FMU runner enabled. /fmu routes are active."
+    echo "   * Compose starts the Station-only facade. Use --profile fmu-local-dev only for isolated local FMU development."
 else
     echo "   * FMU runner disabled. Startup will use '--scale fmu-runner=0'."
 fi

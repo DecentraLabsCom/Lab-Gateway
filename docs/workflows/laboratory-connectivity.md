@@ -79,10 +79,12 @@ For a Guacamole laboratory, `accessURI` identifies the gateway that owns the loc
 
 The gateway exposes the public FMU facade and generated proxy artifacts. The real FMU stays in the designated execution environment:
 
-- `FMU_BACKEND_MODE=local` together with `FMU_LOCAL_DEV_MODE=true` is the
-  Gateway-local development and test path; local native execution is disabled
-  unless both settings are explicit.
-- `FMU_BACKEND_MODE=station` is the production-target path: `fmu-runner` calls the Lab Station internal FMU executor at `FMU_STATION_BASE_URL` with `FMU_STATION_INTERNAL_TOKEN`.
+- The `fmu-local-dev` Compose profile is the Gateway-local development and
+  test path. Its local native executor has no control-plane network or Station
+  credentials.
+- The production `fmu-runner` service is Station-only and calls the Lab Station
+  internal FMU executor at `FMU_STATION_BASE_URL` with
+  `FMU_STATION_INTERNAL_TOKEN`.
 
 The station executor is an internal service. Do not publish it through the
 gateway's public edge or reuse browser access tokens as its internal

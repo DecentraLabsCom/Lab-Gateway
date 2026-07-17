@@ -96,17 +96,23 @@ FMU target model:
 - The real `.fmu` remains on Lab Station.
 - The Gateway keeps the public REST/WSS surface, proxy generation, auth and ticketing.
 - The generated `proxy.fmu` contains interface metadata, runtime binaries and reservation-scoped config, never the real model.
-- This repository keeps a local FMU execution path in `fmu-runner` for isolated
-  development/tests only (`FMU_BACKEND_MODE=local` plus
-  `FMU_LOCAL_DEV_MODE=true`). Production uses the Station backend.
+- This repository keeps a local FMU execution path in a separate
+  `fmu-runner-local` Compose profile for isolated development/tests only.
+  Production uses the Station-only `fmu-runner` service; native local
+  execution does not receive Station/session-observer credentials or
+  control-plane networking.
 
 When Compose is evaluated, `FMU_JWT_AUDIENCE` must be set to the exact public
-FMU origin (for example `https://gateway.example.edu/fmu`). Set
-`FMU_BACKEND_MODE=station` and the Station internal URL/token when real FMUs
-must remain on Lab Station; leave the local backend for development and tests.
+FMU origin (for example `https://gateway.example.edu/fmu`). Set the Station
+internal URL/token when real FMUs must remain on Lab Station.
 The `fmu-runner` service is an optional Compose profile and is disabled by
 default. Enable it explicitly with `FMU_RUNNER_ENABLED=true docker compose
 --profile fmu-runner up -d`; otherwise `/fmu` routes return `503`.
+
+For local development only, enable the facade and start the isolated profile:
+`FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up -d
+openresty fmu-runner-local`. Do not start both FMU profiles at once; they use
+the same OpenResty upstream alias.
 
 ## 🌟 Features
 

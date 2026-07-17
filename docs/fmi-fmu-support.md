@@ -104,11 +104,13 @@ FMU_BACKEND_MODE=station
 FMU_JWT_AUDIENCE=https://<public-gateway-origin>/fmu
 ~~~
 
-For isolated local development/tests, set both `FMU_BACKEND_MODE=local` and
-`FMU_LOCAL_DEV_MODE=true`. Local batch requests use one killable worker process
-per simulation. Native local realtime requires the additional explicit switch
-`FMU_LOCAL_REALTIME_ENABLED=true`; keep it false outside an isolated test
-environment. The internal Station channel is private and
+For isolated local development/tests, start the `fmu-local-dev` Compose
+profile. It sets `FMU_BACKEND_MODE=local` and `FMU_LOCAL_DEV_MODE=true` in a
+container that has only the internal local edge network and no Station,
+session-observer or control-plane secrets. Local batch requests use one
+killable worker process per simulation. Native local realtime requires the
+additional explicit switch `FMU_LOCAL_REALTIME_ENABLED=true`; keep it false
+outside an isolated test environment. The internal Station channel is private and
 authenticated with an internal token or mTLS; the public booking JWT is not
 the sole protection of the internal channel.
 

@@ -14,10 +14,13 @@ services:
       # Server name for URL resolution (WebAuthn rpId, issuer URLs, etc.)
       - SERVER_NAME=${SERVER_NAME}
       - HTTPS_PORT=${HTTPS_PORT:-443}
+      # Keep the Gateway's Full/Lite decision visible to the embedded backend
+      # when BLOCKCHAIN_SERVICES_ENABLED is left at auto.
+      - ISSUER=${ISSUER:-}
       # MySQL datasource for persistence (lab_reservations, auth_users)
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
-      - SPRING_DATASOURCE_USERNAME=${BLOCKCHAIN_MYSQL_USER:-blockchain_app}
-      - SPRING_DATASOURCE_PASSWORD=${BLOCKCHAIN_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      - SPRING_DATASOURCE_USERNAME=${BLOCKCHAIN_MYSQL_USER:?BLOCKCHAIN_MYSQL_USER must be configured}
+      - SPRING_DATASOURCE_PASSWORD=${BLOCKCHAIN_MYSQL_PASSWORD:?BLOCKCHAIN_MYSQL_PASSWORD must be configured}
       # Keep unrelated database/Guacamole principals absent from the backend;
       # this service receives only the explicit credentials above and its own
       # blockchain-services/.env file.
@@ -65,14 +68,44 @@ services:
     command:
       - |
         mode="$${BLOCKCHAIN_SERVICES_ENABLED:-auto}"
-        if [ "$$mode" = "false" ] || { [ "$$mode" = "auto" ] && [ -n "$${ISSUER:-}" ]; }; then
+        issuer="$${ISSUER:-}"
+        server_name="$${SERVER_NAME:-localhost}"
+        https_port="$${HTTPS_PORT:-443}"
+        local_issuer="https://$${server_name}"
+        if [ -n "$$https_port" ] && [ "$$https_port" != "443" ]; then
+          local_issuer="https://$${server_name}:$${https_port}"
+        fi
+        local_issuer="$$local_issuer/auth"
+        while [ "$${issuer%/}" != "$$issuer" ]; do issuer="$${issuer%/}"; done
+        while [ "$${local_issuer%/}" != "$$local_issuer" ]; do local_issuer="$${local_issuer%/}"; done
+        lite_mode=false
+        if [ -n "$$issuer" ] && [ "$$issuer" != "$$local_issuer" ]; then
+          lite_mode=true
+        fi
+        if [ "$$mode" = "false" ] || { [ "$$mode" = "auto" ] && [ "$$lite_mode" = "true" ]; }; then
           echo "Embedded blockchain-services disabled (Lite mode); container is dormant."
           while :; do sleep 86400; done
         fi
         exec /app/entrypoint.sh
     healthcheck:
       # Probe Spring readiness; /health remains the detailed operational status consumed by the Gateway.
-      test: ["CMD", "sh", "-c", "mode=$${BLOCKCHAIN_SERVICES_ENABLED:-auto}; if [ \"$$mode\" = \"false\" ] || { [ \"$$mode\" = \"auto\" ] && [ -n \"$${ISSUER:-}\" ]; }; then exit 0; fi; code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/actuator/health/readiness) && [ $$code -eq 200 ]"]
+      test:
+        - CMD-SHELL
+        - >-
+          mode="$${BLOCKCHAIN_SERVICES_ENABLED:-auto}";
+          issuer="$${ISSUER:-}";
+          server_name="$${SERVER_NAME:-localhost}";
+          https_port="$${HTTPS_PORT:-443}";
+          local_issuer="https://$${server_name}";
+          if [ -n "$$https_port" ] && [ "$$https_port" != "443" ]; then local_issuer="https://$${server_name}:$${https_port}"; fi;
+          local_issuer="$$local_issuer/auth";
+          while [ "$${issuer%/}" != "$$issuer" ]; do issuer="$${issuer%/}"; done;
+          while [ "$${local_issuer%/}" != "$$local_issuer" ]; do local_issuer="$${local_issuer%/}"; done;
+          lite_mode=false;
+          if [ -n "$$issuer" ] && [ "$$issuer" != "$$local_issuer" ]; then lite_mode=true; fi;
+          if [ "$$mode" = "false" ] || { [ "$$mode" = "auto" ] && [ "$$lite_mode" = "true" ]; }; then exit 0; fi;
+          code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/actuator/health/readiness);
+          [ "$$code" -eq 200 ]
       timeout: 10s
       retries: 5
       interval: 30s
@@ -97,7 +130,9 @@ services:
       - ALL
     restart: always
     networks:
-      - guacnet
+      - gateway_backend
+      - ops_backend
+      - database_backend
       - fmu_control
 
   openresty:
@@ -206,8 +241,12 @@ services:
       - NET_BIND_SERVICE
     restart: always
     networks:
-      - guacnet
+      - gateway_public
+      - gateway_backend
+      - gateway_guacamole
+      - ops_control
       - fmu_edge
+      - fmu_local_edge
       - fmu_aas
 
   cloudflared:
@@ -254,7 +293,7 @@ services:
       - ALL
     restart: unless-stopped
     networks:
-      - guacnet
+      - gateway_public
 
   cloudflared-token:
     image: cloudflare/cloudflared:2024.11.0
@@ -284,7 +323,7 @@ services:
       - ALL
     restart: unless-stopped
     networks:
-      - guacnet
+      - gateway_public
 
   certbot:
     image: certbot/certbot:v2.11.0
@@ -346,14 +385,14 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       BLOCKCHAIN_MYSQL_DATABASE: ${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
-      GUACAMOLE_MYSQL_USER: ${GUACAMOLE_MYSQL_USER:-guacamole_app}
-      GUACAMOLE_MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
-      BLOCKCHAIN_MYSQL_USER: ${BLOCKCHAIN_MYSQL_USER:-blockchain_app}
-      BLOCKCHAIN_MYSQL_PASSWORD: ${BLOCKCHAIN_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
-      OPS_BACKEND_MYSQL_USER: ${OPS_BACKEND_MYSQL_USER:-ops_backend}
-      OPS_BACKEND_MYSQL_PASSWORD: ${OPS_BACKEND_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
-      OPS_GUACAMOLE_MYSQL_USER: ${OPS_GUACAMOLE_MYSQL_USER:-ops_guac}
-      OPS_GUACAMOLE_MYSQL_PASSWORD: ${OPS_GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      GUACAMOLE_MYSQL_USER: ${GUACAMOLE_MYSQL_USER:?GUACAMOLE_MYSQL_USER must be configured}
+      GUACAMOLE_MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:?GUACAMOLE_MYSQL_PASSWORD must be configured}
+      BLOCKCHAIN_MYSQL_USER: ${BLOCKCHAIN_MYSQL_USER:?BLOCKCHAIN_MYSQL_USER must be configured}
+      BLOCKCHAIN_MYSQL_PASSWORD: ${BLOCKCHAIN_MYSQL_PASSWORD:?BLOCKCHAIN_MYSQL_PASSWORD must be configured}
+      OPS_BACKEND_MYSQL_USER: ${OPS_BACKEND_MYSQL_USER:?OPS_BACKEND_MYSQL_USER must be configured}
+      OPS_BACKEND_MYSQL_PASSWORD: ${OPS_BACKEND_MYSQL_PASSWORD:?OPS_BACKEND_MYSQL_PASSWORD must be configured}
+      OPS_GUACAMOLE_MYSQL_USER: ${OPS_GUACAMOLE_MYSQL_USER:?OPS_GUACAMOLE_MYSQL_USER must be configured}
+      OPS_GUACAMOLE_MYSQL_PASSWORD: ${OPS_GUACAMOLE_MYSQL_PASSWORD:?OPS_GUACAMOLE_MYSQL_PASSWORD must be configured}
       GUAC_ADMIN_USER: ${GUAC_ADMIN_USER}
       GUAC_ADMIN_PASS: ${GUAC_ADMIN_PASS}
       DEMO_USER: ${DEMO_USER:-demo}
@@ -389,7 +428,9 @@ services:
     # - "3306:3306"
     restart: always
     networks:
-      - guacnet
+      - database_backend
+      - database_guacamole
+      - database_ops
 
   guacamole:
     build:
@@ -403,8 +444,8 @@ services:
     environment:
       GUACD_HOSTNAME: guacd
       MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${GUACAMOLE_MYSQL_USER:-guacamole_app}
-      MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      MYSQL_USER: ${GUACAMOLE_MYSQL_USER:?GUACAMOLE_MYSQL_USER must be configured}
+      MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:?GUACAMOLE_MYSQL_PASSWORD must be configured}
       MYSQL_HOSTNAME: mysql
       API_SESSION_TIMEOUT: ${API_SESSION_TIMEOUT:-15}
       BAN_MAX_INVALID_ATTEMPTS: ${BAN_MAX_INVALID_ATTEMPTS:-5}
@@ -437,7 +478,9 @@ services:
     #ports:
     # - "8080:8080"
     networks:
-      - guacnet
+      - gateway_guacamole
+      - database_guacamole
+      - guacd_net
   guacd:
     image: guacamole/guacd:1.6.0
     healthcheck:
@@ -470,7 +513,7 @@ services:
     #ports:
     # - "4822:4822"
     networks:
-      - guacnet
+      - guacd_net
 
   ops-worker:
     build:
@@ -502,12 +545,12 @@ services:
       - GUACAMOLE_PROVISIONER_TOKEN=${GUACAMOLE_PROVISIONER_TOKEN:-}
       - GUACAMOLE_PROVISIONER_TOKEN_HEADER=${GUACAMOLE_PROVISIONER_TOKEN_HEADER:-X-Guacamole-Provisioner-Token}
       - MYSQL_HOSTNAME=mysql
-      - MYSQL_USER=${OPS_BACKEND_MYSQL_USER:-${MYSQL_USER}}
-      - MYSQL_PASSWORD=${OPS_BACKEND_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
-      - OPS_BACKEND_MYSQL_USER=${OPS_BACKEND_MYSQL_USER:-ops_backend}
-      - OPS_BACKEND_MYSQL_PASSWORD=${OPS_BACKEND_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
-      - OPS_GUACAMOLE_MYSQL_USER=${OPS_GUACAMOLE_MYSQL_USER:-ops_guac}
-      - OPS_GUACAMOLE_MYSQL_PASSWORD=${OPS_GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}}
+      - MYSQL_USER=${OPS_BACKEND_MYSQL_USER:?OPS_BACKEND_MYSQL_USER must be configured}
+      - MYSQL_PASSWORD=${OPS_BACKEND_MYSQL_PASSWORD:?OPS_BACKEND_MYSQL_PASSWORD must be configured}
+      - OPS_BACKEND_MYSQL_USER=${OPS_BACKEND_MYSQL_USER:?OPS_BACKEND_MYSQL_USER must be configured}
+      - OPS_BACKEND_MYSQL_PASSWORD=${OPS_BACKEND_MYSQL_PASSWORD:?OPS_BACKEND_MYSQL_PASSWORD must be configured}
+      - OPS_GUACAMOLE_MYSQL_USER=${OPS_GUACAMOLE_MYSQL_USER:?OPS_GUACAMOLE_MYSQL_USER must be configured}
+      - OPS_GUACAMOLE_MYSQL_PASSWORD=${OPS_GUACAMOLE_MYSQL_PASSWORD:?OPS_GUACAMOLE_MYSQL_PASSWORD must be configured}
       - OPS_MYSQL_DATABASE=${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - GUACAMOLE_MYSQL_DATABASE=${MYSQL_DATABASE}
@@ -564,8 +607,11 @@ services:
       - ALL
     restart: always
     networks:
-      - guacnet
-      - fmu_aas
+      - ops_control
+      - ops_backend
+      - database_ops
+      - ops_guacamole
+      - fmu_aas_ops
 
   # FMU Runner - FMI Co-Simulation execution service
   fmu-runner:
@@ -574,9 +620,9 @@ services:
       context: ./fmu-runner
       dockerfile: Dockerfile
     environment:
-      - FMU_BACKEND_MODE=${FMU_BACKEND_MODE:-station}
-      - FMU_LOCAL_DEV_MODE=${FMU_LOCAL_DEV_MODE:-false}
-      - FMU_LOCAL_REALTIME_ENABLED=${FMU_LOCAL_REALTIME_ENABLED:-false}
+      # The production facade is Station-only. Local native execution uses
+      # the separate fmu-runner-local profile below, without control secrets.
+      - FMU_BACKEND_MODE=station
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
       - FMU_STATION_BASE_URL=${FMU_STATION_BASE_URL:-}
@@ -646,6 +692,68 @@ services:
       - fmu_control
       - fmu_aas
 
+  # Explicit development-only local FMU execution. This service deliberately
+  # does not receive Station/session-observer/proxy-signing credentials and
+  # has no route to the control or AAS networks. OpenResty reaches it through
+  # the fmu-runner network alias on the isolated internal edge.
+  fmu-runner-local:
+    profiles: ["fmu-local-dev"]
+    build:
+      context: ./fmu-runner
+      dockerfile: Dockerfile
+    environment:
+      - FMU_BACKEND_MODE=local
+      - FMU_LOCAL_DEV_MODE=true
+      - FMU_LOCAL_REALTIME_ENABLED=${FMU_LOCAL_REALTIME_ENABLED:-false}
+      - FMU_DATA_PATH=/app/fmu-data
+      - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
+      - HISTORY_DB_PATH=/app/data/history.db
+      - ISSUER=${ISSUER:-}
+      - JWT_ISSUER=${JWT_ISSUER:-}
+      - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}
+      - JWT_AUDIENCE=${FMU_JWT_AUDIENCE:?FMU_JWT_AUDIENCE must be the exact public FMU URL, e.g. https://gateway.example/fmu}
+      - SERVER_NAME=${SERVER_NAME}
+      - MAX_SIMULATION_TIMEOUT=${FMU_MAX_SIMULATION_TIMEOUT:-300}
+      - MAX_CONCURRENT_PER_MODEL=${FMU_MAX_CONCURRENT_PER_MODEL:-10}
+      - PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE=${FMU_PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE:-20}
+      - WS_CREATE_RATE_LIMIT_PER_MINUTE=${WS_CREATE_RATE_LIMIT_PER_MINUTE:-30}
+    volumes:
+      - ./fmu-data:/app/fmu-data:ro
+      - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
+      - fmu-local-history:/app/data
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+    read_only: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=fmu-runner-local"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"
+    networks:
+      fmu_local_edge:
+        aliases:
+          - fmu-runner
+
   # BaSyx AAS Server - Asset Administration Shell registry & repository
   # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_admin_access.lua)
   # Only available in Full Gateway instances (one per institution).
@@ -690,6 +798,7 @@ services:
     restart: always
     networks:
       - fmu_aas
+      - fmu_aas_ops
       - aas_data
 
   # MongoDB backend for BaSyx AAS Server — persists shells/submodels across restarts.
@@ -729,13 +838,46 @@ services:
       - aas_data
 
 networks:
-  guacnet:
+  gateway_public:
     driver: bridge
+  gateway_backend:
+    driver: bridge
+    internal: true
+  gateway_guacamole:
+    driver: bridge
+    internal: true
+  ops_control:
+    driver: bridge
+    internal: true
+  ops_backend:
+    driver: bridge
+  ops_guacamole:
+    driver: bridge
+    internal: true
+  guacd_net:
+    driver: bridge
+  database_backend:
+    driver: bridge
+    internal: true
+  database_guacamole:
+    driver: bridge
+    internal: true
+  database_ops:
+    driver: bridge
+    internal: true
   fmu_edge:
     driver: bridge
+    internal: true
   fmu_control:
     driver: bridge
+    internal: true
   fmu_aas:
+    driver: bridge
+    internal: true
+  fmu_aas_ops:
+    driver: bridge
+    internal: true
+  fmu_local_edge:
     driver: bridge
     internal: true
   aas_data:
@@ -745,5 +887,6 @@ networks:
 volumes:
   mysql_data:
   fmu-history:
+  fmu-local-history:
   basyx_mongo_data:
   basyx_aas_data:

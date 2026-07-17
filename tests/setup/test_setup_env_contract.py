@@ -243,6 +243,7 @@ class SetupEnvContractTest(unittest.TestCase):
 
     def test_lite_does_not_start_embedded_backend_or_cross_fallback_jwt_keys(self):
         self.assertIn("BLOCKCHAIN_SERVICES_ENABLED", self.compose_file)
+        self.assertIn("- ISSUER=${ISSUER:-}", self.compose_file)
         self.assertIn("Embedded blockchain-services disabled (Lite mode)", self.compose_file)
         init_lua = (ROOT / "openresty" / "lua" / "init.lua").read_text()
         self.assertIn('active_key_path = "/etc/ssl/private/public_key.pem"', init_lua)

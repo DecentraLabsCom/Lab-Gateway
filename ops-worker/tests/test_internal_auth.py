@@ -46,3 +46,12 @@ def test_api_fails_closed_when_internal_token_is_unconfigured(client, monkeypatc
     )
 
     assert response.status_code == 503
+
+
+def test_aas_admin_api_rejects_missing_internal_token(client):
+    response = client.post(
+        "/aas-admin/lab/lab-1/sync",
+        headers={worker.OPS_INTERNAL_AUTH_HEADER: ""},
+    )
+
+    assert response.status_code == 401

@@ -177,7 +177,7 @@ The administration routes require `LAB_MANAGER_TOKEN` through the shared lab-man
 
 The provider should also:
 
-- protect the AAS server and admin routes with the Gateway network policy; the bundled profile keeps BaSyx/Mongo on the internal `fmu_aas`/`aas_data` networks and enables Mongo authentication;
+- protect the AAS server and admin routes with the Gateway network policy; the bundled profile keeps BaSyx/Mongo on the internal `fmu_aas`/`fmu_aas_ops`/`aas_data` networks, with separate AAS edges for the FMU and Ops services, and enables Mongo authentication;
 - configure an exact `AAS_ALLOWED_HOSTS` entry and dedicated `AAS_SERVICE_TOKEN` for every external AAS endpoint; caller JWTs are stripped at the Gateway;
 - avoid putting secrets or bearer tokens in shell properties;
 - validate and sanitize external URLs, especially documentation and AAS link targets;
@@ -224,4 +224,3 @@ These items are not prerequisites for the current AAS MVP. Shell generation, pub
 - [ ] Check physical-lab technical data separately from live availability.
 - [ ] Follow the normal Marketplace reservation and access flow.
 - [ ] Use raw JSON/AASX only as an additional integration artifact and validate it against the provider's published terms.
-

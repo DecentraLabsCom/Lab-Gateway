@@ -167,6 +167,31 @@ runner.describe("Lab manager access guard", function()
         runner.assert.equals("secret-token", ngx.req.headers["X-Lab-Manager-Token"])
     end)
 
+    runner.it("replaces browser credentials with the dedicated Ops credential", function()
+        local ngx = run_lab_manager_access({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                OPS_INTERNAL_AUTH_TOKEN = "ops-token",
+                OPS_INTERNAL_AUTH_HEADER = "X-Ops-Internal-Token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            headers = {
+                ["X-Lab-Manager-Token"] = "browser-token",
+                ["X-Ops-Internal-Token"] = "attacker-token",
+                ["Authorization"] = "Bearer attacker-token",
+                ["Cookie"] = "session=attacker-session"
+            },
+            var = { remote_addr = "172.17.0.2", uri = "/ops/api/hosts" }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("ops-token", ngx.req.headers["X-Ops-Internal-Token"])
+        runner.assert.equals(nil, ngx.req.headers["X-Lab-Manager-Token"])
+        runner.assert.equals(nil, ngx.req.headers["Authorization"])
+        runner.assert.equals(nil, ngx.req.headers["Cookie"])
+    end)
+
     runner.it("accepts token from cookie", function()
         local ngx = run_lab_manager_access({
             env = {

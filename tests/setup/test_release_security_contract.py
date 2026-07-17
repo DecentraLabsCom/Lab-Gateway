@@ -23,11 +23,13 @@ def test_release_emits_sbom_and_provenance_attestation():
 
 def test_security_workflow_covers_actions_python_cpp_and_pip_audit():
     security = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
-    assert "actions,java,javascript,python,cpp" in security
+    # The embedded blockchain-services submodule is intentionally excluded by
+    # the CodeQL config; this workflow covers the Gateway's supported sources.
+    assert "actions,javascript,python,cpp" in security
     assert "pip-audit -r fmu-runner/requirements.txt" in security
     assert "pip-audit -r ops-worker/requirements.txt" in security
     assert "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0" in security
-    assert "github/codeql-action/init@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06" in security
+    assert "github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a" in security
     assert "cmake --build fmu-proxy-runtime-src/build-codeql" in security
 
 

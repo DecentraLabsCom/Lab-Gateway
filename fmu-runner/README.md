@@ -13,10 +13,10 @@ Deployment contract:
 
 Backend strategy:
 
-- this service keeps a permanent `local` backend that executes FMUs with [FMPy](https://github.com/CATIA-Systems/FMPy)
+- the production Compose service is `station`-only; local FMPy execution is
+  provided by the separate `fmu-runner-local` development profile
 - local `fmu-data` mounting remains useful for development, smoke tests and automated tests
-- `local` is a permanent development/test backend; `station` is the production
-  target when real FMUs must remain on Lab Station
+- `station` is the production target when real FMUs must remain on Lab Station
 - Local batch simulations run in a fresh one-process worker that is killed on
   timeout/cancel; the service never falls back to a thread for native FMU code.
 - Native local realtime sessions are disabled by default. Set
@@ -116,15 +116,18 @@ pytest fmu-runner/
 Built and started automatically by `docker-compose.yml` in the Lab Gateway root.
 
 ```bash
-# From Lab Gateway root
-docker compose up --build fmu-runner
+# From Lab Gateway root: production Station facade
+docker compose --profile fmu-runner up --build fmu-runner
+
+# Development-only local FMPy facade (isolated network, no control secrets)
+FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-runner-local
 ```
 
 FMU files are mounted from `./fmu-data` into `/fmu-data` inside the container.
 See [fmu-data/README.md](../fmu-data/README.md) for the expected directory layout.
 
-That mount is the `local` backend path. It remains useful for development,
-smoke tests and automated tests, but it is not the intended production topology.
+That mount belongs to the `fmu-runner-local` development profile. It is not
+part of the intended production execution topology.
 
 Target production topology:
 
@@ -153,8 +156,10 @@ Marketplace upload is disabled by design.
 
 ## Station Mode Notes
 
-- `FMU_BACKEND_MODE=station` keeps the public API on Gateway and forwards execution to Lab Station (the production-safe default).
-- `FMU_BACKEND_MODE=local` is an explicit development mode and also requires `FMU_LOCAL_DEV_MODE=true`; without both settings native FMU execution is disabled.
+- `fmu-runner` keeps the public API on Gateway and forwards execution to Lab Station.
+- `fmu-runner-local` is an explicit development profile; its container sets
+  `FMU_BACKEND_MODE=local` and `FMU_LOCAL_DEV_MODE=true` without receiving
+  Station/session-observer/proxy-signing credentials.
 - Internal REST targets:
   - `GET /internal/fmu/catalog` (header `X-FMU-Access-Key`)
   - `GET /internal/fmu/describe` (header `X-FMU-Access-Key`)
