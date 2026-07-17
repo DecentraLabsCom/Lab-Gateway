@@ -14,10 +14,6 @@ ModelMetadata = dict[str, Any]
 logger = logging.getLogger("fmu-runner.backend")
 
 _FMU_ACCESS_KEY_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
-_FMU_ACCESS_KEY_PATH_RE = re.compile(
-    r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*"
-    r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu"
-)
 
 
 class BaseFmuBackend:
@@ -241,6 +237,7 @@ class StationFmuBackend(BaseFmuBackend):
         if not self.base_url:
             raise HTTPException(status_code=503, detail="Station backend is not configured")
 
+        key = ""
         if operation == "health":
             path = "/internal/health"
         elif operation in {"describe", "catalog"}:
@@ -274,6 +271,7 @@ class StationFmuBackend(BaseFmuBackend):
                 if isinstance(payload, dict):
                     detail_text = payload.get("error") or payload.get("message") or detail_text
             except Exception:
+                # A non-JSON error body is handled using the HTTP status instead.
                 pass
             raise HTTPException(status_code=response.status_code, detail=detail_text)
 

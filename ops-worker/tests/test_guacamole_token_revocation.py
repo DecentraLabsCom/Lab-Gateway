@@ -314,7 +314,7 @@ def test_reconciliation_keeps_revoked_rows_eligible_until_evidence_retention_exp
                 created_at = datetime('now', '-120 seconds'),
                 expires_at = datetime('now', '-10 seconds')
         """))
-        row = conn.execute(text(
+        conn.execute(text(
             "SELECT username, created_at, expires_at FROM guacamole_token_revocation_queue"
         )).mappings().one()
     with history_engine.begin() as conn:

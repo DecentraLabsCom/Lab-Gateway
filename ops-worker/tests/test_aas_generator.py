@@ -176,25 +176,25 @@ class TestBuildTechnicalDataSubmodel:
 
 class TestBuildAasShell:
     def test_shell_id(self):
-        shell = _mod.build_aas_shell("42", SAMPLE_HOST)
+        shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
         assert shell["id"] == "urn:decentralabs:lab:42"
 
     def test_shell_id_short(self):
-        shell = _mod.build_aas_shell("42", SAMPLE_HOST)
+        shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
         assert shell["idShort"] == "DecentraLabs_Lab_42"
 
     def test_asset_type_physical(self):
-        shell = _mod.build_aas_shell("42", SAMPLE_HOST)
+        shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
         assert shell["assetInformation"]["assetType"] == "PhysicalLab"
 
     def test_references_both_submodels(self):
-        shell = _mod.build_aas_shell("42", SAMPLE_HOST)
+        shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
         refs = [r["keys"][0]["value"] for r in shell["submodels"]]
         assert "urn:decentralabs:lab:42:sm:nameplate" in refs
         assert "urn:decentralabs:lab:42:sm:technicalData" in refs
 
     def test_description_contains_host_name(self):
-        shell = _mod.build_aas_shell("42", SAMPLE_HOST)
+        shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
         desc = " ".join(d["text"] for d in shell["description"])
         assert "lab-ws-01" in desc
 

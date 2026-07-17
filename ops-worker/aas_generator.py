@@ -28,7 +28,6 @@ _BUNDLED_AAS_URL = "http://basyx-aas-server:8081"
 
 _BASYX_TIMEOUT = int(os.getenv("BASYX_AAS_TIMEOUT", "15"))
 _AAS_LAB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
-_AAS_RESOURCE_PATH_RE = re.compile(r"/(?:shells|submodels)/[A-Za-z0-9_-]{1,1024}")
 
 
 def _aas_request_headers() -> Dict[str, str]:
@@ -199,7 +198,7 @@ def build_technical_data_submodel(
     }
 
 
-def build_aas_shell(lab_id: str, host: Dict[str, Any]) -> Dict[str, Any]:
+def build_physical_aas_shell(lab_id: str, host: Dict[str, Any]) -> Dict[str, Any]:
     """Build the AAS shell for a physical lab resource."""
     aas_id = _aas_id_for_lab(lab_id)
     nameplate_id = _submodel_id_nameplate(lab_id)
@@ -297,7 +296,7 @@ def sync_lab_to_basyx(
         result["disabled"] = True
         return result
 
-    shell_payload = build_aas_shell(lab_id, host)
+    shell_payload = build_physical_aas_shell(lab_id, host)
     nameplate_payload = build_nameplate_submodel(lab_id, host)
     technical_payload = build_technical_data_submodel(lab_id, host, heartbeat)
 

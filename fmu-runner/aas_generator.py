@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -253,6 +253,7 @@ def build_simulation_submodel(
         try:
             _fmu_sha256 = hashlib.sha256(Path(fmu_path).read_bytes()).hexdigest()
         except OSError:
+            # The digest is optional metadata; retain the AAS without it.
             pass
     _model_file: dict = {
         "idShort": "ModelFile",
@@ -526,6 +527,7 @@ def _parse_aasx(aasx_bytes: bytes) -> dict:
                                 origin_path = target
                                 break
                 except ET.ParseError:
+                    # A malformed relationships part can be handled by JSON fallback scanning.
                     pass
 
             # Step 2: candidates — origin part first, then JSON scan fallback
@@ -731,10 +733,7 @@ async def sync_fmu_to_basyx(
                                 lab_id, _usm_post.status_code,
                             )
                     else:
-                        logger.warning(
-                            "Failed to PUT UnitDefinitions submodel for lab %s: %s",
-                            lab_id, _usm_resp.status_code,
-                        )
+                        logger.warning("Failed to PUT UnitDefinitions submodel for lab %s", str(lab_id).replace("\r", "\\r").replace("\n", "\\n"))
 
                 # --- Shell: PUT (create or replace) ---
                 if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", aas_id_encoded):
@@ -767,11 +766,19 @@ async def sync_fmu_to_basyx(
                         return result
 
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
-        logger.warning("BaSyx unreachable at %s: %s", BASYX_AAS_URL, exc)
+        logger.warning(
+            "BaSyx unreachable at %s: %s",
+            str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
         result["error"] = "BaSyx unreachable"
         return result
     except ValueError as exc:
-        logger.error("AAS endpoint policy rejected %s: %s", BASYX_AAS_URL, exc)
+        logger.error(
+            "AAS endpoint policy rejected %s: %s",
+            str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
         result["error"] = "AAS endpoint policy rejected"
         return result
 

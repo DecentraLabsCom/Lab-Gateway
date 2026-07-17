@@ -41,6 +41,7 @@ def _is_loopback_or_private_host(host: str) -> bool:
             if first == 192 and second == 168:
                 return True
         except ValueError:
+            # Non-numeric host labels are not private IPv4 addresses.
             pass
     return False
 

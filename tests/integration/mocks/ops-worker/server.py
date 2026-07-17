@@ -3,7 +3,6 @@ Mock ops-worker server for integration testing.
 Simulates the lab station operations service.
 """
 
-import json
 import secrets
 from flask import Flask, jsonify, request
 

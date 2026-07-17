@@ -174,6 +174,7 @@ class _RealtimeSession:
             try:
                 _ = queue.get_nowait()
             except asyncio.QueueEmpty:
+                # Dropping the oldest item is best-effort when the queue races.
                 pass
             self._pending_queue_drops += 1
             try:
@@ -435,16 +436,19 @@ class _RealtimeSession:
             try:
                 self._fmu.terminate()
             except Exception:
+                # FMU runtimes may reject cleanup after a failed initialization.
                 pass
             try:
                 self._fmu.freeInstance()
             except Exception:
+                # FMU runtimes may reject cleanup after a failed initialization.
                 pass
         self._fmu = None
         if self._unzipdir:
             try:
                 shutil.rmtree(self._unzipdir, ignore_errors=True)
             except Exception:
+                # The temporary extraction directory may already be gone.
                 pass
             self._unzipdir = None
 
@@ -559,6 +563,7 @@ class _RealtimeSession:
                 async with self.connection.send_lock:
                     await self.connection.websocket.send_json(close_payload)
             except Exception:
+                # The peer may already have closed the websocket.
                 pass
         await self.detach()
         self._shutdown_fmu()
@@ -1341,6 +1346,7 @@ class RealtimeWsManager:
                 await self._send_direct(connection, response)
 
         except WebSocketDisconnect:
+            # Normal websocket termination.
             pass
         except HTTPException as exc:
             await self._send_direct(
@@ -1357,4 +1363,5 @@ class RealtimeWsManager:
             try:
                 await websocket.close()
             except Exception:
+                # Closing an already-closed websocket is harmless.
                 pass

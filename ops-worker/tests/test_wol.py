@@ -79,6 +79,13 @@ def test_host_is_up_does_not_open_socket_for_invalid_target():
     mock_connect.assert_not_called()
 
 
+def test_host_is_up_rejects_long_repeated_dns_target_without_regex_backtracking():
+    with patch("worker.socket.create_connection") as mock_connect:
+        assert worker.host_is_up("0." * 127 + "0", 1) is False
+
+    mock_connect.assert_not_called()
+
+
 def test_host_is_up_probes_configured_winrm_port_without_shell():
     with patch("worker.socket.create_connection") as mock_connect:
         assert worker.host_is_up("lab-ws-01", 1, probe_port=5986) is True

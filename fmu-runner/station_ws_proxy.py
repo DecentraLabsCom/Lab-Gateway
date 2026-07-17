@@ -209,6 +209,7 @@ class StationRealtimeWsProxyManager:
                 try:
                     await station_ws.close()
                 except Exception:
+                    # The peer may already have closed the socket.
                     pass
                 station_ws = None
 
@@ -264,6 +265,7 @@ class StationRealtimeWsProxyManager:
                                             "sessionId": session_id,
                                         }))
                                     except Exception:
+                                        # There is no reliable response path after a socket failure.
                                         pass
                                     detail = _public_http_detail(exc, "Session observation failed") if isinstance(exc, HTTPException) else "Session observation failed"
                                     payload = self.error_payload(
@@ -323,6 +325,7 @@ class StationRealtimeWsProxyManager:
                     )
                     await websocket.close(code=1011)
                 except Exception:
+                    # Closing an already-closed client websocket is harmless.
                     pass
 
         try:
@@ -467,7 +470,11 @@ class StationRealtimeWsProxyManager:
                                 request_id=request_id,
                                 retryable=True,
                             )
-                            self.logger.warning("station session.create ticket issue failed request_id=%s error=%s", request_id, exc)
+                            self.logger.warning(
+                                "station session.create ticket issue failed request_id=%s error=%s",
+                                str(request_id).replace("\r", "\\r").replace("\n", "\\n"),
+                                type(exc).__name__,
+                            )
                             await self._send_json(websocket, send_lock, response)
                             local_request_cache[request_id] = response
                             continue

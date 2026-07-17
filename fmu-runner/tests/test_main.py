@@ -27,7 +27,6 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
     from main import (
         app,
         _init_db,
-        HISTORY_DB_PATH,
         _effective_timeout_seconds,
         MAX_SIMULATION_TIMEOUT,
         _build_proxy_model_description_xml,
@@ -456,33 +455,6 @@ def test_describe_preserves_exact_fmi3_int64_and_uint64_starts(mock_resolve, moc
 def test_describe_requires_fmuFileName():
     response = client.get("/api/v1/simulations/describe")
     assert response.status_code == 422  # FastAPI validation error
-
-
-def test_proxy_model_description_preserves_zero_value_reference():
-    xml_bytes = _build_proxy_model_description_xml({
-        "modelName": "ProxyDemo",
-        "guid": "{proxy-guid}",
-        "modelVariables": [
-            {
-                "name": "u",
-                "type": "Real",
-                "causality": "input",
-                "variability": "continuous",
-                "valueReference": 0,
-            },
-            {
-                "name": "y",
-                "type": "Real",
-                "causality": "output",
-                "variability": "continuous",
-                "valueReference": 2,
-            },
-        ],
-    })
-
-    root = ET.fromstring(xml_bytes)
-    scalar_variables = root.findall("./ModelVariables/ScalarVariable")
-    assert scalar_variables[0].attrib["valueReference"] == "0"
 
 
 def test_proxy_model_description_preserves_zero_value_reference():
@@ -1416,7 +1388,6 @@ def test_proxy_download_rate_limited(mock_resolve, mock_issue_ticket, mock_read_
 def test_history_empty_initially(tmp_path, monkeypatch):
     monkeypatch.setattr("main.HISTORY_DB_PATH", str(tmp_path / "test.db"))
     # Ensure schema exists
-    import asyncio
     asyncio.run(_init_db())
 
     response = client.get("/api/v1/simulations/history")
@@ -1438,7 +1409,6 @@ def test_run_persists_to_history(mock_md, mock_exec, mock_resolve, tmp_path, mon
 
     db_path = str(tmp_path / "hist.db")
     monkeypatch.setattr("main.HISTORY_DB_PATH", db_path)
-    import asyncio
     asyncio.run(_init_db())
 
     # Run a simulation

@@ -7,6 +7,7 @@ endpoint with mocked BaSyx and FMU reading.
 
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
+import aas_generator as _aas_mod
 
 # ── Pure generator tests ─────────────────────────────────────────────
 
@@ -597,9 +598,6 @@ class TestAasSyncEndpoint:
 
 # ── sync_fmu_to_basyx unit tests (disabled / unreachable) ────────────
 
-import pytest
-import httpx
-import aas_generator as _aas_mod
 
 
 class TestSyncFmuToBasyxDegradation:
@@ -652,7 +650,6 @@ import io
 import json
 import zipfile
 
-import aas_generator as _aas_mod
 
 
 def _make_aasx(shells=None, submodels=None, concept_descs=None, bad_zip=False) -> bytes:

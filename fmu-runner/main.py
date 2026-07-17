@@ -1216,10 +1216,10 @@ async def _issue_session_ticket(
         raise HTTPException(status_code=500, detail="Invalid session ticket response from auth service")
     logger.info(
         "Issued FMU session ticket request_id=%s lab_id=%s reservation_key=%s ticket_id=%s expires_at=%s",
-        request_id or "-",
-        lab_id,
-        reservation_key or "-",
-        _normalize_ticket_id(session_ticket) or "-",
+        str(request_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
+        str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+        str(reservation_key or "-").replace("\r", "\\r").replace("\n", "\\n"),
+        str(_normalize_ticket_id(session_ticket) or "-").replace("\r", "\\r").replace("\n", "\\n"),
         expires_at,
     )
     return session_ticket, expires_at
@@ -1254,11 +1254,11 @@ async def _redeem_session_ticket(
         raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "error": "Invalid ticket redeem response"})
     logger.info(
         "Redeemed FMU session ticket request_id=%s session_id=%s lab_id=%s reservation_key=%s ticket_id=%s",
-        request_id or "-",
-        session_id or "-",
-        lab_id or "-",
-        reservation_key or "-",
-        _normalize_ticket_id(session_ticket) or "-",
+        str(request_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
+        str(session_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
+        str(lab_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
+        str(reservation_key or "-").replace("\r", "\\r").replace("\n", "\\n"),
+        str(_normalize_ticket_id(session_ticket) or "-").replace("\r", "\\r").replace("\n", "\\n"),
     )
     return claims
 
@@ -1352,10 +1352,10 @@ async def _confirm_fmu_session_started(
         )
     logger.info(
         "Confirmed FMU session request_id=%s session_id=%s reservation_key=%s ticket_id=%s",
-        request_id or "-",
-        session_id,
-        claim_reservation_key,
-        _normalize_ticket_id(session_ticket) or "-",
+        str(request_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
+        str(session_id).replace("\r", "\\r").replace("\n", "\\n"),
+        str(claim_reservation_key).replace("\r", "\\r").replace("\n", "\\n"),
+        str(_normalize_ticket_id(session_ticket) or "-").replace("\r", "\\r").replace("\n", "\\n"),
     )
     return True
 
@@ -1443,6 +1443,7 @@ def _extract_response_error_text(response: httpx.Response) -> str:
         if isinstance(detail_json, dict):
             detail_text = detail_json.get("error") or detail_json.get("message") or detail_text
     except Exception:
+        # The upstream error body is optional and may not be JSON.
         pass
     return detail_text
 
@@ -1454,6 +1455,7 @@ def _extract_response_error_payload(response: httpx.Response) -> dict[str, Any]:
         if isinstance(payload, dict):
             detail = payload
     except Exception:
+        # Preserve the stable error contract when the upstream body is malformed.
         pass
     return detail
 
@@ -1644,7 +1646,11 @@ async def aas_sync_fmu(access_key: str, request: Request):
         try:
             md = read_model_description(str(fmu_path))
         except Exception as exc:
-            logger.error("AAS sync: cannot read FMU %s: %s", access_key, exc)
+            logger.error(
+                "AAS sync: cannot read FMU %s: %s",
+                str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
+                type(exc).__name__,
+            )
             raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
         metadata = _model_metadata_from_model_description(md)
 
@@ -1685,7 +1691,11 @@ async def aas_hints_fmu(access_key: str):
     try:
         md = read_model_description(str(fmu_path))
     except Exception as exc:
-        logger.error("Cannot read FMU model description for %s: %s", access_key, exc)
+        logger.error(
+            "Cannot read FMU model description for %s: %s",
+            str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
         raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
     hints: dict = {}
     for field_name, attr in (
@@ -1814,6 +1824,7 @@ async def resolve_aas_id(shellId: str = Query(...)):
             if target:
                 return {"targetId": target, "override": True}
         except Exception:
+            # Missing or corrupt link files are treated as no override.
             pass
 
     # Also check with .fmu extension (access keys are typically "file.fmu")
@@ -1825,6 +1836,7 @@ async def resolve_aas_id(shellId: str = Query(...)):
             if target:
                 return {"targetId": target, "override": True}
         except Exception:
+            # Missing or corrupt extension link files are treated as no override.
             pass
 
     return {"targetId": shellId, "override": False}
@@ -1938,9 +1950,9 @@ async def download_proxy_fmu(
 
     logger.info(
         "Generated proxy FMU lab_id=%s reservation_key=%s ticket_id=%s bytes=%s sha256=%s signed=%s",
-        lab_id,
-        effective_reservation_key,
-        _normalize_ticket_id(session_ticket) or "-",
+        str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+        str(effective_reservation_key).replace("\r", "\\r").replace("\n", "\\n"),
+        str(_normalize_ticket_id(session_ticket) or "-").replace("\r", "\\r").replace("\n", "\\n"),
         len(archive_bytes),
         artifact_sha256,
         "yes" if FMU_PROXY_SIGNING_KEY else "no",
@@ -2080,13 +2092,21 @@ async def run_simulation(
     except Exception as exc:
         if future is None and job_executor is not None:
             _shutdown_simulation_executor(job_executor, force=True)
-        logger.error("Simulation failed for lab %s: %s", lab_id, exc)
+        logger.error(
+            "Simulation failed for lab %s: %s",
+            str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
         raise HTTPException(status_code=500, detail="Simulation failed") from exc
     finally:
         _finalize_simulation_tracking(sim_id, lab_id)
 
     elapsed = round(time.monotonic() - t0, 3)
-    logger.info("Simulation completed for lab %s in %.3fs", lab_id, elapsed)
+    logger.info(
+        "Simulation completed for lab %s in %.3fs",
+        str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+        elapsed,
+    )
 
     # Persist to history DB (#29)
     await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
@@ -2152,6 +2172,7 @@ async def _cleanup_temp_files():
                 shutil.rmtree(entry)
                 removed += 1
             except Exception:
+                # A failed cleanup must not mask the completed simulation.
                 pass
     if removed:
         logger.info("Cleaned up %d FMPy temp directories", removed)
@@ -2280,7 +2301,11 @@ async def stream_simulation(
                                 req.parameters, req.options, sim_result, elapsed)
 
         except Exception as exc:
-            logger.error("Streaming simulation failed for lab %s: %s", lab_id, exc)
+            logger.error(
+                "Streaming simulation failed for lab %s: %s",
+                str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+                type(exc).__name__,
+            )
             yield json.dumps({"type": "error", "detail": "Simulation failed"}) + "\n"
         finally:
             _finalize_simulation_tracking(sim_id, lab_id)

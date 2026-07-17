@@ -148,6 +148,7 @@ def main() -> int:
         try:
             fmu.freeInstance()
         except Exception:
+            # Cleanup is best-effort after a failed simulation.
             pass
 
     summary = {

@@ -13,7 +13,6 @@ import re
 import socket
 import time
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
@@ -35,10 +34,21 @@ import aas_generator
 APP = Flask(__name__)
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-_PING_TARGET_RE = re.compile(
-    r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
-    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
-)
+
+
+def _is_valid_ping_target(target: str) -> bool:
+    """Validate a DNS name without a backtracking-prone regular expression."""
+    if not target or len(target) > 253:
+        return False
+    labels = target.rstrip(".").split(".")
+    if not labels or any(not label or len(label) > 63 for label in labels):
+        return False
+    return all(
+        label[0].isalnum()
+        and label[-1].isalnum()
+        and all(char.isalnum() or char == "-" for char in label)
+        for label in labels
+    )
 
 
 def _request_id() -> str:
@@ -56,7 +66,8 @@ def internal_error_response(
 ):
     """Log the detailed exception and expose only a stable public error contract."""
     request_id = _request_id()
-    logging.exception("%s request_id=%s", context, request_id)
+    safe_context = str(context).replace("\r", "\\r").replace("\n", "\\n")
+    logging.exception("%s request_id=%s", safe_context, request_id)
     payload: Dict[str, Any] = {
         "error": "Internal server error",
         "code": "INTERNAL_ERROR",
@@ -315,6 +326,7 @@ def _load_or_create_fernet() -> Fernet:
                 try:
                     os.chmod(OPS_SECRETS_KEY_PATH, 0o600)
                 except OSError:
+                    # The container may use a read-only mount; continue with the generated key.
                     pass
                 logging.warning("Generated local OPS_SECRETS_KEY at %s; set OPS_SECRETS_KEY explicitly for production backups", OPS_SECRETS_KEY_PATH)
         except OSError as exc:
@@ -354,6 +366,7 @@ def write_winrm_credentials_store(data: Dict[str, Any]) -> None:
     try:
         os.chmod(OPS_CREDENTIALS_PATH, 0o600)
     except OSError:
+        # Permission hardening is best-effort on bind mounts and Windows filesystems.
         pass
 
 
@@ -385,7 +398,11 @@ def load_winrm_credentials(credential_ref: str) -> Optional[Dict[str, str]]:
         raw = _load_or_create_fernet().decrypt(str(entry["token"]).encode("ascii"))
         parsed = json.loads(raw.decode("utf-8"))
     except (InvalidToken, ValueError, TypeError, json.JSONDecodeError) as exc:
-        logging.warning("Unable to decrypt WinRM credential ref %s: %s", ref, exc)
+        logging.warning(
+            "Unable to decrypt WinRM credential ref %s: %s",
+            str(ref).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
         return None
     user = str(parsed.get("user") or "").strip()
     password = str(parsed.get("password") or "")
@@ -556,7 +573,7 @@ def host_is_up(target: str, timeout: float, probe_port: Optional[int] = None) ->
     if not target:
         return False
     target = str(target).strip()
-    if _PING_TARGET_RE.fullmatch(target) is None:
+    if not _is_valid_ping_target(target):
         logging.warning("Invalid reachability target rejected")
         return False
 
@@ -573,6 +590,7 @@ def host_is_up(target: str, timeout: float, probe_port: Optional[int] = None) ->
         with socket.create_connection((target, probe_port), timeout=max(float(timeout), 0.1)):
             return True
     except (OSError, ValueError, TypeError):
+        # A failed reachability probe is represented by False.
         pass
     return False
 
@@ -657,7 +675,13 @@ def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[li
     exe = host.get("labstation_exe", DEFAULT_LABSTATION_EXE)
     args = args or []
 
-    logging.info("Executing %s %s on %s via %s", exe, command, host.get("name"), endpoint)
+    logging.info(
+        "Executing %s %s on %s via %s",
+        str(exe).replace("\r", "\\r").replace("\n", "\\n"),
+        str(command).replace("\r", "\\r").replace("\n", "\\n"),
+        str(host.get("name")).replace("\r", "\\r").replace("\n", "\\n"),
+        str(endpoint).replace("\r", "\\r").replace("\n", "\\n"),
+    )
     start = time.time()
     session = winrm.Session(
         endpoint,
@@ -938,9 +962,18 @@ def record_reservation_operation(
             try:
                 _check_failure_alert(host_name, reservation_id, lab_id, action, message, payload)
             except Exception as exc:
-                logging.warning("Failure alert check failed for %s: %s", host_name, exc)
+                logging.warning(
+                    "Failure alert check failed for %s: %s",
+                    str(host_name).replace("\r", "\\r").replace("\n", "\\n"),
+                    type(exc).__name__,
+                )
     except Exception as exc:
-        logging.error("Failed to persist reservation operation %s/%s: %s", reservation_id, action, exc)
+        logging.error(
+            "Failed to persist reservation operation %s/%s: %s",
+            str(reservation_id).replace("\r", "\\r").replace("\n", "\\n"),
+            str(action).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
 
 
 def _should_send_failure_alert(host_name: str) -> bool:
@@ -1013,7 +1046,6 @@ def _send_failure_alert(
     last_exception: Optional[Exception] = None
     while attempt <= NOTIFICATION_SERVICE_RETRY_ATTEMPTS:
         attempt += 1
-        start = time.time()
         try:
             response = requests.post(NOTIFICATION_SERVICE_URL, json=payload, headers=headers, timeout=10)
             status_code = response.status_code
@@ -1178,7 +1210,12 @@ def notify_critical_failure(
             "response": "Notification service did not accept the request",
         }
         if last_exception is not None:
-            logging.warning("Notification delivery failed for %s/%s: %s", reservation_id, action, last_exception)
+            logging.warning(
+                "Notification delivery failed for %s/%s: %s",
+                str(reservation_id).replace("\r", "\\r").replace("\n", "\\n"),
+                str(action).replace("\r", "\\r").replace("\n", "\\n"),
+                type(last_exception).__name__,
+            )
         record_reservation_operation(
             reservation_id,
             lab_id,
@@ -1431,7 +1468,7 @@ def api_wol():
     ping_target = str(payload.get("ping_target") or (host or {}).get("ping_target") or (host or {}).get("address") or "").strip()
     if not ping_target:
         return jsonify({"error": "ping_target or host address is required"}), 400
-    if _PING_TARGET_RE.fullmatch(ping_target) is None:
+    if not _is_valid_ping_target(ping_target):
         return jsonify({"error": "ping_target is invalid"}), 400
     attempts = int(payload.get("attempts", 3))
     wait_seconds = float(payload.get("ping_timeout", 10))
@@ -1520,7 +1557,10 @@ def generate_heartbeat_stream(host: Dict[str, Any], include_events: bool):
             yield _format_sse_event("heartbeat", json.dumps(data))
         except Exception as exc:
             request_id = _request_id()
-            logging.exception("Heartbeat stream failed request_id=%s", request_id)
+            logging.exception(
+                "Heartbeat stream failed request_id=%s",
+                str(request_id).replace("\r", "\\r").replace("\n", "\\n"),
+            )
             yield _format_sse_event(
                 "error",
                 json.dumps({
@@ -1706,6 +1746,7 @@ def _rows_to_operations(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any
             try:
                 payload = json.loads(payload)
             except json.JSONDecodeError:
+                # Optional operation payloads may be legacy/non-JSON values.
                 pass
         op_entries.append(
             {
@@ -2036,6 +2077,7 @@ def probe_labstation_http(host: str) -> Dict[str, Any]:
                         if mac_hint:
                             result["suggestedMac"] = mac_hint
                 except ValueError:
+                    # A malformed heartbeat body simply has no MAC hint.
                     pass
                 return result
 
@@ -2554,7 +2596,12 @@ def provision_guacamole_temporary_user(
                 {"entity_id": entity_id},
             )
 
-    logging.info("Provisioned temporary Guacamole user %s for connection %s (active=%s)", username, connection_id, activate)
+    logging.info(
+        "Provisioned temporary Guacamole user %s for connection %s (active=%s)",
+        str(username).replace("\r", "\\r").replace("\n", "\\n"),
+        str(connection_id).replace("\r", "\\r").replace("\n", "\\n"),
+        activate,
+    )
     return {
         "success": True,
         "sessionId": session_id,
@@ -2579,7 +2626,10 @@ def delete_guacamole_temporary_user(session_id: str) -> bool:
         conn.execute(text("DELETE FROM guacamole_connection_permission WHERE entity_id = :entity_id"), {"entity_id": entity_id})
         conn.execute(text("DELETE FROM guacamole_user WHERE entity_id = :entity_id"), {"entity_id": entity_id})
         conn.execute(text("DELETE FROM guacamole_entity WHERE entity_id = :entity_id"), {"entity_id": entity_id})
-    logging.info("Deleted temporary Guacamole user %s", username)
+    logging.info(
+        "Deleted temporary Guacamole user %s",
+        str(username).replace("\r", "\\r").replace("\n", "\\n"),
+    )
     return True
 
 
@@ -2985,7 +3035,11 @@ def api_aas_sync_lab(lab_id: str):
             poll_result = poll_heartbeat(host, include_events=False)
             heartbeat_data = poll_result.get("heartbeat")
         except Exception as exc:
-            logging.warning("AAS sync: could not poll heartbeat for lab %s: %s", lab_id, exc)
+            logging.warning(
+                "AAS sync: could not poll heartbeat for lab %s: %s",
+                str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+                type(exc).__name__,
+            )
     elif DB_ENGINE:
         # Use latest persisted heartbeat from DB if available
         try:
@@ -2994,7 +3048,11 @@ def api_aas_sync_lab(lab_id: str):
                 if heartbeat_data_row and heartbeat_data_row.get("raw"):
                     heartbeat_data = heartbeat_data_row["raw"]
         except Exception as exc:
-            logging.warning("AAS sync: could not load heartbeat from DB for lab %s: %s", lab_id, exc)
+            logging.warning(
+                "AAS sync: could not load heartbeat from DB for lab %s: %s",
+                str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+                type(exc).__name__,
+            )
 
     result = aas_generator.sync_lab_to_basyx(str(lab_id), host, heartbeat_data)
 
