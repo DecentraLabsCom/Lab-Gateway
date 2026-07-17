@@ -33,7 +33,7 @@ wakeonlan==3.0.0
 # Task scheduler
 APScheduler==3.10.4
 pytz==2024.2
-tzlocal==5.2
+tzlocal==5.4.4
 six==1.16.0
 
 # Database ORM
