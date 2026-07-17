@@ -72,9 +72,8 @@ def internal_error_response(
     """Log the detailed exception and expose only a stable public error contract."""
     request_id = _request_id()
     logging.exception(
-        "Ops Worker request failed context=%s request_id=%s",
+        "Ops Worker request failed context=%s",
         _sanitize_log_value(context),
-        request_id,
     )
     payload: Dict[str, Any] = {
         "error": "Internal server error",

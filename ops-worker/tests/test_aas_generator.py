@@ -109,7 +109,9 @@ class TestBuildNameplateSubmodel:
 
     def test_semantic_id_present(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)
-        assert "admin-shell.io" in sm["semanticId"]["keys"][0]["value"]
+        assert sm["semanticId"]["keys"][0]["value"] == (
+            "https://admin-shell.io/zvei/nameplate/2/0/Nameplate"
+        )
 
 
 # ── TechnicalData submodel ────────────────────────────────────────────
@@ -169,7 +171,9 @@ class TestBuildTechnicalDataSubmodel:
 
     def test_semantic_id_present(self):
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, None)
-        assert "admin-shell.io" in sm["semanticId"]["keys"][0]["value"]
+        assert sm["semanticId"]["keys"][0]["value"] == (
+            "https://admin-shell.io/ZVEI/TechnicalData/Submodel/1/2"
+        )
 
 
 # ── AAS Shell ─────────────────────────────────────────────────────────

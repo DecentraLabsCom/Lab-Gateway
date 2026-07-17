@@ -1725,13 +1725,19 @@ def _validate_storage_key(value: str, field_name: str) -> str:
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", text)
     ):
         raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
-    return text
+    # Return the basename produced by pathlib after the strict single-segment
+    # validation.  Callers never use the original request value as a path.
+    return Path(text).name
 
 
 def _aas_link_path(access_key: str) -> Path:
     """Return the filesystem path for an AAS link override file."""
     safe = _validate_storage_key(access_key, "AAS link key")
-    return _AAS_LINK_DATA_PATH / f"{safe}.aas-link.json"
+    base = _AAS_LINK_DATA_PATH.resolve()
+    candidate = (base / f"{safe}.aas-link.json").resolve()
+    if not _is_within_base(base, candidate):
+        raise HTTPException(status_code=400, detail="Invalid AAS link key")
+    return candidate
 
 
 @app.post("/aas-admin/fmu/{access_key}/aas-link")

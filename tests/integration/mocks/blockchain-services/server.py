@@ -113,9 +113,9 @@ class Handler(BaseHTTPRequestHandler):
         """Handle CORS preflight."""
         self.send_response(204)
         origin = self.headers.get("Origin", "")
-        safe_origin = origin if re.fullmatch(
-            r"https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?", origin
-        ) else "*"
+        # Keep the mock's CORS response deterministic and never reflect an
+        # arbitrary request header into a response header.
+        safe_origin = "http://localhost:3000" if origin == "http://localhost:3000" else "*"
         self.send_header("Access-Control-Allow-Origin", safe_origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")

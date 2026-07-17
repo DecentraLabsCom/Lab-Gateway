@@ -32,6 +32,9 @@ jobs:
         with:
           languages: actions,java,javascript,python,cpp
           queries: security-extended,security-and-quality
+          # Keep documented, reviewed false-positive suppressions in source
+          # code effective for the monorepo scan as well as the Java module scan.
+          packs: codeql/java-queries:AlertSuppression.ql,codeql/java-queries:AlertSuppressionAnnotations.ql
 
       - name: Set up Temurin JDK 21
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5

@@ -105,6 +105,19 @@ def _unit_submodel_id_for_lab(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:unitDefinitions"
 
 
+def _fmu_digest(fmu_path: Path) -> str:
+    """Return a digest only for an FMU inside the configured data directory."""
+    try:
+        base = Path(FMU_DATA_PATH).resolve()
+        candidate = Path(fmu_path).resolve()
+        candidate.relative_to(base)
+        if not candidate.is_file():
+            return ""
+        return hashlib.sha256(candidate.read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        return ""
+
+
 _IDSHORT_UNSAFE_RE = re.compile(r"[^a-zA-Z0-9]+")
 
 
@@ -248,13 +261,7 @@ def build_simulation_submodel(
     ]
 
     # ModelFile (File element per IDTA 02006) — best-effort SHA-256 when fmu_path is available
-    _fmu_sha256 = ""
-    if fmu_path is not None:
-        try:
-            _fmu_sha256 = hashlib.sha256(Path(fmu_path).read_bytes()).hexdigest()
-        except OSError:
-            # The digest is optional metadata; retain the AAS without it.
-            pass
+    _fmu_sha256 = _fmu_digest(fmu_path) if fmu_path is not None else ""
     _model_file: dict = {
         "idShort": "ModelFile",
         "modelType": "File",

@@ -243,10 +243,11 @@ class TestBuildSimulationSubmodel:
         assert props["ModelFile"]["value"] == "/fmu-data/test.fmu"
         assert "extensions" not in props["ModelFile"]  # no hash without fmu_path
 
-    def test_model_file_with_sha256(self, tmp_path):
+    def test_model_file_with_sha256(self, tmp_path, monkeypatch):
         import hashlib
         fmu = tmp_path / "test.fmu"
         fmu.write_bytes(b"fake-fmu-content")
+        monkeypatch.setattr(_mod, "FMU_DATA_PATH", str(tmp_path))
         expected_sha = hashlib.sha256(b"fake-fmu-content").hexdigest()
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, fmu_path=fmu)
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
