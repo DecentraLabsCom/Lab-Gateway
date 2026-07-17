@@ -106,20 +106,48 @@ def _unit_submodel_id_for_lab(lab_id: str) -> str:
 
 
 def _fmu_digest(fmu_path: Path) -> str:
-    """Return a digest only for an FMU inside the configured data directory."""
+    """Return a digest for the configured-root FMU matching its filename.
+
+    The caller supplies the already resolved FMU path to indicate that a hash
+    is wanted, but the file to read is selected from directory entries below
+    ``FMU_DATA_PATH``.  This keeps an arbitrary path from becoming a file
+    system access in this module as well as in the runner.
+    """
     try:
         base = Path(FMU_DATA_PATH).resolve()
-        # fmu_path is supplied by the runner only after it has been resolved
-        # and checked to remain under FMU_DATA_PATH.
-        # codeql[py/path-injection]
-        candidate = Path(fmu_path).resolve()
-        # codeql[py/path-injection]
-        candidate.relative_to(base)
-        # codeql[py/path-injection]
-        if not candidate.is_file():
+        filename = fmu_path.name
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*\.fmu", filename, re.IGNORECASE):
             return ""
-        # candidate was resolved and constrained to FMU_DATA_PATH above.
-        # codeql[py/path-injection]
+
+        def _find_match(directory: Path) -> Optional[Path]:
+            try:
+                entries = directory.iterdir()
+            except OSError:
+                return None
+            for entry in entries:
+                if os.path.normcase(entry.name) != os.path.normcase(filename):
+                    continue
+                try:
+                    candidate = entry.resolve(strict=True)
+                except OSError:
+                    continue
+                try:
+                    candidate.relative_to(base)
+                except ValueError:
+                    continue
+                if candidate.is_file():
+                    return candidate
+            return None
+
+        candidate = _find_match(base)
+        if candidate is None:
+            for child in base.iterdir():
+                if child.is_dir():
+                    candidate = _find_match(child)
+                    if candidate is not None:
+                        break
+        if candidate is None:
+            return ""
         return hashlib.sha256(candidate.read_bytes()).hexdigest()
     except (OSError, ValueError):
         return ""
@@ -267,10 +295,7 @@ def build_simulation_submodel(
         {"idShort": "SyncTimestamp", "modelType": "Property", "valueType": "xs:dateTime", "value": datetime.now(timezone.utc).isoformat()},
     ]
 
-    # ModelFile (File element per IDTA 02006) — best-effort SHA-256 when fmu_path is available
-    # fmu_path is resolved by the FMU runner and _fmu_digest enforces the same
-    # configured root before reading it.
-    # codeql[py/path-injection]
+    # ModelFile (File element per IDTA 02006) — best-effort SHA-256 when fmu_path is available.
     _fmu_sha256 = _fmu_digest(fmu_path) if fmu_path is not None else ""
     _model_file: dict = {
         "idShort": "ModelFile",

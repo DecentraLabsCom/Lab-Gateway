@@ -36,6 +36,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _record_browser_session_started,
         _validate_proxy_generation_supported,
         _shutdown_simulation_executor,
+        _resolve_fmu_path,
     )
     from auth import verify_jwt as _original_verify_jwt
 
@@ -1089,6 +1090,46 @@ def test_list_fmus_returns_only_provisioned_file(tmp_path, monkeypatch):
         assert payload["fmus"][0]["source"] == "provisioned"
     finally:
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
+
+
+def test_resolve_fmu_path_finds_direct_file_without_constructing_user_path(tmp_path):
+    fmu = tmp_path / "direct.fmu"
+    fmu.write_bytes(b"direct")
+
+    with patch("main.FMU_DATA_PATH", str(tmp_path)):
+        assert _resolve_fmu_path("direct.fmu") == fmu.resolve()
+
+
+def test_resolve_fmu_path_finds_one_level_provider_file(tmp_path):
+    fmu = tmp_path / "provider-1" / "provider.fmu"
+    fmu.parent.mkdir()
+    fmu.write_bytes(b"provider")
+
+    with patch("main.FMU_DATA_PATH", str(tmp_path)):
+        assert _resolve_fmu_path("provider.fmu") == fmu.resolve()
+
+
+@pytest.mark.parametrize("filename", ["../outside.fmu", "provider/../../outside.fmu", "provider\\outside.fmu"])
+def test_resolve_fmu_path_rejects_path_traversal(tmp_path, filename):
+    with patch("main.FMU_DATA_PATH", str(tmp_path)):
+        with pytest.raises(HTTPException) as exc_info:
+            _resolve_fmu_path(filename)
+    assert exc_info.value.status_code == 400
+
+
+def test_resolve_fmu_path_rejects_symlink_outside_root(tmp_path):
+    outside = tmp_path.parent / "outside.fmu"
+    outside.write_bytes(b"outside")
+    link = tmp_path / "outside.fmu"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are unavailable in this test environment")
+
+    with patch("main.FMU_DATA_PATH", str(tmp_path)):
+        with pytest.raises(HTTPException) as exc_info:
+            _resolve_fmu_path("outside.fmu")
+    assert exc_info.value.status_code == 404
 
 
 def test_list_fmus_requires_access_key():

@@ -5,9 +5,11 @@ Tests the pure generation logic (no BaSyx needed) and the /aas-admin/fmu/{access
 endpoint with mocked BaSyx and FMU reading.
 """
 
-import pytest
+import hashlib
 import sys
 from unittest.mock import patch, MagicMock, AsyncMock
+
+import pytest
 
 # ── Pure generator tests ─────────────────────────────────────────────
 
@@ -255,6 +257,22 @@ class TestBuildSimulationSubmodel:
         sha_ext = next((e for e in props["ModelFile"].get("extensions", []) if e["name"] == "sha256"), None)
         assert sha_ext is not None
         assert sha_ext["value"] == expected_sha
+
+    def test_model_file_hash_never_reads_same_named_file_outside_root(self, tmp_path, monkeypatch):
+        inside = tmp_path / "test.fmu"
+        inside.write_bytes(b"inside-fmu-content")
+        outside_dir = tmp_path.parent / f"{tmp_path.name}-outside"
+        outside_dir.mkdir()
+        outside = outside_dir / "test.fmu"
+        outside.write_bytes(b"outside-fmu-content")
+        monkeypatch.setattr(_aas_mod, "FMU_DATA_PATH", str(tmp_path))
+
+        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, fmu_path=outside)
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        sha_ext = next((e for e in props["ModelFile"].get("extensions", []) if e["name"] == "sha256"), None)
+
+        assert sha_ext is not None
+        assert sha_ext["value"] == hashlib.sha256(b"inside-fmu-content").hexdigest()
 
     def test_simulation_tool_support_structure(self):
         metadata = {**SAMPLE_METADATA, "generationTool": "Modelica v4.1", "fmiVersion": "3.0"}

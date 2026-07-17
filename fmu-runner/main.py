@@ -461,22 +461,36 @@ def _resolve_fmu_path(fmu_filename: str) -> Path:
     base = Path(FMU_DATA_PATH).resolve()
     if not base.is_dir():
         raise HTTPException(status_code=503, detail="FMU data directory is unavailable")
-    # Direct match
-    # The filename has been reduced to one validated storage segment above.
-    # codeql[py/path-injection]
-    direct = (base / fmu_filename).resolve()
-    # direct is normalized and checked against the trusted FMU_DATA_PATH root.
-    # codeql[py/path-injection]
-    if _is_within_base(base, direct) and direct.is_file():
+
+    def _trusted_match(directory: Path) -> Optional[Path]:
+        """Return a matching file already discovered under the trusted root."""
+        try:
+            entries = directory.iterdir()
+        except OSError:
+            return None
+        for entry in entries:
+            # Compare against the directory entry name; never construct a path
+            # by appending the request value to a filesystem path.
+            if os.path.normcase(entry.name) != os.path.normcase(fmu_filename):
+                continue
+            try:
+                resolved = entry.resolve(strict=True)
+            except OSError:
+                continue
+            if _is_within_base(base, resolved) and resolved.is_file():
+                return resolved
+        return None
+
+    # Direct match.  The path comes from directory enumeration, not user input.
+    direct = _trusted_match(base)
+    if direct is not None:
         return direct
-    # Search in provider sub-directories (fmu-data/<provider-wallet>/file.fmu)
+
+    # Search in provider sub-directories (fmu-data/<provider-wallet>/file.fmu).
     for child in base.iterdir():
         if child.is_dir():
-            # codeql[py/path-injection]
-            candidate = (child / fmu_filename).resolve()
-            if not _is_within_base(base, candidate):
-                continue
-            if candidate.is_file():
+            candidate = _trusted_match(child)
+            if candidate is not None:
                 return candidate
     raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
 

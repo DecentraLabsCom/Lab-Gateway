@@ -22,7 +22,14 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
       - name: Show flake outputs
-        run: nix flake show --all-systems
+        run: |
+          for attempt in 1 2 3; do
+            nix flake show --all-systems && exit 0
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          exit 1
 
       - name: Evaluate NixOS configuration
         run: |

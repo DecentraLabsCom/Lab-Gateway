@@ -95,7 +95,7 @@ jobs:
           submodules: recursive
 
       - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
@@ -246,14 +246,14 @@ jobs:
           sha256sum "lab-gateway-full-${{ steps.version.outputs.VERSION }}.sbom.cdx.json" > "lab-gateway-full-${{ steps.version.outputs.VERSION }}.sbom.cdx.json.sha256"
 
       - name: Attest release provenance
-        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
             ${{ env.DIST_DIR }}/lab-gateway-full-${{ steps.version.outputs.VERSION }}.tar.gz
             ${{ env.DIST_DIR }}/lab-gateway-full-${{ steps.version.outputs.VERSION }}.zip
 
       - name: Create Release
-        uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: |
             dist/lab-gateway-full-${{ steps.version.outputs.VERSION }}.tar.gz
