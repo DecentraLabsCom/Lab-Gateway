@@ -13,8 +13,7 @@ import auth
 
 @pytest.fixture(autouse=True)
 def _reset_auth_state(monkeypatch):
-    monkeypatch.setattr(auth, "_jwks_cache", None)
-    monkeypatch.setattr(auth, "_jwks_cache_time", 0.0)
+    monkeypatch.setattr(auth, "_jwks_cache", {"data": None, "fetched_at": 0.0})
     monkeypatch.setattr(auth, "AUTH_JWKS_URL", "https://issuer.example/auth/jwks")
     monkeypatch.setattr(auth, "JWT_ISSUER", None)
     monkeypatch.setattr(auth, "JWT_AUDIENCE", "https://gateway.example/fmu")

@@ -13,7 +13,7 @@ import os
 import logging
 import time
 import hashlib
-from typing import Optional
+from typing import Optional, TypedDict
 from urllib.parse import urlparse
 
 import jwt
@@ -105,26 +105,28 @@ JWT_ISSUER = _resolve_jwt_issuer()
 JWT_AUDIENCE = _normalize_issuer(os.getenv("JWT_AUDIENCE"))
 JWKS_CACHE_TTL = int(os.getenv("JWKS_CACHE_TTL", "300"))  # seconds
 
-_jwks_cache: Optional[dict] = None
-# Used by _fetch_jwks to enforce the configured cache TTL. CodeQL does not
-# connect the global read in the cache check with this write through `global`.
-# codeql[py/unused-global-variable]
-_jwks_cache_time: float = 0.0
+class _JwksCacheState(TypedDict):
+    data: Optional[dict]
+    fetched_at: float
+
+
+_jwks_cache: _JwksCacheState = {"data": None, "fetched_at": 0.0}
 
 
 async def _fetch_jwks(*, force: bool = False) -> dict:
     """Fetch JWKS (cached with TTL, or immediately when a new kid appears)."""
-    global _jwks_cache, _jwks_cache_time
-    if not force and _jwks_cache is not None and (time.time() - _jwks_cache_time) < JWKS_CACHE_TTL:
-        return _jwks_cache
+    cached_jwks = _jwks_cache["data"]
+    if not force and cached_jwks is not None and (time.time() - _jwks_cache["fetched_at"]) < JWKS_CACHE_TTL:
+        return cached_jwks
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(AUTH_JWKS_URL)
             resp.raise_for_status()
-            _jwks_cache = resp.json()
-            _jwks_cache_time = time.time()
-            logger.info("Fetched JWKS from %s (%d keys)", AUTH_JWKS_URL, len(_jwks_cache.get("keys", [])))
-            return _jwks_cache
+            fetched_jwks = resp.json()
+            _jwks_cache["data"] = fetched_jwks
+            _jwks_cache["fetched_at"] = time.time()
+            logger.info("Fetched JWKS from %s (%d keys)", AUTH_JWKS_URL, len(fetched_jwks.get("keys", [])))
+            return fetched_jwks
     except Exception as exc:
         logger.error("Failed to fetch JWKS from %s: %s", AUTH_JWKS_URL, exc)
         raise HTTPException(status_code=503, detail="Auth service unavailable") from exc
