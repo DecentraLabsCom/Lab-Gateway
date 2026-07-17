@@ -247,7 +247,7 @@ class TestBuildSimulationSubmodel:
         import hashlib
         fmu = tmp_path / "test.fmu"
         fmu.write_bytes(b"fake-fmu-content")
-        monkeypatch.setattr(_mod, "FMU_DATA_PATH", str(tmp_path))
+        monkeypatch.setattr(_aas_mod, "FMU_DATA_PATH", str(tmp_path))
         expected_sha = hashlib.sha256(b"fake-fmu-content").hexdigest()
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, fmu_path=fmu)
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
