@@ -205,6 +205,60 @@ async def test_fetch_jwks_returns_503_when_upstream_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fetch_jwks_uses_known_stale_keys_when_issuer_is_temporarily_down(monkeypatch):
+    cached = {"keys": [{"kid": "known-key"}]}
+    monkeypatch.setattr(auth, "_jwks_cache", {"data": cached, "fetched_at": 1000.0})
+    monkeypatch.setattr(auth, "JWKS_STALE_IF_ERROR_MAX_SECONDS", 900)
+    monkeypatch.setattr(auth.time, "time", lambda: 1300.0)
+
+    class _AsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url):
+            raise httpx.ConnectError("connection refused", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(auth.httpx, "AsyncClient", _AsyncClient)
+
+    assert await auth._fetch_jwks() == cached
+    assert auth.jwks_health()["status"] == "DEGRADED"
+
+
+@pytest.mark.asyncio
+async def test_fetch_jwks_fails_closed_when_stale_retention_is_exceeded(monkeypatch):
+    cached = {"keys": [{"kid": "known-key"}]}
+    monkeypatch.setattr(auth, "_jwks_cache", {"data": cached, "fetched_at": 1000.0})
+    monkeypatch.setattr(auth, "JWKS_STALE_IF_ERROR_MAX_SECONDS", 900)
+    monkeypatch.setattr(auth.time, "time", lambda: 1901.0)
+
+    class _AsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url):
+            raise httpx.ConnectError("connection refused", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(auth.httpx, "AsyncClient", _AsyncClient)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth._fetch_jwks()
+
+    assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_verify_jwt_token_accepts_valid_rs256_token(monkeypatch, signing_material):
     async def _fake_fetch(*, force=False):
         return signing_material["jwks"]

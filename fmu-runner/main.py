@@ -44,7 +44,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field
 from xml.etree import ElementTree as ET
 
-from auth import verify_jwt, verify_jwt_token
+from auth import verify_jwt, verify_jwt_token, jwks_health
 from fmu_backend import LocalFmuBackend, StationFmuBackend
 from realtime_ws import RealtimeWsManager
 from station_ws_proxy import StationRealtimeWsProxyManager
@@ -1902,7 +1902,15 @@ async def resolve_aas_id(shellId: str = Query(...)):
 @app.get("/health")
 async def health():
     """Backend-aware health check for the active FMU backend mode."""
-    return await _fmu_backend.health()
+    payload = await _fmu_backend.health()
+    auth_status = jwks_health()
+    checks = dict(payload.get("checks") or {})
+    checks["jwks"] = auth_status["status"] == "UP"
+    payload["checks"] = checks
+    payload["auth"] = auth_status
+    if auth_status["status"] != "UP":
+        payload["status"] = "DEGRADED"
+    return payload
 
 
 @app.websocket("/api/v1/fmu/sessions")

@@ -84,6 +84,23 @@ runner.describe("Access handler", function()
         runner.assert.equals("alice", ngx.req.headers["Authorization"])
         runner.assert.equals(nil, ngx.status)
     end)
+
+    runner.it("does not expire a reservation auth token solely because its tunnel was idle", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["guac_token:reservation-token"] = "dlabs-res-user",
+                ["guac_jwt_exp:reservation-token"] = "500",
+                ["guac_jwt_last_seen:reservation-token"] = "100",
+            },
+            config = { jwt_guac_idle_timeout_seconds = 60 },
+            var = { arg_token = "reservation-token" },
+            now = 200,
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals(nil, ngx.status)
+    end)
 end)
 
 return runner

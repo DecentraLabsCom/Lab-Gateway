@@ -633,6 +633,8 @@ services:
       - ISSUER=${ISSUER:-}
       - JWT_ISSUER=${JWT_ISSUER:-}
       - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}
+      - JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-300}
+      - JWKS_STALE_IF_ERROR_MAX_SECONDS=${JWKS_STALE_IF_ERROR_MAX_SECONDS:-900}
       - JWT_AUDIENCE=${FMU_JWT_AUDIENCE:?FMU_JWT_AUDIENCE must be the exact public FMU URL, e.g. https://gateway.example/fmu}
       - AUTH_SESSION_TICKET_ISSUE_URL=${AUTH_SESSION_TICKET_ISSUE_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/issue}
       - AUTH_SESSION_TICKET_REDEEM_URL=${AUTH_SESSION_TICKET_REDEEM_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/redeem}
@@ -711,6 +713,8 @@ services:
       - ISSUER=${ISSUER:-}
       - JWT_ISSUER=${JWT_ISSUER:-}
       - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}
+      - JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-300}
+      - JWKS_STALE_IF_ERROR_MAX_SECONDS=${JWKS_STALE_IF_ERROR_MAX_SECONDS:-900}
       - JWT_AUDIENCE=${FMU_JWT_AUDIENCE:?FMU_JWT_AUDIENCE must be the exact public FMU URL, e.g. https://gateway.example/fmu}
       - SERVER_NAME=${SERVER_NAME}
       - MAX_SIMULATION_TIMEOUT=${FMU_MAX_SIMULATION_TIMEOUT:-300}

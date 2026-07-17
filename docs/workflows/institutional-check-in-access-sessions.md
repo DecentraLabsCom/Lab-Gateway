@@ -115,7 +115,14 @@ The browser submits the code to the gateway with `POST /auth/access`. OpenResty 
 
 ### FMU
 
-FMU uses the same opaque credential but exchanges it server-to-server through the Marketplace BFF. The BFF captures the gateway session identifier and stores up to six reservation-scoped contexts in one encrypted, HttpOnly, same-site Marketplace cookie. Browser simulation, history, result, and proxy-FMU requests remain same-origin; the BFF selects exactly one context by gateway, lab, and canonical reservation, then forwards only `FMU_SESSION=<selected id>` to the gateway.
+FMU uses the same opaque credential but exchanges it server-to-server through the Marketplace BFF. The BFF captures the gateway session identifier as a reservation-scoped resource capability and stores up to six contexts in one encrypted, HttpOnly, same-site Marketplace cookie. Browser simulation, history, result, and proxy-FMU requests remain same-origin; the BFF selects exactly one unexpired capability by gateway, lab, and canonical reservation, then forwards only `FMU_SESSION=<selected id>` to the gateway.
+
+The capability is independent of the 30-minute Marketplace SSO session after
+handoff. SSO is required to create the initial lab-access credential, but later
+FMU control-plane requests use the encrypted resource context until the
+gateway-issued resource expiration or logout removes it. This allows a valid
+60-minute-or-longer reservation to continue without silently reauthenticating
+the Marketplace session halfway through the run.
 
 This removes the dependency on third-party cookies and prevents one tab from replacing another reservation's FMU session. The technical JWT and gateway session identifier are never returned to Marketplace JavaScript. A gateway `401` clears the runner's optimistic session state, performs one controlled reauthentication, and retries the failed operation once. FMU Runner creates a narrower runtime ticket for simulations and generated proxies. That ticket is reusable only within its reservation window so a proxy can reconnect; redemption requires the target gateway's short-lived observer JWT.
 

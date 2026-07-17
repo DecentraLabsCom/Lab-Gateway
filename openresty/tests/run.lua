@@ -17,6 +17,7 @@ local specs = {
     "tests.unit.session_guard_extended_spec",
     "tests.unit.token_revocation_reporter_spec",
     "tests.unit.fmu_access_handler_spec",
+    "tests.unit.fmu_session_revoke_handler_spec",
     "tests.unit.log_handler_spec",
     "tests.unit.log_handler_extended_spec",
     "tests.unit.entrypoint_wrappers_spec",

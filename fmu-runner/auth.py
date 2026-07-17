@@ -104,13 +104,17 @@ JWT_ALGORITHMS = ["RS256", "ES256"]
 JWT_ISSUER = _resolve_jwt_issuer()
 JWT_AUDIENCE = _normalize_issuer(os.getenv("JWT_AUDIENCE"))
 JWKS_CACHE_TTL = int(os.getenv("JWKS_CACHE_TTL", "300"))  # seconds
+JWKS_STALE_IF_ERROR_MAX_SECONDS = max(
+    0, int(os.getenv("JWKS_STALE_IF_ERROR_MAX_SECONDS", "900"))
+)
 
 class _JwksCacheState(TypedDict):
     data: Optional[dict]
     fetched_at: float
+    stale_since: float
 
 
-_jwks_cache: _JwksCacheState = {"data": None, "fetched_at": 0.0}
+_jwks_cache: _JwksCacheState = {"data": None, "fetched_at": 0.0, "stale_since": 0.0}
 
 
 async def _fetch_jwks(*, force: bool = False) -> dict:
@@ -125,11 +129,48 @@ async def _fetch_jwks(*, force: bool = False) -> dict:
             fetched_jwks = resp.json()
             _jwks_cache["data"] = fetched_jwks
             _jwks_cache["fetched_at"] = time.time()
+            _jwks_cache["stale_since"] = 0.0
             logger.info("Fetched JWKS from %s (%d keys)", AUTH_JWKS_URL, len(fetched_jwks.get("keys", [])))
             return fetched_jwks
     except Exception as exc:
         logger.error("Failed to fetch JWKS from %s: %s", AUTH_JWKS_URL, exc)
+        now = time.time()
+        cached_jwks = _jwks_cache.get("data")
+        fetched_at = float(_jwks_cache.get("fetched_at") or 0.0)
+        stale_age = now - fetched_at
+        if (
+            cached_jwks is not None
+            and fetched_at > 0
+            and stale_age >= 0
+            and stale_age <= JWKS_STALE_IF_ERROR_MAX_SECONDS
+        ):
+            if not _jwks_cache.get("stale_since"):
+                _jwks_cache["stale_since"] = now
+            logger.warning(
+                "Using stale JWKS cache after issuer failure (age=%.0fs, max=%.0fs)",
+                stale_age,
+                JWKS_STALE_IF_ERROR_MAX_SECONDS,
+            )
+            return cached_jwks
         raise HTTPException(status_code=503, detail="Auth service unavailable") from exc
+
+
+def jwks_health() -> dict:
+    """Expose stale-key fallback as degraded without weakening key matching."""
+    cached = _jwks_cache.get("data")
+    stale_since = float(_jwks_cache.get("stale_since") or 0.0)
+    if stale_since:
+        return {
+            "status": "DEGRADED",
+            "stale": True,
+            "staleSince": stale_since,
+            "cachedKeys": len((cached or {}).get("keys", [])),
+        }
+    return {
+        "status": "UP",
+        "stale": False,
+        "cachedKeys": len((cached or {}).get("keys", [])),
+    }
 
 
 def _extract_token(request: Request) -> str:

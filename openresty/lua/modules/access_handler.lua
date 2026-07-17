@@ -25,6 +25,14 @@ local function enforce_guac_timeout(ngx, dict)
         reject(ngx, "Unauthorized: Guacamole JWT session expired")
         return true
     end
+    local username = dict:get("guac_token:" .. token)
+    -- Reservation-backed auth tokens are bounded by the lab JWT expiration.
+    -- A quiet WebSocket does not emit token-bearing HTTP requests, so the
+    -- short idle timeout must not invalidate a still-valid reservation.
+    if username and tostring(username):lower():match("^dlabs%-res%-") then
+        dict:set("guac_jwt_last_seen:" .. token, now, math.max(1, exp - now))
+        return false
+    end
     local idle = tonumber(ngx.shared.config:get("jwt_guac_idle_timeout_seconds")) or 60
     local last = tonumber(dict:get("guac_jwt_last_seen:" .. token))
     if last and now - last > idle then
