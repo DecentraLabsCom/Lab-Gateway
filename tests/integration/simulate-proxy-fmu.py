@@ -34,7 +34,7 @@ def _coerce_dimension_extent(value):
     return int(value)
 
 
-def _variable_by_value_reference(model_description):
+def _variables_by_value_reference(model_description):
     return {int(variable.valueReference): variable for variable in model_description.modelVariables}
 
 
@@ -111,6 +111,11 @@ def main() -> int:
         raise SystemExit(f"FMU not found: {fmu_path}")
 
     model_description = read_model_description(str(fmu_path))
+    if not getattr(model_description, "coSimulation", None):
+        raise SystemExit(
+            f"FMU does not declare a CoSimulation interface: {fmu_path}. "
+            "This script only supports CoSimulation FMUs."
+        )
     default_experiment = getattr(model_description, "defaultExperiment", None)
     start_time = float(getattr(default_experiment, "startTime", 0.0) or 0.0)
     default_stop = float(getattr(default_experiment, "stopTime", 0.1) or 0.1)

@@ -77,9 +77,9 @@ def test_native_worker_is_killed_when_isolated_executor_is_forced_to_stop():
             killed.append(True)
 
     executor = object.__new__(ProcessPoolExecutor)
-    executor._processes = {1: FakeProcess()}
+    setattr(executor, "_processes", {1: FakeProcess()})
     shutdown_calls = []
-    executor.shutdown = lambda **kwargs: shutdown_calls.append(kwargs)
+    setattr(executor, "shutdown", lambda **kwargs: shutdown_calls.append(kwargs))
 
     _shutdown_simulation_executor(executor, force=True)
 
@@ -237,7 +237,9 @@ def test_redeem_session_ticket_fails_closed_without_gateway_credentials():
             )
 
     assert exc_info.value.status_code == 503
-    assert exc_info.value.detail["code"] == "SESSION_OBSERVER_NOT_CONFIGURED"
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["code"] == "SESSION_OBSERVER_NOT_CONFIGURED"
     assert fake_client.calls == []
 
 
@@ -654,11 +656,19 @@ def test_proxy_model_description_generates_fmi3_model_description():
     root = ET.fromstring(xml_bytes)
     assert root.attrib["fmiVersion"] == "3.0"
     assert root.attrib["instantiationToken"] == "{proxy-guid}"
-    assert root.find("./CoSimulation").attrib["modelIdentifier"] == "decentralabs_proxy"
+    co_simulation = root.find("./CoSimulation")
+    assert co_simulation is not None
+    assert co_simulation.attrib["modelIdentifier"] == "decentralabs_proxy"
     assert root.find("./ModelVariables/ScalarVariable") is None
-    assert root.find("./ModelVariables/Float64").attrib["name"] == "time"
-    assert root.find("./ModelVariables/Int32").attrib["name"] == "counter"
-    assert root.find("./ModelStructure/Output").attrib["valueReference"] == "1"
+    time_variable = root.find("./ModelVariables/Float64")
+    assert time_variable is not None
+    assert time_variable.attrib["name"] == "time"
+    counter_variable = root.find("./ModelVariables/Int32")
+    assert counter_variable is not None
+    assert counter_variable.attrib["name"] == "counter"
+    output_structure = root.find("./ModelStructure/Output")
+    assert output_structure is not None
+    assert output_structure.attrib["valueReference"] == "1"
 
 
 def test_proxy_model_description_generates_fmi3_dimensioned_variables():
@@ -705,9 +715,13 @@ def test_proxy_model_description_generates_fmi3_dimensioned_variables():
     assert m.attrib["start"] == "3"
     assert u is not None
     assert u.attrib["start"] == "1 2 3"
-    assert u.find("./Dimension").attrib["valueReference"] == "1"
+    u_dimension = u.find("./Dimension")
+    assert u_dimension is not None
+    assert u_dimension.attrib["valueReference"] == "1"
     assert y is not None
-    assert y.find("./Dimension").attrib["valueReference"] == "1"
+    y_dimension = y.find("./Dimension")
+    assert y_dimension is not None
+    assert y_dimension.attrib["valueReference"] == "1"
 
 
 def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
@@ -738,11 +752,13 @@ def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
 
     root = ET.fromstring(xml_bytes)
     binary_el = root.find("./ModelVariables/Binary")
+    assert binary_el is not None
     assert "start" not in binary_el.attrib
     start_el = binary_el.find("Start")
     assert start_el is not None
     assert start_el.attrib["value"] == "0102"
     clock_el = root.find("./ModelVariables/Clock")
+    assert clock_el is not None
     assert "start" not in clock_el.attrib
 
 
@@ -888,7 +904,7 @@ def test_run_executes_simulation(mock_exec, mock_md, mock_resolve, _stub_browser
 @patch("main._resolve_fmu_path")
 @patch("main.read_model_description")
 @patch("main._executor")
-def test_run_does_not_observe_when_worker_submission_fails(
+def test_run_still_observes_when_worker_submission_fails(
     mock_exec,
     mock_md,
     mock_resolve,
