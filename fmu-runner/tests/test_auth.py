@@ -123,8 +123,8 @@ def test_extract_token_prefers_bearer_header():
     assert auth._extract_token(request) == "header-token"
 
 
-def test_extract_token_rejects_cookie_fallback():
-    request = SimpleNamespace(headers={}, cookies={"jti": "legacy-cookie-token"})
+def test_extract_token_requires_bearer_header():
+    request = SimpleNamespace(headers={}, cookies={"jti": "cookie-token"})
 
     with pytest.raises(HTTPException) as exc:
         auth._extract_token(request)

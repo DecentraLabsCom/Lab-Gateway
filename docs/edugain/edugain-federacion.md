@@ -66,9 +66,8 @@ al rotar las claves de firma.
 ## Atributos de identidad
 
 La identidad estable para vincular el PUC procede de los valores normalizados
-`eduPersonPrincipalName` y/o `eduPersonTargetedID`. `NameID` sirve como fallback
-para el correo, pero no sustituye necesariamente a un PUC estable. Los flujos
-de acceso también necesitan una señal institucional de
+`eduPersonPrincipalName` y/o `eduPersonTargetedID`. Los flujos de acceso
+también necesitan una señal institucional de
 `schacHomeOrganization`, afiliación acotada o correo institucional.
 
 | Familia de atributos | Uso |
@@ -76,7 +75,7 @@ de acceso también necesitan una señal institucional de
 | `eduPersonPrincipalName` | Identidad institucional estable |
 | `eduPersonTargetedID` | Identidad estable por pares |
 | `schacHomeOrganization` / afiliación | Vinculación institucional |
-| `mail` / email | Contacto y fallback institucional opcional |
+| `mail` / email | Contacto o señal institucional opcional |
 | `displayName` / `cn` | Visualización y auditoría opcional |
 
 Confirma con el equipo del IdP la publicación de atributos al SP del

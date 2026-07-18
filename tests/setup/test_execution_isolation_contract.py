@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -47,19 +48,19 @@ def test_local_fmu_network_is_internal_and_openresty_is_the_only_shared_edge():
     assert "fmu_local_edge:\n    driver: bridge\n    internal: true" in COMPOSE
 
 
-def test_application_database_credentials_must_not_fallback_to_legacy_mysql_password():
+def test_application_database_credentials_use_only_dedicated_secret_files():
     assert "GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}" not in COMPOSE
     assert "BLOCKCHAIN_MYSQL_PASSWORD:-${MYSQL_PASSWORD}" not in COMPOSE
     assert "OPS_BACKEND_MYSQL_PASSWORD:-${MYSQL_PASSWORD}" not in COMPOSE
     assert "OPS_GUACAMOLE_MYSQL_PASSWORD:-${MYSQL_PASSWORD}" not in COMPOSE
-    assert "GUACAMOLE_MYSQL_PASSWORD:?GUACAMOLE_MYSQL_PASSWORD must be configured" in COMPOSE
-    assert "BLOCKCHAIN_MYSQL_PASSWORD:?BLOCKCHAIN_MYSQL_PASSWORD must be configured" in COMPOSE
-    assert "OPS_BACKEND_MYSQL_PASSWORD:?OPS_BACKEND_MYSQL_PASSWORD must be configured" in COMPOSE
-    assert "OPS_GUACAMOLE_MYSQL_PASSWORD:?OPS_GUACAMOLE_MYSQL_PASSWORD must be configured" in COMPOSE
-    assert "MYSQL_PASSWORD=CHANGE_ME" in ROOT_ENV
+    assert "GUACAMOLE_MYSQL_PASSWORD_FILE: /run/secrets/guacamole_mysql_password" in COMPOSE
+    assert "BLOCKCHAIN_MYSQL_PASSWORD_FILE: /run/secrets/blockchain_mysql_password" in COMPOSE
+    assert "OPS_BACKEND_MYSQL_PASSWORD_FILE=/run/secrets/ops_backend_mysql_password" in COMPOSE
+    assert "OPS_GUACAMOLE_MYSQL_PASSWORD_FILE=/run/secrets/ops_guacamole_mysql_password" in COMPOSE
+    assert not re.search(r"^MYSQL_PASSWORD=", ROOT_ENV, re.MULTILINE)
 
 
-def test_control_and_data_services_do_not_share_the_legacy_flat_bridge():
+def test_control_and_data_services_use_separate_internal_networks():
     openresty = _service_block("openresty")
     blockchain = _service_block("blockchain-services")
     mysql = _service_block("mysql")

@@ -67,9 +67,8 @@ cache-clear operation during a planned IdP signing-key rotation.
 ## Identity attributes
 
 The stable identity used for PUC binding comes from the normalized
-`eduPersonPrincipalName` and/or `eduPersonTargetedID` values. `NameID` is a
-fallback for email extraction, not a substitute for a stable PUC in every
-flow. Access flows also need an institution signal from
+`eduPersonPrincipalName` and/or `eduPersonTargetedID` values. Access flows also
+need an institution signal from
 `schacHomeOrganization`, scoped affiliation or an institution-bound email.
 
 | Attribute family | Use |
@@ -77,7 +76,7 @@ flow. Access flows also need an institution signal from
 | `eduPersonPrincipalName` | Stable institutional identity input |
 | `eduPersonTargetedID` | Pairwise stable identity input |
 | `schacHomeOrganization` / scoped affiliation | Institution binding |
-| `mail` / email | Optional contact and fallback institution signal |
+| `mail` / email | Optional contact or institution signal |
 | `displayName` / `cn` | Optional display/audit value |
 
 Confirm attribute release to the Marketplace SP with the institution's IdP

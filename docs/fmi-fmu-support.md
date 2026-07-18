@@ -207,14 +207,14 @@ WSS  /internal/fmu/sessions
 
 Gateway-to-Station messages preserve `requestId` and include a validated `gatewayContext` containing the effective `labId`, `accessKey`, `reservationKey` and claims. Station independently checks resource, reservation and expiry values before executing a model operation.
 
-## Compatibility and current status
+## Supported clients and current status
 
 | Client/runtime | Status | Notes |
 | --- | --- | --- |
 | Python FMI client (`fmpy`), FMI 2 Co-Simulation | Validated | Proxy loading and execution tests pass. |
 | `fmpy`, FMI 3 scalar Co-Simulation on `win64` | Validated | Live `Stair.fmu` path. |
 | `fmpy`, FMI 3 dimensioned Co-Simulation on `win64` | Validated | Live `StateSpace.fmu` path. |
-| FMI 3 integer family, Binary and Clock runtime support | Implemented/partially validated | Broader tool and model coverage remains a compatibility item. |
+| FMI 3 integer family, Binary and Clock runtime support | Implemented/partially validated | Broader tool and model coverage remains a validation item. |
 | OpenModelica / OMSimulator | Validated | Standalone proxy, composed local+remote simulation, SSP export and stepwise control. |
 | Classic `omc importFMU(...)` | Out of scope | OMSimulator is the intended OpenModelica path. |
 | Simulink / MATLAB | Pending | Requires a manual smoke test where the tool is available. |

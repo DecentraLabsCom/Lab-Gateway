@@ -53,6 +53,22 @@ from station_ws_proxy import StationRealtimeWsProxyManager
 # Configuration
 # ---------------------------------------------------------------------------
 
+def _env_or_secret_file(name: str, default: str = "") -> str:
+    """Read a value from the environment, falling back to a mounted secret."""
+    value = os.getenv(name)
+    if value:
+        return value
+    path = os.getenv(f"{name}_FILE")
+    if not path:
+        return default
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        logging.warning("Unable to read secret file for %s", name)
+        return default
+
+
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
 # Writable store for AAS link override files (separate from read-only fmu-data).
 _AAS_LINK_DATA_PATH = Path(os.getenv("AAS_LINK_DATA_PATH", "/app/data/aas-links"))
@@ -66,7 +82,7 @@ WS_HEARTBEAT_SECONDS = float(os.getenv("WS_HEARTBEAT_SECONDS", "15"))
 WS_EXPIRING_NOTICE_SECONDS = int(os.getenv("WS_EXPIRING_NOTICE_SECONDS", "60"))
 WS_ATTACH_GRACE_SECONDS = int(os.getenv("WS_ATTACH_GRACE_SECONDS", "120"))
 WS_CLEANUP_SECONDS = float(os.getenv("WS_CLEANUP_SECONDS", "15"))
-INTERNAL_WS_TOKEN = os.getenv("FMU_INTERNAL_WS_TOKEN", "")
+INTERNAL_WS_TOKEN = _env_or_secret_file("FMU_INTERNAL_WS_TOKEN")
 AUTH_SESSION_TICKET_ISSUE_URL = os.getenv(
     "AUTH_SESSION_TICKET_ISSUE_URL",
     "http://blockchain-services:8080/auth/fmu/session-ticket/issue",
@@ -75,9 +91,9 @@ AUTH_SESSION_TICKET_REDEEM_URL = os.getenv(
     "AUTH_SESSION_TICKET_REDEEM_URL",
     "http://blockchain-services:8080/auth/fmu/session-ticket/redeem",
 )
-AUTH_SESSION_TICKET_INTERNAL_TOKEN = os.getenv("AUTH_SESSION_TICKET_INTERNAL_TOKEN", "")
+AUTH_SESSION_TICKET_INTERNAL_TOKEN = _env_or_secret_file("AUTH_SESSION_TICKET_INTERNAL_TOKEN")
 SESSION_OBSERVER_GATEWAY_ID = os.getenv("SESSION_OBSERVER_GATEWAY_ID", "").strip().lower()
-SESSION_OBSERVER_SIGNING_SECRET = os.getenv("SESSION_OBSERVER_SIGNING_SECRET", "").strip()
+SESSION_OBSERVER_SIGNING_SECRET = _env_or_secret_file("SESSION_OBSERVER_SIGNING_SECRET").strip()
 
 
 def _default_access_audit_url() -> str:
@@ -95,7 +111,7 @@ def _default_access_audit_url() -> str:
 ACCESS_AUDIT_URL = os.getenv("ACCESS_AUDIT_URL", "").strip() or _default_access_audit_url()
 FMU_PROXY_RUNTIME_PATH = os.getenv("FMU_PROXY_RUNTIME_PATH", "/app/fmu-proxy-runtime")
 FMU_PROXY_GATEWAY_WS_URL = os.getenv("FMU_PROXY_GATEWAY_WS_URL", "")
-FMU_PROXY_SIGNING_KEY = os.getenv("FMU_PROXY_SIGNING_KEY", "")
+FMU_PROXY_SIGNING_KEY = _env_or_secret_file("FMU_PROXY_SIGNING_KEY")
 FMU_BACKEND_MODE = os.getenv("FMU_BACKEND_MODE", "station").strip().lower()
 FMU_LOCAL_DEV_MODE = os.getenv("FMU_LOCAL_DEV_MODE", "false").strip().lower() in (
     "1", "true", "yes", "on",
@@ -104,7 +120,7 @@ FMU_LOCAL_REALTIME_ENABLED = os.getenv("FMU_LOCAL_REALTIME_ENABLED", "false").st
     "1", "true", "yes", "on",
 )
 FMU_STATION_BASE_URL = os.getenv("FMU_STATION_BASE_URL", "").strip()
-FMU_STATION_INTERNAL_TOKEN = os.getenv("FMU_STATION_INTERNAL_TOKEN", "").strip()
+FMU_STATION_INTERNAL_TOKEN = _env_or_secret_file("FMU_STATION_INTERNAL_TOKEN").strip()
 FMU_STATION_REQUEST_TIMEOUT = float(os.getenv("FMU_STATION_REQUEST_TIMEOUT", "10"))
 FMU_SESSION_OBSERVATION_MAX_ATTEMPTS = max(
     1, int(os.getenv("FMU_SESSION_OBSERVATION_MAX_ATTEMPTS", "3"))
@@ -240,16 +256,13 @@ def _shutdown_simulation_executor(executor: Any, *, force: bool = False) -> None
                     killer()
             except Exception as exc:
                 logger.warning("Unable to terminate FMU worker process: %s", exc)
-    try:
-        executor.shutdown(wait=False, cancel_futures=True)
-    except TypeError:  # Python < 3.9 compatibility for embedded deployments
-        executor.shutdown(wait=False)
+    executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _submit_simulation(*args):
     """Submit work to a fresh one-process pool in production.
 
-    Tests and embedders may replace ``_executor`` with a compatible fake; in
+    Tests may replace ``_executor`` with a lightweight fake; in
     that case the replacement is used directly so the contract remains easy
     to exercise without spawning processes.
     """
@@ -2067,9 +2080,9 @@ async def run_simulation(
         )
         if isinstance(result, dict):
             result = dict(result)
-            # The gateway id is the durable observation key. A legacy Station
-            # response may contain its own executor id, but exposing it would
-            # make the evidence refer to a different job.
+            # The gateway id is the durable observation key. Ignore any
+            # executor identifier returned by Station so evidence stays tied
+            # to the gateway request.
             result["simId"] = sim_id
         return result
     _ensure_local_execution_backend("Simulation run endpoint")

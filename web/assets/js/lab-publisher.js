@@ -1225,27 +1225,6 @@
         `).join('');
     }
 
-    function renderLabsLegacy(labs) {
-        const target = $('labPublisherList');
-        if (!labs.length) {
-            target.classList.add('empty');
-            target.textContent = 'No labs published by this provider wallet yet.';
-            return;
-        }
-        target.classList.remove('empty');
-        target.innerHTML = labs.map(lab => `
-            <div class="lab-row">
-                <div>
-                    <div class="item-title">Lab #${escapeHtml(lab.labId)} ${lab.resourceType === 1 ? 'FMU' : 'Remote'}</div>
-                    <div class="item-meta">${escapeHtml(lab.accessKey || '')} · ${escapeHtml(lab.uri || '')}</div>
-                </div>
-                <div class="item-meta">${escapeHtml(formatRawPriceForUnit(lab.price || '0', resolveLabPriceUnit(lab)))} credits/${escapeHtml(resolveLabPriceUnit(lab))}</div>
-            </div>
-        `).join('');
-    }
-
-    void renderLabsLegacy;
-
     function renderLabs(labs) {
         const target = $('labPublisherList');
         if (!labs.length) {

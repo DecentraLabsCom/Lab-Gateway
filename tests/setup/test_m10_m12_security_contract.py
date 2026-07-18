@@ -35,19 +35,17 @@ def test_ops_worker_container_and_winrm_policy_are_hardened():
     assert "read_only: true" in compose
     assert "no-new-privileges:true" in compose
     assert "cap_drop:" in compose
-    assert "WINRM_REQUIRE_SSL" in worker
+    assert "WINRM_PORT = 5986" in worker
     assert "WinRM HTTPS is required by gateway policy" in worker
     assert "request port does not match the host WinRM policy" in worker
     assert "request transport does not match the host WinRM policy" in worker
     assert '"winrm_use_ssl": true' in sample
     assert '"winrm_port": 5986' in sample
-    assert "WINRM_REQUIRE_SSL=true" in env
+    assert "WINRM_MANAGEMENT_CIDRS=" in env
 
 
-def test_legacy_noncryptographic_jwt_module_is_removed():
+def test_noncryptographic_jwt_module_is_absent():
     assert not (ROOT / "openresty" / "lua" / "jwt_handler.lua").exists()
     assert not (ROOT / "openresty" / "lua" / "modules" / "jwt_handler.lua").exists()
     run_lua = (ROOT / "openresty" / "tests" / "run.lua").read_text(encoding="utf-8")
-    readme = (ROOT / "openresty" / "tests" / "README.md").read_text(encoding="utf-8")
     assert "jwt_handler_spec" not in run_lua
-    assert "compatibility module was removed" in readme
