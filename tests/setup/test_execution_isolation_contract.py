@@ -8,8 +8,6 @@ ROOT_ENV = (ROOT / ".env.example").read_text(encoding="utf-8")
 
 
 def _service_block(service_name: str) -> str:
-    import re
-
     marker_match = re.search(rf"^  {re.escape(service_name)}:\s*$", COMPOSE, re.MULTILINE)
     assert marker_match is not None
     start = marker_match.end()

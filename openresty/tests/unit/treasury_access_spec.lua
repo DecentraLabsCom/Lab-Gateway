@@ -53,7 +53,8 @@ local function run_treasury_access(opts)
     local uri_args = opts.uri_args or {}
     local ngx = ngx_factory.new({
         var = opts.var or {},
-        config = opts.config or {}
+        config = opts.config or {},
+        cache = opts.cache or {}
     })
 
     ngx.req.get_headers = function()
@@ -196,7 +197,10 @@ end)
             },
             var = {
                 remote_addr = "8.8.8.8",
-                cookie_access_token = "secret-token"
+                cookie_access_token = "session-1"
+            },
+            cache = {
+                ["admin_session:billing:session-1"] = "secret-token"
             }
         })
 

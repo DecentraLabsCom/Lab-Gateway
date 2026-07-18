@@ -3,7 +3,7 @@
 
 local bit = require("bit")
 local random = require("resty.random")
-local resty_string = require("resty.string")
+local hex = require("modules.hex")
 local token = os.getenv("ADMIN_ACCESS_TOKEN") or ""
 local config = ngx.shared and ngx.shared.config
 local lite_mode = config and config:get("lite_mode")
@@ -278,7 +278,7 @@ if session_id and ngx.shared.cache then
         if not csrf_bytes then
             return deny_forbidden("Forbidden: CSRF protection is unavailable.")
         end
-        expected_csrf = resty_string.to_hex(csrf_bytes)
+        expected_csrf = hex.encode(csrf_bytes)
         if not ngx.shared.cache:set(csrf_key, expected_csrf, csrf_max_age) then
             return deny_forbidden("Forbidden: CSRF protection is unavailable.")
         end

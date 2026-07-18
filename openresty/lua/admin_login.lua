@@ -4,7 +4,7 @@
 
 local bit = require("bit")
 local random = require("resty.random")
-local resty_string = require("resty.string")
+local hex = require("modules.hex")
 
 local function fail(status, message)
     ngx.status = status
@@ -74,7 +74,7 @@ local session_id = random.bytes(32, true)
 if not session_id then
     return fail(503, "Administrative session service unavailable")
 end
-session_id = resty_string.to_hex(session_id)
+session_id = hex.encode(session_id)
 local session_scope = is_lab and "lab" or "billing"
 local session_cache = ngx.shared.cache
 if not session_cache or not session_cache:set("admin_session:" .. session_scope .. ":" .. session_id, expected, max_age) then

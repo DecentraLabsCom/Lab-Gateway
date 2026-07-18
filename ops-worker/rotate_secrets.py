@@ -118,6 +118,7 @@ def _backup_files(
     try:
         os.chmod(backup_dir, 0o700)
     except OSError:
+        # Permission hardening is best effort on filesystems without POSIX modes.
         pass
     _harden_windows_file(backup_dir)
     for source in (credentials_file, old_key_file):
@@ -128,6 +129,7 @@ def _backup_files(
         try:
             os.chmod(target, 0o600)
         except OSError:
+            # Permission hardening is best effort on filesystems without POSIX modes.
             pass
         _harden_windows_file(target)
 
@@ -193,6 +195,7 @@ def rotate_credentials(
     try:
         os.chmod(credentials_file, 0o600)
     except OSError:
+        # Permission hardening is best effort on filesystems without POSIX modes.
         pass
     _harden_windows_file(credentials_file)
 
@@ -235,6 +238,7 @@ def main() -> int:
         )
     except (OSError, RuntimeError) as exc:
         parser.error(str(exc))
+        return 2
     print(f"Rotadas {count} credenciales; copia de seguridad: {backup_dir}")
     print(f"Nueva clave escrita en: {args.new_key_file}")
     return 0

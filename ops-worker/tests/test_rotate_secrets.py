@@ -1,10 +1,12 @@
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
+import rotate_secrets
 from rotate_secrets import rotate_credentials
 
 
@@ -60,3 +62,26 @@ def test_rotation_rejects_corrupt_entry_without_mutating_files(tmp_path, monkeyp
 
     assert credentials_file.read_bytes() == before
     assert not new_key_file.exists()
+
+
+def test_main_returns_error_status_if_parser_error_hook_returns(tmp_path, monkeypatch):
+    def fail_rotation(*_args):
+        raise RuntimeError("rotation failed")
+
+    monkeypatch.setattr(rotate_secrets, "rotate_credentials", fail_rotation)
+    monkeypatch.setattr(rotate_secrets.argparse.ArgumentParser, "error", lambda _self, _message: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "rotate_secrets",
+            "--credentials-file",
+            str(tmp_path / "credentials.json"),
+            "--old-key-file",
+            str(tmp_path / "old.key"),
+            "--new-key-file",
+            str(tmp_path / "new.key"),
+        ],
+    )
+
+    assert rotate_secrets.main() == 2

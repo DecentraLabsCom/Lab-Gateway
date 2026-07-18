@@ -264,5 +264,21 @@ class SetupEnvContractTest(unittest.TestCase):
         init_lua = (ROOT / "openresty" / "lua" / "init.lua").read_text(encoding="utf-8")
         self.assertIn("fmu_runner_enabled = false", init_lua)
 
+    def test_lua_random_source_is_available_with_openssl_in_runtime_and_test_runners(self):
+        files = (
+            ROOT / "openresty" / "Dockerfile",
+            ROOT / "openresty" / "tests" / "run-lua-tests.sh",
+            ROOT / "openresty" / "tests" / "run-lua-tests.ps1",
+            ROOT / ".github" / "workflows" / "gateway-tests.yml",
+            ROOT / ".github" / "workflows" / "release.yml",
+        )
+
+        for path in files:
+            with self.subTest(path=path):
+                self.assertIn("lua-resty-openssl", path.read_text(encoding="utf-8"))
+
+        random_module = (ROOT / "openresty" / "lua" / "resty" / "random.lua").read_text(encoding="utf-8")
+        self.assertIn('ffi.load("crypto")', random_module)
+
 if __name__ == "__main__":
     unittest.main()

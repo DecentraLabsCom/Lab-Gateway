@@ -25,6 +25,8 @@ local specs = {
     "tests.unit.public_health_spec",
     "tests.unit.gateway_health_spec",
     "tests.unit.treasury_access_spec",
+    "tests.unit.random_spec",
+    "tests.unit.hex_spec",
     "tests.unit.admin_access_spec",
     "tests.unit.lab_manager_access_spec",
     "tests.unit.lab_manager_admin_access_spec",
