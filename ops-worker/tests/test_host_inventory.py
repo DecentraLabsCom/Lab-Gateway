@@ -131,12 +131,16 @@ def with_dynamic_inventory_state(hosts, guacamole_rows):
             self.original_guacamole_engine = worker.GUACAMOLE_DB_ENGINE
             self.original_base_config_path = worker.CONFIG_PATH
             self.original_config_path = worker.DYNAMIC_CONFIG_PATH
+            self.original_management_cidrs = worker.WINRM_MANAGEMENT_CIDRS
+            self.original_resolved_addresses = worker._resolved_addresses
             with open(self.base_path, "w", encoding="utf-8") as handle:
                 json.dump({"hosts": hosts}, handle)
             worker.HOSTS = worker.HostRegistry({"hosts": hosts})
             worker.GUACAMOLE_DB_ENGINE = make_guacamole_engine(guacamole_rows)
             worker.CONFIG_PATH = self.base_path
             worker.DYNAMIC_CONFIG_PATH = self.dynamic_path
+            worker.WINRM_MANAGEMENT_CIDRS = ["192.168.1.0/24"]
+            worker._resolved_addresses = lambda _address: [worker.ipaddress.ip_address("192.168.1.50")]
             return self
 
         def __exit__(self, exc_type, exc, tb):
@@ -144,6 +148,8 @@ def with_dynamic_inventory_state(hosts, guacamole_rows):
             worker.GUACAMOLE_DB_ENGINE = self.original_guacamole_engine
             worker.CONFIG_PATH = self.original_base_config_path
             worker.DYNAMIC_CONFIG_PATH = self.original_config_path
+            worker.WINRM_MANAGEMENT_CIDRS = self.original_management_cidrs
+            worker._resolved_addresses = self.original_resolved_addresses
             self.tmpdir.cleanup()
 
     return DynamicInventoryState()
@@ -394,7 +400,7 @@ def test_discover_returns_404_for_unknown_connection(client):
     assert "not found" in response.get_data(as_text=True)
 
 
-def test_discover_detects_labstation_http_service(client):
+def test_discover_detects_labstation_http_service(client, monkeypatch):
     guacamole = [{
         "id": 11,
         "name": "Lab Station Candidate",
@@ -403,8 +409,9 @@ def test_discover_detects_labstation_http_service(client):
         "port": "3389",
     }]
 
+    monkeypatch.setattr(worker, "WINRM_PORT", 5986)
     with with_inventory_state([], guacamole), \
-            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5985), \
+            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5986), \
             patch("worker.probe_labstation_http", return_value={
                 "checked": True,
                 "detected": True,
@@ -418,7 +425,7 @@ def test_discover_detects_labstation_http_service(client):
     body = response.get_json()
     assert body["status"] == "labstation-detected"
     assert body["connection"]["hostname"] == "lab-candidate"
-    assert body["checks"]["winrm"]["5985"] is True
+    assert body["checks"]["winrm"]["5986"] is True
     assert body["checks"]["labStationHttp"]["detected"] is True
 
 
@@ -450,11 +457,11 @@ def test_discover_suggests_mac_from_heartbeat_when_winrm_reachable(client, monke
             }
         }
     }
-    monkeypatch.setenv("WINRM_USER_LAB_TELEMETRY", "ops-user")
-    monkeypatch.setenv("WINRM_PASS_LAB_TELEMETRY", "ops-pass")
+    monkeypatch.setattr(worker, "WINRM_PORT", 5986)
 
     with with_inventory_state([], guacamole), \
-            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5985), \
+            patch("worker.winrm_credentials_configured", return_value=True), \
+            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5986), \
             patch("worker.probe_labstation_http", return_value={
                 "checked": True,
                 "detected": False,
@@ -478,8 +485,7 @@ def test_discover_uses_first_readable_heartbeat_path(client, monkeypatch):
         "hostname": "lab-custom-path",
         "port": "3389",
     }]
-    monkeypatch.setenv("WINRM_USER_LAB_CUSTOM_PATH", "ops-user")
-    monkeypatch.setenv("WINRM_PASS_LAB_CUSTOM_PATH", "ops-pass")
+    monkeypatch.setattr(worker, "WINRM_PORT", 5986)
     monkeypatch.setattr(worker, "DISCOVERY_HEARTBEAT_PATHS", [
         r"C:\Missing\heartbeat.json",
         r"D:\LabStation\data\heartbeat.json",
@@ -491,7 +497,8 @@ def test_discover_uses_first_readable_heartbeat_path(client, monkeypatch):
         raise RuntimeError("missing")
 
     with with_inventory_state([], guacamole), \
-            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5985), \
+            patch("worker.winrm_credentials_configured", return_value=True), \
+            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5986), \
             patch("worker.probe_labstation_http", return_value={
                 "checked": True,
                 "detected": False,
@@ -514,12 +521,12 @@ def test_discover_derives_heartbeat_path_from_scheduled_task(client, monkeypatch
         "hostname": "lab-installed",
         "port": "3389",
     }]
-    monkeypatch.setenv("WINRM_USER_LAB_INSTALLED", "ops-user")
-    monkeypatch.setenv("WINRM_PASS_LAB_INSTALLED", "ops-pass")
+    monkeypatch.setattr(worker, "WINRM_PORT", 5986)
     derived_path = r"C:\Users\operator\Downloads\LabStation\labstation\data\telemetry\heartbeat.json"
 
     with with_inventory_state([], guacamole), \
-            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5985), \
+            patch("worker.winrm_credentials_configured", return_value=True), \
+            patch("worker.tcp_port_open", side_effect=lambda host, port, timeout=None: port == 5986), \
             patch("worker.probe_labstation_http", return_value={
                 "checked": True,
                 "detected": False,
@@ -724,7 +731,7 @@ def test_save_winrm_credentials_stores_secret_and_reloads(client, monkeypatch, t
         "port": "3389",
     }]
     monkeypatch.setattr(worker, "OPS_CREDENTIALS_PATH", str(tmp_path / "credentials.json"))
-    monkeypatch.setattr(worker, "OPS_SECRETS_KEY_PATH", str(tmp_path / "secrets.key"))
+    monkeypatch.setenv("OPS_SECRETS_KEY", worker.Fernet.generate_key().decode("ascii"))
     monkeypatch.setattr(worker, "_FERNET", None)
 
     with with_dynamic_inventory_state([], guacamole) as state, \

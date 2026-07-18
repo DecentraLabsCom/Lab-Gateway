@@ -42,7 +42,6 @@ SERVER_NAME=lab.your-institution.edu
 
 # Strong passwords — do not leave defaults
 MYSQL_ROOT_PASSWORD=change_to_strong_password
-MYSQL_PASSWORD=legacy_migration_password
 GUACAMOLE_MYSQL_PASSWORD=change_to_strong_password
 BLOCKCHAIN_MYSQL_PASSWORD=change_to_strong_password
 OPS_BACKEND_MYSQL_PASSWORD=change_to_strong_password
@@ -51,6 +50,8 @@ GUACAMOLE_MYSQL_USER=guacamole_app
 BLOCKCHAIN_MYSQL_USER=blockchain_app
 OPS_BACKEND_MYSQL_USER=ops_backend
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
+OPS_SECRETS_KEY=<stable-fernet-key>
+WINRM_MANAGEMENT_CIDRS=10.7.74.0/24
 
 # Guacamole admin (do not use 'guacadmin' in production)
 GUAC_ADMIN_USER=admin

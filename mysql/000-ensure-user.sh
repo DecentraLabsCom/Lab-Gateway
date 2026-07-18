@@ -69,13 +69,6 @@ reject_if_default() {
 
 reject_if_default "GUAC_ADMIN_PASS" "$GUAC_ADMIN_PASS"
 reject_if_default "MYSQL_ROOT_PASSWORD" "$MYSQL_ROOT_PASSWORD"
-# MYSQL_USER/MYSQL_PASSWORD are legacy migration inputs and may remain as
-# CHANGE_ME once all runtime containers use the dedicated principals below.
-
-# The compose file supplies these values with a legacy fallback so existing
-# installations can be upgraded without hand-editing the container command.
-# They are nevertheless required here: every runtime principal must be
-# explicit before grants are reconciled.
 require_env "GUACAMOLE_MYSQL_USER"
 require_env "GUACAMOLE_MYSQL_PASSWORD"
 require_env "BLOCKCHAIN_MYSQL_USER"
@@ -90,7 +83,6 @@ reject_if_default "BLOCKCHAIN_MYSQL_PASSWORD" "$BLOCKCHAIN_MYSQL_PASSWORD"
 reject_if_default "OPS_BACKEND_MYSQL_PASSWORD" "$OPS_BACKEND_MYSQL_PASSWORD"
 reject_if_default "OPS_GUACAMOLE_MYSQL_PASSWORD" "$OPS_GUACAMOLE_MYSQL_PASSWORD"
 
-escaped_legacy_mysql_user="$(escape_sql "${MYSQL_USER:-}")"
 escaped_guacamole_mysql_user="$(escape_sql "$GUACAMOLE_MYSQL_USER")"
 escaped_guacamole_mysql_password="$(escape_sql "$GUACAMOLE_MYSQL_PASSWORD")"
 escaped_blockchain_mysql_user="$(escape_sql "$BLOCKCHAIN_MYSQL_USER")"
@@ -147,8 +139,7 @@ done
 
 echo "MySQL is ready. Configuring user permissions..."
 
-# Reconcile each principal on every run so we do not depend on init-only
-# scripts. The legacy account is removed once the dedicated accounts exist.
+# Reconcile each principal on every run so grants are deterministic.
 for user in \
     "$GUACAMOLE_MYSQL_USER" \
     "$BLOCKCHAIN_MYSQL_USER" \
@@ -156,13 +147,6 @@ for user in \
     "$OPS_GUACAMOLE_MYSQL_USER"; do
     drop_user_definitions "$(escape_sql "$user")"
 done
-if [ -n "${MYSQL_USER:-}" ] && \
-   [ "$MYSQL_USER" != "$GUACAMOLE_MYSQL_USER" ] && \
-   [ "$MYSQL_USER" != "$BLOCKCHAIN_MYSQL_USER" ] && \
-   [ "$MYSQL_USER" != "$OPS_BACKEND_MYSQL_USER" ] && \
-   [ "$MYSQL_USER" != "$OPS_GUACAMOLE_MYSQL_USER" ]; then
-    drop_user_definitions "$escaped_legacy_mysql_user"
-fi
 
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     CREATE DATABASE IF NOT EXISTS \`${escaped_mysql_database}\`;
@@ -272,15 +256,15 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     JOIN guacamole_entity affected ON permissions.affected_username = affected.name AND guacamole_entity.type = 'USER'
     JOIN guacamole_user            ON guacamole_user.entity_id = affected.entity_id;
 
-    -- Disable legacy default account if a different admin is configured
-    SET @legacy_admin = 'guacadmin';
-    SET @legacy_salt = UNHEX(SHA2(UUID(), 256));
+    -- Disable the bundled default account if a different admin is configured
+    SET @default_admin = 'guacadmin';
+    SET @default_salt = UNHEX(SHA2(UUID(), 256));
     UPDATE guacamole_user u
     JOIN guacamole_entity e ON e.entity_id = u.entity_id
-    SET u.password_hash = UNHEX(SHA2(CONCAT(UUID(), @legacy_salt), 256)),
-        u.password_salt = @legacy_salt,
+    SET u.password_hash = UNHEX(SHA2(CONCAT(UUID(), @default_salt), 256)),
+        u.password_salt = @default_salt,
         u.password_date = NOW()
-    WHERE e.name = @legacy_admin AND @guac_admin_user <> @legacy_admin;
+    WHERE e.name = @default_admin AND @guac_admin_user <> @default_admin;
 EOSQL
 
 # ── Demo Guacamole user (header-auth only, password login disabled) ──────────

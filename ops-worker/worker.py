@@ -7,6 +7,7 @@ import json
 import hmac
 import hashlib
 import base64
+import ipaddress
 import logging
 import os
 import re
@@ -34,6 +35,22 @@ import aas_generator
 APP = Flask(__name__)
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _env_or_secret_file(name: str, default: str = "") -> str:
+    """Read a value from the environment, falling back to a mounted secret."""
+    value = os.getenv(name)
+    if value:
+        return value
+    path = os.getenv(f"{name}_FILE")
+    if not path:
+        return default
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        logging.warning("Unable to read secret file for %s", name)
+        return default
 
 
 def _sanitize_log_value(value: Any) -> str:
@@ -94,7 +111,6 @@ def handle_unexpected_exception(exc: Exception):
 CONFIG_PATH = os.getenv("OPS_CONFIG", os.path.join(os.path.dirname(__file__), "hosts.json"))
 DYNAMIC_CONFIG_PATH = os.getenv("OPS_DYNAMIC_CONFIG", "/app/data/hosts.json")
 OPS_CREDENTIALS_PATH = os.getenv("OPS_CREDENTIALS_PATH", "/app/data/winrm-credentials.json")
-OPS_SECRETS_KEY_PATH = os.getenv("OPS_SECRETS_KEY_PATH", "/app/data/ops-secrets.key")
 MYSQL_DSN = os.getenv("MYSQL_DSN")
 GUACAMOLE_MYSQL_DSN = os.getenv("GUACAMOLE_MYSQL_DSN")
 OPS_MYSQL_DATABASE = os.getenv("OPS_MYSQL_DATABASE") or os.getenv("BLOCKCHAIN_MYSQL_DATABASE")
@@ -102,14 +118,11 @@ GUACAMOLE_MYSQL_DATABASE = os.getenv("GUACAMOLE_MYSQL_DATABASE") or os.getenv("M
 MYSQL_HOSTNAME = os.getenv("MYSQL_HOSTNAME") or os.getenv("MYSQL_HOST") or "mysql"
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
 # Database principals are deliberately separate: the worker needs DML on the
-# backend schema and a narrower DML principal on Guacamole's schema.  Keep the
-# legacy variables as a migration fallback for existing installations.
-OPS_MYSQL_USER = os.getenv("OPS_BACKEND_MYSQL_USER") or os.getenv("MYSQL_USER")
-OPS_MYSQL_PASSWORD = os.getenv("OPS_BACKEND_MYSQL_PASSWORD") or os.getenv("MYSQL_PASSWORD")
-GUACAMOLE_MYSQL_USER = os.getenv("OPS_GUACAMOLE_MYSQL_USER") or os.getenv("MYSQL_USER")
-GUACAMOLE_MYSQL_PASSWORD = os.getenv("OPS_GUACAMOLE_MYSQL_PASSWORD") or os.getenv("MYSQL_PASSWORD")
-MYSQL_USER = os.getenv("MYSQL_USER")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
+# backend schema and a narrower DML principal on Guacamole's schema.
+OPS_MYSQL_USER = os.getenv("OPS_BACKEND_MYSQL_USER", "")
+OPS_MYSQL_PASSWORD = _env_or_secret_file("OPS_BACKEND_MYSQL_PASSWORD")
+GUACAMOLE_MYSQL_USER = os.getenv("OPS_GUACAMOLE_MYSQL_USER", "")
+GUACAMOLE_MYSQL_PASSWORD = _env_or_secret_file("OPS_GUACAMOLE_MYSQL_PASSWORD")
 GUACAMOLE_TEMP_USER_CLEANUP_ENABLED = os.getenv(
     "GUACAMOLE_TEMP_USER_CLEANUP_ENABLED",
     "true",
@@ -119,8 +132,8 @@ GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS = max(
     int(os.getenv("GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS", "300")),
 )
 GUACAMOLE_PROVISIONER_TOKEN = (
-    os.getenv("GUACAMOLE_PROVISIONER_TOKEN") or
-    os.getenv("LAB_MANAGER_TOKEN") or
+    _env_or_secret_file("GUACAMOLE_PROVISIONER_TOKEN") or
+    _env_or_secret_file("LAB_MANAGER_TOKEN") or
     ""
 )
 GUACAMOLE_PROVISIONER_TOKEN_HEADER = os.getenv(
@@ -130,24 +143,17 @@ GUACAMOLE_PROVISIONER_TOKEN_HEADER = os.getenv(
 DEFAULT_LABSTATION_EXE = r"C:\LabStation\LabStation.exe"
 WINRM_READ_TIMEOUT = int(os.getenv("OPS_WINRM_READ_TIMEOUT", "30"))
 WINRM_OPERATION_TIMEOUT = int(os.getenv("OPS_WINRM_OPERATION_TIMEOUT", "20"))
-WINRM_REQUIRE_SSL = os.getenv("WINRM_REQUIRE_SSL", "true").strip().lower() not in (
-    "false", "0", "no", "off"
-)
+WINRM_PORT = 5986
 WINRM_ALLOWED_TRANSPORTS = {
     value.strip().lower()
     for value in os.getenv("WINRM_ALLOWED_TRANSPORTS", "ntlm,kerberos,credssp").split(",")
     if value.strip()
 }
-WINRM_ALLOWED_SSL_PORTS = {
-    int(value.strip())
-    for value in os.getenv("WINRM_ALLOWED_SSL_PORTS", "5986").split(",")
-    if value.strip().isdigit()
-}
-WINRM_ALLOWED_PLAINTEXT_PORTS = {
-    int(value.strip())
-    for value in os.getenv("WINRM_ALLOWED_PLAINTEXT_PORTS", "5985").split(",")
-    if value.strip().isdigit()
-}
+WINRM_MANAGEMENT_CIDRS = [
+    value.strip()
+    for value in os.getenv("WINRM_MANAGEMENT_CIDRS", "").split(",")
+    if value.strip()
+]
 ALLOWED_WINRM_COMMANDS = {
     cmd.strip()
     for cmd in os.getenv(
@@ -166,8 +172,8 @@ NOTIFICATION_SERVICE_URL = os.getenv(
 )
 NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER = os.getenv("NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER", "X-Access-Token")
 NOTIFICATION_SERVICE_ACCESS_TOKEN = (
-    os.getenv("NOTIFICATION_SERVICE_ACCESS_TOKEN") or
-    os.getenv("ADMIN_ACCESS_TOKEN")
+    _env_or_secret_file("NOTIFICATION_SERVICE_ACCESS_TOKEN") or
+    _env_or_secret_file("ADMIN_ACCESS_TOKEN")
 )
 NOTIFICATION_SERVICE_ENABLED = os.getenv("NOTIFICATION_SERVICE_ENABLED", "true").strip().lower() not in ("false", "0", "no", "off")
 NOTIFICATION_SERVICE_RETRY_ATTEMPTS = max(0, int(os.getenv("NOTIFICATION_SERVICE_RETRY_ATTEMPTS", "3")))
@@ -186,7 +192,7 @@ ACCESS_AUDIT_URL = os.getenv("ACCESS_AUDIT_URL", "").strip()
 if not ACCESS_AUDIT_URL and not _is_lite_gateway():
     ACCESS_AUDIT_URL = "http://blockchain-services:8080/access-audit/internal/session-observed"
 SESSION_OBSERVER_GATEWAY_ID = os.getenv("SESSION_OBSERVER_GATEWAY_ID", "").strip()
-SESSION_OBSERVER_SIGNING_SECRET = os.getenv("SESSION_OBSERVER_SIGNING_SECRET", "").strip()
+SESSION_OBSERVER_SIGNING_SECRET = _env_or_secret_file("SESSION_OBSERVER_SIGNING_SECRET").strip()
 SESSION_OBSERVATION_OUTBOX_ENABLED = os.getenv(
     "SESSION_OBSERVATION_OUTBOX_ENABLED", "true"
 ).strip().lower() not in ("false", "0", "no", "off")
@@ -202,19 +208,19 @@ SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS = max(
 SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS = max(
     1, int(os.getenv("SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS", "5"))
 )
-SESSION_OBSERVATION_INGEST_TOKEN = os.getenv("SESSION_OBSERVATION_INGEST_TOKEN", "")
+SESSION_OBSERVATION_INGEST_TOKEN = _env_or_secret_file("SESSION_OBSERVATION_INGEST_TOKEN")
 # The Ops Worker is intentionally not a public API.  OpenResty authenticates
 # the operator at the edge and injects this separate, gateway-local credential
 # before proxying to the worker.  Direct callers (including other containers)
 # must still present it; an absent configuration fails closed rather than
 # silently reverting to network-based trust.
-OPS_INTERNAL_AUTH_TOKEN = os.getenv("OPS_INTERNAL_AUTH_TOKEN", "").strip()
+OPS_INTERNAL_AUTH_TOKEN = _env_or_secret_file("OPS_INTERNAL_AUTH_TOKEN").strip()
 OPS_INTERNAL_AUTH_HEADER = os.getenv(
     "OPS_INTERNAL_AUTH_HEADER",
     "X-Ops-Internal-Token",
 ).strip()
 GUAC_ADMIN_USER = os.getenv("GUAC_ADMIN_USER", "")
-GUAC_ADMIN_PASS = os.getenv("GUAC_ADMIN_PASS", "")
+GUAC_ADMIN_PASS = _env_or_secret_file("GUAC_ADMIN_PASS")
 GUAC_API_URL = os.getenv("GUAC_API_URL", "http://guacamole:8080/guacamole/api").rstrip("/")
 GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS = max(
     1, int(os.getenv("GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS", "10"))
@@ -230,11 +236,6 @@ GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS = max(
 )
 HEARTBEAT_SSE_INTERVAL_SECONDS = max(1, int(os.getenv("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")))
 DISCOVERY_TIMEOUT_SECONDS = max(0.2, float(os.getenv("OPS_DISCOVERY_TIMEOUT_SECONDS", "1.5")))
-DISCOVERY_WINRM_PORTS = [
-    int(port.strip())
-    for port in os.getenv("OPS_DISCOVERY_WINRM_PORTS", "5985,5986").split(",")
-    if port.strip().isdigit()
-]
 DISCOVERY_LABSTATION_PORTS = [
     int(port.strip())
     for port in os.getenv("OPS_DISCOVERY_LABSTATION_PORTS", "8765,8088").split(",")
@@ -253,7 +254,6 @@ DISCOVERY_HEARTBEAT_PATHS = [
     ).split(",")
     if path.strip()
 ]
-ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 HTTP_HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 HOST_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$")
@@ -314,30 +314,13 @@ def merge_host_configs(base: Dict[str, Any], dynamic: Dict[str, Any]) -> Dict[st
     return {"hosts": list(merged.values())}
 
 
-def _load_or_create_fernet() -> Fernet:
+def _load_fernet() -> Fernet:
     global _FERNET  # pylint: disable=global-statement
     if _FERNET:
         return _FERNET
-    key = os.getenv("OPS_SECRETS_KEY", "").strip()
+    key = _env_or_secret_file("OPS_SECRETS_KEY").strip()
     if not key:
-        try:
-            if os.path.exists(OPS_SECRETS_KEY_PATH):
-                with open(OPS_SECRETS_KEY_PATH, "rb") as handle:
-                    key = handle.read().decode("ascii").strip()
-            else:
-                os.makedirs(os.path.dirname(OPS_SECRETS_KEY_PATH) or ".", exist_ok=True)
-                key = Fernet.generate_key().decode("ascii")
-                with open(OPS_SECRETS_KEY_PATH, "w", encoding="ascii") as handle:
-                    handle.write(key)
-                    handle.write("\n")
-                try:
-                    os.chmod(OPS_SECRETS_KEY_PATH, 0o600)
-                except OSError:
-                    # The container may use a read-only mount; continue with the generated key.
-                    pass
-                logging.warning("Generated local OPS_SECRETS_KEY at %s; set OPS_SECRETS_KEY explicitly for production backups", OPS_SECRETS_KEY_PATH)
-        except OSError as exc:
-            raise RuntimeError(f"Unable to load or create OPS_SECRETS_KEY: {exc}") from exc
+        raise RuntimeError("OPS_SECRETS_KEY is required to encrypt WinRM credentials")
     _FERNET = Fernet(key.encode("ascii"))
     return _FERNET
 
@@ -385,7 +368,7 @@ def save_winrm_credentials(credential_ref: str, user: str, password: str) -> Non
         raise ValueError("user is required")
     if not str(password or "").strip():
         raise ValueError("password is required")
-    token = _load_or_create_fernet().encrypt(json.dumps({
+    token = _load_fernet().encrypt(json.dumps({
         "user": str(user).strip(),
         "password": str(password),
     }).encode("utf-8")).decode("ascii")
@@ -402,7 +385,7 @@ def load_winrm_credentials(credential_ref: str) -> Optional[Dict[str, str]]:
     if not isinstance(entry, dict) or not entry.get("token"):
         return None
     try:
-        raw = _load_or_create_fernet().decrypt(str(entry["token"]).encode("ascii"))
+        raw = _load_fernet().decrypt(str(entry["token"]).encode("ascii"))
         parsed = json.loads(raw.decode("utf-8"))
     except (InvalidToken, ValueError, TypeError, json.JSONDecodeError) as exc:
         logging.warning(
@@ -423,39 +406,87 @@ def winrm_credentials_configured(credential_ref: str) -> bool:
 
 
 def resolve_host_secret_refs(raw: Dict[str, Any]) -> Dict[str, Any]:
-    # Resolve env-based secrets if they use the form "env:VAR_NAME".
-    # Missing env vars are allowed so UI-provisioned hosts can be visible as
-    # not yet operable without storing plaintext credentials.
+    # Host catalogs contain references only. Credentials are resolved from the
+    # encrypted store at operation time and never copied into the catalog.
     for host in raw.get("hosts", []):
         if not host.get("credential_ref"):
             host["credential_ref"] = host.get("address") or host.get("name")
-        for key in ("winrm_user", "winrm_pass"):
-            val = host.get(key)
-            if isinstance(val, str) and val.startswith("env:"):
-                env_key = val.split(":", 1)[1]
-                env_val = os.getenv(env_key)
-                if not env_val:
-                    logging.warning(
-                        "Missing environment variable '%s' for host '%s' field '%s'",
-                        env_key,
-                        host.get("name", "<unknown>"),
-                        key,
-                    )
-                host[key] = env_val or ""
-        if not host.get("winrm_user") or not host.get("winrm_pass"):
-            creds = load_winrm_credentials(credential_ref_for_host(host))
-            if creds:
-                host["winrm_user"] = creds["user"]
-                host["winrm_pass"] = creds["password"]
-        if not host.get("winrm_user") or not host.get("winrm_pass"):
+        host.pop("winrm_user", None)
+        host.pop("winrm_pass", None)
+        if not winrm_credentials_configured(credential_ref_for_host(host)):
             logging.warning("Missing WinRM credentials for host %s", host.get("name", "<unknown>"))
     return raw
+
+
+def _catalog_bool(value: Any) -> bool:
+    if value is None or value == "":
+        return True
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in ("true", "1", "yes", "on"):
+        return True
+    if normalized in ("false", "0", "no", "off"):
+        return False
+    raise ValueError("winrm_use_ssl must be a boolean")
+
+
+def _resolved_addresses(address: str) -> List[Any]:
+    try:
+        return [ipaddress.ip_address(address)]
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(address, None, type=socket.SOCK_STREAM)
+        except OSError as exc:
+            raise ValueError(f"address '{address}' cannot be resolved") from exc
+        resolved = {ipaddress.ip_address(info[4][0]) for info in infos}
+        if not resolved:
+            raise ValueError(f"address '{address}' cannot be resolved")
+        return list(resolved)
+
+
+def validate_winrm_catalog(config: Dict[str, Any]) -> None:
+    """Reject an invalid Station catalog before it becomes operational."""
+    hosts = config.get("hosts", [])
+    if not hosts:
+        return
+    if not WINRM_MANAGEMENT_CIDRS:
+        raise ValueError("WINRM_MANAGEMENT_CIDRS is required when hosts are configured")
+    try:
+        management_networks = [ipaddress.ip_network(value, strict=False) for value in WINRM_MANAGEMENT_CIDRS]
+    except ValueError as exc:
+        raise ValueError("WINRM_MANAGEMENT_CIDRS contains an invalid network") from exc
+
+    for host in hosts:
+        if not isinstance(host, dict):
+            raise ValueError("every catalog host must be an object")
+        name = str(host.get("name") or "").strip()
+        address = str(host.get("address") or "").strip()
+        if not name or not address:
+            raise ValueError("every catalog host requires name and address")
+        if "winrm_use_ssl" not in host or "winrm_port" not in host:
+            raise ValueError(f"host '{name}' must declare winrm_use_ssl and winrm_port")
+        if not _catalog_bool(host.get("winrm_use_ssl")):
+            raise ValueError(f"host '{name}' must use WinRM HTTPS")
+        configured_port = host.get("winrm_port")
+        if configured_port not in (None, ""):
+            try:
+                configured_port = int(configured_port)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"host '{name}' has an invalid winrm_port") from exc
+            if configured_port != WINRM_PORT:
+                raise ValueError(f"host '{name}' must use WinRM port {WINRM_PORT}")
+        addresses = _resolved_addresses(address)
+        if not any(any(candidate in network for network in management_networks) for candidate in addresses):
+            raise ValueError(f"host '{name}' is outside WINRM_MANAGEMENT_CIDRS")
 
 
 def load_config() -> Dict[str, Any]:
     base = read_hosts_config(CONFIG_PATH, missing_ok=False)
     dynamic = read_hosts_config(DYNAMIC_CONFIG_PATH, missing_ok=True)
-    return resolve_host_secret_refs(merge_host_configs(base, dynamic))
+    merged = merge_host_configs(base, dynamic)
+    validate_winrm_catalog(merged)
+    return resolve_host_secret_refs(merged)
 
 
 class HostRegistry:
@@ -465,8 +496,10 @@ class HostRegistry:
         for host in cfg.get("hosts", []):
             if "name" not in host or "address" not in host:
                 continue
+            host = dict(host)
+            host.pop("winrm_user", None)
+            host.pop("winrm_pass", None)
             key = host["name"].lower()
-            host["quarantined"] = parse_bool(host.get("quarantined"), False)
             self.hosts[key] = host
             for lab_id in host.get("labs", []):
                 lab_key = str(lab_id).strip().lower()
@@ -481,20 +514,10 @@ class HostRegistry:
     def get_by_lab(self, lab_id: Optional[Any]) -> Optional[Dict[str, Any]]:
         if lab_id is None:
             return None
-        host = self.lab_index.get(str(lab_id).strip().lower())
-        if host and host.get("quarantined"):
-            return None
-        return host
+        return self.lab_index.get(str(lab_id).strip().lower())
 
     def all_hosts(self):
-        return [h for h in self.hosts.values() if not h.get("quarantined")]
-
-    def set_quarantine(self, name: str, quarantined: bool) -> bool:
-        host = self.get(name)
-        if not host:
-            return False
-        host["quarantined"] = bool(quarantined)
-        return True
+        return list(self.hosts.values())
 
     def count(self) -> int:
         return len(self.hosts)
@@ -587,10 +610,10 @@ def host_is_up(target: str, timeout: float, probe_port: Optional[int] = None) ->
     # The worker runs in a container and the Lab Station exposes WinRM.  A
     # direct TCP probe keeps the reachability check in-process and avoids
     # passing request data to a shell command.  The port is controlled by the
-    # host configuration; the default follows the gateway's WinRM policy.
+    # Lab Station exposes only the canonical HTTPS WinRM listener.
     if probe_port is None:
-        probe_port = 5986 if WINRM_REQUIRE_SSL else 5985
-    if probe_port not in WINRM_ALLOWED_SSL_PORTS | WINRM_ALLOWED_PLAINTEXT_PORTS:
+        probe_port = WINRM_PORT
+    if probe_port != WINRM_PORT:
         logging.warning("Invalid reachability port rejected")
         return False
     try:
@@ -623,10 +646,12 @@ def _winrm_connection_policy(
     port: Optional[int],
     transport: Optional[str],
 ) -> Tuple[bool, int, str]:
+    if "winrm_use_ssl" not in host or "winrm_port" not in host:
+        raise ValueError("host must declare winrm_use_ssl and winrm_port")
     configured_ssl = _coerce_bool(host.get("winrm_use_ssl"))
-    effective_ssl = WINRM_REQUIRE_SSL if configured_ssl is None else configured_ssl
-    if WINRM_REQUIRE_SSL and not effective_ssl:
+    if configured_ssl is False:
         raise ValueError("WinRM HTTPS is required by gateway policy")
+    effective_ssl = True
 
     requested_ssl = _coerce_bool(use_ssl)
     if requested_ssl is not None and requested_ssl != effective_ssl:
@@ -645,13 +670,14 @@ def _winrm_connection_policy(
             requested_port = int(port)
         except (TypeError, ValueError) as exc:
             raise ValueError("request port is invalid") from exc
+    if configured_port is not None and configured_port != WINRM_PORT:
+        raise ValueError(f"WinRM port must be {WINRM_PORT}")
     if configured_port is not None and requested_port is not None and requested_port != configured_port:
         raise ValueError("request port does not match the host WinRM policy")
 
-    effective_port = requested_port or configured_port or (5986 if effective_ssl else 5985)
-    allowed_ports = WINRM_ALLOWED_SSL_PORTS if effective_ssl else WINRM_ALLOWED_PLAINTEXT_PORTS
-    if effective_port not in allowed_ports:
-        raise ValueError("WinRM port is not allowed by gateway policy")
+    effective_port = requested_port or configured_port
+    if effective_port != WINRM_PORT:
+        raise ValueError(f"WinRM port must be {WINRM_PORT}")
 
     configured_transport = str(host.get("winrm_transport") or "ntlm").strip().lower()
     effective_transport = str(transport or configured_transport).strip().lower()
@@ -662,23 +688,28 @@ def _winrm_connection_policy(
     return effective_ssl, effective_port, effective_transport
 
 
+def _winrm_credentials(host: Dict[str, Any], user: Optional[str], password: Optional[str]) -> Tuple[str, str]:
+    if user or password:
+        raise ValueError("WinRM credentials must be stored through the credentials endpoint")
+    credentials = load_winrm_credentials(credential_ref_for_host(host))
+    if not credentials:
+        raise ValueError("WinRM credentials are required")
+    return credentials["user"], credentials["password"]
+
+
 def winrm_endpoint(host: Dict[str, Any], use_ssl: Optional[bool], port: Optional[int]) -> str:
-    effective_ssl, effective_port, _ = _winrm_connection_policy(host, use_ssl, port, None)
-    scheme = "https" if effective_ssl else "http"
-    return f"{scheme}://{host.get('address')}:{effective_port}/wsman"
+    _, effective_port, _ = _winrm_connection_policy(host, use_ssl, port, None)
+    return f"https://{host.get('address')}:{effective_port}/wsman"
 
 
 def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[list],
                            user: Optional[str], password: Optional[str],
                            transport: Optional[str], use_ssl: Optional[bool],
                            port: Optional[int]) -> Dict[str, Any]:
-    user = user or host.get("winrm_user")
-    password = password or host.get("winrm_pass")
-    if not user or not password:
-        raise ValueError("WinRM credentials are required")
+    user, password = _winrm_credentials(host, user, password)
 
-    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
+    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"https://{host.get('address')}:{effective_port}/wsman"
     exe = host.get("labstation_exe", DEFAULT_LABSTATION_EXE)
     args = args or []
 
@@ -710,13 +741,10 @@ def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[li
 
 def run_remote_powershell(host: Dict[str, Any], script: str, user: Optional[str], password: Optional[str],
                           transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> str:
-    user = user or host.get("winrm_user")
-    password = password or host.get("winrm_pass")
-    if not user or not password:
-        raise ValueError("WinRM credentials are required")
+    user, password = _winrm_credentials(host, user, password)
 
-    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
+    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"https://{host.get('address')}:{effective_port}/wsman"
     session = winrm.Session(endpoint, auth=(user, password), transport=transport)
     result = session.run_ps(script)
     if result.status_code != 0:
@@ -726,13 +754,10 @@ def run_remote_powershell(host: Dict[str, Any], script: str, user: Optional[str]
 
 def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], password: Optional[str],
                      transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> str:
-    user = user or host.get("winrm_user")
-    password = password or host.get("winrm_pass")
-    if not user or not password:
-        raise ValueError("WinRM credentials are required")
+    user, password = _winrm_credentials(host, user, password)
 
-    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
+    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"https://{host.get('address')}:{effective_port}/wsman"
     ps = f"Get-Content -LiteralPath '{path}' -Raw -Encoding UTF8"
 
     session = winrm.Session(endpoint, auth=(user, password), transport=transport)
@@ -745,13 +770,10 @@ def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], passw
 def write_remote_file(host: Dict[str, Any], path: str, contents: str,
                       user: Optional[str], password: Optional[str],
                       transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> None:
-    user = user or host.get("winrm_user")
-    password = password or host.get("winrm_pass")
-    if not user or not password:
-        raise ValueError("WinRM credentials are required")
+    user, password = _winrm_credentials(host, user, password)
 
-    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
+    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"https://{host.get('address')}:{effective_port}/wsman"
     escaped_path = path.replace("'", "''")
     escaped_contents = contents.replace("'", "''")
     ps = f"Set-Content -LiteralPath '{escaped_path}' -Value '{escaped_contents}' -Encoding UTF8"
@@ -765,13 +787,10 @@ def write_remote_file(host: Dict[str, Any], path: str, contents: str,
 def remove_remote_file(host: Dict[str, Any], path: str,
                        user: Optional[str], password: Optional[str],
                        transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> None:
-    user = user or host.get("winrm_user")
-    password = password or host.get("winrm_pass")
-    if not user or not password:
-        raise ValueError("WinRM credentials are required")
+    user, password = _winrm_credentials(host, user, password)
 
-    effective_ssl, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    endpoint = f"{'https' if effective_ssl else 'http'}://{host.get('address')}:{effective_port}/wsman"
+    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
+    endpoint = f"https://{host.get('address')}:{effective_port}/wsman"
     escaped_path = path.replace("'", "''")
     ps = (
         f"if (Test-Path -LiteralPath '{escaped_path}') {{ Remove-Item -LiteralPath '{escaped_path}' -Force }}"
@@ -1521,8 +1540,8 @@ def api_winrm():
             host=host,
             command=command,
             args=args,
-            user=payload.get("user"),
-            password=payload.get("password"),
+            user=None,
+            password=None,
             transport=payload.get("transport"),
             use_ssl=payload.get("use_ssl"),
             port=payload.get("port"),
@@ -1753,7 +1772,7 @@ def _rows_to_operations(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any
             try:
                 payload = json.loads(payload)
             except json.JSONDecodeError:
-                # Optional operation payloads may be legacy/non-JSON values.
+                # Optional operation payloads may contain opaque non-JSON values.
                 pass
         op_entries.append(
             {
@@ -1995,11 +2014,6 @@ def response_looks_like_labstation(response: requests.Response) -> Tuple[bool, O
     return detected, service
 
 
-def normalize_env_name_from_host(host: Any, prefix: str) -> str:
-    normalized = re.sub(r"[^A-Z0-9]+", "_", str(host or "LAB_HOST").upper()).strip("_")
-    return f"{prefix}_{normalized or 'LAB_HOST'}"
-
-
 def normalize_mac(value: Any) -> str:
     candidate = str(value or "").strip()
     if not MAC_RE.fullmatch(candidate):
@@ -2135,19 +2149,16 @@ def build_heartbeat_path_candidates(host: Dict[str, Any]) -> List[str]:
 def discover_heartbeat_hint(hostname: str) -> Dict[str, Any]:
     if not hostname:
         return {"checked": False, "detected": False, "status": "missing-hostname"}
-    user_env = normalize_env_name_from_host(hostname, 'WINRM_USER')
-    pass_env = normalize_env_name_from_host(hostname, 'WINRM_PASS')
-    stored_creds = load_winrm_credentials(hostname) or {}
     temp_host = {
         "name": hostname,
         "address": hostname,
         "credential_ref": hostname,
-        "winrm_user": stored_creds.get("user") or os.getenv(user_env) or "",
-        "winrm_pass": stored_creds.get("password") or os.getenv(pass_env) or "",
         "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": WINRM_PORT,
     }
-    if not temp_host.get("winrm_user") or not temp_host.get("winrm_pass"):
-        return {"checked": False, "detected": False, "status": "missing-winrm-env"}
+    if not winrm_credentials_configured(hostname):
+        return {"checked": False, "detected": False, "status": "missing-winrm-credentials"}
     errors = []
     heartbeat = None
     detected_path = None
@@ -2233,9 +2244,9 @@ def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
         dns_ok = False
 
     winrm_checks = {
-        str(port): tcp_port_open(host, port, DISCOVERY_TIMEOUT_SECONDS)
-        for port in DISCOVERY_WINRM_PORTS
+        str(WINRM_PORT): tcp_port_open(host, WINRM_PORT, DISCOVERY_TIMEOUT_SECONDS)
     }
+    secure_winrm_reachable = winrm_checks[str(WINRM_PORT)]
     labstation_http = probe_labstation_http(host)
     heartbeat_hint = discover_heartbeat_hint(host) if any(winrm_checks.values()) else {
         "checked": False,
@@ -2244,10 +2255,12 @@ def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
     }
     mac_hint = labstation_http.get("suggestedMac") or heartbeat_hint.get("suggestedMac")
 
-    if labstation_http.get("detected") is True:
+    if labstation_http.get("detected") is True and secure_winrm_reachable:
         status = "labstation-detected"
-    elif any(winrm_checks.values()):
+    elif secure_winrm_reachable:
         status = "winrm-reachable"
+    elif labstation_http.get("detected") is True:
+        status = "labstation-detected-without-winrm"
     elif dns_ok:
         status = "host-resolves"
     else:
@@ -2278,15 +2291,6 @@ def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
         },
         "opsHostDraft": ops_host_draft,
     }
-
-
-def require_env_ref_name(value: Any, field: str) -> Tuple[Optional[str], Optional[str]]:
-    candidate = str(value or "").strip()
-    if candidate.startswith("env:"):
-        candidate = candidate.split(":", 1)[1].strip()
-    if not ENV_VAR_NAME_RE.fullmatch(candidate):
-        return None, f"{field} must be an environment variable name like WINRM_USER_LAB_WS_01"
-    return candidate, None
 
 
 def sanitize_host_name(value: Any, fallback: Optional[Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -2397,7 +2401,6 @@ def safe_host_inventory_entry(host: Dict[str, Any]) -> Dict[str, Any]:
         "mac": host.get("mac"),
         "mode": host.get("mode"),
         "labs": [str(lab) for lab in host.get("labs", [])],
-        "quarantined": bool(host.get("quarantined", False)),
         "winrmConfigured": bool(host.get("winrm_user") and host.get("winrm_pass")) or winrm_credentials_configured(credential_ref),
     }
 
@@ -2917,20 +2920,6 @@ def api_aas_sync():
     return jsonify({"host": host_name, "labs": results}), 200
 
 
-@APP.route("/api/hosts/quarantine", methods=["POST"])
-def api_hosts_quarantine():
-    payload = request.get_json(silent=True) or {}
-    name = payload.get("host") or payload.get("name")
-    quarantined = parse_bool(payload.get("quarantined"), True)
-    if not name:
-        return jsonify({"error": "host is required"}), 400
-    with HOSTS_LOCK:
-        ok = HOSTS.set_quarantine(name, quarantined)
-    if not ok:
-        return jsonify({"error": f"host {name} not found"}), 404
-    return jsonify({"host": name, "quarantined": quarantined})
-
-
 @APP.route("/api/hosts/local-mode", methods=["POST"])
 def api_hosts_local_mode():
     payload = request.get_json(force=True, silent=True) or {}
@@ -3027,9 +3016,6 @@ def api_aas_sync_lab(lab_id: str):
     If the lab_id is not mapped, returns 404.
     """
     host = HOSTS.get_by_lab(lab_id)
-    if not host:
-        # Try without quarantine filter (quarantined labs can still have their AAS updated)
-        host = HOSTS.lab_index.get(str(lab_id).strip().lower()) if hasattr(HOSTS, "lab_index") else None
     if not host:
         return jsonify({"error": f"No host mapping found for labId '{lab_id}'"}), 404
 
@@ -3343,11 +3329,11 @@ def session_observation_retry_delay_seconds(attempts: int) -> int:
 
 
 def _encrypt_runtime_secret(value: str) -> str:
-    return _load_or_create_fernet().encrypt(value.encode("utf-8")).decode("ascii")
+    return _load_fernet().encrypt(value.encode("utf-8")).decode("ascii")
 
 
 def _decrypt_runtime_secret(value: str) -> str:
-    return _load_or_create_fernet().decrypt(value.encode("ascii")).decode("utf-8")
+    return _load_fernet().decrypt(value.encode("ascii")).decode("utf-8")
 
 
 def enqueue_guacamole_token_revocation(payload: Mapping[str, Any]) -> bool:

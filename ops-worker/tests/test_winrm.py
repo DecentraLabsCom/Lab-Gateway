@@ -2,6 +2,8 @@ import os
 import sys
 from unittest.mock import patch
 
+import pytest
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -66,19 +68,20 @@ def test_run_labstation_command_requires_credentials():
 
 
 def test_winrm_defaults_to_https_and_rejects_plaintext():
-    host = {"name": "lab-ws-01", "address": "192.168.1.50", "winrm_transport": "ntlm"}
-    original = worker.WINRM_REQUIRE_SSL
-    worker.WINRM_REQUIRE_SSL = True
+    host = {
+        "name": "lab-ws-01",
+        "address": "192.168.1.50",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }
+    endpoint = worker.winrm_endpoint(host, None, None)
+    assert endpoint == "https://192.168.1.50:5986/wsman"
     try:
-        endpoint = worker.winrm_endpoint(host, None, None)
-        assert endpoint == "https://192.168.1.50:5986/wsman"
-        try:
-            worker.winrm_endpoint(host, False, 5985)
-            assert False, "Expected plaintext WinRM to be rejected"
-        except ValueError as exc:
-            assert "HTTPS" in str(exc) or "use_ssl" in str(exc)
-    finally:
-        worker.WINRM_REQUIRE_SSL = original
+        worker.winrm_endpoint(host, False, 5985)
+        assert False, "Expected plaintext WinRM to be rejected"
+    except ValueError as exc:
+        assert "HTTPS" in str(exc) or "use_ssl" in str(exc)
 
 
 def test_winrm_request_cannot_override_host_transport_or_port():
@@ -99,3 +102,31 @@ def test_winrm_request_cannot_override_host_transport_or_port():
         assert False, "Expected host transport policy rejection"
     except ValueError as exc:
         assert "transport" in str(exc)
+
+
+def test_winrm_catalog_fails_closed_on_transport_or_management_vlan():
+    secure_host = {
+        "name": "lab-ws-01",
+        "address": "10.7.74.10",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }
+    original_cidrs = worker.WINRM_MANAGEMENT_CIDRS
+    try:
+        worker.WINRM_MANAGEMENT_CIDRS = []
+        with pytest.raises(ValueError, match="WINRM_MANAGEMENT_CIDRS"):
+            worker.validate_winrm_catalog({"hosts": [secure_host]})
+
+        worker.WINRM_MANAGEMENT_CIDRS = ["10.7.74.0/24"]
+        worker.validate_winrm_catalog({"hosts": [secure_host]})
+
+        insecure_host = {**secure_host, "winrm_use_ssl": False, "winrm_port": 5985}
+        with pytest.raises(ValueError, match="HTTPS"):
+            worker.validate_winrm_catalog({"hosts": [insecure_host]})
+
+        outside_host = {**secure_host, "address": "10.7.75.10"}
+        with pytest.raises(ValueError, match="WINRM_MANAGEMENT_CIDRS"):
+            worker.validate_winrm_catalog({"hosts": [outside_host]})
+    finally:
+        worker.WINRM_MANAGEMENT_CIDRS = original_cidrs

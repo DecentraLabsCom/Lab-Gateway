@@ -4,6 +4,27 @@ set -euo pipefail
 ORIGINAL_ENTRYPOINT="/usr/local/bin/docker-entrypoint.sh"
 ENSURE_SCRIPT="/docker-entrypoint-initdb.d/000-ensure-user.sh"
 
+load_secret() {
+  local variable="$1"
+  local path="$2"
+  if [[ -r "${path}" ]]; then
+    local value
+    value="$(cat "${path}")"
+    export "${variable}=${value}"
+  fi
+}
+
+# Compose secrets are the source of truth. Export them only inside this
+# process so the official MySQL entrypoint and the permission reconciler keep
+# their existing environment-based contracts without exposing values through
+# the Compose service definition.
+load_secret MYSQL_ROOT_PASSWORD /run/secrets/mysql_root_password
+load_secret GUACAMOLE_MYSQL_PASSWORD /run/secrets/guacamole_mysql_password
+load_secret BLOCKCHAIN_MYSQL_PASSWORD /run/secrets/blockchain_mysql_password
+load_secret OPS_BACKEND_MYSQL_PASSWORD /run/secrets/ops_backend_mysql_password
+load_secret OPS_GUACAMOLE_MYSQL_PASSWORD /run/secrets/ops_guacamole_mysql_password
+load_secret GUAC_ADMIN_PASS /run/secrets/guac_admin_pass
+
 if [[ ! -x "${ORIGINAL_ENTRYPOINT}" ]]; then
   echo "Cannot find original MySQL entrypoint at ${ORIGINAL_ENTRYPOINT}" >&2
   exit 1

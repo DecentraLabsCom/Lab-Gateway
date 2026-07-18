@@ -2,6 +2,8 @@
 -- Enforces the access token for non-local clients when configured.
 
 local bit = require("bit")
+local random = require("resty.random")
+local resty_string = require("resty.string")
 local token = os.getenv("ADMIN_ACCESS_TOKEN") or ""
 local config = ngx.shared and ngx.shared.config
 local lite_mode = config and config:get("lite_mode")
@@ -203,15 +205,11 @@ if not network_policy_allows() then
     return deny_forbidden("Forbidden: Wallet and billing access is disabled for this network by dashboard access policy.")
 end
 
-local header_name = os.getenv("ADMIN_ACCESS_TOKEN_HEADER") or os.getenv("TREASURY_TOKEN_HEADER") or "X-Access-Token"
-local cookie_name = os.getenv("ADMIN_ACCESS_TOKEN_COOKIE") or os.getenv("TREASURY_TOKEN_COOKIE") or "access_token"
-
-local function resolve_session(value)
-    if not value or value == "" or not ngx.shared.cache then
-        return value
-    end
-    return ngx.shared.cache:get("admin_session:billing:" .. value) or value
-end
+local header_name = os.getenv("ADMIN_ACCESS_TOKEN_HEADER") or "X-Access-Token"
+local cookie_name = os.getenv("ADMIN_ACCESS_TOKEN_COOKIE") or "access_token"
+local csrf_cookie_name = os.getenv("ADMIN_CSRF_COOKIE") or "dlabs_csrf"
+local csrf_header_name = os.getenv("ADMIN_CSRF_HEADER") or "X-CSRF-Token"
+local csrf_max_age = 900
 
 local function is_tokenized_path(value)
     if not value or value == "" then
@@ -245,11 +243,14 @@ if is_tokenized_request and ngx.var.arg_token and ngx.var.arg_token ~= "" then
 end
 
 local provided = headers[header_name]
+local session_id
 if not provided or provided == "" then
     local cookie_var = "cookie_" .. cookie_name
-    provided = ngx.var[cookie_var]
+    session_id = ngx.var[cookie_var]
+    if session_id and session_id ~= "" and ngx.shared.cache then
+        provided = ngx.shared.cache:get("admin_session:billing:" .. session_id)
+    end
 end
-provided = resolve_session(provided)
 
 if provided and provided ~= "" then
     if not constant_time_eq(provided, token) then
@@ -257,6 +258,48 @@ if provided and provided ~= "" then
     end
 elseif not is_loopback(client_ip) then
     return deny("Unauthorized: Access token required for remote access. " .. token_hint())
+end
+
+-- Browser sessions use an opaque HttpOnly cookie. Bind a separate,
+-- non-HttpOnly token to that session and require it on state-changing calls.
+-- Direct service calls using the configured header remain machine-to-machine
+-- requests and are not exposed to browser CSRF.
+if session_id and ngx.shared.cache then
+    local csrf_key = "admin_csrf:billing:" .. session_id
+    local expected_csrf = ngx.shared.cache:get(csrf_key)
+    local csrf_cookie = ngx.var["cookie_" .. csrf_cookie_name]
+    local method = ngx.req.get_method()
+
+    if not expected_csrf then
+        if method ~= "GET" and method ~= "HEAD" then
+            return deny_forbidden("Forbidden: establish an administrative session before modifying data.")
+        end
+        local csrf_bytes = random.bytes(32, true)
+        if not csrf_bytes then
+            return deny_forbidden("Forbidden: CSRF protection is unavailable.")
+        end
+        expected_csrf = resty_string.to_hex(csrf_bytes)
+        if not ngx.shared.cache:set(csrf_key, expected_csrf, csrf_max_age) then
+            return deny_forbidden("Forbidden: CSRF protection is unavailable.")
+        end
+    end
+
+    if not csrf_cookie or csrf_cookie == "" then
+        if method ~= "GET" and method ~= "HEAD" then
+            return deny_forbidden("Forbidden: CSRF token required.")
+        end
+        ngx.header["Set-Cookie"] = csrf_cookie_name .. "=" .. expected_csrf
+            .. "; Max-Age=" .. csrf_max_age .. "; Path=/; Secure; SameSite=Strict"
+    elseif not constant_time_eq(csrf_cookie, expected_csrf) then
+        return deny_forbidden("Forbidden: invalid CSRF token.")
+    end
+
+    if method == "POST" or method == "PUT" or method == "PATCH" or method == "DELETE" then
+        local provided_csrf = headers[csrf_header_name]
+        if not provided_csrf or not constant_time_eq(provided_csrf, expected_csrf) then
+            return deny_forbidden("Forbidden: CSRF token required.")
+        end
+    end
 end
 
 ngx.req.set_header(header_name, token)

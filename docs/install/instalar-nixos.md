@@ -46,7 +46,16 @@ para la descripción completa de cada variable):
 SERVER_NAME=lab.tu-institucion.edu
 ISSUER=
 MYSQL_ROOT_PASSWORD=contraseña_segura
-MYSQL_PASSWORD=contraseña_segura
+GUACAMOLE_MYSQL_USER=guacamole_app
+GUACAMOLE_MYSQL_PASSWORD=contraseña_segura
+BLOCKCHAIN_MYSQL_USER=blockchain_app
+BLOCKCHAIN_MYSQL_PASSWORD=contraseña_segura
+OPS_BACKEND_MYSQL_USER=ops_backend
+OPS_BACKEND_MYSQL_PASSWORD=contraseña_segura
+OPS_GUACAMOLE_MYSQL_USER=ops_guac
+OPS_GUACAMOLE_MYSQL_PASSWORD=contraseña_segura
+OPS_SECRETS_KEY=<clave-fernet-estable>
+WINRM_MANAGEMENT_CIDRS=10.7.74.0/24
 GUAC_ADMIN_USER=admin
 GUAC_ADMIN_PASS=contraseña_segura
 ADMIN_ACCESS_TOKEN=token_aleatorio

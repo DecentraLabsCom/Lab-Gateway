@@ -50,7 +50,6 @@ SERVER_NAME=lab.your-institution.edu
 ISSUER=
 BLOCKCHAIN_SERVICES_ENABLED=auto
 MYSQL_ROOT_PASSWORD=strong_password
-MYSQL_PASSWORD=legacy_migration_password
 GUACAMOLE_MYSQL_PASSWORD=strong_password
 BLOCKCHAIN_MYSQL_PASSWORD=strong_password
 OPS_BACKEND_MYSQL_PASSWORD=strong_password

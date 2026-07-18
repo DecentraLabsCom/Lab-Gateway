@@ -16,18 +16,15 @@ set "aas_enabled=0"
 set "fmu_runner_enabled=0"
 set "external_aas_url="
 set "existing_mysql_root_password="
-set "existing_mysql_password="
 set "existing_guacamole_mysql_password="
 set "existing_blockchain_mysql_password="
 set "existing_ops_backend_mysql_password="
 set "existing_ops_guacamole_mysql_password="
+set "existing_ops_secrets_key="
 set "existing_basyx_mongo_root_password="
 set "existing_basyx_mongo_password="
 set "existing_aas_allowed_hosts="
 set "existing_aas_service_token="
-set "db_credentials_changed=0"
-set "reset_mysql_volume=0"
-set "mysql_volume_name="
 echo DecentraLabs Gateway - Full Version Setup
 echo ==========================================
 echo.
@@ -71,11 +68,11 @@ echo blockchain-services submodule ready.
 echo.
 
 call :ReadEnvValue "%ROOT_ENV_FILE%" "MYSQL_ROOT_PASSWORD" existing_mysql_root_password
-call :ReadEnvValue "%ROOT_ENV_FILE%" "MYSQL_PASSWORD" existing_mysql_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "GUACAMOLE_MYSQL_PASSWORD" existing_guacamole_mysql_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "BLOCKCHAIN_MYSQL_PASSWORD" existing_blockchain_mysql_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD" existing_ops_backend_mysql_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD" existing_ops_guacamole_mysql_password
+call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_SECRETS_KEY" existing_ops_secrets_key
 call :ReadEnvValue "%ROOT_ENV_FILE%" "BASYX_MONGO_ROOT_PASSWORD" existing_basyx_mongo_root_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "BASYX_MONGO_PASSWORD" existing_basyx_mongo_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" existing_aas_allowed_hosts
@@ -117,9 +114,7 @@ echo Database Passwords
 echo ===================
 echo Enter database passwords (leave empty for auto-generated):
 set "mysql_root_password="
-set "mysql_password="
 set /p "mysql_root_password=MySQL root password: "
-set /p "mysql_password=Guacamole database password: "
 
 if "!mysql_root_password!"=="" (
     if not "!existing_mysql_root_password!"=="" (
@@ -138,23 +133,6 @@ if "!mysql_root_password!"=="" (
     echo Generated root password: !mysql_root_password!
 )
 
-if "!mysql_password!"=="" (
-    if not "!existing_mysql_password!"=="" (
-        call :IsPlaceholderSecret "!existing_mysql_password!"
-        if errorlevel 1 (
-            set "mysql_password=!existing_mysql_password!"
-            echo Reusing existing Guacamole DB password from .env
-        )
-    )
-)
-if "!mysql_password!"=="" (
-    call :GenerateHex 16 generated_hex
-    if not defined generated_hex set "generated_hex=%RANDOM%_%TIME:~9%"
-    set "mysql_password=Gu@c_!generated_hex!"
-    if defined mysql_password set "mysql_password=!mysql_password: =!"
-    echo Generated database password: !mysql_password!
-)
-
 REM Generate independent runtime credentials. These principals are written
 REM to .env without being reused by any other schema or service.
 set "guacamole_mysql_password=!existing_guacamole_mysql_password!"
@@ -169,6 +147,9 @@ if "!guacamole_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "gu
 if "!blockchain_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "blockchain_mysql_password=ChainApp_!generated_hex!"
 if "!ops_backend_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "ops_backend_mysql_password=OpsBackend_!generated_hex!"
 if "!ops_guacamole_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "ops_guacamole_mysql_password=OpsGuac_!generated_hex!"
+set "ops_secrets_key=!existing_ops_secrets_key!"
+if defined ops_secrets_key call :IsPlaceholderSecret "!ops_secrets_key!" && set "ops_secrets_key="
+if "!ops_secrets_key!"=="" for /f "delims=" %%K in ('powershell -NoLogo -NoProfile -Command "[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }) -as [byte[]]).TrimEnd('=') -replace '\+', '-' -replace '/', '_'"') do set "ops_secrets_key=%%K"
 
 REM Bundled BaSyx/Mongo credentials are separate and alphanumeric so they are
 REM safe in the Mongo URI and never reused by MySQL or application principals.
@@ -180,7 +161,6 @@ if "!basyx_mongo_root_password!"=="" call :GenerateHex 16 generated_hex & set "b
 if "!basyx_mongo_password!"=="" call :GenerateHex 16 generated_hex & set "basyx_mongo_password=AasApp_!generated_hex!"
 
 call :UpdateEnv "%ROOT_ENV_FILE%" "MYSQL_ROOT_PASSWORD" "!mysql_root_password!"
-call :UpdateEnv "%ROOT_ENV_FILE%" "MYSQL_PASSWORD" "!mysql_password!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "GUACAMOLE_MYSQL_USER" "guacamole_app"
 call :UpdateEnv "%ROOT_ENV_FILE%" "GUACAMOLE_MYSQL_PASSWORD" "!guacamole_mysql_password!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "BLOCKCHAIN_MYSQL_USER" "blockchain_app"
@@ -189,42 +169,15 @@ call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_BACKEND_MYSQL_USER" "ops_backend"
 call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD" "!ops_backend_mysql_password!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_USER" "ops_guac"
 call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD" "!ops_guacamole_mysql_password!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_SECRETS_KEY" "!ops_secrets_key!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_MONGO_ROOT_USER" "basyx_root"
 call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_MONGO_ROOT_PASSWORD" "!basyx_mongo_root_password!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_MONGO_USER" "aas_app"
 call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_MONGO_PASSWORD" "!basyx_mongo_password!"
 
-set "db_credentials_changed=0"
-if not "!mysql_root_password!"=="!existing_mysql_root_password!" set "db_credentials_changed=1"
-if not "!mysql_password!"=="!existing_mysql_password!" set "db_credentials_changed=1"
-if not "!guacamole_mysql_password!"=="!existing_guacamole_mysql_password!" set "db_credentials_changed=1"
-if not "!blockchain_mysql_password!"=="!existing_blockchain_mysql_password!" set "db_credentials_changed=1"
-if not "!ops_backend_mysql_password!"=="!existing_ops_backend_mysql_password!" set "db_credentials_changed=1"
-if not "!ops_guacamole_mysql_password!"=="!existing_ops_guacamole_mysql_password!" set "db_credentials_changed=1"
-
-for /f %%V in ('powershell -NoLogo -NoProfile -Command "$p=$env:COMPOSE_PROJECT_NAME; if (-not $p) { $p=[IO.Path]::GetFileName((Get-Location).Path).ToLowerInvariant() -replace '[^a-z0-9]','' }; $vol=docker volume ls -q --filter \"label=com.docker.compose.project=$p\" --filter \"label=com.docker.compose.volume=mysql_data\" | Select-Object -First 1; if (-not $vol) { $fallback=($p + '_mysql_data'); docker volume inspect $fallback *> $null; if ($LASTEXITCODE -eq 0) { $vol=$fallback } }; if ($vol) { $vol }"') do set "mysql_volume_name=%%V"
-
-if "!db_credentials_changed!"=="1" if defined mysql_volume_name (
-    echo.
-    echo Detected existing MySQL volume: !mysql_volume_name!
-    echo Database credentials changed in .env, so startup can fail with Access denied ^(1045^).
-    set /p "reset_mysql_input=Reset MySQL volume now to apply new credentials? This removes MySQL data. (y/N): "
-    if defined reset_mysql_input set "reset_mysql_input=!reset_mysql_input: =!"
-    if /i "!reset_mysql_input!"=="y" (
-        set "reset_mysql_volume=1"
-        echo MySQL volume will be reset before startup.
-    ) else if /i "!reset_mysql_input!"=="yes" (
-        set "reset_mysql_volume=1"
-        echo MySQL volume will be reset before startup.
-    ) else (
-        echo Keeping existing MySQL volume. If startup fails, run: docker compose down -v
-    )
-)
-
 echo.
 echo IMPORTANT: Save these passwords securely!
 echo    Root password: !mysql_root_password!
-echo    Database password: !mysql_password!
 echo    Dedicated database principals: guacamole_app, blockchain_app, ops_backend, ops_guac
 echo.
 
@@ -820,11 +773,11 @@ echo.
 
 echo JWT Signing Keys
 echo =================
-echo blockchain-services will generate keys at runtime if missing (volume ./certs).
-if exist certs\private_key.pem (
-    echo private_key.pem already exists in certs\ ^(it will be reused^).
+echo blockchain-services will generate keys at runtime if missing (volume ./blockchain-data).
+if exist blockchain-data\keys\private_key.pem (
+    echo private_key.pem already exists in blockchain-data\keys\ ^(it will be reused^).
 ) else (
-    echo No private_key.pem in certs\; the container will create a new one at startup.
+    echo No private_key.pem in blockchain-data\keys\; the container will create a new one at startup.
 )
 echo.
 echo Certbot (Let's Encrypt) - optional automation
@@ -939,11 +892,7 @@ echo.
 echo Building and starting services...
 echo This may take several minutes on first run...
 
-if "!reset_mysql_volume!"=="1" (
-    call !compose_full! down --remove-orphans -v
-) else (
-    call !compose_full! down --remove-orphans
-)
+call !compose_full! down --remove-orphans
 if errorlevel 1 goto compose_fail
 call !compose_full! build --no-cache
 if errorlevel 1 (
@@ -963,9 +912,6 @@ goto compose_success
 
 :compose_fail
 echo Failed to start services. Check the error messages above.
-if "!db_credentials_changed!"=="1" if defined mysql_volume_name if "!reset_mysql_volume!"=="0" (
-    echo Hint: Existing MySQL volume likely has old credentials. Run: docker compose down -v
-)
 goto docker_start_done
 
 :compose_success

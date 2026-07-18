@@ -45,6 +45,8 @@ export OPS_BACKEND_MYSQL_USER=ops_backend
 export OPS_BACKEND_MYSQL_PASSWORD='strong-backend-password'
 export OPS_GUACAMOLE_MYSQL_USER=ops_guac
 export OPS_GUACAMOLE_MYSQL_PASSWORD='strong-guacamole-password'
+export OPS_SECRETS_KEY='base64-fernet-key'
+export WINRM_MANAGEMENT_CIDRS='10.7.74.0/24'
 export OPS_MYSQL_DATABASE=blockchain_services
 export GUACAMOLE_MYSQL_DATABASE=guacamole_db
 export OPS_POLL_ENABLED=true
@@ -66,6 +68,8 @@ New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and 
       "mac": "00:11:22:33:44:55",
       "credential_ref": "lab-ws-01",
       "winrm_transport": "ntlm",
+      "winrm_use_ssl": true,
+      "winrm_port": 5986,
       "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
       "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl",
       "labs": ["1"]
@@ -83,7 +87,7 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
 - `POST /api/wol`
   - Body: `{ host, mac?, broadcast?, port?, ping_target?, ping_timeout?, attempts? }`
 - `POST /api/winrm`
-  - Body: `{ host, command, args?, user?, password?, transport?, use_ssl?, port? }`
+  - Body: `{ host, command, args?, transport?, use_ssl?, port? }`
   - Runs `C:\LabStation\LabStation.exe <command> <args>` via WinRM. Transport, TLS and port are constrained by the host catalog and gateway policy; HTTPS on port 5986 is the default and request values cannot downgrade or override that policy.
 - `POST /api/heartbeat/poll`
   - Body: `{ host, include_events? }`
@@ -98,15 +102,13 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). Raw WinRM credentials are saved separately.
 - `POST /api/hosts/winrm-credentials`
   - Body: `{ credentialRef, user, password }`
-  - Encrypts and stores WinRM credentials for the configured host.
+  - Encrypts and stores WinRM credentials for the configured host. Credentials are never accepted through `/api/winrm` or stored in the host catalog.
 - `POST /api/reservations/start`
   - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
 - `POST /api/reservations/end`
   - Body: `{ reservationId, host, labId?, release?, releaseArgs?, powerAction? }`
 - `GET /api/reservations/timeline?reservationId=...&limit=...&offset=...`
 - `POST /api/hosts/reload`
-- `POST /api/hosts/quarantine`
-  - Body: `{ host, quarantined }`
 - `POST /api/hosts/local-mode`
 - `GET /api/operations/recent`
 - `POST /api/aas-sync`
@@ -138,22 +140,34 @@ Notification integration knobs:
 Discovery knobs:
 
 - `OPS_DISCOVERY_TIMEOUT_SECONDS` (default `1.5`)
-- `OPS_DISCOVERY_WINRM_PORTS` (default `5985,5986`)
+- WinRM discovery probes the fixed HTTPS listener on port `5986`.
 - `OPS_DISCOVERY_LABSTATION_PORTS` (default `8765,8088`)
 - `OPS_DISCOVERY_LABSTATION_PATHS` (default `/labstation/health,/health`)
 
 WinRM execution policy knobs:
 
-- `WINRM_REQUIRE_SSL` (default `true`); set to `false` only for an explicitly isolated legacy network.
 - `WINRM_ALLOWED_TRANSPORTS` (default `ntlm,kerberos,credssp`).
-- `WINRM_ALLOWED_SSL_PORTS` (default `5986`) and `WINRM_ALLOWED_PLAINTEXT_PORTS` (default `5985`).
+- WinRM always uses HTTPS/TLS on port `5986`.
+- `WINRM_MANAGEMENT_CIDRS` is a comma-separated list of the Station management VLAN CIDRs. It is required when the catalog contains hosts; entries outside it reject startup.
 
 Credential storage knobs:
 
 - `OPS_CREDENTIALS_PATH` (compose default: `/app/data/winrm-credentials.json`)
 - `OPS_SECRETS_KEY` is the production encryption key for WinRM credentials saved from Lab Manager. Generate a Fernet key with:
   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-- `OPS_SECRETS_KEY_PATH` (compose default: `/app/data/ops-secrets.key`) is the fallback local key file used when `OPS_SECRETS_KEY` is not set. This fallback is useful for local pilots, but the file must be backed up with `ops-data`; losing it makes stored credentials undecryptable.
+
+### Fernet key rotation
+
+Rotate the key during a maintenance window, keeping the worker stopped or preventing credential writes:
+
+```powershell
+python .\ops-worker\rotate_secrets.py `
+  --credentials-file .\ops-data\winrm-credentials.json `
+  --old-key-file .\ops-data\ops-secrets.key `
+  --new-key-file .\ops-data\ops-secrets.next.key
+```
+
+The command validates and re-encrypts every entry before changing the store, creates a `backups/ops-secrets-*` directory with restrictive permissions, and never prints secret material. After checking the backup, atomically replace the deployment's `OPS_SECRETS_KEY`/key file with the new key and restart the worker. Back up the new key and credential store together; losing either makes the credentials unrecoverable.
 
 ## Deployment notes
 
@@ -170,9 +184,7 @@ Credential storage knobs:
 - Container runtime uses `waitress` instead of the Flask development server.
 - The Compose image runs as the dedicated `opsworker` UID/GID (matched from `HOST_UID`/`HOST_GID`), with a read-only root filesystem, a small `/tmp` tmpfs, dropped Linux capabilities and Docker's default seccomp profile. Keep the `ops-data` bind mount writable only by that UID/GID.
 - Prefer the Lab Manager `WinRM Credentials` modal for new hosts. It stores encrypted credentials in `OPS_CREDENTIALS_PATH`, keyed by host address.
-- Legacy `env:VAR_NAME` references in `hosts.json` are still supported for static catalogs.
 - `OPS_CONFIG` is the base, usually read-only host catalog.
 - `OPS_DYNAMIC_CONFIG` is the writable dynamic catalog used by Lab Manager provisioning; Docker Compose maps it to `./ops-data/hosts.json`.
 - In production, set `OPS_SECRETS_KEY` to a stable secret and include it in the deployment backup/secret rotation process.
-- If `OPS_SECRETS_KEY` is not set, ops-worker generates a local key at `OPS_SECRETS_KEY_PATH`; this is the alternative for local/single-node deployments.
-- Keep `hosts.json`, `ops-data/hosts.json`, `ops-data/winrm-credentials.json`, and `ops-data/ops-secrets.key` out of git.
+- Keep `hosts.json`, `ops-data/hosts.json`, and `ops-data/winrm-credentials.json` out of git.

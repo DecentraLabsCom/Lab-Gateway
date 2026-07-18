@@ -28,7 +28,7 @@ each Lite owns the complete local management path.
 
 `/ops/health` remains available for service readiness. Every other Ops route is gateway-proxied and subject to the Lab Manager access policy. OpenResty injects the separate `OPS_INTERNAL_AUTH_TOKEN` only after that edge check; the worker rejects direct `/api/*` and `/aas-admin/*` calls without it. The ops worker itself should not be published directly outside the container network.
 
-WinRM credentials are deliberately separate from `hosts.json`. A host refers to a `credential_ref`; the ops worker encrypts the corresponding credentials using `OPS_SECRETS_KEY` in production. The local fallback key at `OPS_SECRETS_KEY_PATH` is appropriate only for single-node pilots and must be backed up with the protected ops data.
+WinRM credentials are deliberately separate from `hosts.json`. A host refers to a `credential_ref`; the ops worker encrypts the corresponding credentials using the required `OPS_SECRETS_KEY`.
 
 ## Host inventory and telemetry
 
@@ -41,6 +41,8 @@ An ops host records the managed address, optional MAC address, credential refere
   "mac": "00:11:22:33:44:55",
   "credential_ref": "lab-ws-01",
   "winrm_transport": "ntlm",
+  "winrm_use_ssl": true,
+  "winrm_port": 5986,
   "heartbeat_path": "C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json",
   "labs": ["1"]
 }
@@ -61,7 +63,6 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `POST /ops/api/hosts/provision` | Create or update a dynamic host after successful discovery. |
 | `POST /ops/api/hosts/winrm-credentials` | Store encrypted credentials for a host reference. |
 | `POST /ops/api/hosts/reload` | Reload the static/dynamic host catalog. |
-| `POST /ops/api/hosts/quarantine` | Quarantine or re-enable a host. |
 | `POST /ops/api/hosts/local-mode` | Set the station local-mode operational flag. |
 | `POST /ops/api/reservations/start` | Start the operational preparation for one reservation. |
 | `POST /ops/api/reservations/end` | Finish the operational cleanup for one reservation. |
@@ -120,7 +121,7 @@ Exit code `0` means success, `1` means completed with warnings, and values of `2
 ## Connectivity requirements
 
 - **Wake-on-LAN:** the gateway can send UDP magic packets to the lab broadcast domain and the Windows firmware/NIC is configured for magic-packet wake.
-- **WinRM:** the gateway can reach the station's management listener. The station pilot setup uses WinRM HTTP on port 5985; production deployments should constrain it to a dedicated management VLAN and prefer TLS/5986 when certificate management is available.
+- **WinRM:** the gateway reaches the Station only through its configured management VLAN, using HTTPS/TLS on port 5986. `WINRM_MANAGEMENT_CIDRS` is mandatory when hosts are configured; startup rejects any Station address outside those networks or any non-HTTPS/non-5986 catalog entry.
 - **Guacamole:** `guacd` can reach the station's configured RDP, VNC, or SSH service over the lab network.
 - **FMU station mode:** when `FMU_BACKEND_MODE=station`, `fmu-runner` can reach `FMU_STATION_BASE_URL` and authenticate with `FMU_STATION_INTERNAL_TOKEN`.
 - **Telemetry:** the gateway's WinRM identity can read the configured heartbeat and optional session-guard event files.

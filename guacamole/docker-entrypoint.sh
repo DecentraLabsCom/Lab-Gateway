@@ -6,6 +6,11 @@
 
 set -e
 
+if [ -r /run/secrets/guacamole_mysql_password ]; then
+  MYSQL_PASSWORD="$(cat /run/secrets/guacamole_mysql_password)"
+  export MYSQL_PASSWORD
+fi
+
 GUAC_HOME="/etc/guacamole"
 PROPERTIES_FILE="${GUAC_HOME}/guacamole.properties"
 

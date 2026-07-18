@@ -359,7 +359,7 @@ The setup scripts protect these files as deployment secrets: Unix uses
 `umask 077`, `.env`/`blockchain-services/.env` mode `0600`, and `0700` state
 directories; Windows removes inherited ACLs and grants only the operator,
 SYSTEM, and Administrators. Keep the files outside source control and back up
-the Ops Worker Fernet key (`OPS_SECRETS_KEY` or its protected key path) before
+the Ops Worker Fernet key (`OPS_SECRETS_KEY`) before
 rotating or rebuilding the host.
 
 #### Gateway Configuration (`.env`)
@@ -383,8 +383,6 @@ HOST_GID=1000
 # Database Configuration
 MYSQL_ROOT_PASSWORD=secure_password
 MYSQL_DATABASE=guacamole_db
-MYSQL_USER=legacy_migration_user
-MYSQL_PASSWORD=legacy_migration_password
 BLOCKCHAIN_MYSQL_DATABASE=blockchain_services
 GUACAMOLE_MYSQL_USER=guacamole_app
 GUACAMOLE_MYSQL_PASSWORD=guacamole_app_password
@@ -434,7 +432,7 @@ CERTBOT_STAGING=0
 
 See [Guacamole Session Policy](docs/guacamole-session-policy.md) for the different timeout and logout behavior of admin, manual non-admin, and reservation/JWT users.
 
-Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and each dedicated database password (defaults like `CHANGE_ME` will stop MySQL from initializing). `MYSQL_USER`/`MYSQL_PASSWORD` are retained only for migration of old volumes. Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` loopback-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/billing endpoints exposed through OpenResty for remote access.
+Use a strong `GUAC_ADMIN_PASS`. Common defaults are rejected at startup to avoid insecure deployments. The same check applies to `MYSQL_ROOT_PASSWORD` and each dedicated database password (defaults like `CHANGE_ME` will stop MySQL from initializing). Set a stable `OPS_SECRETS_KEY` for encrypted WinRM credentials. Set a strong `LAB_MANAGER_TOKEN` (or leave it empty to keep `/ops` disabled and `/lab-manager` loopback-only). Set `ADMIN_ACCESS_TOKEN` to protect wallet/billing endpoints exposed through OpenResty for remote access.
 
 Manual Guacamole logins are protected at both layers: OpenResty limits attempts by source IP and username, while the pinned `guacamole-auth-ban` extension blocks repeated authentication failures by source IP (five failures, five-minute ban by default). Keep the three `BAN_*` values at their defaults unless the operational threat model requires a stricter policy; pair them with an allowlist/VPN and unique administrator credentials for internet-facing deployments.
 

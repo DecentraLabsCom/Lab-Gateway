@@ -21,18 +21,15 @@ certbot_enabled=false
 aas_bundled=false
 fmu_runner_enabled=false
 existing_mysql_root_password=""
-existing_mysql_password=""
 existing_guacamole_mysql_password=""
 existing_blockchain_mysql_password=""
 existing_ops_backend_mysql_password=""
 existing_ops_guacamole_mysql_password=""
+existing_ops_secrets_key=""
 existing_basyx_mongo_root_password=""
 existing_basyx_mongo_password=""
 existing_aas_allowed_hosts=""
 existing_aas_service_token=""
-db_credentials_changed=false
-reset_mysql_volume=false
-mysql_volume_name=""
 
 echo "DecentraLabs Gateway - Full Version Setup"
 echo "=========================================="
@@ -110,25 +107,6 @@ is_placeholder_secret() {
     esac
 }
 
-detect_mysql_volume() {
-    local project_name="${COMPOSE_PROJECT_NAME:-}"
-    local volume_name=""
-
-    if [ -z "$project_name" ]; then
-        project_name="$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
-    fi
-
-    volume_name="$(docker volume ls -q \
-        --filter "label=com.docker.compose.project=${project_name}" \
-        --filter "label=com.docker.compose.volume=mysql_data" | head -n 1)"
-
-    if [ -z "$volume_name" ] && docker volume inspect "${project_name}_mysql_data" >/dev/null 2>&1; then
-        volume_name="${project_name}_mysql_data"
-    fi
-
-    echo "$volume_name"
-}
-
 remove_env_var() {
     local file="$1"
     local key="$2"
@@ -195,11 +173,11 @@ echo "blockchain-services submodule ready."
 echo
 
 existing_mysql_root_password="$(get_env_default "MYSQL_ROOT_PASSWORD" "$ROOT_ENV_FILE")"
-existing_mysql_password="$(get_env_default "MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
 existing_guacamole_mysql_password="$(get_env_default "GUACAMOLE_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
 existing_blockchain_mysql_password="$(get_env_default "BLOCKCHAIN_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
 existing_ops_backend_mysql_password="$(get_env_default "OPS_BACKEND_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
 existing_ops_guacamole_mysql_password="$(get_env_default "OPS_GUACAMOLE_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
+existing_ops_secrets_key="$(get_env_default "OPS_SECRETS_KEY" "$ROOT_ENV_FILE")"
 existing_basyx_mongo_root_password="$(get_env_default "BASYX_MONGO_ROOT_PASSWORD" "$ROOT_ENV_FILE")"
 existing_basyx_mongo_password="$(get_env_default "BASYX_MONGO_PASSWORD" "$ROOT_ENV_FILE")"
 existing_aas_allowed_hosts="$(get_env_default "AAS_ALLOWED_HOSTS" "$ROOT_ENV_FILE")"
@@ -238,7 +216,6 @@ echo "Database Passwords"
 echo "=================="
 echo "Enter database passwords (leave empty for auto-generated):"
 read -p "MySQL root password: " mysql_root_password
-read -p "Guacamole database password: " mysql_password
 
 if [ -z "$mysql_root_password" ]; then
     if [ -n "$existing_mysql_root_password" ] && ! is_placeholder_secret "$existing_mysql_root_password"; then
@@ -247,16 +224,6 @@ if [ -z "$mysql_root_password" ]; then
     else
         mysql_root_password="R00t_$(openssl rand -hex 16 2>/dev/null || echo P@ss_${RANDOM}_$(date +%s))"
         echo "Generated root password: $mysql_root_password"
-    fi
-fi
-
-if [ -z "$mysql_password" ]; then
-    if [ -n "$existing_mysql_password" ] && ! is_placeholder_secret "$existing_mysql_password"; then
-        mysql_password="$existing_mysql_password"
-        echo "Reusing existing Guacamole DB password from .env"
-    else
-        mysql_password="Gu@c_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
-        echo "Generated database password: $mysql_password"
     fi
 fi
 
@@ -279,6 +246,10 @@ fi
 if [ -z "$ops_guacamole_mysql_password" ] || is_placeholder_secret "$ops_guacamole_mysql_password"; then
     ops_guacamole_mysql_password="OpsGuac_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
 fi
+ops_secrets_key="$existing_ops_secrets_key"
+if [ -z "$ops_secrets_key" ] || is_placeholder_secret "$ops_secrets_key"; then
+    ops_secrets_key="$(openssl rand -base64 32 | tr -d '\n=' | tr '+/' '-_')"
+fi
 
 # Bundled BaSyx/Mongo uses separate alphanumeric credentials so they are safe
 # in the Mongo URI and cannot be reused for MySQL or application principals.
@@ -294,7 +265,6 @@ fi
 # Update database credentials only in the gateway root env (.env). The
 # blockchain-services submodule env is kept free of gateway-managed secrets.
 update_env_var "$ROOT_ENV_FILE" "MYSQL_ROOT_PASSWORD" "$mysql_root_password"
-update_env_var "$ROOT_ENV_FILE" "MYSQL_PASSWORD" "$mysql_password"
 update_env_var "$ROOT_ENV_FILE" "GUACAMOLE_MYSQL_USER" "guacamole_app"
 update_env_var "$ROOT_ENV_FILE" "GUACAMOLE_MYSQL_PASSWORD" "$guacamole_mysql_password"
 update_env_var "$ROOT_ENV_FILE" "BLOCKCHAIN_MYSQL_USER" "blockchain_app"
@@ -303,39 +273,15 @@ update_env_var "$ROOT_ENV_FILE" "OPS_BACKEND_MYSQL_USER" "ops_backend"
 update_env_var "$ROOT_ENV_FILE" "OPS_BACKEND_MYSQL_PASSWORD" "$ops_backend_mysql_password"
 update_env_var "$ROOT_ENV_FILE" "OPS_GUACAMOLE_MYSQL_USER" "ops_guac"
 update_env_var "$ROOT_ENV_FILE" "OPS_GUACAMOLE_MYSQL_PASSWORD" "$ops_guacamole_mysql_password"
+update_env_var "$ROOT_ENV_FILE" "OPS_SECRETS_KEY" "$ops_secrets_key"
 update_env_var "$ROOT_ENV_FILE" "BASYX_MONGO_ROOT_USER" "basyx_root"
 update_env_var "$ROOT_ENV_FILE" "BASYX_MONGO_ROOT_PASSWORD" "$basyx_mongo_root_password"
 update_env_var "$ROOT_ENV_FILE" "BASYX_MONGO_USER" "aas_app"
 update_env_var "$ROOT_ENV_FILE" "BASYX_MONGO_PASSWORD" "$basyx_mongo_password"
 
-if [ "$mysql_root_password" != "$existing_mysql_root_password" ] || \
-   [ "$mysql_password" != "$existing_mysql_password" ] || \
-   [ "$guacamole_mysql_password" != "$existing_guacamole_mysql_password" ] || \
-   [ "$blockchain_mysql_password" != "$existing_blockchain_mysql_password" ] || \
-   [ "$ops_backend_mysql_password" != "$existing_ops_backend_mysql_password" ] || \
-   [ "$ops_guacamole_mysql_password" != "$existing_ops_guacamole_mysql_password" ]; then
-    db_credentials_changed=true
-fi
-
-mysql_volume_name="$(detect_mysql_volume)"
-if [ -n "$mysql_volume_name" ] && [ "$db_credentials_changed" = true ]; then
-    echo
-    echo "Detected existing MySQL volume: ${mysql_volume_name}"
-    echo "Database credentials changed in .env, so startup can fail with Access denied (1045)."
-    read -p "Reset MySQL volume now to apply new credentials? This removes MySQL data. (y/N): " reset_mysql_input
-    reset_mysql_input="$(echo "$reset_mysql_input" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
-    if [ "$reset_mysql_input" = "y" ] || [ "$reset_mysql_input" = "yes" ]; then
-        reset_mysql_volume=true
-        echo "MySQL volume will be reset before startup."
-    else
-        echo "Keeping existing MySQL volume. If startup fails, run: docker compose down -v"
-    fi
-fi
-
 echo
 echo "IMPORTANT: Save these passwords securely!"
 echo "   Root password: $mysql_root_password"
-echo "   Database password: $mysql_password"
 echo "   Dedicated database principals: guacamole_app, blockchain_app, ops_backend, ops_guac"
 echo
 
@@ -922,11 +868,11 @@ fi
 echo
 echo "JWT Signing Keys"
 echo "================"
-echo "blockchain-services will generate the key if missing (volume ./certs)."
-if [ -f "certs/private_key.pem" ]; then
-    echo "private_key.pem already exists in certs/ (it will be reused)."
+echo "blockchain-services will generate the key if missing (volume ./blockchain-data)."
+if [ -f "blockchain-data/keys/private_key.pem" ]; then
+    echo "private_key.pem already exists in blockchain-data/keys/ (it will be reused)."
 else
-    echo "No private_key.pem in certs/; the container will create a new one at startup."
+    echo "No private_key.pem in blockchain-data/keys/; the container will create a new one at startup."
 fi
 
 echo
@@ -1106,11 +1052,7 @@ echo "Building and starting services..."
 echo "This may take several minutes on first run..."
 
 set +e
-if [ "$reset_mysql_volume" = true ]; then
-    $compose_full down --remove-orphans -v
-else
-    $compose_full down --remove-orphans
-fi
+$compose_full down --remove-orphans
 $compose_full build --no-cache
 $compose_full $compose_up_args
 compose_result=$?
@@ -1155,9 +1097,6 @@ echo "   * Blockchain Services API: /auth"
     echo "Your blockchain-based authentication system is now running."
 else
     echo "Failed to start services. Check the error messages above."
-    if [ -n "$mysql_volume_name" ] && [ "$db_credentials_changed" = true ] && [ "$reset_mysql_volume" != true ]; then
-        echo "Hint: Existing MySQL volume uses old credentials. Run: $compose_full down -v"
-    fi
 fi
 
 echo

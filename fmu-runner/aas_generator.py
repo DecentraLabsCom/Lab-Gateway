@@ -23,11 +23,27 @@ import httpx
 
 logger = logging.getLogger("fmu-runner.aas")
 
+
+def _env_or_secret_file(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value:
+        return value
+    path = os.getenv(f"{name}_FILE")
+    if not path:
+        return default
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        logger.warning("Unable to read secret file for %s", name)
+        return default
+
+
 # Empty default: if not configured (e.g. Lite mode gateways without --profile aas),
 # sync_fmu_to_basyx returns a disabled result instead of attempting a connection.
 BASYX_AAS_URL = os.getenv("BASYX_AAS_URL", "")
 AAS_ALLOWED_HOSTS = os.getenv("AAS_ALLOWED_HOSTS", "")
-AAS_SERVICE_TOKEN = os.getenv("AAS_SERVICE_TOKEN", "")
+AAS_SERVICE_TOKEN = _env_or_secret_file("AAS_SERVICE_TOKEN")
 AAS_SERVICE_TOKEN_HEADER = os.getenv("AAS_SERVICE_TOKEN_HEADER", "Authorization")
 _BUNDLED_AAS_URL = "http://basyx-aas-server:8081"
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")

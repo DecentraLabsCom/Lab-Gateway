@@ -20,27 +20,18 @@ services:
       # MySQL datasource for persistence (lab_reservations, auth_users)
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
       - SPRING_DATASOURCE_USERNAME=${BLOCKCHAIN_MYSQL_USER:?BLOCKCHAIN_MYSQL_USER must be configured}
-      - SPRING_DATASOURCE_PASSWORD=${BLOCKCHAIN_MYSQL_PASSWORD:?BLOCKCHAIN_MYSQL_PASSWORD must be configured}
-      # Keep unrelated database/Guacamole principals absent from the backend;
-      # this service receives only the explicit credentials above and its own
-      # blockchain-services/.env file.
-      - MYSQL_ROOT_PASSWORD=
-      - MYSQL_USER=
-      - MYSQL_PASSWORD=
-      - GUACAMOLE_MYSQL_USER=
-      - GUACAMOLE_MYSQL_PASSWORD=
-      - OPS_BACKEND_MYSQL_USER=
-      - OPS_BACKEND_MYSQL_PASSWORD=
-      - OPS_GUACAMOLE_MYSQL_USER=
-      - OPS_GUACAMOLE_MYSQL_PASSWORD=
-      - GUAC_ADMIN_USER=
-      - GUAC_ADMIN_PASS=
+      - SPRING_DATASOURCE_PASSWORD_FILE=/run/secrets/blockchain_mysql_password
+      - SPRING_DATASOURCE_PASSWORD=
       - PROVIDER_CONFIG_PATH=/app/data/provider.properties
-      - ADMIN_ACCESS_TOKEN=${ADMIN_ACCESS_TOKEN}
+      - PRIVATE_KEY_PATH=/app/data/keys/private_key.pem
+      - PUBLIC_KEY_PATH=/app/data/keys/public_key.pem
+      - ADMIN_ACCESS_TOKEN_FILE=/run/secrets/admin_access_token
+      - ADMIN_ACCESS_TOKEN=
       - ADMIN_ACCESS_TOKEN_HEADER=${ADMIN_ACCESS_TOKEN_HEADER:-X-Access-Token}
       - ADMIN_ACCESS_TOKEN_COOKIE=${ADMIN_ACCESS_TOKEN_COOKIE:-access_token}
       - ADMIN_ACCESS_TOKEN_REQUIRED=${ADMIN_ACCESS_TOKEN_REQUIRED:-true}
-      - LAB_MANAGER_TOKEN=${LAB_MANAGER_TOKEN}
+      - LAB_MANAGER_TOKEN_FILE=/run/secrets/lab_manager_token
+      - LAB_MANAGER_TOKEN=
       # Do not expose the gateway-to-Ops credential to the backend.
       - OPS_INTERNAL_AUTH_TOKEN=
       - OPS_INTERNAL_AUTH_HEADER=
@@ -54,19 +45,32 @@ services:
       - FMU_DATA_PATH=/app/fmu-data
       - 'SPRING_APPLICATION_JSON={"ethereum":{"gas":{"price":{"default":5},"limit":{"contract":1000000}}}}'
     volumes:
-      - ./certs:/app/config/keys
       - ./blockchain-data:/app/data
       - ./lab-content:/app/lab-content
       - ./fmu-data:/app/fmu-data:ro
     depends_on:
       mysql:
         condition: service_healthy
-    # In Lite mode keep the optional container dormant so the same compose
-    # project can be used for upgrades, but never start the Java backend or
-    # generate a local JWT key. OpenResty selects the remote key exclusively.
+    secrets:
+      - blockchain_mysql_password
+      - admin_access_token
+      - lab_manager_token
+    # In Lite mode keep the optional container dormant; never start the Java
+    # backend or generate a local JWT key. OpenResty selects the remote key.
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        read_secret() {
+          variable="$$1"
+          path="$$2"
+          if [ -r "$$path" ]; then
+            value="$$(cat "$$path")"
+            export "$$variable=$$value"
+          fi
+        }
+        read_secret SPRING_DATASOURCE_PASSWORD /run/secrets/blockchain_mysql_password
+        read_secret ADMIN_ACCESS_TOKEN /run/secrets/admin_access_token
+        read_secret LAB_MANAGER_TOKEN /run/secrets/lab_manager_token
         mode="$${BLOCKCHAIN_SERVICES_ENABLED:-auto}"
         issuer="$${ISSUER:-}"
         server_name="$${SERVER_NAME:-localhost}"
@@ -161,22 +165,22 @@ services:
       - /var/run:size=16M,mode=755
     environment:
       - GUAC_ADMIN_USER=${GUAC_ADMIN_USER}
-      - GUAC_ADMIN_PASS=${GUAC_ADMIN_PASS}
+      - GUAC_ADMIN_PASS_FILE=/run/secrets/guac_admin_pass
       - GUACAMOLE_LOGIN_RATE_LIMIT_PER_MINUTE=${GUACAMOLE_LOGIN_RATE_LIMIT_PER_MINUTE:-10}
       - SERVER_NAME=${SERVER_NAME}
       - HTTPS_PORT=${HTTPS_PORT}
       - HTTP_PORT=${HTTP_PORT}
       - ISSUER=${ISSUER}
       - AUTH_ACCESS_CODE_REDEEM_URL=${AUTH_ACCESS_CODE_REDEEM_URL:-}
-      - AUTH_ACCESS_CODE_REDEEMER_TOKEN=${AUTH_ACCESS_CODE_REDEEMER_TOKEN}
+      - AUTH_ACCESS_CODE_REDEEMER_TOKEN_FILE=/run/secrets/auth_access_code_redeemer_token
       - API_SESSION_TIMEOUT=${API_SESSION_TIMEOUT:-15}
-      - SESSION_OBSERVATION_INGEST_TOKEN=${SESSION_OBSERVATION_INGEST_TOKEN:-}
+      - SESSION_OBSERVATION_INGEST_TOKEN_FILE=/run/secrets/session_observation_ingest_token
       - OPS_SESSION_OBSERVATION_INGEST_URL=${OPS_SESSION_OBSERVATION_INGEST_URL:-http://ops-worker:8081/internal/session-observations}
       - OPS_GUACAMOLE_TOKEN_INGEST_URL=${OPS_GUACAMOLE_TOKEN_INGEST_URL:-http://ops-worker:8081/internal/guacamole-token-revocations}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
       - AUTO_LOGOUT_ON_DISCONNECT=${AUTO_LOGOUT_ON_DISCONNECT:-true}
       - MARKETPLACE_URL=${MARKETPLACE_URL:-https://marketplace-decentralabs.vercel.app}
-      - ADMIN_ACCESS_TOKEN=${ADMIN_ACCESS_TOKEN}
+      - ADMIN_ACCESS_TOKEN_FILE=/run/secrets/admin_access_token
       - ADMIN_ACCESS_TOKEN_HEADER=${ADMIN_ACCESS_TOKEN_HEADER:-X-Access-Token}
       - ADMIN_ACCESS_TOKEN_COOKIE=${ADMIN_ACCESS_TOKEN_COOKIE:-access_token}
       - ADMIN_DASHBOARD_LOCAL_ONLY=${ADMIN_DASHBOARD_LOCAL_ONLY:-true}
@@ -184,22 +188,22 @@ services:
       - SECURITY_ALLOW_PRIVATE_NETWORKS=${SECURITY_ALLOW_PRIVATE_NETWORKS:-true}
       - ADMIN_ALLOWED_CIDRS=${ADMIN_ALLOWED_CIDRS:-}
       - ADMIN_TRUST_FORWARDED_IP=${ADMIN_TRUST_FORWARDED_IP:-true}
-      - LAB_MANAGER_TOKEN=${LAB_MANAGER_TOKEN}
-      - OPS_INTERNAL_AUTH_TOKEN=${OPS_INTERNAL_AUTH_TOKEN:?OPS_INTERNAL_AUTH_TOKEN must be configured}
+      - LAB_MANAGER_TOKEN_FILE=/run/secrets/lab_manager_token
+      - OPS_INTERNAL_AUTH_TOKEN_FILE=/run/secrets/ops_internal_auth_token
       - OPS_INTERNAL_AUTH_HEADER=${OPS_INTERNAL_AUTH_HEADER:-X-Ops-Internal-Token}
       - LAB_MANAGER_TOKEN_HEADER=${LAB_MANAGER_TOKEN_HEADER}
       - LAB_MANAGER_TOKEN_COOKIE=${LAB_MANAGER_TOKEN_COOKIE}
-      - GUACAMOLE_PROVISIONER_TOKEN=${GUACAMOLE_PROVISIONER_TOKEN:-}
+      - GUACAMOLE_PROVISIONER_TOKEN_FILE=/run/secrets/guacamole_provisioner_token
       - GUACAMOLE_PROVISIONER_TOKEN_HEADER=${GUACAMOLE_PROVISIONER_TOKEN_HEADER:-X-Guacamole-Provisioner-Token}
       - LAB_ADMIN_BACKEND_URL=${LAB_ADMIN_BACKEND_URL:-}
-      - LAB_ADMIN_BACKEND_TOKEN=${LAB_ADMIN_BACKEND_TOKEN:-}
+      - LAB_ADMIN_BACKEND_TOKEN_FILE=/run/secrets/lab_admin_backend_token
       - LAB_ADMIN_BACKEND_TOKEN_HEADER=${LAB_ADMIN_BACKEND_TOKEN_HEADER:-X-Lab-Manager-Token}
       - LAB_ADMIN_BACKEND_ALLOW_INSECURE=${LAB_ADMIN_BACKEND_ALLOW_INSECURE:-false}
       - FMU_RUNNER_ENABLED=${FMU_RUNNER_ENABLED:-false}
       - AAS_ENABLED=${AAS_ENABLED:-}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-}
       - AAS_ALLOWED_HOSTS=${AAS_ALLOWED_HOSTS:-}
-      - AAS_SERVICE_TOKEN=${AAS_SERVICE_TOKEN:-}
+      - AAS_SERVICE_TOKEN_FILE=/run/secrets/aas_service_token
       - AAS_SERVICE_TOKEN_HEADER=${AAS_SERVICE_TOKEN_HEADER:-Authorization}
       - DEMO_USER=${DEMO_USER:-demo}
       - DEMO_LAB_ID=${DEMO_LAB_ID:-}
@@ -213,6 +217,16 @@ services:
         condition: service_healthy  # Full waits for its JWT key; Lite is dormant/ready
       ops-worker:
         condition: service_started
+    secrets:
+      - admin_access_token
+      - lab_manager_token
+      - ops_internal_auth_token
+      - guac_admin_pass
+      - auth_access_code_redeemer_token
+      - session_observation_ingest_token
+      - guacamole_provisioner_token
+      - aas_service_token
+      - lab_admin_backend_token
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f -k https://localhost:443/ -H 'Host: ${SERVER_NAME}' --connect-timeout 5"]
       timeout: 10s
@@ -378,24 +392,27 @@ services:
     entrypoint: ["/bin/bash", "/usr/local/bin/ensure-user-entrypoint.sh"]
     command: ["mysqld"]
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
       MYSQL_DATABASE: ${MYSQL_DATABASE}
-      # Legacy names are passed only so 000-ensure-user.sh can reconcile old
-      # installations; application containers use the dedicated principals.
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       BLOCKCHAIN_MYSQL_DATABASE: ${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       GUACAMOLE_MYSQL_USER: ${GUACAMOLE_MYSQL_USER:?GUACAMOLE_MYSQL_USER must be configured}
-      GUACAMOLE_MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:?GUACAMOLE_MYSQL_PASSWORD must be configured}
+      GUACAMOLE_MYSQL_PASSWORD_FILE: /run/secrets/guacamole_mysql_password
       BLOCKCHAIN_MYSQL_USER: ${BLOCKCHAIN_MYSQL_USER:?BLOCKCHAIN_MYSQL_USER must be configured}
-      BLOCKCHAIN_MYSQL_PASSWORD: ${BLOCKCHAIN_MYSQL_PASSWORD:?BLOCKCHAIN_MYSQL_PASSWORD must be configured}
+      BLOCKCHAIN_MYSQL_PASSWORD_FILE: /run/secrets/blockchain_mysql_password
       OPS_BACKEND_MYSQL_USER: ${OPS_BACKEND_MYSQL_USER:?OPS_BACKEND_MYSQL_USER must be configured}
-      OPS_BACKEND_MYSQL_PASSWORD: ${OPS_BACKEND_MYSQL_PASSWORD:?OPS_BACKEND_MYSQL_PASSWORD must be configured}
+      OPS_BACKEND_MYSQL_PASSWORD_FILE: /run/secrets/ops_backend_mysql_password
       OPS_GUACAMOLE_MYSQL_USER: ${OPS_GUACAMOLE_MYSQL_USER:?OPS_GUACAMOLE_MYSQL_USER must be configured}
-      OPS_GUACAMOLE_MYSQL_PASSWORD: ${OPS_GUACAMOLE_MYSQL_PASSWORD:?OPS_GUACAMOLE_MYSQL_PASSWORD must be configured}
+      OPS_GUACAMOLE_MYSQL_PASSWORD_FILE: /run/secrets/ops_guacamole_mysql_password
       GUAC_ADMIN_USER: ${GUAC_ADMIN_USER}
-      GUAC_ADMIN_PASS: ${GUAC_ADMIN_PASS}
+      GUAC_ADMIN_PASS_FILE: /run/secrets/guac_admin_pass
       DEMO_USER: ${DEMO_USER:-demo}
+    secrets:
+      - mysql_root_password
+      - guacamole_mysql_password
+      - blockchain_mysql_password
+      - ops_backend_mysql_password
+      - ops_guacamole_mysql_password
+      - guac_admin_pass
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/ensure-user-entrypoint.sh:/usr/local/bin/ensure-user-entrypoint.sh:ro
@@ -445,12 +462,14 @@ services:
       GUACD_HOSTNAME: guacd
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${GUACAMOLE_MYSQL_USER:?GUACAMOLE_MYSQL_USER must be configured}
-      MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:?GUACAMOLE_MYSQL_PASSWORD must be configured}
+      MYSQL_PASSWORD_FILE: /run/secrets/guacamole_mysql_password
       MYSQL_HOSTNAME: mysql
       API_SESSION_TIMEOUT: ${API_SESSION_TIMEOUT:-15}
       BAN_MAX_INVALID_ATTEMPTS: ${BAN_MAX_INVALID_ATTEMPTS:-5}
       BAN_ADDRESS_DURATION: ${BAN_ADDRESS_DURATION:-300}
       BAN_MAX_ADDRESSES: ${BAN_MAX_ADDRESSES:-10485670}
+    secrets:
+      - guacamole_mysql_password
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/guacamole/"]
       timeout: 10s
@@ -528,8 +547,7 @@ services:
       - OPS_CONFIG=/app/hosts.json
       - OPS_DYNAMIC_CONFIG=/app/data/hosts.json
       - OPS_CREDENTIALS_PATH=${OPS_CREDENTIALS_PATH:-/app/data/winrm-credentials.json}
-      - OPS_SECRETS_KEY=${OPS_SECRETS_KEY:-}
-      - OPS_SECRETS_KEY_PATH=${OPS_SECRETS_KEY_PATH:-/app/data/ops-secrets.key}
+      - OPS_SECRETS_KEY_FILE=/run/secrets/ops_secrets_key
       - OPS_POLL_ENABLED=true
       - OPS_POLL_INTERVAL=60
       - OPS_RESERVATION_AUTOMATION=true
@@ -539,41 +557,50 @@ services:
       - SERVER_NAME=${SERVER_NAME}
       - HTTPS_PORT=${HTTPS_PORT}
       - ISSUER=${ISSUER}
-      - LAB_MANAGER_TOKEN=${LAB_MANAGER_TOKEN}
-      - OPS_INTERNAL_AUTH_TOKEN=${OPS_INTERNAL_AUTH_TOKEN:?OPS_INTERNAL_AUTH_TOKEN must be configured}
+      - LAB_MANAGER_TOKEN_FILE=/run/secrets/lab_manager_token
+      - OPS_INTERNAL_AUTH_TOKEN_FILE=/run/secrets/ops_internal_auth_token
       - OPS_INTERNAL_AUTH_HEADER=${OPS_INTERNAL_AUTH_HEADER:-X-Ops-Internal-Token}
-      - GUACAMOLE_PROVISIONER_TOKEN=${GUACAMOLE_PROVISIONER_TOKEN:-}
+      - GUACAMOLE_PROVISIONER_TOKEN_FILE=/run/secrets/guacamole_provisioner_token
       - GUACAMOLE_PROVISIONER_TOKEN_HEADER=${GUACAMOLE_PROVISIONER_TOKEN_HEADER:-X-Guacamole-Provisioner-Token}
       - MYSQL_HOSTNAME=mysql
-      - MYSQL_USER=${OPS_BACKEND_MYSQL_USER:?OPS_BACKEND_MYSQL_USER must be configured}
-      - MYSQL_PASSWORD=${OPS_BACKEND_MYSQL_PASSWORD:?OPS_BACKEND_MYSQL_PASSWORD must be configured}
       - OPS_BACKEND_MYSQL_USER=${OPS_BACKEND_MYSQL_USER:?OPS_BACKEND_MYSQL_USER must be configured}
-      - OPS_BACKEND_MYSQL_PASSWORD=${OPS_BACKEND_MYSQL_PASSWORD:?OPS_BACKEND_MYSQL_PASSWORD must be configured}
+      - OPS_BACKEND_MYSQL_PASSWORD_FILE=/run/secrets/ops_backend_mysql_password
       - OPS_GUACAMOLE_MYSQL_USER=${OPS_GUACAMOLE_MYSQL_USER:?OPS_GUACAMOLE_MYSQL_USER must be configured}
-      - OPS_GUACAMOLE_MYSQL_PASSWORD=${OPS_GUACAMOLE_MYSQL_PASSWORD:?OPS_GUACAMOLE_MYSQL_PASSWORD must be configured}
+      - OPS_GUACAMOLE_MYSQL_PASSWORD_FILE=/run/secrets/ops_guacamole_mysql_password
       - OPS_MYSQL_DATABASE=${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - GUACAMOLE_MYSQL_DATABASE=${MYSQL_DATABASE}
       - ACCESS_AUDIT_URL=${ACCESS_AUDIT_URL:-}
+      - NOTIFICATION_SERVICE_ACCESS_TOKEN_FILE=/run/secrets/admin_access_token
       - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
-      - SESSION_OBSERVER_SIGNING_SECRET=${SESSION_OBSERVER_SIGNING_SECRET:-}
-      - SESSION_OBSERVATION_INGEST_TOKEN=${SESSION_OBSERVATION_INGEST_TOKEN:-}
+      - SESSION_OBSERVER_SIGNING_SECRET_FILE=/run/secrets/session_observer_signing_secret
+      - SESSION_OBSERVATION_INGEST_TOKEN_FILE=/run/secrets/session_observation_ingest_token
       - GUAC_ADMIN_USER=${GUAC_ADMIN_USER}
-      - GUAC_ADMIN_PASS=${GUAC_ADMIN_PASS}
+      - GUAC_ADMIN_PASS_FILE=/run/secrets/guac_admin_pass
       - GUAC_API_URL=${GUAC_API_URL:-http://guacamole:8080/guacamole/api}
       - GUACAMOLE_HISTORY_LOOKBACK_SECONDS=${GUACAMOLE_HISTORY_LOOKBACK_SECONDS:-30}
       - GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS=${GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS:-300}
-      - WINRM_REQUIRE_SSL=${WINRM_REQUIRE_SSL:-true}
       - WINRM_ALLOWED_TRANSPORTS=${WINRM_ALLOWED_TRANSPORTS:-ntlm,kerberos,credssp}
-      - WINRM_ALLOWED_SSL_PORTS=${WINRM_ALLOWED_SSL_PORTS:-5986}
-      - WINRM_ALLOWED_PLAINTEXT_PORTS=${WINRM_ALLOWED_PLAINTEXT_PORTS:-5985}
+      - WINRM_MANAGEMENT_CIDRS=${WINRM_MANAGEMENT_CIDRS:-}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
       - AAS_ALLOWED_HOSTS=${AAS_ALLOWED_HOSTS:-}
-      - AAS_SERVICE_TOKEN=${AAS_SERVICE_TOKEN:-}
+      - AAS_SERVICE_TOKEN_FILE=/run/secrets/aas_service_token
       - AAS_SERVICE_TOKEN_HEADER=${AAS_SERVICE_TOKEN_HEADER:-Authorization}
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
       - ./ops-data:/app/data
+    secrets:
+      - admin_access_token
+      - lab_manager_token
+      - ops_internal_auth_token
+      - ops_secrets_key
+      - session_observer_signing_secret
+      - guacamole_provisioner_token
+      - session_observation_ingest_token
+      - guac_admin_pass
+      - aas_service_token
+      - ops_backend_mysql_password
+      - ops_guacamole_mysql_password
     tmpfs:
       - /tmp:size=32M,mode=1777
     read_only: true
@@ -626,7 +653,7 @@ services:
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
       - FMU_STATION_BASE_URL=${FMU_STATION_BASE_URL:-}
-      - FMU_STATION_INTERNAL_TOKEN=${FMU_STATION_INTERNAL_TOKEN:-}
+      - FMU_STATION_INTERNAL_TOKEN_FILE=/run/secrets/fmu_station_internal_token
       - FMU_STATION_REQUEST_TIMEOUT=${FMU_STATION_REQUEST_TIMEOUT:-10}
       - FMU_SESSION_OBSERVATION_MAX_ATTEMPTS=${FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:-3}
       - HISTORY_DB_PATH=/app/data/history.db
@@ -638,21 +665,21 @@ services:
       - JWT_AUDIENCE=${FMU_JWT_AUDIENCE:?FMU_JWT_AUDIENCE must be the exact public FMU URL, e.g. https://gateway.example/fmu}
       - AUTH_SESSION_TICKET_ISSUE_URL=${AUTH_SESSION_TICKET_ISSUE_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/issue}
       - AUTH_SESSION_TICKET_REDEEM_URL=${AUTH_SESSION_TICKET_REDEEM_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/redeem}
-      - AUTH_SESSION_TICKET_INTERNAL_TOKEN=${AUTH_SESSION_TICKET_INTERNAL_TOKEN:-}
+      - AUTH_SESSION_TICKET_INTERNAL_TOKEN_FILE=/run/secrets/auth_session_ticket_internal_token
       - ACCESS_AUDIT_URL=${ACCESS_AUDIT_URL:-}
       - FMU_GATEWAY_ID=${FMU_GATEWAY_ID:-}
       - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
-      - SESSION_OBSERVER_SIGNING_SECRET=${SESSION_OBSERVER_SIGNING_SECRET:-}
+      - SESSION_OBSERVER_SIGNING_SECRET_FILE=/run/secrets/session_observer_signing_secret
       - SERVER_NAME=${SERVER_NAME}
       - MAX_SIMULATION_TIMEOUT=${FMU_MAX_SIMULATION_TIMEOUT:-300}
       - MAX_CONCURRENT_PER_MODEL=${FMU_MAX_CONCURRENT_PER_MODEL:-10}
       - PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE=${FMU_PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE:-20}
       - WS_CREATE_RATE_LIMIT_PER_MINUTE=${FMU_WS_CREATE_RATE_LIMIT_PER_MINUTE:-30}
       - FMU_PROXY_GATEWAY_WS_URL=${FMU_PROXY_GATEWAY_WS_URL:-}
-      - FMU_PROXY_SIGNING_KEY=${FMU_PROXY_SIGNING_KEY:-}
+      - FMU_PROXY_SIGNING_KEY_FILE=/run/secrets/fmu_proxy_signing_key
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
       - AAS_ALLOWED_HOSTS=${AAS_ALLOWED_HOSTS:-}
-      - AAS_SERVICE_TOKEN=${AAS_SERVICE_TOKEN:-}
+      - AAS_SERVICE_TOKEN_FILE=/run/secrets/aas_service_token
       - AAS_SERVICE_TOKEN_HEADER=${AAS_SERVICE_TOKEN_HEADER:-Authorization}
     volumes:
       - ./fmu-data:/app/fmu-data:ro
@@ -664,6 +691,12 @@ services:
     depends_on:
       blockchain-services:
         condition: service_healthy
+    secrets:
+      - fmu_station_internal_token
+      - auth_session_ticket_internal_token
+      - session_observer_signing_secret
+      - fmu_proxy_signing_key
+      - aas_service_token
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
       interval: 30s
@@ -840,6 +873,46 @@ services:
     restart: always
     networks:
       - aas_data
+
+secrets:
+  mysql_root_password:
+    environment: MYSQL_ROOT_PASSWORD
+  guacamole_mysql_password:
+    environment: GUACAMOLE_MYSQL_PASSWORD
+  blockchain_mysql_password:
+    environment: BLOCKCHAIN_MYSQL_PASSWORD
+  ops_backend_mysql_password:
+    environment: OPS_BACKEND_MYSQL_PASSWORD
+  ops_guacamole_mysql_password:
+    environment: OPS_GUACAMOLE_MYSQL_PASSWORD
+  guac_admin_pass:
+    environment: GUAC_ADMIN_PASS
+  admin_access_token:
+    environment: ADMIN_ACCESS_TOKEN
+  lab_manager_token:
+    environment: LAB_MANAGER_TOKEN
+  ops_internal_auth_token:
+    environment: OPS_INTERNAL_AUTH_TOKEN
+  ops_secrets_key:
+    environment: OPS_SECRETS_KEY
+  auth_access_code_redeemer_token:
+    environment: AUTH_ACCESS_CODE_REDEEMER_TOKEN
+  session_observation_ingest_token:
+    environment: SESSION_OBSERVATION_INGEST_TOKEN
+  guacamole_provisioner_token:
+    environment: GUACAMOLE_PROVISIONER_TOKEN
+  aas_service_token:
+    environment: AAS_SERVICE_TOKEN
+  lab_admin_backend_token:
+    environment: LAB_ADMIN_BACKEND_TOKEN
+  fmu_station_internal_token:
+    environment: FMU_STATION_INTERNAL_TOKEN
+  auth_session_ticket_internal_token:
+    environment: AUTH_SESSION_TICKET_INTERNAL_TOKEN
+  session_observer_signing_secret:
+    environment: SESSION_OBSERVER_SIGNING_SECRET
+  fmu_proxy_signing_key:
+    environment: FMU_PROXY_SIGNING_KEY
 
 networks:
   gateway_public:

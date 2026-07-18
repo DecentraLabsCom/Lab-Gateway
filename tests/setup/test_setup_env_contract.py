@@ -212,7 +212,8 @@ class SetupEnvContractTest(unittest.TestCase):
 
         self.assertIn("env GUACAMOLE_PROVISIONER_TOKEN;", self.nginx_conf)
         self.assertIn("env GUACAMOLE_PROVISIONER_TOKEN_HEADER;", self.nginx_conf)
-        self.assertGreaterEqual(self.compose_file.count("GUACAMOLE_PROVISIONER_TOKEN="), 2)
+        self.assertIn("GUACAMOLE_PROVISIONER_TOKEN_FILE=/run/secrets/guacamole_provisioner_token", self.compose_file)
+        self.assertGreaterEqual(self.compose_file.count("guacamole_provisioner_token"), 2)
 
     def test_ops_worker_has_a_separate_gateway_internal_credential(self):
         for script in (self.setup_sh, self.setup_bat):
@@ -221,7 +222,8 @@ class SetupEnvContractTest(unittest.TestCase):
 
         self.assertIn("env OPS_INTERNAL_AUTH_TOKEN;", self.nginx_conf)
         self.assertIn("env OPS_INTERNAL_AUTH_HEADER;", self.nginx_conf)
-        self.assertGreaterEqual(self.compose_file.count("OPS_INTERNAL_AUTH_TOKEN="), 2)
+        self.assertIn("OPS_INTERNAL_AUTH_TOKEN_FILE=/run/secrets/ops_internal_auth_token", self.compose_file)
+        self.assertGreaterEqual(self.compose_file.count("ops_internal_auth_token"), 2)
 
     def test_database_principals_are_separated_in_compose(self):
         mysql_script = (ROOT / "mysql" / "000-ensure-user.sh").read_text()
@@ -238,8 +240,9 @@ class SetupEnvContractTest(unittest.TestCase):
         self.assertIn("GRANT SELECT, INSERT, UPDATE, DELETE ON", mysql_script)
         self.assertIn("grant_guacamole_worker_tables", mysql_script)
         self.assertIsNone(re.search(r"GRANT ALL PRIVILEGES ON .*escaped_ops_", mysql_script))
-        for key in ("MYSQL_PASSWORD", "GUACAMOLE_MYSQL_PASSWORD", "OPS_BACKEND_MYSQL_PASSWORD", "OPS_GUACAMOLE_MYSQL_PASSWORD"):
-            self.assertIn(f"- {key}=", self.compose_file)
+        for key in ("GUACAMOLE_MYSQL_PASSWORD", "OPS_BACKEND_MYSQL_PASSWORD", "OPS_GUACAMOLE_MYSQL_PASSWORD"):
+            self.assertIn(f"{key}_FILE=", self.compose_file)
+        self.assertIsNone(re.search(r"^\s*- MYSQL_PASSWORD=|^\s*MYSQL_PASSWORD:", self.compose_file, re.MULTILINE))
 
     def test_lite_does_not_start_embedded_backend_or_cross_fallback_jwt_keys(self):
         self.assertIn("BLOCKCHAIN_SERVICES_ENABLED", self.compose_file)
