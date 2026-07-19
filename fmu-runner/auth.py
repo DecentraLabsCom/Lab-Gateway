@@ -117,6 +117,13 @@ class _JwksCacheState(TypedDict):
 _jwks_cache: _JwksCacheState = {"data": None, "fetched_at": 0.0, "stale_since": 0.0}
 
 
+def _cached_jwks_key_count(cached: object) -> int:
+    if not isinstance(cached, dict):
+        return 0
+    keys = cached.get("keys")
+    return len(keys) if isinstance(keys, list) else 0
+
+
 async def _fetch_jwks(*, force: bool = False) -> dict:
     """Fetch JWKS (cached with TTL, or immediately when a new kid appears)."""
     cached_jwks = _jwks_cache["data"]
@@ -158,18 +165,25 @@ async def _fetch_jwks(*, force: bool = False) -> dict:
 def jwks_health() -> dict:
     """Expose stale-key fallback as degraded without weakening key matching."""
     cached = _jwks_cache.get("data")
+    cached_keys = _cached_jwks_key_count(cached)
     stale_since = float(_jwks_cache.get("stale_since") or 0.0)
+    if cached_keys == 0:
+        return {
+            "status": "DOWN",
+            "stale": False,
+            "cachedKeys": 0,
+        }
     if stale_since:
         return {
             "status": "DEGRADED",
             "stale": True,
             "staleSince": stale_since,
-            "cachedKeys": len((cached or {}).get("keys", [])),
+            "cachedKeys": cached_keys,
         }
     return {
         "status": "UP",
         "stale": False,
-        "cachedKeys": len((cached or {}).get("keys", [])),
+        "cachedKeys": cached_keys,
     }
 
 

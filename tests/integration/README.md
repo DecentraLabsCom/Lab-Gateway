@@ -2,6 +2,27 @@
 
 This suite validates OpenResty routing and security behavior against mock services.
 
+## Real Compose readiness smoke test
+
+Use this separate smoke test to validate the database-dependent services in the
+real root Compose stack. It starts MySQL, the embedded blockchain-services,
+Guacamole, and Ops Worker, then waits for each service healthcheck to report
+`healthy`. It removes only the resources belonging to its temporary Compose
+project when it finishes.
+
+Prerequisites:
+
+- a configured root `.env`
+- a configured `blockchain-services/.env`
+- Docker images/build dependencies available locally
+
+```bash
+bash ./tests/integration/run-compose-stack-integration.sh
+```
+
+Set `COMPOSE_STACK_TEST_TIMEOUT_SECONDS` to change the default 10-minute
+readiness timeout.
+
 ## What is covered
 
 - `/health` and `/gateway/health`
@@ -98,6 +119,7 @@ Notes:
 ```text
 tests/integration/
 |- run-integration.sh
+|- run-compose-stack-integration.sh
 |- docker-compose.integration.yml
 |- certs/generate-certs.sh
 `- mocks/

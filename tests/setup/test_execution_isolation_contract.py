@@ -58,6 +58,24 @@ def test_application_database_credentials_use_only_dedicated_secret_files():
     assert not re.search(r"^MYSQL_PASSWORD=", ROOT_ENV, re.MULTILINE)
 
 
+def test_mysql_healthcheck_reads_passwords_from_mounted_secrets():
+    mysql = _service_block("mysql")
+    healthcheck = (ROOT / "mysql" / "healthcheck.sh").read_text(encoding="utf-8")
+
+    assert "./mysql/healthcheck.sh:/usr/local/bin/mysql-healthcheck.sh:ro" in mysql
+    assert 'test: ["CMD", "bash", "/usr/local/bin/mysql-healthcheck.sh"]' in mysql
+    assert 'root_password="$(read_secret /run/secrets/mysql_root_password)"' in healthcheck
+    assert 'blockchain_password="$(read_secret /run/secrets/blockchain_mysql_password)"' in healthcheck
+    assert 'value="$(cat "$path")"' in healthcheck
+    assert "mysqladmin ping" in healthcheck
+    assert '-p"$root_password"' in healthcheck
+    assert "mysql \\\n  -h localhost" in healthcheck
+    assert '-u"$BLOCKCHAIN_MYSQL_USER"' in healthcheck
+    assert '-p"$blockchain_password"' in healthcheck
+    assert '-p"$${MYSQL_ROOT_PASSWORD}"' not in mysql
+    assert '-p"$${BLOCKCHAIN_MYSQL_PASSWORD}"' not in mysql
+
+
 def test_control_and_data_services_use_separate_internal_networks():
     openresty = _service_block("openresty")
     blockchain = _service_block("blockchain-services")

@@ -129,9 +129,23 @@ def test_health_returns_status():
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] in ("UP", "DEGRADED")
+    assert data["status"] in ("UP", "DEGRADED", "DOWN")
     assert "checks" in data
     assert "fmuCount" in data
+
+
+def test_health_reports_down_when_jwks_has_never_loaded():
+    with patch("main.jwks_health", return_value={
+        "status": "DOWN",
+        "stale": False,
+        "cachedKeys": 0,
+    }):
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "DOWN"
+    assert data["checks"]["jwks"] is False
 
 
 def test_issue_session_ticket_uses_authorization_header_and_payload():

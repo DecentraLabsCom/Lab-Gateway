@@ -106,6 +106,12 @@ if exist "%BLOCKCHAIN_ENV_FILE%" (
         exit /b 1
     )
 )
+call :MigrateSamlEnv
+if errorlevel 1 (
+    echo Failed to migrate SAML configuration.
+    pause
+    exit /b 1
+)
 call :RemoveGatewayManagedBackendEnv
 echo.
 
@@ -1003,6 +1009,12 @@ call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_USER"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD"
 exit /b
+
+:MigrateSamlEnv
+if not exist "%BLOCKCHAIN_ENV_FILE%" exit /b 1
+if not exist "scripts\Migrate-SamlEnv.ps1" exit /b 1
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "scripts\Migrate-SamlEnv.ps1" -EnvPath "%BLOCKCHAIN_ENV_FILE%" -TemplatePath "blockchain-services\.env.example"
+exit /b %errorlevel%
 
 :RemoveEnv
 set "env_file=%~1"

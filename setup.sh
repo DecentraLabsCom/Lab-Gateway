@@ -47,6 +47,22 @@ update_env_var() {
     fi
 }
 
+migrate_saml_env() {
+    local python_cmd=""
+    if command -v python3 >/dev/null 2>&1; then
+        python_cmd="python3"
+    elif command -v python >/dev/null 2>&1; then
+        python_cmd="python"
+    fi
+    if [ -z "$python_cmd" ]; then
+        echo "Unable to migrate SAML configuration: Python 3 is required." >&2
+        return 1
+    fi
+    "$python_cmd" scripts/migrate-saml-env.py \
+        --env "$BLOCKCHAIN_ENV_FILE" \
+        --template "blockchain-services/.env.example"
+}
+
 secure_gateway_state() {
     # The first invocation happens before state directories are created, so
     # skip absent paths; once a path exists, a failed permission repair is a
@@ -207,6 +223,7 @@ else
     cp blockchain-services/.env.example "$BLOCKCHAIN_ENV_FILE"
     echo "Created blockchain-services/.env from template"
 fi
+migrate_saml_env
 remove_gateway_managed_backend_env
 echo
 

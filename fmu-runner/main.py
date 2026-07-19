@@ -1921,7 +1921,9 @@ async def health():
     checks["jwks"] = auth_status["status"] == "UP"
     payload["checks"] = checks
     payload["auth"] = auth_status
-    if auth_status["status"] != "UP":
+    if auth_status["status"] == "DOWN":
+        payload["status"] = "DOWN"
+    elif auth_status["status"] != "UP":
         payload["status"] = "DEGRADED"
     return payload
 

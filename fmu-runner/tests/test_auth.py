@@ -13,7 +13,11 @@ import auth
 
 @pytest.fixture(autouse=True)
 def _reset_auth_state(monkeypatch):
-    monkeypatch.setattr(auth, "_jwks_cache", {"data": None, "fetched_at": 0.0})
+    monkeypatch.setattr(
+        auth,
+        "_jwks_cache",
+        {"data": None, "fetched_at": 0.0, "stale_since": 0.0},
+    )
     monkeypatch.setattr(auth, "AUTH_JWKS_URL", "https://issuer.example/auth/jwks")
     monkeypatch.setattr(auth, "JWT_ISSUER", None)
     monkeypatch.setattr(auth, "JWT_AUDIENCE", "https://gateway.example/fmu")
@@ -84,6 +88,42 @@ def test_resolve_jwt_issuer_derives_full_mode_issuer(monkeypatch):
     monkeypatch.setenv("HTTPS_PORT", "8443")
 
     assert auth._resolve_jwt_issuer() == "https://gateway.example:8443/auth"
+
+
+def test_jwks_health_is_down_before_a_valid_jwks_has_been_loaded():
+    health = auth.jwks_health()
+
+    assert health["status"] == "DOWN"
+    assert health["stale"] is False
+    assert health["cachedKeys"] == 0
+
+
+def test_jwks_health_is_down_for_an_empty_jwks_payload(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "_jwks_cache",
+        {"data": {"keys": []}, "fetched_at": 1000.0, "stale_since": 0.0},
+    )
+
+    assert auth.jwks_health()["status"] == "DOWN"
+
+
+def test_jwks_health_is_up_after_a_fresh_jwks_has_been_loaded(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "_jwks_cache",
+        {
+            "data": {"keys": [{"kid": "fresh-key"}]},
+            "fetched_at": 1000.0,
+            "stale_since": 0.0,
+        },
+    )
+
+    health = auth.jwks_health()
+
+    assert health["status"] == "UP"
+    assert health["stale"] is False
+    assert health["cachedKeys"] == 1
 
 
 @pytest.fixture
