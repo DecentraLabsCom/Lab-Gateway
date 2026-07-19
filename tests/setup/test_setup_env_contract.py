@@ -280,5 +280,10 @@ class SetupEnvContractTest(unittest.TestCase):
         random_module = (ROOT / "openresty" / "lua" / "resty" / "random.lua").read_text(encoding="utf-8")
         self.assertIn('ffi.load("crypto")', random_module)
 
+    def test_openresty_does_not_install_unused_lua_resty_string_dependency(self):
+        dockerfile = (ROOT / "openresty" / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertNotIn("lua-resty-string", dockerfile)
+
 if __name__ == "__main__":
     unittest.main()

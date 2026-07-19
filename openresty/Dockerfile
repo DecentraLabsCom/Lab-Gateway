@@ -20,7 +20,6 @@ RUN apk add --no-cache \
 # Install Lua modules
 RUN luarocks --tree=$TREE install lua-resty-http && \
     luarocks --tree=$TREE install lua-resty-jwt && \
-    luarocks --tree=$TREE install lua-resty-string && \
     luarocks --tree=$TREE install lua-resty-openssl && \
     luarocks --tree=$TREE install lua-resty-mysql
 
