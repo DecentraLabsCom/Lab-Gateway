@@ -264,7 +264,7 @@ class SetupEnvContractTest(unittest.TestCase):
         self.assertGreaterEqual(self.compose_file.count("ops_internal_auth_token"), 2)
 
     def test_database_principals_are_separated_in_compose(self):
-        mysql_script = (ROOT / "mysql" / "000-ensure-user.sh").read_text()
+        mysql_script = (ROOT / "mysql" / "000-ensure-user.sh").read_text(encoding="utf-8")
         for key in (
             "GUACAMOLE_MYSQL_USER",
             "BLOCKCHAIN_MYSQL_USER",

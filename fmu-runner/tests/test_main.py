@@ -1116,7 +1116,7 @@ def test_stream_returns_ndjson_events(mock_md, mock_exec, mock_resolve):
     assert "application/x-ndjson" in response.headers.get("content-type", "")
 
     lines = [json.loads(line) for line in response.text.strip().split("\n") if line.strip()]
-    types = [l["type"] for l in lines]
+    types = [event["type"] for event in lines]
     assert "started" in types
     assert "completed" in types
     # At least one data chunk
