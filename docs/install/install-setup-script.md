@@ -5,11 +5,15 @@ configuration files, secrets, and container startup in a single interactive sess
 
 ## Prerequisites
 
+Install Docker/Compose, Git, and Python 3. Python 3 is used by the setup script
+to migrate the SAML environment configuration before the containers start.
+
 | Requirement | Minimum version |
 |---|---|
 | Docker Engine (Linux) or Docker Desktop (Windows/macOS) | 20.10+ |
 | Docker Compose | 2.0+ (included with Docker Desktop) |
 | Git | any recent version |
+| Python | 3.x |
 | 2 CPU cores, 4 GB RAM, 20 GB free disk | — |
 
 Verify Docker is working before running the script:

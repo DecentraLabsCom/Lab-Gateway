@@ -149,7 +149,7 @@ async def _fetch_jwks(*, force: bool = False) -> dict:
             cached_jwks is not None
             and fetched_at > 0
             and stale_age >= 0
-            and stale_age <= JWKS_STALE_IF_ERROR_MAX_SECONDS
+            and stale_age < JWKS_STALE_IF_ERROR_MAX_SECONDS
         ):
             if not _jwks_cache.get("stale_since"):
                 _jwks_cache["stale_since"] = now
@@ -167,22 +167,34 @@ def jwks_health() -> dict:
     cached = _jwks_cache.get("data")
     cached_keys = _cached_jwks_key_count(cached)
     stale_since = float(_jwks_cache.get("stale_since") or 0.0)
+    fetched_at = float(_jwks_cache.get("fetched_at") or 0.0)
+    age_seconds = max(0.0, time.time() - fetched_at) if fetched_at > 0 else None
     if cached_keys == 0:
         return {
             "status": "DOWN",
             "stale": False,
             "cachedKeys": 0,
         }
-    if stale_since:
+    if fetched_at <= 0 or age_seconds is None or age_seconds >= JWKS_STALE_IF_ERROR_MAX_SECONDS:
+        return {
+            "status": "DOWN",
+            "stale": True,
+            "staleSince": stale_since or fetched_at,
+            "ageSeconds": age_seconds,
+            "cachedKeys": cached_keys,
+        }
+    if stale_since or age_seconds >= JWKS_CACHE_TTL:
         return {
             "status": "DEGRADED",
             "stale": True,
-            "staleSince": stale_since,
+            "staleSince": stale_since or fetched_at + JWKS_CACHE_TTL,
+            "ageSeconds": age_seconds,
             "cachedKeys": cached_keys,
         }
     return {
         "status": "UP",
         "stale": False,
+        "ageSeconds": age_seconds,
         "cachedKeys": cached_keys,
     }
 

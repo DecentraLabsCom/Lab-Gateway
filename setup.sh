@@ -20,6 +20,7 @@ cf_enabled=false
 certbot_enabled=false
 aas_bundled=false
 fmu_runner_enabled=false
+setup_python_cmd=""
 existing_mysql_root_password=""
 existing_guacamole_mysql_password=""
 existing_blockchain_mysql_password=""
@@ -48,17 +49,7 @@ update_env_var() {
 }
 
 migrate_saml_env() {
-    local python_cmd=""
-    if command -v python3 >/dev/null 2>&1; then
-        python_cmd="python3"
-    elif command -v python >/dev/null 2>&1; then
-        python_cmd="python"
-    fi
-    if [ -z "$python_cmd" ]; then
-        echo "Unable to migrate SAML configuration: Python 3 is required." >&2
-        return 1
-    fi
-    "$python_cmd" scripts/migrate-saml-env.py \
+    "$setup_python_cmd" scripts/migrate-saml-env.py \
         --env "$BLOCKCHAIN_ENV_FILE" \
         --template "blockchain-services/.env.example"
 }
@@ -163,6 +154,18 @@ remove_gateway_managed_backend_env() {
 
 # Check prerequisites
 echo "Checking prerequisites..."
+if command -v python3 >/dev/null 2>&1; then
+    setup_python_cmd="python3"
+elif command -v python >/dev/null 2>&1; then
+    setup_python_cmd="python"
+fi
+if [ -z "$setup_python_cmd" ] || ! "$setup_python_cmd" -c \
+    'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1; then
+    echo "Python 3 is required for the SAML environment migration." >&2
+    echo "   Install Python 3 and rerun setup.sh." >&2
+    exit 1
+fi
+
 if ! command -v docker &> /dev/null; then
     echo "Docker is not installed. Please install Docker first."
     echo "   Visit: https://docs.docker.com/get-docker/"

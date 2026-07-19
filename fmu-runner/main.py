@@ -40,11 +40,11 @@ import httpx
 import jwt
 from fmpy import read_model_description, simulate_fmu
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, JSONResponse
 from pydantic import BaseModel, Field
 from xml.etree import ElementTree as ET
 
-from auth import verify_jwt, verify_jwt_token, jwks_health
+from auth import _fetch_jwks, verify_jwt, verify_jwt_token, jwks_health
 from fmu_backend import LocalFmuBackend, StationFmuBackend
 from realtime_ws import RealtimeWsManager
 from station_ws_proxy import StationRealtimeWsProxyManager
@@ -301,6 +301,11 @@ def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     await _init_db()
+    if os.getenv("JWKS_PRELOAD_ON_STARTUP", "true").strip().lower() not in {"0", "false", "no", "off"}:
+        try:
+            await _fetch_jwks(force=True)
+        except HTTPException:
+            logging.warning("JWKS preload failed; health will remain DOWN until keys are loaded")
     if _realtime_manager is not None:
         await _realtime_manager.start()
     try:
@@ -1925,7 +1930,10 @@ async def health():
         payload["status"] = "DOWN"
     elif auth_status["status"] != "UP":
         payload["status"] = "DEGRADED"
-    return payload
+    return JSONResponse(
+        content=payload,
+        status_code=503 if payload.get("status") == "DOWN" else 200,
+    )
 
 
 @app.websocket("/api/v1/fmu/sessions")

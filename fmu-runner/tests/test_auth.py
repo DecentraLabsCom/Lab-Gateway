@@ -118,6 +118,7 @@ def test_jwks_health_is_up_after_a_fresh_jwks_has_been_loaded(monkeypatch):
             "stale_since": 0.0,
         },
     )
+    monkeypatch.setattr(auth.time, "time", lambda: 1001.0)
 
     health = auth.jwks_health()
 
@@ -296,6 +297,7 @@ async def test_fetch_jwks_fails_closed_when_stale_retention_is_exceeded(monkeypa
         await auth._fetch_jwks()
 
     assert exc.value.status_code == 503
+    assert auth.jwks_health()["status"] == "DOWN"
 
 
 @pytest.mark.asyncio

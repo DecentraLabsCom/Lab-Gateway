@@ -127,9 +127,9 @@ class _FakeAsyncClient:
 
 def test_health_returns_status():
     response = client.get("/health")
-    assert response.status_code == 200
     data = response.json()
     assert data["status"] in ("UP", "DEGRADED", "DOWN")
+    assert response.status_code == (503 if data["status"] == "DOWN" else 200)
     assert "checks" in data
     assert "fmuCount" in data
 
@@ -142,7 +142,7 @@ def test_health_reports_down_when_jwks_has_never_loaded():
     }):
         response = client.get("/health")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
     data = response.json()
     assert data["status"] == "DOWN"
     assert data["checks"]["jwks"] is False

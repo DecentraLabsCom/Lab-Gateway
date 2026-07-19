@@ -6,6 +6,9 @@ los contenedores en una única sesión interactiva.
 
 ## Prerequisitos
 
+Instala Docker/Compose, Git y Python 3. Python 3 se utiliza para migrar la
+configuración del entorno SAML antes de iniciar los contenedores.
+
 | Requisito | Versión mínima |
 |---|---|
 | Docker Engine (Linux) o Docker Desktop (Windows/macOS) | 20.10+ |
