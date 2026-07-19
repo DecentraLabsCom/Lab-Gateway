@@ -1,4 +1,7 @@
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -176,6 +179,41 @@ class SetupEnvContractTest(unittest.TestCase):
             self.assertIn(snippet, self.setup_sh)
         for snippet in expected_bat:
             self.assertIn(snippet, self.setup_bat)
+
+    def test_setup_env_updates_escape_sed_replacement_metacharacters(self):
+        self.assertIn("local escaped_value", self.setup_sh)
+        self.assertIn("escaped_value=$(printf '%s' \"$value\" | sed 's/[\\\\&|]/\\\\&/g')", self.setup_sh)
+        self.assertIn('sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"', self.setup_sh)
+
+        bash_path = shutil.which("bash")
+        if bash_path is None:
+            self.skipTest("bash is required to execute setup.sh's shell contract")
+        bash_probe = subprocess.run(
+            [bash_path, "-c", "exit 0"],
+            capture_output=True,
+            text=True,
+        )
+        if bash_probe.returncode != 0:
+            self.skipTest("bash is not executable in this environment")
+
+        function_match = re.search(r"(?ms)^update_env_var\(\) \{.*?^\}", self.setup_sh)
+        self.assertIsNotNone(function_match)
+
+        value = r"a|b&c\d"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text("TOKEN=old\n", encoding="utf-8")
+            script = (
+                f"{function_match.group(0)}\n"
+                'update_env_var "$1" "TOKEN" "$2"\n'
+            )
+            subprocess.run(
+                [bash_path, "-c", script, "bash", env_file.as_posix(), value],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(env_file.read_text(encoding="utf-8"), f"TOKEN={value}\n")
 
     def test_lite_bundle_binds_technical_gateway_id_to_public_hostname(self):
         self.assertIn("lite_public_origin", self.issue_lite_sh)

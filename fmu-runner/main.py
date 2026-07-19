@@ -580,6 +580,23 @@ def _format_fmi_start_value(value) -> Optional[str]:
     return str(value)
 
 
+def _format_fmi3_binary_start_value(raw_value, formatted_value: str) -> str:
+    """Serialize a Binary start value using FMI 3's hexBinary representation.
+
+    Metadata transported through JSON uses canonical base64 for raw bytes. The
+    generated modelDescription.xml must convert that transport representation
+    back to hexadecimal for the FMI 3 schema.
+    """
+    if isinstance(raw_value, (bytes, bytearray)):
+        return bytes(raw_value).hex()
+    if isinstance(raw_value, str):
+        try:
+            return base64.b64decode(raw_value, validate=True).hex()
+        except ValueError:
+            return formatted_value
+    return formatted_value
+
+
 def _collect_declared_type_definitions(model_metadata: dict) -> dict[str, dict]:
     definitions: dict[str, dict] = {}
     for variable in model_metadata.get("modelVariables", []):
@@ -1149,7 +1166,7 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             if start_value is not None and (initial or "").lower() != "calculated":
                 if normalized_fmi3_type == "Binary":
                     raw = var.get("start")
-                    hex_value = bytes(raw).hex() if isinstance(raw, (bytes, bytearray)) else start_value
+                    hex_value = _format_fmi3_binary_start_value(raw, start_value)
                     ET.SubElement(typed_variable, "Start", {"value": hex_value})
                 elif normalized_fmi3_type == "String":
                     ET.SubElement(typed_variable, "Start", {"value": start_value})

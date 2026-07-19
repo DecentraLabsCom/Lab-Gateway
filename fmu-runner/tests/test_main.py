@@ -30,6 +30,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _effective_timeout_seconds,
         MAX_SIMULATION_TIMEOUT,
         _build_proxy_model_description_xml,
+        _model_metadata_from_model_description,
         _issue_session_ticket,
         _redeem_session_ticket,
         _confirm_fmu_session_started,
@@ -774,6 +775,33 @@ def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
     clock_el = root.find("./ModelVariables/Clock")
     assert clock_el is not None
     assert "start" not in clock_el.attrib
+
+
+def test_proxy_model_description_binary_start_from_metadata_pipeline_is_hex_encoded():
+    class _Variable:
+        name = "blob"
+        causality = "input"
+        variability = "discrete"
+        valueReference = 11
+        type = "Binary"
+        start = b"\x01\x02"
+
+    class _ModelDescription:
+        fmiVersion = "3.0"
+        modelName = "ProxyFmi3Binary"
+        guid = "{proxy-guid}"
+        coSimulation = object()
+        modelExchange = None
+        defaultExperiment = None
+        modelVariables = [_Variable()]
+
+    metadata = _model_metadata_from_model_description(_ModelDescription())
+    xml_bytes = _build_proxy_model_description_xml(metadata)
+
+    root = ET.fromstring(xml_bytes)
+    start_el = root.find("./ModelVariables/Binary/Start")
+    assert start_el is not None
+    assert start_el.attrib["value"] == "0102"
 
 
 def test_validate_proxy_generation_supports_extended_fmi3_integer_types():

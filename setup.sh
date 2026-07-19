@@ -40,11 +40,16 @@ update_env_var() {
     local file="$1"
     local key="$2"
     local value="$3"
+    local escaped_value
+
+    # Escape sed replacement metacharacters before interpolating user-supplied
+    # URLs, passwords, tokens, and other environment values.
+    escaped_value=$(printf '%s' "$value" | sed 's/[\\&|]/\\&/g')
 
     if grep -qE "^${key}=" "$file"; then
-        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+        sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
     else
-        echo "${key}=${value}" >> "$file"
+        printf '%s\n' "${key}=${value}" >> "$file"
     fi
 }
 
@@ -1016,7 +1021,7 @@ echo "Next Steps"
 echo "=========="
 echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
-echo "3. Configure blockchain settings in blockchain-services/.env is needed"
+echo "3. Configure blockchain settings in blockchain-services/.env as needed"
 echo "4. Run: $compose_full $compose_up_args"
 if [ "$cf_enabled" = true ]; then
     echo "5. Cloudflare tunnel: check '$compose_full logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
