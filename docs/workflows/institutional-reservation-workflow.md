@@ -14,6 +14,13 @@ This document describes the current institutional reservation process from a use
 
 The chain is authoritative for the reservation lifecycle. Marketplace and Lab Gateway consume events and maintain operational projections for UI, notification, and laboratory preparation; these projections must not be used as a substitute for the on-chain state.
 
+An intent registration is a separate, short-lived authorization record. If the
+WebAuthn ceremony is cancelled or fails before backend authorization, the
+Marketplace cancels the still-pending registration through its registered
+signer. The lifecycle record is bound to the authorization session and is also
+reconciled against the intent expiry; it must not be confused with a
+reservation cancellation.
+
 ## Reservation states
 
 | State | Meaning |
@@ -79,6 +86,13 @@ sequenceDiagram
 
 Marketplace currently submits on-chain intent registration and requests the WebAuthn authorization session concurrently. The initial response reports registration as `submitted`; after mining, Marketplace signals the consumer backend that registration is available. This lets the user complete WebAuthn without waiting for a block while preserving the contract's final intent-consumption gate.
 
+If the authorization window closes, the Marketplace sends a session-bound
+cleanup request. The server verifies the session/request/institution binding,
+serializes signer access, and calls `cancelIntent` while the intent is still
+`Pending`. Expired records are reconciled with `expireIntent`; an already
+executed or cancelled intent is removed from the lifecycle store without a
+second transaction.
+
 The consumer backend accepts an intent only after validating its shape, SAML assertion and assertion-hash binding, replay rules, WebAuthn assertion, expiry, EIP-712 signature, and trusted-signer policy. Accepted intents are persisted and move through `QUEUED`, `AUTHORIZED_PENDING_REGISTRATION`, `IN_PROGRESS`, `EXECUTED`, `FAILED`, or `REJECTED` as applicable.
 
 ## Booking branches
@@ -97,9 +111,37 @@ The current confirmation contract accepts a call from either the payer instituti
 
 ## Cancellation and expiry
 
-While a request is `PENDING`, the authorized payer backend can cancel the request through an intent-bound cancellation. A confirmed institutional booking may be cancelled before its start time by the appropriate payer backend with the matching PUC hash; the contract applies the cancellation fee and institutional refund rules.
+The `REQUEST_BOOKING` branch has two independent operational actors: the payer
+institution requests the booking, while the provider/lab owner (or its
+registered backend) may confirm or deny the pending request under the contract
+rules. A confirmed institutional booking may be cancelled before its start
+time by the authorized payer institution/backend with the matching PUC hash;
+the provider backend is not assumed to be available for that cancellation
+path. The contract applies the cancellation fee and institutional refund rules.
+
+Before a cancellation is submitted, the Marketplace preview exposes the
+on-chain status, cancellation cutoff, total fee, minimum-fee flag, provider
+fee, spending period, source credit lots and destination account. The preview
+is informational; the contract and institutional backend validate the final
+amount again. Legacy reservations without recorded source lots are labelled as
+legacy rather than being presented as a fully traceable lot allocation.
 
 The chain may also cancel or settle reservations during expiry/release processing. UI labels such as "active" or "completed" are operational views and must not be treated as aliases for the on-chain states above.
+
+## Listing, deletion and settlement boundaries
+
+Listing is performed through the current `listLab`/`unlistLab` contract
+surface. The Marketplace and Gateway perform a metadata health preflight before
+listing; the atomic `addAndList` path applies the same gate before submitting
+the transaction. Legacy `listToken`/`unlistToken` selectors are not part of
+the effective Diamond allowlist.
+
+Deleting a lab does not cancel reservations or erase settlement history. The
+contract guards deletion while active reservations or receivables remain, and
+the provider UI reports that existing reservations are not cancelled
+automatically. Settlement claims require a non-zero unique claim ID,
+reservations reference and invoice reference; the backend persists and
+deduplicates the corresponding invoice/payment references.
 
 ## Operational behavior
 

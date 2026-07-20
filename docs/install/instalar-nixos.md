@@ -11,7 +11,9 @@ como todos los servicios del gateway a través de systemd.
 
 ## Prerequisitos
 
-- Una máquina o VM con **NixOS 23.05+** y flakes habilitados.
+- Una máquina o VM con una versión actual de NixOS compatible con la entrada
+  `nixos-unstable` del flake y flakes habilitados. Para despliegues repetibles,
+  fija la entrada en lugar de depender de un canal sin fijar.
 - Acceso a Internet desde el host de destino (para descargar entradas del flake e imágenes de contenedores).
 - `git` disponible en el host de destino.
 
@@ -45,6 +47,7 @@ para la descripción completa de cada variable):
 # .env
 SERVER_NAME=lab.tu-institucion.edu
 ISSUER=
+BLOCKCHAIN_SERVICES_ENABLED=auto
 MYSQL_ROOT_PASSWORD=contraseña_segura
 GUACAMOLE_MYSQL_USER=guacamole_app
 GUACAMOLE_MYSQL_PASSWORD=contraseña_segura
@@ -79,6 +82,15 @@ MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-kno
 
 Mantén los valores de orquestacion Gateway/OpenResty solo en `.env`. El `docker-compose.yml` raiz inyecta esos valores al backend embebido desde `.env`.
 
+En modo Lite, el backend embebido no es la autoridad JWT local: OpenResty
+bloquea sus rutas de emisor `/auth` y confía en el `ISSUER` remoto. Para Full +
+N Lite o backend standalone + N Lite, aprovisiona cada Lite con su trust bundle
+y ruta remota de provisionador. Consulta
+[Arquitecturas de despliegue](../deployment-architectures.md).
+
+Para la propiedad de las variables, valores de confianza Lite y requisitos de
+los perfiles, consulta también la [referencia de configuración](../reference/configuration.md).
+
 Para un despliegue standalone de `blockchain-services` no gestionado por este Compose del Gateway, configura el `.env` propio de ese servicio standalone con su
 `LAB_MANAGER_TOKEN` y, si procede, `LAB_MANAGER_ALLOWED_CIDRS`.
 
@@ -109,6 +121,10 @@ Comprueba el estado de salud:
 ```bash
 curl -k https://localhost/health
 ```
+
+Este endpoint público sólo comunica la salud agregada. Autentícate como
+operador de Lab Manager y usa `/gateway/health/details` cuando necesites
+diagnosticar una dependencia; consulta [Operación y salud](../reference/operations-and-health.md).
 
 ## Paso 6 — Usar el módulo NixOS directamente
 
@@ -179,3 +195,4 @@ docker compose logs -f blockchain-services
 
 - [Tutorial de operador de extremo a extremo](../tutorials/tutorial-primera-sesion-laboratorio.md)
 - [Guía de federación eduGAIN](../edugain/edugain-federacion.md)
+- [Operación y salud](../reference/operations-and-health.md)

@@ -145,4 +145,4 @@ The reservation timeline endpoint provides the combined operational view. It is 
 - Ops worker: `ops-worker/worker.py`
 - Host configuration: `ops-worker/hosts.example.json`
 - Lab Station CLI and service: `Lab Station/labstation/`
-- WinRM command details: `Lab Station/labstation/docs/winrm-command-contract.md`
+- WinRM command details: `Lab Station/docs/winrm-command-contract.md`

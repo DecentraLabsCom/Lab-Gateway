@@ -3,6 +3,11 @@
 Use this guide if you want full control over every configuration step without running
 the interactive setup script.
 
+Before editing environment files, choose the control-plane topology in
+[Deployment architectures](../deployment-architectures.md). The complete
+variable ownership and optional-profile reference is
+[Configuration reference](../reference/configuration.md).
+
 ## Prerequisites
 
 | Requirement | Minimum version |
@@ -192,6 +197,16 @@ Watch the logs while containers initialise:
 docker compose logs -f
 ```
 
+Enable optional services only when they are configured and required. For
+example, the production FMU facade is Station-only and uses its own profile:
+
+```bash
+FMU_RUNNER_ENABLED=true docker compose --profile fmu-runner up -d
+```
+
+For development-only local FMU execution, use `fmu-local-dev` instead; never
+start both FMU profiles. See the [configuration reference](../reference/configuration.md).
+
 ## Step 8 — Verify health
 
 ```bash
@@ -217,7 +232,7 @@ docker compose restart blockchain-services
 
 ## Step 10 — Configure lab connections in Guacamole
 
-See [Guacamole Connections](../../configuring-lab-connections/guacamole-connections.md).
+See [Guacamole Connections](../configuring-lab-connections/guacamole-connections.md).
 
 ## Useful commands
 
@@ -239,3 +254,4 @@ docker compose up -d --build blockchain-services
 
 - [NixOS installation](install-nixos.md)
 - [End-to-end operator tutorial](../tutorials/tutorial-first-lab-session.md)
+- [Operations and health](../reference/operations-and-health.md)

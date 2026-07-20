@@ -6,6 +6,25 @@ operations) and the access plane (OpenResty, Guacamole, FMU and Station/ops
 traffic). `ISSUER` selects the JWT authority; the lab's on-chain `accessURI`
 selects the access plane that serves the user.
 
+Read this document when selecting a topology or adding a Lite Gateway. Then
+apply the [configuration reference](reference/configuration.md) and validate
+the deployed result with [operations and health](reference/operations-and-health.md).
+
+## Selection procedure
+
+1. Use **Full only** when one institution issues credentials and serves its own
+   laboratories from one gateway.
+2. Use **Lite** when a local laboratory network needs its own access plane but
+   a remote Full or standalone backend owns credentials and provider control.
+3. Use **Full + N Lite** when one Full backend operates several local access
+   planes.
+4. Use **standalone backend + N Lite** when the control plane is intentionally
+   independent of any access-plane gateway.
+
+Every Lite needs a unique public origin/gateway ID, a control-plane-issued
+trust bundle, and an explicit protected provisioner route. Do not publish a
+lab to a Lite `accessURI` until those three conditions are true.
+
 ## Components and boundaries
 
 | Component | Control-plane responsibility | Access-plane responsibility |

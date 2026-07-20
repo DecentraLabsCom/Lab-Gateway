@@ -73,16 +73,26 @@ setup.bat
 
 ## Step 4 - Answer the interactive prompts
 
-The script will guide you through the following steps automatically:
+The script guides you through the following steps automatically:
 
-1. **Checks prerequisites** — Docker, Compose, and Git availability.
-2. **Initialises submodules** — Pulls `blockchain-services` if it was not cloned recursively.
-3. **Creates `.env` and `blockchain-services/.env`** — Copies the bundled templates.
-4. **Asks for your domain name** — Used in TLS, CORS, and OIDC issuer configuration.
-5. **Generates database passwords** — Random strong values are written directly to `.env`.
-6. **Asks for Guacamole admin credentials** — Username and password for the remote-desktop admin panel.
-7. **Asks about Cloudflare Tunnel** — Optional; use this if the server does not have a public IP.
-8. **Starts the stack** — Runs `docker compose up -d` with all containers.
+1. **Checks prerequisites and initialises submodules** — including the embedded
+   `blockchain-services` repository.
+2. **Creates and protects `.env` and `blockchain-services/.env`** — then
+   generates distinct database, operator, redemption, observation, and Ops
+   Worker secrets where needed.
+3. **Configures the public edge** — domain, direct versus router/NAT ports,
+   administrator access scope, Guacamole administration, and Lab Manager
+   access.
+4. **Selects Full or Lite mode** — an empty `ISSUER` creates a Full Gateway;
+   an external `ISSUER` selects Lite mode. Lite setup requires a matching
+   trust bundle issued by the remote Full control plane.
+5. **Configures optional capabilities** — FMU access and, for Full Gateways,
+   bundled, external, or disabled AAS support.
+6. **Offers a Cloudflare Tunnel** and starts the selected Compose services.
+
+The script is interactive by design. For a repeatable non-interactive change,
+use the [manual Compose guide](install-manual-compose.md) together with the
+[configuration reference](../reference/configuration.md).
 
 ## Step 5 - Verify the stack is running
 
@@ -98,12 +108,13 @@ health endpoint:
 curl -k https://localhost/health
 ```
 
-The response is the detailed `blockchain-services` health document. A healthy
-stack reports `status: "UP"`; `DEGRADED` means a queue, database or dependency
-check needs attention even though the HTTP endpoint is reachable.
+The public response is deliberately aggregate and safe for load balancers. A
+healthy edge reports `status: "UP"`; use `/gateway/health` for aggregate local
+access-plane readiness. After opening a Lab Manager session, use
+`/health/details` or `/gateway/health/details` for dependency diagnostics.
 
 ```json
-{"status":"UP","service":"blockchain-services"}
+{"status":"UP","service":"lab-gateway","mode":"full","public":true}
 ```
 
 ## Step 6 - Set up the institutional wallet
@@ -133,7 +144,7 @@ docker compose restart blockchain-services
 
 ## Step 8 - Configure a lab connection in Guacamole
 
-See [Guacamole Connections](../../configuring-lab-connections/guacamole-connections.md) for the
+See [Guacamole Connections](../configuring-lab-connections/guacamole-connections.md) for the
 full step-by-step guide on adding RDP/VNC connections to your physical lab computers.
 
 ## Troubleshooting
@@ -147,6 +158,7 @@ full step-by-step guide on adding RDP/VNC connections to your physical lab compu
 
 ## Next steps
 
-- [Configure lab connections](../../configuring-lab-connections/guacamole-connections.md)
+- [Configure lab connections](../configuring-lab-connections/guacamole-connections.md)
 - [Manual Docker Compose installation](install-manual-compose.md)
 - [End-to-end operator tutorial](../tutorials/tutorial-first-lab-session.md)
+- [Operations and health](../reference/operations-and-health.md)

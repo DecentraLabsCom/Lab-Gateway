@@ -73,6 +73,9 @@ CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 ```
 
+For environment ownership, Lite trust values, and profile-specific requirements,
+also read the [configuration reference](../reference/configuration.md).
+
 ```env
 # blockchain-services/.env
 CONTRACT_ADDRESS=0xYourContractAddress
@@ -120,6 +123,10 @@ Check health:
 ```bash
 curl -k https://localhost/health
 ```
+
+This public endpoint reports aggregate readiness only. Authenticate as a Lab
+Manager operator and use `/gateway/health/details` when a dependency needs
+diagnosis; see [Operations and health](../reference/operations-and-health.md).
 
 ## Step 6 — Using the NixOS module directly
 
@@ -190,3 +197,4 @@ docker compose logs -f blockchain-services
 
 - [End-to-end operator tutorial](../tutorials/tutorial-first-lab-session.md)
 - [eduGAIN federation guide](../edugain/edugain-federation.md)
+- [Operations and health](../reference/operations-and-health.md)

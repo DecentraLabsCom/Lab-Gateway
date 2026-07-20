@@ -838,6 +838,7 @@
             accessURI: $('labAccessURI').value.trim(),
             accessKey: $('labAccessKey').value.trim(),
             resourceType: Number($('labResourceType').value),
+            creatorPucHash: $('labCreatorPucHash').value.trim(),
         };
         if (setupMode === 'quick') {
             payload.metadataUrl = $('labMetadataUrl').value.trim();
@@ -1298,6 +1299,7 @@
         $('labDetectedResource').value = '';
         $('labListImmediately').value = lab.listed ? 'true' : 'false';
         $('labAccessURI').value = lab.accessURI || '';
+        $('labCreatorPucHash').value = '';
         $('labAccessKey').value = lab.accessKey || '';
         $('labMaxConcurrentUsers').value = Number(lab.resourceType) === 1 ? '2' : '1';
         const priceUnit = resolveLabPriceUnit(lab);
@@ -1500,6 +1502,7 @@
         setValue('labPrice', '0');
         setValue('labPriceUnit', 'hour');
         setValue('labAccessURI', '');
+        setValue('labCreatorPucHash', '');
         setValue('labMetadataUrl', '');
         setValue('labName', '');
         setValue('labKeywords', '');
