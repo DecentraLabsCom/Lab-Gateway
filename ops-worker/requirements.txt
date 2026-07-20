@@ -34,7 +34,7 @@ wakeonlan==3.0.0
 APScheduler==3.11.3
 pytz==2024.2
 tzlocal==5.4.4
-six==1.16.0
+six==1.17.0
 
 # Database ORM
 SQLAlchemy==2.0.35
