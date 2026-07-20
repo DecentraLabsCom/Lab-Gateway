@@ -750,12 +750,14 @@ if not exist fmu-proxy-runtime\binaries\win64 mkdir fmu-proxy-runtime\binaries\w
 if not exist fmu-proxy-runtime\binaries\darwin64 mkdir fmu-proxy-runtime\binaries\darwin64
 if not exist ops-data mkdir ops-data
 if not exist ops-data\guac-revocation-spool mkdir ops-data\guac-revocation-spool
+if not exist secrets mkdir secrets
 if not exist certs\.gitkeep type nul > certs\.gitkeep
 call :SecureEnvFile "%ROOT_ENV_FILE%"
 call :SecureEnvFile "%BLOCKCHAIN_ENV_FILE%"
 call :SecureSecretTree "certs"
 call :SecureSecretTree "blockchain-data"
 call :SecureSecretTree "ops-data"
+call :SyncComposeSecrets
 
 echo SSL Certificates
 echo ================
@@ -1027,6 +1029,39 @@ set "env_file=%~1"
 set "env_key=%~2"
 set "env_value=%~3"
 powershell -NoLogo -NoProfile -Command "& { param($file,$key,$value); if (-not (Test-Path -LiteralPath $file)) { New-Item -Path $file -ItemType File -Force | Out-Null }; $content = @(); if (Test-Path -LiteralPath $file) { $content = @(Get-Content -LiteralPath $file) }; $pattern = '^' + [regex]::Escape($key) + '=.*$'; $replacement = $key + '=' + $value; $updated = $false; for ($i = 0; $i -lt $content.Count; $i++) { if ($content[$i] -match $pattern) { $content[$i] = $replacement; $updated = $true } }; if (-not $updated) { $content += $replacement }; Set-Content -LiteralPath $file -Value $content -Encoding Ascii }" "%env_file%" "%env_key%" "%env_value%"
+exit /b
+
+:SyncComposeSecrets
+call :WriteComposeSecret "mysql_root_password" "MYSQL_ROOT_PASSWORD"
+call :WriteComposeSecret "guacamole_mysql_password" "GUACAMOLE_MYSQL_PASSWORD"
+call :WriteComposeSecret "blockchain_mysql_password" "BLOCKCHAIN_MYSQL_PASSWORD"
+call :WriteComposeSecret "ops_backend_mysql_password" "OPS_BACKEND_MYSQL_PASSWORD"
+call :WriteComposeSecret "ops_guacamole_mysql_password" "OPS_GUACAMOLE_MYSQL_PASSWORD"
+call :WriteComposeSecret "guac_admin_pass" "GUAC_ADMIN_PASS"
+call :WriteComposeSecret "admin_access_token" "ADMIN_ACCESS_TOKEN"
+call :WriteComposeSecret "lab_manager_token" "LAB_MANAGER_TOKEN"
+call :WriteComposeSecret "ops_internal_auth_token" "OPS_INTERNAL_AUTH_TOKEN"
+call :WriteComposeSecret "ops_secrets_key" "OPS_SECRETS_KEY"
+call :WriteComposeSecret "auth_access_code_redeemer_token" "AUTH_ACCESS_CODE_REDEEMER_TOKEN"
+call :WriteComposeSecret "session_observation_ingest_token" "SESSION_OBSERVATION_INGEST_TOKEN"
+call :WriteComposeSecret "guacamole_provisioner_token" "GUACAMOLE_PROVISIONER_TOKEN"
+call :WriteComposeSecret "aas_service_token" "AAS_SERVICE_TOKEN"
+call :WriteComposeSecret "lab_admin_backend_token" "LAB_ADMIN_BACKEND_TOKEN"
+call :WriteComposeSecret "fmu_station_internal_token" "FMU_STATION_INTERNAL_TOKEN"
+call :WriteComposeSecret "auth_session_ticket_internal_token" "AUTH_SESSION_TICKET_INTERNAL_TOKEN"
+call :WriteComposeSecret "session_observer_signing_secret" "SESSION_OBSERVER_SIGNING_SECRET"
+call :WriteComposeSecret "fmu_proxy_signing_key" "FMU_PROXY_SIGNING_KEY"
+call :SecureSecretTree "secrets"
+exit /b
+
+:WriteComposeSecret
+set "secret_name=%~1"
+set "secret_key=%~2"
+set "secret_value="
+call :ReadEnvValue "%ROOT_ENV_FILE%" "%secret_key%" secret_value
+set "DL_COMPOSE_SECRET_PATH=%CD%\secrets\%secret_name%"
+set "DL_COMPOSE_SECRET_VALUE=!secret_value!"
+powershell -NoLogo -NoProfile -Command "[IO.File]::WriteAllText($env:DL_COMPOSE_SECRET_PATH, $env:DL_COMPOSE_SECRET_VALUE, [Text.UTF8Encoding]::new($false))"
 exit /b
 
 :ReadEnvValue

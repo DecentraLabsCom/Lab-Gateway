@@ -14,6 +14,7 @@ umask 077
 ROOT_ENV_FILE=".env"
 BLOCKCHAIN_ENV_FILE="blockchain-services/.env"
 compose_cmd="docker compose"
+compose_min_version="2.14.0"
 compose_files=""
 compose_profiles=""
 cf_enabled=false
@@ -69,7 +70,7 @@ secure_gateway_state() {
             return 1
         }
     fi
-    for state_dir in certs blockchain-data ops-data; do
+    for state_dir in certs blockchain-data ops-data secrets; do
         if [ -d "$state_dir" ]; then
             chmod 700 "$state_dir" || {
                 echo "Unable to restrict state directory permissions: $state_dir" >&2
@@ -81,7 +82,7 @@ secure_gateway_state() {
     # be readable by other local users.  Public certificates remain readable
     # by the gateway process through its owner/group mapping.
     local existing_dirs=()
-    for state_dir in certs blockchain-data ops-data; do
+    for state_dir in certs blockchain-data ops-data secrets; do
         [ -d "$state_dir" ] && existing_dirs+=("$state_dir")
     done
     if [ "${#existing_dirs[@]}" -gt 0 ] && ! find "${existing_dirs[@]}" -type f \
@@ -92,6 +93,41 @@ secure_gateway_state() {
         echo "Unable to restrict private key and credential file permissions." >&2
         return 1
     fi
+}
+
+write_compose_secret() {
+    local secret_name="$1"
+    local env_key="$2"
+    local value
+
+    value="$(get_env_default "$env_key" "$ROOT_ENV_FILE")"
+    printf '%s' "$value" > "secrets/$secret_name"
+    chmod 600 "secrets/$secret_name"
+}
+
+sync_compose_secrets() {
+    mkdir -p secrets
+    chmod 700 secrets
+
+    write_compose_secret mysql_root_password MYSQL_ROOT_PASSWORD
+    write_compose_secret guacamole_mysql_password GUACAMOLE_MYSQL_PASSWORD
+    write_compose_secret blockchain_mysql_password BLOCKCHAIN_MYSQL_PASSWORD
+    write_compose_secret ops_backend_mysql_password OPS_BACKEND_MYSQL_PASSWORD
+    write_compose_secret ops_guacamole_mysql_password OPS_GUACAMOLE_MYSQL_PASSWORD
+    write_compose_secret guac_admin_pass GUAC_ADMIN_PASS
+    write_compose_secret admin_access_token ADMIN_ACCESS_TOKEN
+    write_compose_secret lab_manager_token LAB_MANAGER_TOKEN
+    write_compose_secret ops_internal_auth_token OPS_INTERNAL_AUTH_TOKEN
+    write_compose_secret ops_secrets_key OPS_SECRETS_KEY
+    write_compose_secret auth_access_code_redeemer_token AUTH_ACCESS_CODE_REDEEMER_TOKEN
+    write_compose_secret session_observation_ingest_token SESSION_OBSERVATION_INGEST_TOKEN
+    write_compose_secret guacamole_provisioner_token GUACAMOLE_PROVISIONER_TOKEN
+    write_compose_secret aas_service_token AAS_SERVICE_TOKEN
+    write_compose_secret lab_admin_backend_token LAB_ADMIN_BACKEND_TOKEN
+    write_compose_secret fmu_station_internal_token FMU_STATION_INTERNAL_TOKEN
+    write_compose_secret auth_session_ticket_internal_token AUTH_SESSION_TICKET_INTERNAL_TOKEN
+    write_compose_secret session_observer_signing_secret SESSION_OBSERVER_SIGNING_SECRET
+    write_compose_secret fmu_proxy_signing_key FMU_PROXY_SIGNING_KEY
 }
 
 get_env_default() {
@@ -183,12 +219,39 @@ if ! docker compose version &> /dev/null; then
     exit 1
 fi
 
+compose_version="$(docker compose version --short 2>/dev/null || true)"
+if [ -z "$compose_version" ]; then
+    echo "Unable to determine the Docker Compose plugin version." >&2
+    echo "   Run: docker compose version" >&2
+    exit 1
+fi
+
+if ! "$setup_python_cmd" - "$compose_min_version" "$compose_version" <<'PY'
+import re
+import sys
+
+def parse_version(value):
+    match = re.search(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?", value)
+    if not match:
+        raise SystemExit(2)
+    return tuple(int(part or 0) for part in match.groups())
+
+required = parse_version(sys.argv[1])
+installed = parse_version(sys.argv[2])
+raise SystemExit(0 if installed >= required else 1)
+PY
+then
+    echo "Docker Compose $compose_version is unsupported; version $compose_min_version or newer is required." >&2
+    echo "   Visit: https://docs.docker.com/compose/install/" >&2
+    exit 1
+fi
+
 if ! command -v git &> /dev/null; then
     echo "Git is required to initialize blockchain-services."
     exit 1
 fi
 
-echo "Docker, Docker Compose, and Git are available"
+echo "Docker, Docker Compose $compose_version, and Git are available"
 echo
 
 echo "Ensuring blockchain-services submodule is present..."
@@ -822,6 +885,11 @@ echo "   * FMU JWT audience: ${expected_fmu_audience}"
 # executed when the operator chooses not to start Docker services.
 secure_gateway_state
 
+# Docker Compose local secrets must be backed by files when a read-only service
+# consumes them. Keep the generated files synchronized with the gateway env
+# after all interactive configuration has been written.
+sync_compose_secrets
+
 echo
 echo "Ops Worker configuration"
 echo "------------------------"
@@ -1076,14 +1144,13 @@ echo
 echo "Building and starting services..."
 echo "This may take several minutes on first run..."
 
-set +e
 $compose_full down --remove-orphans
-$compose_full build --no-cache
-$compose_full $compose_up_args
-compose_result=$?
-set -e
+if ! $compose_full build --no-cache; then
+    echo "Failed to build services. Check the error messages above." >&2
+    exit 1
+fi
 
-if [ $compose_result -eq 0 ]; then
+if $compose_full $compose_up_args; then
     echo
     echo "Services started successfully!"
 if [ "$domain" = "localhost" ]; then
@@ -1121,7 +1188,8 @@ echo "   * Blockchain Services API: /auth"
     echo "Full version deployment complete!"
     echo "Your blockchain-based authentication system is now running."
 else
-    echo "Failed to start services. Check the error messages above."
+    echo "Failed to start services. Check the error messages above." >&2
+    exit 1
 fi
 
 echo

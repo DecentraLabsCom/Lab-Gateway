@@ -19,6 +19,13 @@ load_secret() {
 # their existing environment-based contracts without exposing values through
 # the Compose service definition.
 load_secret MYSQL_ROOT_PASSWORD /run/secrets/mysql_root_password
+# The official MySQL entrypoint treats MYSQL_ROOT_PASSWORD and
+# MYSQL_ROOT_PASSWORD_FILE as mutually exclusive. The custom entrypoint has
+# already loaded the secret into MYSQL_ROOT_PASSWORD, so remove the _FILE
+# variant before delegating to the official entrypoint.
+if [[ -n "${MYSQL_ROOT_PASSWORD:-}" && -n "${MYSQL_ROOT_PASSWORD_FILE:-}" ]]; then
+  unset MYSQL_ROOT_PASSWORD_FILE
+fi
 load_secret GUACAMOLE_MYSQL_PASSWORD /run/secrets/guacamole_mysql_password
 load_secret BLOCKCHAIN_MYSQL_PASSWORD /run/secrets/blockchain_mysql_password
 load_secret OPS_BACKEND_MYSQL_PASSWORD /run/secrets/ops_backend_mysql_password

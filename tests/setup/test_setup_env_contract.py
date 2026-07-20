@@ -282,6 +282,42 @@ class SetupEnvContractTest(unittest.TestCase):
             self.assertIn(f"{key}_FILE=", self.compose_file)
         self.assertIsNone(re.search(r"^\s*- MYSQL_PASSWORD=|^\s*MYSQL_PASSWORD:", self.compose_file, re.MULTILINE))
 
+    def test_local_compose_secrets_are_files_for_read_only_services(self):
+        secret_mappings = {
+            "mysql_root_password": "MYSQL_ROOT_PASSWORD",
+            "guacamole_mysql_password": "GUACAMOLE_MYSQL_PASSWORD",
+            "blockchain_mysql_password": "BLOCKCHAIN_MYSQL_PASSWORD",
+            "ops_backend_mysql_password": "OPS_BACKEND_MYSQL_PASSWORD",
+            "ops_guacamole_mysql_password": "OPS_GUACAMOLE_MYSQL_PASSWORD",
+            "guac_admin_pass": "GUAC_ADMIN_PASS",
+            "admin_access_token": "ADMIN_ACCESS_TOKEN",
+            "lab_manager_token": "LAB_MANAGER_TOKEN",
+            "ops_internal_auth_token": "OPS_INTERNAL_AUTH_TOKEN",
+            "ops_secrets_key": "OPS_SECRETS_KEY",
+            "auth_access_code_redeemer_token": "AUTH_ACCESS_CODE_REDEEMER_TOKEN",
+            "session_observation_ingest_token": "SESSION_OBSERVATION_INGEST_TOKEN",
+            "guacamole_provisioner_token": "GUACAMOLE_PROVISIONER_TOKEN",
+            "aas_service_token": "AAS_SERVICE_TOKEN",
+            "lab_admin_backend_token": "LAB_ADMIN_BACKEND_TOKEN",
+            "fmu_station_internal_token": "FMU_STATION_INTERNAL_TOKEN",
+            "auth_session_ticket_internal_token": "AUTH_SESSION_TICKET_INTERNAL_TOKEN",
+            "session_observer_signing_secret": "SESSION_OBSERVER_SIGNING_SECRET",
+            "fmu_proxy_signing_key": "FMU_PROXY_SIGNING_KEY",
+        }
+        for secret_name, env_key in secret_mappings.items():
+            with self.subTest(secret=secret_name):
+                self.assertIn(f"file: ./secrets/{secret_name}", self.compose_file)
+                self.assertIn(f"write_compose_secret {secret_name} {env_key}", self.setup_sh)
+                self.assertIn(f'call :WriteComposeSecret "{secret_name}" "{env_key}"', self.setup_bat)
+
+        self.assertNotIn("environment: ADMIN_ACCESS_TOKEN", self.compose_file)
+        self.assertNotIn("environment: MYSQL_ROOT_PASSWORD", self.compose_file)
+
+    def test_mysql_entrypoint_removes_conflicting_root_password_file_variable(self):
+        entrypoint = (ROOT / "mysql" / "ensure-user-entrypoint.sh").read_text(encoding="utf-8")
+        self.assertIn("load_secret MYSQL_ROOT_PASSWORD /run/secrets/mysql_root_password", entrypoint)
+        self.assertIn("unset MYSQL_ROOT_PASSWORD_FILE", entrypoint)
+
     def test_lite_does_not_start_embedded_backend_or_cross_fallback_jwt_keys(self):
         self.assertIn("BLOCKCHAIN_SERVICES_ENABLED", self.compose_file)
         self.assertIn("- ISSUER=${ISSUER:-}", self.compose_file)

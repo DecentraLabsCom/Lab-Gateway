@@ -13,7 +13,7 @@ referencia completa de variables y perfiles opcionales está en
 | Requisito | Versión mínima |
 |---|---|
 | Docker Engine (Linux) o Docker Desktop (Windows/macOS) | 20.10+ |
-| Docker Compose | 2.0+ |
+| Plugin de Docker Compose | 2.14.0+ (`docker compose`; no se admite el legacy `docker-compose`) |
 | Git | cualquier versión reciente |
 | 2 núcleos CPU, 4 GB RAM, 20 GB de disco libre | — |
 
@@ -74,6 +74,29 @@ CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 # Obligatorio para la interpolación de Compose; usa el origen FMU público
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
+
+## Paso 3a — Generar los ficheros de secretos de Compose
+
+El fichero Compose utiliza secretos respaldados por ficheros del host porque
+varios servicios ejecutan con el sistema de ficheros raíz en solo lectura.
+Genéralos después de configurar `.env` y antes de ejecutar `docker compose
+config` o `docker compose up`.
+
+Linux, macOS o WSL:
+
+```bash
+bash scripts/sync-compose-secrets.sh
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Sync-ComposeSecrets.ps1
+```
+
+El comando crea el directorio ignorado `secrets/` con permisos restrictivos.
+Ejecútalo de nuevo cada vez que cambie un secreto en `.env`. No incluyas ni
+borres este directorio mientras el despliegue esté en uso.
 
 #### Modo del gateway
 

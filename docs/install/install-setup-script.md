@@ -11,7 +11,7 @@ to migrate the SAML environment configuration before the containers start.
 | Requirement | Minimum version |
 |---|---|
 | Docker Engine (Linux) or Docker Desktop (Windows/macOS) | 20.10+ |
-| Docker Compose | 2.0+ (included with Docker Desktop) |
+| Docker Compose plugin | 2.14.0+ (`docker compose`; legacy `docker-compose` is not supported) |
 | Git | any recent version |
 | Python | 3.x |
 | 2 CPU cores, 4 GB RAM, 20 GB free disk | — |
@@ -22,6 +22,15 @@ Verify Docker is working before running the script:
 docker --version
 docker compose version
 ```
+
+The setup script requires Docker Compose plugin 2.14.0 or newer. The current
+gateway has been tested with the v2.35.1 plugin. Run the setup script before
+starting Compose so it can generate the local files used by the Compose
+secrets.
+
+The script creates the ignored `secrets/` directory from the credentials in
+`.env`. Keep that directory on the host while the gateway is deployed; it must
+not be committed or deleted independently of the environment file.
 
 ## Step 1 — Clone the repository
 

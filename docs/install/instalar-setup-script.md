@@ -12,7 +12,7 @@ configuración del entorno SAML antes de iniciar los contenedores.
 | Requisito | Versión mínima |
 |---|---|
 | Docker Engine (Linux) o Docker Desktop (Windows/macOS) | 20.10+ |
-| Docker Compose | 2.0+ (incluido con Docker Desktop) |
+| Plugin de Docker Compose | 2.14.0+ (`docker compose`; no se admite el legacy `docker-compose`) |
 | Git | cualquier versión reciente |
 | 2 núcleos CPU, 4 GB RAM, 20 GB de disco libre | — |
 
@@ -22,6 +22,16 @@ Verifica que Docker funciona antes de ejecutar el script:
 docker --version
 docker compose version
 ```
+
+El script requiere el plugin de Docker Compose 2.14.0 o posterior. El gateway
+actual se ha probado con el plugin v2.35.1. Ejecuta primero el script de
+instalación para que genere los ficheros locales usados por los secretos de
+Compose.
+
+El script crea el directorio ignorado `secrets/` a partir de las credenciales
+de `.env`. Mantén ese directorio en el host mientras el gateway esté instalado;
+no debe incluirse en Git ni borrarse de forma independiente del fichero de
+entorno.
 
 ## Paso 1 — Clonar el repositorio
 

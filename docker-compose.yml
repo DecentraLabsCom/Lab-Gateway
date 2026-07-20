@@ -877,43 +877,43 @@ services:
 
 secrets:
   mysql_root_password:
-    environment: MYSQL_ROOT_PASSWORD
+    file: ./secrets/mysql_root_password
   guacamole_mysql_password:
-    environment: GUACAMOLE_MYSQL_PASSWORD
+    file: ./secrets/guacamole_mysql_password
   blockchain_mysql_password:
-    environment: BLOCKCHAIN_MYSQL_PASSWORD
+    file: ./secrets/blockchain_mysql_password
   ops_backend_mysql_password:
-    environment: OPS_BACKEND_MYSQL_PASSWORD
+    file: ./secrets/ops_backend_mysql_password
   ops_guacamole_mysql_password:
-    environment: OPS_GUACAMOLE_MYSQL_PASSWORD
+    file: ./secrets/ops_guacamole_mysql_password
   guac_admin_pass:
-    environment: GUAC_ADMIN_PASS
+    file: ./secrets/guac_admin_pass
   admin_access_token:
-    environment: ADMIN_ACCESS_TOKEN
+    file: ./secrets/admin_access_token
   lab_manager_token:
-    environment: LAB_MANAGER_TOKEN
+    file: ./secrets/lab_manager_token
   ops_internal_auth_token:
-    environment: OPS_INTERNAL_AUTH_TOKEN
+    file: ./secrets/ops_internal_auth_token
   ops_secrets_key:
-    environment: OPS_SECRETS_KEY
+    file: ./secrets/ops_secrets_key
   auth_access_code_redeemer_token:
-    environment: AUTH_ACCESS_CODE_REDEEMER_TOKEN
+    file: ./secrets/auth_access_code_redeemer_token
   session_observation_ingest_token:
-    environment: SESSION_OBSERVATION_INGEST_TOKEN
+    file: ./secrets/session_observation_ingest_token
   guacamole_provisioner_token:
-    environment: GUACAMOLE_PROVISIONER_TOKEN
+    file: ./secrets/guacamole_provisioner_token
   aas_service_token:
-    environment: AAS_SERVICE_TOKEN
+    file: ./secrets/aas_service_token
   lab_admin_backend_token:
-    environment: LAB_ADMIN_BACKEND_TOKEN
+    file: ./secrets/lab_admin_backend_token
   fmu_station_internal_token:
-    environment: FMU_STATION_INTERNAL_TOKEN
+    file: ./secrets/fmu_station_internal_token
   auth_session_ticket_internal_token:
-    environment: AUTH_SESSION_TICKET_INTERNAL_TOKEN
+    file: ./secrets/auth_session_ticket_internal_token
   session_observer_signing_secret:
-    environment: SESSION_OBSERVER_SIGNING_SECRET
+    file: ./secrets/session_observer_signing_secret
   fmu_proxy_signing_key:
-    environment: FMU_PROXY_SIGNING_KEY
+    file: ./secrets/fmu_proxy_signing_key
 
 networks:
   gateway_public:
