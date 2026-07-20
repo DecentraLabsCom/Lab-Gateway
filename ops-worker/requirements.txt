@@ -32,7 +32,7 @@ wakeonlan==3.0.0
 
 # Task scheduler
 APScheduler==3.11.3
-pytz==2024.2
+pytz==2026.2
 tzlocal==5.4.4
 six==1.17.0
 
