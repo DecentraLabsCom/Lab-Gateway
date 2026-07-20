@@ -29,9 +29,10 @@ instalación para que genere los ficheros locales usados por los secretos de
 Compose.
 
 El script crea el directorio ignorado `secrets/` a partir de las credenciales
-de `.env`. Mantén ese directorio en el host mientras el gateway esté instalado;
-no debe incluirse en Git ni borrarse de forma independiente del fichero de
-entorno.
+de `.env` y asigna su propiedad a `HOST_UID:HOST_GID` para que los servicios no
+root puedan leer los ficheros montados. Mantén ese directorio en el host
+mientras el gateway esté instalado; no debe incluirse en Git ni borrarse de
+forma independiente del fichero de entorno.
 
 ## Paso 1 — Clonar el repositorio
 

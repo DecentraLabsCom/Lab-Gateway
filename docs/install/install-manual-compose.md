@@ -79,7 +79,8 @@ FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 
 The Compose file uses host-backed secret files because several services run
 with a read-only root filesystem. Generate them after configuring `.env` and
-before running `docker compose config` or `docker compose up`.
+after setting `HOST_UID` and `HOST_GID`, before running `docker compose config`
+or `docker compose up`.
 
 Linux, macOS, or WSL:
 

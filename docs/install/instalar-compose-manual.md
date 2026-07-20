@@ -79,8 +79,8 @@ FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 
 El fichero Compose utiliza secretos respaldados por ficheros del host porque
 varios servicios ejecutan con el sistema de ficheros raíz en solo lectura.
-Genéralos después de configurar `.env` y antes de ejecutar `docker compose
-config` o `docker compose up`.
+Genéralos después de configurar `.env` y `HOST_UID`/`HOST_GID`, antes de
+ejecutar `docker compose config` o `docker compose up`.
 
 Linux, macOS o WSL:
 

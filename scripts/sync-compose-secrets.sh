@@ -29,7 +29,7 @@ write_secret() {
     local secret_name="$1"
     local env_key="$2"
     read_env_value "${env_key}" > "${SECRETS_DIR}/${secret_name}"
-    chmod 600 "${SECRETS_DIR}/${secret_name}"
+    chmod 640 "${SECRETS_DIR}/${secret_name}"
 }
 
 write_secret mysql_root_password MYSQL_ROOT_PASSWORD
@@ -51,5 +51,19 @@ write_secret fmu_station_internal_token FMU_STATION_INTERNAL_TOKEN
 write_secret auth_session_ticket_internal_token AUTH_SESSION_TICKET_INTERNAL_TOKEN
 write_secret session_observer_signing_secret SESSION_OBSERVER_SIGNING_SECRET
 write_secret fmu_proxy_signing_key FMU_PROXY_SIGNING_KEY
+
+host_uid="$(read_env_value HOST_UID)"
+host_gid="$(read_env_value HOST_GID)"
+if [[ "${host_uid}" =~ ^[0-9]+$ && "${host_gid}" =~ ^[0-9]+$ ]]; then
+    current_uid="$(id -u)"
+    current_gid="$(id -g)"
+    if [[ "${current_uid}" != "${host_uid}" || "${current_gid}" != "${host_gid}" ]]; then
+        chown "${host_uid}:${host_gid}" "${SECRETS_DIR}" "${SECRETS_DIR}"/*
+    fi
+    chmod 750 "${SECRETS_DIR}"
+else
+    echo "HOST_UID/HOST_GID must be numeric in ${ENV_FILE}; cannot assign secret ownership." >&2
+    exit 1
+fi
 
 echo "Compose secret files synchronized in ${SECRETS_DIR}."

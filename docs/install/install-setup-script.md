@@ -29,8 +29,10 @@ starting Compose so it can generate the local files used by the Compose
 secrets.
 
 The script creates the ignored `secrets/` directory from the credentials in
-`.env`. Keep that directory on the host while the gateway is deployed; it must
-not be committed or deleted independently of the environment file.
+`.env` and assigns ownership to `HOST_UID:HOST_GID` so non-root services can
+read the mounted files. Keep that directory on the host while the gateway is
+deployed; it must not be committed or deleted independently of the environment
+file.
 
 ## Step 1 — Clone the repository
 

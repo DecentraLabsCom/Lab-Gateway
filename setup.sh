@@ -102,12 +102,26 @@ write_compose_secret() {
 
     value="$(get_env_default "$env_key" "$ROOT_ENV_FILE")"
     printf '%s' "$value" > "secrets/$secret_name"
-    chmod 600 "secrets/$secret_name"
+    chmod 640 "secrets/$secret_name"
 }
 
 sync_compose_secrets() {
     mkdir -p secrets
-    chmod 700 secrets
+    local host_uid
+    local host_gid
+    host_uid="$(get_env_default HOST_UID "$ROOT_ENV_FILE")"
+    host_gid="$(get_env_default HOST_GID "$ROOT_ENV_FILE")"
+    if [[ ! "$host_uid" =~ ^[0-9]+$ || ! "$host_gid" =~ ^[0-9]+$ ]]; then
+        echo "HOST_UID/HOST_GID must be numeric before generating Compose secrets." >&2
+        return 1
+    fi
+    if [[ "$(id -u)" != "$host_uid" || "$(id -g)" != "$host_gid" ]]; then
+        chown "${host_uid}:${host_gid}" secrets || {
+            echo "Unable to assign Compose secret ownership to ${host_uid}:${host_gid}." >&2
+            return 1
+        }
+    fi
+    chmod 750 secrets
 
     write_compose_secret mysql_root_password MYSQL_ROOT_PASSWORD
     write_compose_secret guacamole_mysql_password GUACAMOLE_MYSQL_PASSWORD
@@ -885,11 +899,6 @@ echo "   * FMU JWT audience: ${expected_fmu_audience}"
 # executed when the operator chooses not to start Docker services.
 secure_gateway_state
 
-# Docker Compose local secrets must be backed by files when a read-only service
-# consumes them. Keep the generated files synchronized with the gateway env
-# after all interactive configuration has been written.
-sync_compose_secrets
-
 echo
 echo "Ops Worker configuration"
 echo "------------------------"
@@ -944,6 +953,11 @@ if [ -n "$host_uid" ] && [ -n "$host_gid" ]; then
 else
     echo "Warning: Unable to detect host UID/GID; using defaults."
 fi
+
+# Docker Compose local secrets must be backed by files when a read-only service
+# consumes them. Keep the generated files synchronized with the gateway env
+# after assigning ownership to the container user.
+sync_compose_secrets
 
 if [ -f "certs/fullchain.pem" ] && [ -f "certs/privkey.pem" ]; then
     echo "SSL certificates found in certs/ - they will be used."
