@@ -8,6 +8,7 @@ function escapeHtml(str) {
 
 document.addEventListener('DOMContentLoaded', () => {
     let billingAccessReady = false;
+    let billingAccessPromise = null;
 
     function hasBillingAccess() {
         return billingAccessReady;
@@ -80,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     $('#btnTestLoad').addEventListener('click', () => {
         if (!hasBillingAccess()) {
-            promptBillingToken(() => loadConfig());
+            requireBillingAccess(() => loadConfig(), () => loadConfig());
             return;
         }
         loadConfig();
@@ -90,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
     driverEl.addEventListener('change', toggleSections);
     configureBtn.addEventListener('click', () => {
         if (!hasBillingAccess()) {
-            promptBillingToken(() => loadConfig(() => {
+            requireBillingAccess(() => openModal(), () => loadConfig(() => {
                 openModal();
             }));
             return;
@@ -363,7 +364,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadConfig(onSuccess) {
         setStatus('Loading...');
         updateBillingStatusAction();
-        return fetch('/billing/admin/notifications', {
+        if (billingAccessPromise) {
+            return billingAccessPromise.then(accessReady => {
+                if (accessReady && typeof onSuccess === 'function') onSuccess();
+                return accessReady;
+            });
+        }
+
+        const request = fetch('/billing/admin/notifications', {
             credentials: 'include',
             // Billing is requested only when its configuration is used, not
             // as a second authentication prompt during page loading.
@@ -403,6 +411,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof onSuccess === 'function') {
                     onSuccess();
                 }
+                return true;
             })
             .catch(err => {
                 console.error(err);
@@ -411,12 +420,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 setStatus(needsToken ? 'Gateway administrator token required' : 'Error');
                 updateBillingStatusAction();
                 showToast(needsToken ? 'Enter the Gateway administrator token to load notifications' : 'Cannot load config (check administrator access)', 'error');
+                return false;
             });
+
+        let pending;
+        pending = request.finally(() => {
+            if (billingAccessPromise === pending) billingAccessPromise = null;
+        });
+        billingAccessPromise = pending;
+        return pending.then(accessReady => {
+            if (accessReady && typeof onSuccess === 'function') onSuccess();
+            return accessReady;
+        });
+    }
+
+    function requireBillingAccess(onAuthenticated, onTokenAuthenticated) {
+        if (hasBillingAccess()) {
+            if (typeof onAuthenticated === 'function') onAuthenticated();
+            return;
+        }
+
+        loadConfig().then(accessReady => {
+            if (accessReady) {
+                if (typeof onAuthenticated === 'function') onAuthenticated();
+                return;
+            }
+            promptBillingToken(onTokenAuthenticated || onAuthenticated);
+        });
     }
 
     function saveConfig() {
         if (!hasBillingAccess()) {
-            promptBillingToken(() => saveConfig());
+            requireBillingAccess(() => saveConfig());
             return;
         }
 
@@ -583,7 +618,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function sendTestEmail() {
         if (!hasBillingAccess()) {
-            promptBillingToken(() => sendTestEmail());
+            requireBillingAccess(() => sendTestEmail());
             return;
         }
 
