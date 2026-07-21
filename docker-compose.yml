@@ -647,6 +647,11 @@ services:
     build:
       context: ./fmu-runner
       dockerfile: Dockerfile
+    # Compose file secrets preserve the host file ownership and mode. The
+    # runner is deliberately non-root, so grant it the host secret group
+    # instead of making the secret files world-readable.
+    group_add:
+      - "${HOST_GID:-1000}"
     environment:
       # The production facade is Station-only. Local native execution uses
       # the separate fmu-runner-local profile below, without control secrets.

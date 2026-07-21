@@ -442,8 +442,6 @@ body {
 
 .status-modal .col li a {
     color: inherit;
-    text-decoration: underline;
-    text-underline-offset: 2px;
 }
 
 .status-modal .col li a:hover {
