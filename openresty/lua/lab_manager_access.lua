@@ -233,12 +233,26 @@ local function token_hint()
 end
 
 local provided = headers[header_name]
+local session_id
 
 if not provided or provided == "" then
     local cookie_var = "cookie_" .. cookie_name
-    provided = ngx.var[cookie_var]
+    session_id = ngx.var[cookie_var]
+    provided = session_id
 end
-provided = resolve_session(provided)
+if session_id and session_id ~= "" and ngx.shared.cache then
+    local session_token = ngx.shared.cache:get("admin_session:lab:" .. session_id)
+    if session_token then
+        provided = session_token
+    else
+        -- Do not mirror a legacy raw-token cookie to additional paths.
+        session_id = nil
+        provided = resolve_session(provided)
+    end
+else
+    session_id = nil
+    provided = resolve_session(provided)
+end
 
 if is_lab_manager and ngx.var.arg_token and ngx.var.arg_token ~= "" then
     ngx.status = 400
@@ -254,6 +268,20 @@ if provided and provided ~= "" then
     end
 elseif not is_loopback(client_ip) then
     return deny_or_redirect("Unauthorized: lab manager token required. " .. token_hint())
+end
+
+-- Keep older path-scoped sessions usable across all Lab Manager surfaces.
+-- A session cookie created for /lab-manager is not sent to /ops or /lab-admin;
+-- once the session has been validated, mirror the same opaque session id to
+-- the other protected paths. Header-authenticated service calls do not receive
+-- browser cookies.
+if session_id and session_id ~= "" then
+    local session_cookies = {}
+    for _, path in ipairs({ "/lab-manager", "/lab-admin", "/ops", "/aas-admin", "/health", "/gateway/health" }) do
+        session_cookies[#session_cookies + 1] = cookie_name .. "=" .. session_id
+            .. "; Max-Age=900; Path=" .. path .. "; HttpOnly; Secure; SameSite=Lax"
+    end
+    ngx.header["Set-Cookie"] = session_cookies
 end
 
 ngx.req.set_header(header_name, token)
