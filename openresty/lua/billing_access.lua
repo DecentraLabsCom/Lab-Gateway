@@ -42,6 +42,7 @@ if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
 end
 
 local uri = ngx.var.uri or ""
+local headers = ngx.req.get_headers()
 
 local function deny_or_redirect(message)
     local is_page = uri == "/wallet-dashboard" or uri == "/wallet-dashboard/"
@@ -180,7 +181,6 @@ end
 local trust_xff = os.getenv("ADMIN_TRUST_FORWARDED_IP")
 local xff_trusted = trust_xff ~= "false" and trust_xff ~= "0"
 
-local headers = ngx.req.get_headers()
 local remote_addr = ngx.var.remote_addr or ""
 local forwarded_ip = extract_first_ip(headers["X-Forwarded-For"])
 if not forwarded_ip then

@@ -3,6 +3,7 @@
 
 local bit = require("bit")
 local token = os.getenv("LAB_MANAGER_TOKEN") or ""
+local headers = ngx.req.get_headers()
 
 local function deny(message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
@@ -143,7 +144,6 @@ local function extract_first_ip(value)
     return ip
 end
 
-local headers = ngx.req.get_headers()
 local remote_addr = ngx.var.remote_addr or ""
 
 -- When ADMIN_TRUST_FORWARDED_IP=false the gateway is the public edge and
