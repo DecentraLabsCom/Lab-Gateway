@@ -256,7 +256,6 @@ body {
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
-    flex: 0 1 300px;
     min-width: 0;
     max-width: 100%;
     line-height: 1.25;
