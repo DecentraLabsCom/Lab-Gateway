@@ -127,7 +127,8 @@ class _FakeAsyncClient:
 # ─── /health ─────────────────────────────────────────────────────────
 
 def test_health_returns_status():
-    response = client.get("/health")
+    with patch("main._fetch_jwks", new_callable=AsyncMock):
+        response = client.get("/health")
     data = response.json()
     assert data["status"] in ("UP", "DEGRADED", "DOWN")
     assert response.status_code == (503 if data["status"] == "DOWN" else 200)
@@ -136,7 +137,8 @@ def test_health_returns_status():
 
 
 def test_health_reports_down_when_jwks_has_never_loaded():
-    with patch("main.jwks_health", return_value={
+    with patch("main._fetch_jwks", new_callable=AsyncMock), \
+         patch("main.jwks_health", return_value={
         "status": "DOWN",
         "stale": False,
         "cachedKeys": 0,
@@ -147,6 +149,19 @@ def test_health_reports_down_when_jwks_has_never_loaded():
     data = response.json()
     assert data["status"] == "DOWN"
     assert data["checks"]["jwks"] is False
+
+
+def test_health_refreshes_jwks_before_evaluating_cache_age():
+    with patch("main._fetch_jwks", new_callable=AsyncMock) as refresh, \
+         patch("main.jwks_health", return_value={
+             "status": "UP",
+             "stale": False,
+             "cachedKeys": 1,
+         }):
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    refresh.assert_awaited_once_with()
 
 
 def test_issue_session_ticket_uses_authorization_header_and_payload():

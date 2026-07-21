@@ -1938,6 +1938,16 @@ async def resolve_aas_id(shellId: str = Query(...)):
 async def health():
     """Backend-aware health check for the active FMU backend mode."""
     payload = await _fmu_backend.health()
+    # Keep the JWKS cache alive even when the runner receives no authenticated
+    # traffic.  Without this refresh, jwks_health() eventually marks an
+    # otherwise healthy runner as DOWN solely because the cached keys aged past
+    # JWKS_STALE_IF_ERROR_MAX_SECONDS.
+    try:
+        await _fetch_jwks()
+    except HTTPException:
+        # jwks_health() below reports the appropriate UP/DEGRADED/DOWN state
+        # from the cache, including the configured stale-if-error window.
+        pass
     auth_status = jwks_health()
     checks = dict(payload.get("checks") or {})
     checks["jwks"] = auth_status["status"] == "UP"
