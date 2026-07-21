@@ -275,7 +275,10 @@
         syncSetupMode();
         syncResourceTypeFields();
         syncBookingModeFields();
-        loadPublisherData();
+        // /lab-manager/ has already authenticated the operator. Publisher
+        // metadata is optional at startup and must not trigger a duplicate
+        // token dialog if one of its protected reads returns 401 briefly.
+        loadPublisherData({ skipAuthPrompt: true });
     });
 
     function initMarketplaceFields() {
@@ -398,13 +401,13 @@
         return 'UTC';
     }
 
-    async function loadPublisherData() {
+    async function loadPublisherData(options = {}) {
         setStatus('Loading provider status...', false);
         try {
             const [status, hosts, labs] = await Promise.all([
-                fetchJson('/lab-admin/status'),
-                fetchJson('/ops/api/hosts').catch(() => null),
-                fetchJson('/lab-admin/labs').catch(() => null),
+                fetchJson('/lab-admin/status', options),
+                fetchJson('/ops/api/hosts', options).catch(() => null),
+                fetchJson('/lab-admin/labs', options).catch(() => null),
             ]);
             state.status = status;
             state.hosts = hosts?.hosts || [];

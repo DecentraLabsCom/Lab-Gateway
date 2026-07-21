@@ -110,7 +110,10 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAccessPolicy();
     checkOpsAvailability();
     updateBillingStatusAction();
-    loadActivityFeed();
+    // This is a non-critical startup read. The protected page has already
+    // authenticated the operator, so a transient 401 must not reopen the
+    // Lab Manager token modal during initial rendering.
+    loadActivityFeed(false, { skipAuthPrompt: true });
 
     // Lab Station ops state
     const refreshHostsBtn = $('#refreshHostsBtn');
@@ -348,7 +351,10 @@ document.addEventListener('DOMContentLoaded', () => {
         hostListEl.addEventListener('click', handleHostActions);
         renderHosts();
         hostNames.forEach(startHeartbeatStream);
-        loadHostInventory();
+        // The page itself has already passed the Lab Manager access guard.
+        // Do not open a second token dialog if an optional startup request
+        // briefly returns 401 while path-scoped session cookies settle.
+        loadHostInventory({ skipAuthPrompt: true });
     }
     if (guacamoleCandidateListEl) {
         guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
@@ -613,7 +619,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!badge) return;
         try {
             const res = await fetch('/lab-manager/access-policy', {
-                credentials: 'include'
+                credentials: 'include',
+                skipAuthPrompt: true
             });
             if (res.status === 401) {
                 badge.textContent = 'Lab Manager session required';
@@ -662,9 +669,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---- Lab Station ops helpers ----
-    async function loadHostInventory() {
+    async function loadHostInventory(options = {}) {
         try {
-            const res = await fetch('/ops/api/hosts');
+            const res = await fetch('/ops/api/hosts', options);
             if (res.status === 403) {
                 showOpsWarning();
                 return;
@@ -1373,7 +1380,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function loadActivityFeed(append = false) {
+    async function loadActivityFeed(append = false, options = {}) {
         const activityFeed = $('#activityFeedList');
         if (!activityFeed) return;
         if (!append) {
@@ -1388,7 +1395,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 limit: String(activityFeedState.limit),
                 offset: String(activityFeedState.offset)
             });
-            const res = await fetch(`/ops/api/operations/recent?${params.toString()}`);
+            const res = await fetch(`/ops/api/operations/recent?${params.toString()}`, options);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const body = await res.json();
             const entries = Array.isArray(body.operations) ? body.operations : [];
