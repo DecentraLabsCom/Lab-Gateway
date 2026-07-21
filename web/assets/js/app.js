@@ -118,6 +118,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 statusDot.style.animation = 'pulse-dot-partial 2s infinite';
             } else if (statusIndicator.classList.contains('checking')) {
                 statusDot.style.animation = 'pulse-dot-checking 2s infinite';
+            } else if (statusIndicator.classList.contains('unknown')) {
+                statusDot.style.animation = 'pulse-dot-checking 2s infinite';
             } else {
                 statusDot.style.animation = 'pulse-dot-offline 2s infinite';
             }
@@ -153,20 +155,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.public === true) {
                     const publicStatus = (data.status || '').toString().toUpperCase();
                     if (publicStatus === 'UP') {
-                        statusIndicator.className = 'status-indicator online';
-                        statusText.textContent = 'System Online';
+                        statusIndicator.className = 'status-indicator unknown';
+                        statusText.textContent = 'Gateway Online · Configuration Unknown';
                     } else if (publicStatus === 'PARTIAL') {
                         statusIndicator.className = 'status-indicator partial';
-                        statusText.textContent = 'Partial';
+                        statusText.textContent = 'Gateway Partially Available · Configuration Unknown';
                     } else {
                         statusIndicator.className = 'status-indicator offline';
-                        statusText.textContent = 'System Unavailable';
+                        statusText.textContent = 'Gateway Unavailable';
                     }
                     statusIndicator.setAttribute('title', 'Click for status details');
                     lastStatusDetails = {
                         status: statusText.textContent,
                         ok: publicStatus === 'UP' ? ['Public readiness operative'] : [],
-                        missing: publicStatus === 'UP' ? [] : ['Detailed diagnostics require operator authentication']
+                        missing: ['Configuration status requires Lab Manager authentication']
                     };
                     return;
                 }
@@ -232,16 +234,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (statusValue === 'UP') {
                     statusIndicator.className = 'status-indicator online';
-                    statusText.textContent = 'System Online';
+                    statusText.textContent = 'Gateway Online';
                     statusIndicator.setAttribute('title', 'Click for status details');
                 } else if (statusValue === 'PARTIAL') {
                     statusIndicator.className = 'status-indicator partial';
                     statusIndicator.setAttribute('title', 'Click for status details');
-                    statusText.textContent = 'Partial';
+                    statusText.textContent = 'Gateway Partially Available';
                 } else {
                     statusIndicator.className = 'status-indicator offline';
                     statusIndicator.setAttribute('title', 'Click for status details');
-                    statusText.textContent = 'System Unavailable';
+                    statusText.textContent = 'Gateway Unavailable';
                 }
 
                 lastStatusDetails = {
@@ -251,12 +253,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
             })
             .catch(() => {
-                statusIndicator.className = 'status-indicator checking';
-                statusText.textContent = 'Checking Status...';
+                statusIndicator.className = 'status-indicator unknown';
+                statusText.textContent = 'Status Unknown';
                 lastStatusDetails = {
-                    status: 'Checking Status...',
+                    status: 'Status Unknown',
                     ok: [],
-                    missing: ['Awaiting latest status']
+                    missing: ['Unable to retrieve current status']
                 };
             });
     }

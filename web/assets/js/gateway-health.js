@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .catch(err => {
                 console.error(err);
-                setStatus('System Unavailable', 'offline');
+                setStatus('Status Unknown', 'unknown');
                 if (serviceGrid) serviceGrid.innerHTML = '<div class="health-row">Cannot load gateway health</div>';
             });
     }
@@ -43,9 +43,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function render(data) {
         const statusVal = (data.status || '').toString().toUpperCase();
-        if (statusVal === 'UP') setStatus('System Online', 'online');
-        else if (statusVal === 'PARTIAL') setStatus('Partial', 'partial');
-        else setStatus('System Unavailable', 'offline');
+        if (statusVal === 'UP') setStatus('Gateway Online · Configuration Unknown', 'unknown');
+        else if (statusVal === 'PARTIAL') setStatus('Gateway Partially Available · Configuration Unknown', 'partial');
+        else setStatus('Gateway Unavailable', 'offline');
 
         // Public health deliberately omits service and infrastructure details.
         // Keep the page useful without inventing a false per-service status.

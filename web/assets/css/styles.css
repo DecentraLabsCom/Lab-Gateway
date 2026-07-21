@@ -256,13 +256,23 @@ body {
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
+    flex: 0 1 340px;
+    min-width: 0;
+    max-width: 100%;
+    line-height: 1.25;
+    text-align: left;
+    overflow-wrap: anywhere;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.status-text {
+    min-width: 0;
 }
 
 .status-indicator.online {
     background: var(--success-bg);
     color: var(--success-color);
     border: 1px solid var(--success-color);
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .status-indicator.partial {
@@ -271,9 +281,15 @@ body {
     border: 1px solid #ffa500;
 }
 
-.status-indicator.online:hover {
+.status-indicator:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-primary-hover);
+}
+
+.status-indicator.unknown {
+    background: var(--primary-bg-26);
+    color: var(--primary-color);
+    border: 1px solid var(--primary-color);
 }
 
 .status-indicator.checking {
@@ -306,6 +322,11 @@ body {
 }
 
 .status-indicator.checking .status-dot {
+    background: var(--primary-color);
+    animation: pulse-dot-checking 2s infinite;
+}
+
+.status-indicator.unknown .status-dot {
     background: var(--primary-color);
     animation: pulse-dot-checking 2s infinite;
 }
@@ -632,6 +653,13 @@ body {
     
     .panel-header {
         flex-direction: column;
+        text-align: center;
+    }
+
+    .status-indicator {
+        width: 100%;
+        flex-basis: auto;
+        justify-content: center;
         text-align: center;
     }
     
