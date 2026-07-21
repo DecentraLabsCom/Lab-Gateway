@@ -114,6 +114,12 @@ outside an isolated test environment. The internal Station channel is private an
 authenticated with an internal token or mTLS; the public booking JWT is not
 the sole protection of the internal channel.
 
+JWT key retrieval is independent of the FMU execution backend. In Full mode the
+runner uses `http://blockchain-services:8080/auth/jwks`; in Lite mode it uses
+the external issuer's JWKS endpoint. `AUTH_JWKS_URL` may explicitly override
+that selection. The local profile reaches the Full-mode endpoint through the
+dedicated internal `fmu_auth` network.
+
 ### 4. Manage interface disclosure
 
 The generated proxy must expose enough FMI metadata for interoperability: variables, types, causality, variability and units. This is intentional FMI interface disclosure. For sensitive models, providers may use private aliases such as `u1` and `y1`; aliasing reduces semantic leakage but does not replace authorization, reservation or network controls.

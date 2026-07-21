@@ -138,6 +138,8 @@ services:
       - ops_backend
       - database_backend
       - fmu_control
+      # Dedicated authentication path for the isolated local FMU runner.
+      - fmu_auth
 
   openresty:
     build:
@@ -797,6 +799,9 @@ services:
       fmu_local_edge:
         aliases:
           - fmu-runner
+      # Full-mode local runners need the blockchain-services JWKS endpoint,
+      # without joining the broader control-plane networks.
+      fmu_auth:
 
   # BaSyx AAS Server - Asset Administration Shell registry & repository
   # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_admin_access.lua)
@@ -962,6 +967,11 @@ networks:
     driver: bridge
     internal: true
   fmu_local_edge:
+    driver: bridge
+    internal: true
+  # Narrow internal path used only for JWT public-key retrieval by the local
+  # FMU profile. It is intentionally separate from fmu_control.
+  fmu_auth:
     driver: bridge
     internal: true
   aas_data:

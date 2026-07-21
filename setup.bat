@@ -14,6 +14,7 @@ set "cf_enabled=0"
 set "certbot_enabled=0"
 set "aas_enabled=0"
 set "fmu_runner_enabled=0"
+set "fmu_runner_profile=fmu-runner"
 set "external_aas_url="
 set "existing_mysql_root_password="
 set "existing_guacamole_mysql_password="
@@ -620,8 +621,34 @@ if /i "!enable_fmu_runner!"=="" (
 )
 if "!fmu_runner_enabled!"=="1" (
     call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_RUNNER_ENABLED" "true"
+    set "current_fmu_backend_mode="
+    call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" current_fmu_backend_mode
+    if /i "!current_fmu_backend_mode!"=="local" (
+        set "current_fmu_backend_mode=local"
+    ) else (
+        set "current_fmu_backend_mode=station"
+    )
+    set "selected_fmu_backend_mode="
+    set /p "selected_fmu_backend_mode=FMU execution backend [station/local] (default: !current_fmu_backend_mode!): "
+    if defined selected_fmu_backend_mode set "selected_fmu_backend_mode=!selected_fmu_backend_mode: =!"
+    if not defined selected_fmu_backend_mode set "selected_fmu_backend_mode=!current_fmu_backend_mode!"
+    if /i "!selected_fmu_backend_mode!"=="local" (
+        set "fmu_runner_profile=fmu-local-dev"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "local"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "true"
+        echo    * Local FMU execution selected.
+        echo    * Full mode retrieves JWKS over the dedicated fmu_auth network; Lite mode uses the external issuer JWKS endpoint.
+    ) else if /i "!selected_fmu_backend_mode!"=="station" (
+        set "fmu_runner_profile=fmu-runner"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "station"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"
+        echo    * Lab Station FMU execution selected.
+    ) else (
+        echo Invalid FMU execution backend: !selected_fmu_backend_mode! ^(choose station or local^).
+        exit /b 1
+    )
     echo    * FMU runner enabled. /fmu routes are active.
-    echo    * Compose starts the Station-only facade. Use --profile fmu-local-dev only for isolated local FMU development.
+    echo    * Compose profile: !fmu_runner_profile!.
 ) else (
     call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_RUNNER_ENABLED" "false"
     echo    * FMU runner disabled. Startup will use '--scale fmu-runner=0'.
@@ -729,6 +756,7 @@ if "!cf_enabled!"=="1" (
 REM Build complete compose command: base + files + profile
 set "compose_full=%compose_cmd% !compose_files!"
 if "!cf_enabled!"=="1" set "compose_full=!compose_full! --profile !cf_profile!"
+if "!fmu_runner_enabled!"=="1" set "compose_full=!compose_full! --profile !fmu_runner_profile!"
 set "compose_up_args=up -d"
 if "!fmu_runner_enabled!"=="0" set "compose_up_args=up -d --scale fmu-runner=0"
 echo.

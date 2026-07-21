@@ -160,6 +160,9 @@ Marketplace upload is disabled by design.
 - `fmu-runner-local` is an explicit development profile; its container sets
   `FMU_BACKEND_MODE=local` and `FMU_LOCAL_DEV_MODE=true` without receiving
   Station/session-observer/proxy-signing credentials.
+- FMU execution mode is independent of JWT key retrieval. Full mode uses the
+  local `blockchain-services` JWKS endpoint, Lite mode uses the external
+  issuer's JWKS endpoint, and `AUTH_JWKS_URL` can override either choice.
 - Internal REST targets:
   - `GET /internal/fmu/catalog` (header `X-FMU-Access-Key`)
   - `GET /internal/fmu/describe` (header `X-FMU-Access-Key`)

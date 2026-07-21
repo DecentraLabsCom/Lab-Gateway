@@ -221,7 +221,9 @@ FMU_RUNNER_ENABLED=true docker compose --profile fmu-runner up -d
 ```
 
 Para ejecución FMU local exclusiva de desarrollo usa `fmu-local-dev`; nunca
-arranques los dos perfiles FMU a la vez. Consulta la
+arranques los dos perfiles FMU a la vez. `FMU_BACKEND_MODE` controla dónde se
+ejecuta el FMU; el modo Full/Lite determina independientemente el origen de
+JWKS. Consulta la
 [referencia de configuración](../reference/configuration.md).
 
 ## Paso 8 — Verificar el estado de salud

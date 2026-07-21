@@ -110,6 +110,11 @@ Do not start both FMU profiles: they intentionally use the same internal
 upstream alias. For the complete configuration model, see
 [Configuration reference](docs/reference/configuration.md).
 
+`FMU_BACKEND_MODE` selects where the FMU executes and is independent of the
+Full/Lite authentication topology. The runner uses the local
+`blockchain-services` JWKS endpoint in Full mode and the external issuer JWKS
+endpoint in Lite mode; `AUTH_JWKS_URL` is available as an explicit override.
+
 ## Security model
 
 - Browser hand-off uses a one-time opaque access code. OpenResty redeems it

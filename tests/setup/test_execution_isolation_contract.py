@@ -30,13 +30,14 @@ def test_production_fmu_runner_is_station_only_and_keeps_control_networks_out_of
     assert "FMU_LOCAL_DEV_MODE=true" in local
     assert "fmu_control" not in local
     assert "fmu_aas" not in local
+    assert "fmu_auth" in local
     assert "AUTH_SESSION_TICKET_INTERNAL_TOKEN" not in local
     assert "SESSION_OBSERVER_SIGNING_SECRET" not in local
     assert "FMU_STATION_INTERNAL_TOKEN" not in local
     assert "FMU_PROXY_SIGNING_KEY" not in local
 
 
-def test_local_fmu_network_is_internal_and_openresty_is_the_only_shared_edge():
+def test_local_fmu_network_is_internal_with_a_dedicated_auth_path():
     openresty = _service_block("openresty")
     local = _service_block("fmu-runner-local")
 
@@ -44,6 +45,7 @@ def test_local_fmu_network_is_internal_and_openresty_is_the_only_shared_edge():
     assert "fmu_local_edge" in local
     assert "fmu-runner" in local
     assert "fmu_local_edge:\n    driver: bridge\n    internal: true" in COMPOSE
+    assert "fmu_auth:\n    driver: bridge\n    internal: true" in COMPOSE
 
 
 def test_application_database_credentials_use_only_dedicated_secret_files():
@@ -92,6 +94,7 @@ def test_control_and_data_services_use_separate_internal_networks():
     assert "gateway_backend" in blockchain
     assert "database_backend" in blockchain
     assert "fmu_control" in blockchain
+    assert "fmu_auth" in blockchain
     assert "guacnet" not in blockchain
 
     assert "database_backend" in mysql

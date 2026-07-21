@@ -21,6 +21,7 @@ cf_enabled=false
 certbot_enabled=false
 aas_bundled=false
 fmu_runner_enabled=false
+fmu_runner_profile="fmu-runner"
 setup_python_cmd=""
 existing_mysql_root_password=""
 existing_guacamole_mysql_password=""
@@ -790,8 +791,37 @@ else
 fi
 update_env_var "$ROOT_ENV_FILE" "FMU_RUNNER_ENABLED" "$fmu_runner_enabled"
 if [ "$fmu_runner_enabled" = "true" ]; then
+    current_fmu_backend_mode="$(get_env_default "FMU_BACKEND_MODE" "$ROOT_ENV_FILE")"
+    case "${current_fmu_backend_mode,,}" in
+        local) current_fmu_backend_mode="local" ;;
+        *) current_fmu_backend_mode="station" ;;
+    esac
+    read -p "FMU execution backend [station/local] (default: ${current_fmu_backend_mode}): " selected_fmu_backend_mode
+    selected_fmu_backend_mode=$(echo "$selected_fmu_backend_mode" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+    if [ -z "$selected_fmu_backend_mode" ]; then
+        selected_fmu_backend_mode="$current_fmu_backend_mode"
+    fi
+    case "$selected_fmu_backend_mode" in
+        local)
+            fmu_runner_profile="fmu-local-dev"
+            update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "local"
+            update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "true"
+            echo "   * Local FMU execution selected."
+            echo "   * Full mode retrieves JWKS over the dedicated fmu_auth network; Lite mode uses the external issuer JWKS endpoint."
+            ;;
+        station)
+            fmu_runner_profile="fmu-runner"
+            update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "station"
+            update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"
+            echo "   * Lab Station FMU execution selected."
+            ;;
+        *)
+            echo "Invalid FMU execution backend: $selected_fmu_backend_mode (choose station or local)." >&2
+            exit 1
+            ;;
+    esac
     echo "   * FMU runner enabled. /fmu routes are active."
-    echo "   * Compose starts the Station-only facade. Use --profile fmu-local-dev only for isolated local FMU development."
+    echo "   * Compose profile: $fmu_runner_profile."
 else
     echo "   * FMU runner disabled. Startup will use '--scale fmu-runner=0'."
 fi
@@ -1068,9 +1098,9 @@ fi
 
 if [ "$fmu_runner_enabled" = "true" ]; then
     if [ -n "$compose_profiles" ]; then
-        compose_profiles="$compose_profiles --profile fmu-runner"
+        compose_profiles="$compose_profiles --profile $fmu_runner_profile"
     else
-        compose_profiles="--profile fmu-runner"
+        compose_profiles="--profile $fmu_runner_profile"
     fi
 fi
 
