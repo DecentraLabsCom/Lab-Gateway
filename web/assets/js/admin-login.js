@@ -13,8 +13,8 @@
         ? 'Lab Manager sign-in'
         : 'Gateway administrator sign-in';
     document.getElementById('loginDescription').textContent = isLabManager
-        ? 'Enter the Lab Manager token. It is exchanged for an HttpOnly session cookie and is never stored in browser storage.'
-        : 'Enter the Gateway administrator token for Wallet & Billing. It is exchanged for an HttpOnly session cookie and is never stored in browser storage.';
+        ? 'Enter the Lab Manager token. It is exchanged for an HttpOnly session cookie.'
+        : 'Enter the Gateway administrator token for Wallet & Billing. It is exchanged for an HttpOnly session cookie.';
     document.getElementById('tokenLabel').textContent = isLabManager
         ? 'Lab Manager token'
         : 'Gateway administrator token';

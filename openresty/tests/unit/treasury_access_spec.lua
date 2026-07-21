@@ -52,20 +52,24 @@ local function run_treasury_access(opts)
     local headers = opts.headers or {}
     local uri_args = opts.uri_args or {}
     local ngx = ngx_factory.new({
+        method = opts.method,
         var = opts.var or {},
         config = opts.config or {},
         cache = opts.cache or {}
     })
 
+    ---@diagnostic disable-next-line: duplicate-set-field
     ngx.req.get_headers = function()
         return headers
     end
     ngx.req.get_uri_args = function()
         return uri_args
     end
+    ---@diagnostic disable-next-line: duplicate-set-field
     ngx.say = function(message)
         ngx._body = message
     end
+    ---@diagnostic disable-next-line: duplicate-set-field
     ngx.exit = function(code)
         ngx._exit = code
         return code
@@ -151,7 +155,10 @@ end)
 
 runner.it("does not allow bearer service tokens to write billing data", function()
     local ngx = run_treasury_access({
-        env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+        env = {
+            ADMIN_ACCESS_TOKEN = "secret-token",
+            ADMIN_DASHBOARD_LOCAL_ONLY = "false"
+        },
         headers = { Authorization = "Bearer marketplace-service-token" },
         method = "POST",
         var = {
