@@ -310,10 +310,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     const publicStatus = (data.status || '').toString().toUpperCase();
                     if (publicStatus === 'UP') {
                         statusIndicator.className = 'status-indicator unknown';
-                        statusText.textContent = 'Gateway Online · Configuration Unknown';
+                        statusText.textContent = 'Gateway Online · Config. Unknown';
                     } else if (publicStatus === 'PARTIAL') {
                         statusIndicator.className = 'status-indicator partial';
-                        statusText.textContent = 'Gateway Partially Available · Configuration Unknown';
+                        statusText.textContent = 'Gateway Partially Available · Config. Unknown';
                     } else {
                         statusIndicator.className = 'status-indicator offline';
                         statusText.textContent = 'Gateway Unavailable';

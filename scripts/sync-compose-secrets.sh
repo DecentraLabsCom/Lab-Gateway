@@ -28,8 +28,16 @@ read_env_value() {
 write_secret() {
     local secret_name="$1"
     local env_key="$2"
-    read_env_value "${env_key}" > "${SECRETS_DIR}/${secret_name}"
-    chmod 640 "${SECRETS_DIR}/${secret_name}"
+    local secret_path="${SECRETS_DIR}/${secret_name}"
+    local temporary_path
+
+    # Local Compose mounts file-backed secrets directly, preserving the
+    # source-file mode.  Keep the directory private, but let non-root service
+    # users read the mounted file even when their UID differs from HOST_UID.
+    temporary_path="$(mktemp "${SECRETS_DIR}/.${secret_name}.XXXXXX")"
+    read_env_value "${env_key}" > "${temporary_path}"
+    chmod 644 "${temporary_path}"
+    mv -f "${temporary_path}" "${secret_path}"
 }
 
 write_secret mysql_root_password MYSQL_ROOT_PASSWORD

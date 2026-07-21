@@ -94,9 +94,12 @@ Windows PowerShell:
 powershell -ExecutionPolicy Bypass -File .\scripts\Sync-ComposeSecrets.ps1
 ```
 
-El comando crea el directorio ignorado `secrets/` con permisos restrictivos.
-Ejecútalo de nuevo cada vez que cambie un secreto en `.env`. No incluyas ni
-borres este directorio mientras el despliegue esté en uso.
+El comando crea el directorio ignorado `secrets/` con permisos de directorio
+`0750` y ficheros `0644`. El modo de los ficheros debe permitir que los
+servicios no root lean los secretos montados por Compose; el directorio sigue
+restringiendo el acceso local. Ejecútalo de nuevo cada vez que cambie un
+secreto en `.env`. No incluyas ni borres este directorio mientras el
+despliegue esté en uso.
 
 #### Modo del gateway
 

@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SETUP_SH = ROOT / "setup.sh"
 SETUP_BAT = ROOT / "setup.bat"
+SYNC_COMPOSE_SECRETS_SH = ROOT / "scripts" / "sync-compose-secrets.sh"
 ISSUE_LITE_SH = ROOT / "scripts" / "issue-lite-trust-bundle.sh"
 ISSUE_LITE_PS1 = ROOT / "scripts" / "Issue-LiteTrustBundle.ps1"
 NGINX_CONF = ROOT / "openresty" / "nginx.conf"
@@ -46,6 +47,7 @@ class SetupEnvContractTest(unittest.TestCase):
     def setUpClass(cls):
         cls.setup_sh = SETUP_SH.read_text(encoding="utf-8")
         cls.setup_bat = SETUP_BAT.read_text(encoding="utf-8")
+        cls.sync_compose_secrets_sh = SYNC_COMPOSE_SECRETS_SH.read_text(encoding="utf-8")
         cls.issue_lite_sh = ISSUE_LITE_SH.read_text(encoding="utf-8")
         cls.issue_lite_ps1 = ISSUE_LITE_PS1.read_text(encoding="utf-8")
         cls.nginx_conf = NGINX_CONF.read_text(encoding="utf-8")
@@ -312,6 +314,17 @@ class SetupEnvContractTest(unittest.TestCase):
 
         self.assertNotIn("environment: ADMIN_ACCESS_TOKEN", self.compose_file)
         self.assertNotIn("environment: MYSQL_ROOT_PASSWORD", self.compose_file)
+
+    def test_compose_secret_files_are_readable_by_non_root_container_users(self):
+        # File-backed Compose secrets preserve the source-file mode inside the
+        # container. The directory remains restricted, while each mounted file
+        # must be readable by image-specific non-root service users whose UID
+        # may differ from HOST_UID.
+        self.assertIn('chmod 644 "$temporary_path"', self.setup_sh)
+        self.assertIn('chown "${owner_uid}:${owner_gid}" "$temporary_path"', self.setup_sh)
+        self.assertIn('mktemp "${secret_path}.tmp.XXXXXX"', self.setup_sh)
+        self.assertIn('chmod 644 "${temporary_path}"', self.sync_compose_secrets_sh)
+        self.assertIn('chmod 750 "${SECRETS_DIR}"', self.sync_compose_secrets_sh)
 
     def test_mysql_entrypoint_removes_conflicting_root_password_file_variable(self):
         entrypoint = (ROOT / "mysql" / "ensure-user-entrypoint.sh").read_text(encoding="utf-8")

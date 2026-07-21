@@ -99,11 +99,42 @@ secure_gateway_state() {
 write_compose_secret() {
     local secret_name="$1"
     local env_key="$2"
+    local owner_uid="$3"
+    local owner_gid="$4"
     local value
+    local secret_path="secrets/$secret_name"
+    local temporary_path
 
     value="$(get_env_default "$env_key" "$ROOT_ENV_FILE")"
-    printf '%s' "$value" > "secrets/$secret_name"
-    chmod 640 "secrets/$secret_name"
+    # Compose file-backed secrets are bind mounts in local Compose mode, so
+    # the source-file mode is preserved inside the container.  Several
+    # consumers run as image-specific non-root users rather than HOST_UID, so
+    # 0640 can make an otherwise valid secret unreadable.  The containing
+    # directory remains 0750, which prevents unrelated host users from
+    # traversing it.
+    temporary_path="$(mktemp "${secret_path}.tmp.XXXXXX")"
+    if ! printf '%s' "$value" > "$temporary_path"; then
+        rm -f "$temporary_path"
+        echo "Unable to write Compose secret: $secret_name" >&2
+        return 1
+    fi
+    if ! chmod 644 "$temporary_path"; then
+        rm -f "$temporary_path"
+        echo "Unable to set Compose secret permissions: $secret_name" >&2
+        return 1
+    fi
+    if [[ "$(id -u)" != "$owner_uid" || "$(id -g)" != "$owner_gid" ]]; then
+        if ! chown "${owner_uid}:${owner_gid}" "$temporary_path"; then
+            rm -f "$temporary_path"
+            echo "Unable to assign Compose secret ownership: $secret_name" >&2
+            return 1
+        fi
+    fi
+    if ! mv -f "$temporary_path" "$secret_path"; then
+        rm -f "$temporary_path"
+        echo "Unable to install Compose secret: $secret_name" >&2
+        return 1
+    fi
 }
 
 sync_compose_secrets() {
@@ -124,25 +155,25 @@ sync_compose_secrets() {
     fi
     chmod 750 secrets
 
-    write_compose_secret mysql_root_password MYSQL_ROOT_PASSWORD
-    write_compose_secret guacamole_mysql_password GUACAMOLE_MYSQL_PASSWORD
-    write_compose_secret blockchain_mysql_password BLOCKCHAIN_MYSQL_PASSWORD
-    write_compose_secret ops_backend_mysql_password OPS_BACKEND_MYSQL_PASSWORD
-    write_compose_secret ops_guacamole_mysql_password OPS_GUACAMOLE_MYSQL_PASSWORD
-    write_compose_secret guac_admin_pass GUAC_ADMIN_PASS
-    write_compose_secret admin_access_token ADMIN_ACCESS_TOKEN
-    write_compose_secret lab_manager_token LAB_MANAGER_TOKEN
-    write_compose_secret ops_internal_auth_token OPS_INTERNAL_AUTH_TOKEN
-    write_compose_secret ops_secrets_key OPS_SECRETS_KEY
-    write_compose_secret auth_access_code_redeemer_token AUTH_ACCESS_CODE_REDEEMER_TOKEN
-    write_compose_secret session_observation_ingest_token SESSION_OBSERVATION_INGEST_TOKEN
-    write_compose_secret guacamole_provisioner_token GUACAMOLE_PROVISIONER_TOKEN
-    write_compose_secret aas_service_token AAS_SERVICE_TOKEN
-    write_compose_secret lab_admin_backend_token LAB_ADMIN_BACKEND_TOKEN
-    write_compose_secret fmu_station_internal_token FMU_STATION_INTERNAL_TOKEN
-    write_compose_secret auth_session_ticket_internal_token AUTH_SESSION_TICKET_INTERNAL_TOKEN
-    write_compose_secret session_observer_signing_secret SESSION_OBSERVER_SIGNING_SECRET
-    write_compose_secret fmu_proxy_signing_key FMU_PROXY_SIGNING_KEY
+    write_compose_secret mysql_root_password MYSQL_ROOT_PASSWORD "$host_uid" "$host_gid"
+    write_compose_secret guacamole_mysql_password GUACAMOLE_MYSQL_PASSWORD "$host_uid" "$host_gid"
+    write_compose_secret blockchain_mysql_password BLOCKCHAIN_MYSQL_PASSWORD "$host_uid" "$host_gid"
+    write_compose_secret ops_backend_mysql_password OPS_BACKEND_MYSQL_PASSWORD "$host_uid" "$host_gid"
+    write_compose_secret ops_guacamole_mysql_password OPS_GUACAMOLE_MYSQL_PASSWORD "$host_uid" "$host_gid"
+    write_compose_secret guac_admin_pass GUAC_ADMIN_PASS "$host_uid" "$host_gid"
+    write_compose_secret admin_access_token ADMIN_ACCESS_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret lab_manager_token LAB_MANAGER_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret ops_internal_auth_token OPS_INTERNAL_AUTH_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret ops_secrets_key OPS_SECRETS_KEY "$host_uid" "$host_gid"
+    write_compose_secret auth_access_code_redeemer_token AUTH_ACCESS_CODE_REDEEMER_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret session_observation_ingest_token SESSION_OBSERVATION_INGEST_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret guacamole_provisioner_token GUACAMOLE_PROVISIONER_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret aas_service_token AAS_SERVICE_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret lab_admin_backend_token LAB_ADMIN_BACKEND_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret fmu_station_internal_token FMU_STATION_INTERNAL_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret auth_session_ticket_internal_token AUTH_SESSION_TICKET_INTERNAL_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret session_observer_signing_secret SESSION_OBSERVER_SIGNING_SECRET "$host_uid" "$host_gid"
+    write_compose_secret fmu_proxy_signing_key FMU_PROXY_SIGNING_KEY "$host_uid" "$host_gid"
 }
 
 get_env_default() {

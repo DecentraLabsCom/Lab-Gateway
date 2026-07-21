@@ -29,10 +29,13 @@ starting Compose so it can generate the local files used by the Compose
 secrets.
 
 The script creates the ignored `secrets/` directory from the credentials in
-`.env` and assigns ownership to `HOST_UID:HOST_GID` so non-root services can
-read the mounted files. Keep that directory on the host while the gateway is
-deployed; it must not be committed or deleted independently of the environment
-file.
+`.env`, protects the directory with mode `0750`, and assigns the files to
+`HOST_UID:HOST_GID`. The files use mode `0644` because file-backed Compose
+secrets are direct mounts and several services run as image-specific non-root
+users whose UID may differ from `HOST_UID`; the directory still prevents
+unauthorized local users from reaching the files. Keep that directory on the
+host while the gateway is deployed; it must not be committed or deleted
+independently of the environment file.
 
 ## Step 1 — Clone the repository
 
