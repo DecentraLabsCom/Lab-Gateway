@@ -54,7 +54,33 @@ local function deny_or_redirect(message)
     return deny(message)
 end
 
+local function is_marketplace_billing_read()
+    local method = ngx.req.get_method()
+    if method ~= "GET" and method ~= "HEAD" then
+        return false
+    end
+
+    local is_read_path = uri:sub(1, #"/billing/credit-accounts/") == "/billing/credit-accounts/"
+        or uri == "/billing/funding-orders"
+        or uri:sub(1, #"/billing/funding-orders/") == "/billing/funding-orders/"
+    if not is_read_path then
+        return false
+    end
+
+    local authorization = headers["Authorization"] or headers["authorization"]
+    return type(authorization) == "string"
+        and authorization:match("^%s*[Bb][Ee][Aa][Rr][Ee][Rr]%s+%S+") ~= nil
+end
+
 if uri == "/wallet/health" or uri == "/billing/health" then
+    return
+end
+
+-- Marketplace server-to-server billing reads carry a short-lived JWT. The
+-- Spring controller validates its signature, audience, institution and scope;
+-- this edge guard must let that credential reach the backend. Mutations and
+-- admin routes continue through the existing access-token policy below.
+if is_marketplace_billing_read() then
     return
 end
 

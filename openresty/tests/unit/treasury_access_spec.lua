@@ -134,6 +134,36 @@ runner.it("allows wallet health without token from public IP", function()
     runner.assert.equals(nil, ngx.req.headers["X-Access-Token"])
 end)
 
+runner.it("allows Marketplace billing reads with a bearer service token", function()
+    local ngx = run_treasury_access({
+        env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+        headers = { Authorization = "Bearer marketplace-service-token" },
+        method = "GET",
+        var = {
+            remote_addr = "8.8.8.8",
+            uri = "/billing/credit-accounts/0x1111111111111111111111111111111111111111"
+        }
+    })
+
+    runner.assert.equals(nil, ngx.status)
+    runner.assert.equals(nil, ngx._exit)
+end)
+
+runner.it("does not allow bearer service tokens to write billing data", function()
+    local ngx = run_treasury_access({
+        env = { ADMIN_ACCESS_TOKEN = "secret-token" },
+        headers = { Authorization = "Bearer marketplace-service-token" },
+        method = "POST",
+        var = {
+            remote_addr = "8.8.8.8",
+            uri = "/billing/funding-orders"
+        }
+    })
+
+    runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
+    runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
+end)
+
     runner.it("rejects when token is invalid", function()
         local ngx = run_treasury_access({
             env = {
