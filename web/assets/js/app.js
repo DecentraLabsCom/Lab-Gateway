@@ -130,6 +130,81 @@ document.addEventListener('DOMContentLoaded', function() {
     createStatusModal();
     let lastStatusDetails = { ok: [], missing: [], status: '' };
 
+    function renderDetailedStatus(data, statusIndicator, statusText) {
+        const services = data.services || {};
+        const blockchain = services.blockchain || {};
+        const guacamole = services.guacamole || {};
+        const guacApi = services.guacamole_api || {};
+        const ops = services.ops || {};
+        const mysql = services.mysql || {};
+        const liteAuth = services.lite_auth || {};
+        const mode = (data.mode || gatewayMode || 'full').toString().toLowerCase();
+        const liteMode = data.lite === true || mode === 'lite';
+        const statusValue = (data.status || '').toString().toUpperCase();
+
+        const okItems = [];
+        const missingItems = [];
+        const labsOk = guacamole.ok === true && guacApi.ok === true && mysql.ok === true;
+
+        if (liteMode) {
+            setGatewayMode({ mode: 'lite', lite: true });
+            if (liteAuth.ok === true) {
+                okItems.push('Lite issuer/public key trust operative');
+            } else {
+                missingItems.push({ text: 'Lite issuer/public key trust failed', href: '/gateway-health/' });
+            }
+        } else if (blockchain.ok === true) {
+            okItems.push('Blockchain services operative');
+        } else {
+            missingItems.push({ text: 'Blockchain services inoperative', href: '/gateway-health/' });
+        }
+
+        if (labsOk) {
+            okItems.push('Labs access operative');
+        } else {
+            missingItems.push({ text: 'Labs access inoperative', href: '/gateway-health/' });
+        }
+
+        if (ops.ok === false) {
+            missingItems.push({ text: 'Ops worker inoperative', href: '/gateway-health/' });
+        }
+
+        const fmuRunner = services.fmu_runner || {};
+        if (fmuRunner.enabled === true) {
+            if (fmuRunner.ok === true) {
+                okItems.push('FMU runner operative');
+            } else {
+                missingItems.push({ text: 'FMU runner inoperative', href: '/gateway-health/' });
+            }
+        }
+
+        const aas = services.aas || {};
+        if (aas.enabled === true) {
+            if (aas.ok === true) {
+                okItems.push('AAS server operative');
+            } else {
+                missingItems.push({ text: 'AAS server inoperative', href: '/gateway-health/' });
+            }
+        }
+
+        if (statusValue === 'UP') {
+            statusIndicator.className = 'status-indicator online';
+            statusText.textContent = 'Gateway Online';
+        } else if (statusValue === 'PARTIAL') {
+            statusIndicator.className = 'status-indicator partial';
+            statusText.textContent = 'Gateway Partially Available';
+        } else {
+            statusIndicator.className = 'status-indicator offline';
+            statusText.textContent = 'Gateway Unavailable';
+        }
+        statusIndicator.setAttribute('title', 'Click for status details');
+        lastStatusDetails = {
+            status: statusText.textContent,
+            ok: okItems,
+            missing: missingItems
+        };
+    }
+
     // System status monitoring - checks Guacamole and blockchain-services (incl. keys)
     function updateSystemStatus() {
         const statusIndicator = document.querySelector('.status-indicator');
@@ -170,91 +245,26 @@ document.addEventListener('DOMContentLoaded', function() {
                         ok: publicStatus === 'UP' ? ['Public readiness operative'] : [],
                         missing: [{
                             text: 'Configuration status requires operator authentication',
-                            href: '/lab-manager',
+                            href: '/gateway-health/',
                             authPath: '/lab-manager/'
                         }]
                     };
+                    fetch('/gateway/health/details', {
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        skipAuthPrompt: true
+                    }).then(detailsResponse => {
+                        if (detailsResponse.status === 401 || detailsResponse.status === 403) return null;
+                        return detailsResponse.json().catch(() => null);
+                    }).then(details => {
+                        if (details && details.public !== true) {
+                            renderDetailedStatus(details, statusIndicator, statusText);
+                        }
+                    }).catch(() => {});
                     return;
                 }
 
-                const services = data.services || {};
-                const blockchain = services.blockchain || {};
-                const guacamole = services.guacamole || {};
-                const guacApi = services.guacamole_api || {};
-                const ops = services.ops || {};
-                const mysql = services.mysql || {};
-                const liteAuth = services.lite_auth || {};
-                const mode = (data.mode || gatewayMode || 'full').toString().toLowerCase();
-                const liteMode = data.lite === true || mode === 'lite';
-                const statusValue = (data.status || '').toString().toUpperCase();
-
-                const okItems = [];
-                const missingItems = [];
-
-                const labsOk = guacamole.ok === true && guacApi.ok === true && mysql.ok === true;
-
-                if (liteMode) {
-                    setGatewayMode({ mode: 'lite', lite: true });
-                    if (liteAuth.ok === true) {
-                        okItems.push('Lite issuer/public key trust operative');
-                    } else {
-                        missingItems.push({ text: 'Lite issuer/public key trust failed', href: '/gateway-health/' });
-                    }
-                } else {
-                    if (blockchain.ok === true) {
-                        okItems.push('Blockchain services operative');
-                    } else {
-                        missingItems.push({ text: 'Blockchain services inoperative', href: '/gateway-health/' });
-                    }
-                }
-
-                if (labsOk) {
-                    okItems.push('Labs access operative');
-                } else {
-                    missingItems.push({ text: 'Labs access inoperative', href: '/gateway-health/' });
-                }
-
-                if (ops.ok === false) {
-                    missingItems.push({ text: 'Ops worker inoperative', href: '/gateway-health/' });
-                }
-
-                const fmuRunner = services.fmu_runner || {};
-                if (fmuRunner.enabled === true) {
-                    if (fmuRunner.ok === true) {
-                        okItems.push('FMU runner operative');
-                    } else {
-                        missingItems.push({ text: 'FMU runner inoperative', href: '/gateway-health/' });
-                    }
-                }
-
-                const aas = services.aas || {};
-                if (aas.enabled === true) {
-                    if (aas.ok === true) {
-                        okItems.push('AAS server operative');
-                    } else {
-                        missingItems.push({ text: 'AAS server inoperative', href: '/gateway-health/' });
-                    }
-                }
-
-                if (statusValue === 'UP') {
-                    statusIndicator.className = 'status-indicator online';
-                    statusText.textContent = 'Gateway Online';
-                    statusIndicator.setAttribute('title', 'Click for status details');
-                } else if (statusValue === 'PARTIAL') {
-                    statusIndicator.className = 'status-indicator partial';
-                    statusIndicator.setAttribute('title', 'Click for status details');
-                    statusText.textContent = 'Gateway Partially Available';
-                } else {
-                    statusIndicator.className = 'status-indicator offline';
-                    statusIndicator.setAttribute('title', 'Click for status details');
-                    statusText.textContent = 'Gateway Unavailable';
-                }
-
-                lastStatusDetails = {
-                    status: statusText.textContent,
-                    ok: okItems,
-                    missing: missingItems
-                };
+                renderDetailedStatus(data, statusIndicator, statusText);
             })
             .catch(() => {
                 statusIndicator.className = 'status-indicator unknown';
@@ -363,9 +373,11 @@ function openStatusModal(details) {
             if (item.authPath) {
                 link.addEventListener('click', event => {
                     event.preventDefault();
-                    const destination = item.authPath;
+                    const authenticationPath = item.authPath;
+                    const destination = item.href || authenticationPath;
                     const accessPolicy = fetch('/lab-manager/access-policy', {
                         credentials: 'same-origin',
+                        cache: 'no-store',
                         skipAuthPrompt: true
                     });
                     accessPolicy.then(response => {
@@ -374,13 +386,13 @@ function openStatusModal(details) {
                             return;
                         }
                         if (response.status === 401 && window.AuthTokenHandler?.requestAuthenticationForPath) {
-                            window.AuthTokenHandler.requestAuthenticationForPath(destination, () => {
+                            window.AuthTokenHandler.requestAuthenticationForPath(authenticationPath, () => {
                                 window.location.assign(destination);
                             });
                             return;
                         }
-                        window.location.assign(item.href);
-                    }).catch(() => window.location.assign(item.href));
+                        window.location.assign(destination);
+                    }).catch(() => window.location.assign(destination));
                 });
             }
             li.appendChild(link);

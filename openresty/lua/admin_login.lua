@@ -83,7 +83,7 @@ end
 local encoded = session_id
 local cookies = {}
 if is_lab then
-    for _, path in ipairs({ "/lab-manager", "/lab-admin", "/ops", "/aas-admin" }) do
+    for _, path in ipairs({ "/lab-manager", "/lab-admin", "/ops", "/aas-admin", "/health", "/gateway/health" }) do
         cookies[#cookies + 1] = cookie_name .. "=" .. encoded
             .. "; Max-Age=" .. max_age .. "; Path=" .. path
             .. "; HttpOnly; Secure; SameSite=Lax"

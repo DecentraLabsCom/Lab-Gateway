@@ -85,6 +85,26 @@
                     body: new URLSearchParams({ token })
                 });
                 if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+                if (config.key === 'lab-manager') {
+                    const sessionCheck = await fetch('/lab-manager/access-policy', {
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        skipAuthPrompt: true
+                    });
+                    if (!sessionCheck.ok) {
+                        throw new Error('Authentication session could not be established');
+                    }
+                } else if (config.key === 'billing') {
+                    const sessionCheck = await fetch('/wallet-dashboard', {
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        skipAuthPrompt: true
+                    });
+                    const sessionPath = new URL(sessionCheck.url, window.location.origin).pathname;
+                    if (!sessionCheck.ok || !sessionPath.startsWith('/wallet-dashboard/')) {
+                        throw new Error('Authentication session could not be established');
+                    }
+                }
                 const callbacks = activePrompt.callbacks.slice();
                 hideTokenModal();
                 callbacks.forEach(cb => cb());

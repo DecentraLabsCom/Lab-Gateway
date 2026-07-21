@@ -37,7 +37,7 @@ local cookies = {}
 for _, path in ipairs({ "/wallet", "/billing", "/wallet-dashboard", "/institution-config" }) do
     cookies[#cookies + 1] = cookie_header(admin_name, path)
 end
-for _, path in ipairs({ "/lab-manager", "/lab-admin", "/ops", "/aas-admin" }) do
+for _, path in ipairs({ "/lab-manager", "/lab-admin", "/ops", "/aas-admin", "/health", "/gateway/health" }) do
     cookies[#cookies + 1] = cookie_header(lab_name, path)
 end
 ngx.header["Set-Cookie"] = cookies

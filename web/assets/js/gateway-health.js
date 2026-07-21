@@ -18,8 +18,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (e) {
                     data = { parseError: e.message };
                 }
-                render(data);
+                if (data.public === true) {
+                    return fetch('/gateway/health/details', {
+                        credentials: 'same-origin',
+                        cache: 'no-store'
+                    }).then(detailsResponse => {
+                        if (detailsResponse.status === 401 || detailsResponse.status === 403) return data;
+                        return detailsResponse.json().catch(() => data);
+                    }).catch(() => data);
+                }
+                return data;
             })
+            .then(data => render(data))
             .catch(err => {
                 console.error(err);
                 setStatus('Status Unknown', 'unknown');
@@ -43,9 +53,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function render(data) {
         const statusVal = (data.status || '').toString().toUpperCase();
-        if (statusVal === 'UP') setStatus('Gateway Online · Configuration Unknown', 'unknown');
-        else if (statusVal === 'PARTIAL') setStatus('Gateway Partially Available · Configuration Unknown', 'partial');
-        else setStatus('Gateway Unavailable', 'offline');
+        const configurationUnknown = data.public === true;
+        if (statusVal === 'UP') {
+            setStatus(configurationUnknown ? 'Gateway Online · Configuration Unknown' : 'Gateway Online', configurationUnknown ? 'unknown' : 'online');
+        } else if (statusVal === 'PARTIAL') {
+            setStatus(configurationUnknown ? 'Gateway Partially Available · Configuration Unknown' : 'Gateway Partially Available', 'partial');
+        } else {
+            setStatus('Gateway Unavailable', 'offline');
+        }
 
         // Public health deliberately omits service and infrastructure details.
         // Keep the page useful without inventing a false per-service status.
