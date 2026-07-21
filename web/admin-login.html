@@ -3,20 +3,20 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Administrative sign-in</title>
+    <title>Gateway sign-in</title>
     <link rel="stylesheet" href="assets/css/admin-login.css">
 </head>
 <body>
     <main class="login-card">
-        <h1>Administrative sign-in</h1>
-        <p>Use the Gateway administrator token. It is exchanged for an HttpOnly session cookie and is never stored in browser storage.</p>
+        <h1 id="loginTitle">Gateway sign-in</h1>
+        <p id="loginDescription">Use the Gateway administrator token. It is exchanged for an HttpOnly session cookie and is never stored in browser storage.</p>
         <form id="adminLoginForm" autocomplete="off">
-            <label for="token">Access token</label>
+            <label id="tokenLabel" for="token">Access token</label>
             <input id="token" name="token" type="password" autocomplete="current-password" required maxlength="512">
             <button type="submit">Sign in</button>
             <p id="error" class="error" role="alert" hidden></p>
         </form>
     </main>
-    <script src="assets/js/admin-login.js" defer></script>
+    <script src="assets/js/admin-login.js?v=auth-scopes-v2" defer></script>
 </body>
 </html>

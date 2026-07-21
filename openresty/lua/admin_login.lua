@@ -101,6 +101,8 @@ else
             .. "; Max-Age=" .. max_age .. "; Path=" .. path
             .. "; HttpOnly; Secure; SameSite=Lax"
     end
+    local csrf_cookie_name = os.getenv("ADMIN_CSRF_COOKIE") or "dlabs_csrf"
+    cookies[#cookies + 1] = csrf_cookie_name .. "=; Max-Age=0; Path=/; Secure; SameSite=Strict"
 end
 
 ngx.header["Set-Cookie"] = cookies

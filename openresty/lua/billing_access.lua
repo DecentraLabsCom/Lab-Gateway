@@ -44,8 +44,11 @@ end
 local uri = ngx.var.uri or ""
 
 local function deny_or_redirect(message)
-    if uri == "/wallet-dashboard" and ngx.req.get_method() == "GET" then
-        return ngx.redirect("/admin-login.html?scope=billing", 302)
+    local is_page = uri == "/wallet-dashboard" or uri == "/wallet-dashboard/"
+        or uri == "/wallet-dashboard/index.html"
+    local accept = headers["Accept"] or ""
+    if is_page and ngx.req.get_method() == "GET" and accept:find("text/html", 1, true) then
+        return ngx.redirect("/?auth=billing&next=/wallet-dashboard/", 302)
     end
     return deny(message)
 end
@@ -299,7 +302,15 @@ if session_id and ngx.shared.cache then
         ngx.header["Set-Cookie"] = csrf_cookie_name .. "=" .. expected_csrf
             .. "; Max-Age=" .. csrf_max_age .. "; Path=/; Secure; SameSite=Strict"
     elseif not constant_time_eq(csrf_cookie, expected_csrf) then
-        return deny_forbidden("Forbidden: invalid CSRF token.")
+        -- A browser may retain the non-HttpOnly CSRF cookie after the
+        -- server-side administrative session has expired or OpenResty has
+        -- restarted. A safe request can repair that cookie; mutations still
+        -- fail closed until the client has received and echoed it.
+        if method ~= "GET" and method ~= "HEAD" then
+            return deny_forbidden("Forbidden: invalid CSRF token.")
+        end
+        ngx.header["Set-Cookie"] = csrf_cookie_name .. "=" .. expected_csrf
+            .. "; Max-Age=" .. csrf_max_age .. "; Path=/; Secure; SameSite=Strict"
     end
 
     if method == "POST" or method == "PUT" or method == "PATCH" or method == "DELETE" then

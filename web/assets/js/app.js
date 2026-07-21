@@ -56,6 +56,81 @@ document.addEventListener('DOMContentLoaded', function() {
     
     applyGatewayMode();
 
+    function installProtectedEntryHandlers() {
+        const handler = window.AuthTokenHandler;
+        if (!handler || typeof handler.getTokenConfigForPath !== 'function'
+            || typeof handler.requestAuthenticationForPath !== 'function') {
+            return;
+        }
+
+        document.querySelectorAll('.access-btn[href]').forEach(button => {
+            const destination = new URL(button.href, window.location.origin);
+            const config = handler.getTokenConfigForPath(destination.pathname);
+            if (!config) return;
+
+            button.addEventListener('click', event => {
+                event.preventDefault();
+                const checkPath = config.key === 'lab-manager'
+                    ? '/lab-manager/access-policy'
+                    : '/wallet-dashboard/';
+                fetch(checkPath, {
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    skipAuthPrompt: true
+                }).then(response => {
+                    if (response.status === 401) {
+                        handler.requestAuthenticationForPath(destination.pathname, () => {
+                            window.location.assign(destination.href);
+                        });
+                        return;
+                    }
+                    window.location.assign(destination.href);
+                }).catch(() => window.location.assign(destination.href));
+            });
+        });
+    }
+
+    installProtectedEntryHandlers();
+
+    function handlePendingAuthentication() {
+        const handler = window.AuthTokenHandler;
+        const params = new URLSearchParams(window.location.search);
+        const scope = params.get('auth');
+        const nextValue = params.get('next');
+        if (!handler || !scope || !nextValue) return;
+
+        let destination;
+        try {
+            destination = new URL(nextValue, window.location.origin);
+        } catch (_) {
+            return;
+        }
+        if (destination.origin !== window.location.origin
+            || !['/lab-manager/', '/wallet-dashboard/'].includes(destination.pathname)) {
+            return;
+        }
+        const config = handler.getTokenConfigForPath(destination.pathname);
+        if (!config || config.key !== scope) return;
+
+        window.history.replaceState({}, document.title, window.location.pathname);
+        const checkPath = scope === 'lab-manager' ? '/lab-manager/access-policy' : '/wallet-dashboard/';
+        fetch(checkPath, {
+            credentials: 'same-origin',
+            cache: 'no-store',
+            skipAuthPrompt: true
+        }).then(response => {
+            if (response.status === 401) {
+                handler.requestAuthenticationForPath(destination.pathname, () => {
+                    window.location.assign(destination.href);
+                });
+                return;
+            }
+            window.location.assign(destination.href);
+        }).catch(() => window.location.assign(destination.href));
+    }
+
+    handlePendingAuthentication();
+
     document.querySelectorAll('[data-external-url]').forEach(button => {
         button.addEventListener('click', () => window.open(button.dataset.externalUrl, '_blank', 'noopener,noreferrer'));
     });

@@ -219,8 +219,10 @@ local request_uri = ngx.var.request_uri or ""
 local is_lab_manager = is_lab_manager_path(uri) or is_lab_manager_path(request_uri)
 
 local function deny_or_redirect(message)
-    if uri == "/lab-manager" and ngx.req.get_method() == "GET" then
-        return ngx.redirect("/admin-login.html?scope=lab-manager", 302)
+    local is_page = uri == "/lab-manager" or uri == "/lab-manager/" or uri == "/lab-manager/index.html"
+    local accept = headers["Accept"] or ""
+    if is_page and ngx.req.get_method() == "GET" and accept:find("text/html", 1, true) then
+        return ngx.redirect("/?auth=lab-manager&next=/lab-manager/", 302)
     end
     return deny(message)
 end

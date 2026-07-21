@@ -78,15 +78,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     populateTimezones();
 
-    $('#btnTestLoad').addEventListener('click', loadConfig);
+    $('#btnTestLoad').addEventListener('click', () => {
+        if (!hasBillingAccess()) {
+            promptBillingToken(() => loadConfig());
+            return;
+        }
+        loadConfig();
+    });
     $('#saveConfigBtn').addEventListener('click', saveConfig);
     $('#btnTestEmail').addEventListener('click', sendTestEmail);
     driverEl.addEventListener('change', toggleSections);
     configureBtn.addEventListener('click', () => {
         if (!hasBillingAccess()) {
-            loadConfig(() => {
+            promptBillingToken(() => loadConfig(() => {
                 openModal();
-            });
+            }));
             return;
         }
         openModal();
@@ -351,7 +357,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadConfig(onSuccess) {
         setStatus('Loading...');
         updateBillingStatusAction();
-        return fetch('/billing/admin/notifications', { credentials: 'include' })
+        return fetch('/billing/admin/notifications', {
+            credentials: 'include',
+            // Billing is requested only when its configuration is used, not
+            // as a second authentication prompt during page loading.
+            skipAuthPrompt: true
+        })
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
@@ -391,9 +402,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error(err);
                 billingAccessReady = false;
                 const needsToken = err.message === 'HTTP 401';
-                setStatus(needsToken ? 'Admin access token required' : 'Error');
+                setStatus(needsToken ? 'Gateway administrator token required' : 'Error');
                 updateBillingStatusAction();
-                showToast(needsToken ? 'Enter Wallet & Billing token to load notifications' : 'Cannot load config (check admin access)', 'error');
+                showToast(needsToken ? 'Enter the Gateway administrator token to load notifications' : 'Cannot load config (check administrator access)', 'error');
             });
     }
 
@@ -524,8 +535,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 login: '/admin/login',
                 header: 'X-Access-Token',
                 cookie: 'access_token',
-                title: 'Wallet & Billing Access Token',
-                description: 'This area requires a Wallet & Billing access token.'
+                title: 'Gateway administrator token required',
+                description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.',
+                invalidMessage: 'Invalid Gateway administrator token.'
             };
         }
 
@@ -543,7 +555,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const needsToken = !hasBillingAccess();
         configStatusEl.classList.toggle('token-required-action', needsToken);
-        configStatusEl.title = needsToken ? 'Click to enter Wallet & Billing token' : '';
+        configStatusEl.title = needsToken ? 'Click to enter the Gateway administrator token' : '';
         configStatusEl.setAttribute('aria-disabled', needsToken ? 'false' : 'true');
     }
 
@@ -601,17 +613,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!badge) return;
         try {
             const res = await fetch('/lab-manager/access-policy', {
-                credentials: 'include',
-                skipAuthPrompt: true
+                credentials: 'include'
             });
             if (res.status === 401) {
-                badge.textContent = 'Access Policy Requires Token';
-                badge.classList.remove('local', 'private', 'external');
+                badge.textContent = 'Lab Manager session required';
+                badge.classList.remove('local', 'private', 'external', 'token-required-action');
                 return;
             }
             if (res.status === 403) {
                 badge.textContent = 'Access Policy Blocked';
-                badge.classList.remove('local', 'private', 'external');
+                badge.classList.remove('local', 'private', 'external', 'token-required-action');
                 return;
             }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -619,7 +630,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateAccessPolicyBadge(status);
         } catch (err) {
             badge.textContent = 'Access Policy Unavailable';
-            badge.classList.remove('local', 'private', 'external');
+            badge.classList.remove('local', 'private', 'external', 'token-required-action');
         }
     }
 
@@ -633,7 +644,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? status.dashboardAllowedCidrs.split(',').map(item => item.trim()).filter(Boolean)
             : [];
 
-        badge.classList.remove('local', 'private', 'external');
+        badge.classList.remove('local', 'private', 'external', 'token-required-action');
         if (!localOnly) {
             badge.textContent = 'External Access Allowed';
             badge.classList.add('external');

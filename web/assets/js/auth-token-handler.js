@@ -9,14 +9,14 @@
     'use strict';
 
     const TOKEN_CONFIG = {
-        '/lab-manager': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager Access Token', description: 'This area requires a Lab Manager access token.' },
-        '/lab-admin': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager Access Token', description: 'Lab publishing operations require a Lab Manager access token.' },
-        '/ops': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager Access Token', description: 'Lab Station operations require a Lab Manager access token.' },
-        '/aas-admin': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager Access Token', description: 'AAS administration requires a Lab Manager access token.' },
-        '/wallet': { key: 'billing', login: '/admin/login', title: 'Wallet & Billing Access Token', description: 'This area requires a Wallet & Billing access token.' },
-        '/billing': { key: 'billing', login: '/admin/login', title: 'Wallet & Billing Access Token', description: 'This area requires a Wallet & Billing access token.' },
-        '/wallet-dashboard': { key: 'billing', login: '/admin/login', title: 'Wallet & Billing Access Token', description: 'This area requires a Wallet & Billing access token.' },
-        '/institution-config': { key: 'billing', login: '/admin/login', title: 'Wallet & Billing Access Token', description: 'This area requires a Wallet & Billing access token.' }
+        '/lab-manager': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager token required', description: 'Enter the Lab Manager token. It is used for lab administration and Lab Station operations.', invalidMessage: 'Invalid Lab Manager token.' },
+        '/lab-admin': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager token required', description: 'Lab publishing requires the Lab Manager token.', invalidMessage: 'Invalid Lab Manager token.' },
+        '/ops': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager token required', description: 'Lab Station operations require the Lab Manager token.', invalidMessage: 'Invalid Lab Manager token.' },
+        '/aas-admin': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager token required', description: 'AAS administration requires the Lab Manager token.', invalidMessage: 'Invalid Lab Manager token.' },
+        '/wallet': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.', invalidMessage: 'Invalid Gateway administrator token.' },
+        '/billing': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.', invalidMessage: 'Invalid Gateway administrator token.' },
+        '/wallet-dashboard': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.', invalidMessage: 'Invalid Gateway administrator token.' },
+        '/institution-config': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.', invalidMessage: 'Invalid Gateway administrator token.' }
     };
 
     const activePrompt = { key: null, callbacks: [] };
@@ -82,17 +82,27 @@
                     method: 'POST',
                     credentials: 'same-origin',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({ token })
+                    body: new URLSearchParams({ token }),
+                    // A failed login belongs to this modal. Do not let the
+                    // global 401 handler open another token-type prompt.
+                    skipAuthPrompt: true
                 });
-                if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+                if (!response.ok) {
+                    const message = await response.text();
+                    throw new Error(response.status === 401
+                        ? (config.invalidMessage || 'Invalid administrative token.')
+                        : (message || `HTTP ${response.status}`));
+                }
                 if (config.key === 'lab-manager') {
-                    const sessionCheck = await fetch('/lab-manager/access-policy', {
-                        credentials: 'same-origin',
-                        cache: 'no-store',
-                        skipAuthPrompt: true
-                    });
-                    if (!sessionCheck.ok) {
-                        throw new Error('Authentication session could not be established');
+                    for (const path of ['/lab-manager/access-policy', '/ops/health/details']) {
+                        const sessionCheck = await fetch(path, {
+                            credentials: 'same-origin',
+                            cache: 'no-store',
+                            skipAuthPrompt: true
+                        });
+                        if (sessionCheck.status === 401 || sessionCheck.status === 403) {
+                            throw new Error('Lab Manager session could not be established');
+                        }
                     }
                 } else if (config.key === 'billing') {
                     const sessionCheck = await fetch('/wallet-dashboard', {
@@ -110,6 +120,8 @@
                 callbacks.forEach(cb => cb());
             } catch (err) {
                 showError(err.message || 'Authentication failed');
+                input.focus();
+                input.select();
             } finally {
                 submit.disabled = false;
             }
