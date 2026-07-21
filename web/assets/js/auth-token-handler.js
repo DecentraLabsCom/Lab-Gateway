@@ -27,9 +27,9 @@
             <div id="authTokenModal" class="auth-token-modal" hidden>
                 <div class="auth-token-modal-overlay"></div>
                 <div class="auth-token-modal-content">
-                    <div class="auth-token-modal-header"><h2 id="authTokenModalTitle">Access Token Required</h2><button id="authTokenModalClose" type="button">&times;</button></div>
-                    <div class="auth-token-modal-body"><p id="authTokenModalDescription"></p><input type="password" id="authTokenInput" autocomplete="off" maxlength="512"><div id="authTokenError" class="auth-token-error" hidden></div></div>
-                    <div class="auth-token-modal-footer"><button id="authTokenCancel" type="button">Cancel</button><button id="authTokenSubmit" type="button">Submit</button></div>
+                    <div class="auth-token-modal-header"><h2 id="authTokenModalTitle">Access Token Required</h2><button id="authTokenModalClose" class="auth-token-modal-close" type="button">&times;</button></div>
+                    <div class="auth-token-modal-body"><p id="authTokenModalDescription"></p><div class="auth-token-input-group"><input type="password" id="authTokenInput" class="auth-token-input" autocomplete="off" maxlength="512"></div><div id="authTokenError" class="auth-token-error" hidden></div></div>
+                    <div class="auth-token-modal-footer"><button id="authTokenCancel" class="auth-token-btn auth-token-btn-cancel" type="button">Cancel</button><button id="authTokenSubmit" class="auth-token-btn auth-token-btn-primary" type="button">Submit</button></div>
                 </div>
             </div>`);
         const modal = document.getElementById('authTokenModal');
