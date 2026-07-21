@@ -69,6 +69,7 @@
         const submit = document.getElementById('authTokenSubmit');
         const error = document.getElementById('authTokenError');
         input.value = '';
+        error.textContent = '';
         error.hidden = true;
         modal.hidden = false;
         modal.classList.add('show');

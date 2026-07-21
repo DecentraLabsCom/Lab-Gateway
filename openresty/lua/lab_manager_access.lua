@@ -2,14 +2,17 @@
 -- Enforces a dedicated access token for non-local clients when configured.
 
 local bit = require("bit")
+local random = require("resty.random")
+local hex = require("modules.hex")
 local token = os.getenv("LAB_MANAGER_TOKEN") or ""
 local headers = ngx.req.get_headers()
 
-local function deny(message)
-    ngx.status = ngx.HTTP_UNAUTHORIZED
+local function deny(message, status)
+    status = status or ngx.HTTP_UNAUTHORIZED
+    ngx.status = status
     ngx.header["Content-Type"] = "text/plain"
     ngx.say(message or "Unauthorized")
-    return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+    return ngx.exit(status)
 end
 
 -- Constant-time string comparison to mitigate timing side-channels on token checks.
@@ -234,11 +237,13 @@ end
 
 local provided = headers[header_name]
 local session_id
+local cookie_value
 
 if not provided or provided == "" then
     local cookie_var = "cookie_" .. cookie_name
-    session_id = ngx.var[cookie_var]
-    provided = session_id
+    cookie_value = ngx.var[cookie_var]
+    session_id = cookie_value
+    provided = cookie_value
 end
 if session_id and session_id ~= "" and ngx.shared.cache then
     local session_token = ngx.shared.cache:get("admin_session:lab:" .. session_id)
@@ -270,14 +275,37 @@ elseif not is_loopback(client_ip) then
     return deny_or_redirect("Unauthorized: lab manager token required. " .. token_hint())
 end
 
+-- Migrate a legacy raw-token cookie once it has passed validation. New
+-- sessions never expose the configured token to the browser, but installations
+-- upgraded from the old cookie format may still have one path-scoped raw
+-- cookie. Replace it with the same opaque session format used by login.
+if cookie_value and cookie_value ~= "" and not session_id and ngx.shared.cache then
+    local session_bytes = random.bytes(32, true)
+    if session_bytes then
+        local migrated_id = hex.encode(session_bytes)
+        if ngx.shared.cache:set("admin_session:lab:" .. migrated_id, token, 900) then
+            session_id = migrated_id
+        end
+    end
+end
+
 -- Keep older path-scoped sessions usable across all Lab Manager surfaces.
 -- A session cookie created for /lab-manager is not sent to /ops or /lab-admin;
 -- once the session has been validated, mirror the same opaque session id to
 -- the other protected paths. Header-authenticated service calls do not receive
 -- browser cookies.
 if session_id and session_id ~= "" then
-    local session_cookies = {}
-    for _, path in ipairs({ "/lab-manager", "/lab-admin", "/ops", "/aas-admin", "/health", "/gateway/health" }) do
+    local session_cookies = {
+        cookie_name .. "=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax"
+    }
+    for _, path in ipairs({
+        "/lab-manager", "/lab-manager/",
+        "/lab-admin", "/lab-admin/",
+        "/ops", "/ops/",
+        "/aas-admin", "/aas-admin/",
+        "/health", "/health/",
+        "/gateway/health", "/gateway/health/"
+    }) do
         session_cookies[#session_cookies + 1] = cookie_name .. "=" .. session_id
             .. "; Max-Age=900; Path=" .. path .. "; HttpOnly; Secure; SameSite=Lax"
     end
@@ -293,7 +321,7 @@ if uri:sub(1, 5) == "/ops/" then
     local internal_token = os.getenv("OPS_INTERNAL_AUTH_TOKEN") or ""
     local internal_header = os.getenv("OPS_INTERNAL_AUTH_HEADER") or "X-Ops-Internal-Token"
     if internal_token == "" then
-        return deny("Service unavailable: OPS_INTERNAL_AUTH_TOKEN is not configured.")
+        return deny("Service unavailable: OPS_INTERNAL_AUTH_TOKEN is not configured.", ngx.HTTP_SERVICE_UNAVAILABLE)
     end
     ngx.req.clear_header("Authorization")
     ngx.req.clear_header("Cookie")

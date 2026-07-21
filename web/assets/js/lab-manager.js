@@ -677,7 +677,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             if (res.status === 401) {
-                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
+                if (!options.skipAuthPrompt) {
+                    showToast('Lab Manager session required to load Lab Station hosts', 'error');
+                }
                 return;
             }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);

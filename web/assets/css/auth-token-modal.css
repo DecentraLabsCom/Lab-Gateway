@@ -182,6 +182,13 @@
     gap: 0.5rem;
 }
 
+/* The generic `.auth-token-error` rule must not override the HTML `hidden`
+ * state. Keep the empty error slot out of the layout until a real message is
+ * available. */
+.auth-token-error[hidden] {
+    display: none !important;
+}
+
 .auth-token-error::before {
     content: '⚠️';
     font-size: 1.2rem;
