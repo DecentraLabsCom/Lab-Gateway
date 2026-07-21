@@ -185,8 +185,8 @@ body {
 .title-line {
     display: block;
     background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
-    background-clip: text;
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     text-shadow: var(--shadow-glow);
     animation: glow-pulse 3s ease-in-out infinite alternate;
@@ -194,8 +194,8 @@ body {
 
 .title-line.highlight {
     background: linear-gradient(45deg, var(--secondary-color), var(--primary-color));
-    background-clip: text;
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     font-size: 1.2em;
 }
@@ -227,6 +227,7 @@ body {
     border-radius: 15px;
     padding: 30px;
     margin-bottom: 50px;
+    -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
     box-shadow: var(--shadow-glow);
 }
@@ -254,13 +255,13 @@ body {
     border-radius: 20px;
     font-size: 0.9rem;
     font-weight: 600;
+    cursor: pointer;
 }
 
 .status-indicator.online {
     background: var(--success-bg);
     color: var(--success-color);
     border: 1px solid var(--success-color);
-    cursor: pointer;
     transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
@@ -268,7 +269,6 @@ body {
     background: var(--warning-bg-1a);
     color: #ffa500;
     border: 1px solid #ffa500;
-    cursor: pointer;
 }
 
 .status-indicator.online:hover {
@@ -534,6 +534,7 @@ body {
     border-radius: 12px;
     padding: 25px;
     text-align: center;
+    -webkit-backdrop-filter: blur(5px);
     backdrop-filter: blur(5px);
     transition: all 0.3s ease;
 }
@@ -788,6 +789,7 @@ footer a:hover, .footer a:hover {
     padding: 25px;
     border-radius: 15px;
     border: 1px solid var(--primary-bg-33);
+    -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
     transition: all 0.3s ease;
 }
@@ -928,6 +930,7 @@ footer a:hover, .footer a:hover {
     width: 100%;
     height: 100%;
     background: var(--overlay-bg);
+    -webkit-backdrop-filter: blur(5px);
     backdrop-filter: blur(5px);
 }
 
@@ -1093,6 +1096,7 @@ footer a:hover, .footer a:hover {
     width: 100%;
     height: 100%;
     background: var(--overlay-bg);
+    -webkit-backdrop-filter: blur(5px);
     backdrop-filter: blur(5px);
     z-index: 999;
 }
