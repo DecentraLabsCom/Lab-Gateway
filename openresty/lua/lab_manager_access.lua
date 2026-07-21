@@ -218,6 +218,13 @@ local uri = ngx.var.uri or ""
 local request_uri = ngx.var.request_uri or ""
 local is_lab_manager = is_lab_manager_path(uri) or is_lab_manager_path(request_uri)
 
+local function deny_or_redirect(message)
+    if uri == "/lab-manager" and ngx.req.get_method() == "GET" then
+        return ngx.redirect("/admin-login.html?scope=lab-manager", 302)
+    end
+    return deny(message)
+end
+
 local function token_hint()
     local hint = "Provide " .. header_name .. " header or " .. cookie_name .. " cookie"
     return hint .. ". Query-string tokens are disabled; use the POST admin login endpoint."
@@ -241,10 +248,10 @@ end
 
 if provided and provided ~= "" then
     if not constant_time_eq(provided, token) then
-        return deny("Unauthorized: invalid lab manager token. " .. token_hint())
+        return deny_or_redirect("Unauthorized: invalid lab manager token. " .. token_hint())
     end
 elseif not is_loopback(client_ip) then
-    return deny("Unauthorized: lab manager token required. " .. token_hint())
+    return deny_or_redirect("Unauthorized: lab manager token required. " .. token_hint())
 end
 
 ngx.req.set_header(header_name, token)

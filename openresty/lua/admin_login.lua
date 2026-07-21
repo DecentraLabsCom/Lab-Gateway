@@ -82,6 +82,13 @@ if not session_cache or not session_cache:set("admin_session:" .. session_scope 
 end
 local encoded = session_id
 local cookies = {}
+local legacy_paths = is_lab
+    and { "/", "/lab-manager/", "/lab-admin/", "/ops/", "/aas-admin/", "/health/", "/gateway/health/" }
+    or { "/", "/wallet/", "/billing/", "/wallet-dashboard/", "/institution-config/" }
+for _, path in ipairs(legacy_paths) do
+    cookies[#cookies + 1] = cookie_name .. "=; Max-Age=0; Path=" .. path
+        .. "; HttpOnly; Secure; SameSite=Lax"
+end
 if is_lab then
     for _, path in ipairs({ "/lab-manager", "/lab-admin", "/ops", "/aas-admin", "/health", "/gateway/health" }) do
         cookies[#cookies + 1] = cookie_name .. "=" .. encoded

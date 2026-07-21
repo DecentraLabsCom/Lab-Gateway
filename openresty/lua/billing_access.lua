@@ -42,6 +42,14 @@ if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
 end
 
 local uri = ngx.var.uri or ""
+
+local function deny_or_redirect(message)
+    if uri == "/wallet-dashboard" and ngx.req.get_method() == "GET" then
+        return ngx.redirect("/admin-login.html?scope=billing", 302)
+    end
+    return deny(message)
+end
+
 if uri == "/wallet/health" or uri == "/billing/health" then
     return
 end
@@ -254,10 +262,10 @@ end
 
 if provided and provided ~= "" then
     if not constant_time_eq(provided, token) then
-        return deny("Unauthorized: Invalid access token. " .. token_hint())
+        return deny_or_redirect("Unauthorized: Invalid access token. " .. token_hint())
     end
 elseif not is_loopback(client_ip) then
-    return deny("Unauthorized: Access token required for remote access. " .. token_hint())
+    return deny_or_redirect("Unauthorized: Access token required for remote access. " .. token_hint())
 end
 
 -- Browser sessions use an opaque HttpOnly cookie. Bind a separate,
