@@ -325,9 +325,21 @@ local guac_api = capture("/__health_guac_api")
 local ops = capture("/__health_ops")
 local fmu_runner = fmu_runner_enabled and capture("/__health_fmu_runner") or { ok = false, status = nil, body = {} }
 local aas = aas_enabled and capture("/__health_aas") or { ok = false, status = nil, body = {} }
-local mysql_ok, mysql_err = check_mysql()
+local ops_body = ops.body or {}
+local mysql_ok, mysql_err
+if ops_body.db ~= nil then
+    mysql_ok = ops_body.db == true
+    mysql_err = mysql_ok and nil or "ops-worker reports MySQL unavailable"
+else
+    mysql_ok, mysql_err = check_mysql()
+end
 local guacd_ok, guacd_err = check_guacd()
 local guac_api_ok = guac_api.status and guac_api.status < 500
+
+local fmu_runner_body = fmu_runner.body or {}
+local fmu_runner_payload_status = tostring(fmu_runner_body.status or ""):upper()
+local fmu_runner_ok = fmu_runner.ok and fmu_runner_payload_status == "UP"
+local fmu_runner_status = fmu_runner.status
 
 local block_body = blockchain.body or {}
 if block_body.billing_configured == nil and block_body.treasury_configured ~= nil then
@@ -340,8 +352,12 @@ local blockchain_ok = blockchain_ready(blockchain)
 local dns_hosts = { "blockchain-services", "guacamole", "ops-worker", "mysql" }
 local dns = {}
 for _, h in ipairs(dns_hosts) do
-    local ok, err = check_dns(h)
-    dns[h] = ok and true or false
+    if h == "mysql" and ops_body.db ~= nil then
+        dns[h] = ops_body.db == true
+    else
+        local ok, err = check_dns(h)
+        dns[h] = ok and true or false
+    end
 end
 
 -- Certificate expiry (days)
@@ -355,7 +371,6 @@ for _, k in ipairs(required_env) do
 end
 
 -- Ops worker details (optional)
-local ops_body = ops.body or {}
 local guacamole_schema_ok = ops_body.guacamole_schema == true
 
 local status_checks = {
@@ -373,7 +388,7 @@ elseif lite_auth then
     table.insert(status_checks, { ok = lite_auth.ok })
 end
 if fmu_runner_enabled then
-    table.insert(status_checks, { ok = fmu_runner.ok })
+    table.insert(status_checks, { ok = fmu_runner_ok })
 end
 if aas_enabled then
     table.insert(status_checks, { ok = aas.ok })
@@ -432,10 +447,10 @@ local result = {
             remote_public_key_status = lite_auth and lite_auth.remote_public_key_status or "not_applicable"
         },
         fmu_runner = {
-            ok = fmu_runner.ok,
+            ok = fmu_runner_ok,
             enabled = fmu_runner_enabled,
-            status = fmu_runner.status,
-            details = fmu_runner.body
+            status = fmu_runner_status,
+            details = fmu_runner_body
         },
         aas = {
             ok = aas.ok,

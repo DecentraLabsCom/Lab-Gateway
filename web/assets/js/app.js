@@ -174,7 +174,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (fmuRunner.ok === true) {
                 okItems.push('FMU runner operative');
             } else {
-                missingItems.push({ text: 'FMU runner inoperative', href: '/gateway-health/' });
+                const fmuStatus = (fmuRunner.details?.status || fmuRunner.status || '').toString().toUpperCase();
+                missingItems.push({
+                    text: fmuStatus === 'DEGRADED' || fmuStatus === 'PARTIAL' ? 'FMU runner degraded' : 'FMU runner inoperative',
+                    href: '/gateway-health/'
+                });
             }
         }
 

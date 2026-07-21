@@ -258,6 +258,7 @@ services:
       - gateway_public
       - gateway_backend
       - gateway_guacamole
+      - guacd_net
       - ops_control
       - fmu_edge
       - fmu_local_edge
