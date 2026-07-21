@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=hidden-attr-fix">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=notifications-actions-v1">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css">
 </head>
 <body>
@@ -20,8 +20,6 @@
             <div class="header-actions">
                 <span class="access-badge" id="labManagerAccessBadge">Access Policy Loading</span>
                 <a class="ghost-btn" href="/"><i class="fas fa-arrow-left"></i> Back to Gateway</a>
-                <button class="ghost-btn" id="btnTestLoad"><i class="fas fa-rotate-right"></i> Reload Config</button>
-                <button class="primary-btn" id="saveConfigBtn"><i class="fas fa-save"></i> Save Settings</button>
             </div>
         </header>
 
@@ -446,7 +444,11 @@
                             <h2>Notifications Setup</h2>
                             <p>Configure email + ICS invites for reservation lifecycle.</p>
                         </div>
-                        <span class="pill" id="configStatus">Unsaved</span>
+                        <div class="card-header-actions">
+                            <span class="pill" id="configStatus">Unsaved</span>
+                            <button class="ghost-btn" id="btnTestLoad"><i class="fas fa-rotate-right"></i> Reload Config</button>
+                            <button class="primary-btn" id="saveConfigBtn"><i class="fas fa-save"></i> Save Settings</button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div class="form-grid">

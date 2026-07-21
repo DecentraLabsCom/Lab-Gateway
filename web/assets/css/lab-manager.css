@@ -124,6 +124,7 @@ body {
 }
 .card-header h2 { margin: 0; font-family: 'Orbitron', monospace; letter-spacing: 0.5px; }
 .card-header p { margin: 4px 0 0; color: var(--muted); font-size: 0.95rem; }
+.card-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .card-body { padding: 12px 20px 20px; }
 
 .pill {
@@ -963,6 +964,7 @@ body {
 @media (max-width: 768px) {
     .lm-header { flex-direction: column; align-items: flex-start; }
     .header-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+    .card-header-actions { width: 100%; justify-content: flex-start; }
     .primary-btn, .ghost-btn { width: auto; }
 }
 .warning-icon { color: #856404; margin-right: 8px; }
