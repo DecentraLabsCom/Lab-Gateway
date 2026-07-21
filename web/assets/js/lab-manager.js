@@ -536,7 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 header: 'X-Access-Token',
                 cookie: 'access_token',
                 title: 'Gateway administrator token required',
-                description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.',
+                description: 'Enter the Gateway administrator token for Wallet & Billing.',
                 invalidMessage: 'Invalid Gateway administrator token.'
             };
         }

@@ -317,9 +317,10 @@ fi
 # =================================================================
 echo "Test 17: Lab-manager bootstrap redirect"
 LAB_MANAGER_BOOTSTRAP_HEADERS=$(curl -sk --resolve lab.test:${PORT}:127.0.0.1 -D - -o /dev/null \
+  -H "Accept: text/html" \
   "https://lab.test:${PORT}/lab-manager")
 if echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -Eq "^HTTP/.* 302" \
-  && echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -Eqi "^location: /admin-login.html\\?scope=lab-manager"; then
+  && echo "$LAB_MANAGER_BOOTSTRAP_HEADERS" | grep -Eqi "^location: /\\?auth=lab-manager&next=/lab-manager/"; then
   log_pass "Lab-manager redirects to secure login page"
 else
   log_fail "Lab-manager bootstrap redirect mismatch: $LAB_MANAGER_BOOTSTRAP_HEADERS"

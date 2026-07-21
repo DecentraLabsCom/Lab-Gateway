@@ -13,10 +13,10 @@
         '/lab-admin': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager token required', description: 'Lab publishing requires the Lab Manager token.', invalidMessage: 'Invalid Lab Manager token.' },
         '/ops': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager token required', description: 'Lab Station operations require the Lab Manager token.', invalidMessage: 'Invalid Lab Manager token.' },
         '/aas-admin': { key: 'lab-manager', login: '/lab-manager/login', title: 'Lab Manager token required', description: 'AAS administration requires the Lab Manager token.', invalidMessage: 'Invalid Lab Manager token.' },
-        '/wallet': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.', invalidMessage: 'Invalid Gateway administrator token.' },
-        '/billing': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.', invalidMessage: 'Invalid Gateway administrator token.' },
-        '/wallet-dashboard': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.', invalidMessage: 'Invalid Gateway administrator token.' },
-        '/institution-config': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing. This is different from the Lab Manager token.', invalidMessage: 'Invalid Gateway administrator token.' }
+        '/wallet': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing.', invalidMessage: 'Invalid Gateway administrator token.' },
+        '/billing': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing.', invalidMessage: 'Invalid Gateway administrator token.' },
+        '/wallet-dashboard': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing.', invalidMessage: 'Invalid Gateway administrator token.' },
+        '/institution-config': { key: 'billing', login: '/admin/login', title: 'Gateway administrator token required', description: 'Enter the Gateway administrator token for Wallet & Billing.', invalidMessage: 'Invalid Gateway administrator token.' }
     };
 
     const activePrompt = { key: null, callbacks: [] };
