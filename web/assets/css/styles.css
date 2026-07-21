@@ -440,6 +440,16 @@ body {
     font-size: 0.9rem;
 }
 
+.status-modal .col li a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.status-modal .col li a:hover {
+    color: var(--primary-color);
+}
+
 .status-modal .col.ok h4 { color: var(--success-color); }
 .status-modal .col.ok li { border-color: var(--success-border-4d); }
 

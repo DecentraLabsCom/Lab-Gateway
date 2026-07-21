@@ -108,6 +108,13 @@
         return best;
     }
 
+    function requestAuthenticationForPath(path, callback) {
+        const config = getTokenConfigForPath(path);
+        if (!config) return false;
+        showTokenModal(config, callback);
+        return true;
+    }
+
     function requestPath(value) {
         try { return new URL(value, window.location.origin).pathname; } catch (_) { return window.location.pathname; }
     }
@@ -140,5 +147,10 @@
         createAuthenticatedFetch();
     }
 
-    window.AuthTokenHandler = { showTokenModal, hideTokenModal, getTokenConfigForPath };
+    window.AuthTokenHandler = {
+        showTokenModal,
+        hideTokenModal,
+        getTokenConfigForPath,
+        requestAuthenticationForPath
+    };
 })();

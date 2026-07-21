@@ -168,7 +168,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     lastStatusDetails = {
                         status: statusText.textContent,
                         ok: publicStatus === 'UP' ? ['Public readiness operative'] : [],
-                        missing: ['Configuration status requires Lab Manager authentication']
+                        missing: [{
+                            text: 'Configuration status requires operator authentication',
+                            href: '/lab-manager',
+                            authPath: '/lab-manager/'
+                        }]
                     };
                     return;
                 }
@@ -350,16 +354,44 @@ function openStatusModal(details) {
     const okItems = Array.isArray(details.ok) && details.ok.length ? details.ok : ['No additional checks passed'];
     const badItems = Array.isArray(details.missing) && details.missing.length ? details.missing : ['No outstanding issues'];
 
-    okItems.forEach(item => {
+    const appendStatusItem = (list, item) => {
         const li = document.createElement('li');
-        li.textContent = typeof item === 'object' && item !== null ? (item.text || '') : item;
-        okList.appendChild(li);
-    });
-    badItems.forEach(item => {
-        const li = document.createElement('li');
-        li.textContent = typeof item === 'object' && item !== null ? (item.text || '') : item;
-        badList.appendChild(li);
-    });
+        if (typeof item === 'object' && item !== null && item.href) {
+            const link = document.createElement('a');
+            link.href = item.href;
+            link.textContent = item.text || item.href;
+            if (item.authPath) {
+                link.addEventListener('click', event => {
+                    event.preventDefault();
+                    const destination = item.authPath;
+                    const accessPolicy = fetch('/lab-manager/access-policy', {
+                        credentials: 'same-origin',
+                        skipAuthPrompt: true
+                    });
+                    accessPolicy.then(response => {
+                        if (response.ok) {
+                            window.location.assign(destination);
+                            return;
+                        }
+                        if (response.status === 401 && window.AuthTokenHandler?.requestAuthenticationForPath) {
+                            window.AuthTokenHandler.requestAuthenticationForPath(destination, () => {
+                                window.location.assign(destination);
+                            });
+                            return;
+                        }
+                        window.location.assign(item.href);
+                    }).catch(() => window.location.assign(item.href));
+                });
+            }
+            li.appendChild(link);
+        } else {
+            li.textContent = typeof item === 'object' && item !== null ? (item.text || '') : item;
+        }
+        list.appendChild(li);
+    };
+
+    okItems.forEach(item => appendStatusItem(okList, item));
+    badItems.forEach(item => appendStatusItem(badList, item));
 
     modal.classList.add('show');
 }
