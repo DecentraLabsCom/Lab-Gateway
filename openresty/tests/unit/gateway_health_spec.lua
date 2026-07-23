@@ -160,15 +160,16 @@ local function build_http_stub(map)
 end
 
 local function run_gateway_health(opts)
-    local ngx = ngx_factory.new({
+    local ngx
+    ngx = ngx_factory.new({
         config = opts.config or {},
-        now = opts.now or 0
+        now = opts.now or 0,
+        say = function(message)
+            ngx._body = message
+        end
     })
 
     ngx.header = {}
-    ngx.say = function(message)
-        ngx._body = message
-    end
     ngx.location = {
         capture = function(path)
             return (opts.captures or {})[path]
@@ -352,7 +353,6 @@ runner.describe("OpenResty gateway_health.lua", function()
             status = 503,
             body = { db = false, guacamole_schema = false }
         }
-        opts.tcp["guacd:4822"] = false
 
         local result = run_gateway_health(opts)._body
 

@@ -142,9 +142,10 @@ local function new(opts)
     ngx_stub._timer_calls = timer_calls
 
     local say_output = {}
-    function ngx_stub.say(msg)
+    local function default_say(msg)
         say_output[#say_output + 1] = tostring(msg)
     end
+    ngx_stub.say = opts.say or default_say
     ngx_stub._say_output = say_output
 
     local print_output = {}
