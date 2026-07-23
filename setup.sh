@@ -838,6 +838,7 @@ if [ "$fmu_runner_enabled" = "true" ]; then
             update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "local"
             update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "true"
             echo "   * Local FMU execution selected."
+            echo "   * The local FMU runner will restart automatically after a Docker or host restart."
             echo "   * Full mode retrieves JWKS over the dedicated fmu_auth network; Lite mode uses the external issuer JWKS endpoint."
             ;;
         station)
@@ -845,6 +846,7 @@ if [ "$fmu_runner_enabled" = "true" ]; then
             update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "station"
             update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"
             echo "   * Lab Station FMU execution selected."
+            echo "   * The production FMU runner will restart automatically after a Docker or host restart."
             ;;
         *)
             echo "Invalid FMU execution backend: $selected_fmu_backend_mode (choose station or local)." >&2
@@ -855,6 +857,7 @@ if [ "$fmu_runner_enabled" = "true" ]; then
     echo "   * Compose profile: $fmu_runner_profile."
 else
     echo "   * FMU runner disabled. Startup will use '--scale fmu-runner=0'."
+    echo "   * No FMU runner container will be configured."
 fi
 echo
 
@@ -1166,6 +1169,7 @@ echo "1. Review and customize .env file if needed"
 echo "2. Ensure SSL certificates are in place"
 echo "3. Configure blockchain settings in blockchain-services/.env as needed"
 echo "4. Run: $compose_full $compose_up_args"
+echo "   Core services and Guacamole use automatic restart policies; the selected FMU profile does too."
 if [ "$cf_enabled" = true ]; then
     echo "5. Cloudflare tunnel: check '$compose_full logs ${cf_service:-cloudflared}' for the public hostname (or your configured tunnel token domain)."
 fi

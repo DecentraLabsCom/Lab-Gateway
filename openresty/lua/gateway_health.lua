@@ -7,6 +7,23 @@ local FULLCHAIN_PATH = "/etc/ssl/private/fullchain.pem"
 local PRIVKEY_PATH = "/etc/ssl/private/privkey.pem"
 local STATIC_ROOT_INDEX_PATH = "/var/www/html/index.html"
 
+local function response_is_reachable(status, body)
+    if not status then
+        return false
+    end
+    if status < 500 then
+        return true
+    end
+    if type(body) ~= "table" then
+        return false
+    end
+    local payload_status = tostring(body.status or ""):upper()
+    return payload_status == "DEGRADED"
+        or payload_status == "PARTIAL"
+        or body.db ~= nil
+        or body.guacamole_schema ~= nil
+end
+
 local function trim(value)
     if not value then
         return ""
@@ -119,6 +136,7 @@ local function capture(path)
     return {
         status = res.status,
         ok = res.status and res.status < 400,
+        reachable = response_is_reachable(res.status, parsed),
         body = parsed,
         raw = body
     }
@@ -211,11 +229,13 @@ end
 
 local function overall_status(services)
     local ok_count = 0
+    local reachable_count = 0
     for _, svc in ipairs(services) do
         if svc.ok then ok_count = ok_count + 1 end
+        if svc.reachable then reachable_count = reachable_count + 1 end
     end
     if ok_count == #services then return "UP" end
-    if ok_count > 0 then return "PARTIAL" end
+    if ok_count > 0 or reachable_count > 0 then return "PARTIAL" end
     return "DOWN"
 end
 
@@ -335,6 +355,9 @@ else
 end
 local guacd_ok, guacd_err = check_guacd()
 local guac_api_ok = guac_api.status and guac_api.status < 500
+local guac_reachable = guac.reachable == true
+local guac_api_reachable = guac_api.reachable == true
+local ops_reachable = ops.reachable == true
 
 local fmu_runner_body = fmu_runner.body or {}
 local fmu_runner_payload_status = tostring(fmu_runner_body.status or ""):upper()
@@ -345,7 +368,7 @@ local block_body = blockchain.body or {}
 if block_body.billing_configured == nil and block_body.treasury_configured ~= nil then
     block_body.billing_configured = block_body.treasury_configured
 end
-local blockchain_reachable = blockchain.status ~= nil
+local blockchain_reachable = blockchain.reachable == true
 local blockchain_ok = blockchain_ready(blockchain)
 
 -- DNS checks
@@ -374,24 +397,24 @@ end
 local guacamole_schema_ok = ops_body.guacamole_schema == true
 
 local status_checks = {
-    { ok = guac.ok },
-    { ok = guac_api_ok },
-    { ok = guacd_ok },
-    { ok = ops.ok },
-    { ok = guacamole_schema_ok },
-    { ok = mysql_ok }
+    { ok = guac.ok, reachable = guac_reachable },
+    { ok = guac_api_ok, reachable = guac_api_reachable },
+    { ok = guacd_ok, reachable = guacd_ok },
+    { ok = ops.ok, reachable = ops_reachable },
+    { ok = guacamole_schema_ok, reachable = ops_reachable },
+    { ok = mysql_ok, reachable = mysql_ok or ops_reachable }
 }
 
 if not lite_mode then
-    table.insert(status_checks, 1, { ok = blockchain_ok })
+    table.insert(status_checks, 1, { ok = blockchain_ok, reachable = blockchain_reachable })
 elseif lite_auth then
-    table.insert(status_checks, { ok = lite_auth.ok })
+    table.insert(status_checks, { ok = lite_auth.ok, reachable = lite_auth.issuer_host_dns_ok })
 end
 if fmu_runner_enabled then
-    table.insert(status_checks, { ok = fmu_runner_ok })
+    table.insert(status_checks, { ok = fmu_runner_ok, reachable = fmu_runner.reachable == true })
 end
 if aas_enabled then
-    table.insert(status_checks, { ok = aas.ok })
+    table.insert(status_checks, { ok = aas.ok, reachable = aas.reachable == true })
 end
 
 -- Build structured response

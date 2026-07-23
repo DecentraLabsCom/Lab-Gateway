@@ -66,15 +66,43 @@ runner.describe("OpenResty public_health.lua", function()
         runner.assert.equals("full", result.mode)
     end)
 
-    runner.it("reports DOWN when a dependency is unavailable", function()
+    runner.it("reports PARTIAL when one dependency is unavailable but others are healthy", function()
         local ngx, result = run_health("/gateway/health", {
             ["/__health_guacamole"] = { status = 503 },
             ["/__health_guac_api"] = { status = 200 },
-            ["/__health_ops"] = { status = 200 }
+            ["/__health_ops"] = { status = 200 },
+            ["/__health_blockchain"] = { status = 200 }
+        })
+
+        runner.assert.equals(503, ngx.status)
+        runner.assert.equals("PARTIAL", result.status)
+    end)
+
+    runner.it("reports DOWN when all gateway dependencies are unavailable", function()
+        local ngx, result = run_health("/gateway/health", {
+            ["/__health_guacamole"] = { status = 503 },
+            ["/__health_guac_api"] = { status = 503 },
+            ["/__health_ops"] = { status = 503 },
+            ["/__health_blockchain"] = { status = 503 }
         })
 
         runner.assert.equals(503, ngx.status)
         runner.assert.equals("DOWN", result.status)
+    end)
+
+    runner.it("reports PARTIAL when the backend is reachable but its health is degraded", function()
+        local ngx, result = run_health("/gateway/health", {
+            ["/__health_guacamole"] = { status = 200 },
+            ["/__health_guac_api"] = { status = 200 },
+            ["/__health_ops"] = { status = 200 },
+            ["/__health_blockchain"] = {
+                status = 503,
+                body = '{"status":"DEGRADED","provider_registered":false,"consumer_registered":false}'
+            }
+        })
+
+        runner.assert.equals(503, ngx.status)
+        runner.assert.equals("PARTIAL", result.status)
     end)
 
     runner.it("reports the ops-worker health status independently", function()

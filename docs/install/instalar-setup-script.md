@@ -121,6 +121,18 @@ el endpoint de salud del gateway:
 curl -k https://localhost/health
 ```
 
+Los servicios gestionados por Compose, incluido `guacamole`, quedan con
+política de reinicio automático. Si se habilitó el perfil `fmu-local-dev`, su
+runner también se reiniciará tras reiniciar Docker o el equipo. En Linux,
+verifica además que Docker se inicie con el sistema:
+
+```bash
+sudo systemctl enable --now docker
+```
+
+En Windows, activa **Start Docker Desktop when you sign in** en la
+configuración de Docker Desktop.
+
 La respuesta pública es agregada deliberadamente y es apta para balanceadores.
 Un borde sano devuelve `status: "UP"`; usa `/gateway/health` para la salud
 agregada del plano de acceso local. Tras abrir una sesión de Lab Manager, usa

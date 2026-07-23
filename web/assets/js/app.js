@@ -219,7 +219,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const okItems = [];
         const missingItems = [];
-        const labsOk = guacamole.ok === true && guacApi.ok === true && mysql.ok === true;
+        const labServices = [
+            guacamole,
+            guacApi,
+            services.guacd || {},
+            services.guacamole_schema || {},
+            mysql
+        ];
+        const operationalLabServices = labServices.filter(service => service.ok === true).length;
+        const labsOk = operationalLabServices === labServices.length;
 
         if (liteMode) {
             setGatewayMode({ mode: 'lite', lite: true });
@@ -231,13 +239,24 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (blockchain.ok === true) {
             okItems.push('Blockchain services operative');
         } else {
-            missingItems.push({ text: 'Blockchain services inoperative', href: '/gateway-health/' });
+            const blockchainStatus = (blockchain.details?.status || blockchain.status || '').toString().toUpperCase();
+            const blockchainReachable = blockchain.reachable === true
+                || (typeof blockchain.status === 'number' && blockchain.status < 500);
+            missingItems.push({
+                text: blockchainReachable || blockchainStatus === 'DEGRADED' || blockchainStatus === 'PARTIAL'
+                    ? 'Blockchain services degraded'
+                    : 'Blockchain services inoperative',
+                href: '/gateway-health/'
+            });
         }
 
         if (labsOk) {
             okItems.push('Labs access operative');
         } else {
-            missingItems.push({ text: 'Labs access inoperative', href: '/gateway-health/' });
+            missingItems.push({
+                text: operationalLabServices > 0 ? 'Labs access degraded' : 'Labs access inoperative',
+                href: '/gateway-health/'
+            });
         }
 
         if (ops.ok === false) {
@@ -302,6 +321,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     data = body ? JSON.parse(body) : {};
                 } catch (e) {
                     data = { parseError: e.message };
+                }
+
+                if (data.parseError || !data.status) {
+                    statusIndicator.className = 'status-indicator unknown';
+                    statusText.textContent = 'Status Unknown';
+                    statusIndicator.setAttribute('title', 'Click for status details');
+                    lastStatusDetails = {
+                        status: 'Status Unknown',
+                        ok: [],
+                        missing: ['Unable to interpret current status']
+                    };
+                    return;
                 }
 
                 // The public endpoint is intentionally aggregate-only. Do not

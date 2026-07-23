@@ -16,6 +16,19 @@ NGINX_CONF = ROOT / "openresty" / "nginx.conf"
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 
 
+def _service_block(service_name: str, compose_text: str) -> str:
+    marker_match = re.search(
+        rf"^  {re.escape(service_name)}:\s*$", compose_text, re.MULTILINE
+    )
+    assert marker_match is not None
+    start = marker_match.end()
+    next_service_match = re.search(
+        r"^  [A-Za-z0-9_-]+:\s*$", compose_text[start:], re.MULTILINE
+    )
+    next_service = start + next_service_match.start() if next_service_match else -1
+    return compose_text[start:] if next_service == -1 else compose_text[start:next_service]
+
+
 GATEWAY_MANAGED_BACKEND_KEYS = [
     "ADMIN_ACCESS_TOKEN",
     "ADMIN_ACCESS_TOKEN_HEADER",
@@ -350,6 +363,17 @@ class SetupEnvContractTest(unittest.TestCase):
         self.assertIn('ADMIN_TRUST_FORWARDED_IP=${ADMIN_TRUST_FORWARDED_IP:-true}', self.compose_file)
         init_lua = (ROOT / "openresty" / "lua" / "init.lua").read_text(encoding="utf-8")
         self.assertIn("fmu_runner_enabled = false", init_lua)
+
+    def test_selected_services_restart_after_host_or_docker_restart(self):
+        for service in ("guacamole", "fmu-runner-local"):
+            with self.subTest(service=service):
+                service_block = _service_block(service, self.compose_file)
+                self.assertRegex(service_block, r"(?m)^\s+restart:\s+(?:always|unless-stopped)\s*$")
+
+        for script in (self.setup_sh, self.setup_bat):
+            with self.subTest(script="setup", script_text=script):
+                self.assertIn("fmu-local-dev", script)
+                self.assertIn("fmu-runner", script)
 
     def test_lua_random_source_is_available_with_openssl_in_runtime_and_test_runners(self):
         files = (

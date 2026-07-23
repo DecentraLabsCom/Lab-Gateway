@@ -13,15 +13,18 @@ or dependency diagnostics.
 | Endpoint | Audience | Meaning |
 | --- | --- | --- |
 | `GET /health` | Public | Liveness/readiness of the public gateway edge. |
-| `GET /gateway/health` | Public | Aggregate readiness of the local access-plane dependencies. In Full mode it also requires the embedded backend; in Lite mode it checks remote issuer trust instead. |
+| `GET /gateway/health` | Public | Aggregate readiness of the local access-plane dependencies. In Full mode it also requires the embedded backend; in Lite mode the remote issuer-trust check is available through the protected details endpoint. |
 | `GET /ops/health` | Public | Aggregate Ops Worker readiness. |
 | `GET /health/details` | Lab Manager operator | Detailed backend, network, certificate, and configuration diagnostics. |
 | `GET /gateway/health/details` | Lab Manager operator | Detailed local dependency and Lite issuer-trust diagnostics. |
 | `GET /ops/health/details` | Lab Manager operator | Detailed Ops Worker diagnostics. |
 | `GET /gateway/mode` | Public | Reports the selected edge mode without dependency details. Use it to confirm Full versus Lite after a configuration change. |
 
-The public response has the stable shape below. `status` is `UP` or `DOWN` and
-the endpoint returns `503` for an unavailable dependency.
+The public response has the stable shape below. `status` is `UP`, `PARTIAL`, or
+`DOWN`. `PARTIAL` means that the gateway is reachable but not all local
+dependencies are ready, such as incomplete provider or consumer registration.
+`DOWN` is reserved for the case where none of the checked dependencies is
+available. The endpoint returns `503` for a partial or unavailable gateway.
 
 ```json
 {

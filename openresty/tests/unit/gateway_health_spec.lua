@@ -340,6 +340,25 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals(false, result.infra.mysql_up)
     end)
 
+    runner.it("reports PARTIAL when dependencies respond but are not ready", function()
+        local opts = healthy_gateway_health_opts()
+        opts.captures["/__health_blockchain"] = {
+            status = 503,
+            body = { status = "DEGRADED" }
+        }
+        opts.captures["/__health_guacamole"] = { status = 503, body = {} }
+        opts.captures["/__health_guac_api"] = { status = 503, body = {} }
+        opts.captures["/__health_ops"] = {
+            status = 503,
+            body = { db = false, guacamole_schema = false }
+        }
+        opts.tcp["guacd:4822"] = false
+
+        local result = run_gateway_health(opts)._body
+
+        runner.assert.equals("PARTIAL", result.status)
+    end)
+
     runner.it("keeps blockchain reachable details but does not report readiness for DEGRADED", function()
         local opts = healthy_gateway_health_opts()
         opts.captures["/__health_blockchain"] = {

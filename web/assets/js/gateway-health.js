@@ -52,6 +52,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function render(data) {
+        if (data.parseError || !data.status) {
+            setStatus('Status Unknown', 'unknown');
+            if (serviceGrid) serviceGrid.innerHTML = '<div class="health-row">Cannot interpret gateway health response.</div>';
+            if (infraSection) infraSection.innerHTML = '';
+            return;
+        }
+
         const statusVal = (data.status || '').toString().toUpperCase();
         const configurationUnknown = data.public === true;
         if (statusVal === 'UP') {
@@ -69,10 +76,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 topGrid.innerHTML = `<div class="health-row"><span>Public readiness</span><span class="tag ${statusVal === 'UP' ? 'ok' : 'bad'}">${statusVal === 'UP' ? 'OK' : 'Issue'}</span></div>`;
             }
             if (serviceGrid) {
-                serviceGrid.innerHTML = '<div class="health-row">Detailed service diagnostics require Lab Manager authentication.</div>';
+                serviceGrid.innerHTML = '<div class="health-row">Detailed service diagnostics require Lab Manager authentication. <a href="/lab-manager/">Authenticate</a></div>';
             }
             if (infraSection) {
-                infraSection.innerHTML = '<div class="health-row">Infrastructure diagnostics require Lab Manager authentication.</div>';
+                infraSection.innerHTML = '<div class="health-row">Infrastructure diagnostics require Lab Manager authentication. <a href="/lab-manager/">Authenticate</a></div>';
             }
             return;
         }
@@ -179,7 +186,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const blockchainCard = document.createElement('div');
             blockchainCard.className = 'health-card service-column';
             const blockchainOk = blockchainVal.ok === true;
-            const blockchainTag = summaryTag(blockchainOk, blockchainVal.status);
+            const blockchainStatus = blockchainVal.details?.status || blockchainVal.status;
+            const blockchainTag = summaryTag(blockchainOk, blockchainStatus);
             blockchainCard.innerHTML = `
                 <div class="health-row">
                     <strong>Blockchain services</strong>
@@ -197,7 +205,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     ['DB', boolTag(d.database_up)],
                     ['Wallet configured', boolTag(d.wallet_configured)],
                     ['Billing configured', boolTag(d.billing_configured ?? d.treasury_configured)],
+                    ['Operating mode', textTag(d.operating_mode)],
                     ['Provider registered', boolTag(d.provider_registered)],
+                    ['Consumer registered', boolTag(d.consumer_registered)],
+                    ['Institution registered', boolTag(d.institution_registered)],
                     ['Invite token', boolTag(d.invite_token_configured)],
                     ['Event listener', boolTag(d.event_listener_enabled)],
                     ['SAML validation', boolTag(d.saml_validation_ready)],
@@ -411,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const statusText = status.toString().toUpperCase();
         if (statusText === 'DEGRADED' || statusText === 'PARTIAL') {
-            return { cls: 'bad', text: 'Issue' };
+            return { cls: 'bad', text: 'Degraded' };
         }
         if (statusText === 'DOWN' || statusText === 'FAIL' || statusText === 'ERROR') {
             return { cls: 'bad', text: 'Error' };

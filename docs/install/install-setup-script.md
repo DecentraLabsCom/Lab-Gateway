@@ -122,6 +122,18 @@ health endpoint:
 curl -k https://localhost/health
 ```
 
+Compose-managed services, including `guacamole`, are configured with automatic
+restart policies. If the `fmu-local-dev` profile was enabled, its runner is
+also restarted after a Docker daemon or host restart. On Linux, also verify
+that Docker starts with the system:
+
+```bash
+sudo systemctl enable --now docker
+```
+
+On Windows, enable **Start Docker Desktop when you sign in** in Docker Desktop
+settings.
+
 The public response is deliberately aggregate and safe for load balancers. A
 healthy edge reports `status: "UP"`; use `/gateway/health` for aggregate local
 access-plane readiness. After opening a Lab Manager session, use
