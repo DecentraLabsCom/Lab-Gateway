@@ -417,9 +417,25 @@ def _get_claim_lab_id(claims: dict) -> Optional[str]:
     return _normalize_lab_id(claims.get("labId"))
 
 
-def _enforce_fmu_claim(claims: dict):
+_PROVIDER_DESCRIBE_SCOPE = "fmu:describe"
+_PROVIDER_DESCRIBE_PURPOSE = "provider-describe"
+
+
+def _is_provider_describe_claim(claims: dict) -> bool:
+    """Return whether claims identify the short-lived metadata-only token."""
+    return (
+        str(claims.get("resourceType") or "").strip().lower() == "fmu"
+        and str(claims.get("scope") or "").strip() == _PROVIDER_DESCRIBE_SCOPE
+        and str(claims.get("purpose") or "").strip() == _PROVIDER_DESCRIBE_PURPOSE
+        and bool(str(claims.get("accessKey") or "").strip())
+    )
+
+
+def _enforce_fmu_claim(claims: dict, *, allow_provider_describe: bool = False):
     if str(claims.get("resourceType") or "").lower() != "fmu":
         raise HTTPException(status_code=403, detail="Token is not authorised for FMU endpoints")
+    if allow_provider_describe and _is_provider_describe_claim(claims):
+        return
     missing = [
         name for name in ("labId", "accessKey", "reservationKey", "pucHash")
         if not str(claims.get(name) or "").strip()
@@ -2081,7 +2097,7 @@ async def describe(
     claims: dict = Depends(verify_jwt),
 ):
     """Return model metadata parsed from the FMU's modelDescription.xml."""
-    _enforce_fmu_claim(claims)
+    _enforce_fmu_claim(claims, allow_provider_describe=True)
     metadata = await _fmu_backend.get_authorized_model_metadata(
         claims=claims,
         requested_fmu_filename=fmuFileName,

@@ -653,6 +653,10 @@ if "!fmu_runner_enabled!"=="1" (
     echo    * Compose profile: !fmu_runner_profile!.
 ) else (
     call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_RUNNER_ENABLED" "false"
+    rem Keep the persisted selection safe when the optional integration is disabled.
+    rem The local profile also hard-codes this guard, but clearing stale state
+    rem keeps .env and the selected deployment mode consistent.
+    call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"
     echo    * FMU runner disabled. Startup will use '--scale fmu-runner=0'.
     echo    * No FMU runner container will be configured.
 )

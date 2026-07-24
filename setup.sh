@@ -856,6 +856,10 @@ if [ "$fmu_runner_enabled" = "true" ]; then
     echo "   * FMU runner enabled. /fmu routes are active."
     echo "   * Compose profile: $fmu_runner_profile."
 else
+    # Keep the persisted selection safe if the optional integration is
+    # disabled. The local profile also hard-codes this guard, but clearing it
+    # prevents stale .env state from being mistaken for an active deployment.
+    update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"
     echo "   * FMU runner disabled. Startup will use '--scale fmu-runner=0'."
     echo "   * No FMU runner container will be configured."
 fi

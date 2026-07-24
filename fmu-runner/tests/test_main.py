@@ -38,6 +38,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _validate_proxy_generation_supported,
         _shutdown_simulation_executor,
         _resolve_fmu_path,
+        _enforce_fmu_claim,
     )
     from auth import verify_jwt as _original_verify_jwt
 
@@ -64,6 +65,44 @@ def _fake_jwt(**claims):
 app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 client = TestClient(app)
+
+
+def test_provider_describe_claims_are_allowed_only_for_metadata():
+    claims = {
+        "resourceType": "fmu",
+        "accessKey": "StateSpace.fmu",
+        "scope": "fmu:describe",
+        "purpose": "provider-describe",
+    }
+
+    _enforce_fmu_claim(claims, allow_provider_describe=True)
+
+
+def test_provider_describe_claims_cannot_be_used_for_execution():
+    claims = {
+        "resourceType": "fmu",
+        "accessKey": "StateSpace.fmu",
+        "scope": "fmu:describe",
+        "purpose": "provider-describe",
+    }
+
+    with pytest.raises(HTTPException) as error:
+        _enforce_fmu_claim(claims)
+
+    assert error.value.status_code == 403
+
+
+def test_describe_scope_without_provider_purpose_still_requires_reservation_claims():
+    claims = {
+        "resourceType": "fmu",
+        "accessKey": "StateSpace.fmu",
+        "scope": "fmu:describe",
+    }
+
+    with pytest.raises(HTTPException) as error:
+        _enforce_fmu_claim(claims, allow_provider_describe=True)
+
+    assert error.value.status_code == 403
 
 
 def test_native_worker_is_killed_when_isolated_executor_is_forced_to_stop():
@@ -466,6 +505,26 @@ def test_describe_returns_model_metadata(mock_resolve, mock_read):
     assert len(data["modelVariables"]) == 2
     assert data["modelVariables"][0]["name"] == "mass"
     assert data["modelVariables"][0]["causality"] == "input"
+
+
+@patch("main.read_model_description", return_value=MockModelDescription())
+@patch("main._resolve_fmu_path")
+def test_provider_describe_token_is_accepted_by_metadata_endpoint(mock_resolve, mock_read):
+    mock_resolve.return_value = "/fake/path/StateSpace.fmu"
+    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
+        accessKey="StateSpace.fmu",
+        resourceType="fmu",
+        labId=None,
+        reservationKey=None,
+        pucHash=None,
+        scope="fmu:describe",
+        purpose="provider-describe",
+    )
+    try:
+        response = client.get("/api/v1/simulations/describe?fmuFileName=StateSpace.fmu")
+        assert response.status_code == 200
+    finally:
+        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
 @patch("main.read_model_description", return_value=MockFmi3WideIntegerDescription())

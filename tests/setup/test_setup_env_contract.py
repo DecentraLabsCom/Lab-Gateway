@@ -364,6 +364,34 @@ class SetupEnvContractTest(unittest.TestCase):
         init_lua = (ROOT / "openresty" / "lua" / "init.lua").read_text(encoding="utf-8")
         self.assertIn("fmu_runner_enabled = false", init_lua)
 
+    def test_setup_maps_selected_fmu_mode_to_the_matching_compose_profile(self):
+        expected_shell = [
+            'fmu_runner_profile="fmu-local-dev"',
+            'update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "local"',
+            'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "true"',
+            'fmu_runner_profile="fmu-runner"',
+            'update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "station"',
+            'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"',
+            'compose_profiles="--profile $fmu_runner_profile"',
+            'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"',
+        ]
+        expected_bat = [
+            'set "fmu_runner_profile=fmu-local-dev"',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "local"',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "true"',
+            'set "fmu_runner_profile=fmu-runner"',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "station"',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"',
+            'set "compose_full=!compose_full! --profile !fmu_runner_profile!"',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"',
+        ]
+        for snippet in expected_shell:
+            with self.subTest(script="setup.sh", snippet=snippet):
+                self.assertIn(snippet, self.setup_sh)
+        for snippet in expected_bat:
+            with self.subTest(script="setup.bat", snippet=snippet):
+                self.assertIn(snippet, self.setup_bat)
+
     def test_selected_services_restart_after_host_or_docker_restart(self):
         for service in ("guacamole", "fmu-runner-local"):
             with self.subTest(service=service):
