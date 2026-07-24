@@ -206,9 +206,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     ['Wallet configured', boolTag(d.wallet_configured)],
                     ['Billing configured', boolTag(d.billing_configured ?? d.treasury_configured)],
                     ['Operating mode', textTag(d.operating_mode)],
-                    ['Provider registered', boolTag(d.provider_registered)],
+                    ['Provider registered', providerRegistrationTag(d.provider_registered, d.operating_mode)],
                     ['Consumer registered', boolTag(d.consumer_registered)],
-                    ['Institution registered', boolTag(d.institution_registered)],
                     ['Invite token', boolTag(d.invite_token_configured)],
                     ['Event listener', boolTag(d.event_listener_enabled)],
                     ['SAML validation', boolTag(d.saml_validation_ready)],
@@ -379,6 +378,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (value === true) return createTag('OK', 'ok');
         if (value === false) return createTag('Issue', 'bad');
         return createTag('Pending', 'bad');
+    }
+
+    function providerRegistrationTag(value, operatingMode) {
+        if (String(operatingMode || '').toLowerCase() === 'consumer-only' && value !== true) {
+            return createTag('No', 'info');
+        }
+        return boolTag(value);
     }
 
     function textTag(value) {

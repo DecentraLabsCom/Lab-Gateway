@@ -10,6 +10,7 @@
 .tag { padding: 4px 10px; border-radius: 8px; font-size: 0.85rem; }
 .tag.ok { background: var(--success-bg); color: var(--success-color); border: 1px solid var(--success-color); }
 .tag.bad { background: var(--secondary-bg); color: var(--secondary-color); border: 1px solid var(--secondary-color); }
+.tag.info { background: rgba(0, 245, 255, 0.12); color: var(--primary-color); border: 1px solid var(--primary-color); }
 .tag.warn { background: var(--warning-bg-1a); color: #ffa500; border: 1px solid #ffa500; }
 .section-title { margin: 16px 0 8px; font-size: 1rem; color: var(--text-secondary); }
 .keyval { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
