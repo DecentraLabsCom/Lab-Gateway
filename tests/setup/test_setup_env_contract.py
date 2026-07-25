@@ -9,6 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SETUP_SH = ROOT / "setup.sh"
 SETUP_BAT = ROOT / "setup.bat"
+CANONICAL_BACKEND_ENTRYPOINT = ROOT / "blockchain-services" / "docker" / "entrypoint.sh"
+STANDALONE_BACKEND_ENTRYPOINT = ROOT.parent / "Blockchain-Services" / "docker" / "entrypoint.sh"
 SYNC_COMPOSE_SECRETS_SH = ROOT / "scripts" / "sync-compose-secrets.sh"
 ISSUE_LITE_SH = ROOT / "scripts" / "issue-lite-trust-bundle.sh"
 ISSUE_LITE_PS1 = ROOT / "scripts" / "Issue-LiteTrustBundle.ps1"
@@ -93,6 +95,36 @@ class SetupEnvContractTest(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertNotIn(token, self.setup_sh)
                 self.assertNotIn(token, self.setup_bat)
+
+    def test_intent_payload_key_is_configured_by_full_setup(self):
+        expected_shell = [
+            'existing_intent_payload_encryption_key="$(get_env_default "INTENT_PAYLOAD_ENCRYPTION_KEY" "$BLOCKCHAIN_ENV_FILE")"',
+            'read -r -s -p "Intent payload encryption key (leave empty to generate): " intent_payload_encryption_key',
+            'intent_payload_encryption_key="$(openssl rand -base64 32 | tr -d \'\\n\')"',
+            'update_env_var "$BLOCKCHAIN_ENV_FILE" "INTENT_PAYLOAD_ENCRYPTION_KEY" "$intent_payload_encryption_key"',
+        ]
+        expected_bat = [
+            'call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "INTENT_PAYLOAD_ENCRYPTION_KEY" existing_intent_payload_encryption_key',
+            'call :ReadSecret "Intent payload encryption key (leave empty to generate): " intent_payload_encryption_key',
+            'call :GenerateObserverSecret intent_payload_encryption_key',
+            'call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "INTENT_PAYLOAD_ENCRYPTION_KEY" "!intent_payload_encryption_key!"',
+        ]
+        for snippet in expected_shell:
+            with self.subTest(script="setup.sh", snippet=snippet):
+                self.assertIn(snippet, self.setup_sh)
+        for snippet in expected_bat:
+            with self.subTest(script="setup.bat", snippet=snippet):
+                self.assertIn(snippet, self.setup_bat)
+
+    def test_backend_entrypoints_persist_generated_intent_payload_key(self):
+        for path in (CANONICAL_BACKEND_ENTRYPOINT, STANDALONE_BACKEND_ENTRYPOINT):
+            entrypoint = path.read_text(encoding="utf-8")
+            with self.subTest(entrypoint=str(path)):
+                self.assertIn("INTENT_PAYLOAD_ENCRYPTION_KEY", entrypoint)
+                self.assertIn(".intent-payload-encryption-key", entrypoint)
+                self.assertIn("openssl rand -base64 32", entrypoint)
+                self.assertIn("export INTENT_PAYLOAD_ENCRYPTION_KEY", entrypoint)
+                self.assertIn("chmod 600", entrypoint)
 
     def test_shared_admin_keys_are_written_to_gateway_root_env(self):
         expected_shell_writes = [

@@ -29,6 +29,7 @@ existing_blockchain_mysql_password=""
 existing_ops_backend_mysql_password=""
 existing_ops_guacamole_mysql_password=""
 existing_ops_secrets_key=""
+existing_intent_payload_encryption_key=""
 existing_basyx_mongo_root_password=""
 existing_basyx_mongo_password=""
 existing_aas_allowed_hosts=""
@@ -311,6 +312,7 @@ existing_blockchain_mysql_password="$(get_env_default "BLOCKCHAIN_MYSQL_PASSWORD
 existing_ops_backend_mysql_password="$(get_env_default "OPS_BACKEND_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
 existing_ops_guacamole_mysql_password="$(get_env_default "OPS_GUACAMOLE_MYSQL_PASSWORD" "$ROOT_ENV_FILE")"
 existing_ops_secrets_key="$(get_env_default "OPS_SECRETS_KEY" "$ROOT_ENV_FILE")"
+existing_intent_payload_encryption_key="$(get_env_default "INTENT_PAYLOAD_ENCRYPTION_KEY" "$BLOCKCHAIN_ENV_FILE")"
 existing_basyx_mongo_root_password="$(get_env_default "BASYX_MONGO_ROOT_PASSWORD" "$ROOT_ENV_FILE")"
 existing_basyx_mongo_password="$(get_env_default "BASYX_MONGO_PASSWORD" "$ROOT_ENV_FILE")"
 existing_aas_allowed_hosts="$(get_env_default "AAS_ALLOWED_HOSTS" "$ROOT_ENV_FILE")"
@@ -342,6 +344,23 @@ else
 fi
 migrate_saml_env
 remove_gateway_managed_backend_env
+echo
+
+# Intent payload encryption key
+echo "Intent Payload Encryption Key"
+echo "=============================="
+intent_payload_encryption_key="$existing_intent_payload_encryption_key"
+if [ -z "$intent_payload_encryption_key" ] || is_placeholder_secret "$intent_payload_encryption_key"; then
+    read -r -s -p "Intent payload encryption key (leave empty to generate): " intent_payload_encryption_key
+    echo
+    if [ -z "$intent_payload_encryption_key" ]; then
+        intent_payload_encryption_key="$(openssl rand -base64 32 | tr -d '\n')"
+        echo "Generated and persisted an intent payload encryption key."
+    fi
+else
+    echo "Existing intent payload encryption key found; keeping it."
+fi
+update_env_var "$BLOCKCHAIN_ENV_FILE" "INTENT_PAYLOAD_ENCRYPTION_KEY" "$intent_payload_encryption_key"
 echo
 
 # Database Passwords Configuration

@@ -22,6 +22,7 @@ set "existing_blockchain_mysql_password="
 set "existing_ops_backend_mysql_password="
 set "existing_ops_guacamole_mysql_password="
 set "existing_ops_secrets_key="
+set "existing_intent_payload_encryption_key="
 set "existing_basyx_mongo_root_password="
 set "existing_basyx_mongo_password="
 set "existing_aas_allowed_hosts="
@@ -74,6 +75,7 @@ call :ReadEnvValue "%ROOT_ENV_FILE%" "BLOCKCHAIN_MYSQL_PASSWORD" existing_blockc
 call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD" existing_ops_backend_mysql_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD" existing_ops_guacamole_mysql_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "OPS_SECRETS_KEY" existing_ops_secrets_key
+call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "INTENT_PAYLOAD_ENCRYPTION_KEY" existing_intent_payload_encryption_key
 call :ReadEnvValue "%ROOT_ENV_FILE%" "BASYX_MONGO_ROOT_PASSWORD" existing_basyx_mongo_root_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "BASYX_MONGO_PASSWORD" existing_basyx_mongo_password
 call :ReadEnvValue "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" existing_aas_allowed_hosts
@@ -114,6 +116,21 @@ if errorlevel 1 (
     exit /b 1
 )
 call :RemoveGatewayManagedBackendEnv
+echo.
+
+REM Intent Payload Encryption Key
+echo Intent Payload Encryption Key
+echo ==============================
+set "intent_payload_encryption_key=!existing_intent_payload_encryption_key!"
+if defined intent_payload_encryption_key call :IsPlaceholderSecret "!intent_payload_encryption_key!" && set "intent_payload_encryption_key="
+if not defined intent_payload_encryption_key (
+    call :ReadSecret "Intent payload encryption key (leave empty to generate): " intent_payload_encryption_key
+    if not defined intent_payload_encryption_key call :GenerateObserverSecret intent_payload_encryption_key
+    echo Generated or configured the intent payload encryption key.
+) else (
+    echo Existing intent payload encryption key found; keeping it.
+)
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "INTENT_PAYLOAD_ENCRYPTION_KEY" "!intent_payload_encryption_key!"
 echo.
 
 REM Database Passwords
@@ -1140,6 +1157,15 @@ exit /b
 setlocal
 for /f %%H in ('powershell -NoLogo -NoProfile -Command "$bytes = New-Object byte[](32); [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes); [Convert]::ToBase64String($bytes).TrimEnd('=^').Replace('+','-').Replace('/','_')"') do set "_secret=%%H"
 endlocal & set "%~1=%_secret%"
+exit /b
+
+:ReadSecret
+set "DL_SECRET_PROMPT=%~1"
+set "secret_result="
+for /f "delims=" %%S in ('powershell -NoLogo -NoProfile -Command "$secure=Read-Host -Prompt $env:DL_SECRET_PROMPT -AsSecureString; $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try {[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)} finally {[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)}"') do set "secret_result=%%S"
+if "%~2" NEQ "" set "%~2=%secret_result%"
+set "DL_SECRET_PROMPT="
+set "secret_result="
 exit /b
 
 :IsPlaceholderSecret
