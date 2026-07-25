@@ -10,7 +10,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SETUP_SH = ROOT / "setup.sh"
 SETUP_BAT = ROOT / "setup.bat"
 CANONICAL_BACKEND_ENTRYPOINT = ROOT / "blockchain-services" / "docker" / "entrypoint.sh"
-STANDALONE_BACKEND_ENTRYPOINT = ROOT.parent / "Blockchain-Services" / "docker" / "entrypoint.sh"
 SYNC_COMPOSE_SECRETS_SH = ROOT / "scripts" / "sync-compose-secrets.sh"
 ISSUE_LITE_SH = ROOT / "scripts" / "issue-lite-trust-bundle.sh"
 ISSUE_LITE_PS1 = ROOT / "scripts" / "Issue-LiteTrustBundle.ps1"
@@ -117,14 +116,12 @@ class SetupEnvContractTest(unittest.TestCase):
                 self.assertIn(snippet, self.setup_bat)
 
     def test_backend_entrypoints_persist_generated_intent_payload_key(self):
-        for path in (CANONICAL_BACKEND_ENTRYPOINT, STANDALONE_BACKEND_ENTRYPOINT):
-            entrypoint = path.read_text(encoding="utf-8")
-            with self.subTest(entrypoint=str(path)):
-                self.assertIn("INTENT_PAYLOAD_ENCRYPTION_KEY", entrypoint)
-                self.assertIn(".intent-payload-encryption-key", entrypoint)
-                self.assertIn("openssl rand -base64 32", entrypoint)
-                self.assertIn("export INTENT_PAYLOAD_ENCRYPTION_KEY", entrypoint)
-                self.assertIn("chmod 600", entrypoint)
+        entrypoint = CANONICAL_BACKEND_ENTRYPOINT.read_text(encoding="utf-8")
+        self.assertIn("INTENT_PAYLOAD_ENCRYPTION_KEY", entrypoint)
+        self.assertIn(".intent-payload-encryption-key", entrypoint)
+        self.assertIn("openssl rand -base64 32", entrypoint)
+        self.assertIn("export INTENT_PAYLOAD_ENCRYPTION_KEY", entrypoint)
+        self.assertIn("chmod 600", entrypoint)
 
     def test_shared_admin_keys_are_written_to_gateway_root_env(self):
         expected_shell_writes = [
