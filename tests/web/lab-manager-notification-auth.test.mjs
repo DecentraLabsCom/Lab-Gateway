@@ -36,8 +36,11 @@ function createElement(id) {
       return child;
     },
     querySelectorAll: () => [],
+    querySelector: () => null,
+    contains: () => true,
     setAttribute: () => {},
     click: () => listeners.get('click')?.({ preventDefault() {} }),
+    dispatchEvent: (event) => listeners.get(event.type)?.(event),
   };
   return element;
 }
@@ -61,7 +64,8 @@ function loadLabManager({ billingResponse }) {
     'fmuSyncDocsUrl', 'fmuSyncContactEmail', 'fmuSyncDescriptionHint',
     'fmuSyncLicenseHint', 'aasLinkKey', 'aasLinkLabId', 'aasLinkAasId',
     'aasLinkSaveBtn', 'aasLinkCheckBtn', 'aasLinkDeleteBtn', 'aasLinkResult',
-    'timelineReservationId', 'loadTimelineBtn', 'timelineResult', 'smtpSection',
+    'timelineReservationId', 'loadTimelineBtn', 'timelineResult', 'upcomingReservationsList',
+    'upcomingReservationsStatus', 'smtpSection',
     'graphSection', 'toast', 'labManagerAccessBadge', 'opsHint', 'activityFeedList',
   ];
   const elements = new Map(ids.map((id) => [id, createElement(id)]));
@@ -78,11 +82,13 @@ function loadLabManager({ billingResponse }) {
   };
   const promptCalls = [];
   const window = {
+    confirm: () => true,
     AuthTokenHandler: {
       showTokenModal: (...args) => promptCalls.push(args),
       getTokenConfigForPath: () => ({ key: 'billing', login: '/admin/login' }),
     },
   };
+  const fetchCalls = [];
   const context = vm.createContext({
     document,
     window,
@@ -97,16 +103,19 @@ function loadLabManager({ billingResponse }) {
       this.textContent = text;
       this.value = value;
     },
-    fetch: (url) => String(url) === '/billing/admin/notifications'
-      ? billingResponse
-      : Promise.resolve({ ok: true, status: 200, json: async () => ({}) }),
+    fetch: (url, options = {}) => {
+      fetchCalls.push({ url: String(url), options });
+      return String(url) === '/billing/admin/notifications'
+        ? billingResponse
+        : Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    },
   });
 
   vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {
     filename: 'lab-manager.js',
   });
 
-  return { elements, promptCalls };
+  return { elements, promptCalls, fetchCalls };
 }
 
 test('reuses an existing billing session while the initial notifications check is pending', async () => {
@@ -128,4 +137,38 @@ test('reuses an existing billing session while the initial notifications check i
 
   assert.equal(promptCalls.length, 0);
   assert.equal(elements.get('configModal').classList.contains('show'), true);
+});
+
+test('cancellation click reads the reason from the reservation row and posts it', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+  });
+  const reservationList = elements.get('upcomingReservationsList');
+  const row = {
+    dataset: { reservationKey: `0x${'ab'.repeat(32)}` },
+    querySelector: (selector) => selector === '[data-reservation-reason]'
+      ? { value: '1', disabled: false }
+      : null,
+  };
+  const button = {
+    disabled: false,
+    closest: (selector) => {
+      if (selector === '[data-action="cancel-reservation"]') return button;
+      if (selector === '[data-reservation-key]') return button;
+      if (selector === '.reservation-item') return row;
+      return null;
+    },
+  };
+
+  reservationList.dispatchEvent({ type: 'click', target: button });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const cancellation = fetchCalls.find(({ options }) => options.method === 'POST');
+  assert.ok(cancellation);
+  assert.match(cancellation.url, /\/lab-admin\/reservations\/0x[a-f0-9]{64}\/cancel$/);
+  assert.deepEqual(JSON.parse(cancellation.options.body), { reasonCode: 1 });
 });

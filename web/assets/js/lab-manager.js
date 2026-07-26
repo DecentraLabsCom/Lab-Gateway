@@ -1757,19 +1757,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>`
                 : `<div class="reservation-cancel-note">Cancellation unavailable for this status.</div>`;
             const renter = shortAddress(reservation.renter);
+            const labLabel = reservation.labName || `Lab #${reservation.labId}`;
+            const institution = reservation.institutionName || shortAddress(reservation.institutionAddress);
             return `<article class="reservation-item" data-reservation-key="${escapeHtml(key)}">
                 <div class="reservation-item-main">
                     <div class="reservation-item-heading">
-                        <span class="item-title">Lab #${escapeHtml(reservation.labId)}</span>
+                        <span class="item-title">${escapeHtml(labLabel)}</span>
+                        <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
                         <span class="pill ${statusClass}">${escapeHtml(status)}</span>
                     </div>
                     <div class="reservation-item-meta">
                         <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
                         <span>Price: ${escapeHtml(reservation.priceCredits || '0')} service credits</span>
                         <span>Provider share: ${escapeHtml(reservation.providerShareCredits || '0')} credits</span>
+                        <span>Institution: ${escapeHtml(institution || 'Unknown')}</span>
                         <span>Renter: ${escapeHtml(renter)}</span>
                     </div>
-                    <div class="reservation-item-key"><span>Reservation:</span> <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></div>
                 </div>
                 ${actions}
             </article>`;
@@ -1804,7 +1807,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleUpcomingReservationActions(event) {
         const button = event.target.closest('[data-action="cancel-reservation"]');
         if (!button || !upcomingReservationsListEl.contains(button)) return;
-        const row = button.closest('[data-reservation-key]');
+        const row = button.closest('.reservation-item');
         const key = row?.dataset.reservationKey;
         const reasonEl = row?.querySelector('[data-reservation-reason]');
         const reasonCode = Number(reasonEl?.value);
