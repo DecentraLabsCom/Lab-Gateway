@@ -74,6 +74,13 @@ FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
 _AAS_LINK_DATA_PATH = Path(os.getenv("AAS_LINK_DATA_PATH", "/app/data/aas-links"))
 MAX_SIMULATION_TIMEOUT = int(os.getenv("MAX_SIMULATION_TIMEOUT", "300"))
 MAX_CONCURRENT_PER_MODEL = int(os.getenv("MAX_CONCURRENT_PER_MODEL", "10"))
+# Keep the virtual address-space ceiling above the container memory ceiling.
+# FMPy/Numpy can reserve substantial virtual address space before dlopen() maps
+# the FMU binary; the Docker cgroup remains the effective resident-memory cap.
+FMU_WORKER_ADDRESS_SPACE_LIMIT = int(os.getenv(
+    "FMU_WORKER_ADDRESS_SPACE_LIMIT",
+    str(2 * 1024 ** 3),
+))
 MAX_STOP_TIME = float(os.getenv("MAX_STOP_TIME", "86400"))  # 24h upper bound
 MIN_STEP_SIZE = float(os.getenv("MIN_STEP_SIZE", "1e-6"))    # 1 µs lower bound
 HISTORY_DB_PATH = os.getenv("HISTORY_DB_PATH", "/app/data/history.db")
@@ -1630,8 +1637,10 @@ def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_siz
     try:
         if posix_resource is not None:
             posix_resource.setrlimit(posix_resource.RLIMIT_CPU, (timeout, timeout + 5))
-            # 1 GB virtual memory limit
-            posix_resource.setrlimit(posix_resource.RLIMIT_AS, (1 * 1024 ** 3, 1 * 1024 ** 3))
+            posix_resource.setrlimit(
+                posix_resource.RLIMIT_AS,
+                (FMU_WORKER_ADDRESS_SPACE_LIMIT, FMU_WORKER_ADDRESS_SPACE_LIMIT),
+            )
     except Exception:
         pass  # May fail on non-Linux or if not root
 

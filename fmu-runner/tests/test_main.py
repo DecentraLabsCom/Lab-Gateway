@@ -39,6 +39,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _shutdown_simulation_executor,
         _resolve_fmu_path,
         _enforce_fmu_claim,
+        FMU_WORKER_ADDRESS_SPACE_LIMIT,
     )
     from auth import verify_jwt as _original_verify_jwt
 
@@ -968,6 +969,10 @@ def _make_delayed_future(result, delay_sec=0.1):
             f.set_result(result)
     Timer(delay_sec, _set_result_if_pending).start()
     return f
+
+
+def test_worker_address_space_limit_leaves_native_loader_headroom():
+    assert FMU_WORKER_ADDRESS_SPACE_LIMIT == 2 * 1024 ** 3
 
 
 def test_effective_timeout_caps_to_configured_max_without_exp():
