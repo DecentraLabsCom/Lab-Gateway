@@ -9,6 +9,7 @@ table of contents.
 - [Documentation guide](docs/README.md)
 - [Deployment architectures](docs/deployment-architectures.md)
 - [Configuration reference](docs/reference/configuration.md)
+- [Trusted proxy real-IP configuration](openresty/real_ip.d/README.md)
 - Installation
   - [Setup script (EN)](docs/install/install-setup-script.md)
   - [Script de configuración (ES)](docs/install/instalar-setup-script.md)
@@ -56,4 +57,5 @@ table of contents.
 
 The embedded canonical backend lives in `blockchain-services/`. Its detailed
 API, security, wallet, deployment, and operations documentation starts at
-[blockchain-services documentation](blockchain-services/SUMMARY.md).
+the standalone repository's
+[blockchain-services documentation](https://github.com/DecentraLabsCom/blockchain-services/blob/main/SUMMARY.md).
