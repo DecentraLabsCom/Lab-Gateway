@@ -107,7 +107,9 @@ FMU_JWT_AUDIENCE=https://<public-gateway-origin>/fmu
 For isolated local development/tests, start the `fmu-local-dev` Compose
 profile. It sets `FMU_BACKEND_MODE=local` and `FMU_LOCAL_DEV_MODE=true` in a
 container that has only the internal local edge network and no Station,
-session-observer or control-plane secrets. Local batch requests use one
+control-plane or proxy-signing secrets. It receives only the dedicated
+session-observer credential required for authenticated ticket redemption and
+durable session observation. Local batch requests use one
 killable worker process per simulation. Native local realtime requires the
 additional switch `FMU_LOCAL_REALTIME_ENABLED=true`; the setup scripts set it
 automatically for the local backend, while manual Compose starts must set it

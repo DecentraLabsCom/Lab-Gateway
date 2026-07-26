@@ -237,6 +237,11 @@ FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true \
   docker compose --profile fmu-local-dev up -d openresty fmu-runner-local
 ```
 
+This assumes the root `.env` and `secrets/session_observer_signing_secret` have
+been prepared by the setup flow. The local runner needs this dedicated,
+least-privilege observer credential to redeem FMU tickets and record accepted
+sessions; it does not need Station or administrator credentials.
+
 `FMU_BACKEND_MODE` controls FMU execution location; Full/Lite authentication
 controls the JWKS source independently. The setup scripts persist
 `FMU_LOCAL_REALTIME_ENABLED=true` automatically when the local backend is

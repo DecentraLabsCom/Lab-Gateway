@@ -32,7 +32,12 @@ def test_production_fmu_runner_is_station_only_and_keeps_control_networks_out_of
     assert "fmu_aas" not in local
     assert "fmu_auth" in local
     assert "AUTH_SESSION_TICKET_INTERNAL_TOKEN" not in local
-    assert "SESSION_OBSERVER_SIGNING_SECRET" not in local
+    assert "AUTH_SESSION_TICKET_ISSUE_URL=" in local
+    assert "AUTH_SESSION_TICKET_REDEEM_URL=" in local
+    assert "ACCESS_AUDIT_URL=" in local
+    assert "SESSION_OBSERVER_GATEWAY_ID=" in local
+    assert "SESSION_OBSERVER_SIGNING_SECRET_FILE=/run/secrets/session_observer_signing_secret" in local
+    assert "- session_observer_signing_secret" in local
     assert "FMU_STATION_INTERNAL_TOKEN" not in local
     assert "FMU_PROXY_SIGNING_KEY" not in local
 

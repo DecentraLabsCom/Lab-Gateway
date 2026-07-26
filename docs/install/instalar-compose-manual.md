@@ -232,6 +232,12 @@ FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true \
   docker compose --profile fmu-local-dev up -d openresty fmu-runner-local
 ```
 
+Esto presupone que el flujo de setup ya ha preparado el `.env` raíz y
+`secrets/session_observer_signing_secret`. El runner local necesita esta
+credencial de observación, con privilegios mínimos, para canjear tickets FMU y
+registrar sesiones aceptadas; no necesita credenciales de Lab Station ni de
+administrador.
+
 `FMU_BACKEND_MODE` controla dónde se ejecuta el FMU; el modo Full/Lite determina
 independientemente el origen de JWKS. Los scripts de setup guardan
 automáticamente `FMU_LOCAL_REALTIME_ENABLED=true` cuando se selecciona el

@@ -119,8 +119,8 @@ Built and started automatically by `docker-compose.yml` in the Lab Gateway root.
 # From Lab Gateway root: production Station facade
 docker compose --profile fmu-runner up --build fmu-runner
 
-# Development-only local FMPy facade (isolated network, no control secrets)
-FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-runner-local
+# Development-only local FMPy facade (isolated network, observer credential only)
+FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-runner-local
 ```
 
 FMU files are mounted from `./fmu-data` into `/fmu-data` inside the container.
@@ -159,7 +159,9 @@ Marketplace upload is disabled by design.
 - `fmu-runner` keeps the public API on Gateway and forwards execution to Lab Station.
 - `fmu-runner-local` is an explicit development profile; its container sets
   `FMU_BACKEND_MODE=local` and `FMU_LOCAL_DEV_MODE=true` without receiving
-  Station/session-observer/proxy-signing credentials.
+  Station/control-plane/proxy-signing credentials. It receives only the
+  dedicated session-observer credential required for authenticated ticket
+  redemption and durable session observation.
 - FMU execution mode is independent of JWT key retrieval. Full mode uses the
   local `blockchain-services` JWKS endpoint, Lite mode uses the external
   issuer's JWKS endpoint, and `AUTH_JWKS_URL` can override either choice.

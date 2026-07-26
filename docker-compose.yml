@@ -744,9 +744,11 @@ services:
       - fmu_aas
 
   # Explicit development-only local FMU execution. This service deliberately
-  # does not receive Station/session-observer/proxy-signing credentials and
-  # has no route to the control or AAS networks. OpenResty reaches it through
-  # the fmu-runner network alias on the isolated internal edge.
+  # does not receive Station/control-plane/proxy-signing credentials and has
+  # no route to the control or AAS networks. It receives only the dedicated
+  # session-observer credential needed to redeem FMU tickets and record the
+  # accepted session. OpenResty reaches it through the fmu-runner network
+  # alias on the isolated internal edge.
   fmu-runner-local:
     profiles: ["fmu-local-dev"]
     build:
@@ -765,6 +767,11 @@ services:
       - JWKS_CACHE_TTL=${JWKS_CACHE_TTL:-300}
       - JWKS_STALE_IF_ERROR_MAX_SECONDS=${JWKS_STALE_IF_ERROR_MAX_SECONDS:-900}
       - JWT_AUDIENCE=${FMU_JWT_AUDIENCE:?FMU_JWT_AUDIENCE must be the exact public FMU URL, e.g. https://gateway.example/fmu}
+      - AUTH_SESSION_TICKET_ISSUE_URL=${AUTH_SESSION_TICKET_ISSUE_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/issue}
+      - AUTH_SESSION_TICKET_REDEEM_URL=${AUTH_SESSION_TICKET_REDEEM_URL:-http://blockchain-services:8080/auth/fmu/session-ticket/redeem}
+      - ACCESS_AUDIT_URL=${ACCESS_AUDIT_URL:-}
+      - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
+      - SESSION_OBSERVER_SIGNING_SECRET_FILE=/run/secrets/session_observer_signing_secret
       - SERVER_NAME=${SERVER_NAME}
       - MAX_SIMULATION_TIMEOUT=${FMU_MAX_SIMULATION_TIMEOUT:-300}
       - MAX_CONCURRENT_PER_MODEL=${FMU_MAX_CONCURRENT_PER_MODEL:-10}
@@ -777,6 +784,8 @@ services:
     tmpfs:
       - /tmp:size=64M,mode=1777
     read_only: true
+    secrets:
+      - session_observer_signing_secret
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
       interval: 30s
