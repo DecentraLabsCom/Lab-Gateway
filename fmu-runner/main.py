@@ -2438,11 +2438,10 @@ async def stream_simulation(
             await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
                                 req.parameters, req.options, sim_result, elapsed)
 
-        except Exception as exc:
-            logger.error(
-                "Streaming simulation failed for lab %s: %s",
+        except Exception:
+            logger.exception(
+                "Streaming simulation failed for lab %s",
                 str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
-                type(exc).__name__,
             )
             yield json.dumps({"type": "error", "detail": "Simulation failed"}) + "\n"
         finally:

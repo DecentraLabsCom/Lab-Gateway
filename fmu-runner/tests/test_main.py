@@ -16,7 +16,7 @@ from collections import defaultdict, deque
 from xml.etree import ElementTree as ET
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -1198,6 +1198,32 @@ def test_stream_returns_ndjson_events(mock_md, mock_exec, mock_resolve):
     # Started message has simId
     started = next(l for l in lines if l["type"] == "started")
     assert "simId" in started
+
+
+@patch("main._resolve_fmu_path")
+@patch("main.read_model_description")
+@patch("main._executor")
+def test_stream_logs_worker_exception_details(mock_exec, mock_md, mock_resolve, caplog):
+    mock_resolve.return_value = "/fake/path/spring.fmu"
+    mock_md_obj = MagicMock()
+    mock_md_obj.coSimulation = True
+    mock_md_obj.modelExchange = False
+    mock_md.return_value = mock_md_obj
+
+    failed = Future()
+    failed.set_exception(RuntimeError("native FMU load failed"))
+    mock_exec.submit.return_value = failed
+
+    with caplog.at_level("ERROR", logger="fmu-runner"):
+        response = client.post("/api/v1/simulations/stream", json={
+            "labId": 1,
+            "parameters": {},
+            "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
+        })
+
+    assert response.status_code == 200
+    assert "native FMU load failed" in caplog.text
+    assert any(record.exc_info for record in caplog.records if record.name == "fmu-runner")
 
 
 # --- #29 - Simulation History ---
