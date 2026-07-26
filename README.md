@@ -101,7 +101,7 @@ The default stack starts `openresty`, `blockchain-services` (Full mode only),
 | Profile | Purpose | Typical command |
 | --- | --- | --- |
 | `fmu-runner` | Production FMU facade; executes through Lab Station | `FMU_RUNNER_ENABLED=true docker compose --profile fmu-runner up -d` |
-| `fmu-local-dev` | Isolated local FMU development/testing; never production | `FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up -d openresty fmu-runner-local` |
+| `fmu-local-dev` | Isolated local FMU development/testing; never production | `FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true docker compose --profile fmu-local-dev up -d openresty fmu-runner-local` |
 | `aas` | Bundled BaSyx AAS and MongoDB | `docker compose --profile aas up -d` |
 | `certbot` | ACME certificate acquisition/renewal | `docker compose --profile certbot up -d` |
 | `cloudflare` / `cloudflare-token` | Cloudflare Tunnel variants | See the setup guide |

@@ -230,8 +230,17 @@ FMU_RUNNER_ENABLED=true docker compose --profile fmu-runner up -d
 ```
 
 For development-only local FMU execution, use `fmu-local-dev` instead; never
-start both FMU profiles. `FMU_BACKEND_MODE` controls FMU execution location;
-Full/Lite authentication controls the JWKS source independently. See the
+start both FMU profiles. Enable local realtime explicitly:
+
+```bash
+FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true \
+  docker compose --profile fmu-local-dev up -d openresty fmu-runner-local
+```
+
+`FMU_BACKEND_MODE` controls FMU execution location; Full/Lite authentication
+controls the JWKS source independently. The setup scripts persist
+`FMU_LOCAL_REALTIME_ENABLED=true` automatically when the local backend is
+selected. Keep it `false` for the station-backed production profile. See the
 [configuration reference](../reference/configuration.md).
 
 ## Step 8 — Verify health

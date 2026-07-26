@@ -400,6 +400,7 @@ class SetupEnvContractTest(unittest.TestCase):
     def test_optional_fmu_profile_and_openresty_runtime_defaults_are_explicit(self):
         env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
         self.assertIn("FMU_RUNNER_ENABLED=false", env_example)
+        self.assertIn("FMU_LOCAL_REALTIME_ENABLED=false", env_example)
         self.assertIn('FMU_RUNNER_ENABLED=${FMU_RUNNER_ENABLED:-false}', self.compose_file)
         self.assertIn('AUTO_LOGOUT_ON_DISCONNECT=${AUTO_LOGOUT_ON_DISCONNECT:-true}', self.compose_file)
         self.assertIn('ADMIN_TRUST_FORWARDED_IP=${ADMIN_TRUST_FORWARDED_IP:-true}', self.compose_file)
@@ -411,21 +412,27 @@ class SetupEnvContractTest(unittest.TestCase):
             'fmu_runner_profile="fmu-local-dev"',
             'update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "local"',
             'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "true"',
+            'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED" "true"',
             'fmu_runner_profile="fmu-runner"',
             'update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "station"',
             'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"',
+            'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED" "false"',
             'compose_profiles="--profile $fmu_runner_profile"',
             'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"',
+            'update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED" "false"',
         ]
         expected_bat = [
             'set "fmu_runner_profile=fmu-local-dev"',
             'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "local"',
             'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "true"',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "true"',
             'set "fmu_runner_profile=fmu-runner"',
             'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "station"',
             'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "false"',
             'set "compose_full=!compose_full! --profile !fmu_runner_profile!"',
             'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "false"',
         ]
         for snippet in expected_shell:
             with self.subTest(script="setup.sh", snippet=snippet):

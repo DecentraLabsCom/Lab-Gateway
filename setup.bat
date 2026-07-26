@@ -653,13 +653,16 @@ if "!fmu_runner_enabled!"=="1" (
         set "fmu_runner_profile=fmu-local-dev"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "local"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "true"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "true"
         echo    * Local FMU execution selected.
+        echo    * Local realtime FMU sessions enabled for isolated development.
         echo    * The local FMU runner will restart automatically after a Docker or host restart.
         echo    * Full mode retrieves JWKS over the dedicated fmu_auth network; Lite mode uses the external issuer JWKS endpoint.
     ) else if /i "!selected_fmu_backend_mode!"=="station" (
         set "fmu_runner_profile=fmu-runner"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "station"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"
+        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "false"
         echo    * Lab Station FMU execution selected.
         echo    * The production FMU runner will restart automatically after a Docker or host restart.
     ) else (
@@ -674,6 +677,7 @@ if "!fmu_runner_enabled!"=="1" (
     rem The local profile also hard-codes this guard, but clearing stale state
     rem keeps .env and the selected deployment mode consistent.
     call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "false"
     echo    * FMU runner disabled. Startup will use '--scale fmu-runner=0'.
     echo    * No FMU runner container will be configured.
 )
