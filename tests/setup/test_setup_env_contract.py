@@ -81,6 +81,13 @@ class SetupEnvContractTest(unittest.TestCase):
                     self.setup_bat,
                 )
 
+    def test_full_access_code_redeemer_map_reaches_embedded_backend(self):
+        backend_service = _service_block("blockchain-services", self.compose_file)
+        self.assertIn(
+            "- ACCESS_CODE_REDEEMER_CREDENTIALS_JSON=${ACCESS_CODE_REDEEMER_CREDENTIALS_JSON:-}",
+            backend_service,
+        )
+
     def test_gateway_setup_no_longer_writes_shared_admin_keys_to_blockchain_env(self):
         forbidden_tokens = [
             "update_env_in_all",

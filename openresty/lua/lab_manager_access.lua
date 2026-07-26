@@ -283,7 +283,7 @@ if cookie_value and cookie_value ~= "" and not session_id and ngx.shared.cache t
     local session_bytes = random.bytes(32, true)
     if session_bytes then
         local migrated_id = hex.encode(session_bytes)
-        if ngx.shared.cache:set("admin_session:lab:" .. migrated_id, token, 900) then
+        if ngx.shared.cache:set("admin_session:lab:" .. migrated_id, token, 1800) then
             session_id = migrated_id
         end
     end
@@ -307,7 +307,7 @@ if session_id and session_id ~= "" then
         "/gateway/health", "/gateway/health/"
     }) do
         session_cookies[#session_cookies + 1] = cookie_name .. "=" .. session_id
-            .. "; Max-Age=900; Path=" .. path .. "; HttpOnly; Secure; SameSite=Lax"
+            .. "; Max-Age=1800; Path=" .. path .. "; HttpOnly; Secure; SameSite=Lax"
     end
     ngx.header["Set-Cookie"] = session_cookies
 end

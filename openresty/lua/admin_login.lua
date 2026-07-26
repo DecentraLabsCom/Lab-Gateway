@@ -67,7 +67,7 @@ end
 local cookie_name = is_lab
     and (os.getenv("LAB_MANAGER_TOKEN_COOKIE") or "lab_manager_token")
     or (os.getenv("ADMIN_ACCESS_TOKEN_COOKIE") or "access_token")
-local max_age = 900
+local max_age = 1800
 -- Reject delimiters before creating the server-side session.  The browser
 -- receives only the random session identifier, never the configured token.
 local session_id = random.bytes(32, true)

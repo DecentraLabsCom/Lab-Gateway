@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_admin_bootstrap_is_post_only_and_cookies_are_path_scoped():
     conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
     login = (ROOT / "openresty" / "lua" / "admin_login.lua").read_text(encoding="utf-8")
+    lab_access = (ROOT / "openresty" / "lua" / "lab_manager_access.lua").read_text(encoding="utf-8")
     assert "?token=" not in conf
     assert "content_by_lua_file /etc/openresty/lua/admin_login.lua" in conf
     assert "ngx.req.get_method() ~= \"POST\"" in login
@@ -14,9 +15,12 @@ def test_admin_bootstrap_is_post_only_and_cookies_are_path_scoped():
     assert '"/ops"' in login
     assert '"/wallet-dashboard"' in login
     assert '"/billing"' in login
-    assert "local max_age = 900" in login
+    assert "local max_age = 1800" in login
     assert "admin_session:" in login
     assert "resty.random" in login
+    assert "admin_session:lab:" in lab_access
+    assert "token, 1800" in lab_access
+    assert "Max-Age=1800" in lab_access
 
 
 def test_gateway_admin_web_does_not_persist_or_forward_tokens():
