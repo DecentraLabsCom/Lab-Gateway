@@ -384,6 +384,12 @@ class SetupEnvContractTest(unittest.TestCase):
         self.assertIn('FULL_JWT_PUBLIC_KEY="/etc/openresty/jwt-keys/public_key.pem"', self.init_ssl)
         self.assertIn('JWT_PUBLIC_KEY="$FULL_JWT_PUBLIC_KEY"', self.init_ssl)
 
+    def test_embedded_backend_receives_access_code_encryption_key(self):
+        self.assertIn(
+            "- ACCESS_CODE_ENCRYPTION_KEY=${ACCESS_CODE_ENCRYPTION_KEY:-}",
+            self.compose_file,
+        )
+
     def test_optional_fmu_profile_and_openresty_runtime_defaults_are_explicit(self):
         env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
         self.assertIn("FMU_RUNNER_ENABLED=false", env_example)

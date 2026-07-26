@@ -17,6 +17,9 @@ services:
       # Keep the Gateway's Full/Lite decision visible to the embedded backend
       # when BLOCKCHAIN_SERVICES_ENABLED is left at auto.
       - ISSUER=${ISSUER:-}
+      # Full-only AES-256 key used by the durable access-code hand-off store.
+      # The setup scripts generate this in the Gateway root .env.
+      - ACCESS_CODE_ENCRYPTION_KEY=${ACCESS_CODE_ENCRYPTION_KEY:-}
       # MySQL datasource for persistence (lab_reservations, auth_users)
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
       - SPRING_DATASOURCE_USERNAME=${BLOCKCHAIN_MYSQL_USER:?BLOCKCHAIN_MYSQL_USER must be configured}
