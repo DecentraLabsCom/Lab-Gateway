@@ -91,6 +91,18 @@ python .\tests\integration\simulate-proxy-fmu.py .\tests\integration\artifacts\f
 
 Loads and simulates a downloaded `proxy.fmu` with `fmpy` on the Windows host to validate the native runtime.
 
+To validate the realtime Gateway stream directly from a downloaded proxy (without hiding the WebSocket events behind an FMI tool), run:
+
+```powershell
+python .\tests\integration\probe_proxy_stream.py "$env:USERPROFILE\Downloads\fmu-proxy-lab-id.fmu"
+```
+
+The probe validates `session.create`, `model.describe`, `sim.initialize`,
+`sim.subscribeOutputs`, `sim.start`, several monotonic `sim.outputs` events,
+`sim.pause`, and `session.terminate`. Use `--insecure` only against a local
+gateway with a self-signed certificate. A proxy's session ticket is short-lived;
+download a fresh proxy when the probe reports an expired ticket.
+
 OpenModelica / OMSimulator validation:
 
 ```powershell
