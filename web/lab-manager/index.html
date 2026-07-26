@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=notifications-actions-v1">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=reservations-v1">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -494,12 +494,12 @@
                     <div class="card-header">
                         <div>
                             <h2>Upcoming Reservations</h2>
-                            <p>Auto-sync to calendar when approved.</p>
+                            <p>Review upcoming bookings and cancel them before they start.</p>
                         </div>
-                        <span class="pill soft">coming soon</span>
+                        <span class="pill soft" id="upcomingReservationsStatus">Loading...</span>
                     </div>
-                    <div class="card-body list fixed-height">
-                        <div class="empty">No data yet. This will list approved/pending reservations with start/end and lab.</div>
+                    <div class="card-body list fixed-height reservation-list" id="upcomingReservationsList" aria-live="polite">
+                        <div class="empty">Loading upcoming reservations...</div>
                     </div>
                 </div>
             </section>
@@ -706,7 +706,7 @@
     <div id="toast" class="toast"></div>
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v2"></script>
-    <script src="../assets/js/lab-manager.js?v=billing-session-v1"></script>
+    <script src="../assets/js/lab-manager.js?v=reservations-v1"></script>
     <script src="../assets/js/lab-publisher.js?v=fmu-resource-autodetect-v2"></script>
 </body>
 </html>

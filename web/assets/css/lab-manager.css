@@ -602,6 +602,76 @@ body {
 
 .list { display: flex; flex-direction: column; gap: 10px; }
 .fixed-height { max-height: 260px; overflow-y: auto; }
+.reservation-list {
+    padding-right: 4px;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary-2) #0d1220;
+}
+.reservation-list::-webkit-scrollbar { width: 10px; }
+.reservation-list::-webkit-scrollbar-track { background: #0d1220; border-radius: 999px; }
+.reservation-list::-webkit-scrollbar-thumb {
+    background: var(--primary-2);
+    border: 2px solid #0d1220;
+    border-radius: 999px;
+}
+.reservation-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 14px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #0f1422;
+}
+.reservation-item-main { min-width: 0; }
+.reservation-item-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.reservation-item-heading .pill { font-size: 0.75rem; }
+.reservation-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+.reservation-item-key {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+}
+.reservation-item-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.reservation-reason {
+    min-height: 32px;
+    max-width: 180px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #0d1220;
+    color: var(--text);
+}
+.reservation-cancel-note {
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: right;
+}
+@media (max-width: 700px) {
+    .reservation-item { grid-template-columns: 1fr; }
+    .reservation-item-actions { justify-content: flex-start; }
+    .reservation-cancel-note { text-align: left; }
+}
 .item {
     padding: 12px;
     border: 1px solid var(--border);
@@ -824,6 +894,7 @@ body {
 }
 .mini-btn.primary { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: var(--bg); border: none; }
 .mini-btn.danger { border-color: #ff6b6b; color: #ffb3b3; }
+.mini-btn:disabled { opacity: 0.55; cursor: wait; }
 .pill.good { border-color: var(--success); color: var(--success); }
 .pill.warn { border-color: var(--warning); color: var(--warning); }
 .pill.bad { border-color: #ff6b6b; color: #ffb3b3; }

@@ -324,6 +324,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const timelineInput = $('#timelineReservationId');
     const timelineBtn = $('#loadTimelineBtn');
     const timelineResult = $('#timelineResult');
+    const upcomingReservationsListEl = $('#upcomingReservationsList');
+    const upcomingReservationsStatusEl = $('#upcomingReservationsStatus');
     const TIMELINE_DEFAULT_LIMIT = 100;
     const timelineState = {
         reservationId: null,
@@ -433,6 +435,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return accessReady;
         });
     }
+
+    if (upcomingReservationsListEl) {
+        upcomingReservationsListEl.addEventListener('click', handleUpcomingReservationActions);
+    }
+    loadUpcomingReservations();
 
     function requireBillingAccess(onAuthenticated, onTokenAuthenticated) {
         if (hasBillingAccess()) {
@@ -1684,6 +1691,159 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         resetTimelineState(reservationId);
         await requestTimelinePage(0, false);
+    }
+
+    async function loadUpcomingReservations() {
+        if (!upcomingReservationsListEl) return;
+        setUpcomingReservationsStatus('Loading...', 'soft');
+        try {
+            const res = await fetch('/lab-admin/reservations/upcoming', { credentials: 'include' });
+            if (res.status === 401) {
+                renderUpcomingReservationsMessage('Unauthorized: check LAB_MANAGER_TOKEN.');
+                setUpcomingReservationsStatus('Unauthorized', 'bad');
+                return;
+            }
+            if (res.status === 403) {
+                renderUpcomingReservationsMessage('Access denied: provider reservation administration is not available.');
+                setUpcomingReservationsStatus('Access denied', 'bad');
+                return;
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(body.error || `Unable to load reservations (HTTP ${res.status}).`);
+            }
+            const reservations = Array.isArray(body.reservations) ? body.reservations : [];
+            renderUpcomingReservations(reservations);
+            const suffix = body.truncated ? '+' : '';
+            setUpcomingReservationsStatus(`${body.count ?? reservations.length}${suffix} upcoming`, 'soft');
+        } catch (err) {
+            console.error(err);
+            renderUpcomingReservationsMessage('Unable to load upcoming reservations.');
+            setUpcomingReservationsStatus('Unavailable', 'bad');
+        }
+    }
+
+    function renderUpcomingReservations(reservations) {
+        if (!upcomingReservationsListEl) return;
+        if (!reservations.length) {
+            renderUpcomingReservationsMessage('No upcoming reservations for your labs.');
+            return;
+        }
+
+        upcomingReservationsListEl.innerHTML = reservations.map(reservation => {
+            const key = String(reservation.reservationKey || '');
+            const status = String(reservation.statusLabel || 'UNKNOWN');
+            const statusClass = reservation.status === 1 ? 'good' : reservation.status === 0 ? 'warn' : 'soft';
+            const reasonOptions = reservation.status === 0
+                ? [
+                    [1, 'Manual cancellation'],
+                    [2, 'Not eligible'],
+                    [6, 'Technical issue'],
+                    [7, 'Provider unavailable']
+                ]
+                : [
+                    [1, 'Manual cancellation'],
+                    [6, 'Technical issue'],
+                    [7, 'Provider unavailable']
+                ];
+            const actions = reservation.cancellable
+                ? `<div class="reservation-item-actions">
+                    <select class="reservation-reason" aria-label="Cancellation reason" data-reservation-reason>
+                        ${reasonOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}
+                    </select>
+                    <button type="button" class="mini-btn danger" data-action="cancel-reservation" data-reservation-key="${escapeHtml(key)}">
+                        ${reservation.status === 0 ? 'Decline request' : 'Cancel reservation'}
+                    </button>
+                </div>`
+                : `<div class="reservation-cancel-note">Cancellation unavailable for this status.</div>`;
+            const renter = shortAddress(reservation.renter);
+            return `<article class="reservation-item" data-reservation-key="${escapeHtml(key)}">
+                <div class="reservation-item-main">
+                    <div class="reservation-item-heading">
+                        <span class="item-title">Lab #${escapeHtml(reservation.labId)}</span>
+                        <span class="pill ${statusClass}">${escapeHtml(status)}</span>
+                    </div>
+                    <div class="reservation-item-meta">
+                        <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
+                        <span>Price: ${escapeHtml(reservation.priceCredits || '0')} service credits</span>
+                        <span>Provider share: ${escapeHtml(reservation.providerShareCredits || '0')} credits</span>
+                        <span>Renter: ${escapeHtml(renter)}</span>
+                    </div>
+                    <div class="reservation-item-key"><span>Reservation:</span> <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></div>
+                </div>
+                ${actions}
+            </article>`;
+        }).join('');
+    }
+
+    function renderUpcomingReservationsMessage(message) {
+        if (upcomingReservationsListEl) {
+            upcomingReservationsListEl.innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
+        }
+    }
+
+    function setUpcomingReservationsStatus(message, type) {
+        if (!upcomingReservationsStatusEl) return;
+        upcomingReservationsStatusEl.textContent = message;
+        upcomingReservationsStatusEl.className = `pill ${type || 'soft'}`;
+    }
+
+    function formatReservationDate(epochSeconds) {
+        const timestamp = Number(epochSeconds);
+        if (!Number.isFinite(timestamp)) return 'Unknown time';
+        return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+            .format(new Date(timestamp * 1000));
+    }
+
+    function shortAddress(value, prefixLength = 6, suffixLength = 4) {
+        const text = String(value || '');
+        if (text.length <= prefixLength + suffixLength + 3) return text;
+        return `${text.slice(0, prefixLength)}…${text.slice(-suffixLength)}`;
+    }
+
+    async function handleUpcomingReservationActions(event) {
+        const button = event.target.closest('[data-action="cancel-reservation"]');
+        if (!button || !upcomingReservationsListEl.contains(button)) return;
+        const row = button.closest('[data-reservation-key]');
+        const key = row?.dataset.reservationKey;
+        const reasonEl = row?.querySelector('[data-reservation-reason]');
+        const reasonCode = Number(reasonEl?.value);
+        if (!key || !Number.isInteger(reasonCode)) return;
+        if (!window.confirm('Cancel this upcoming reservation? A confirmed reservation returns its full price as service credits.')) {
+            return;
+        }
+
+        button.disabled = true;
+        if (reasonEl) reasonEl.disabled = true;
+        try {
+            const res = await fetch(`/lab-admin/reservations/${encodeURIComponent(key)}/cancel`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Idempotency-Key': createReservationIdempotencyKey()
+                },
+                body: JSON.stringify({ reasonCode })
+            });
+            const body = await res.json().catch(() => ({}));
+            if (res.status === 401) throw new Error('Unauthorized: check LAB_MANAGER_TOKEN.');
+            if (res.status === 403) throw new Error('Access denied: provider reservation administration is not available.');
+            if (!res.ok) throw new Error(body.error || `Cancellation failed (HTTP ${res.status}).`);
+            showToast('Reservation cancellation submitted', 'success');
+            await loadUpcomingReservations();
+        } catch (err) {
+            console.error(err);
+            showToast(err.message || 'Reservation cancellation failed', 'error');
+            button.disabled = false;
+            if (reasonEl) reasonEl.disabled = false;
+        }
+    }
+
+    function createReservationIdempotencyKey() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return `lab-manager-${window.crypto.randomUUID()}`;
+        }
+        return `lab-manager-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
 
     function resetTimelineState(reservationId) {
