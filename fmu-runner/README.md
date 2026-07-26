@@ -162,6 +162,9 @@ Marketplace upload is disabled by design.
   Station/control-plane/proxy-signing credentials. It receives only the
   dedicated session-observer credential required for authenticated ticket
   redemption and durable session observation.
+- The local profile extracts native FMU binaries into the dedicated
+  executable tmpfs `/app/fmu-runtime` via `TMPDIR`; the general `/tmp` mount
+  remains restricted while FMPy loads the FMU shared library.
 - FMU execution mode is independent of JWT key retrieval. Full mode uses the
   local `blockchain-services` JWKS endpoint, Lite mode uses the external
   issuer's JWKS endpoint, and `AUTH_JWKS_URL` can override either choice.

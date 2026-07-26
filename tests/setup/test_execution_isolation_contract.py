@@ -40,6 +40,8 @@ def test_production_fmu_runner_is_station_only_and_keeps_control_networks_out_of
     assert "- session_observer_signing_secret" in local
     assert "FMU_STATION_INTERNAL_TOKEN" not in local
     assert "FMU_PROXY_SIGNING_KEY" not in local
+    assert "TMPDIR=/app/fmu-runtime" in local
+    assert "- /app/fmu-runtime:exec,size=64M,mode=1777" in local
 
 
 def test_local_fmu_network_is_internal_with_a_dedicated_auth_path():

@@ -764,6 +764,8 @@ services:
       - FMU_LOCAL_REALTIME_ENABLED=${FMU_LOCAL_REALTIME_ENABLED:-false}
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
+      # FMPy extracts native FMU binaries here before loading them.
+      - TMPDIR=/app/fmu-runtime
       - HISTORY_DB_PATH=/app/data/history.db
       - ISSUER=${ISSUER:-}
       - JWT_ISSUER=${JWT_ISSUER:-}
@@ -786,6 +788,7 @@ services:
       - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
       - fmu-local-history:/app/data
     tmpfs:
+      - /app/fmu-runtime:exec,size=64M,mode=1777
       - /tmp:size=64M,mode=1777
     read_only: true
     secrets:
