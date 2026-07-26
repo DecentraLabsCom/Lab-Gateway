@@ -59,6 +59,11 @@ Marketplace requires an authenticated SSO session and a PUC. It validates a futu
 
 The resulting EIP-712 intent binds the reservation payload to the Marketplace administrative signer and to the institutional executor. The contract recomputes the reservation key and price and consumes the intent only when action, executor, payload hash, nonce, and expiry all match.
 
+`pricePerSecond` and the resulting `price` are raw service-credit units. The
+canonical scale is 7 decimals (`10,000,000` raw units per credit). Human
+credit amounts must be converted at the UI/API boundary; neither the gateway
+nor the backend should apply a legacy 5-decimal divisor.
+
 ## Preparation and WebAuthn authorization
 
 ```mermaid

@@ -24,7 +24,7 @@
         originalPriceUnit: null,
     };
 
-    const CREDIT_DECIMALS = 5;
+    const CREDIT_DECIMALS = 7;
     const RAW_PER_CREDIT = 10n ** BigInt(CREDIT_DECIMALS);
     const SECONDS_PER_UNIT = {
         minute: 60n,
@@ -33,7 +33,7 @@
         week: 604800n,
         month: 2592000n,
     };
-    const DISPLAY_PRICE_DECIMALS = 1;
+    const DISPLAY_PRICE_DECIMALS = 3;
     const RESOURCE_TYPES = { LAB: 'lab', FMU: 'fmu' };
     const WEEKDAY_OPTIONS = [
         { value: 'MONDAY', label: 'Mon' },
@@ -886,7 +886,7 @@
             displayAmount: $('labPrice').value.trim(),
             displayUnit: priceUnit,
             rawPricePerSecond: rawPricePerSecond.toString(),
-            roundingMode: 'ceil-per-second',
+            roundingMode: 'nearest-per-second',
             billingMode: 'linear-duration',
         };
         const termsOfUse = sanitizeTermsOfUse({
@@ -1788,7 +1788,9 @@
         const rawPerUnit = parseHourlyCreditsToRaw(displayCredits);
         const seconds = SECONDS_PER_UNIT[normalizePricingUnit(unit)];
         if (rawPerUnit === 0n) return 0n;
-        return (rawPerUnit + seconds - 1n) / seconds;
+        const base = rawPerUnit / seconds;
+        const remainder = rawPerUnit % seconds;
+        return remainder * 2n >= seconds ? base + 1n : base;
     }
 
     function getSelectedAllowedPeriodRange() {
