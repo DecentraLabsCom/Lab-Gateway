@@ -41,7 +41,7 @@ import jwt
 from fmpy import read_model_description, simulate_fmu
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
 from fastapi.responses import StreamingResponse, Response, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from xml.etree import ElementTree as ET
 
 from auth import _fetch_jwks, verify_jwt, verify_jwt_token, jwks_health
@@ -394,6 +394,13 @@ class SimulationRequest(BaseModel):
     labId: Optional[str] = None
     parameters: dict = Field(default_factory=dict)
     options: dict = Field(default_factory=dict)
+
+    @field_validator("labId", mode="before")
+    @classmethod
+    def _normalize_lab_id(cls, value):
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            return str(value)
+        return value
 
 
 # ----- helpers -----

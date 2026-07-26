@@ -1181,7 +1181,7 @@ def test_stream_returns_ndjson_events(mock_md, mock_exec, mock_resolve):
     mock_exec.submit.return_value = _make_future(_make_run_result())
 
     response = client.post("/api/v1/simulations/stream", json={
-        "labId": "1",
+        "labId": 1,
         "parameters": {"mass": 1.5},
         "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
     })
