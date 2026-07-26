@@ -631,20 +631,27 @@ body {
     border-radius: 999px;
 }
 .reservation-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     padding: 12px;
     border: 1px solid var(--border);
     border-radius: 10px;
     background: #0f1422;
 }
-.reservation-item-main { min-width: 0; }
 .reservation-item-heading {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: nowrap;
+}
+.reservation-item-schedule {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+    font-size: 0.88rem;
 }
 .reservation-item-heading .pill { font-size: 0.75rem; }
 .reservation-item-heading .item-title {
@@ -658,10 +665,9 @@ body {
 }
 .reservation-item-reference code { color: inherit; }
 .reservation-item-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px 12px;
-    margin-top: 6px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
     color: var(--muted);
     font-size: 0.88rem;
 }
@@ -687,8 +693,8 @@ body {
     text-align: right;
 }
 @media (max-width: 700px) {
-    .reservation-item { grid-template-columns: 1fr; }
     .reservation-item-heading { flex-wrap: wrap; }
+    .reservation-item-schedule { align-items: flex-start; flex-direction: column; }
     .reservation-item-actions { justify-content: flex-start; }
     .reservation-cancel-note { text-align: left; }
 }

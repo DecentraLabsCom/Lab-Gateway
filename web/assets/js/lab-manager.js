@@ -1760,20 +1760,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const labLabel = reservation.labName || `Lab #${reservation.labId}`;
             const institution = reservation.institutionName || shortAddress(reservation.institutionAddress);
             return `<article class="reservation-item" data-reservation-key="${escapeHtml(key)}">
-                <div class="reservation-item-main">
-                    <div class="reservation-item-heading">
-                        <span class="item-title">${escapeHtml(labLabel)}</span>
-                        <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
-                        <span class="pill ${statusClass}">${escapeHtml(status)}</span>
-                    </div>
-                    <div class="reservation-item-meta">
-                        <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
-                        <span>Price: ${escapeHtml(reservation.priceCredits || '0')} service credits</span>
-                        <span>Provider share: ${escapeHtml(reservation.providerShareCredits || '0')} credits</span>
-                        <span>Renter: (${escapeHtml(institution || 'Unknown')}) ${escapeHtml(renter)}</span>
-                    </div>
+                <div class="reservation-item-heading">
+                    <span class="item-title">${escapeHtml(labLabel)}</span>
+                    <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
+                    <span class="pill ${statusClass}">${escapeHtml(status)}</span>
                 </div>
-                ${actions}
+                <div class="reservation-item-schedule">
+                    <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
+                    ${actions}
+                </div>
+                <div class="reservation-item-meta">
+                    <span>Price: ${escapeHtml(reservation.priceCredits || '0')} service credits</span>
+                    <span>Provider share: ${escapeHtml(reservation.providerShareCredits || '0')} credits</span>
+                    <span>Renter: (${escapeHtml(institution || 'Unknown')}) ${escapeHtml(renter)}</span>
+                </div>
             </article>`;
         }).join('');
     }
