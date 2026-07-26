@@ -644,13 +644,17 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 }
 .reservation-item-heading .pill { font-size: 0.75rem; }
+.reservation-item-heading .item-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
 .reservation-item-reference {
     color: var(--muted);
     font-size: 0.78rem;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
 }
 .reservation-item-reference code { color: inherit; }
 .reservation-item-meta {
@@ -684,6 +688,7 @@ body {
 }
 @media (max-width: 700px) {
     .reservation-item { grid-template-columns: 1fr; }
+    .reservation-item-heading { flex-wrap: wrap; }
     .reservation-item-actions { justify-content: flex-start; }
     .reservation-cancel-note { text-align: left; }
 }

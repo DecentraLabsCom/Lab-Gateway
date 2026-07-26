@@ -1770,8 +1770,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
                         <span>Price: ${escapeHtml(reservation.priceCredits || '0')} service credits</span>
                         <span>Provider share: ${escapeHtml(reservation.providerShareCredits || '0')} credits</span>
-                        <span>Institution: ${escapeHtml(institution || 'Unknown')}</span>
-                        <span>Renter: ${escapeHtml(renter)}</span>
+                        <span>Renter: (${escapeHtml(institution || 'Unknown')}) ${escapeHtml(renter)}</span>
                     </div>
                 </div>
                 ${actions}
