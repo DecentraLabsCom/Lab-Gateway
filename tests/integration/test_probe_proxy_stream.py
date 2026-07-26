@@ -14,7 +14,6 @@ from probe_proxy_stream import (
     _receive_stream_samples,
     _send_command,
     load_proxy_metadata,
-    main,
     run_probe,
     validate_stream_samples,
 )

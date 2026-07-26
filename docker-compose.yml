@@ -23,6 +23,10 @@ services:
       # Full-only map of gateway IDs to the redeemer credentials accepted by
       # the embedded backend. The setup scripts generate it in the root .env.
       - ACCESS_CODE_REDEEMER_CREDENTIALS_JSON=${ACCESS_CODE_REDEEMER_CREDENTIALS_JSON:-}
+      # Full-only map of gateway IDs to the short-lived session-observer
+      # credentials accepted by the embedded backend. The FMU runner signs
+      # observer JWTs with the matching per-gateway secret.
+      - SESSION_OBSERVER_CREDENTIALS_JSON=${SESSION_OBSERVER_CREDENTIALS_JSON:-}
       # MySQL datasource for persistence (lab_reservations, auth_users)
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true
       - SPRING_DATASOURCE_USERNAME=${BLOCKCHAIN_MYSQL_USER:?BLOCKCHAIN_MYSQL_USER must be configured}

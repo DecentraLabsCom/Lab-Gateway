@@ -65,6 +65,12 @@ def test_application_database_credentials_use_only_dedicated_secret_files():
     assert not re.search(r"^MYSQL_PASSWORD=", ROOT_ENV, re.MULTILINE)
 
 
+def test_blockchain_services_receives_session_observer_credentials():
+    blockchain = _service_block("blockchain-services")
+
+    assert "SESSION_OBSERVER_CREDENTIALS_JSON=${SESSION_OBSERVER_CREDENTIALS_JSON:-}" in blockchain
+
+
 def test_mysql_healthcheck_reads_passwords_from_mounted_secrets():
     mysql = _service_block("mysql")
     healthcheck = (ROOT / "mysql" / "healthcheck.sh").read_text(encoding="utf-8")
