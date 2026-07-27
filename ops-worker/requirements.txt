@@ -42,4 +42,4 @@ typing_extensions==4.16.0
 greenlet==3.1.1
 
 # MySQL driver
-PyMySQL==1.1.1
+PyMySQL==1.2.0
