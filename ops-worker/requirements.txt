@@ -37,7 +37,7 @@ tzlocal==5.4.4
 six==1.17.0
 
 # Database ORM
-SQLAlchemy==2.0.35
+SQLAlchemy==2.0.51
 typing_extensions==4.16.0
 greenlet==3.1.1
 
