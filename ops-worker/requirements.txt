@@ -28,7 +28,7 @@ ntlm-auth==1.5.0
 cryptography==49.0.0
 
 # Wake-on-LAN
-wakeonlan==3.0.0
+wakeonlan==4.0.0
 
 # Task scheduler
 APScheduler==3.11.3
