@@ -21,7 +21,7 @@ def create_engine_with_guacamole_schema():
 
 @pytest.fixture(autouse=True)
 def valid_fernet_key(monkeypatch):
-    monkeypatch.setattr(worker, "_load_fernet", lambda: object())
+    monkeypatch.setattr(worker, "_load_fernet", object)
 
 
 def test_health_confirms_the_guacamole_schema(monkeypatch):
