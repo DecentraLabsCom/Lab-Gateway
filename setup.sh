@@ -1112,7 +1112,9 @@ echo "Blockchain Services Configuration"
 echo "================================="
 
 echo
-# Provider registration enabled by default (non-interactive).
+# Full mode enables provider registration and provider-side reservation
+# automation. The contract still limits external confirmation/denial to the
+# current lab owner or its authorized backend.
 update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_ENABLED" "true"
 update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 

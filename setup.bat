@@ -878,7 +878,9 @@ echo.
 echo Blockchain Services Configuration
 echo ==================================
 echo.
-rem Provider registration enabled by default (non-interactive).
+rem Full mode enables provider registration and provider-side reservation
+rem automation. The contract still limits external confirmation/denial to the
+rem current lab owner or its authorized backend.
 call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_ENABLED" "true"
 call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default

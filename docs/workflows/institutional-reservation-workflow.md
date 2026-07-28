@@ -9,7 +9,7 @@ This document describes the current institutional reservation process from a use
 | User | Starts the reservation and completes the institutional WebAuthn ceremony. |
 | Marketplace | Validates the user session, prepares and signs an EIP-712 intent, registers it on chain, and orchestrates the authorization ceremony. |
 | Consumer backend | Validates the SAML and WebAuthn evidence, persists the accepted intent, and executes the institutional transaction. |
-| Provider backend | Observes and may process pending reservation requests according to its configured reservation automation. |
+| Provider backend | Observes pending reservation requests and accepts or denies them according to its configured reservation automation. |
 | Smart contracts | Enforce intent consumption, reservation payload, price, state, and treasury rules. |
 
 The chain is authoritative for the reservation lifecycle. Marketplace and Lab Gateway consume events and maintain operational projections for UI, notification, and laboratory preparation; these projections must not be used as a substitute for the on-chain state.
@@ -104,15 +104,22 @@ The consumer backend accepts an intent only after validating its shape, SAML ass
 
 ### Direct booking: institution owns the laboratory
 
-If the payer institution is also the current owner of the lab, Marketplace selects `DIRECT_BOOKING`. `institutionalDirectBookingWithIntent` consumes the intent, creates the institutional reservation, and confirms it in one transaction. There is no externally visible pending-confirmation interval.
+If the payer institution is also the current owner of the lab, Marketplace selects `DIRECT_BOOKING`. The institution wallet or its registered backend may execute the intent; the contract resolves the owner as the payer/provider identity. `institutionalDirectBookingWithIntent` consumes the intent, creates the institutional reservation, and confirms it in one transaction. There is no externally visible pending-confirmation interval.
 
 ### Reservation request: external provider laboratory
 
-For an external lab, Marketplace selects `REQUEST_BOOKING`. `institutionalReservationRequestWithIntent` consumes the intent and creates a `PENDING` reservation. The request contains the payer institution, PUC hash, lab, start/end window, and computed reservation key.
+For an external lab, Marketplace selects `REQUEST_BOOKING`. The institution wallet or its registered backend executes the intent; the contract resolves the payer from the registered `schacHomeOrganization`, rather than treating the backend as a separate institution. `institutionalReservationRequestWithIntent` consumes the intent and creates a `PENDING` reservation. The request contains the payer institution, PUC hash, lab, start/end window, and computed reservation key.
 
 Confirmation verifies that the reservation is pending, the institution and PUC hash match the reservation, the provider/lab is eligible, the request period remains valid, and the payer's institutional treasury can spend the computed price. On success it captures the spend, reserves the physical-lab calendar interval where applicable, sets `CONFIRMED`, and emits `ReservationConfirmed`.
 
-The current confirmation contract accepts a call from either the payer institution (or its registered backend) or the provider/lab owner (or its registered backend), provided the supplied institution and PUC match the reservation. Deployments with automatic reservation processing must therefore treat their automation policy and backend registration as part of the confirmation trust boundary.
+The confirmation contract accepts external requests only from the current
+provider/lab owner or its registered backend, provided the supplied institution
+and PUC match the reservation. The payer's treasury is charged by this
+provider-authorized confirmation. The same provider-side authority is required
+to deny a pending request. The payer remains authorized to create and cancel
+its request/booking according to policy, but cannot confirm or deny an external
+request. `DIRECT_BOOKING` is the separate payer-authorized path for a lab the
+institution currently owns.
 
 ## Cancellation and expiry
 
@@ -150,7 +157,13 @@ deduplicates the corresponding invoice/payment references.
 
 ## Operational behavior
 
-Contract event listeners can persist reservation events, notify users, and, when reservation automation is enabled, evaluate a pending request against laboratory metadata and submit confirmation or denial. This automation is operationally useful but does not change the contract-level authorization and treasury checks.
+Contract event listeners can persist reservation events and notify users. Before
+loading laboratory metadata, provider-side reservation automation resolves the
+local wallet's on-chain role: only the current lab owner/backend may confirm or
+deny an external request, and only when provider features are enabled. Payer
+and unrelated listeners remain informational and do not submit confirmation or
+denial transactions. Executing the payer's request intent does not trigger a
+confirmation postflight; the provider must process the resulting event.
 
 The reservation key intentionally represents a `(labId, start)` slot. It is suitable for exclusive laboratory scheduling. Resource types that permit concurrent sessions require a distinct concurrency model rather than assuming that this key identifies independent simultaneous bookings.
 
