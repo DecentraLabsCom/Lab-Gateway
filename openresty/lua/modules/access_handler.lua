@@ -8,6 +8,19 @@ local function reject(ngx, message)
     ngx.exit(ngx.HTTP_UNAUTHORIZED)
 end
 
+local function cookie_value(cookies, name)
+    if not cookies then
+        return nil
+    end
+    for pair in tostring(cookies):gmatch("[^;]+") do
+        local key, value = pair:match("^%s*([^=;%s]+)%s*=%s*(.-)%s*$")
+        if key == name then
+            return value
+        end
+    end
+    return nil
+end
+
 local function enforce_guac_timeout(ngx, dict)
     local token = ngx.var.arg_token
     if not token or token == "" then return false end
@@ -65,7 +78,7 @@ function _M.run(ngx_ctx, deps)
     -- Demo handoff is intentionally a separate cookie and cache namespace.
     -- It cannot satisfy the reservation JTI path and never receives a
     -- reservation key or durable economic-session registration.
-    local demo_jti = string.match(cookies, "DEMO_JTI=([^;]+)")
+    local demo_jti = cookie_value(cookies, "DEMO_JTI")
     if demo_jti and demo_jti ~= "" and dict:get("demo_session:" .. demo_jti) then
         local demo_username = dict:get("demo_session:" .. demo_jti)
         local demo_exp = tonumber(dict:get("demo_exp:" .. demo_jti))
@@ -87,7 +100,7 @@ function _M.run(ngx_ctx, deps)
         return
     end
 
-    local jti = string.match(cookies, "JTI=([^;]+)")
+    local jti = cookie_value(cookies, "JTI")
     if not jti or jti == "" then return end
     local username = dict:get("username:" .. jti)
     local exp = username and tonumber(dict:get("exp:" .. username))

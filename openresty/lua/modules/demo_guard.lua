@@ -11,6 +11,15 @@ local DEFAULT_DEMO_SESSION_TTL = 600
 local MARKETPLACE_CHECK_TIMEOUT_MS = 3000
 local ACTIVE_KEY = "active"
 
+local function decrement_active(demo_sessions)
+    local remaining = demo_sessions:incr(ACTIVE_KEY, -1, 0)
+    if remaining and remaining < 0 then
+        demo_sessions:set(ACTIVE_KEY, 0)
+        return 0
+    end
+    return remaining
+end
+
 local function reject(ngx, message)
     ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
     ngx.header["Content-Type"] = "text/plain"
@@ -120,16 +129,13 @@ function _M.start(ngx_ctx, jti, exp, deps)
         return nil, "Demo access is unavailable"
     end
     if active > 1 then
-        local remaining = demo_sessions:incr(ACTIVE_KEY, -1, 0)
-        if remaining and remaining <= 0 then
-            demo_sessions:delete(ACTIVE_KEY)
-        end
+        decrement_active(demo_sessions)
         return nil, "A demo session is already in progress. Please try again later."
     end
 
     local stored, store_err = demo_sessions:set("session:" .. jti, "1", ttl)
     if not stored then
-        demo_sessions:delete(ACTIVE_KEY)
+        decrement_active(demo_sessions)
         ngx.log(ngx.ERR, "demo_guard: failed to register demo JTI: " .. tostring(store_err))
         return nil, "Demo access is unavailable"
     end
@@ -175,10 +181,7 @@ function _M.release(ngx_ctx, jti)
         return false
     end
     demo_sessions:delete(session_key)
-    local remaining = demo_sessions:incr(ACTIVE_KEY, -1, 0)
-    if remaining and remaining <= 0 then
-        demo_sessions:delete(ACTIVE_KEY)
-    end
+    decrement_active(demo_sessions)
     ngx.log(ngx.INFO, "demo_guard: demo session ended")
     return true
 end
