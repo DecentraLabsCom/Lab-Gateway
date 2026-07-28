@@ -122,6 +122,51 @@ class SetupEnvContractTest(unittest.TestCase):
             with self.subTest(script="setup.bat", snippet=snippet):
                 self.assertIn(snippet, self.setup_bat)
 
+    def test_ops_secrets_key_generation_keeps_fernet_padding_and_validates_existing_values(self):
+        expected_shell = [
+            'tr -d \'\\n\' | tr \'+/\' \'-_\'',
+            'is_valid_fernet_key',
+            'Existing OPS_SECRETS_KEY is not a valid Fernet key',
+        ]
+        expected_bat = [
+            "[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }) -as [byte[]]).Replace('+','-').Replace('/','_')",
+            ":IsValidFernetKey",
+            "Existing OPS_SECRETS_KEY is not a valid Fernet key",
+        ]
+        for snippet in expected_shell:
+            with self.subTest(script="setup.sh", snippet=snippet):
+                self.assertIn(snippet, self.setup_sh)
+        for snippet in expected_bat:
+            with self.subTest(script="setup.bat", snippet=snippet):
+                self.assertIn(snippet, self.setup_bat)
+
+    def test_secret_synchronizers_reject_invalid_fernet_keys(self):
+        expected_shell = [
+            "is_valid_fernet_key()",
+            '[[ "${env_key}" == "OPS_SECRETS_KEY" ]]',
+            "OPS_SECRETS_KEY must be a valid 32-byte URL-safe base64 Fernet key.",
+        ]
+        expected_powershell = [
+            "if ($mapping.Value -eq 'OPS_SECRETS_KEY'",
+            "^[A-Za-z0-9_-]{43}=$",
+            "OPS_SECRETS_KEY must be a valid 32-byte URL-safe base64 Fernet key.",
+        ]
+        sync_powershell = (ROOT / "scripts" / "Sync-ComposeSecrets.ps1").read_text(
+            encoding="utf-8"
+        )
+        for snippet in expected_shell:
+            with self.subTest(script="sync-compose-secrets.sh", snippet=snippet):
+                self.assertIn(snippet, self.sync_compose_secrets_sh)
+        for snippet in expected_powershell:
+            with self.subTest(script="Sync-ComposeSecrets.ps1", snippet=snippet):
+                self.assertIn(snippet, sync_powershell)
+
+    def test_openresty_does_not_use_an_unrendered_server_name_placeholder(self):
+        lab_access = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+        self.assertNotIn("${SERVER_NAME}", lab_access)
+        self.assertIn("server_name _;", lab_access)
+        self.assertIn("set_by_lua_block $ops_origin", lab_access)
+
     def test_backend_entrypoints_persist_generated_intent_payload_key(self):
         entrypoint = CANONICAL_BACKEND_ENTRYPOINT.read_text(encoding="utf-8")
         self.assertIn("INTENT_PAYLOAD_ENCRYPTION_KEY", entrypoint)

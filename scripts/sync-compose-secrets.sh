@@ -6,6 +6,10 @@ ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${1:-${ROOT_DIR}/.env}"
 SECRETS_DIR="${ROOT_DIR}/secrets"
 
+is_valid_fernet_key() {
+    [[ "$1" =~ ^[A-Za-z0-9_-]{43}=$ ]]
+}
+
 if [[ ! -f "${ENV_FILE}" ]]; then
     echo "Environment file not found: ${ENV_FILE}" >&2
     exit 1
@@ -30,12 +34,19 @@ write_secret() {
     local env_key="$2"
     local secret_path="${SECRETS_DIR}/${secret_name}"
     local temporary_path
+    local value
 
     # Local Compose mounts file-backed secrets directly, preserving the
     # source-file mode.  Keep the directory private, but let non-root service
     # users read the mounted file even when their UID differs from HOST_UID.
     temporary_path="$(mktemp "${SECRETS_DIR}/.${secret_name}.XXXXXX")"
-    read_env_value "${env_key}" > "${temporary_path}"
+    value="$(read_env_value "${env_key}")"
+    if [[ "${env_key}" == "OPS_SECRETS_KEY" ]] && ! is_valid_fernet_key "${value}"; then
+        rm -f "${temporary_path}"
+        echo "OPS_SECRETS_KEY must be a valid 32-byte URL-safe base64 Fernet key." >&2
+        exit 1
+    fi
+    printf '%s\n' "${value}" > "${temporary_path}"
     chmod 644 "${temporary_path}"
     mv -f "${temporary_path}" "${secret_path}"
 }

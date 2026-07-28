@@ -1440,9 +1440,20 @@ def database_is_usable(engine: Optional[Engine], statement: str) -> bool:
         return False
 
 
+def fernet_key_is_usable() -> bool:
+    """Validate the key needed to durably encrypt runtime bearer material."""
+    try:
+        _load_fernet()
+        return True
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("OPS_SECRETS_KEY is unavailable or invalid: %s", type(exc).__name__)
+        return False
+
+
 @APP.route("/health", methods=["GET"])
 def health():
     db_ok = database_is_usable(DB_ENGINE, "SELECT 1")
+    fernet_ok = fernet_key_is_usable()
     guacamole_schema_ok = database_is_usable(
         GUACAMOLE_DB_ENGINE,
         """
@@ -1469,11 +1480,12 @@ def health():
             logging.warning("Health durable queue check failed: %s", exc)
     revocation_queue_ok = failed_revocations == 0
     observation_outbox_ok = failed_observations == 0
-    healthy = db_ok and guacamole_schema_ok and revocation_queue_ok and observation_outbox_ok
+    healthy = db_ok and fernet_ok and guacamole_schema_ok and revocation_queue_ok and observation_outbox_ok
     return jsonify({
         "status": "ok" if healthy else "degraded",
         "hosts_loaded": len(HOSTS.all_hosts()),
         "db": db_ok,
+        "ops_secrets_key": fernet_ok,
         "guacamole_schema": guacamole_schema_ok,
         "guacamole_failed_revocations": failed_revocations,
         "guacamole_revocation_queue": revocation_queue_ok,

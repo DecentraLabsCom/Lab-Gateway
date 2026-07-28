@@ -202,6 +202,10 @@ is_placeholder_secret() {
     esac
 }
 
+is_valid_fernet_key() {
+    [[ "$1" =~ ^[A-Za-z0-9_-]{43}=$ ]]
+}
+
 remove_env_var() {
     local file="$1"
     local key="$2"
@@ -400,8 +404,15 @@ if [ -z "$ops_guacamole_mysql_password" ] || is_placeholder_secret "$ops_guacamo
     ops_guacamole_mysql_password="OpsGuac_$(openssl rand -hex 16 2>/dev/null || echo ${RANDOM}_$(date +%s))"
 fi
 ops_secrets_key="$existing_ops_secrets_key"
-if [ -z "$ops_secrets_key" ] || is_placeholder_secret "$ops_secrets_key"; then
-    ops_secrets_key="$(openssl rand -base64 32 | tr -d '\n=' | tr '+/' '-_')"
+if [ -n "$ops_secrets_key" ] && is_placeholder_secret "$ops_secrets_key"; then
+    ops_secrets_key=""
+fi
+if [ -n "$ops_secrets_key" ] && ! is_valid_fernet_key "$ops_secrets_key"; then
+    echo "Existing OPS_SECRETS_KEY is not a valid Fernet key; recover the original key before continuing." >&2
+    exit 1
+fi
+if [ -z "$ops_secrets_key" ]; then
+    ops_secrets_key="$(openssl rand -base64 32 | tr -d '\n' | tr '+/' '-_')"
 fi
 
 # Bundled BaSyx/Mongo uses separate alphanumeric credentials so they are safe

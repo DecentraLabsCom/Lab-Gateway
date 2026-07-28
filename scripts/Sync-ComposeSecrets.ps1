@@ -45,6 +45,9 @@ $secretMappings = [ordered]@{
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 foreach ($mapping in $secretMappings.GetEnumerator()) {
     $value = if ($values.ContainsKey($mapping.Value)) { $values[$mapping.Value] } else { '' }
+    if ($mapping.Value -eq 'OPS_SECRETS_KEY' -and $value -notmatch '^[A-Za-z0-9_-]{43}=$') {
+        throw 'OPS_SECRETS_KEY must be a valid 32-byte URL-safe base64 Fernet key.'
+    }
     $target = Join-Path $secretsDirectory $mapping.Key
     [System.IO.File]::WriteAllText($target, $value, $utf8NoBom)
 }

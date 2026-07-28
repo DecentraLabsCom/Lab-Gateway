@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine, text
+import pytest
 
 import worker
 
@@ -16,6 +17,11 @@ def create_engine_with_guacamole_schema():
             )
         """))
     return engine
+
+
+@pytest.fixture(autouse=True)
+def valid_fernet_key(monkeypatch):
+    monkeypatch.setattr(worker, "_load_fernet", lambda: object())
 
 
 def test_health_confirms_the_guacamole_schema(monkeypatch):
@@ -80,3 +86,22 @@ def test_health_fails_when_the_guacamole_schema_is_unusable(monkeypatch):
     assert response.json["status"] == "degraded"
     assert response.json["db"] is True
     assert response.json["guacamole_schema"] is False
+
+
+def test_health_degrades_when_the_ops_secrets_key_is_invalid(monkeypatch):
+    ops_engine = create_engine("sqlite:///:memory:", future=True)
+    with ops_engine.begin() as conn:
+        conn.execute(text("CREATE TABLE guacamole_token_revocation_queue (status VARCHAR(32) NOT NULL)"))
+        conn.execute(text("CREATE TABLE gateway_session_observation_outbox (status VARCHAR(32) NOT NULL)"))
+    monkeypatch.setattr(worker, "DB_ENGINE", ops_engine)
+    monkeypatch.setattr(worker, "GUACAMOLE_DB_ENGINE", create_engine_with_guacamole_schema())
+
+    def invalid_key():
+        raise ValueError("invalid Fernet key")
+
+    monkeypatch.setattr(worker, "_load_fernet", invalid_key)
+
+    response = worker.APP.test_client().get("/health")
+
+    assert response.status_code == 503
+    assert response.json["ops_secrets_key"] is False

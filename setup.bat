@@ -173,7 +173,14 @@ if "!ops_backend_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "
 if "!ops_guacamole_mysql_password!"=="" call :GenerateHex 16 generated_hex & set "ops_guacamole_mysql_password=OpsGuac_!generated_hex!"
 set "ops_secrets_key=!existing_ops_secrets_key!"
 if defined ops_secrets_key call :IsPlaceholderSecret "!ops_secrets_key!" && set "ops_secrets_key="
-if "!ops_secrets_key!"=="" for /f "delims=" %%K in ('powershell -NoLogo -NoProfile -Command "[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }) -as [byte[]]).TrimEnd('=') -replace '\+', '-' -replace '/', '_'"') do set "ops_secrets_key=%%K"
+if defined ops_secrets_key (
+    call :IsValidFernetKey "!ops_secrets_key!"
+    if errorlevel 1 (
+        echo Existing OPS_SECRETS_KEY is not a valid Fernet key; recover the original key before continuing.
+        exit /b 1
+    )
+)
+if "!ops_secrets_key!"=="" for /f "delims=" %%K in ('powershell -NoLogo -NoProfile -Command "[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }) -as [byte[]]).Replace('+','-').Replace('/','_')"') do set "ops_secrets_key=%%K"
 
 REM Bundled BaSyx/Mongo credentials are separate and alphanumeric so they are
 REM safe in the Mongo URI and never reused by MySQL or application principals.
@@ -1162,6 +1169,13 @@ setlocal
 for /f %%H in ('powershell -NoLogo -NoProfile -Command "$bytes = New-Object byte[](32); [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes); [Convert]::ToBase64String($bytes).TrimEnd('=^').Replace('+','-').Replace('/','_')"') do set "_secret=%%H"
 endlocal & set "%~1=%_secret%"
 exit /b
+
+:IsValidFernetKey
+set "DL_FERNET_KEY=%~1"
+powershell -NoLogo -NoProfile -Command "$key=$env:DL_FERNET_KEY; if ($key -cmatch '^[A-Za-z0-9_-]{43}=$') { exit 0 } else { exit 1 }"
+set "fernet_key_status=%errorlevel%"
+set "DL_FERNET_KEY="
+exit /b %fernet_key_status%
 
 :ReadSecret
 set "DL_SECRET_PROMPT=%~1"
