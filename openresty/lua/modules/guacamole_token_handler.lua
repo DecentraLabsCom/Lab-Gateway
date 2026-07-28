@@ -27,6 +27,7 @@ local function clear_mappings(dict, username, token)
         dict:delete("guac_jwt_last_seen:" .. token)
         dict:delete("guac_jti:" .. token)
         dict:delete("guac_reservation:" .. token)
+        dict:delete("guac_demo:" .. token)
     end
 end
 
@@ -112,6 +113,41 @@ local function secure_reservation_token(ngx, dict, username, token, cjson, deps)
     return nil
 end
 
+local function secure_demo_token(ngx, dict, username, token, cjson)
+    local demo_exp = tonumber(ngx.ctx.demo_exp)
+    local demo_jti = ngx.ctx.demo_jti
+    local demo_username = ngx.ctx.demo_username
+    if not demo_exp or not demo_jti or demo_jti == "" or not demo_username
+        or string.lower(username) ~= string.lower(demo_username) then
+        ngx.log(ngx.ERR, "Guacamole token - Incomplete demo security context")
+        clear_mappings(dict, username, token)
+        return security_error(cjson)
+    end
+
+    local retention = tonumber(ngx.shared.config:get("guac_token_security_retention_seconds"))
+        or DEFAULT_TOKEN_SECURITY_RETENTION_SECONDS
+    local mapping_ttl = math.max(1, demo_exp - ngx.time() + math.max(1, retention))
+    local mappings = {
+        { "token:" .. username, token },
+        { "guac_token:" .. token, username },
+        { "guac_jwt_exp:" .. token, demo_exp },
+        { "guac_jwt_last_seen:" .. token, ngx.time() },
+        { "guac_jti:" .. token, demo_jti },
+        { "guac_demo:" .. token, demo_jti },
+        { "guac_enforcement_exp:" .. username, demo_exp },
+    }
+    for _, mapping in ipairs(mappings) do
+        if not set_mapping(ngx, dict, mapping[1], mapping[2], mapping_ttl) then
+            clear_mappings(dict, username, token)
+            dict:delete("guac_enforcement_exp:" .. username)
+            return security_error(cjson)
+        end
+    end
+
+    ngx.log(ngx.INFO, "Guacamole token - Demo session secured for " .. username)
+    return nil
+end
+
 function _M.handle_response(ngx_ctx, response, deps)
     local ngx = ngx_ctx or ngx
     local cjson = (deps and deps.cjson) or require "cjson.safe"
@@ -128,7 +164,12 @@ function _M.handle_response(ngx_ctx, response, deps)
     local username = string.lower(tostring(decoded.username))
     local dict = ngx.shared.cache
 
-    if ngx.ctx and ngx.ctx.jwt_authenticated then
+    if ngx.ctx and ngx.ctx.demo_authenticated then
+        local failed = secure_demo_token(ngx, dict, username, token, cjson)
+        if failed then
+            return failed
+        end
+    elseif ngx.ctx and ngx.ctx.jwt_authenticated then
         local failed = secure_reservation_token(ngx, dict, username, token, cjson, deps)
         if failed then
             return failed

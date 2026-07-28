@@ -21,7 +21,9 @@ local function build_ngx(opts)
         demo_sessions      = opts.demo_sessions or {},
         demo_sessions_dict = opts.demo_sessions_dict,
         ctx                = opts.ctx or {
+            demo_authenticated = opts.demo_authenticated ~= false,
             jwt_jti = opts.jti or "demo-jti",
+            demo_jti = opts.jti or "demo-jti",
             jwt_exp = opts.exp or 1000,
         },
     })
@@ -44,6 +46,14 @@ local function run(ngx, http_stub)
             and function() return http_stub end
             or  function() return HttpClientStub.new({}) end
     }
+    if ngx.ctx.demo_authenticated and not ngx.shared.demo_sessions:get("session:" .. ngx.ctx.demo_jti) then
+        local ttl, err = DemoGuard.start(ngx, ngx.ctx.demo_jti, ngx.ctx.jwt_exp, deps)
+        if not ttl then
+            ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
+            ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
+            return
+        end
+    end
     DemoGuard.run(ngx, deps)
 end
 
@@ -52,14 +62,14 @@ end
 runner.describe("Demo guard", function()
 
     runner.it("passes through immediately for a regular (non-demo) user", function()
-        local ngx = build_ngx({ auth = "alice" })
+        local ngx = build_ngx({ auth = "alice", demo_authenticated = false })
         run(ngx, make_http_stub(true))
         runner.assert.equals(nil, ngx._exit_code)
         runner.assert.equals(nil, ngx.status)
     end)
 
     runner.it("passes through when Authorization header is absent", function()
-        local ngx = build_ngx({})
+        local ngx = build_ngx({ demo_authenticated = false })
         run(ngx, make_http_stub(true))
         runner.assert.equals(nil, ngx._exit_code)
         runner.assert.equals(nil, ngx.status)

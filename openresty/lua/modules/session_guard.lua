@@ -65,6 +65,7 @@ local function clear_cached_user_token(dict, username, user_token)
         dict:delete("guac_jwt_last_seen:" .. user_token)
         dict:delete("guac_jti:" .. user_token)
         dict:delete("guac_reservation:" .. user_token)
+        dict:delete("guac_demo:" .. user_token)
     end
 end
 

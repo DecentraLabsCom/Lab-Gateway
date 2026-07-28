@@ -26,6 +26,13 @@ local function enforce_guac_timeout(ngx, dict)
         return true
     end
     local username = dict:get("guac_token:" .. token)
+    -- Demo sessions use the same hard expiry queue as reservation sessions,
+    -- but they must not be invalidated by the short idle timeout while a
+    -- Guacamole WebSocket is quiet.
+    if dict:get("guac_demo:" .. token) then
+        dict:set("guac_jwt_last_seen:" .. token, now, math.max(1, exp - now))
+        return false
+    end
     -- Reservation-backed auth tokens are bounded by the lab JWT expiration.
     -- A quiet WebSocket does not emit token-bearing HTTP requests, so the
     -- short idle timeout must not invalidate a still-valid reservation.
@@ -54,6 +61,32 @@ function _M.run(ngx_ctx, deps)
 
     local cookies = ngx.var.http_cookie
     if not cookies or cookies == "" then return end
+
+    -- Demo handoff is intentionally a separate cookie and cache namespace.
+    -- It cannot satisfy the reservation JTI path and never receives a
+    -- reservation key or durable economic-session registration.
+    local demo_jti = string.match(cookies, "DEMO_JTI=([^;]+)")
+    if demo_jti and demo_jti ~= "" and dict:get("demo_session:" .. demo_jti) then
+        local demo_username = dict:get("demo_session:" .. demo_jti)
+        local demo_exp = tonumber(dict:get("demo_exp:" .. demo_jti))
+        if not demo_username or not demo_exp then
+            return
+        end
+        if ngx.time() >= demo_exp then
+            reject(ngx, "Unauthorized: demo access session expired")
+            return
+        end
+        ngx.req.set_header("Authorization", demo_username)
+        ngx.ctx.demo_authenticated = true
+        ngx.ctx.demo_username = demo_username
+        ngx.ctx.demo_jti = demo_jti
+        ngx.ctx.demo_exp = demo_exp
+        ngx.ctx.jwt_jti = demo_jti
+        ngx.ctx.jwt_exp = demo_exp
+        demo_guard.run(ngx)
+        return
+    end
+
     local jti = string.match(cookies, "JTI=([^;]+)")
     if not jti or jti == "" then return end
     local username = dict:get("username:" .. jti)
@@ -69,7 +102,6 @@ function _M.run(ngx_ctx, deps)
     ngx.ctx.jwt_jti = jti
     ngx.ctx.jwt_reservation_key = dict:get("reservation:" .. jti)
     ngx.ctx.jwt_exp = exp
-    demo_guard.run(ngx)
 end
 
 return _M

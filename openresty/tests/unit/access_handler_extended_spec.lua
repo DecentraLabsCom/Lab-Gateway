@@ -33,6 +33,43 @@ runner.describe("Access handler one-time cookie policy", function()
         runner.assert.equals("alice", ngx.req.headers["Authorization"])
     end)
 
+    runner.it("propagates a valid demo handoff without creating reservation auth", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["demo_session:demo-jti"] = "demo",
+                ["demo_exp:demo-jti"] = "500",
+            },
+            demo_sessions = { ["session:demo-jti"] = "1", active = 1 },
+            var = { http_cookie = "DEMO_JTI=demo-jti" },
+            now = 100,
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals("demo", ngx.req.headers["Authorization"])
+        runner.assert.equals(true, ngx.ctx.demo_authenticated)
+        runner.assert.equals(nil, ngx.ctx.jwt_authenticated)
+        runner.assert.equals(nil, ngx.ctx.jwt_reservation_key)
+    end)
+
+    runner.it("keeps a valid reservation JTI working when an unrelated demo cookie is present", function()
+        local ngx = ngx_factory.new({
+            cache = {
+                ["username:jti"] = "dlabs-res-user",
+                ["exp:dlabs-res-user"] = "500",
+                ["reservation:jti"] = "0xabc",
+            },
+            var = { http_cookie = "DEMO_JTI=stale; JTI=jti" },
+            now = 100,
+        })
+
+        handler.run(ngx)
+
+        runner.assert.equals("dlabs-res-user", ngx.req.headers["Authorization"])
+        runner.assert.equals(true, ngx.ctx.jwt_authenticated)
+        runner.assert.equals(nil, ngx.ctx.demo_authenticated)
+    end)
+
     runner.it("does not turn an access-phase websocket request into SessionStarted evidence", function()
         local reported = false
         local ngx = ngx_factory.new({

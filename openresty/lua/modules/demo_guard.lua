@@ -1,18 +1,13 @@
 -- ============================================================================
 -- demo_guard.lua - Demo-user access guard
 -- ============================================================================
--- The demo restriction is a session policy, not a request counter.  A valid
--- lab-access JTI is registered once in the shared dict and subsequent asset /
--- API requests for that same JTI are pass-throughs.  The entry is removed on
--- the WebSocket tunnel close (with JWT expiry as the hard fallback).
---
--- Availability is fail-closed: a missing configuration, timeout, non-200
--- response, malformed JSON, or non-boolean isAvailable result cannot grant
--- demo access while the booking authority is unknown.
+-- Demo access is deliberately independent from reservation access.  A demo
+-- request must carry the gateway-issued DEMO_JTI context; a normal reservation
+-- JTI never enters this policy.
 
 local _M = {}
 
-local DEMO_SESSION_TTL = 600 -- seconds; JWT exp remains the hard upper bound
+local DEFAULT_DEMO_SESSION_TTL = 600
 local MARKETPLACE_CHECK_TIMEOUT_MS = 3000
 local ACTIVE_KEY = "active"
 
@@ -23,6 +18,25 @@ local function reject(ngx, message)
     ngx.say(message)
     ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
     return false
+end
+
+local function configured_session_ttl(ngx)
+    local config = ngx.shared.config
+    local ttl = tonumber(config and config:get("demo_session_ttl_seconds"))
+        or DEFAULT_DEMO_SESSION_TTL
+    if ttl < 1 then
+        return DEFAULT_DEMO_SESSION_TTL
+    end
+    return math.floor(math.min(DEFAULT_DEMO_SESSION_TTL, ttl))
+end
+
+local function session_ttl(ngx, exp)
+    local ttl = configured_session_ttl(ngx)
+    local expires_at = tonumber(exp)
+    if expires_at then
+        return math.max(1, math.min(ttl, expires_at - ngx.time()))
+    end
+    return ttl
 end
 
 -- Returns: busy (boolean), error (string|nil).  A nil busy value means the
@@ -54,8 +68,8 @@ local function is_lab_busy(ngx, marketplace_url, lab_id, deps)
         return nil, "availability authority returned a non-success response"
     end
 
-    local cjson = require "cjson.safe"
-    local body, parse_err = cjson.decode(res.body)
+    local cjson = (deps and deps.cjson) or require "cjson.safe"
+    local body, parse_err = cjson.decode(res.body or "")
     if parse_err or type(body) ~= "table" then
         return nil, "availability authority returned invalid JSON"
     end
@@ -66,96 +80,85 @@ local function is_lab_busy(ngx, marketplace_url, lab_id, deps)
     return body.isAvailable == false, nil
 end
 
-local function session_ttl(ngx)
-    local now = ngx.time()
-    local exp = tonumber(ngx.ctx and ngx.ctx.jwt_exp)
-    if exp then
-        return math.max(1, math.min(DEMO_SESSION_TTL, exp - now))
-    end
-    return DEMO_SESSION_TTL
-end
-
-local function current_jti(ngx)
-    local jti = ngx.ctx and ngx.ctx.jwt_jti
-    if type(jti) ~= "string" or jti == "" or #jti > 256 then
-        return nil
-    end
-    return jti
-end
-
--- Public entry point.  Returns true for a demo request that may continue,
--- false when the request was rejected (ngx.exit is also called).
-function _M.run(ngx_ctx, deps)
+function _M.check_availability(ngx_ctx, deps)
     local ngx = ngx_ctx or ngx
-    deps = deps or {}
-
     local config = ngx.shared.config
-    local demo_user = config:get("demo_user") or "demo"
-    local username = ngx.req.get_headers()["Authorization"]
-    if not username or string.lower(username) ~= string.lower(demo_user) then
-        return true
+    local marketplace_url = config:get("marketplace_url") or ""
+    if marketplace_url == "" then
+        return nil, "MARKETPLACE_URL is not configured"
     end
+    return is_lab_busy(ngx, marketplace_url, config:get("demo_lab_id") or "", deps)
+end
 
-    local jti = current_jti(ngx)
-    if not jti then
-        ngx.log(ngx.WARN, "demo_guard: demo authentication has no valid JTI")
-        return reject(ngx, "Demo access is unavailable")
+-- Atomically reserve the single demo slot.  The handoff route calls this
+-- before it creates DEMO_JTI mappings, so an unavailable lab never receives a
+-- browser session cookie.
+function _M.start(ngx_ctx, jti, exp, deps)
+    local ngx = ngx_ctx or ngx
+    if type(jti) ~= "string" or jti == "" or #jti > 256 then
+        return nil, "invalid demo session identifier"
     end
 
     local demo_sessions = ngx.shared.demo_sessions
     if not demo_sessions then
-        ngx.log(ngx.ERR, "demo_guard: demo_sessions shared dictionary is unavailable")
-        return reject(ngx, "Demo access is unavailable")
+        return nil, "demo session storage is unavailable"
     end
 
-    local session_key = "session:" .. jti
-    if demo_sessions:get(session_key) then
-        ngx.ctx.demo_session_jti = jti
-        return true
-    end
-
-    local marketplace_url = config:get("marketplace_url") or ""
-    if marketplace_url == "" then
-        ngx.log(ngx.WARN, "demo_guard: MARKETPLACE_URL is not configured")
-        return reject(ngx, "Demo availability cannot be verified")
-    end
-
-    local busy, check_err = is_lab_busy(
-        ngx,
-        marketplace_url,
-        config:get("demo_lab_id") or "",
-        deps
-    )
+    local busy, check_err = _M.check_availability(ngx, deps)
     if check_err then
         ngx.log(ngx.WARN, "demo_guard: " .. check_err)
-        return reject(ngx, "Demo availability cannot be verified")
+        return nil, "Demo availability cannot be verified"
     end
     if busy then
-        ngx.log(ngx.WARN, "demo_guard: rejecting demo access - lab reservation is active")
-        return reject(ngx, "Lab currently reserved. Please try again later.")
+        return nil, "Lab currently reserved. Please try again later."
     end
 
-    local ttl = session_ttl(ngx)
+    local ttl = session_ttl(ngx, exp)
     local active, incr_err = demo_sessions:incr(ACTIVE_KEY, 1, 0, ttl)
     if not active then
         ngx.log(ngx.ERR, "demo_guard: failed to increment active session set: " .. tostring(incr_err))
-        return reject(ngx, "Demo access is unavailable")
+        return nil, "Demo access is unavailable"
     end
     if active > 1 then
-        demo_sessions:incr(ACTIVE_KEY, -1, 0)
-        ngx.log(ngx.WARN, "demo_guard: rejecting concurrent demo session")
-        return reject(ngx, "A demo session is already in progress. Please try again later.")
+        local remaining = demo_sessions:incr(ACTIVE_KEY, -1, 0)
+        if remaining and remaining <= 0 then
+            demo_sessions:delete(ACTIVE_KEY)
+        end
+        return nil, "A demo session is already in progress. Please try again later."
     end
 
-    local stored, store_err = demo_sessions:set(session_key, "1", ttl)
+    local stored, store_err = demo_sessions:set("session:" .. jti, "1", ttl)
     if not stored then
-        demo_sessions:incr(ACTIVE_KEY, -1, 0)
+        demo_sessions:delete(ACTIVE_KEY)
         ngx.log(ngx.ERR, "demo_guard: failed to register demo JTI: " .. tostring(store_err))
+        return nil, "Demo access is unavailable"
+    end
+
+    return ttl
+end
+
+-- Public entry point.  A normal reservation request is always a pass-through;
+-- only access_handler.lua can mark a request as demo_authenticated after it
+-- has validated a gateway-issued DEMO_JTI mapping.
+function _M.run(ngx_ctx, deps)
+    local ngx = ngx_ctx or ngx
+    if not (ngx.ctx and ngx.ctx.demo_authenticated) then
+        return true
+    end
+
+    local jti = ngx.ctx.demo_jti
+    if type(jti) ~= "string" or jti == "" or #jti > 256 then
+        ngx.log(ngx.WARN, "demo_guard: demo authentication has no valid DEMO_JTI")
         return reject(ngx, "Demo access is unavailable")
+    end
+
+    local demo_sessions = ngx.shared.demo_sessions
+    if not demo_sessions or not demo_sessions:get("session:" .. jti) then
+        ngx.log(ngx.WARN, "demo_guard: demo session is no longer active")
+        return reject(ngx, "Demo session is no longer active")
     end
 
     ngx.ctx.demo_session_jti = jti
-    ngx.log(ngx.INFO, "demo_guard: demo session started")
     return true
 end
 
@@ -172,7 +175,10 @@ function _M.release(ngx_ctx, jti)
         return false
     end
     demo_sessions:delete(session_key)
-    demo_sessions:incr(ACTIVE_KEY, -1, 0)
+    local remaining = demo_sessions:incr(ACTIVE_KEY, -1, 0)
+    if remaining and remaining <= 0 then
+        demo_sessions:delete(ACTIVE_KEY)
+    end
     ngx.log(ngx.INFO, "demo_guard: demo session ended")
     return true
 end

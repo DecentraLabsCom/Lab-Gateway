@@ -27,6 +27,41 @@ local function jwt_ngx(opts)
 end
 
 runner.describe("Guacamole token content-phase handler", function()
+    runner.it("secures demo tokens with a hard expiry without reservation registration", function()
+        local ngx = ngx_factory.new({
+            config = {
+                server_name = "lite.lab.example",
+                guac_token_security_retention_seconds = 1200,
+            },
+            ctx = {
+                demo_authenticated = true,
+                demo_exp = 700,
+                demo_jti = "demo-jti",
+                demo_username = "demo",
+            },
+            now = 100,
+        })
+        local demo_response = {
+            status = 200,
+            body = '{"authToken":"demo-token","username":"demo","dataSource":"mysql"}',
+            header = { ["Content-Type"] = "application/json" },
+        }
+
+        local secured = handler.handle_response(ngx, demo_response, {
+            cjson = cjson,
+            revocation_reporter = {
+                register = function()
+                    error("demo sessions must not use the reservation queue")
+                end,
+            },
+        })
+
+        runner.assert.equals(200, secured.status)
+        runner.assert.equals("demo-jti", ngx.shared.cache:get("guac_demo:demo-token"))
+        runner.assert.equals(700, ngx.shared.cache:get("guac_jwt_exp:demo-token"))
+        runner.assert.equals(700, ngx.shared.cache:get("guac_enforcement_exp:demo"))
+    end)
+
     runner.it("registers JWT token revocation before exposing the token", function()
         local ngx = jwt_ngx()
         local registered

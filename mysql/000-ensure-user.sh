@@ -268,9 +268,10 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
 EOSQL
 
 # ── Demo Guacamole user (header-auth only, password login disabled) ──────────
-# The user is pre-created so the lab admin only needs to assign a connection.
-# Connection assignment is intentionally NOT automated here.
+# The user is pre-created and, when DEMO_CONNECTION_ID is configured below,
+# receives access to exactly one explicitly configured connection.
 DEMO_GUAC_USER="${DEMO_USER:-demo}"
+DEMO_CONNECTION_ID="${DEMO_CONNECTION_ID:-}"
 escaped_demo_user="$(escape_sql "$DEMO_GUAC_USER")"
 echo "Ensuring demo Guacamole user: ${DEMO_GUAC_USER}"
 
@@ -290,5 +291,42 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     FROM guacamole_entity
     WHERE name = '${escaped_demo_user}' AND type = 'USER';
 EOSQL
+
+# A demo token is useful only when the demo principal can see the configured
+# physical-lab connection.  Reconcile only this dedicated principal's
+# connection permissions, then grant the narrow READ permission and leave
+# every other Guacamole account/connection untouched.  The explicit
+# connection id prevents a public demo request from selecting an arbitrary
+# connection.
+if [ -n "$DEMO_CONNECTION_ID" ]; then
+    if ! [[ "$DEMO_CONNECTION_ID" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Invalid DEMO_CONNECTION_ID; expected a positive numeric connection_id." >&2
+        exit 1
+    fi
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" <<-EOSQL
+        DELETE permission
+        FROM guacamole_connection_permission permission
+        INNER JOIN guacamole_entity entity ON entity.entity_id = permission.entity_id
+        WHERE entity.name = '${escaped_demo_user}' AND entity.type = 'USER';
+
+        INSERT IGNORE INTO guacamole_connection_permission (entity_id, connection_id, permission)
+        SELECT entity_id, ${DEMO_CONNECTION_ID}, 'READ'
+        FROM guacamole_entity
+        WHERE name = '${escaped_demo_user}' AND type = 'USER'
+          AND EXISTS (
+              SELECT 1 FROM guacamole_connection
+              WHERE connection_id = ${DEMO_CONNECTION_ID}
+          );
+EOSQL
+    echo "Ensured demo READ permission for Guacamole connection ${DEMO_CONNECTION_ID}."
+else
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" <<-EOSQL
+        DELETE permission
+        FROM guacamole_connection_permission permission
+        INNER JOIN guacamole_entity entity ON entity.entity_id = permission.entity_id
+        WHERE entity.name = '${escaped_demo_user}' AND entity.type = 'USER';
+EOSQL
+    echo "DEMO_CONNECTION_ID is empty; demo handoff remains disabled until a connection is configured."
+fi
 
 echo "=== User configuration completed successfully ==="

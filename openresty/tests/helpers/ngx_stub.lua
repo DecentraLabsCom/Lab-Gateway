@@ -70,6 +70,7 @@ local function new(opts)
         HTTP_UNAUTHORIZED = 401,
         HTTP_SERVICE_UNAVAILABLE = 503,
         HTTP_TOO_MANY_REQUESTS = 429,
+        HTTP_SEE_OTHER = 303,
         HTTP_POST = 8,
         status = opts.status or nil,
         header = opts.header or {},
@@ -78,7 +79,8 @@ local function new(opts)
         shared = {
             cache         = opts.cache_dict         or new_shared_dict(opts.cache         or {}),
             config        = opts.config_dict        or new_shared_dict(opts.config        or {}),
-            demo_sessions = opts.demo_sessions_dict or new_shared_dict(opts.demo_sessions or {})
+            demo_sessions = opts.demo_sessions_dict or new_shared_dict(opts.demo_sessions or {}),
+            demo_issue_rate = opts.demo_issue_rate_dict or new_shared_dict(opts.demo_issue_rate or {})
         },
         req = {},
         location = {},
@@ -121,6 +123,12 @@ local function new(opts)
             return opts.location_capture(uri, capture_opts)
         end
         return nil
+    end
+
+    function ngx_stub.redirect(uri, status)
+        ngx_stub._redirect = { uri = uri, status = status }
+        ngx_stub.status = status
+        return status
     end
 
     function ngx_stub.log(_, level, message)

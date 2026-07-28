@@ -166,6 +166,14 @@ if demo_user == "" then demo_user = "demo" end
 config:set("demo_user", demo_user)
 local demo_lab_id = trim(os.getenv("DEMO_LAB_ID")) or ""
 config:set("demo_lab_id", demo_lab_id)
+local demo_connection_id = trim(os.getenv("DEMO_CONNECTION_ID")) or ""
+config:set("demo_connection_id", demo_connection_id)
+local demo_session_ttl_seconds = tonumber(trim(os.getenv("DEMO_SESSION_TTL_SECONDS")) or "") or 600
+if demo_session_ttl_seconds < 1 then demo_session_ttl_seconds = 600 end
+config:set("demo_session_ttl_seconds", math.floor(math.min(600, demo_session_ttl_seconds)))
+local demo_rate_limit_per_minute = tonumber(trim(os.getenv("DEMO_RATE_LIMIT_PER_MINUTE")) or "") or 10
+if demo_rate_limit_per_minute < 1 then demo_rate_limit_per_minute = 10 end
+config:set("demo_rate_limit_per_minute", math.floor(demo_rate_limit_per_minute))
 local marketplace_url = (trim(os.getenv("MARKETPLACE_URL")) or ""):gsub("/+$", "")
 config:set("marketplace_url", marketplace_url)
 
