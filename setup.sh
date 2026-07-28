@@ -1117,6 +1117,13 @@ echo
 # current lab owner or its authorized backend.
 update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_ENABLED" "true"
 update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+# Keep the metadata SSRF boundary explicit in generated provider deployments.
+update_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_METADATA_LOCAL_ENABLED" "false"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_METADATA_MAX_BYTES" "1048576"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_METADATA_MAX_CONCURRENT_FETCHES" "8"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_METADATA_HTTP_CONNECT_TIMEOUT_MS" "5000"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_METADATA_HTTP_READ_TIMEOUT_MS" "10000"
+update_env_var "$BLOCKCHAIN_ENV_FILE" "LAB_METADATA_HTTP_CALL_TIMEOUT_MS" "15000"
 
 # Use CONTRACT_ADDRESS from blockchain-services/.env (no prompt)
 contract_default=$(get_env_default "CONTRACT_ADDRESS" "$BLOCKCHAIN_ENV_FILE")

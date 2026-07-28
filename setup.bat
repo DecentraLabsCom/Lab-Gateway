@@ -883,6 +883,13 @@ rem automation. The contract still limits external confirmation/denial to the
 rem current lab owner or its authorized backend.
 call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_ENABLED" "true"
 call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
+rem Keep the metadata SSRF boundary explicit in generated provider deployments.
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_METADATA_LOCAL_ENABLED" "false"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_METADATA_MAX_BYTES" "1048576"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_METADATA_MAX_CONCURRENT_FETCHES" "8"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_METADATA_HTTP_CONNECT_TIMEOUT_MS" "5000"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_METADATA_HTTP_READ_TIMEOUT_MS" "10000"
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "LAB_METADATA_HTTP_CALL_TIMEOUT_MS" "15000"
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" contract_default
 if defined contract_default (
     call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "CONTRACT_ADDRESS" "!contract_default!"
