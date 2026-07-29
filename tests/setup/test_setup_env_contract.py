@@ -441,6 +441,15 @@ class SetupEnvContractTest(unittest.TestCase):
             "- ACCESS_CODE_ENCRYPTION_KEY=${ACCESS_CODE_ENCRYPTION_KEY:-}",
             self.compose_file,
         )
+        self.assertIn(
+            "- FMU_ACCESS_STATE_PATH=${FMU_ACCESS_STATE_PATH:-/var/lib/openresty/fmu-access}",
+            self.compose_file,
+        )
+        self.assertIn(
+            "./fmu-access-state:${FMU_ACCESS_STATE_PATH:-/var/lib/openresty/fmu-access}",
+            self.compose_file,
+        )
+        self.assertIn("env ACCESS_CODE_ENCRYPTION_KEY;", self.nginx_conf)
 
     def test_optional_fmu_profile_and_openresty_runtime_defaults_are_explicit(self):
         env_example = (ROOT / ".env.example").read_text(encoding="utf-8")

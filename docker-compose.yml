@@ -17,7 +17,7 @@ services:
       # Keep the Gateway's Full/Lite decision visible to the embedded backend
       # when BLOCKCHAIN_SERVICES_ENABLED is left at auto.
       - ISSUER=${ISSUER:-}
-      # Full-only AES-256 key used by the durable access-code hand-off store.
+      # AES-256 key used by the durable access-code hand-off store.
       # The setup scripts generate this in the Gateway root .env.
       - ACCESS_CODE_ENCRYPTION_KEY=${ACCESS_CODE_ENCRYPTION_KEY:-}
       # Full-only map of gateway IDs to the redeemer credentials accepted by
@@ -179,6 +179,8 @@ services:
       # Lite mode may still have a stale file here, but mode-specific Lua
       # selection never reads it; Lite uses only certs/public_key.pem.
       - ./blockchain-data/keys:/etc/openresty/jwt-keys:ro
+      # Durable encrypted FMU mappings survive OpenResty container restarts.
+      - ./fmu-access-state:${FMU_ACCESS_STATE_PATH:-/var/lib/openresty/fmu-access}
     tmpfs:
       - /tmp:size=64M,mode=1777
       - /var/run:size=16M,mode=755
@@ -192,6 +194,8 @@ services:
       - ISSUER=${ISSUER}
       - AUTH_ACCESS_CODE_REDEEM_URL=${AUTH_ACCESS_CODE_REDEEM_URL:-}
       - AUTH_ACCESS_CODE_REDEEMER_TOKEN_FILE=/run/secrets/auth_access_code_redeemer_token
+      - ACCESS_CODE_ENCRYPTION_KEY=${ACCESS_CODE_ENCRYPTION_KEY:-}
+      - FMU_ACCESS_STATE_PATH=${FMU_ACCESS_STATE_PATH:-/var/lib/openresty/fmu-access}
       - API_SESSION_TIMEOUT=${API_SESSION_TIMEOUT:-15}
       - SESSION_OBSERVATION_INGEST_TOKEN_FILE=/run/secrets/session_observation_ingest_token
       - OPS_SESSION_OBSERVATION_INGEST_URL=${OPS_SESSION_OBSERVATION_INGEST_URL:-http://ops-worker:8081/internal/session-observations}

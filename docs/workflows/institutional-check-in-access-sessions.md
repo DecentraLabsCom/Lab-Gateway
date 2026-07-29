@@ -111,7 +111,7 @@ When the consumer and provider backend are the same deployment, Marketplace uses
 
 The provider keeps the signed lab-access JWT internal. After activation it persists a short-lived opaque one-time access code, audits issuance, then marks provisioning delivered and returns only that code with the Guacamole URL to Marketplace. If either audit persistence or the fenced `DELIVERED` transition fails, the newly created code is revoked before rollback.
 
-The browser submits the code to the gateway with `POST /auth/access`. OpenResty redeems it server-to-server using its redeemer credential, validates the returned JWT, stores only the session mapping, sets a Secure, HttpOnly JTI cookie, and responds with a `303` redirect to a URL without credential material. A code can be redeemed once.
+The browser submits the code to the gateway with `POST /auth/access`. OpenResty redeems it server-to-server using its redeemer credential, validates the returned JWT, stores the minimal `{sessionId, exp, token}` FMU mapping encrypted under the configured persistent state directory (and warms the shared cache), sets a Secure, HttpOnly JTI cookie, and responds with a `303` redirect to a URL without credential material. A code can be redeemed once. If OpenResty restarts before the credential expires, the FMU access handler rehydrates the shared cache from that encrypted mapping; an unavailable mapping store fails closed.
 
 ### FMU
 

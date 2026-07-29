@@ -1,6 +1,7 @@
 local cjson = require "cjson.safe"
 local http = require "resty.http"
 local jwt = require "resty.jwt"
+local fmu_access_store = require "modules.fmu_access_store"
 
 local function fail(status, message)
     ngx.status = status
@@ -102,6 +103,9 @@ local exp = tonumber(claims.exp)
 if not jti or not username or not exp or exp <= ngx.time() then
     return fail(401, "Expired access credential")
 end
+if type(jti) ~= "string" or #jti < 16 or #jti > 512 or not jti:match("^[A-Za-z0-9_-]+$") then
+    return fail(401, "Invalid access credential")
+end
 local config = ngx.shared.config
 local expected_issuer = config:get("issuer")
 if not claims.iss or claims.iss:gsub("/+$", "") ~= tostring(expected_issuer):gsub("/+$", "") then
@@ -140,8 +144,17 @@ local remaining_lifetime = math.max(1, exp - ngx.time())
 local token_security_retention = tonumber(config:get("guac_token_security_retention_seconds")) or 1200
 local enforcement_lifetime = remaining_lifetime + math.max(1, token_security_retention)
 if resource_type == "fmu" then
-    cache:set("fmu_access_token:" .. jti, token, remaining_lifetime)
-    cache:set("fmu_access_exp:" .. jti, exp, remaining_lifetime)
+    local persisted, persistence_err = fmu_access_store.default:save(jti, token, exp, ngx.time())
+    if not persisted then
+        ngx.log(ngx.ERR, "FMU access state persistence failed: ", tostring(persistence_err))
+        return fail(503, "FMU access session unavailable")
+    end
+    local cached_token, cache_token_err = cache:set("fmu_access_token:" .. jti, token, remaining_lifetime)
+    local cached_exp, cache_exp_err = cache:set("fmu_access_exp:" .. jti, exp, remaining_lifetime)
+    if not cached_token or not cached_exp then
+        ngx.log(ngx.WARN, "FMU access cache warm-up failed; durable state remains authoritative: ",
+            tostring(cache_token_err or cache_exp_err))
+    end
     ngx.header["Set-Cookie"] = "FMU_SESSION=" .. jti
         .. "; Max-Age=" .. remaining_lifetime
         .. "; Path=/fmu; Secure; HttpOnly; SameSite=Lax"

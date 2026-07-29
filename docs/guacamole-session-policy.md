@@ -64,6 +64,13 @@ Reservation users are temporary users provisioned as `dlabs-res-...`.
 - Active desktop connections are terminated when the JWT/reservation expires.
 - Refreshing `/guacamole/` works while the JTI cookie/JWT remains valid; after expiration, OpenResty rejects the session.
 
+For FMU access, OpenResty stores the short-lived `{sessionId, exp, token}`
+mapping encrypted with `ACCESS_CODE_ENCRYPTION_KEY` under
+`FMU_ACCESS_STATE_PATH` as well as in shared memory. The durable file is
+mounted from `fmu-access-state/`, so an OpenResty restart can rehydrate the
+mapping while the JWT is still within `exp`; a missing key or unavailable state
+directory fails the FMU request closed.
+
 This policy treats a reservation as a time window rather than a single-use connection attempt.
 
 ### Reservation concurrency contract
@@ -93,6 +100,8 @@ BAN_ADDRESS_DURATION=300
 BAN_MAX_ADDRESSES=10485670
 JWT_GUAC_IDLE_TIMEOUT_SECONDS=60
 LAB_ACCESS_JWT_MAX_TTL_SECONDS=14400
+ACCESS_CODE_ENCRYPTION_KEY=CHANGE_ME
+FMU_ACCESS_STATE_PATH=/var/lib/openresty/fmu-access
 ```
 
 - `API_SESSION_TIMEOUT`: Guacamole auth token timeout, in minutes.

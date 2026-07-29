@@ -804,6 +804,7 @@ echo.
 
 if not exist certs mkdir certs
 if not exist blockchain-data mkdir blockchain-data
+if not exist fmu-access-state mkdir fmu-access-state
 if not exist lab-content mkdir lab-content
 if not exist fmu-data mkdir fmu-data
 if not exist fmu-proxy-runtime mkdir fmu-proxy-runtime
@@ -819,6 +820,7 @@ call :SecureEnvFile "%ROOT_ENV_FILE%"
 call :SecureEnvFile "%BLOCKCHAIN_ENV_FILE%"
 call :SecureSecretTree "certs"
 call :SecureSecretTree "blockchain-data"
+call :SecureSecretTree "fmu-access-state"
 call :SecureSecretTree "ops-data"
 call :SyncComposeSecrets
 

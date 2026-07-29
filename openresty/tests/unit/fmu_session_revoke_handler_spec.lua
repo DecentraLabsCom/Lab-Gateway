@@ -13,7 +13,14 @@ runner.describe("FMU session revocation handler", function()
             var = { http_cookie = "FMU_SESSION=session-123456789" },
         })
 
-        handler.run(ngx)
+        handler.run(ngx, {
+            store = {
+                remove = function(_, session_id)
+                    runner.assert.equals("session-123456789", session_id)
+                    return true
+                end,
+            },
+        })
 
         runner.assert.equals(nil, ngx.shared.cache:get("fmu_access_token:session-123456789"))
         runner.assert.equals(nil, ngx.shared.cache:get("fmu_access_exp:session-123456789"))

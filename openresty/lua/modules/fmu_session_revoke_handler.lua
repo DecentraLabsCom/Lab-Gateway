@@ -1,4 +1,5 @@
 local _M = {}
+local access_store = require "modules.fmu_access_store"
 
 local function cookie_value(cookies, name)
     if not cookies then
@@ -13,8 +14,9 @@ local function cookie_value(cookies, name)
     return nil
 end
 
-function _M.run(ngx_ctx)
+function _M.run(ngx_ctx, dependencies)
     local ngx = ngx_ctx or ngx
+    local store = (dependencies and dependencies.store) or access_store.default
     if ngx.req.get_method() ~= "POST" then
         ngx.status = 405
         ngx.header["Content-Type"] = "text/plain"
@@ -31,6 +33,12 @@ function _M.run(ngx_ctx)
     end
 
     if session_id then
+        local removed, remove_err = store:remove(session_id)
+        if not removed then
+            ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
+            ngx.say("FMU access session unavailable")
+            return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
+        end
         local cache = ngx.shared.cache
         cache:delete("fmu_access_token:" .. session_id)
         cache:delete("fmu_access_exp:" .. session_id)

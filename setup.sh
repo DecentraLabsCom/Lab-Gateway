@@ -72,7 +72,7 @@ secure_gateway_state() {
             return 1
         }
     fi
-    for state_dir in certs blockchain-data ops-data secrets; do
+    for state_dir in certs blockchain-data fmu-access-state ops-data secrets; do
         if [ -d "$state_dir" ]; then
             chmod 700 "$state_dir" || {
                 echo "Unable to restrict state directory permissions: $state_dir" >&2
@@ -84,7 +84,7 @@ secure_gateway_state() {
     # be readable by other local users.  Public certificates remain readable
     # by the gateway process through its owner/group mapping.
     local existing_dirs=()
-    for state_dir in certs blockchain-data ops-data secrets; do
+    for state_dir in certs blockchain-data fmu-access-state ops-data secrets; do
         [ -d "$state_dir" ] && existing_dirs+=("$state_dir")
     done
     if [ "${#existing_dirs[@]}" -gt 0 ] && ! find "${existing_dirs[@]}" -type f \
@@ -1012,6 +1012,7 @@ echo "================"
 
 mkdir -p certs
 mkdir -p blockchain-data
+mkdir -p fmu-access-state
 mkdir -p lab-content
 mkdir -p fmu-data
 mkdir -p fmu-proxy-runtime/binaries/linux64
@@ -1020,6 +1021,7 @@ mkdir -p fmu-proxy-runtime/binaries/darwin64
 mkdir -p ops-data/guac-revocation-spool
 chmod 700 certs 2>/dev/null || true
 chmod 700 blockchain-data 2>/dev/null || true
+chmod 700 fmu-access-state 2>/dev/null || true
 chmod 755 lab-content 2>/dev/null || true
 chmod 755 fmu-data 2>/dev/null || true
 chmod 755 fmu-proxy-runtime 2>/dev/null || true
@@ -1046,10 +1048,11 @@ if [ -n "$host_uid" ] && [ -n "$host_gid" ]; then
 
     # Align permissions so containers can write to bind mounts without manual chmod.
     if command -v chown >/dev/null 2>&1; then
-        if chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content 2>/dev/null; then
-            echo "Adjusted ownership of certs/, blockchain-data/, and lab-content/ to ${host_uid}:${host_gid}"
+        if chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content 2>/dev/null \
+            && chown -R "${host_uid}:${host_gid}" fmu-access-state 2>/dev/null; then
+            echo "Adjusted ownership of certs/, blockchain-data/, fmu-access-state/, and lab-content/ to ${host_uid}:${host_gid}"
         else
-            echo "Warning: Unable to change ownership of certs/, blockchain-data/, or lab-content/. Run chown manually if needed." >&2
+            echo "Warning: Unable to change ownership of certs/, blockchain-data/, fmu-access-state/, or lab-content/. Run chown manually if needed." >&2
         fi
     fi
 else

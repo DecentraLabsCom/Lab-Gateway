@@ -31,6 +31,7 @@ luacov.report.out
 # Database data (persistent volumes)
 mysql_data/
 blockchain-data/
+fmu-access-state/
 fmu-data/*
 !fmu-data/README.md
 !fmu-data/*.fmu
