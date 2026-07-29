@@ -1,5 +1,6 @@
 local ok_http, resty_http = pcall(require, "resty.http")
 local ok_cjson, cjson_safe = pcall(require, "cjson.safe")
+local ok_demo_guard, demo_guard = pcall(require, "modules.demo_guard")
 
 local SessionGuard = {}
 SessionGuard.__index = SessionGuard
@@ -7,6 +8,8 @@ SessionGuard.__index = SessionGuard
 -- Timer and TTL constants in seconds
 local INITIAL_DELAY_SECONDS = 10
 local EXPIRED_CHECK_INTERVAL = 10
+local DEMO_CHECK_INTERVAL = 2
+local DEMO_CHECK_TIMEOUT_MS = 3000
 local TUNNEL_CHECK_INTERVAL = 2
 local DEFAULT_GUAC_API = "http://guacamole:8080/guacamole/api"
 
@@ -129,6 +132,49 @@ local function iterate_expired_jwt_tokens(dict, now)
     return expired
 end
 
+local function iterate_demo_tokens(dict)
+    local demo_tokens = {}
+    for _, key in ipairs(dict:get_keys(0)) do
+        if key:match("^guac_demo:") then
+            local token = key:sub(11)
+            if token ~= "" then
+                demo_tokens[#demo_tokens + 1] = token
+            end
+        end
+    end
+    return demo_tokens
+end
+
+local function request_demo_availability(self, httpc, exp)
+    local config = self.config
+    local marketplace_url = config:get("marketplace_url") or ""
+    local lab_id = config:get("demo_lab_id") or ""
+    local now = self.ngx.time()
+    local end_time = tonumber(exp)
+
+    if marketplace_url == "" or lab_id == "" or not end_time or now + 1 >= end_time then
+        return nil, "demo availability is not configured or has expired"
+    end
+
+    httpc:set_timeout(DEMO_CHECK_TIMEOUT_MS)
+    local url = marketplace_url
+        .. "/api/contract/reservation/checkAvailable"
+        .. "?labId=" .. self.ngx.escape_uri(tostring(lab_id))
+        .. "&start=" .. tostring(now + 1)
+        .. "&end=" .. tostring(end_time)
+    local res, err = httpc:request_uri(url, { method = "GET", ssl_verify = true })
+    if err or not res or res.status ~= 200 then
+        return nil, "availability authority unavailable"
+    end
+
+    local body, parse_err = self.cjson.decode(res.body or "")
+    if parse_err or type(body) ~= "table" or type(body.isAvailable) ~= "boolean" then
+        return nil, "availability authority returned invalid JSON"
+    end
+
+    return body.isAvailable == false, nil
+end
+
 local function revoke_explicit_token(self, httpc, auth_token, user_token, username)
     local display_username = username or "unknown JWT user"
     local res = httpc:request_uri(self.guac_api .. "/tokens/" .. user_token .. "?token=" .. auth_token, {
@@ -225,6 +271,86 @@ function SessionGuard:check_expired_sessions()
     end
 end
 
+-- Demo access is not represented by a normal reservation, so an active demo
+-- must be revoked when the authoritative reservation calendar becomes busy.
+-- This is deliberately a separate, short polling loop: it bounds the race
+-- window without making every reservation session query Marketplace.
+function SessionGuard:check_demo_sessions()
+    local dict = self.dict
+    local ngx = self.ngx
+    local demo_tokens = iterate_demo_tokens(dict)
+    if #demo_tokens == 0 then
+        return
+    end
+
+    local httpc = self.http_factory()
+    local auth_token, data_source = request_guac_token(self, httpc)
+    if not auth_token then
+        return
+    end
+
+    local res, err = httpc:request_uri(self.guac_api .. "/session/data/" .. data_source
+        .. "/activeConnections?token=" .. auth_token, {
+        method = "GET",
+        headers = { ["Accept"] = "application/json" }
+    })
+    if not res or res.status ~= 200 then
+        ngx.log(ngx.ERR, "Worker - Error retrieving active connections for demo revocation")
+        return
+    end
+
+    local active_connections = self.cjson.decode(res.body or "")
+    if not active_connections then
+        ngx.log(ngx.WARN, "Worker - Failed to decode active connections for demo revocation")
+        return
+    end
+
+    local now = ngx.time()
+    for _, user_token in ipairs(demo_tokens) do
+        local exp = tonumber(dict:get("guac_jwt_exp:" .. user_token))
+        if exp and now < exp then
+            local busy, availability_err = request_demo_availability(self, httpc, exp)
+            if availability_err then
+                ngx.log(ngx.WARN, "Worker - " .. availability_err)
+                -- Demo access is optional; do not keep it alive when its
+                -- reservation authority cannot be verified.
+                busy = true
+            end
+            if busy then
+                local username = dict:get(token_reverse_cache_key(user_token))
+                local close_failed = false
+
+                for identifier, conn in pairs(active_connections) do
+                    if username and string.lower(conn.username or "") == string.lower(username) then
+                        local patch_body = self.cjson.encode({
+                            { op = "remove", path = "/" .. identifier }
+                        })
+                        local close_res = httpc:request_uri(self.guac_api .. "/session/data/" .. data_source
+                            .. "/activeConnections?token=" .. auth_token, {
+                            method = "PATCH",
+                            body = patch_body,
+                            headers = { ["Content-Type"] = "application/json-patch+json" }
+                        })
+                        if not close_res or close_res.status ~= 204 then
+                            close_failed = true
+                            ngx.log(ngx.ERR, "Worker - Error terminating overlapping demo session for " .. username)
+                        end
+                    end
+                end
+
+                if not close_failed then
+                    if revoke_explicit_token(self, httpc, auth_token, user_token, username) then
+                        if ok_demo_guard then
+                            demo_guard.release(self.ngx, dict:get("guac_jti:" .. user_token))
+                        end
+                        clear_cached_user_token(dict, username, user_token)
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function iterate_pending_users(dict)
     local keys = dict:get_keys(0)
     local pending = {}
@@ -298,6 +424,17 @@ function SessionGuard:start()
             ngx.log(ngx.INFO, "Worker - Periodic expired session check initialized (every " .. EXPIRED_CHECK_INTERVAL .. "s)")
         end
 
+        local ok_demo, err_demo = ngx.timer.every(DEMO_CHECK_INTERVAL, function()
+            -- Paid reservations can be confirmed after a demo handoff. Recheck
+            -- the full remaining demo window and revoke overlapping sessions.
+            self:check_demo_sessions()
+        end)
+        if not ok_demo then
+            ngx.log(ngx.ERR, "Worker - Error initializing demo-session guard: " .. tostring(err_demo))
+        else
+            ngx.log(ngx.INFO, "Worker - Demo-session guard initialized (every " .. DEMO_CHECK_INTERVAL .. "s)")
+        end
+
         local ok_tunnel, err_tunnel = ngx.timer.every(TUNNEL_CHECK_INTERVAL, function()
             -- Consume tunnel closure markers quickly so manual sessions are revoked promptly.
             self:check_tunnel_closures()
@@ -309,6 +446,7 @@ function SessionGuard:start()
         end
 
         self:check_expired_sessions()
+        self:check_demo_sessions()
         self:check_tunnel_closures()
     end)
 

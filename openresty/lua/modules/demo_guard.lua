@@ -50,7 +50,7 @@ end
 
 -- Returns: busy (boolean), error (string|nil).  A nil busy value means the
 -- Marketplace authority could not provide a trustworthy answer.
-local function is_lab_busy(ngx, marketplace_url, lab_id, deps)
+local function is_lab_busy(ngx, marketplace_url, lab_id, demo_exp, deps)
     if not lab_id or lab_id == "" then
         return nil, "DEMO_LAB_ID is not configured"
     end
@@ -63,11 +63,17 @@ local function is_lab_busy(ngx, marketplace_url, lab_id, deps)
     httpc:set_timeout(MARKETPLACE_CHECK_TIMEOUT_MS)
 
     local now = ngx.time()
+    local configured_end = now + configured_session_ttl(ngx)
+    local end_time = math.min(tonumber(demo_exp) or configured_end, configured_end)
+    local start_time = now + 1
+    if start_time >= end_time then
+        return true, "demo session has no valid availability window"
+    end
     local url = marketplace_url
         .. "/api/contract/reservation/checkAvailable"
         .. "?labId=" .. ngx.escape_uri(tostring(lab_id))
-        .. "&start=" .. tostring(now)
-        .. "&end=" .. tostring(now + 60)
+        .. "&start=" .. tostring(start_time)
+        .. "&end=" .. tostring(end_time)
 
     local res, err = httpc:request_uri(url, { method = "GET", ssl_verify = true })
     if err or not res then
@@ -89,14 +95,14 @@ local function is_lab_busy(ngx, marketplace_url, lab_id, deps)
     return body.isAvailable == false, nil
 end
 
-function _M.check_availability(ngx_ctx, deps)
+function _M.check_availability(ngx_ctx, exp, deps)
     local ngx = ngx_ctx or ngx
     local config = ngx.shared.config
     local marketplace_url = config:get("marketplace_url") or ""
     if marketplace_url == "" then
         return nil, "MARKETPLACE_URL is not configured"
     end
-    return is_lab_busy(ngx, marketplace_url, config:get("demo_lab_id") or "", deps)
+    return is_lab_busy(ngx, marketplace_url, config:get("demo_lab_id") or "", exp, deps)
 end
 
 -- Atomically reserve the single demo slot.  The handoff route calls this
@@ -113,7 +119,7 @@ function _M.start(ngx_ctx, jti, exp, deps)
         return nil, "demo session storage is unavailable"
     end
 
-    local busy, check_err = _M.check_availability(ngx, deps)
+    local busy, check_err = _M.check_availability(ngx, exp, deps)
     if check_err then
         ngx.log(ngx.WARN, "demo_guard: " .. check_err)
         return nil, "Demo availability cannot be verified"
@@ -153,7 +159,7 @@ function _M.run(ngx_ctx, deps)
     end
 
     local jti = ngx.ctx.demo_jti
-    if type(jti) ~= "string" or jti == "" or #jti > 256 then
+    if type(jti) ~= "string" or jti == "" or #jti > 256 or ngx.ctx.jwt_jti ~= jti then
         ngx.log(ngx.WARN, "demo_guard: demo authentication has no valid DEMO_JTI")
         return reject(ngx, "Demo access is unavailable")
     end

@@ -15,11 +15,13 @@ local function build_ngx(opts)
         demo_user       = opts.demo_user or "demo",
         demo_lab_id     = lab_id,
         marketplace_url = marketplace,
+        demo_session_ttl_seconds = opts.demo_session_ttl_seconds or 600,
     }
     local ngx = ngx_factory.new({
         config             = config,
         demo_sessions      = opts.demo_sessions or {},
         demo_sessions_dict = opts.demo_sessions_dict,
+        now                = opts.now,
         ctx                = opts.ctx or {
             demo_authenticated = opts.demo_authenticated ~= false,
             jwt_jti = opts.jti or "demo-jti",
@@ -80,6 +82,17 @@ runner.describe("Demo guard", function()
         run(ngx, make_http_stub(true))
         runner.assert.equals(nil, ngx._exit_code)
         runner.assert.equals(1, ngx.shared.demo_sessions:get("active"))
+    end)
+
+    runner.it("checks the complete demo lifetime and starts just after the chain clock", function()
+        local ngx = build_ngx({ auth = "demo", now = 200, exp = 800 })
+        local http_stub = make_http_stub(true)
+        run(ngx, http_stub)
+
+        runner.assert.equals(
+            "https://mp.example.com/api/contract/reservation/checkAvailable?labId=lab42&start=201&end=800",
+            http_stub.calls[1].url
+        )
     end)
 
     runner.it("rejects demo user with 503 when lab has an active reservation", function()

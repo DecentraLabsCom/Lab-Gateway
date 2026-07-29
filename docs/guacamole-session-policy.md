@@ -64,6 +64,24 @@ Reservation users are temporary users provisioned as `dlabs-res-...`.
 - Active desktop connections are terminated when the JWT/reservation expires.
 - Refreshing `/guacamole/` works while the JTI cookie/JWT remains valid; after expiration, OpenResty rejects the session.
 
+## Demo Sessions and Reservation Overlap
+
+Demo access is disabled unless `DEMO_LAB_ID` and `DEMO_CONNECTION_ID` are
+configured. When enabled, the handoff checks the authoritative Marketplace
+calendar for the complete demo window, from one second after the current chain
+clock through the demo expiry (up to the default 600 seconds). The one-second
+offset is required because the on-chain availability method rejects ranges whose
+start is at or before `block.timestamp`.
+
+The demo JTI remains isolated from reservation JTIs and the demo slot is still
+limited to one active session. Because the calendar read and a later paid
+reservation confirmation are separate transactions, OpenResty also polls the
+full remaining demo window every two seconds. If a confirmed reservation starts
+inside that window, active Guacamole tunnels are closed and their demo token is
+revoked. If the availability authority cannot be verified during that poll,
+the optional demo session is also closed fail-closed and the condition is
+logged for operations; the initial demo handoff always fails closed as well.
+
 For FMU access, OpenResty stores the short-lived `{sessionId, exp, token}`
 mapping encrypted with `ACCESS_CODE_ENCRYPTION_KEY` under
 `FMU_ACCESS_STATE_PATH` as well as in shared memory. The durable file is

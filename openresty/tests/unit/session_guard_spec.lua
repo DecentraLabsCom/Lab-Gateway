@@ -10,7 +10,9 @@ local function build_guard(cache, responses)
         config = {
             admin_user = "admin",
             admin_pass = "secret",
-            guac_uri = "/guacamole"
+            guac_uri = "/guacamole",
+            marketplace_url = "https://mp.example.com",
+            demo_lab_id = "42"
         },
         now = 200
     })
@@ -132,6 +134,36 @@ runner.describe("Session guard", function()
         ngx._timer_calls.at[1].callback(false)
 
         runner.assert.equals(10, ngx._timer_calls.every[1].interval)
+        runner.assert.equals(2, ngx._timer_calls.every[2].interval)
+    end)
+
+    runner.it("revokes an active demo when a paid reservation now overlaps it", function()
+        local cache = {
+            ["guac_demo:token-1"] = "demo-jti",
+            ["guac_jti:token-1"] = "demo-jti",
+            ["guac_jwt_exp:token-1"] = "800",
+            ["guac_token:token-1"] = "demo",
+            ["token:demo"] = "token-1"
+        }
+
+        local responses = {
+            { status = 200, body = cjson.encode({ authToken = "admin-token", dataSource = "mysql" }) },
+            { status = 200, body = cjson.encode({ ["123"] = { username = "demo" } }) },
+            { status = 200, body = cjson.encode({ isAvailable = false }) },
+            { status = 204 },
+            { status = 204 }
+        }
+
+        local guard, http_stub, ngx = build_guard(cache, responses)
+        guard:check_demo_sessions()
+
+        local store = ngx.shared.cache._data
+        runner.assert.equals(nil, store["guac_demo:token-1"])
+        runner.assert.equals(nil, store["guac_jwt_exp:token-1"])
+        runner.assert.equals(nil, store["token:demo"])
+        runner.assert.equals(5, #http_stub.calls)
+        runner.assert.truthy(http_stub.calls[3].url:match("start=201"))
+        runner.assert.truthy(http_stub.calls[3].url:match("end=800"))
     end)
 
     runner.it("processes tunnel closures and cleans pending flags", function()
