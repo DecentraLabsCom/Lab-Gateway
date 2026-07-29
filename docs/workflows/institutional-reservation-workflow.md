@@ -100,6 +100,23 @@ second transaction.
 
 The consumer backend accepts an intent only after validating its shape, SAML assertion and assertion-hash binding, replay rules, WebAuthn assertion, expiry, EIP-712 signature, and trusted-signer policy. Accepted intents are persisted and move through `QUEUED`, `AUTHORIZED_PENDING_REGISTRATION`, `IN_PROGRESS`, `EXECUTED`, `FAILED`, or `REJECTED` as applicable.
 
+### Trust model for institutional execution
+
+WebAuthn is verified by the consumer backend and is not verified by the
+Diamond. The contract's intent checks prove the registered operation, payload,
+executor, nonce and expiry; they do not prove that a user completed WebAuthn.
+The backend and its managed wallet are therefore trusted institutional
+authorities in the current model. A compromise of that backend/wallet can use
+its authorized direct contract routes without a user's WebAuthn assertion.
+
+The active `DIRECT_BOOKING` branch uses
+`institutionalDirectBookingWithIntent` (action `11`) and is not the same as
+`institutionalReservationRequest`. The latter direct selector is present in
+the current Diamond selector allowlist but has no caller in the current
+Marketplace or canonical backend code. It remains a possible external
+administrative surface until explicitly removed through a reviewed selector
+upgrade.
+
 ## Booking branches
 
 ### Direct booking: institution owns the laboratory
