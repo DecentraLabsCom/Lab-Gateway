@@ -53,7 +53,7 @@ Marketplace requires an authenticated SSO session and a PUC. It validates a futu
 
 - `pucHash`: hash of the normalized PUC;
 - `assertionHash`: hash of the SAML assertion;
-- `reservationKey`: `keccak256(abi.encodePacked(labId, start))`;
+- `reservationKey`: `keccak256(abi.encodePacked(labId, start, pucHash))`;
 - `price`: `pricePerSecond * (end - start)`;
 - a request identifier, expiry, sequential intent nonce, executor, signer, action, and payload hash.
 
@@ -180,7 +180,12 @@ and unrelated listeners remain informational and do not submit confirmation or
 denial transactions. Executing the payer's request intent does not trigger a
 confirmation postflight; the provider must process the resulting event.
 
-The reservation key intentionally represents a `(labId, start)` slot. It is suitable for exclusive laboratory scheduling. Resource types that permit concurrent sessions require a distinct concurrency model rather than assuming that this key identifies independent simultaneous bookings.
+The reservation key is derived from `(labId, start, pucHash)`. This keeps exclusive
+physical-lab scheduling keyed by its calendar interval while allowing distinct FMU
+users to reserve the same start instant. FMU capacity remains provider-side policy:
+the provider counts active overlapping reservations and evaluates
+`maxConcurrentUsers` from the lab metadata together with the calendar, hours and
+maintenance rules before confirming the request.
 
 Intent nonces are sequential per signer on chain. Any horizontally scaled component that prepares or registers intents must serialize nonce assignment per signer; a transaction carrying a nonce other than the next expected value is rejected by the contract.
 

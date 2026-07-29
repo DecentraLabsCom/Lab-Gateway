@@ -817,7 +817,10 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
-            setStatus(`${editing ? 'Updated' : 'Published'}. Tx: ${result.transactionHash || 'pending'}${result.labId ? ' Lab #' + result.labId : ''}`, false);
+            const transactionMessage = result.transactionHash
+                ? ` Tx: ${result.transactionHash}`
+                : (editing ? ' Metadata saved without an on-chain transaction.' : '');
+            setStatus(`${editing ? 'Updated' : 'Published'}.${transactionMessage}${result.labId ? ' Lab #' + result.labId : ''}`, false);
             if (editing) clearEditMode(false);
             await loadPublisherData();
         } catch (err) {
