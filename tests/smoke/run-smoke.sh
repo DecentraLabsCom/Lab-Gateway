@@ -90,7 +90,7 @@ echo "Test 2: one-time access-code exchange"
 ACCESS_CODE=smoke-access-code
 curl -sk --resolve lab.test:${PORT}:127.0.0.1 -c "$COOKIE_FILE" -X POST --data-urlencode "access_code=${ACCESS_CODE}" https://lab.test:${PORT}/auth/access >/dev/null
 
-if grep -q "JTI.*smoke-jti-123" "$COOKIE_FILE"; then
+if grep -q "JTI.*smoke-jti-123456" "$COOKIE_FILE"; then
   log_pass "Access code redeemed and JTI cookie set"
 else
   log_fail "JTI cookie missing expected entry"

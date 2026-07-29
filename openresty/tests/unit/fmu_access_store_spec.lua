@@ -5,7 +5,7 @@ local TEST_SESSION_ID = "session-store-spec-1234"
 local function fake_cipher_factory()
     return {
         encrypt = function(_, _, _, plaintext, _, aad)
-            return plaintext .. "|" .. aad
+            return plaintext:reverse() .. "|" .. aad
         end,
         get_aead_tag = function()
             return "tag"
@@ -15,7 +15,7 @@ local function fake_cipher_factory()
             if stored_aad ~= aad then
                 return nil, "bad aad"
             end
-            return plaintext
+            return plaintext:reverse()
         end,
     }
 end

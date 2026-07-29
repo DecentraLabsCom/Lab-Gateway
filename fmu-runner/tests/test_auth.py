@@ -31,6 +31,19 @@ def test_resolve_auth_jwks_url_prefers_explicit_env(monkeypatch):
     assert auth._resolve_auth_jwks_url() == "https://custom.example/jwks"
 
 
+def test_resolve_auth_jwks_url_rejects_explicit_http_for_public_host(monkeypatch):
+    monkeypatch.setenv("AUTH_JWKS_URL", "http://issuer-public.example/jwks")
+
+    with pytest.raises(ValueError, match="HTTPS"):
+        auth._resolve_auth_jwks_url()
+
+
+def test_resolve_auth_jwks_url_allows_explicit_http_for_localhost(monkeypatch):
+    monkeypatch.setenv("AUTH_JWKS_URL", "http://localhost:8080/auth/jwks")
+
+    assert auth._resolve_auth_jwks_url() == "http://localhost:8080/auth/jwks"
+
+
 def test_resolve_auth_jwks_url_derives_from_issuer(monkeypatch):
     monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
     monkeypatch.setenv("ISSUER", "https://issuer.example/auth/")

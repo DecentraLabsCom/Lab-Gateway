@@ -121,7 +121,8 @@ the sole protection of the internal channel.
 JWT key retrieval is independent of the FMU execution backend. In Full mode the
 runner uses `http://blockchain-services:8080/auth/jwks`; in Lite mode it uses
 the external issuer's JWKS endpoint. `AUTH_JWKS_URL` may explicitly override
-that selection. The local profile reaches the Full-mode endpoint through the
+that selection, but it is subject to the same HTTPS requirement; HTTP is only
+accepted for loopback/private hosts used by local Compose networking. The local profile reaches the Full-mode endpoint through the
 dedicated internal `fmu_auth` network.
 
 ### 4. Manage interface disclosure

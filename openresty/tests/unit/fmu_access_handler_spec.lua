@@ -6,10 +6,10 @@ runner.describe("FMU access handler", function()
     runner.it("injects the server-side bearer for a valid HttpOnly session", function()
         local ngx = ngx_factory.new({
             cache = {
-                ["fmu_access_token:session-1"] = "technical-jwt",
-                ["fmu_access_exp:session-1"] = 500,
+                ["fmu_access_token:session-valid-1234"] = "technical-jwt",
+                ["fmu_access_exp:session-valid-1234"] = 500,
             },
-            var = { http_cookie = "FMU_SESSION=session-1" },
+            var = { http_cookie = "FMU_SESSION=session-valid-1234" },
             now = 100,
         })
 
@@ -56,10 +56,10 @@ runner.describe("FMU access handler", function()
     runner.it("rejects an expired FMU session", function()
         local ngx = ngx_factory.new({
             cache = {
-                ["fmu_access_token:session-1"] = "technical-jwt",
-                ["fmu_access_exp:session-1"] = 100,
+                ["fmu_access_token:session-valid-1234"] = "technical-jwt",
+                ["fmu_access_exp:session-valid-1234"] = 100,
             },
-            var = { http_cookie = "FMU_SESSION=session-1" },
+            var = { http_cookie = "FMU_SESSION=session-valid-1234" },
             now = 100,
         })
 

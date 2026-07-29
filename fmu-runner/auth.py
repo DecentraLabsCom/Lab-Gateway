@@ -71,19 +71,26 @@ def _build_jwks_url_from_issuer(issuer: str) -> str:
     parsed = urlparse(issuer)
     if not parsed.scheme or not parsed.netloc:
         raise ValueError(f"Invalid issuer URL: {issuer}")
+
+    return _validate_jwks_url(issuer.rstrip("/") + "/jwks")
+
+
+def _validate_jwks_url(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError(f"Invalid JWKS URL: {url}")
     if parsed.scheme != "https" and not _is_loopback_or_private_host(parsed.netloc):
         raise ValueError(
-            f"Insecure issuer scheme '{parsed.scheme}': JWKS public keys must be "
-            f"fetched over HTTPS for non-loopback hosts. Got: {issuer}"
+            f"Insecure JWKS scheme '{parsed.scheme}': JWKS public keys must be "
+            f"fetched over HTTPS for non-loopback hosts. Got: {url}"
         )
-    # Use issuer as the base so any path prefix is preserved (#2).
-    return issuer.rstrip("/") + "/jwks"
+    return url
 
 
 def _resolve_auth_jwks_url() -> str:
     explicit = os.getenv("AUTH_JWKS_URL")
     if explicit and explicit.strip():
-        return explicit.strip()
+        return _validate_jwks_url(explicit.strip())
 
     issuer = _normalize_issuer(os.getenv("ISSUER"))
     if issuer:

@@ -5,7 +5,7 @@ const crypto = require("crypto");
 const header = { alg: "RS256", typ: "JWT" };
 const payload = {
   sub: "smoke-user",
-  jti: "smoke-jti-123",
+  jti: "smoke-jti-123456",
   iss: "https://lab.test:18443/auth",
   aud: "https://lab.test:18443/guacamole",
   resourceType: "lab",
