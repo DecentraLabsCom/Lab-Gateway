@@ -104,6 +104,12 @@ FMU_BACKEND_MODE=station
 FMU_JWT_AUDIENCE=https://<public-gateway-origin>/fmu
 ~~~
 
+The Station is the single operational capacity authority. Set its
+`FMU_MAX_SESSIONS` value to the effective execution limit; the provider
+backend reads `GET /internal/fmu/capacity` before FMU publication and provider
+confirmation, and rejects metadata whose `maxConcurrentUsers` exceeds that
+limit. A capacity read failure leaves a pending reservation retryable.
+
 For isolated local development/tests, start the `fmu-local-dev` Compose
 profile. It sets `FMU_BACKEND_MODE=local` and `FMU_LOCAL_DEV_MODE=true` in a
 container that has only the internal local edge network and no Station,
@@ -209,6 +215,7 @@ The private Station API includes:
 
 ~~~text
 GET  /internal/health
+GET  /internal/fmu/capacity       (internal token required)
 GET  /internal/fmu/catalog  (X-FMU-Access-Key header)
 GET  /internal/fmu/describe  (X-FMU-Access-Key header)
 POST /internal/fmu/simulations/run       (JSON body: accessKey)

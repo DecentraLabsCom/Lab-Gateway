@@ -60,6 +60,11 @@ services:
       - LAB_METADATA_LOCAL_ENABLED=${LAB_METADATA_LOCAL_ENABLED:-false}
       - LAB_METADATA_LOCAL_ROOT=${LAB_METADATA_LOCAL_ROOT:-/app/lab-metadata-fixtures}
       - FMU_DATA_PATH=/app/fmu-data
+      - FMU_STATION_BASE_URL=${FMU_STATION_BASE_URL:-}
+      - FMU_STATION_INTERNAL_TOKEN_FILE=/run/secrets/fmu_station_internal_token
+      - FMU_STATION_INTERNAL_TOKEN=
+      - FMU_STATION_REQUEST_TIMEOUT_MS=${FMU_STATION_REQUEST_TIMEOUT_MS:-5000}
+      - FMU_CAPACITY_REQUIRED=${FMU_CAPACITY_REQUIRED:-true}
       - 'SPRING_APPLICATION_JSON={"ethereum":{"gas":{"price":{"default":5},"limit":{"contract":1000000}}}}'
     volumes:
       - ./blockchain-data:/app/data
@@ -72,6 +77,7 @@ services:
       - blockchain_mysql_password
       - admin_access_token
       - lab_manager_token
+      - fmu_station_internal_token
     # In Lite mode keep the optional container dormant; never start the Java
     # backend or generate a local JWT key. OpenResty selects the remote key.
     entrypoint: ["/bin/sh", "-c"]
@@ -88,6 +94,7 @@ services:
         read_secret SPRING_DATASOURCE_PASSWORD /run/secrets/blockchain_mysql_password
         read_secret ADMIN_ACCESS_TOKEN /run/secrets/admin_access_token
         read_secret LAB_MANAGER_TOKEN /run/secrets/lab_manager_token
+        read_secret FMU_STATION_INTERNAL_TOKEN /run/secrets/fmu_station_internal_token
         mode="$${BLOCKCHAIN_SERVICES_ENABLED:-auto}"
         issuer="$${ISSUER:-}"
         server_name="$${SERVER_NAME:-localhost}"

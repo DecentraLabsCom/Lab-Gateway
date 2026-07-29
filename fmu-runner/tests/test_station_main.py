@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -101,6 +101,22 @@ def test_run_station_mode_forwards_request(monkeypatch):
     assert response.json()["simId"]
     assert station_backend.run_call["authorization"] == "Bearer station-token"
     assert station_backend.run_call["request_payload"]["reservationKey"] == "res-1"
+
+
+def test_run_station_mode_does_not_use_local_runner_capacity(monkeypatch):
+    station_backend = _StationBackendStub()
+    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(main, "_get_station_backend", lambda: station_backend)
+    acquire = Mock(side_effect=AssertionError("local capacity must not be consulted in Station mode"))
+    monkeypatch.setattr(main, "_acquire_slot", acquire)
+
+    response = client.post(
+        "/api/v1/simulations/run",
+        json={"labId": "1", "reservationKey": "res-1"},
+    )
+
+    assert response.status_code == 200
+    acquire.assert_not_called()
 
 
 def test_run_station_records_observation_before_releasing_job(monkeypatch):
