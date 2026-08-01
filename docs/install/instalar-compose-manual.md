@@ -75,6 +75,37 @@ CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
 
+En un gateway Full, configura tambien las credenciales usadas para el canje de
+codigos de acceso opacos y la observacion de sesiones FMU. Los valores JSON
+deben ser objetos JSON validos y la clave debe coincidir exactamente con el
+`SERVER_NAME` normalizado. No uses una cadena con formato `host:token`:
+
+```env
+AUTH_ACCESS_CODE_REDEEMER_TOKEN=<token-aleatorio-de-canje>
+ACCESS_CODE_ENCRYPTION_KEY=<clave-base64url-para-32-bytes>
+ACCESS_CODE_REDEEMER_CREDENTIALS_JSON={"lab.tu-institucion.edu":"<token-aleatorio-de-canje>"}
+SESSION_OBSERVER_GATEWAY_ID=lab.tu-institucion.edu
+SESSION_OBSERVER_SIGNING_SECRET=<secreto-base64url-para-32-bytes>
+SESSION_OBSERVER_CREDENTIALS_JSON={"lab.tu-institucion.edu":"<secreto-base64url-para-32-bytes>"}
+```
+
+Genera de forma independiente la clave de cifrado y el secreto del observador.
+Ambos deben decodificar exactamente a 32 bytes:
+
+```bash
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+```
+
+Ejecuta el comando dos veces y usa valores distintos. El token de canje puede
+ser cualquier secreto aleatorio de alta entropia; por ejemplo:
+
+```bash
+openssl rand -hex 32
+```
+
+Los gateways Lite deben usar las credenciales y el trust bundle emitidos por el
+gateway Full remoto en lugar de inventar mapas locales de modo Full.
+
 ## Paso 3a — Generar los ficheros de secretos de Compose
 
 El fichero Compose utiliza secretos respaldados por ficheros del host porque
@@ -85,13 +116,23 @@ ejecutar `docker compose config` o `docker compose up`.
 Linux, macOS o WSL:
 
 ```bash
+python3 scripts/validate-gateway-env.py --env .env
 bash scripts/sync-compose-secrets.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Validate-GatewayEnv.ps1 -EnvPath .\.env
 powershell -ExecutionPolicy Bypass -File .\scripts\Sync-ComposeSecrets.ps1
+```
+
+Valida el modelo de Compose renderizado antes de iniciar los servicios:
+
+```bash
+docker compose config --quiet
+docker compose config --services
+docker compose config --profiles
 ```
 
 El comando crea el directorio ignorado `secrets/` con permisos de directorio
@@ -100,6 +141,10 @@ servicios no root lean los secretos montados por Compose; el directorio sigue
 restringiendo el acceso local. Ejecútalo de nuevo cada vez que cambie un
 secreto en `.env`. No incluyas ni borres este directorio mientras el
 despliegue esté en uso.
+
+En Linux, no ejecutes los comandos anteriores hasta completar el Paso 5:
+`HOST_UID`, `HOST_GID` y los directorios persistentes deben estar preparados.
+El validador debe terminar sin errores antes de continuar con Compose.
 
 #### Modo del gateway
 
@@ -174,9 +219,28 @@ HOST_GID=1000
 Crea y asigna propietario a los directorios de datos:
 
 ```bash
-mkdir -p blockchain-data certs
-chown -R 1000:1000 blockchain-data certs
+gateway_uid="$(id -u)"
+gateway_gid="$(id -g)"
+
+mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
+  fmu-proxy-runtime/binaries/linux64 \
+  fmu-proxy-runtime/binaries/win64 \
+  fmu-proxy-runtime/binaries/darwin64 \
+  ops-data/guac-revocation-spool
+
+sudo chown -R "${gateway_uid}:${gateway_gid}" \
+  blockchain-data certs fmu-access-state lab-content
+chmod 700 fmu-access-state
+chmod 755 lab-content fmu-data fmu-proxy-runtime \
+  fmu-proxy-runtime/binaries fmu-proxy-runtime/binaries/linux64 \
+  fmu-proxy-runtime/binaries/win64 fmu-proxy-runtime/binaries/darwin64
+chmod 700 ops-data ops-data/guac-revocation-spool
 ```
+
+En particular, `fmu-access-state` debe ser escribible por el UID de OpenResty
+porque almacena los mapeos FMU cifrados y persistentes. Si ejecutas el stack
+mediante `sudo`, conserva el `HOST_UID` y `HOST_GID` de la cuenta de despliegue;
+no los sustituyas silenciosamente por los de root.
 
 ## Paso 6 — Añadir certificados SSL
 
@@ -219,24 +283,49 @@ Habilita servicios opcionales solo cuando estén configurados y sean necesarios.
 Por ejemplo, la fachada FMU de producción es exclusiva para Lab Station y usa
 su propio perfil:
 
+```env
+FMU_RUNNER_ENABLED=true
+FMU_BACKEND_MODE=station
+FMU_LOCAL_DEV_MODE=false
+FMU_LOCAL_REALTIME_ENABLED=false
+FMU_STATION_BASE_URL=https://station.internal.example
+FMU_STATION_INTERNAL_TOKEN=<station-internal-token>
+```
+
 ```bash
-FMU_RUNNER_ENABLED=true docker compose --profile fmu-runner up -d
+docker compose --profile fmu-runner up -d --build
 ```
 
 Para ejecución FMU local exclusiva de desarrollo usa `fmu-local-dev`; nunca
 arranques los dos perfiles FMU a la vez. Activa explícitamente el realtime
 local:
 
-```bash
-FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true \
-  docker compose --profile fmu-local-dev up -d openresty fmu-runner-local
+```env
+FMU_RUNNER_ENABLED=true
+FMU_BACKEND_MODE=local
+FMU_LOCAL_DEV_MODE=true
+FMU_LOCAL_REALTIME_ENABLED=true
 ```
 
-Esto presupone que el flujo de setup ya ha preparado el `.env` raíz y
-`secrets/session_observer_signing_secret`. El runner local necesita esta
-credencial de observación, con privilegios mínimos, para canjear tickets FMU y
-registrar sesiones aceptadas; no necesita credenciales de Lab Station ni de
+```bash
+docker compose --profile fmu-local-dev up -d --build openresty fmu-runner-local
+```
+
+La ejecución local necesita `secrets/session_observer_signing_secret`, generado
+a partir de `SESSION_OBSERVER_SIGNING_SECRET`, para canjear tickets FMU y
+registrar sesiones aceptadas. No necesita credenciales de Lab Station ni de
 administrador.
+
+Para la ejecución local, coloca cada FMU publicado en uno de los layouts
+soportados y haz coincidir `accessKey`/`fmuFileName` con el recurso configurado:
+
+```text
+fmu-data/<accessKey>.fmu
+fmu-data/<accessKey>/model.fmu
+```
+
+Consulta [FMU data layout](../../fmu-data/README.md) para el almacenamiento por
+proveedor y [soporte FMI/FMU](../fmi-fmu-support.md) para publicación y validación.
 
 `FMU_BACKEND_MODE` controla dónde se ejecuta el FMU; el modo Full/Lite determina
 independientemente el origen de JWKS. Los scripts de setup guardan
@@ -254,6 +343,26 @@ curl -k https://localhost/health
 # Servicios de blockchain
 curl -k https://localhost/auth/.well-known/openid-configuration
 ```
+
+Si FMU esta habilitado, verifica tambien el runner seleccionado y el montaje
+del estado persistente:
+
+```bash
+docker compose ps openresty fmu-runner fmu-runner-local
+docker compose exec -T openresty id
+stat -c '%u:%g %a %n' fmu-access-state
+docker compose exec -T openresty sh -c '
+  set -eu
+  probe=/var/lib/openresty/fmu-access/.write-test-$$
+  printf test > "$probe"
+  rm -f "$probe"
+  echo "OpenResty puede escribir el estado FMU"
+'
+```
+
+El UID/GID de OpenResty debe coincidir con el propietario de
+`fmu-access-state`. Un health check correcto por si solo no prueba esta ruta de
+escritura.
 
 Ambos deben devolver JSON sin errores. La respuesta pública de salud está deliberadamente reducida; los operadores de Lab Manager pueden usar `/health/details` con el `LAB_MANAGER_TOKEN` configurado para obtener el diagnóstico detallado.
 
