@@ -822,6 +822,8 @@ call :SecureSecretTree "certs"
 call :SecureSecretTree "blockchain-data"
 call :SecureSecretTree "fmu-access-state"
 call :SecureSecretTree "ops-data"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "scripts\Validate-GatewayEnv.ps1" -EnvPath "%ROOT_ENV_FILE%"
+if errorlevel 1 exit /b 1
 call :SyncComposeSecrets
 
 echo SSL Certificates

@@ -1062,6 +1062,7 @@ fi
 # Docker Compose local secrets must be backed by files when a read-only service
 # consumes them. Keep the generated files synchronized with the gateway env
 # after assigning ownership to the container user.
+"$setup_python_cmd" scripts/validate-gateway-env.py --env "$ROOT_ENV_FILE"
 sync_compose_secrets
 
 if [ -f "certs/fullchain.pem" ] && [ -f "certs/privkey.pem" ]; then

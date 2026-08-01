@@ -1,0 +1,9 @@
+.pytest-basetemp/
+.pytest_cache/
+__pycache__/
+.coverage
+.ci-logs/
+.ci-summary/
+.tmp/
+tests/
+requirements-dev.txt

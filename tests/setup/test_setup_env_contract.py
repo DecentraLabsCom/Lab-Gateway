@@ -1,6 +1,7 @@
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ CANONICAL_BACKEND_ENTRYPOINT = ROOT / "blockchain-services" / "docker" / "entryp
 SYNC_COMPOSE_SECRETS_SH = ROOT / "scripts" / "sync-compose-secrets.sh"
 ISSUE_LITE_SH = ROOT / "scripts" / "issue-lite-trust-bundle.sh"
 ISSUE_LITE_PS1 = ROOT / "scripts" / "Issue-LiteTrustBundle.ps1"
+VALIDATE_GATEWAY_ENV_PY = ROOT / "scripts" / "validate-gateway-env.py"
 NGINX_CONF = ROOT / "openresty" / "nginx.conf"
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 
@@ -64,6 +66,7 @@ class SetupEnvContractTest(unittest.TestCase):
         cls.sync_compose_secrets_sh = SYNC_COMPOSE_SECRETS_SH.read_text(encoding="utf-8")
         cls.issue_lite_sh = ISSUE_LITE_SH.read_text(encoding="utf-8")
         cls.issue_lite_ps1 = ISSUE_LITE_PS1.read_text(encoding="utf-8")
+        cls.validate_gateway_env_ps1 = (ROOT / "scripts" / "Validate-GatewayEnv.ps1").read_text(encoding="utf-8")
         cls.nginx_conf = NGINX_CONF.read_text(encoding="utf-8")
         cls.compose_file = COMPOSE_FILE.read_text(encoding="utf-8")
         cls.init_ssl = (ROOT / "openresty" / "init-ssl.sh").read_text(encoding="utf-8")
@@ -87,6 +90,64 @@ class SetupEnvContractTest(unittest.TestCase):
             "- ACCESS_CODE_REDEEMER_CREDENTIALS_JSON=${ACCESS_CODE_REDEEMER_CREDENTIALS_JSON:-}",
             backend_service,
         )
+
+    def test_full_gateway_credential_maps_must_be_json_and_match_gateway_identity(self):
+        invalid_env = "\n".join([
+            "SERVER_NAME=lab.example",
+            "ISSUER=",
+            "AUTH_ACCESS_CODE_REDEEMER_TOKEN=acr-secret",
+            "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON=lab.example:acr-secret",
+            "SESSION_OBSERVER_GATEWAY_ID=lab.example",
+            "SESSION_OBSERVER_SIGNING_SECRET=observer-secret",
+            "SESSION_OBSERVER_CREDENTIALS_JSON=lab.example:observer-secret",
+        ]) + "\n"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(invalid_env, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(VALIDATE_GATEWAY_ENV_PY), "--env", str(env_file)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ACCESS_CODE_REDEEMER_CREDENTIALS_JSON must be a JSON object", result.stderr)
+
+    def test_full_gateway_credential_maps_accept_matching_json(self):
+        valid_env = "\n".join([
+            "SERVER_NAME=lab.example",
+            "ISSUER=",
+            "AUTH_ACCESS_CODE_REDEEMER_TOKEN=acr-secret",
+            'ACCESS_CODE_REDEEMER_CREDENTIALS_JSON={"lab.example":"acr-secret"}',
+            "SESSION_OBSERVER_GATEWAY_ID=lab.example",
+            "SESSION_OBSERVER_SIGNING_SECRET=observer-secret",
+            'SESSION_OBSERVER_CREDENTIALS_JSON={"lab.example":"observer-secret"}',
+        ]) + "\n"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(valid_env, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(VALIDATE_GATEWAY_ENV_PY), "--env", str(env_file)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_setup_validates_full_gateway_credential_maps_before_syncing_secrets(self):
+        self.assertIn(
+            'scripts/validate-gateway-env.py --env "$ROOT_ENV_FILE"',
+            self.setup_sh,
+        )
+        self.assertIn(
+            'scripts\\Validate-GatewayEnv.ps1" -EnvPath "%ROOT_ENV_FILE%"',
+            self.setup_bat,
+        )
+        for key in (
+            "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON",
+            "SESSION_OBSERVER_CREDENTIALS_JSON",
+        ):
+            self.assertIn(key, self.validate_gateway_env_ps1)
 
     def test_gateway_setup_no_longer_writes_shared_admin_keys_to_blockchain_env(self):
         forbidden_tokens = [
