@@ -110,12 +110,11 @@ authorities in the current model. A compromise of that backend/wallet can use
 its authorized direct contract routes without a user's WebAuthn assertion.
 
 The active `DIRECT_BOOKING` branch uses
-`institutionalDirectBookingWithIntent` (action `11`) and is not the same as
-`institutionalReservationRequest`. The latter direct selector is present in
-the current Diamond selector allowlist but has no caller in the current
-Marketplace or canonical backend code. It remains a possible external
-administrative surface until explicitly removed through a reviewed selector
-upgrade.
+`institutionalDirectBookingWithIntent` (action `11`). The former direct
+institution/backend selector had no active caller and has been removed from
+the production selector manifest and ABI. Existing Diamond instances still
+require the reviewed selector-removal upgrade described in the deployment
+procedure.
 
 ## Booking branches
 

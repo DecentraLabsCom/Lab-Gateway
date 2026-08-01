@@ -42,13 +42,13 @@ stateDiagram-v2
 `ACCESS_AUTHORIZED` is an access gate, not proof that a session actually started. Provider settlement based on session evidence additionally requires the recorded `SessionStarted` attestation.
 
 The normal consumer check-in path uses the EIP-712
-`checkInReservationWithSignature` selector. The Diamond also exposes
-`checkInReservation`, which requires only `DEFAULT_ADMIN_ROLE` and moves an
-in-window confirmed reservation to `ACCESS_AUTHORIZED` without an institutional
-signature or WebAuthn evidence. It is an administrative/emergency override,
-not part of the normal Marketplace flow. Keep the default-admin key separate
-from institutional wallets and audit every use; the current contract does not
-provide a timelock or a dedicated emergency event for this override.
+`checkInReservationWithSignature` selector. The exceptional
+`emergencyCheckIn(bytes32,uint8)` selector moves an in-window confirmed
+reservation to `ACCESS_AUTHORIZED` only through the Diamond owner when that
+owner is a multisig or timelock contract. It requires a non-zero reason code,
+emits an operational emergency alert, and excludes the reservation generation
+from provider settlement until governance calls `reviewEmergencyCheckIn`.
+It is not part of the normal Marketplace flow.
 
 ## Access sequence
 
