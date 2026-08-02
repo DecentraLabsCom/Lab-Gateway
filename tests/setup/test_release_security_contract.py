@@ -33,6 +33,13 @@ def test_security_workflow_covers_actions_python_cpp_and_pip_audit():
     assert "cmake --build fmu-proxy-runtime-src/build-codeql" in security
 
 
+def test_ops_worker_summary_requires_a_completed_checkout():
+    workflow = (ROOT / ".github" / "workflows" / "gateway-tests.yml").read_text(encoding="utf-8")
+    guard = "if: always() && hashFiles('.github/scripts/test_summary.py') != ''"
+
+    assert workflow.count(guard) == 2
+
+
 def test_all_workflow_actions_are_pinned_to_commits():
     for workflow in (ROOT / ".github" / "workflows").glob("*.yml"):
         for line in workflow.read_text(encoding="utf-8").splitlines():

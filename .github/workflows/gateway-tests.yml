@@ -219,7 +219,7 @@ jobs:
           python -m pytest tests --junitxml=pytest-results.xml -q | tee pytest.log
 
       - name: Build Ops Worker suite summary
-        if: always()
+        if: always() && hashFiles('.github/scripts/test_summary.py') != ''
         run: |
           python .github/scripts/test_summary.py suite \
             --suite-id ops-worker \
@@ -230,7 +230,7 @@ jobs:
             --output .ci-summary/ops-worker.json
 
       - name: Upload Ops Worker summary artifact
-        if: always()
+        if: always() && hashFiles('.github/scripts/test_summary.py') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ops-worker-summary
