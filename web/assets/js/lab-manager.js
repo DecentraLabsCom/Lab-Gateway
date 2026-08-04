@@ -439,7 +439,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (upcomingReservationsListEl) {
         upcomingReservationsListEl.addEventListener('click', handleUpcomingReservationActions);
     }
-    loadUpcomingReservations();
+    loadActionableReservations();
 
     function requireBillingAccess(onAuthenticated, onTokenAuthenticated) {
         if (hasBillingAccess()) {
@@ -1693,11 +1693,11 @@ document.addEventListener('DOMContentLoaded', () => {
         await requestTimelinePage(0, false);
     }
 
-    async function loadUpcomingReservations() {
+    async function loadActionableReservations() {
         if (!upcomingReservationsListEl) return;
         setUpcomingReservationsStatus('Loading...', 'soft');
         try {
-            const res = await fetch('/lab-admin/reservations/upcoming', { credentials: 'include' });
+            const res = await fetch('/lab-admin/reservations/actionable', { credentials: 'include' });
             if (res.status === 401) {
                 renderUpcomingReservationsMessage('Unauthorized: check LAB_MANAGER_TOKEN.');
                 setUpcomingReservationsStatus('Unauthorized', 'bad');
@@ -1715,10 +1715,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const reservations = Array.isArray(body.reservations) ? body.reservations : [];
             renderUpcomingReservations(reservations);
             const suffix = body.truncated ? '+' : '';
-            setUpcomingReservationsStatus(`${body.count ?? reservations.length}${suffix} upcoming`, 'soft');
+            setUpcomingReservationsStatus(`${body.count ?? reservations.length}${suffix} actionable`, 'soft');
         } catch (err) {
             console.error(err);
-            renderUpcomingReservationsMessage('Unable to load upcoming reservations.');
+            renderUpcomingReservationsMessage('Unable to load actionable reservations.');
             setUpcomingReservationsStatus('Unavailable', 'bad');
         }
     }
@@ -1726,7 +1726,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderUpcomingReservations(reservations) {
         if (!upcomingReservationsListEl) return;
         if (!reservations.length) {
-            renderUpcomingReservationsMessage('No upcoming reservations for your labs.');
+            renderUpcomingReservationsMessage('No actionable reservations for your labs.');
             return;
         }
 
@@ -1734,22 +1734,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const key = String(reservation.reservationKey || '');
             const status = String(reservation.statusLabel || 'UNKNOWN');
             const statusClass = reservation.status === 1 ? 'good' : reservation.status === 0 ? 'warn' : 'soft';
-            const reasonOptions = reservation.status === 0
-                ? [
-                    [1, 'Manual cancellation'],
-                    [2, 'Not eligible'],
-                    [6, 'Technical issue'],
-                    [7, 'Provider unavailable']
-                ]
-                : [
-                    [1, 'Manual cancellation'],
-                    [6, 'Technical issue'],
-                    [7, 'Provider unavailable']
-                ];
-            const actions = reservation.cancellable
+            const reasonOptions = Array.isArray(reservation.cancellationOptions)
+                ? reservation.cancellationOptions
+                    .map(option => ({
+                        code: Number(option.reasonCode),
+                        label: String(option.label || `Reason ${option.reasonCode}`),
+                        deadline: Number(option.deadline),
+                        penalty: Number(option.reputationPenalty)
+                    }))
+                    .filter(option => Number.isInteger(option.code))
+                : [];
+            const actions = reservation.cancellable && reasonOptions.length
                 ? `<div class="reservation-item-actions">
                     <select class="reservation-reason" aria-label="Cancellation reason" data-reservation-reason>
-                        ${reasonOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}
+                        ${reasonOptions.map(option => {
+                            const deadline = Number.isFinite(option.deadline)
+                                ? `until ${formatReservationDate(option.deadline)}`
+                                : 'deadline unavailable';
+                            const penalty = Number.isFinite(option.penalty)
+                                ? `${option.penalty} reputation`
+                                : 'penalty unavailable';
+                            return `<option value="${option.code}">Reason ${option.code}: ${escapeHtml(option.label)} · ${escapeHtml(penalty)} · ${escapeHtml(deadline)}</option>`;
+                        }).join('')}
                     </select>
                     <button type="button" class="mini-btn danger" data-action="cancel-reservation" data-reservation-key="${escapeHtml(key)}">
                         ${reservation.status === 0 ? 'Decline request' : 'Cancel reservation'}
@@ -1832,7 +1838,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.status === 403) throw new Error('Access denied: provider reservation administration is not available.');
             if (!res.ok) throw new Error(body.error || `Cancellation failed (HTTP ${res.status}).`);
             showToast('Reservation cancellation submitted', 'success');
-            await loadUpcomingReservations();
+            await loadActionableReservations();
         } catch (err) {
             console.error(err);
             showToast(err.message || 'Reservation cancellation failed', 'error');

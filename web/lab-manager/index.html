@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=reservations-v5">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=reservations-v6">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -493,13 +493,13 @@
                 <div class="card reservation-card">
                     <div class="card-header">
                         <div>
-                            <h2>Upcoming Reservations</h2>
-                            <p>Review upcoming bookings and cancel them before they start.</p>
+                            <h2>Actionable Reservations</h2>
+                            <p>Review future bookings and service failures that are still eligible for provider cancellation.</p>
                         </div>
                         <span class="pill soft" id="upcomingReservationsStatus">Loading...</span>
                     </div>
                     <div class="card-body list fixed-height reservation-list" id="upcomingReservationsList" aria-live="polite">
-                        <div class="empty">Loading upcoming reservations...</div>
+                        <div class="empty">Loading actionable reservations...</div>
                     </div>
                 </div>
             </section>
@@ -706,7 +706,7 @@
     <div id="toast" class="toast"></div>
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v2"></script>
-    <script src="../assets/js/lab-manager.js?v=reservations-v5"></script>
+    <script src="../assets/js/lab-manager.js?v=reservations-v6"></script>
     <script src="../assets/js/lab-publisher.js?v=fmu-resource-autodetect-v2"></script>
 </body>
 </html>
