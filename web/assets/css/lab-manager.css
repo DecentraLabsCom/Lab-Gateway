@@ -849,6 +849,11 @@ body {
     gap: 10px;
     padding-top: 10px;
 }
+.reservation-pagination {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0 4px;
+}
 .activity-meta { color: var(--muted); font-size: 0.9rem; }
 .empty { padding: 14px; color: var(--muted); background: #0f1422; border: 1px dashed var(--border); border-radius: 10px; }
 .host-input {

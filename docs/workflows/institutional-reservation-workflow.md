@@ -190,17 +190,21 @@ The chain may also cancel or settle reservations during expiry/release processin
 ## Listing, deletion and settlement boundaries
 
 Listing is performed through the current `listLab`/`unlistLab` contract
-surface. The Marketplace and Gateway perform a metadata health preflight before
-listing; the atomic `addAndList` path applies the same gate before submitting
-the transaction. Legacy `listToken`/`unlistToken` selectors are not part of
-the effective Diamond allowlist.
+surface. `Listed` means that new reservation intake is enabled; `Unlisted`
+keeps the lab record and existing obligations but stops new intake. The
+Marketplace and Gateway perform a metadata health preflight before listing;
+the atomic `addAndList` path applies the same gate before submitting the
+transaction. Legacy `listToken`/`unlistToken` selectors are not part of the
+effective Diamond allowlist.
 
-Deleting a lab does not cancel reservations or erase settlement history. The
-contract guards deletion while active reservations or receivables remain, and
-the provider UI reports that existing reservations are not cancelled
-automatically. Settlement claims require a non-zero unique claim ID,
-reservations reference and invoice reference; the backend persists and
-deduplicates the corresponding invoice/payment references.
+Deleting a lab is the irreversible on-chain `deleteLab` operation: it burns the
+lab token and removes the active record. It does not cancel reservations or
+erase settlement history, and the contract guards deletion while active
+reservations or receivables remain. Gateway-hosted content is hidden through a
+separate local tombstone/retention flow; local purge is not an on-chain state.
+Settlement claims require a non-zero unique claim ID, reservations reference
+and invoice reference; the backend persists and deduplicates the corresponding
+invoice/payment references.
 
 ## Operational behavior
 

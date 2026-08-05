@@ -817,10 +817,15 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
+            assertLabMutationSuccess(result, editing ? 'Update' : 'Publish');
             const transactionMessage = result.transactionHash
                 ? ` Tx: ${result.transactionHash}`
                 : (editing ? ' Metadata saved without an on-chain transaction.' : '');
-            setStatus(`${editing ? 'Updated' : 'Published'}.${transactionMessage}${result.labId ? ' Lab #' + result.labId : ''}`, false);
+            const action = String(result.action || '').toLowerCase();
+            const createLabel = result.action === 'existingLab' || result.status === 'already_exists'
+                ? 'Existing lab'
+                : action.includes('andlist') ? 'Listed' : 'Created';
+            setStatus(`${editing ? 'Updated' : createLabel}.${transactionMessage}${result.labId ? ' Lab #' + result.labId : ''}`, false);
             if (editing) clearEditMode(false);
             await loadPublisherData();
         } catch (err) {
@@ -1255,7 +1260,7 @@
                         <button class="mini-btn" type="button" data-lab-action="${lab.listed ? 'unlist' : 'list'}" data-lab-id="${escapeAttr(lab.labId)}" title="${lab.listed ? 'Unlist' : 'List'} Lab #${escapeAttr(lab.labId)}" aria-label="${lab.listed ? 'Unlist' : 'List'} Lab #${escapeAttr(lab.labId)}">
                             <i class="fas ${lab.listed ? 'fa-eye-slash' : 'fa-eye'}"></i>
                         </button>
-                        <button class="mini-btn danger" type="button" data-lab-action="delete" data-lab-id="${escapeAttr(lab.labId)}" title="Delete Lab #${escapeAttr(lab.labId)}" aria-label="Delete Lab #${escapeAttr(lab.labId)}">
+                        <button class="mini-btn danger" type="button" data-lab-action="delete" data-lab-id="${escapeAttr(lab.labId)}" title="Delete Lab #${escapeAttr(lab.labId)} on-chain" aria-label="Delete Lab #${escapeAttr(lab.labId)} on-chain">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -1451,6 +1456,7 @@
             const result = await fetchJson(`/lab-admin/labs/${encodeURIComponent(lab.labId)}/${shouldList ? 'list' : 'unlist'}`, {
                 method: 'POST',
             });
+            assertLabMutationSuccess(result, shouldList ? 'List' : 'Unlist');
             setStatus(`${shouldList ? 'Listed' : 'Unlisted'} Lab #${lab.labId}. Tx: ${result.transactionHash || 'pending'}`, false);
             await loadPublisherData();
         } catch (err) {
@@ -1461,12 +1467,13 @@
     }
 
     async function deleteLab(lab, button) {
-        if (!window.confirm(`Delete Lab #${lab.labId}? This cannot be undone on-chain.`)) return;
+        if (!window.confirm(`Delete Lab #${lab.labId} on-chain? This burns the lab token and cannot be undone. Use Unlist to stop new bookings while preserving the lab record.`)) return;
         button.disabled = true;
         try {
             const result = await fetchJson(`/lab-admin/labs/${encodeURIComponent(lab.labId)}`, { method: 'DELETE' });
+            assertLabMutationSuccess(result, 'Delete');
             if (state.editingLabId === String(lab.labId)) clearEditMode(false);
-            setStatus(`Deleted Lab #${lab.labId}. Tx: ${result.transactionHash || 'pending'}`, false);
+            setStatus(`Deleted Lab #${lab.labId} on-chain. Gateway content is hidden and retained according to its purge policy. Tx: ${result.transactionHash || 'pending'}`, false);
             await loadPublisherData();
         } catch (err) {
             setStatus(err.message || 'Delete failed', true);
@@ -1718,6 +1725,26 @@
             throw new Error(body.error || body.detail || `HTTP ${res.status}`);
         }
         return body;
+    }
+
+    function assertLabMutationSuccess(result, action) {
+        if (result?.success !== true) {
+            throw new Error(result?.error || `${action} failed`);
+        }
+
+        // Metadata-only updates and duplicate publications are successful
+        // idempotent outcomes without a new transaction receipt.
+        if (result.action === 'metadataOnly' || result.status === 'offchain_updated'
+            || result.action === 'existingLab' || result.status === 'already_exists') {
+            return result;
+        }
+
+        const status = String(result.status || '').trim().toLowerCase();
+        const receiptSucceeded = ['0x1', '1', 'ok', 'success', 'succeeded', 'confirmed'].includes(status);
+        if (!result.transactionHash || !receiptSucceeded) {
+            throw new Error(`${action} transaction did not confirm on-chain`);
+        }
+        return result;
     }
 
     function setStatus(message, isError) {

@@ -327,6 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const upcomingReservationsListEl = $('#upcomingReservationsList');
     const upcomingReservationsStatusEl = $('#upcomingReservationsStatus');
     const TIMELINE_DEFAULT_LIMIT = 100;
+    const ACTIONABLE_RESERVATIONS_PAGE_SIZE = 100;
     const timelineState = {
         reservationId: null,
         limit: TIMELINE_DEFAULT_LIMIT,
@@ -334,6 +335,14 @@ document.addEventListener('DOMContentLoaded', () => {
         base: null,
         pagination: null,
         nextOffset: 0,
+        loading: false
+    };
+    const actionableReservationsState = {
+        reservations: [],
+        offset: 0,
+        nextOffset: 0,
+        total: 0,
+        hasMore: false,
         loading: false
     };
     
@@ -1693,11 +1702,24 @@ document.addEventListener('DOMContentLoaded', () => {
         await requestTimelinePage(0, false);
     }
 
-    async function loadActionableReservations() {
+    async function loadActionableReservations({ append = false } = {}) {
         if (!upcomingReservationsListEl) return;
-        setUpcomingReservationsStatus('Loading...', 'soft');
+        if (actionableReservationsState.loading) return;
+        if (!append) {
+            actionableReservationsState.reservations = [];
+            actionableReservationsState.offset = 0;
+            actionableReservationsState.nextOffset = 0;
+            actionableReservationsState.total = 0;
+            actionableReservationsState.hasMore = false;
+        }
+        actionableReservationsState.loading = true;
+        setUpcomingReservationsStatus(append ? 'Loading more...' : 'Loading...', 'soft');
         try {
-            const res = await fetch('/lab-admin/reservations/actionable', { credentials: 'include' });
+            const params = new URLSearchParams({
+                limit: String(ACTIONABLE_RESERVATIONS_PAGE_SIZE),
+                offset: String(actionableReservationsState.nextOffset)
+            });
+            const res = await fetch(`/lab-admin/reservations/actionable?${params.toString()}`, { credentials: 'include' });
             if (res.status === 401) {
                 renderUpcomingReservationsMessage('Unauthorized: check LAB_MANAGER_TOKEN.');
                 setUpcomingReservationsStatus('Unauthorized', 'bad');
@@ -1712,28 +1734,64 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) {
                 throw new Error(body.error || `Unable to load reservations (HTTP ${res.status}).`);
             }
-            const reservations = Array.isArray(body.reservations) ? body.reservations : [];
-            renderUpcomingReservations(reservations);
-            const suffix = body.truncated ? '+' : '';
-            setUpcomingReservationsStatus(`${body.count ?? reservations.length}${suffix} actionable`, 'soft');
+            const page = Array.isArray(body.reservations) ? body.reservations : [];
+            const pagination = body.pagination || {};
+            const returned = Number.isFinite(Number(pagination.returned))
+                ? Number(pagination.returned)
+                : page.length;
+            const nextOffset = Number.isFinite(Number(pagination.nextOffset))
+                ? Number(pagination.nextOffset)
+                : Number.isFinite(Number(body.nextOffset))
+                    ? Number(body.nextOffset)
+                    : actionableReservationsState.nextOffset + returned;
+            actionableReservationsState.reservations = append
+                ? actionableReservationsState.reservations.concat(page)
+                : page;
+            actionableReservationsState.offset = Number.isFinite(Number(pagination.offset))
+                ? Number(pagination.offset)
+                : Number.isFinite(Number(body.offset))
+                    ? Number(body.offset)
+                    : actionableReservationsState.offset;
+            actionableReservationsState.nextOffset = nextOffset;
+            actionableReservationsState.total = Number.isFinite(Number(pagination.total))
+                ? Number(pagination.total)
+                : Number.isFinite(Number(body.totalCount))
+                    ? Number(body.totalCount)
+                    : actionableReservationsState.reservations.length;
+            actionableReservationsState.hasMore = typeof pagination.hasMore === 'boolean'
+                ? pagination.hasMore
+                : typeof body.hasMore === 'boolean'
+                    ? body.hasMore
+                    : Boolean(body.truncated);
+            renderUpcomingReservations();
+            const loadedCount = actionableReservationsState.reservations.length;
+            const totalCount = actionableReservationsState.total || loadedCount;
+            const status = actionableReservationsState.hasMore
+                ? `${loadedCount} of ${totalCount} actionable`
+                : `${totalCount} actionable`;
+            setUpcomingReservationsStatus(status, 'soft');
         } catch (err) {
             console.error(err);
-            renderUpcomingReservationsMessage('Unable to load actionable reservations.');
+            if (!append) renderUpcomingReservationsMessage('Unable to load actionable reservations.');
             setUpcomingReservationsStatus('Unavailable', 'bad');
+        } finally {
+            actionableReservationsState.loading = false;
         }
     }
 
-    function renderUpcomingReservations(reservations) {
+    function renderUpcomingReservations() {
         if (!upcomingReservationsListEl) return;
+        const reservations = actionableReservationsState.reservations;
         if (!reservations.length) {
             renderUpcomingReservationsMessage('No actionable reservations for your labs.');
             return;
         }
 
-        upcomingReservationsListEl.innerHTML = reservations.map(reservation => {
+        const items = reservations.map(reservation => {
             const key = String(reservation.reservationKey || '');
             const status = String(reservation.statusLabel || 'UNKNOWN');
-            const statusClass = reservation.status === 1 ? 'good' : reservation.status === 0 ? 'warn' : 'soft';
+            const numericStatus = normalizeReservationStatus(reservation.status);
+            const statusClass = numericStatus === 1 ? 'good' : numericStatus === 0 ? 'warn' : 'soft';
             const reasonOptions = Array.isArray(reservation.cancellationOptions)
                 ? reservation.cancellationOptions
                     .map(option => ({
@@ -1758,14 +1816,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         }).join('')}
                     </select>
                     <button type="button" class="mini-btn danger" data-action="cancel-reservation" data-reservation-key="${escapeHtml(key)}">
-                        ${reservation.status === 0 ? 'Decline request' : 'Cancel reservation'}
+                        ${cancellationButtonLabel(numericStatus)}
                     </button>
                 </div>`
                 : `<div class="reservation-cancel-note">Cancellation unavailable for this status.</div>`;
             const renter = shortAddress(reservation.renter);
             const labLabel = reservation.labName || `Lab #${reservation.labId}`;
             const institution = reservation.institutionName || shortAddress(reservation.institutionAddress);
-            return `<article class="reservation-item" data-reservation-key="${escapeHtml(key)}">
+            return `<article class="reservation-item" data-reservation-key="${escapeHtml(key)}" data-reservation-status="${numericStatus ?? ''}">
                 <div class="reservation-item-heading">
                     <span class="item-title">${escapeHtml(labLabel)}</span>
                     <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
@@ -1782,6 +1840,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </article>`;
         }).join('');
+        const loadMore = actionableReservationsState.hasMore
+            ? '<div class="reservation-pagination"><button type="button" class="mini-btn primary" data-action="load-more-actionable">Load more</button></div>'
+            : '';
+        upcomingReservationsListEl.innerHTML = `${items}${loadMore}`;
     }
 
     function renderUpcomingReservationsMessage(message) {
@@ -1803,6 +1865,17 @@ document.addEventListener('DOMContentLoaded', () => {
             .format(new Date(timestamp * 1000));
     }
 
+    function normalizeReservationStatus(status) {
+        const numericStatus = Number(status);
+        return Number.isInteger(numericStatus) ? numericStatus : null;
+    }
+
+    function cancellationButtonLabel(status) {
+        if (status === 0) return 'Decline request';
+        if (status === 2) return 'Report service failure';
+        return 'Cancel reservation';
+    }
+
     function shortAddress(value, prefixLength = 6, suffixLength = 4) {
         const text = String(value || '');
         if (text.length <= prefixLength + suffixLength + 3) return text;
@@ -1810,14 +1883,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function handleUpcomingReservationActions(event) {
+        const loadMoreButton = event.target.closest('[data-action="load-more-actionable"]');
+        if (loadMoreButton && upcomingReservationsListEl.contains(loadMoreButton)) {
+            await loadActionableReservations({ append: true });
+            return;
+        }
         const button = event.target.closest('[data-action="cancel-reservation"]');
         if (!button || !upcomingReservationsListEl.contains(button)) return;
         const row = button.closest('.reservation-item');
         const key = row?.dataset.reservationKey;
+        const reservationStatus = normalizeReservationStatus(row?.dataset.reservationStatus);
         const reasonEl = row?.querySelector('[data-reservation-reason]');
         const reasonCode = Number(reasonEl?.value);
         if (!key || !Number.isInteger(reasonCode)) return;
-        if (!window.confirm('Cancel this upcoming reservation? A confirmed reservation returns its full price as service credits.')) {
+        const confirmationMessage = reservationStatus === 2
+            ? 'Report provider service failure for this access-authorized reservation? The full price returns as service credits.'
+            : 'Cancel this upcoming reservation? A confirmed reservation returns its full price as service credits.';
+        if (!window.confirm(confirmationMessage)) {
             return;
         }
 

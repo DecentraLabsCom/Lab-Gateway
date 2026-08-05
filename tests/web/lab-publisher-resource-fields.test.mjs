@@ -118,7 +118,13 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
-    window.__labPublisherTestHooks = { state, syncResourceTypeFields, applySelectedResource, buildMetadata };
+    window.__labPublisherTestHooks = {
+      state,
+      syncResourceTypeFields,
+      applySelectedResource,
+      buildMetadata,
+      assertLabMutationSuccess,
+    };
 })();`
   );
   const document = createDocument();
@@ -177,6 +183,28 @@ hooks.syncResourceTypeFields();
 
 assert.equal(document.getElementById('labAccessURI').value, 'https://lite.example.edu/guacamole');
 assert.equal(document.getElementById('labAccessKey').value, 'guac:id:42');
+
+assert.throws(
+  () => hooks.assertLabMutationSuccess({
+    success: true,
+    action: 'listLab',
+    status: '0x0',
+    transactionHash: '0xreverted',
+  }, 'List'),
+  /did not confirm on-chain/,
+  'A reverted receipt must not be presented as a successful lab action'
+);
+assert.doesNotThrow(() => hooks.assertLabMutationSuccess({
+  success: true,
+  action: 'updateLab',
+  status: '0x1',
+  transactionHash: '0xconfirmed',
+}, 'Update'));
+assert.doesNotThrow(() => hooks.assertLabMutationSuccess({
+  success: true,
+  action: 'metadataOnly',
+  status: 'offchain_updated',
+}, 'Update'));
 
 const fetchCalls = [];
 const metadataByFile = {

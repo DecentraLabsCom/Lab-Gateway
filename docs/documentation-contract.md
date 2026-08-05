@@ -45,6 +45,26 @@ The reservation and session workflows are separate: a confirmed reservation
 does not itself create a session, and `SessionStarted` is durable economic
 evidence rather than a synonym for accepting an access request.
 
+## Current lab lifecycle vocabulary
+
+The following terms are deliberately separated between the on-chain protocol
+and local content handling. User interfaces may explain these states in plain
+language, but must not use them as interchangeable aliases:
+
+| Term | Meaning |
+| --- | --- |
+| `Created` | The lab record/token exists on-chain; it may be listed or unlisted. |
+| `Listed` | The on-chain lab accepts new reservation intake. |
+| `Unlisted` | The on-chain lab remains owned and editable but does not accept new reservations; existing obligations remain. |
+| `Deleted` | The on-chain lab is unlisted, burned and removed from the active catalogue. This is irreversible on-chain and does not cancel historical reservations or erase settlement history. |
+| `PendingTombstone` / `PROCESSING` | Local backend hand-off states that reserve or apply deletion of gateway-hosted content. |
+| `Tombstoned` / `PURGED` | Local content states: content is hidden immediately after tombstoning, then removed after the retention deadline. |
+
+“Published” may describe the provider workflow, but it is not a protocol state.
+“Delete metadata”, “remove listing” and “purge content” are different actions:
+the first concerns application-managed metadata, the second is `unlistLab`,
+and the third is delayed local storage cleanup.
+
 External reservation timing is a separate invariant: the on-chain pending
 request TTL is 5 minutes and the minimum creation lead is 10 minutes. The
 canonical provider listener keeps its confirmation/canonicality gate and uses

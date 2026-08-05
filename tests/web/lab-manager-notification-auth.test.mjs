@@ -45,7 +45,7 @@ function createElement(id) {
   return element;
 }
 
-function loadLabManager({ billingResponse }) {
+function loadLabManager({ billingResponse, actionableResponse = null }) {
   const ids = [
     'driver', 'enabled', 'from', 'fromName', 'defaultTo', 'timezone',
     'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'smtpStartTls',
@@ -105,8 +105,11 @@ function loadLabManager({ billingResponse }) {
     },
     fetch: (url, options = {}) => {
       fetchCalls.push({ url: String(url), options });
-      return String(url) === '/billing/admin/notifications'
+      const parsedUrl = new URL(String(url), 'http://localhost');
+      return parsedUrl.pathname === '/billing/admin/notifications'
         ? billingResponse
+        : parsedUrl.pathname === '/lab-admin/reservations/actionable' && actionableResponse
+          ? actionableResponse
         : Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
     },
   });
@@ -171,4 +174,55 @@ test('cancellation click reads the reason from the reservation row and posts it'
   assert.ok(cancellation);
   assert.match(cancellation.url, /\/lab-admin\/reservations\/0x[a-f0-9]{64}\/cancel$/);
   assert.deepEqual(JSON.parse(cancellation.options.body), { reasonCode: 1 });
+});
+
+test('renders the provider service-failure action for an access-authorized reservation', async () => {
+  const reservationKey = `0x${'cd'.repeat(32)}`;
+  const { elements } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    actionableResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        pagination: {
+          offset: 0,
+          limit: 100,
+          returned: 1,
+          total: 501,
+          nextOffset: 1,
+          hasMore: true,
+        },
+        reservations: [{
+          reservationKey,
+          status: 2,
+          statusLabel: 'ACCESS_AUTHORIZED',
+          cancellable: true,
+          cancellationOptions: [{
+            reasonCode: 8,
+            label: 'Service failure',
+            deadline: Math.floor(Date.now() / 1000) + 3600,
+            reputationPenalty: -3,
+          }],
+          start: Math.floor(Date.now() / 1000) - 60,
+          end: Math.floor(Date.now() / 1000) + 3600,
+          labId: '42',
+          priceCredits: '1',
+          providerShareCredits: '0.9',
+        }],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const rendered = elements.get('upcomingReservationsList').innerHTML;
+  assert.match(rendered, /Reason 8/);
+  assert.match(rendered, /Report service failure/);
+  assert.match(rendered, /data-action="cancel-reservation"/);
+  assert.match(rendered, /data-action="load-more-actionable"/);
 });
