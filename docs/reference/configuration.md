@@ -54,6 +54,7 @@ CORS_ALLOWED_ORIGINS=https://marketplace.example.edu
 # blockchain-services/.env
 CONTRACT_ADDRESS=0x...
 ETHEREUM_SEPOLIA_RPC_URL=https://rpc.example.edu
+BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ALLOWED_ORIGINS=https://lab.example.edu,https://marketplace.example.edu

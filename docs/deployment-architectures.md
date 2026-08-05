@@ -21,6 +21,13 @@ the deployed result with [operations and health](reference/operations-and-health
 4. Use **standalone backend + N Lite** when the control plane is intentionally
    independent of any access-plane gateway.
 
+The backend role is configured separately with
+`BLOCKCHAIN_SERVICES_MODE=provider-consumer` or `consumer-only`. A standalone
+consumer backend can participate in the same remote-control-plane topology
+without acquiring provider registration, lab publication or access-gateway
+authority. `ISSUER` selects the JWT authority; it does not select the backend
+role.
+
 Every Lite needs a unique public origin/gateway ID, a control-plane-issued
 trust bundle, and an explicit protected provisioner route. Do not publish a
 lab to a Lite `accessURI` until those three conditions are true.
@@ -96,6 +103,7 @@ LAB_ADMIN_BACKEND_URL=
 LAB_MANAGER_TOKEN=<strong-local-operator-token>
 
 # blockchain-services/.env
+BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ```
@@ -189,6 +197,7 @@ each Lite as an access plane:
 
 ```env
 # standalone blockchain-services/.env
+BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ```

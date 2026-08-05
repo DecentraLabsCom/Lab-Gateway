@@ -40,6 +40,7 @@ sequenceDiagram
 Provider features are required on the control plane:
 
 ```env
+BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 SAML_IDP_TRUST_MODE=whitelist

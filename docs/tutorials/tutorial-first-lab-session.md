@@ -31,8 +31,8 @@ token, and opens an authenticated Guacamole window pointing at your lab computer
 ## Part 1 — Register the institution as a lab provider
 
 Provider registration follows a two-system handshake: the **Marketplace** generates a
-signed provisioning token, and the **Lab Gateway** applies it to complete both local
-configuration and on-chain registration in a single step.
+signed provisioning token, and the **Lab Gateway** applies it to complete the remote
+on-chain registration and the local configuration commit.
 
 > **Precondition:** this tutorial assumes you deployed Lab Gateway in **provider+consumer mode**
 > by following one of the [installation guides](../install/). If you installed in consumer-only
@@ -68,17 +68,19 @@ to complete the on-chain provider registration on your behalf.
 What happens next (automatically):
 
 - `blockchain-services` validates the token signature against the Marketplace JWKS.
-- Configuration fields (institution name, email, country, organisation, gateway URL) are
-  saved and locked to the values encoded in the token.
 - `blockchain-services` calls back to the Marketplace to trigger on-chain registration:
   wallet address receives `PROVIDER_ROLE` and `INSTITUTION_ROLE`, and the gateway's
   auth endpoint is recorded in the smart contract.
-- The dashboard shows **Provider Token Applied** once the blockchain transaction confirms.
+- After the Marketplace confirms the transaction, `blockchain-services` writes the
+  token-derived fields and `provider.registered` together as one atomic replacement of
+  `config/provider.properties`. The dashboard shows **Provider Token Applied** only after
+  this local snapshot is committed as well.
 
-> If the dashboard shows **Provider Token Saved** (not Applied), the on-chain step did
-> not complete yet. Use the **Retry registration** button after verifying your
-> institutional wallet has been created (Step 5 / Section "Institutional Wallet Setup"
-> in the installation guide).
+> If the local snapshot cannot be committed after the on-chain transaction, the endpoint
+> returns a retryable `LOCAL_REGISTRATION_PERSISTENCE_FAILED` response. The previous
+> properties snapshot is left intact; fix the filesystem/configuration issue and retry
+> the same provisioning token so the Marketplace can reconcile its already-active
+> registration without submitting a duplicate provider transaction.
 
 ---
 

@@ -1119,6 +1119,7 @@ echo
 # Full mode enables provider registration and provider-side reservation
 # automation. The contract still limits external confirmation/denial to the
 # current lab owner or its authorized backend.
+update_env_var "$BLOCKCHAIN_ENV_FILE" "BLOCKCHAIN_SERVICES_MODE" "provider-consumer"
 update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_ENABLED" "true"
 update_env_var "$BLOCKCHAIN_ENV_FILE" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 # Keep the metadata SSRF boundary explicit in generated provider deployments.

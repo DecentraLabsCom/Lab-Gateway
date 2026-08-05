@@ -49,7 +49,11 @@ stateDiagram-v2
 
 ## Inputs bound into a reservation intent
 
-Marketplace requires an authenticated SSO session and a PUC. It validates a future start time, positive duration, laboratory identity, laboratory price, and the user's institutional affiliation. It computes:
+Marketplace requires an authenticated SSO session and a PUC. It validates a
+start at least ten minutes in the future, positive duration, laboratory
+identity, laboratory price, and the user's institutional affiliation. The
+contract repeats this lead-time check, so a direct institutional backend cannot
+shorten the provider's decision window. It computes:
 
 - `pucHash`: hash of the normalized PUC;
 - `assertionHash`: hash of the SAML assertion;
@@ -98,7 +102,14 @@ serializes signer access, and calls `cancelIntent` while the intent is still
 executed or cancelled intent is removed from the lifecycle store without a
 second transaction.
 
-The consumer backend accepts an intent only after validating its shape, SAML assertion and assertion-hash binding, replay rules, WebAuthn assertion, expiry, EIP-712 signature, and trusted-signer policy. Accepted intents are persisted and move through `QUEUED`, `AUTHORIZED_PENDING_REGISTRATION`, `IN_PROGRESS`, `EXECUTED`, `FAILED`, or `REJECTED` as applicable.
+The consumer backend accepts an intent only after validating its shape, SAML assertion and assertion-hash binding, replay rules, WebAuthn assertion, expiry, EIP-712 signature, and trusted-signer policy. Accepted intents are persisted and move through `QUEUED`, `AUTHORIZED_PENDING_REGISTRATION`, `IN_PROGRESS`, `EXECUTED`, `FAILED`, or `REJECTED` as applicable. `EXECUTED` means only that the intent transaction was mined successfully and consumed the registered intent; it is not a reservation confirmation.
+
+Intent status responses therefore expose `reservationStatus` separately. The
+backend reads this value from `getReservation(reservationKey)` and reports
+`pending`, `confirmed`, `access_authorized`, `settled`, `cancelled`, or
+`unknown`. Marketplace may show a reservation as confirmed only for
+`confirmed` or a later lifecycle state. A missing or `unknown` value must stay
+in the pending/reconciliation path even when `status` is `executed`.
 
 ### Trust model for institutional execution
 
@@ -126,7 +137,7 @@ If the payer institution is also the current owner of the lab, Marketplace selec
 
 For an external lab, Marketplace selects `REQUEST_BOOKING`. The institution wallet or its registered backend executes the intent; the contract resolves the payer from the registered `schacHomeOrganization`, rather than treating the backend as a separate institution. `institutionalReservationRequestWithIntent` consumes the intent and creates a `PENDING` reservation. The request contains the payer institution, PUC hash, lab, start/end window, and computed reservation key.
 
-Confirmation verifies that the reservation is pending, the institution and PUC hash match the reservation, the provider/lab is eligible, the request period remains valid, and the payer's institutional treasury can spend the computed price. On success it captures the spend, reserves the physical-lab calendar interval where applicable, sets `CONFIRMED`, and emits `ReservationConfirmed`.
+Confirmation verifies that the reservation is pending, the institution and PUC hash match the reservation, the provider/lab is eligible, the request period remains valid, and the payer's institutional treasury can spend the computed price. The five-minute request TTL is the normal decision window; the ten-minute creation lead leaves it available for provider checks and transaction propagation. On success it captures the spend, reserves the physical-lab calendar interval where applicable, sets `CONFIRMED`, and emits `ReservationConfirmed`.
 
 The confirmation contract accepts external requests only from the current
 provider/lab owner or its registered backend, provided the supplied institution

@@ -40,6 +40,7 @@ sequenceDiagram
 El plano de control debe tener habilitadas las funciones de proveedor:
 
 ```env
+BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 SAML_IDP_TRUST_MODE=whitelist

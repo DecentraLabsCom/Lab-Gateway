@@ -74,6 +74,7 @@ FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 # blockchain-services/.env
 CONTRACT_ADDRESS=0xTuDireccionDeContrato
 ETHEREUM_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
+BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ALLOWED_ORIGINS=https://lab.tu-institucion.edu,https://marketplace-decentralabs.vercel.app

@@ -194,6 +194,7 @@ CONTRACT_ADDRESS=0xYourContractAddress
 ETHEREUM_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep
 
 # Provider features (required for full Lab Gateway mode)
+BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 

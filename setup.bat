@@ -885,6 +885,7 @@ echo.
 rem Full mode enables provider registration and provider-side reservation
 rem automation. The contract still limits external confirmation/denial to the
 rem current lab owner or its authorized backend.
+call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "BLOCKCHAIN_SERVICES_MODE" "provider-consumer"
 call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_ENABLED" "true"
 call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "FEATURES_PROVIDERS_REGISTRATION_ENABLED" "true"
 rem Keep the metadata SSRF boundary explicit in generated provider deployments.

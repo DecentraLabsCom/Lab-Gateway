@@ -80,6 +80,7 @@ also read the [configuration reference](../reference/configuration.md).
 # blockchain-services/.env
 CONTRACT_ADDRESS=0xYourContractAddress
 ETHEREUM_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
+BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ALLOWED_ORIGINS=https://lab.your-institution.edu,https://marketplace-decentralabs.vercel.app
