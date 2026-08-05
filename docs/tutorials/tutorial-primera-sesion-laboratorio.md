@@ -216,8 +216,10 @@ Esto inicia el flujo de autenticación:
    SAML/WebAuthn correspondientes.
 2. `blockchain-services` valida identidad, PUC, reserva, ventana temporal y el
    estado on-chain `ACCESS_AUTHORIZED` cuando el flujo lo exige.
-3. El backend devuelve un código opaco de un solo uso; OpenResty lo canjea
-   servidor a servidor y solo conserva el mapeo de sesión JTI seguro.
+3. El backend devuelve un código opaco con una reserva de canje de corta
+   duración; OpenResty valida localmente el JWT, el destino y el estado de la
+   sesión antes de confirmar el canje. Si la validación falla, libera la
+   reserva; solo conserva el mapeo de sesión JTI seguro después del commit.
 4. El navegador se redirige al Guacamole del gateway seleccionado sin incluir
    el JWT en la URL.
 

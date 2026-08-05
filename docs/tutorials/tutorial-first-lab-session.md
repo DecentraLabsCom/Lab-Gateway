@@ -214,8 +214,9 @@ authentication flow:
    evidence to the consumer/provider backend.
 2. `blockchain-services` validates identity, PUC, reservation, time window and
    on-chain `ACCESS_AUTHORIZED` state as required by the selected flow.
-3. The backend returns an opaque one-time access code; OpenResty redeems it
-   server-to-server and stores only the secure JTI session mapping.
+3. The backend returns an opaque access code; OpenResty reserves it server-to-server,
+   validates the returned JWT locally, and commits it only after the secure JTI
+   session mapping is ready.
 4. The browser is redirected to the selected gateway's Guacamole viewer without
    a JWT in the URL.
 

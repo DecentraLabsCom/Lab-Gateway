@@ -33,6 +33,10 @@ local admin_user = require_env("GUAC_ADMIN_USER")
 local admin_pass = require_env("GUAC_ADMIN_PASS")
 local server_name = os.getenv("SERVER_NAME") or "localhost"
 local https_port = os.getenv("HTTPS_PORT") or "443"
+local gateway_id = (server_name:gsub("%.$", "")):lower()
+if https_port and https_port ~= "" and https_port ~= "443" then
+    gateway_id = gateway_id .. ":" .. https_port
+end
 local auto_logout = os.getenv("AUTO_LOGOUT_ON_DISCONNECT") or "false"
 local guac_api_url = os.getenv("GUAC_API_URL")
 local default_guac_api_url = "http://guacamole:8080/guacamole/api"
@@ -115,6 +119,7 @@ end
 local guac_token_security_retention_seconds = api_session_timeout_minutes * 60 + 300
 
 config:set("server_name", server_name)
+config:set("gateway_id", gateway_id)
 config:set("guac_uri", "/guacamole")
 config:set("issuer", issuer)
 config:set("lite_mode", lite_mode and 1 or 0)

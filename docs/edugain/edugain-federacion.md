@@ -30,8 +30,10 @@ sequenceDiagram
     M->>B: JWT vinculado + aserción SAML
     B->>B: Verificar firma, emisor, PUC y afiliación
     B-->>M: Código de acceso opaco / contexto
-    M->>L: POST /auth/access con código
-    L->>B: Canje servidor a servidor si es remoto
+    M->>L: POST /auth/access-code/redeem
+    L->>B: Preparar reserva de canje
+    L->>L: Validar JWT, destino y estado local
+    L->>B: Confirmar o liberar la reserva
     L-->>Usuario: Cookie segura y URL limpia
 ```
 

@@ -39,6 +39,26 @@ def parse_map(values: dict[str, str], key: str) -> dict[str, str]:
     return {map_key.strip().lower(): map_value for map_key, map_value in parsed.items()}
 
 
+def canonical_gateway_id(values: dict[str, str]) -> str:
+    """Return the technical gateway identity represented by the local public origin.
+
+    SERVER_NAME remains hostname-only because OpenResty uses it to build URLs.
+    The identity used in credentials and JWTs is the normalized hostname plus
+    a non-default HTTPS port, so two gateways sharing a hostname cannot collide.
+    """
+    server_name = values.get("SERVER_NAME", "").strip().lower().rstrip(".")
+    if not server_name:
+        raise SystemExit("SERVER_NAME is required in Full mode")
+    raw_port = values.get("HTTPS_PORT", "443").strip() or "443"
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise SystemExit("HTTPS_PORT must be an integer between 1 and 65535") from exc
+    if port < 1 or port > 65535:
+        raise SystemExit("HTTPS_PORT must be an integer between 1 and 65535")
+    return server_name if port == 443 else f"{server_name}:{port}"
+
+
 def validate(path: Path) -> None:
     values = read_env(path)
     redeemers = parse_map(values, "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON")
@@ -51,9 +71,7 @@ def validate(path: Path) -> None:
     if issuer:
         return
 
-    gateway_id = values.get("SERVER_NAME", "").strip().lower().rstrip(".")
-    if not gateway_id:
-        raise SystemExit("SERVER_NAME is required in Full mode")
+    gateway_id = canonical_gateway_id(values)
 
     redeemer = values.get("AUTH_ACCESS_CODE_REDEEMER_TOKEN", "").strip()
     if redeemer.lower() in PLACEHOLDER_VALUES:
@@ -61,20 +79,26 @@ def validate(path: Path) -> None:
     if redeemers.get(gateway_id) != redeemer:
         raise SystemExit(
             "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON must contain the Full gateway "
-            "SERVER_NAME mapped to AUTH_ACCESS_CODE_REDEEMER_TOKEN"
+            "gateway ID (SERVER_NAME plus non-default HTTPS_PORT) mapped to "
+            "AUTH_ACCESS_CODE_REDEEMER_TOKEN"
         )
 
     observer_id = values.get("SESSION_OBSERVER_GATEWAY_ID", "").strip().lower().rstrip(".")
     if observer_id != gateway_id:
-        raise SystemExit("SESSION_OBSERVER_GATEWAY_ID must match SERVER_NAME in Full mode")
+        raise SystemExit("SESSION_OBSERVER_GATEWAY_ID must match the canonical gateway ID in Full mode")
     observer_secret = values.get("SESSION_OBSERVER_SIGNING_SECRET", "").strip()
     if observer_secret.lower() in PLACEHOLDER_VALUES:
         raise SystemExit("SESSION_OBSERVER_SIGNING_SECRET must be configured in Full mode")
     if observers.get(gateway_id) != observer_secret:
         raise SystemExit(
             "SESSION_OBSERVER_CREDENTIALS_JSON must contain the Full gateway "
-            "SERVER_NAME mapped to SESSION_OBSERVER_SIGNING_SECRET"
+            "gateway ID (SERVER_NAME plus non-default HTTPS_PORT) mapped to "
+            "SESSION_OBSERVER_SIGNING_SECRET"
         )
+
+    fmu_gateway_id = values.get("FMU_GATEWAY_ID", "").strip().lower().rstrip(".")
+    if fmu_gateway_id and fmu_gateway_id != gateway_id:
+        raise SystemExit("FMU_GATEWAY_ID must match the canonical gateway ID in Full mode")
 
 
 def main() -> int:

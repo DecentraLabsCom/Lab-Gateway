@@ -117,7 +117,8 @@ function _M.report_guacamole_session_observed(ngx_ctx, deps)
         reservationKey = reservation_key,
         jwtJti = jwt_jti,
         sessionId = "guac:" .. session_hash,
-        gatewayId = (deps and deps.gateway_id) or os.getenv("GATEWAY_ID") or ngx.shared.config:get("server_name"),
+        gatewayId = (deps and deps.gateway_id) or os.getenv("GATEWAY_ID")
+            or ngx.shared.config:get("gateway_id") or ngx.shared.config:get("server_name"),
         accessType = "guacamole",
         observedAt = reported_at,
         reportedAt = reported_at,

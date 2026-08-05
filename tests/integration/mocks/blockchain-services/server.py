@@ -21,6 +21,9 @@ rate_limit_buckets = defaultdict(lambda: {
     "last_refill": time.time()
 })
 issued_session_tickets = {}
+access_code_prepared = False
+access_code_redeemed = False
+ACCESS_CODE_REDEMPTION_HANDLE = "integration-redemption-handle"
 
 
 def check_rate_limit(client_ip: str) -> bool:
@@ -186,6 +189,7 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, 404, {"error": "not found"})
 
     def do_POST(self):
+        global access_code_prepared, access_code_redeemed
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
 
@@ -222,10 +226,40 @@ class Handler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(content_length) or b"{}")
             code = body.get("accessCode")
-            if code != "mock-access-code":
+            if code != "mock-access-code" or access_code_redeemed:
                 json_response(self, 401, {"error": "Invalid or expired access code"})
                 return
-            json_response(self, 200, {"token": "mock-saml-jwt-token", "labURL": "https://localhost:18444/guacamole/"})
+            if access_code_prepared:
+                json_response(self, 409, {"error": "Access code redemption is already in progress"})
+                return
+            access_code_prepared = True
+            json_response(self, 200, {
+                "token": "mock-saml-jwt-token",
+                "labURL": "https://localhost:18444/guacamole/",
+                "redemptionHandle": ACCESS_CODE_REDEMPTION_HANDLE,
+            })
+            return
+
+        if parsed.path in {"/auth/access-code/redeem/commit", "/auth/access-code/redeem/release"}:
+            if not self.check_rate_limit_and_respond():
+                return
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(content_length) or b"{}")
+            if body.get("accessCode") != "mock-access-code" or body.get("redemptionHandle") != ACCESS_CODE_REDEMPTION_HANDLE:
+                json_response(self, 401, {"error": "Invalid or expired access-code redemption"})
+                return
+            if parsed.path.endswith("/commit"):
+                if access_code_redeemed:
+                    self.send_response(204)
+                    self.end_headers()
+                    return
+                if not access_code_prepared:
+                    json_response(self, 401, {"error": "Invalid or expired access-code redemption"})
+                    return
+                access_code_redeemed = True
+            access_code_prepared = False
+            self.send_response(204)
+            self.end_headers()
             return
 
         if parsed.path == "/auth/fmu/session-ticket/issue":

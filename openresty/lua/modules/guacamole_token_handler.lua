@@ -100,7 +100,7 @@ local function secure_reservation_token(ngx, dict, username, token, cjson, deps)
         username = username,
         reservationKey = reservation_key,
         jwtJti = jwt_jti,
-        gatewayId = ngx.shared.config:get("server_name"),
+        gatewayId = ngx.shared.config:get("gateway_id") or ngx.shared.config:get("server_name"),
         expiresAt = jwt_exp,
     }, deps and deps.revocation_delivery)
     if not ok or not registered then

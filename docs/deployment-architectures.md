@@ -131,7 +131,9 @@ LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 
 Use a Full-issued trust bundle whenever possible. It binds the Lite origin to
 `ISSUER`, `FMU_GATEWAY_ID`, `FMU_JWT_AUDIENCE`, the session-observer credential
-and the Guacamole provisioner credential. A Lite setup without a remote
+and the Guacamole provisioner credential. The technical gateway ID is the
+normalized public host plus `:port` for a non-default HTTPS port; `SERVER_NAME`
+stays hostname-only for local URL construction. A Lite setup without a remote
 `LAB_ADMIN_BACKEND_URL` deliberately blocks on-chain lab administration.
 
 The local `/auth/**` surface is disabled in Lite mode. Access-code redemption,
@@ -152,7 +154,8 @@ LAB_ADMIN_BACKEND_TOKEN=<token-accepted-by-full-lab-admin>
 LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 ```
 
-Issue one trust bundle per public Lite origin:
+Issue one trust bundle per public Lite origin (the generated filename replaces
+`:` with `_`, but the ID inside the bundle retains the port):
 
 ```bash
 scripts/issue-lite-trust-bundle.sh \
@@ -180,7 +183,9 @@ sequenceDiagram
     L->>G: Create local Guacamole user/permission
     F-->>M: Opaque access code and Lite accessURI
     M->>L: POST /auth/access with code
-    L->>F: Redeem code and validate issuer/gateway claims
+    L->>F: Prepare redemption handle
+    L->>L: Validate JWT, destination and local state
+    L->>F: Commit handle, or release on failure
     L-->>M: Secure cookie and clean local Guacamole URL
     G->>S: RDP/WinRM/FMUs on private network
 ```
@@ -237,7 +242,8 @@ For every composite deployment verify:
 
 - the issuer/JWKS origin and `accessURI` are intentionally different where
   required;
-- every Lite has a unique `FMU_GATEWAY_ID` and observer signing secret;
+- every Lite has a unique `FMU_GATEWAY_ID` (including any non-default public
+  port) and observer signing secret;
 - remote access-code, FMU ticket, observation and provisioner routes use HTTPS
   or an explicitly controlled private link;
 - `GET /gateway/mode` reports the expected local edge mode and `/gateway/health`

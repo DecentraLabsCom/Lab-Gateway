@@ -457,6 +457,16 @@ if /i "!domain!"=="localhost" (
 )
 echo.
 
+REM Keep SERVER_NAME hostname-only, but include the public non-default HTTPS
+REM port in the technical gateway identity used by credentials and JWTs.
+set "gateway_identity_host=!domain!"
+if "!https_port!"=="" set "https_port=443"
+if "!https_port!"=="443" (
+    set "gateway_identity=!gateway_identity_host!"
+) else (
+    set "gateway_identity=!gateway_identity_host!:!https_port!"
+)
+
 echo JWT Issuer ^(Full/Lite^)
 echo ======================
 echo ISSUER controls which JWT issuer OpenResty accepts:
@@ -486,7 +496,7 @@ if "!issuer_value!"=="" (
     call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" session_observer_gateway_id
     call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" session_observer_signing_secret
     call :ReadEnvValue "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" session_observer_credentials_json
-    if not defined session_observer_gateway_id set "session_observer_gateway_id=!domain!"
+    if not defined session_observer_gateway_id set "session_observer_gateway_id=!gateway_identity!"
     if not defined session_observer_signing_secret call :GenerateObserverSecret session_observer_signing_secret
     if not defined session_observer_credentials_json set "session_observer_credentials_json={}"
     if "!session_observer_credentials_json!"=="{}" set "session_observer_credentials_json={^"!session_observer_gateway_id!^":^"!session_observer_signing_secret!^"}"
@@ -572,15 +582,15 @@ if "!issuer_value!"=="" (
         echo Trust bundle ISSUER does not match the configured Full issuer.
         exit /b 1
     )
-    if /i not "!bundle_server_name!"=="!domain!" (
+    if /i not "!bundle_server_name!"=="!gateway_identity_host!" (
         echo Trust bundle SERVER_NAME does not match this Lite gateway.
         exit /b 1
     )
-    if /i not "!bundle_gateway_id!"=="!domain!" (
+    if /i not "!bundle_gateway_id!"=="!gateway_identity!" (
         echo Trust bundle gateway ID does not match this Lite gateway.
         exit /b 1
     )
-    if /i not "!bundle_fmu_gateway_id!"=="!domain!" (
+    if /i not "!bundle_fmu_gateway_id!"=="!gateway_identity!" (
         echo Trust bundle FMU gateway ID does not match this Lite gateway.
         exit /b 1
     )

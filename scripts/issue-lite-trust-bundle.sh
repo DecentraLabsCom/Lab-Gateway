@@ -20,7 +20,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-IFS=$'\t' read -r lite_public_origin full_origin gateway_id < <(python3 - "$lite_public_origin" "$full_origin" <<'PY'
+IFS=$'\t' read -r lite_public_origin full_origin server_name gateway_id < <(python3 - "$lite_public_origin" "$full_origin" <<'PY'
 import sys
 from urllib.parse import urlsplit
 
@@ -35,18 +35,20 @@ def validate(label, raw):
         raise SystemExit(f"{label} has an invalid hostname")
     port = parsed.port
     origin = f"https://{host}" + (f":{port}" if port and port != 443 else "")
-    return origin, host
+    gateway_id = host + (f":{port}" if port and port != 443 else "")
+    return origin, host, gateway_id
 
-lite_origin, gateway_id = validate("lite-public-origin", sys.argv[1])
-full_origin, _ = validate("full-public-origin", sys.argv[2])
-print(lite_origin, full_origin, gateway_id, sep="\t")
+lite_origin, server_name, gateway_id = validate("lite-public-origin", sys.argv[1])
+full_origin, _, _ = validate("full-public-origin", sys.argv[2])
+print(lite_origin, full_origin, server_name, gateway_id, sep="\t")
 PY
 )
-if [ -z "$lite_public_origin" ] || [ -z "$full_origin" ] || [ -z "$gateway_id" ]; then
+if [ -z "$lite_public_origin" ] || [ -z "$full_origin" ] || [ -z "$server_name" ] || [ -z "$gateway_id" ]; then
     echo "Unable to validate Lite and Full public origins" >&2
     exit 2
 fi
-output_file="${3:-lite-trust-${gateway_id}.env}"
+safe_gateway_id="${gateway_id//:/_}"
+output_file="${3:-lite-trust-${safe_gateway_id}.env}"
 
 redeemer="acr_$(openssl rand -hex 32)"
 secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
@@ -90,7 +92,7 @@ PY
 umask 077
 {
     echo "ISSUER=${full_origin}/auth"
-    echo "SERVER_NAME=${gateway_id}"
+    echo "SERVER_NAME=${server_name}"
     echo "AUTH_ACCESS_CODE_REDEEMER_TOKEN=${redeemer}"
     echo "ACCESS_AUDIT_URL=${full_origin}/access-audit/internal/session-observed"
     echo "SESSION_OBSERVER_GATEWAY_ID=${gateway_id}"

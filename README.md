@@ -10,9 +10,10 @@ access, and connects the laboratory network to the institutional control plane.
 The repository also embeds the canonical `blockchain-services` backend for a
 complete deployment.
 
-Start with the [documentation guide](docs/README.md). It is the entry point for
-installation, deployment modes, operational runbooks, and component-specific
-documentation.
+Start with the [documentation guide](docs/README.md). Its
+[documentation contract](docs/documentation-contract.md) is the entry point for
+document ownership, installation, deployment modes, operational runbooks, and
+component-specific documentation.
 
 ## Architecture at a glance
 
@@ -117,9 +118,10 @@ endpoint in Lite mode; `AUTH_JWKS_URL` is available as an explicit override.
 
 ## Security model
 
-- Browser hand-off uses a one-time opaque access code. OpenResty redeems it
-  server-to-server and sets a Secure, HttpOnly JTI cookie; lab JWTs do not
-  appear in URLs.
+- Browser hand-off uses an opaque access code with a short redemption lease.
+  OpenResty reserves it server-to-server, validates the JWT and local
+  destination/state, commits it only after validation, and sets a Secure,
+  HttpOnly JTI cookie; lab JWTs do not appear in URLs.
 - Administrative surfaces use short-lived, path-scoped cookies created by
   `POST /lab-manager/login` or `POST /admin/login`. Query-string tokens and
   browser-storage tokens are rejected.
@@ -135,6 +137,8 @@ network and operator model.
 ## Documentation map
 
 - [Documentation guide](docs/README.md) — task-based navigation and terminology.
+- [Documentation contract](docs/documentation-contract.md) — canonical source
+  ownership and cross-project consistency rules.
 - [Deployment architectures](docs/deployment-architectures.md) — Full, Lite,
   composite, and standalone topologies.
 - [Configuration reference](docs/reference/configuration.md) — environment

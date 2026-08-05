@@ -40,19 +40,25 @@ if not redeem_url then
         redeem_url = "http://blockchain-services:8080/auth/access-code/redeem"
     end
 end
+local redeem_base = redeem_url:gsub("/+$", "")
+local commit_url = redeem_base .. "/commit"
+local release_url = redeem_base .. "/release"
 local httpc = http.new()
 httpc:set_timeout(5000)
 local redeemer_token = os.getenv("AUTH_ACCESS_CODE_REDEEMER_TOKEN")
 if not redeemer_token or redeemer_token == "" or string.upper(redeemer_token) == "CHANGE_ME" then
     return fail(503, "Access-code redemption is not configured")
 end
+local gateway_id = tostring(
+    ngx.shared.config:get("gateway_id") or ngx.shared.config:get("server_name") or ""
+)
 local response, request_err = httpc:request_uri(redeem_url, {
     method = "POST",
     body = cjson.encode({ accessCode = access_code }),
     headers = {
         ["Content-Type"] = "application/json",
         ["X-Access-Code-Redeemer-Token"] = redeemer_token,
-        ["X-Gateway-ID"] = tostring(ngx.shared.config:get("server_name") or ""),
+        ["X-Gateway-ID"] = gateway_id,
     },
     ssl_verify = true,
 })
@@ -67,18 +73,70 @@ end
 local payload = cjson.decode(response.body or "")
 local token = payload and payload.token
 local lab_url = payload and payload.labURL
-if type(token) ~= "string" or token == "" or type(lab_url) ~= "string" or lab_url == "" then
+local redemption_handle = payload and payload.redemptionHandle
+if type(token) ~= "string" or token == "" or type(lab_url) ~= "string" or lab_url == ""
+    or type(redemption_handle) ~= "string" or redemption_handle == "" then
     return fail(502, "Invalid access service response")
+end
+
+local committed = false
+local function release_prepared()
+    if committed then
+        return true
+    end
+    local release_client = http.new()
+    release_client:set_timeout(5000)
+    local release_response, release_err = release_client:request_uri(release_url, {
+        method = "POST",
+        body = cjson.encode({ accessCode = access_code, redemptionHandle = redemption_handle }),
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["X-Access-Code-Redeemer-Token"] = redeemer_token,
+            ["X-Gateway-ID"] = gateway_id,
+        },
+        ssl_verify = true,
+    })
+    if not release_response or release_response.status < 200 or release_response.status >= 300 then
+        ngx.log(ngx.WARN, "Unable to release prepared access code: ", tostring(release_err or release_response and release_response.status))
+        return false
+    end
+    return true
+end
+
+local function local_fail(status, message)
+    release_prepared()
+    return fail(status, message)
+end
+
+local function commit_prepared()
+    local commit_client = http.new()
+    commit_client:set_timeout(5000)
+    local commit_response, commit_err = commit_client:request_uri(commit_url, {
+        method = "POST",
+        body = cjson.encode({ accessCode = access_code, redemptionHandle = redemption_handle }),
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["X-Access-Code-Redeemer-Token"] = redeemer_token,
+            ["X-Gateway-ID"] = gateway_id,
+        },
+        ssl_verify = true,
+    })
+    if not commit_response or commit_response.status < 200 or commit_response.status >= 300 then
+        ngx.log(ngx.ERR, "Access-code commit unavailable: ", tostring(commit_err or commit_response and commit_response.status))
+        return false
+    end
+    committed = true
+    return true
 end
 
 local cache = ngx.shared.cache
 local public_key = cache:get("public_key")
 if not public_key then
-    return fail(503, "Authentication key unavailable")
+    return local_fail(503, "Authentication key unavailable")
 end
 local parsed = jwt:load_jwt(token)
 if not parsed.valid then
-    return fail(401, "Invalid access credential")
+    return local_fail(401, "Invalid access credential")
 end
 -- Key rotation keeps the previous public key available for the maximum JWT
 -- lifetime.  Verify against the active key first, then the overlap key so a
@@ -94,26 +152,26 @@ for _, candidate in ipairs({ public_key, cache:get("public_key_previous") }) do
     end
 end
 if not verified then
-    return fail(401, "Invalid access credential")
+    return local_fail(401, "Invalid access credential")
 end
 local claims = verified.payload or {}
 local jti = claims.jti
 local username = claims.sub
 local exp = tonumber(claims.exp)
 if not jti or not username or not exp or exp <= ngx.time() then
-    return fail(401, "Expired access credential")
+    return local_fail(401, "Expired access credential")
 end
 if type(jti) ~= "string" or #jti < 16 or #jti > 512 or not jti:match("^[A-Za-z0-9_-]+$") then
-    return fail(401, "Invalid access credential")
+    return local_fail(401, "Invalid access credential")
 end
 local config = ngx.shared.config
 local expected_issuer = config:get("issuer")
 if not claims.iss or claims.iss:gsub("/+$", "") ~= tostring(expected_issuer):gsub("/+$", "") then
-    return fail(401, "Invalid access credential issuer")
+    return local_fail(401, "Invalid access credential issuer")
 end
 local nbf = tonumber(claims.nbf)
 if nbf and ngx.time() < nbf then
-    return fail(401, "Access credential not yet valid")
+    return local_fail(401, "Access credential not yet valid")
 end
 local port = config:get("https_port") or "443"
 local port_suffix = port == "443" and "" or (":" .. port)
@@ -124,19 +182,19 @@ local function normalize_url(value)
     return value and tostring(value):gsub("/+$", "") or value
 end
 if normalize_url(claims.aud) ~= normalize_url(expected_audience) then
-    return fail(401, "Invalid access credential audience")
+    return local_fail(401, "Invalid access credential audience")
 end
 
 -- Only redirect within this gateway; validate this before setting any session cookie.
 local scheme, host, path = lab_url:match("^(https?)://([^/]+)(/[^?#]*)")
 local current_host = ngx.var.http_host or ngx.var.host
 if not scheme or not host or (host ~= ngx.var.host and host ~= current_host) then
-    return fail(400, "Invalid lab redirect")
+    return local_fail(400, "Invalid lab redirect")
 end
 if resource_type == "fmu" and not path:match("^/fmu[/]?") then
-    return fail(400, "Invalid FMU destination")
+    return local_fail(400, "Invalid FMU destination")
 elseif resource_type ~= "fmu" and resource_type ~= "lab" then
-    return fail(400, "Unsupported access resource")
+    return local_fail(400, "Unsupported access resource")
 end
 
 local username_lower = string.lower(username)
@@ -147,7 +205,13 @@ if resource_type == "fmu" then
     local persisted, persistence_err = fmu_access_store.default:save(jti, token, exp, ngx.time())
     if not persisted then
         ngx.log(ngx.ERR, "FMU access state persistence failed: ", tostring(persistence_err))
-        return fail(503, "FMU access session unavailable")
+        return local_fail(503, "FMU access session unavailable")
+    end
+    if not commit_prepared() then
+        fmu_access_store.default:remove(jti)
+        cache:delete("fmu_access_token:" .. jti)
+        cache:delete("fmu_access_exp:" .. jti)
+        return local_fail(503, "FMU access session unavailable")
     end
     local cached_token, cache_token_err = cache:set("fmu_access_token:" .. jti, token, remaining_lifetime)
     local cached_exp, cache_exp_err = cache:set("fmu_access_exp:" .. jti, exp, remaining_lifetime)
@@ -161,6 +225,9 @@ if resource_type == "fmu" then
     ngx.header["Referrer-Policy"] = "no-referrer"
     ngx.status = 204
     return ngx.exit(204)
+end
+if not commit_prepared() then
+    return local_fail(503, "Access session unavailable")
 end
 ---@diagnostic disable-next-line: redundant-parameter
 cache:set("username:" .. jti, username_lower, remaining_lifetime)

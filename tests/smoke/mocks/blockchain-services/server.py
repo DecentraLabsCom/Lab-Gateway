@@ -10,6 +10,8 @@ ACCESS_CODE = "smoke-access-code"
 MARKETPLACE_AUTHORIZATION = "Bearer smoke-marketplace-token"
 JWT_PATH = "/data/jwt.txt"
 redeemed = False
+prepared = False
+redemption_handle = "smoke-redemption-handle"
 redeem_lock = Lock()
 
 
@@ -56,17 +58,46 @@ class AuthHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+        global redeemed, prepared
         if self.path == "/auth/access-code/redeem":
             request = read_json(self)
-            global redeemed
             with redeem_lock:
                 if request.get("accessCode") != ACCESS_CODE or redeemed:
                     write_json(self, 401, {"error": "Invalid or expired access code"})
                     return
-                redeemed = True
+                if prepared:
+                    write_json(self, 409, {"error": "Access code redemption is already in progress"})
+                    return
+                prepared = True
             with open(JWT_PATH, "r", encoding="utf-8") as jwt_file:
                 token = jwt_file.read().strip()
-            write_json(self, 200, {"token": token, "labURL": "https://lab.test:18443/guacamole/"})
+            write_json(self, 200, {
+                "token": token,
+                "labURL": "https://lab.test:18443/guacamole/",
+                "redemptionHandle": redemption_handle,
+            })
+            return
+
+        if self.path in {"/auth/access-code/redeem/commit", "/auth/access-code/redeem/release"}:
+            request = read_json(self)
+            with redeem_lock:
+                if request.get("accessCode") != ACCESS_CODE or request.get("redemptionHandle") != redemption_handle:
+                    write_json(self, 401, {"error": "Invalid or expired access-code redemption"})
+                    return
+                if self.path.endswith("/commit"):
+                    if redeemed:
+                        self.send_response(204)
+                        self.end_headers()
+                        return
+                    if not prepared:
+                        write_json(self, 401, {"error": "Invalid or expired access-code redemption"})
+                        return
+                    redeemed = True
+                    prepared = False
+                else:
+                    prepared = False
+                self.send_response(204)
+                self.end_headers()
             return
 
         write_json(self, 404, {"error": "not found"})

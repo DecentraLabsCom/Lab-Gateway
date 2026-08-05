@@ -134,6 +134,51 @@ class SetupEnvContractTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_full_gateway_credential_maps_preserve_non_default_https_port(self):
+        valid_env = "\n".join([
+            "SERVER_NAME=lab.example",
+            "HTTPS_PORT=8443",
+            "ISSUER=",
+            "AUTH_ACCESS_CODE_REDEEMER_TOKEN=acr-secret",
+            'ACCESS_CODE_REDEEMER_CREDENTIALS_JSON={"lab.example:8443":"acr-secret"}',
+            "SESSION_OBSERVER_GATEWAY_ID=lab.example:8443",
+            "SESSION_OBSERVER_SIGNING_SECRET=observer-secret",
+            'SESSION_OBSERVER_CREDENTIALS_JSON={"lab.example:8443":"observer-secret"}',
+        ]) + "\n"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(valid_env, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(VALIDATE_GATEWAY_ENV_PY), "--env", str(env_file)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_full_gateway_credential_maps_reject_hostname_only_id_on_non_default_port(self):
+        invalid_env = "\n".join([
+            "SERVER_NAME=lab.example",
+            "HTTPS_PORT=8443",
+            "ISSUER=",
+            "AUTH_ACCESS_CODE_REDEEMER_TOKEN=acr-secret",
+            'ACCESS_CODE_REDEEMER_CREDENTIALS_JSON={"lab.example":"acr-secret"}',
+            "SESSION_OBSERVER_GATEWAY_ID=lab.example",
+            "SESSION_OBSERVER_SIGNING_SECRET=observer-secret",
+            'SESSION_OBSERVER_CREDENTIALS_JSON={"lab.example":"observer-secret"}',
+        ]) + "\n"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(invalid_env, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(VALIDATE_GATEWAY_ENV_PY), "--env", str(env_file)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gateway ID", result.stderr)
+
     def test_setup_validates_full_gateway_credential_maps_before_syncing_secrets(self):
         self.assertIn(
             'scripts/validate-gateway-env.py --env "$ROOT_ENV_FILE"',
@@ -372,14 +417,18 @@ class SetupEnvContractTest(unittest.TestCase):
             )
             self.assertEqual(env_file.read_text(encoding="utf-8"), f"TOKEN={value}\n")
 
-    def test_lite_bundle_binds_technical_gateway_id_to_public_hostname(self):
+    def test_lite_bundle_binds_technical_gateway_id_to_public_origin_host_and_port(self):
         self.assertIn("lite_public_origin", self.issue_lite_sh)
-        self.assertIn("read -r lite_public_origin full_origin gateway_id", self.issue_lite_sh)
-        self.assertIn('echo "SERVER_NAME=${gateway_id}"', self.issue_lite_sh)
+        self.assertIn("read -r lite_public_origin full_origin server_name gateway_id", self.issue_lite_sh)
+        self.assertIn('echo "SERVER_NAME=${server_name}"', self.issue_lite_sh)
+        self.assertIn('safe_gateway_id="${gateway_id//:/_}"', self.issue_lite_sh)
+        self.assertIn('gateway_id = host + (f":{port}" if port and port != 443 else "")', self.issue_lite_sh)
         self.assertNotIn("<gateway-id>", self.issue_lite_sh)
 
         self.assertIn("LitePublicOrigin", self.issue_lite_ps1)
-        self.assertIn('"SERVER_NAME=$GatewayId"', self.issue_lite_ps1)
+        self.assertIn('"SERVER_NAME=$($lite.HostName)"', self.issue_lite_ps1)
+        self.assertIn('$GatewayId = $lite.GatewayId', self.issue_lite_ps1)
+        self.assertIn("$GatewayId.Replace(':', '_')", self.issue_lite_ps1)
         self.assertNotIn("[string]$GatewayId", self.issue_lite_ps1)
 
     def test_lite_bundle_and_setup_wire_session_ticket_endpoints_to_full(self):

@@ -137,7 +137,12 @@ If the payer institution is also the current owner of the lab, Marketplace selec
 
 For an external lab, Marketplace selects `REQUEST_BOOKING`. The institution wallet or its registered backend executes the intent; the contract resolves the payer from the registered `schacHomeOrganization`, rather than treating the backend as a separate institution. `institutionalReservationRequestWithIntent` consumes the intent and creates a `PENDING` reservation. The request contains the payer institution, PUC hash, lab, start/end window, and computed reservation key.
 
-Confirmation verifies that the reservation is pending, the institution and PUC hash match the reservation, the provider/lab is eligible, the request period remains valid, and the payer's institutional treasury can spend the computed price. The five-minute request TTL is the normal decision window; the ten-minute creation lead leaves it available for provider checks and transaction propagation. On success it captures the spend, reserves the physical-lab calendar interval where applicable, sets `CONFIRMED`, and emits `ReservationConfirmed`.
+Confirmation verifies that the reservation is pending, the institution and PUC hash match the reservation, the provider/lab is eligible, the request period remains valid, and the payer's institutional treasury can spend the computed price. The five-minute request TTL is the decision window; the ten-minute creation lead leaves a five-minute safety margin before the service window. The provider backend retains 12-confirmation finality but uses 15-second polling/retry defaults. If finality or processing misses the deadline, the request expires without confirmation or credit capture. On success it captures the spend, reserves the physical-lab calendar interval where applicable, sets `CONFIRMED`, and emits `ReservationConfirmed`.
+
+The timing values are embedded in the deployed reservation facets. A source
+change is not active for an existing Diamond until the reviewed facet upgrade is
+mined and verified; provider event-listener settings must be changed in the
+same rollout.
 
 The confirmation contract accepts external requests only from the current
 provider/lab owner or its registered backend, provided the supplied institution

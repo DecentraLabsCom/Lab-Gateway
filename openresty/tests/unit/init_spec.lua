@@ -100,6 +100,7 @@ runner.describe("OpenResty init.lua", function()
         })
 
         runner.assert.equals("gateway.example", ngx.shared.config:get("server_name"))
+        runner.assert.equals("gateway.example:8443", ngx.shared.config:get("gateway_id"))
         runner.assert.equals("/guacamole", ngx.shared.config:get("guac_uri"))
         runner.assert.equals("https://gateway.example:8443/auth", ngx.shared.config:get("issuer"))
         runner.assert.equals(0, ngx.shared.config:get("lite_mode"))

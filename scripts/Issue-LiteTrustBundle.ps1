@@ -16,14 +16,18 @@ function Resolve-PublicOrigin([string]$Name, [string]$Value) {
     }
     $hostName = $uri.DnsSafeHost.TrimEnd('.').ToLowerInvariant()
     $origin = 'https://' + $hostName
-    if (-not $uri.IsDefaultPort -and $uri.Port -ne 443) { $origin += ':' + $uri.Port }
-    return @{ Origin = $origin; HostName = $hostName }
+    $gatewayId = $hostName
+    if (-not $uri.IsDefaultPort -and $uri.Port -ne 443) {
+        $origin += ':' + $uri.Port
+        $gatewayId += ':' + $uri.Port
+    }
+    return @{ Origin = $origin; HostName = $hostName; GatewayId = $gatewayId }
 }
 
 $lite = Resolve-PublicOrigin 'LitePublicOrigin' $LitePublicOrigin
 $full = Resolve-PublicOrigin 'FullPublicOrigin' $FullPublicOrigin
-$GatewayId = $lite.HostName
-if ([string]::IsNullOrWhiteSpace($OutputFile)) { $OutputFile = "lite-trust-$GatewayId.env" }
+$GatewayId = $lite.GatewayId
+if ([string]::IsNullOrWhiteSpace($OutputFile)) { $OutputFile = "lite-trust-$($GatewayId.Replace(':', '_')).env" }
 $root = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $root '.env'
 if (-not (Test-Path -LiteralPath $envFile)) {
@@ -113,7 +117,7 @@ Set-Content -LiteralPath $envFile -Value $lines -Encoding Ascii
 $origin = $full.Origin
 @(
     "ISSUER=$origin/auth"
-    "SERVER_NAME=$GatewayId"
+    "SERVER_NAME=$($lite.HostName)"
     "AUTH_ACCESS_CODE_REDEEMER_TOKEN=$redeemer"
     "ACCESS_AUDIT_URL=$origin/access-audit/internal/session-observed"
     "SESSION_OBSERVER_GATEWAY_ID=$GatewayId"

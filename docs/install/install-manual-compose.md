@@ -77,16 +77,19 @@ FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 
 For a Full gateway, configure the credentials used by opaque access-code
 redemption and FMU session observation. The JSON values must be valid JSON
-objects, and the key must match the normalized `SERVER_NAME` exactly. Do not
-use a `host:token` string:
+objects. `SERVER_NAME` remains hostname-only for URL construction; the
+technical gateway ID is the normalized public host plus `:HTTPS_PORT` when the
+HTTPS port is not 443. This prevents two gateways on the same hostname from
+sharing credentials:
 
 ```env
+HTTPS_PORT=8443
 AUTH_ACCESS_CODE_REDEEMER_TOKEN=<random-redeemer-token>
 ACCESS_CODE_ENCRYPTION_KEY=<url-safe-base64-key-for-32-bytes>
-ACCESS_CODE_REDEEMER_CREDENTIALS_JSON={"lab.your-institution.edu":"<random-redeemer-token>"}
-SESSION_OBSERVER_GATEWAY_ID=lab.your-institution.edu
+ACCESS_CODE_REDEEMER_CREDENTIALS_JSON={"lab.your-institution.edu:8443":"<random-redeemer-token>"}
+SESSION_OBSERVER_GATEWAY_ID=lab.your-institution.edu:8443
 SESSION_OBSERVER_SIGNING_SECRET=<url-safe-base64-secret-for-32-bytes>
-SESSION_OBSERVER_CREDENTIALS_JSON={"lab.your-institution.edu":"<url-safe-base64-secret-for-32-bytes>"}
+SESSION_OBSERVER_CREDENTIALS_JSON={"lab.your-institution.edu:8443":"<url-safe-base64-secret-for-32-bytes>"}
 ```
 
 Generate the encryption key and observer secret independently. Both must decode

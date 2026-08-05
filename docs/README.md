@@ -5,6 +5,14 @@ choosing a deployment or changing environment variables. The current source of
 truth is the repository configuration and implementation; this documentation
 explains how to use them without duplicating internal implementation details.
 
+The [documentation contract](documentation-contract.md) defines ownership and
+the conflict-resolution order for cross-project flows. Use it before editing a
+workflow, API reference, installation guide or translation.
+
+| Cross-project concern | Owning document |
+| --- | --- |
+| Documentation ownership and conflict resolution | [Documentation contract](documentation-contract.md) |
+
 ## Core concepts
 
 | Term | Meaning |

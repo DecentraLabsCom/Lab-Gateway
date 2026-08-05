@@ -92,8 +92,10 @@ configuration with the dedicated lab account, not an administrator account.
    `guac:id:<connection_id>` access key.
 4. Publish the laboratory with the exact public gateway origin as `accessURI`.
 5. Complete a reservation-based access test. The expected user path is an
-   opaque one-time code exchanged at `POST /auth/access`, followed by a clean
-   Guacamole URL with a Secure, HttpOnly session cookie.
+   opaque code whose redemption is reserved at `POST /auth/access-code/redeem`,
+   validated locally by the gateway, and committed only after validation;
+   successful access ends at a clean Guacamole URL with a Secure, HttpOnly
+   session cookie. A failed local check releases the short-lived handle.
 
 If a reservation reaches the manual Guacamole login screen instead, diagnose
 the access-code and provisioning path with [Operations and health](../reference/operations-and-health.md),

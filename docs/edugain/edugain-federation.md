@@ -30,8 +30,10 @@ sequenceDiagram
     M->>B: Bound JWT + SAML assertion
     B->>B: Verify signature, issuer, PUC and affiliation
     B-->>M: Opaque access code / reservation context
-    M->>L: POST /auth/access with code
-    L->>B: Server-side redemption when remote
+    M->>L: POST /auth/access-code/redeem
+    L->>B: Prepare redemption handle
+    L->>L: Validate JWT, destination and local state
+    L->>B: Commit handle, or release on failure
     L-->>User: Secure cookie and clean access URL
 ```
 

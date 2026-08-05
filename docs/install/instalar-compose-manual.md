@@ -77,16 +77,19 @@ FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 
 En un gateway Full, configura tambien las credenciales usadas para el canje de
 codigos de acceso opacos y la observacion de sesiones FMU. Los valores JSON
-deben ser objetos JSON validos y la clave debe coincidir exactamente con el
-`SERVER_NAME` normalizado. No uses una cadena con formato `host:token`:
+deben ser objetos JSON validos. `SERVER_NAME` sigue siendo solo el hostname para
+construir URLs; el ID tecnico es el host publico normalizado mas `:HTTPS_PORT`
+cuando el puerto HTTPS no es 443. Asi dos gateways con el mismo hostname no
+comparten credenciales:
 
 ```env
+HTTPS_PORT=8443
 AUTH_ACCESS_CODE_REDEEMER_TOKEN=<token-aleatorio-de-canje>
 ACCESS_CODE_ENCRYPTION_KEY=<clave-base64url-para-32-bytes>
-ACCESS_CODE_REDEEMER_CREDENTIALS_JSON={"lab.tu-institucion.edu":"<token-aleatorio-de-canje>"}
-SESSION_OBSERVER_GATEWAY_ID=lab.tu-institucion.edu
+ACCESS_CODE_REDEEMER_CREDENTIALS_JSON={"lab.tu-institucion.edu:8443":"<token-aleatorio-de-canje>"}
+SESSION_OBSERVER_GATEWAY_ID=lab.tu-institucion.edu:8443
 SESSION_OBSERVER_SIGNING_SECRET=<secreto-base64url-para-32-bytes>
-SESSION_OBSERVER_CREDENTIALS_JSON={"lab.tu-institucion.edu":"<secreto-base64url-para-32-bytes>"}
+SESSION_OBSERVER_CREDENTIALS_JSON={"lab.tu-institucion.edu:8443":"<secreto-base64url-para-32-bytes>"}
 ```
 
 Genera de forma independiente la clave de cifrado y el secreto del observador.

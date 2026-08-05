@@ -681,6 +681,17 @@ else
     fi
 fi
 
+# The hostname is kept separately from the technical gateway identity. The
+# latter is what is signed into observer JWTs and used as the credential-map
+# key, so a non-default public HTTPS port must remain part of the identity.
+gateway_identity_host="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]' | sed 's/\.$//')"
+gateway_identity_port="$(get_env_default "HTTPS_PORT" "$ROOT_ENV_FILE")"
+if [ -z "$gateway_identity_port" ] || [ "$gateway_identity_port" = "443" ]; then
+    gateway_identity="$gateway_identity_host"
+else
+    gateway_identity="${gateway_identity_host}:${gateway_identity_port}"
+fi
+
 echo
 echo "JWT Issuer (Full/Lite)"
 echo "======================"
@@ -711,7 +722,7 @@ if [ -z "$issuer_value" ]; then
     session_observer_signing_secret="$(get_env_default "SESSION_OBSERVER_SIGNING_SECRET" "$ROOT_ENV_FILE")"
     session_observer_credentials_json="$(get_env_default "SESSION_OBSERVER_CREDENTIALS_JSON" "$ROOT_ENV_FILE")"
     if [ -z "$session_observer_gateway_id" ]; then
-        session_observer_gateway_id="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-zA-Z0-9._-')"
+        session_observer_gateway_id="$gateway_identity"
     fi
     if [ -z "$session_observer_signing_secret" ]; then
         session_observer_signing_secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
@@ -796,11 +807,10 @@ else
         echo "Trust bundle ISSUER does not match the configured Full issuer." >&2
         exit 1
     fi
-    expected_gateway_id="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]' | sed 's/\.$//')"
-    if [ "$bundle_server_name" != "$expected_gateway_id" ] \
-        || [ "$bundle_gateway_id" != "$expected_gateway_id" ] \
-        || [ "$bundle_fmu_gateway_id" != "$expected_gateway_id" ]; then
-        echo "Trust bundle gateway identity does not match SERVER_NAME ${expected_gateway_id}." >&2
+    if [ "$bundle_server_name" != "$gateway_identity_host" ] \
+        || [ "$bundle_gateway_id" != "$gateway_identity" ] \
+        || [ "$bundle_fmu_gateway_id" != "$gateway_identity" ]; then
+        echo "Trust bundle gateway identity does not match ${gateway_identity}." >&2
         exit 1
     fi
     update_env_var "$ROOT_ENV_FILE" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "$bundle_redeemer"

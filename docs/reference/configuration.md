@@ -103,18 +103,25 @@ On the remote control plane, configure an explicit
 `GUACAMOLE_PROVISIONER_ROUTES_JSON` entry for every Lite `accessURI`. Never
 derive an endpoint or credential from laboratory metadata.
 
+The gateway identity used by access-code redemption, FMU tickets and session
+observation is the lower-case public host plus `:port` whenever the public HTTPS
+port is not 443. `SERVER_NAME` remains hostname-only; therefore
+`https://lab.example:8443/guacamole` targets `lab.example:8443`, not merely
+`lab.example`. Full and Lite trust-bundle maps, `targetGatewayId` and observer
+JWT `iss`/`sub` must use that same canonical value.
+
 ## Configuration groups
 
 | Group | Important variables | Operational rule |
 | --- | --- | --- |
-| Public edge | `SERVER_NAME`, `HTTPS_PORT`, `HTTP_PORT`, `OPENRESTY_BIND_*` | `SERVER_NAME` and `HTTPS_PORT` form the local issuer in Full mode. Bind to `127.0.0.1` only behind a trusted reverse proxy. |
+| Public edge | `SERVER_NAME`, `HTTPS_PORT`, `HTTP_PORT`, `OPENRESTY_BIND_*` | `SERVER_NAME` and `HTTPS_PORT` form the local issuer in Full mode. The technical gateway ID is normalized `SERVER_NAME` plus `:HTTPS_PORT` for a non-default HTTPS port. Bind to `127.0.0.1` only behind a trusted reverse proxy. |
 | Mode and trust | `ISSUER`, `JWT_ISSUER`, `BLOCKCHAIN_SERVICES_ENABLED` | `ISSUER` must exactly match JWT `iss`. An external issuer selects Lite mode. |
 | Database | `MYSQL_*`, `GUACAMOLE_MYSQL_*`, `BLOCKCHAIN_MYSQL_*`, `OPS_*_MYSQL_*` | Maintain separate MySQL principals and passwords for Guacamole, backend, and operations. |
 | Operator access | `ADMIN_ACCESS_TOKEN`, `LAB_MANAGER_TOKEN`, `ADMIN_*`, `SECURITY_ALLOW_PRIVATE_NETWORKS` | Use independent random tokens. Prefer explicit CIDRs/VPNs; never pass tokens in query strings. |
 | Backend and contracts | `CONTRACT_ADDRESS`, `ETHEREUM_*_RPC_URL`, `FEATURES_PROVIDERS_*`, `ALLOWED_ORIGINS` | These live in `blockchain-services/.env`. A Full provider deployment needs provider features enabled; only the current lab owner/authorized backend may automatically confirm or deny external requests. |
 | Lab metadata | `LAB_METADATA_MAX_BYTES`, `LAB_METADATA_HTTP_*`, `LAB_METADATA_MAX_CONCURRENT_FETCHES`, `LAB_METADATA_LOCAL_*` | The backend treats on-chain metadata as untrusted: only exact registered provider HTTPS origins are fetched. Keep local fixtures disabled in production. |
 | Guacamole | `GUAC_ADMIN_*`, `API_SESSION_TIMEOUT`, `JWT_GUAC_IDLE_TIMEOUT_SECONDS`, `BAN_*` | Manual administrator login is an operations path, not the end-user hand-off. Keep anti-brute-force controls enabled. |
-| FMU | `FMU_RUNNER_ENABLED`, `FMU_BACKEND_MODE`, `FMU_LOCAL_DEV_MODE`, `FMU_JWT_AUDIENCE`, `AUTH_JWKS_URL`, `FMU_STATION_*`, `FMU_GATEWAY_ID` | The audience must be the exact public FMU `accessURI`. `FMU_BACKEND_MODE` selects local versus Lab Station execution; Full/Lite selects the JWKS source. `AUTH_JWKS_URL` is an optional explicit override and must use HTTPS, except for loopback/private hosts used by local Compose networking. |
+| FMU | `FMU_RUNNER_ENABLED`, `FMU_BACKEND_MODE`, `FMU_LOCAL_DEV_MODE`, `FMU_JWT_AUDIENCE`, `AUTH_JWKS_URL`, `FMU_STATION_*`, `FMU_GATEWAY_ID` | The audience must be the exact public FMU `accessURI`. `FMU_GATEWAY_ID` uses the same host-plus-non-default-port identity as observer credentials. `FMU_BACKEND_MODE` selects local versus Lab Station execution; Full/Lite selects the JWKS source. `AUTH_JWKS_URL` is an optional explicit override and must use HTTPS, except for loopback/private hosts used by local Compose networking. |
 | Ops / Lab Station | `OPS_SECRETS_KEY`, `WINRM_MANAGEMENT_CIDRS`, `OPS_ALLOWED_COMMANDS` | Use TLS WinRM on 5986 and a restricted management network. Losing the stable Fernet key makes stored credentials unreadable. |
 | AAS | `BASYX_AAS_URL`, `AAS_ALLOWED_HOSTS`, `AAS_SERVICE_TOKEN` | Use `https://` and exact host allow-listing for an external AAS. Caller JWTs are not forwarded. |
 | CORS and proxies | `CORS_ALLOWED_ORIGINS`, `TRUST_PROXY_HEADERS` | Keep origins explicit. Trust forwarded client-IP headers only from a controlled upstream proxy. |

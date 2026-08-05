@@ -110,7 +110,7 @@ signal.
 | `/lab-manager` and `/ops/**` | `LAB_MANAGER_TOKEN`, exchanged for a short-lived path-scoped cookie | Lab inventory, Station operations, operational timelines, and diagnostics. |
 | `/wallet-dashboard`, `/wallet/**`, `/billing/**`, `/institution-config` | `ADMIN_ACCESS_TOKEN`, exchanged for an administrative cookie | Institutional wallet, billing, and administrative configuration. |
 | `/guacamole/` manual login | Guacamole credentials with rate limits and IP bans | Operator break-glass/manual administration only. |
-| `/auth/access` | One-time opaque access code | End-user reservation hand-off. |
+| `/auth/access` | Short-lived opaque access code; gateway-local validation followed by commit/release | End-user reservation hand-off. |
 
 Keep administrative access behind the configured network policy, VPN, or
 allow-list. `POST /admin/logout` removes administrative cookies; never rely on

@@ -70,16 +70,18 @@ sequenceDiagram
     Consumer-->>Marketplace: Accepted check-in and transaction hash
     Marketplace->>Provider: POST /auth/access-credential with bound provider JWT
     Provider->>Chain: Validate reservation and current time window
-    Provider->>Provider: Prepare provisional Guacamole access when applicable
-    Provider->>Chain: Poll reservation status for ACCESS_AUTHORIZED
+    Provider-->>Marketplace: 503 ACCESS_AUTHORIZATION_PENDING + Retry-After
+    Marketplace->>Provider: Retry credential issuance
+    Provider->>Chain: Read current reservation status once
     Chain-->>Provider: ACCESS_AUTHORIZED
-    Provider->>Chain: Final full reservation/window validation
-    Provider->>Provider: Activate, audit, persist encrypted delivery
+    Provider->>Provider: Acquire lease, activate, audit, persist delivery
     Provider->>Provider: Mark CODE_PERSISTED then DELIVERED
     Provider-->>Marketplace: Code, URL, resourceType, canonical reservationKey
     Marketplace-->>User: Authorized handoff metadata
     User->>Gateway: POST /auth/access with code
-    Gateway->>Provider: Server-to-server code redemption
+    Gateway->>Provider: Prepare redemption handle
+    Gateway->>Gateway: Validate JWT, destination and local state
+    Gateway->>Provider: Commit handle, or release on failure
     Gateway-->>User: Secure JTI cookie and clean Guacamole redirect
 ```
 
@@ -98,17 +100,25 @@ If a pre-broadcast failure occurs after nonce reservation, `FAILED` remains a wa
 
 ### 3. Provider access is gated on chain
 
-`POST /auth/access-credential` first validates the provider-facing Marketplace JWT and the full reservation state and time window. It may prepare a provisional Guacamole user and precompute the technical credential, but it does not activate the user or deliver the credential until the chain reports `ACCESS_AUTHORIZED`.
+`POST /auth/access-credential` first validates the provider-facing Marketplace JWT and the full reservation state and time window. If the reservation is not yet `ACCESS_AUTHORIZED`, it performs one lightweight status read and returns `503 ACCESS_AUTHORIZATION_PENDING` with `Retry-After`. It does not poll the chain, acquire a provisioning lease, or create a Guacamole user in that request.
 
-The provider polls the lightweight on-chain status for at most 27 seconds. Before activating access, it repeats the full reservation and validity-window validation. This preserves protection against cancellation or expiry while the provider was waiting.
+Marketplace retries only the provider credential endpoint with bounded backoff;
+it never repeats the consumer check-in. Each retry is a new bounded read. Once
+`ACCESS_AUTHORIZED` is visible, the provider repeats the full reservation and
+validity-window validation, acquires its fenced lease, activates Guacamole/FMU,
+and persists the encrypted delivery. A mined or observed authorization
+rejection produces `409 ACCESS_AUTHORIZATION_REJECTED`.
 
-For a request that times out, the provider returns `503 ACCESS_AUTHORIZATION_PENDING`, removes its own provisional Guacamole state, and retains no delivered access credential. A mined or observed authorization rejection produces `409 ACCESS_AUTHORIZATION_REJECTED`.
+The remote activation call is still bounded and synchronous after the chain
+gate, because Marketplace must not receive a code for a resource that has not
+been created. It is no longer part of the potentially long transaction-mining
+wait; a separate provisioning outbox would be a later scale optimization.
 
 Marketplace honors the provider's bounded `Retry-After` response by retrying only `POST /auth/access-credential`. It never repeats the consumer check-in. For a same-backend combined request, the first pending response supplies the transaction hash and Marketplace continues through `/auth/access-credential` rather than invoking `/auth/authorize-and-issue` again.
 
 Provider coordination is fenced by `reservationKey`. A lease generation identifies the current owner of provisional state, so a stale request cannot roll back a user created or activated by a newer request.
 
-The delivery saga is `PREPARED → ACTIVATED → CODE_PERSISTED → DELIVERED → CONSUMED`, with explicit revoke and rollback outcomes. The access-code row is linked uniquely to the reservation and lease generation. Bearer JWT and recoverable code are AES-GCM encrypted at rest. If the provider response is lost after `CODE_PERSISTED`, a revalidated retry returns the same unconsumed code, or refreshes only that opaque code if its short TTL elapsed while the underlying credential is still valid. It does not reprovision the resource. Redemption clears both encrypted secrets and marks the generation `CONSUMED`. The code expiry never exceeds the credential expiry.
+The delivery saga is `PREPARED → ACTIVATED → CODE_PERSISTED → DELIVERED`, followed by gateway redemption states `REDEMPTION_PREPARED → LOCAL_VALIDATED → CONSUMED`. A prepared redemption has a 30-second lease and can transition to `RELEASED` (or expire) without consuming the code. Only the authenticated commit after local validation clears both encrypted secrets and marks the generation `CONSUMED`; explicit revoke and rollback remain separate outcomes. The access-code row is linked uniquely to the reservation and lease generation. Bearer JWT and recoverable code are AES-GCM encrypted at rest. If the provider response is lost after `CODE_PERSISTED`, a revalidated retry returns the same unconsumed code, or refreshes only that opaque code if its short TTL elapsed while the underlying credential is still valid. It does not reprovision the resource. The code expiry never exceeds the credential expiry.
 
 ### 4. Single deployment path
 
@@ -118,9 +128,9 @@ When the consumer and provider backend are the same deployment, Marketplace uses
 
 ### Guacamole
 
-The provider keeps the signed lab-access JWT internal. After activation it persists a short-lived opaque one-time access code, audits issuance, then marks provisioning delivered and returns only that code with the Guacamole URL to Marketplace. If either audit persistence or the fenced `DELIVERED` transition fails, the newly created code is revoked before rollback.
+The provider keeps the signed lab-access JWT internal. After activation it persists a short-lived opaque access code, audits issuance, then marks provisioning delivered and returns only that code with the Guacamole URL to Marketplace. The gateway consumes the code exactly once through its prepare/validate/commit sequence; a failed local check releases the lease. If either audit persistence or the fenced `DELIVERED` transition fails, the newly created code is revoked before rollback.
 
-The browser submits the code to the gateway with `POST /auth/access`. OpenResty redeems it server-to-server using its redeemer credential, validates the returned JWT, stores the minimal `{sessionId, exp, token}` FMU mapping encrypted under the configured persistent state directory (and warms the shared cache), sets a Secure, HttpOnly JTI cookie, and responds with a `303` redirect to a URL without credential material. A code can be redeemed once. If OpenResty restarts before the credential expires, the FMU access handler rehydrates the shared cache from that encrypted mapping; an unavailable mapping store fails closed.
+The browser submits the code to the gateway with `POST /auth/access`. OpenResty first reserves it server-to-server using its redeemer credential, then validates the returned JWT signature, issuer, audience, destination and expiry locally. For FMU it persists the minimal `{sessionId, exp, token}` mapping encrypted under the configured persistent state directory before committing; Guacamole commits after the same local checks. A local rejection calls `/release` best-effort, while a successful `/commit` makes the code single-use. OpenResty then sets a Secure, HttpOnly JTI cookie and responds with a `303` redirect to a URL without credential material. If OpenResty restarts before the credential expires, the FMU access handler rehydrates the shared cache from that encrypted mapping; an unavailable mapping store fails closed.
 
 ### FMU
 
@@ -186,6 +196,11 @@ An unmapped remote `accessURI` fails closed. Remote Guacamole provisioners are
 never derived from an untrusted origin and never share the Full gateway's local
 provisioner credential.
 
+The identity used by redemption, FMU tickets and observations is the lower-case
+public host plus `:port` for a non-default HTTPS port. `SERVER_NAME` stays
+hostname-only for URL construction, so `https://lab.example:8443/guacamole`
+uses `lab.example:8443` as `targetGatewayId` and as observer JWT `iss`/`sub`.
+
 ## Settlement and audit consequences
 
 Access issuance is audited locally with the reservation key, lab, PUC hash, access type, credential identifier, expiry, issuer, and credential hash. Session-start publication is asynchronous and does not delay the user's access response.
@@ -202,9 +217,10 @@ weaken exclusive booking: a different reservation or principal remains barred.
 `SessionStarted` is unique per `reservationKey`, so reconnects cannot multiply
 settlement evidence.
 
-The 27-second wait for `ACCESS_AUTHORIZED` is the chosen strong-consistency
-contract. The provider deliberately does not grant access based only on an
-accepted or broadcast check-in transaction.
+The accepted or broadcast check-in transaction is not treated as authorization.
+The provider deliberately grants access only after a later retry observes
+`ACCESS_AUTHORIZED`; transaction submission and receipt monitoring remain
+durable background work.
 
 ## Related implementation surfaces
 

@@ -71,7 +71,7 @@ Only Marketplace and the selected gateway access URI are normally public. The ba
 
 ## Interactive laboratory access
 
-For a Guacamole laboratory, `accessURI` identifies the gateway that owns the local Guacamole connection catalog. The provider backend selects a provisioning route from that URI and creates a reservation-scoped temporary user on that access gateway. The browser receives an opaque one-time code, exchanges it at the gateway, and is redirected to a clean Guacamole URL with a Secure, HttpOnly session cookie.
+For a Guacamole laboratory, `accessURI` identifies the gateway that owns the local Guacamole connection catalog. The provider backend selects a provisioning route from that URI and creates a reservation-scoped temporary user on that access gateway. The browser receives an opaque access code; the gateway reserves a short-lived redemption handle, validates the JWT, destination and local state, and commits only after those checks succeed. It then redirects to a clean Guacamole URL with a Secure, HttpOnly session cookie; failed local validation releases the handle.
 
 `guacd` then reaches the configured RDP, VNC, or SSH target over the provider's private laboratory network. The target machine must be reachable from `guacd`; it does not need a public address.
 
