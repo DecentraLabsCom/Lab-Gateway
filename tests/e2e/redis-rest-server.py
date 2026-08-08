@@ -17,6 +17,10 @@ from typing import Any
 def normalize_redis_value(value: Any) -> Any:
     """Convert redis-py byte values to JSON-safe values recursively."""
 
+    # redis-py 6 exposes successful SET replies as True, whereas the
+    # Upstash-compatible REST protocol returns the Redis simple string "OK".
+    if isinstance(value, bool):
+        return "OK" if value else None
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     if isinstance(value, tuple):

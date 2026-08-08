@@ -157,6 +157,29 @@ class ReleaseGate(unittest.TestCase):
         status = result.stdout.strip()
         self.assertEqual(status, "healthy", f"{service} is not healthy: {status}")
 
+    def _wait_for_service_healthy(self, service: str, timeout: float = 120) -> None:
+        deadline = time.monotonic() + timeout
+        last_status = "missing"
+        while time.monotonic() < deadline:
+            container = self._service_container(service)
+            result = subprocess.run(
+                [
+                    "docker",
+                    "inspect",
+                    "--format",
+                    "{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}",
+                    container,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            last_status = result.stdout.strip()
+            if last_status == "healthy":
+                return
+            time.sleep(2)
+        self.fail(f"Timed out waiting for {service} to become healthy: {last_status}")
+
     def test_real_compose_dependencies_are_healthy(self) -> None:
         """The gate starts with real MySQL, Redis and Anvil, never mocks."""
 
@@ -224,10 +247,16 @@ class ReleaseGate(unittest.TestCase):
             )
             sql(f"REPLACE INTO {table} (marker, value) VALUES ('{marker}', 'committed')")
             self._restart(service)
-            self._assert_service_healthy(service)
+            self._wait_for_service_healthy(service)
             self.assertEqual(sql(f"SELECT value FROM {table} WHERE marker = '{marker}'"), "committed")
         finally:
-            sql(f"DELETE FROM {table} WHERE marker = '{marker}'")
+            try:
+                self._wait_for_service_healthy(service)
+                sql(f"DELETE FROM {table} WHERE marker = '{marker}'")
+            except (AssertionError, subprocess.CalledProcessError):
+                # Compose cleanup removes the isolated volume after a failed
+                # run; do not hide the assertion that caused the failure.
+                pass
 
     def test_anvil_rpc_and_deployed_contract_evidence(self) -> None:
         rpc_url = os.environ.get("ANVIL_RPC_URL")

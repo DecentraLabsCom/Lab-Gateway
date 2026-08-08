@@ -19,3 +19,7 @@ def test_normalize_redis_value_preserves_nested_results():
         ["one", None, 2],
         {"field": "value"},
     ]
+
+
+def test_normalize_redis_value_matches_upstash_simple_string_for_set():
+    assert MODULE.normalize_redis_value(True) == "OK"
