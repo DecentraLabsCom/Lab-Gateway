@@ -1,0 +1,64 @@
+services:
+  mysql:
+    image: mysql:8.0.41
+    environment:
+      MYSQL_ROOT_PASSWORD: release-gate-root
+      MYSQL_DATABASE: blockchain_services
+      MYSQL_USER: release_gate
+      MYSQL_PASSWORD: release-gate-password
+    ports:
+      - "13306:3306"
+    volumes:
+      - release_gate_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -urelease_gate -prelease-gate-password"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "16379:6379"
+    volumes:
+      - release_gate_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis-rest:
+    build:
+      context: .
+      dockerfile: Dockerfile.redis-rest
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      REDIS_REST_TOKEN: ${REDIS_REST_TOKEN:-release-gate-token}
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "16380:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    command: ["anvil", "--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1"]
+    ports:
+      - "18545:8545"
+    healthcheck:
+      test: ["CMD", "cast", "chain-id", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  release_gate_mysql:
+  release_gate_redis:
