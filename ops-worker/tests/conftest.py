@@ -146,6 +146,31 @@ def db_engine():
         Column("created_at", DateTime),
     )
 
+    Table(
+        "power_operations",
+        metadata,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("reservation_id", String(128)),
+        Column("lab_id", String(128)),
+        Column("policy_id", String(128)),
+        Column("step_id", String(128)),
+        Column("phase", String(32)),
+        Column("controller_id", String(128)),
+        Column("outlet_key", String(64)),
+        Column("action", String(32), nullable=False),
+        Column("requested_state", String(32)),
+        Column("observed_state_before", String(32)),
+        Column("observed_state_after", String(32)),
+        Column("status", String(32), nullable=False),
+        Column("success", Boolean, nullable=False, default=False),
+        Column("response_code", Integer),
+        Column("duration_ms", Integer),
+        Column("idempotency_key", String(255), nullable=False, unique=True),
+        Column("payload", Text),
+        Column("message", Text),
+        Column("created_at", DateTime),
+    )
+
     metadata.create_all(engine)
     original_engine = worker.DB_ENGINE
     worker.DB_ENGINE = engine

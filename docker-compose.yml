@@ -457,6 +457,7 @@ services:
       - ./mysql/000-ensure-user.sh:/docker-entrypoint-initdb.d/000-ensure-user.sh:ro
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
       - ./mysql/002-labstation-ops.sql:/docker-entrypoint-initdb.d/002-labstation-ops.sql:ro
+      - ./mysql/003-energy-policies.sql:/docker-entrypoint-initdb.d/003-energy-policies.sql:ro
     healthcheck:
       test: ["CMD", "bash", "/usr/local/bin/mysql-healthcheck.sh"]
       timeout: 20s
@@ -586,6 +587,8 @@ services:
       - OPS_CONFIG=/app/hosts.json
       - OPS_DYNAMIC_CONFIG=/app/data/hosts.json
       - OPS_CREDENTIALS_PATH=${OPS_CREDENTIALS_PATH:-/app/data/winrm-credentials.json}
+      - OPS_POWER_CONFIG=${OPS_POWER_CONFIG:-/app/data/power-controllers.json}
+      - OPS_POWER_CREDENTIALS_PATH=${OPS_POWER_CREDENTIALS_PATH:-/app/data/power-credentials.json}
       - OPS_SECRETS_KEY_FILE=/run/secrets/ops_secrets_key
       - OPS_POLL_ENABLED=true
       - OPS_POLL_INTERVAL=60

@@ -328,6 +328,74 @@
                 <div class="card">
                     <div class="card-header">
                         <div>
+                            <h2>Power Controllers</h2>
+                            <p>Inspect configured outlets and run controlled manual tests through /ops.</p>
+                        </div>
+                        <div class="actions inline-actions">
+                            <span class="pill soft" id="powerControllersStatus">Loading...</span>
+                            <button class="primary-btn" id="refreshPowerControllersBtn"><i class="fas fa-rotate-right"></i> Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-grid power-controls">
+                            <label class="field">
+                                <span>Operation reason</span>
+                                <input type="text" id="powerOperationReason" maxlength="160" placeholder="Lab Manager manual test">
+                            </label>
+                            <label class="field">
+                                <span>Cycle off time (seconds)</span>
+                                <input type="number" id="powerCycleSeconds" min="1" max="3600" value="10" inputmode="numeric">
+                            </label>
+                            <label class="field toggle-field power-maintenance-field">
+                                <span>Maintenance mode for protected outlets</span>
+                                <label class="switch" for="powerMaintenanceMode">
+                                    <input type="checkbox" id="powerMaintenanceMode" aria-label="Enable maintenance mode for protected power outlets">
+                                    <span class="slider"></span>
+                                </label>
+                            </label>
+                        </div>
+                        <div class="hint" id="powerControllersHint">
+                            Protected outlets require an explicit maintenance mode toggle. The catalog and credentials are managed provider-side.
+                        </div>
+                        <div class="power-controller-list" id="powerControllerList" aria-live="polite">
+                            <div class="empty">No power controllers loaded yet.</div>
+                        </div>
+                        <div class="subcard power-policy-editor">
+                            <div class="subcard-header">
+                                <div>
+                                    <h3><i class="fas fa-file-code"></i> Lab power policy</h3>
+                                    <div class="hint">Edit only the policy JSON. Controllers, outlets and credentials remain provider-local.</div>
+                                </div>
+                                <span class="pill soft" id="powerPoliciesStatus">Loading...</span>
+                            </div>
+                            <div class="form-grid power-policy-toolbar">
+                                <label class="field">
+                                    <span>Existing policy</span>
+                                    <select id="powerPolicySelect">
+                                        <option value="">New policy</option>
+                                    </select>
+                                </label>
+                                <label class="field">
+                                    <span>Lab ID</span>
+                                    <input type="text" id="powerPolicyLabId" maxlength="128" placeholder="lab-1">
+                                </label>
+                                <div class="actions inline-actions power-policy-actions">
+                                    <button class="ghost-btn" type="button" id="refreshPowerPoliciesBtn"><i class="fas fa-rotate-right"></i> Reload</button>
+                                    <button class="ghost-btn" type="button" id="formatPowerPolicyBtn"><i class="fas fa-align-left"></i> Format JSON</button>
+                                    <button class="primary-btn" type="button" id="savePowerPolicyBtn"><i class="fas fa-save"></i> Save Policy</button>
+                                </div>
+                            </div>
+                            <textarea id="powerPolicyJson" class="power-policy-json" rows="16" spellcheck="false" aria-label="Power policy JSON"></textarea>
+                            <div class="hint" id="powerPolicyEditorHint" aria-live="polite">Select an existing policy or enter a new Lab ID.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="grid single-column">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
                             <h2>Lab Station Ops</h2>
                             <p>Poll heartbeat and trigger LabStation commands via /ops.</p>
                         </div>

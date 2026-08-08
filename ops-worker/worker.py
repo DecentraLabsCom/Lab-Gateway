@@ -31,6 +31,11 @@ import requests
 import winrm
 from apscheduler.schedulers.background import BackgroundScheduler
 import aas_generator
+from power.api import power_bp
+from power.models import ValidationError as PowerValidationError
+from power.credentials import PowerCredentialStore
+from power.persistence import PowerOperationStore
+from power.service import PowerRuntime
 
 APP = Flask(__name__)
 
@@ -111,6 +116,7 @@ def handle_unexpected_exception(exc: Exception):
 CONFIG_PATH = os.getenv("OPS_CONFIG", os.path.join(os.path.dirname(__file__), "hosts.json"))
 DYNAMIC_CONFIG_PATH = os.getenv("OPS_DYNAMIC_CONFIG", "/app/data/hosts.json")
 OPS_CREDENTIALS_PATH = os.getenv("OPS_CREDENTIALS_PATH", "/app/data/winrm-credentials.json")
+POWER_CONFIG_PATH = os.getenv("OPS_POWER_CONFIG", "/app/data/power-controllers.json")
 MYSQL_DSN = os.getenv("MYSQL_DSN")
 GUACAMOLE_MYSQL_DSN = os.getenv("GUACAMOLE_MYSQL_DSN")
 OPS_MYSQL_DATABASE = os.getenv("OPS_MYSQL_DATABASE") or os.getenv("BLOCKCHAIN_MYSQL_DATABASE")
@@ -1002,6 +1008,104 @@ def record_reservation_operation(
         )
 
 
+def _record_power_operation(operation: Dict[str, Any]) -> None:
+    """Project a power step into the existing reservation timeline."""
+    reservation_id = str(operation.get("reservationId") or "").strip()
+    controller_id = str(operation.get("controllerId") or "").strip()
+    action = str(operation.get("action") or "").strip().lower()
+    if not reservation_id or not controller_id or action not in {"on", "off", "cycle"}:
+        logging.warning("Skipping malformed power operation projection")
+        return
+    status = str(operation.get("status") or "failed")
+    success = bool(operation.get("success"))
+    record_reservation_operation(
+        reservation_id=reservation_id,
+        lab_id=str(operation.get("labId")) if operation.get("labId") is not None else None,
+        host_name=controller_id,
+        action=f"power:{action}",
+        status=status,
+        success=success,
+        response_code=200 if success else 502,
+        duration_ms=operation.get("durationMs"),
+        payload={
+            "phase": operation.get("phase"),
+            "controllerId": controller_id,
+            "outlet": operation.get("outlet"),
+            "idempotencyKey": operation.get("idempotencyKey"),
+            "observedStateBefore": operation.get("observedStateBefore"),
+            "observedStateAfter": operation.get("observedStateAfter"),
+            "actor": operation.get("actor"),
+            "reason": operation.get("reason"),
+        },
+        message=operation.get("message"),
+    )
+
+
+POWER_OPERATION_STORE = PowerOperationStore(DB_ENGINE) if DB_ENGINE else None
+POWER_CREDENTIAL_STORE = PowerCredentialStore.from_environment()
+try:
+    POWER_RUNTIME = PowerRuntime.from_path(
+        POWER_CONFIG_PATH,
+        record_operation=_record_power_operation,
+        operation_store=POWER_OPERATION_STORE,
+        credential_resolver=POWER_CREDENTIAL_STORE.get,
+    )
+except Exception as exc:
+    # A malformed or unavailable power catalog must fail closed for power
+    # operations without preventing unrelated Lab Station operations from
+    # starting.
+    logging.error("Power configuration unavailable: %s", type(exc).__name__)
+    POWER_RUNTIME = PowerRuntime.from_config(
+        {"controllers": [], "outlets": [], "policies": []},
+        record_operation=_record_power_operation,
+        operation_store=POWER_OPERATION_STORE,
+        credential_resolver=POWER_CREDENTIAL_STORE.get,
+    )
+APP.extensions["power_runtime"] = POWER_RUNTIME
+APP.register_blueprint(power_bp)
+
+
+def _host_local_mode_enabled(host: Dict[str, Any]) -> bool:
+    """Read the last persisted Lab Station local-mode signal when available."""
+    if DB_ENGINE:
+        try:
+            with DB_ENGINE.connect() as conn:
+                heartbeat = _fetch_latest_heartbeat(conn, host.get("name", ""))
+            if heartbeat is not None:
+                return bool(heartbeat.get("localMode"))
+        except Exception as exc:
+            logging.warning("Unable to read local mode for power policy: %s", type(exc).__name__)
+    return parse_bool(host.get("local_mode", host.get("localMode")), False)
+
+
+def _execute_reservation_power_phase(
+    reservation_id: str,
+    lab_id: Optional[str],
+    host: Dict[str, Any],
+    phase: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not lab_id or not parse_bool(payload.get("power", True), True):
+        return {"success": True, "status": "power_disabled", "phase": phase, "steps": []}
+    try:
+        return POWER_RUNTIME.execute_policy(
+            str(lab_id),
+            str(reservation_id),
+            phase,
+            actor=str(payload.get("actor") or "reservation-orchestrator"),
+            local_mode=_host_local_mode_enabled(host),
+        )
+    except (PowerValidationError, KeyError, PermissionError) as exc:
+        logging.warning("Power policy phase failed: %s", type(exc).__name__)
+        return {
+            "success": False,
+            "status": "failed",
+            "phase": phase,
+            "steps": [],
+            "message": "Power policy phase failed",
+        }
+
+
 def _should_send_failure_alert(host_name: str) -> bool:
     if not DB_ENGINE or not host_name:
         return False
@@ -1655,10 +1759,36 @@ def handle_reservation_start(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], i
     success = True
     status_code = 200
 
-    if wake_enabled:
+    if lab_id:
+        power_result = _execute_reservation_power_phase(
+            reservation_id,
+            lab_id,
+            host,
+            "pre_start",
+            payload,
+        )
+        steps.extend(power_result.get("steps", []))
+        if not power_result.get("success"):
+            success = False
+            status_code = 502
+
+    if success and wake_enabled:
         ok, step = perform_wake_step(host, reservation_id, lab_id, payload.get("wakeOptions", {}))
         steps.append(step)
         if not ok:
+            success = False
+            status_code = 502
+
+    if success and lab_id:
+        power_result = _execute_reservation_power_phase(
+            reservation_id,
+            lab_id,
+            host,
+            "post_start",
+            payload,
+        )
+        steps.extend(power_result.get("steps", []))
+        if not power_result.get("success"):
             success = False
             status_code = 502
 
@@ -1698,7 +1828,20 @@ def handle_reservation_end(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int
     success = True
     status_code = 200
 
-    if release_enabled:
+    if lab_id:
+        power_result = _execute_reservation_power_phase(
+            reservation_id,
+            lab_id,
+            host,
+            "pre_end",
+            payload,
+        )
+        steps.extend(power_result.get("steps", []))
+        if not power_result.get("success"):
+            success = False
+            status_code = 502
+
+    if success and release_enabled:
         release_args = normalize_args(payload.get("releaseArgs"), ["--reboot"])
         ok, step = perform_command_step(host, reservation_id, lab_id, "release", "release-session", release_args)
         steps.append(step)
@@ -1713,6 +1856,19 @@ def handle_reservation_end(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int
         ok, step = perform_command_step(host, reservation_id, lab_id, f"power:{mode}", "power", args)
         steps.append(step)
         if not ok:
+            success = False
+            status_code = 502
+
+    if success and lab_id:
+        power_result = _execute_reservation_power_phase(
+            reservation_id,
+            lab_id,
+            host,
+            "post_end",
+            payload,
+        )
+        steps.extend(power_result.get("steps", []))
+        if not power_result.get("success"):
             success = False
             status_code = 502
 

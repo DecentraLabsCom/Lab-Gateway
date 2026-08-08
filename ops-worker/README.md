@@ -6,12 +6,14 @@ This service handles remote lab host operations for the gateway:
 - Remote LabStation command execution over WinRM.
 - Heartbeat polling and persistence in MySQL.
 - Optional reservation automation (start/end orchestration).
+- Provider-local power policies through the `power/` driver layer.
 
 ## Main components
 
 - `worker.py`: Flask API and scheduler.
 - `hosts.json` (`OPS_CONFIG`): host inventory and credentials references.
-- MySQL tables from `mysql/002-labstation-ops.sql`, stored in the `BLOCKCHAIN_MYSQL_DATABASE` schema alongside `lab_reservations`.
+- `power/`: power controller models, policy executor, registry, encrypted credential resolver and drivers.
+- MySQL tables from `mysql/002-labstation-ops.sql` and `mysql/003-energy-policies.sql`, stored in the `BLOCKCHAIN_MYSQL_DATABASE` schema alongside `lab_reservations`.
 - Guacamole observations use both the live `activeConnections` API and durable `guacamole_connection_history`, so a tunnel that opens and closes between polls can still produce evidence. Registration durably records the token's pre-revocation validation. Historical reconciliation matches the unique temporary username and issuance/expiry window, and uses the persisted reservation key/JTI binding after revocation without reusing the revoked token. Historical observations carry the connection's real `start_date` as `observedAt`; the outbox adds the delivery instant as `reportedAt` when it uses the short-lived observer JWT. Rows remain eligible for historical observation for `GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS` (default 300 seconds) after expiry, including after revocation; this does not extend token authorization or revocation timing.
 
 ```mermaid
@@ -107,6 +109,23 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
 - `POST /api/reservations/end`
   - Body: `{ reservationId, host, labId?, release?, releaseArgs?, powerAction? }`
+- `GET /api/power/controllers`
+  - Returns configured power controllers, capabilities and outlet state.
+- `GET /api/power/policies`
+  - Returns the validated provider-local policy JSON without credentials.
+- `PUT /api/power/policies/{labId}`
+  - Validates and atomically persists one lab policy, then activates it in the current runtime.
+- `POST /api/power/mock/reset`
+  - Resets configured mock controllers; intended for development and CI only.
+- `POST /api/power/controllers/{controllerId}/outlets/{outletId}/commands`
+  - Body: `{ command: "set_state", state: "on"|"off", actor?, reason?, idempotencyKey }`.
+  - The `cycle` command also accepts `offSeconds`. Protected outlets require both `allowProtected` and `maintenance`.
+- `POST /api/labs/{labId}/power/start`
+  - Body: `{ reservationId, actor?, dryRun? }`; executes the `pre_start` phase.
+- `POST /api/labs/{labId}/power/end`
+  - Body: `{ reservationId, actor?, dryRun? }`; executes the `post_end` phase.
+- `GET /api/power/operations?reservationId=...`
+  - Returns durable power operation history when `power_operations` is available.
 - `GET /api/reservations/timeline?reservationId=...&limit=...&offset=...`
 - `POST /api/hosts/reload`
 - `POST /api/hosts/local-mode`
@@ -129,6 +148,8 @@ Reservation automation knobs:
 - `OPS_RESERVATION_END_DELAY` (default `60`)
 - `OPS_RESERVATION_LOOKBACK` (default `21600`)
 - `OPS_RESERVATION_RETRY_COOLDOWN` (default `60`)
+
+When a lab has a configured power policy, reservation start executes `pre_start` before Wake-on-LAN and `post_start` after preparation. Reservation end executes `pre_end`, the existing release/power action, and `post_end`. The policy can skip these phases while the latest persisted Lab Station heartbeat reports local mode.
 
 Notification integration knobs:
 
@@ -155,6 +176,25 @@ Credential storage knobs:
 - `OPS_CREDENTIALS_PATH` (compose default: `/app/data/winrm-credentials.json`)
 - `OPS_SECRETS_KEY` is the production encryption key for WinRM credentials saved from Lab Manager. Generate a Fernet key with:
   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+
+Power configuration:
+
+- `OPS_POWER_CONFIG` (compose default: `/app/data/power-controllers.json`)
+- `OPS_POWER_CREDENTIALS_PATH` (compose default: `/app/data/power-credentials.json`)
+- Start from `power-controllers.sample.json`; copy it to the writable `ops-data` directory and change only provider-local values.
+- The `mock` driver is available for development and CI. The `apc-powernet-snmp` driver supports legacy PowerNet and `rPDU2` profiles, but physical activation remains gated on pilot hardware validation.
+- The catalog contains `controllers`, `outlets` and `policies`. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` can edit only the validated policy JSON through the protected policy endpoint; controllers and outlets remain provider-local configuration.
+- APC credentials are resolved by `credentialRef` from the encrypted, provider-local `power-credentials.json` store using `OPS_SECRETS_KEY`; the store is never returned by the API.
+- Provision APC credentials locally with `power_credentials.py`; the secret JSON is read from stdin and the command prints only the reference and type:
+
+  ```powershell
+  '{"version":"v2c","community":"..."}' | python .\power_credentials.py set --ref pdu-lab-01-snmp --type snmpv2c
+  python .\power_credentials.py list
+  ```
+
+  Use `--overwrite` for an intentional replacement. Do not put communities, passwords or tokens in command arguments or logs.
+- Policy step idempotency is deterministic and is persisted in `power_operations` when the migration is available. Successful operations are also projected into `reservation_operations` as `power:on`, `power:off` or `power:cycle`, so the existing reservation timeline can display them. If the migration is unavailable, the worker falls back to process-local idempotency and logs the condition.
+- Existing deployments must apply `mysql/003-energy-policies.sql` to the blockchain-services database before enabling physical power control.
 
 ### Fernet key rotation
 
@@ -187,4 +227,4 @@ The command validates and re-encrypts every entry before changing the store, cre
 - `OPS_CONFIG` is the base, usually read-only host catalog.
 - `OPS_DYNAMIC_CONFIG` is the writable dynamic catalog used by Lab Manager provisioning; Docker Compose maps it to `./ops-data/hosts.json`.
 - In production, set `OPS_SECRETS_KEY` to a stable secret and include it in the deployment backup/secret rotation process.
-- Keep `hosts.json`, `ops-data/hosts.json`, and `ops-data/winrm-credentials.json` out of git.
+- Keep `hosts.json`, `ops-data/hosts.json`, `ops-data/winrm-credentials.json`, and `ops-data/power-credentials.json` out of git.

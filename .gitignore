@@ -98,6 +98,8 @@ Thumbs.db
 dev/
 ops-worker/hosts.json
 ops-data/winrm-credentials.json
+ops-data/power-credentials.json
+ops-data/power-controllers.json
 ops-data/ops-secrets.key
 
 # Smart contracts

@@ -1,0 +1,72 @@
+{
+  "controllers": [
+    {
+      "id": "mock-lab-01",
+      "name": "Mock lab controller",
+      "driver": "mock",
+      "enabled": true,
+      "config": {
+        "outlets": ["1", "2"]
+      }
+    }
+  ],
+  "outlets": [
+    {
+      "controllerId": "mock-lab-01",
+      "outlet": "1",
+      "logicalName": "plc",
+      "critical": true
+    },
+    {
+      "controllerId": "mock-lab-01",
+      "outlet": "2",
+      "logicalName": "hmi"
+    }
+  ],
+  "policies": [
+    {
+      "id": "lab-1-default",
+      "labId": "1",
+      "policyName": "PLC bench default",
+      "enabled": true,
+      "startFailureMode": "fail_reservation_start",
+      "endFailureMode": "warn_and_continue",
+      "steps": [
+        {
+          "phase": "pre_start",
+          "sequence": 10,
+          "controllerId": "mock-lab-01",
+          "outlet": "1",
+          "action": "on",
+          "required": true,
+          "readBackRequired": true
+        },
+        {
+          "phase": "pre_start",
+          "sequence": 20,
+          "controllerId": "mock-lab-01",
+          "outlet": "2",
+          "action": "on",
+          "required": true,
+          "readBackRequired": true
+        },
+        {
+          "phase": "post_end",
+          "sequence": 10,
+          "controllerId": "mock-lab-01",
+          "outlet": "2",
+          "action": "off",
+          "required": false
+        },
+        {
+          "phase": "post_end",
+          "sequence": 20,
+          "controllerId": "mock-lab-01",
+          "outlet": "1",
+          "action": "off",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

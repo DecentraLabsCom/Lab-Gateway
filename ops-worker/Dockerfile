@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping \
 COPY worker.py /app/worker.py
 COPY aas_generator.py /app/aas_generator.py
 COPY rotate_secrets.py /app/rotate_secrets.py
+COPY power_credentials.py /app/power_credentials.py
+COPY power /app/power
 
 RUN groupadd --gid "${OPS_GID}" opsworker \
     && useradd --uid "${OPS_UID}" --gid "${OPS_GID}" --create-home --shell /usr/sbin/nologin opsworker \

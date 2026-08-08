@@ -120,10 +120,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshHostsBtn = $('#refreshHostsBtn');
     const hostListEl = $('#hostList');
     const guacamoleCandidateListEl = $('#guacamoleCandidateList');
+    const refreshPowerControllersBtn = $('#refreshPowerControllersBtn');
+    const powerControllerListEl = $('#powerControllerList');
+    const powerControllersStatusEl = $('#powerControllersStatus');
+    const powerControllersHintEl = $('#powerControllersHint');
+    const powerOperationReasonEl = $('#powerOperationReason');
+    const powerCycleSecondsEl = $('#powerCycleSeconds');
+    const powerMaintenanceModeEl = $('#powerMaintenanceMode');
+    const refreshPowerPoliciesBtn = $('#refreshPowerPoliciesBtn');
+    const powerPolicySelectEl = $('#powerPolicySelect');
+    const powerPolicyLabIdEl = $('#powerPolicyLabId');
+    const powerPolicyJsonEl = $('#powerPolicyJson');
+    const formatPowerPolicyBtn = $('#formatPowerPolicyBtn');
+    const savePowerPolicyBtn = $('#savePowerPolicyBtn');
+    const powerPoliciesStatusEl = $('#powerPoliciesStatus');
+    const powerPolicyEditorHintEl = $('#powerPolicyEditorHint');
     const hostState = {};
     const hostMetadata = {};
     const guacamoleCandidateState = {};
     const heartbeatSources = {};
+    let powerControllers = [];
+    let powerPolicies = [];
     let hostNames = [];
     let guacamoleCandidates = [];
 
@@ -368,6 +385,17 @@ document.addEventListener('DOMContentLoaded', () => {
         // briefly returns 401 while path-scoped session cookies settle.
         loadHostInventory({ skipAuthPrompt: true });
     }
+    if (powerControllerListEl) {
+        powerControllerListEl.addEventListener('click', handlePowerActions);
+        if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', loadPowerControllers);
+        loadPowerControllers({ skipAuthPrompt: true });
+    }
+    if (powerPolicySelectEl) powerPolicySelectEl.addEventListener('change', loadSelectedPowerPolicy);
+    if (refreshPowerPoliciesBtn) refreshPowerPoliciesBtn.addEventListener('click', loadPowerPolicies);
+    if (formatPowerPolicyBtn) formatPowerPolicyBtn.addEventListener('click', formatPowerPolicy);
+    if (savePowerPolicyBtn) savePowerPolicyBtn.addEventListener('click', savePowerPolicy);
+    if (powerPolicyJsonEl && !powerPolicyJsonEl.value) resetPowerPolicyEditor();
+    if (powerPolicySelectEl) loadPowerPolicies({ skipAuthPrompt: true });
     if (guacamoleCandidateListEl) {
         guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
     }
@@ -773,6 +801,296 @@ document.addEventListener('DOMContentLoaded', () => {
             ? `${unmatchedCount} Guacamole connection${unmatchedCount === 1 ? '' : 's'} not linked to an ops host.`
             : 'Guacamole inventory unavailable.';
         opsHint.textContent = `Hosts are loaded from ops-worker/hosts.json and ops-data/hosts.json. ${guacStatus}`;
+    }
+
+    async function loadPowerControllers(options = {}) {
+        if (powerControllersStatusEl) {
+            powerControllersStatusEl.textContent = 'Loading...';
+            powerControllersStatusEl.className = 'pill soft';
+        }
+        try {
+            const res = await fetch('/ops/api/power/controllers', options);
+            if (res.status === 403) {
+                showOpsWarning();
+                return;
+            }
+            if (res.status === 401) {
+                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power controllers', 'error');
+                return;
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            powerControllers = Array.isArray(body.controllers) ? body.controllers : [];
+            renderPowerControllers();
+            if (powerControllersStatusEl) {
+                powerControllersStatusEl.textContent = `${powerControllers.length} controller${powerControllers.length === 1 ? '' : 's'}`;
+                powerControllersStatusEl.className = 'pill good';
+            }
+            if (powerControllersHintEl) {
+                powerControllersHintEl.textContent = powerControllers.length
+                    ? 'Protected outlets require an explicit maintenance mode toggle. Physical activation remains subject to provider hardware validation.'
+                    : 'No controller is configured. Add one to the provider-local power catalog before using this panel.';
+            }
+        } catch (err) {
+            console.warn('Unable to load power controllers', err);
+            powerControllers = [];
+            renderPowerControllers();
+            if (powerControllersStatusEl) {
+                powerControllersStatusEl.textContent = 'Unavailable';
+                powerControllersStatusEl.className = 'pill bad';
+            }
+            if (powerControllersHintEl) powerControllersHintEl.textContent = 'Power controllers could not be loaded.';
+        }
+    }
+
+    async function loadPowerPolicies(options = {}) {
+        if (powerPoliciesStatusEl) {
+            powerPoliciesStatusEl.textContent = 'Loading...';
+            powerPoliciesStatusEl.className = 'pill soft';
+        }
+        try {
+            const selectedLabId = powerPolicyLabIdEl?.value.trim() || powerPolicySelectEl?.value || '';
+            const res = await fetch('/ops/api/power/policies', options);
+            if (res.status === 403) {
+                showOpsWarning();
+                return;
+            }
+            if (res.status === 401) {
+                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power policies', 'error');
+                return;
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            powerPolicies = Array.isArray(body.policies) ? body.policies : [];
+            renderPowerPolicyOptions(selectedLabId);
+            if (powerPoliciesStatusEl) {
+                powerPoliciesStatusEl.textContent = `${powerPolicies.length} polic${powerPolicies.length === 1 ? 'y' : 'ies'}`;
+                powerPoliciesStatusEl.className = 'pill good';
+            }
+        } catch (err) {
+            console.warn('Unable to load power policies', err);
+            powerPolicies = [];
+            renderPowerPolicyOptions('');
+            if (powerPoliciesStatusEl) {
+                powerPoliciesStatusEl.textContent = 'Unavailable';
+                powerPoliciesStatusEl.className = 'pill bad';
+            }
+            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Power policies could not be loaded.';
+        }
+    }
+
+    function renderPowerPolicyOptions(preferredLabId) {
+        if (!powerPolicySelectEl) return;
+        const current = powerPolicySelectEl.value;
+        powerPolicySelectEl.innerHTML = '<option value="">New policy</option>';
+        powerPolicies.forEach(policy => {
+            const option = document.createElement('option');
+            option.value = policy.labId || '';
+            option.textContent = `${policy.labId || 'unknown'} · ${policy.policyName || 'Unnamed policy'}`;
+            powerPolicySelectEl.appendChild(option);
+        });
+        const selected = preferredLabId || current;
+        if (selected && powerPolicies.some(policy => String(policy.labId) === selected)) {
+            powerPolicySelectEl.value = selected;
+        } else {
+            powerPolicySelectEl.value = '';
+        }
+        loadSelectedPowerPolicy();
+    }
+
+    function loadSelectedPowerPolicy() {
+        const labId = powerPolicySelectEl?.value || '';
+        const policy = powerPolicies.find(item => String(item.labId || '') === labId);
+        if (policy) {
+            if (powerPolicyLabIdEl) powerPolicyLabIdEl.value = policy.labId || '';
+            if (powerPolicyJsonEl) powerPolicyJsonEl.value = JSON.stringify(policy, null, 2);
+            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Edit the policy and save it to the provider-local catalog.';
+            return;
+        }
+        resetPowerPolicyEditor(false);
+    }
+
+    function resetPowerPolicyEditor(clearLabId = true) {
+        if (clearLabId && powerPolicyLabIdEl) powerPolicyLabIdEl.value = '';
+        if (powerPolicyJsonEl) {
+            powerPolicyJsonEl.value = JSON.stringify(
+                { policyName: 'New lab policy', enabled: true, steps: [] },
+                null,
+                2,
+            );
+        }
+        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Enter a Lab ID and a valid policy JSON object.';
+    }
+
+    function formatPowerPolicy() {
+        if (!powerPolicyJsonEl) return;
+        try {
+            powerPolicyJsonEl.value = JSON.stringify(JSON.parse(powerPolicyJsonEl.value), null, 2);
+            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'JSON format is valid. Save to apply it.';
+        } catch (err) {
+            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = `Invalid JSON: ${err.message}`;
+            showToast('Power policy JSON is invalid', 'error');
+        }
+    }
+
+    async function savePowerPolicy() {
+        const labId = powerPolicyLabIdEl?.value.trim() || '';
+        if (!labId) {
+            showToast('Enter a Lab ID before saving the policy', 'error');
+            return;
+        }
+        let policy;
+        try {
+            policy = JSON.parse(powerPolicyJsonEl?.value || '{}');
+        } catch (err) {
+            showToast(`Power policy JSON is invalid: ${err.message}`, 'error');
+            return;
+        }
+        if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+            showToast('Power policy must be a JSON object', 'error');
+            return;
+        }
+        if (policy.labId && String(policy.labId) !== labId) {
+            showToast('The JSON labId must match the Lab ID field', 'error');
+            return;
+        }
+        policy.labId = labId;
+        delete policy.lab_id;
+        if (savePowerPolicyBtn) savePowerPolicyBtn.disabled = true;
+        try {
+            const res = await fetch(`/ops/api/power/policies/${encodeURIComponent(labId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(policy)
+            });
+            const body = await res.json().catch(() => ({}));
+            if (res.status === 403) {
+                showOpsWarning();
+                return;
+            }
+            if (res.status === 401) throw new Error('Lab Manager session required');
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            showToast(`Power policy for ${labId} saved`, 'success');
+            await loadPowerPolicies({ skipAuthPrompt: true });
+            if (powerPolicySelectEl) powerPolicySelectEl.value = labId;
+            loadSelectedPowerPolicy();
+        } catch (err) {
+            showToast(`Power policy save failed: ${err.message}`, 'error');
+        } finally {
+            if (savePowerPolicyBtn) savePowerPolicyBtn.disabled = false;
+        }
+    }
+
+    function renderPowerControllers() {
+        if (!powerControllerListEl) return;
+        powerControllerListEl.innerHTML = '';
+        if (!powerControllers.length) {
+            powerControllerListEl.innerHTML = '<div class="empty">No power controllers are configured.</div>';
+            return;
+        }
+        powerControllers.forEach(controller => {
+            const row = document.createElement('div');
+            row.className = 'power-controller-row';
+            const discovery = controller.discovery || {};
+            const reachable = discovery.reachable === true;
+            const discoveryText = reachable
+                ? 'reachable'
+                : discovery.errorCode ? `unreachable (${discovery.errorCode})` : 'unknown reachability';
+            const safeControllerId = escapeHtml(controller.id);
+            const safeName = escapeHtml(controller.name || controller.id);
+            const safeDriver = escapeHtml(controller.driver);
+            const safeHost = escapeHtml(controller.host || 'local/mock');
+            const safeDiscovery = escapeHtml(discoveryText);
+            const outlets = Array.isArray(controller.outlets) ? controller.outlets : [];
+            row.innerHTML = `
+                <div class="power-controller-heading">
+                    <div>
+                        <div class="host-title">${safeName}</div>
+                        <div class="host-meta mono">${safeControllerId} · ${safeDriver} · ${safeHost}</div>
+                    </div>
+                    <span class="pill ${reachable ? 'good' : 'warn'}">${safeDiscovery}</span>
+                </div>
+                <div class="power-outlet-list">
+                    ${outlets.length ? outlets.map(outlet => renderPowerOutlet(controller, outlet)).join('') : '<div class="empty">No outlets configured.</div>'}
+                </div>
+            `;
+            powerControllerListEl.appendChild(row);
+        });
+    }
+
+    function renderPowerOutlet(controller, outlet) {
+        const protectedOutlet = outlet.protected === true;
+        const state = String(outlet.state || 'unknown').toLowerCase();
+        const stateClass = state === 'on' ? 'good' : state === 'off' ? 'soft' : 'warn';
+        const label = outlet.displayName || outlet.logicalName || outlet.outlet;
+        return `
+            <div class="power-outlet-row">
+                <div>
+                    <div class="item-title">${escapeHtml(label)}</div>
+                    <div class="host-meta">Outlet ${escapeHtml(outlet.outlet)}${protectedOutlet ? ' · protected' : ''}${outlet.critical ? ' · critical' : ''}</div>
+                </div>
+                <div class="power-outlet-actions">
+                    <span class="pill ${stateClass}">${escapeHtml(state)}</span>
+                    <button class="mini-btn" data-power-action="on" data-controller-id="${escapeHtml(controller.id)}" data-outlet-id="${escapeHtml(outlet.outlet)}" data-protected="${protectedOutlet}">On</button>
+                    <button class="mini-btn" data-power-action="off" data-controller-id="${escapeHtml(controller.id)}" data-outlet-id="${escapeHtml(outlet.outlet)}" data-protected="${protectedOutlet}">Off</button>
+                    <button class="mini-btn primary" data-power-action="cycle" data-controller-id="${escapeHtml(controller.id)}" data-outlet-id="${escapeHtml(outlet.outlet)}" data-protected="${protectedOutlet}">Cycle</button>
+                </div>
+            </div>
+        `;
+    }
+
+    async function handlePowerActions(event) {
+        const button = event.target.closest('[data-power-action]');
+        if (!button) return;
+        const action = button.dataset.powerAction;
+        const controllerId = button.dataset.controllerId;
+        const outletId = button.dataset.outletId;
+        const protectedOutlet = button.dataset.protected === 'true';
+        if (protectedOutlet && !powerMaintenanceModeEl?.checked) {
+            showToast('Enable maintenance mode before operating a protected outlet', 'error');
+            return;
+        }
+        const offSeconds = Number.parseInt(powerCycleSecondsEl?.value || '10', 10);
+        if (action === 'cycle' && (!Number.isInteger(offSeconds) || offSeconds < 1 || offSeconds > 3600)) {
+            showToast('Cycle off time must be between 1 and 3600 seconds', 'error');
+            return;
+        }
+        button.disabled = true;
+        try {
+            const payload = {
+                command: action === 'cycle' ? 'cycle' : 'set_state',
+                state: action === 'cycle' ? undefined : action,
+                actor: 'lab-manager',
+                reason: powerOperationReasonEl?.value.trim() || 'Lab Manager manual power test',
+                idempotencyKey: createPowerIdempotencyKey(),
+                offSeconds: action === 'cycle' ? offSeconds : undefined,
+                allowProtected: protectedOutlet,
+                maintenance: protectedOutlet && Boolean(powerMaintenanceModeEl?.checked)
+            };
+            Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
+            const res = await fetch(
+                `/ops/api/power/controllers/${encodeURIComponent(controllerId)}/outlets/${encodeURIComponent(outletId)}/commands`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+            );
+            const body = await res.json().catch(() => ({}));
+            if (res.status === 403) {
+                showOpsWarning();
+                return;
+            }
+            if (res.status === 401) throw new Error('Lab Manager session required');
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            showToast(`Power ${action} completed for outlet ${outletId}`, 'success');
+            await loadPowerControllers({ skipAuthPrompt: true });
+        } catch (err) {
+            showToast(`Power ${action} failed: ${err.message}`, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function createPowerIdempotencyKey() {
+        if (window.crypto?.randomUUID) return `lab-manager:${window.crypto.randomUUID()}`;
+        return `lab-manager:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     }
 
     function startHeartbeatStream(host) {
