@@ -201,17 +201,19 @@ class ApcPowerNetSnmpDriver:
         rows = self._call("walk", oid)
         return [(str(row_oid), value) for row_oid, value in rows]
 
+    def _legacy_outlet_count(self) -> Optional[int]:
+        try:
+            return _int(self._get(APC_LEGACY_OIDS["outlet_count"]), "outlet count")
+        except PowerDriverError:
+            return None
+
     def _profile(self) -> str:
         if self._selected_profile:
             return self._selected_profile
-        count = 0
-        try:
-            count = _int(self._get(APC_LEGACY_OIDS["outlet_count"]), "outlet count")
-            if count > 0:
-                self._selected_profile = "legacy"
-                return "legacy"
-        except PowerDriverError:
-            count = 0
+        count = self._legacy_outlet_count()
+        if count is not None and count > 0:
+            self._selected_profile = "legacy"
+            return "legacy"
         try:
             rows = self._walk(APC_RPDU2_OIDS["index"])
         except PowerDriverError as exc:
