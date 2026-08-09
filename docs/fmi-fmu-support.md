@@ -9,7 +9,7 @@ DecentraLabs exposes a protected FMU as a reservation-scoped remote simulation:
 - The provider's real `.fmu` remains on Lab Station and is never delivered to the user.
 - Marketplace does not upload the real model. The provider provisions it on the execution station and publishes an `accessKey` reference.
 - The user downloads a generated `proxy.fmu`, imports it into a native FMI tool and runs the model through the Gateway.
-- A short-lived, single-use session ticket binds the real-time session to the user, lab and reservation.
+- A short-lived, reservation-bound session ticket binds the real-time session to the user, lab and reservation.
 - Reservation windows, availability rules, terms and existing lab metadata apply to FMU resources in the same way as to physical laboratories.
 
 The current product target is FMI 2.0.3 Co-Simulation. FMI 3.0 Co-Simulation is supported on the validated runtime paths described below. Model Exchange and Scheduled Execution are outside the current product scope.
@@ -168,11 +168,11 @@ The request requires an authenticated session and authorization over the reserva
 - `X-Proxy-Artifact-Sha256`, the SHA-256 hash of the generated artifact; and
 - `X-Proxy-Artifact-Signature`, an optional `hmac-sha256=<hex>` signature when the provider configured artifact signing.
 
-Verify the hash, and the signature when present, before importing the proxy. If the embedded ticket expires or has already been used, regenerate the proxy; tickets are not reusable.
+Verify the hash, and the signature when present, before importing the proxy. If the embedded ticket expires or the reservation is cancelled, regenerate the proxy. Ticket redemption rechecks the current on-chain reservation state.
 
 ### 3. Import and run it in an FMI tool
 
-Import `proxy.fmu` as a normal Co-Simulation FMU. The proxy opens a secure WebSocket to the provider Gateway, exchanges the one-shot ticket and maps FMI calls to the remote real-time API. No local DecentraLabs agent is needed.
+Import `proxy.fmu` as a normal Co-Simulation FMU. The proxy opens a secure WebSocket to the provider Gateway, exchanges the reservation-bound ticket and maps FMI calls to the remote real-time API. No local DecentraLabs agent is needed.
 
 The externally advertised Gateway facade is:
 
@@ -199,7 +199,7 @@ session.terminate
 
 Every request carries a `requestId`; responses and events echo it where applicable. `session.terminate` is idempotent. A session is forcibly closed when the reservation window expires.
 
-A ticket-based `session.create` is bound to the user, lab and reservation, has a short configurable TTL (default 120 seconds) and can be consumed only once. Reuse returns `SESSION_TICKET_ALREADY_USED`. Other expected errors include `SESSION_TICKET_INVALID`, `SESSION_TICKET_EXPIRED`, `RESERVATION_NOT_ACTIVE`, `SESSION_EXPIRED`, `RATE_LIMITED` and `INTERNAL_ERROR`.
+A ticket-based `session.create` is bound to the user, lab and reservation and has a short configurable TTL (default 120 seconds). It can be reused only while the ticket and the current on-chain reservation remain valid. Other expected errors include `SESSION_TICKET_INVALID`, `SESSION_TICKET_EXPIRED`, `RESERVATION_NOT_ACTIVE`, `SESSION_EXPIRED`, `SESSION_TICKET_RESERVATION_STATE_UNAVAILABLE`, `RATE_LIMITED` and `INTERNAL_ERROR`.
 
 ### 5. Simulation time and streaming
 
@@ -251,7 +251,7 @@ Useful validation scripts are under `Lab Gateway/tests/integration/`, including 
 - Never publish or return the real FMU through Marketplace, Gateway or proxy downloads.
 - Keep Station APIs on a private network and require the internal token or mTLS.
 - Enforce the reservation window at proxy download, session creation and execution time.
-- Treat `sessionTicket` as a short-lived capability: single use, reservation bound and never logged in plaintext.
+- Treat `sessionTicket` as a short-lived capability: reservation bound, checked against current on-chain state and never logged in plaintext.
 - Rate-limit proxy downloads and real-time session creation.
 - Keep physical-lab flows unchanged; FMU-specific behavior applies only when `resourceType=fmu`.
 
