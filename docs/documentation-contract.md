@@ -59,6 +59,7 @@ language, but must not use them as interchangeable aliases:
 | `Deleted` | The on-chain lab is unlisted, burned and removed from the active catalogue. This is irreversible on-chain and does not cancel historical reservations or erase settlement history. |
 | `PendingTombstone` / `PROCESSING` | Local backend hand-off states that reserve or apply deletion of gateway-hosted content. |
 | `Tombstoned` / `PURGED` | Local content states: content is hidden immediately after tombstoning, then removed after the retention deadline. |
+| `PREPARED` / `BROADCAST_UNKNOWN` / `CONFIRMED_DELETED` / `CANCELLED` / `STUCK_UNKNOWN` | Durable broadcast decision states for the deletion hand-off; they are not aliases for the on-chain lab lifecycle or the local filesystem state. |
 
 “Published” may describe the provider workflow, but it is not a protocol state.
 “Delete metadata”, “remove listing” and “purge content” are different actions:

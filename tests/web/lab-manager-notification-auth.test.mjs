@@ -106,10 +106,14 @@ function loadLabManager({ billingResponse, actionableResponse = null }) {
     fetch: (url, options = {}) => {
       fetchCalls.push({ url: String(url), options });
       const parsedUrl = new URL(String(url), 'http://localhost');
+      if (parsedUrl.pathname === '/lab-admin/reservations/actionable' && actionableResponse) {
+        const response = typeof actionableResponse === 'function'
+          ? actionableResponse(parsedUrl, fetchCalls.length)
+          : actionableResponse;
+        return Promise.resolve(response);
+      }
       return parsedUrl.pathname === '/billing/admin/notifications'
         ? billingResponse
-        : parsedUrl.pathname === '/lab-admin/reservations/actionable' && actionableResponse
-          ? actionableResponse
         : Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
     },
   });
@@ -120,6 +124,49 @@ function loadLabManager({ billingResponse, actionableResponse = null }) {
 
   return { elements, promptCalls, fetchCalls };
 }
+
+test('forwards the actionable reservation resume cursor when loading more', async () => {
+  const cursor = 'djF8N3wxMDA';
+  const actionableResponse = (url) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      success: true,
+      reservations: [],
+      pagination: {
+        offset: Number(url.searchParams.get('offset')),
+        limit: 100,
+        returned: 0,
+        nextOffset: 100,
+        hasMore: url.searchParams.get('cursor') === cursor,
+        ...(url.searchParams.get('cursor') === null ? { nextCursor: cursor } : {}),
+      },
+    }),
+  });
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    actionableResponse,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const list = elements.get('upcomingReservationsList');
+  const loadMoreButton = {
+    closest: (selector) => selector === '[data-action="load-more-actionable"]' ? loadMoreButton : null,
+  };
+  list.dispatchEvent({ type: 'click', target: loadMoreButton });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const actionableCalls = fetchCalls
+    .map(({ url }) => new URL(url, 'http://localhost'))
+    .filter(({ pathname }) => pathname === '/lab-admin/reservations/actionable');
+  assert.equal(actionableCalls.length, 2);
+  assert.equal(actionableCalls[0].searchParams.get('cursor'), null);
+  assert.equal(actionableCalls[1].searchParams.get('cursor'), cursor);
+});
 
 test('reuses an existing billing session while the initial notifications check is pending', async () => {
   let resolveBilling;

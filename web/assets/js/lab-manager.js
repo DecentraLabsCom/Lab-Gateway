@@ -358,7 +358,9 @@ document.addEventListener('DOMContentLoaded', () => {
         reservations: [],
         offset: 0,
         nextOffset: 0,
-        total: 0,
+        cursor: null,
+        total: null,
+        totalKnown: false,
         hasMore: false,
         loading: false
     };
@@ -2027,7 +2029,9 @@ document.addEventListener('DOMContentLoaded', () => {
             actionableReservationsState.reservations = [];
             actionableReservationsState.offset = 0;
             actionableReservationsState.nextOffset = 0;
-            actionableReservationsState.total = 0;
+            actionableReservationsState.cursor = null;
+            actionableReservationsState.total = null;
+            actionableReservationsState.totalKnown = false;
             actionableReservationsState.hasMore = false;
         }
         actionableReservationsState.loading = true;
@@ -2037,6 +2041,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 limit: String(ACTIONABLE_RESERVATIONS_PAGE_SIZE),
                 offset: String(actionableReservationsState.nextOffset)
             });
+            if (actionableReservationsState.cursor) {
+                params.set('cursor', actionableReservationsState.cursor);
+            }
             const res = await fetch(`/lab-admin/reservations/actionable?${params.toString()}`, { credentials: 'include' });
             if (res.status === 401) {
                 renderUpcomingReservationsMessage('Unauthorized: check LAB_MANAGER_TOKEN.');
@@ -2071,11 +2078,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? Number(body.offset)
                     : actionableReservationsState.offset;
             actionableReservationsState.nextOffset = nextOffset;
-            actionableReservationsState.total = Number.isFinite(Number(pagination.total))
-                ? Number(pagination.total)
-                : Number.isFinite(Number(body.totalCount))
-                    ? Number(body.totalCount)
-                    : actionableReservationsState.reservations.length;
+            actionableReservationsState.cursor = typeof pagination.nextCursor === 'string'
+                ? pagination.nextCursor
+                : typeof body.nextCursor === 'string'
+                    ? body.nextCursor
+                    : null;
+            const totalKnown = Number.isFinite(Number(pagination.total))
+                || Number.isFinite(Number(body.totalCount));
+            actionableReservationsState.totalKnown = totalKnown;
+            actionableReservationsState.total = totalKnown
+                ? Number.isFinite(Number(pagination.total))
+                    ? Number(pagination.total)
+                    : Number(body.totalCount)
+                : null;
             actionableReservationsState.hasMore = typeof pagination.hasMore === 'boolean'
                 ? pagination.hasMore
                 : typeof body.hasMore === 'boolean'
@@ -2083,9 +2098,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     : Boolean(body.truncated);
             renderUpcomingReservations();
             const loadedCount = actionableReservationsState.reservations.length;
-            const totalCount = actionableReservationsState.total || loadedCount;
+            const totalCount = actionableReservationsState.totalKnown
+                ? actionableReservationsState.total
+                : loadedCount;
             const status = actionableReservationsState.hasMore
-                ? `${loadedCount} of ${totalCount} actionable`
+                ? actionableReservationsState.totalKnown
+                    ? `${loadedCount} of ${totalCount} actionable`
+                    : `${loadedCount}+ actionable`
                 : `${totalCount} actionable`;
             setUpcomingReservationsStatus(status, 'soft');
         } catch (err) {
