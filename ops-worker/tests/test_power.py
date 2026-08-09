@@ -268,6 +268,59 @@ def test_power_api_requires_reservation_and_rejects_unknown_controller(client, m
         json={"command": "set_state", "state": "on", "idempotencyKey": "unknown-1"},
     )
     assert unknown.status_code == 404
+    assert unknown.json["error"] == "Power controller or outlet was not found"
+
+
+def test_power_api_sanitizes_exception_details(client, monkeypatch):
+    runtime = build_runtime()
+    monkeypatch.setitem(worker.APP.extensions, "power_runtime", runtime)
+
+    invalid_policy = client.put(
+        "/api/power/policies/lab-1",
+        json={
+            "policyName": "invalid",
+            "steps": [
+                {
+                    "phase": "pre_start",
+                    "sequence": 10,
+                    "controllerId": "mock-lab-01",
+                    "outlet": "1",
+                    "action": "on",
+                },
+                {
+                    "phase": "pre_start",
+                    "sequence": 10,
+                    "controllerId": "mock-lab-01",
+                    "outlet": "2",
+                    "action": "off",
+                },
+            ],
+        },
+    )
+    assert invalid_policy.status_code == 400
+    assert invalid_policy.json["error"] == "Power policy is invalid"
+    assert "duplicate sequence" not in invalid_policy.get_data(as_text=True)
+
+    runtime.registry.get("mock-lab-01").outlets["1"].protected = True
+    forbidden = client.post(
+        "/api/power/controllers/mock-lab-01/outlets/1/commands",
+        json={"command": "off", "idempotencyKey": "protected-1"},
+    )
+    assert forbidden.status_code == 403
+    assert forbidden.json["error"] == "Power operation is not permitted"
+    assert "protected outlet" not in forbidden.get_data(as_text=True)
+
+    def raise_validation_error(*_args, **_kwargs):
+        raise ValidationError("internal phase details")
+
+    monkeypatch.setattr(runtime, "execute_policy", raise_validation_error)
+    phase = client.post(
+        "/api/labs/lab-1/power/start",
+        json={"reservationId": "reservation-1"},
+    )
+    assert phase.status_code == 422
+    assert phase.json["error"] == "Power phase request is invalid"
+    assert "internal phase details" not in phase.get_data(as_text=True)
 
 
 def test_power_operation_is_projected_to_reservation_timeline(db_engine):

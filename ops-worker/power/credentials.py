@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -13,6 +14,16 @@ from cryptography.fernet import Fernet, InvalidToken
 
 class PowerCredentialError(RuntimeError):
     """Raised when a referenced power credential cannot be resolved."""
+
+
+def _secure_file(path: Path) -> None:
+    try:
+        os.chmod(path, 0o600)
+    except OSError as exc:
+        raise PowerCredentialError("power credential store permissions could not be secured") from exc
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _secret_value(name: str) -> str:
@@ -147,16 +158,10 @@ class PowerCredentialStore:
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            try:
-                os.chmod(temporary, 0o600)
-            except OSError:
-                pass
+            _secure_file(temporary)
             os.replace(temporary, self.path)
             temporary = None
-            try:
-                os.chmod(self.path, 0o600)
-            except OSError:
-                pass
+            _secure_file(self.path)
         except OSError as exc:
             raise PowerCredentialError("power credential store could not be written") from exc
         finally:
@@ -164,5 +169,5 @@ class PowerCredentialStore:
                 try:
                     temporary.unlink()
                 except OSError:
-                    pass
+                    LOGGER.warning("Unable to remove temporary power credential store file")
         return {"credentialRef": reference, "type": kind}

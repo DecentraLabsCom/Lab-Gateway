@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -18,6 +19,16 @@ from .registry import CredentialResolver, PowerRegistry
 
 class PowerConfigError(RuntimeError):
     """Raised when the provider-local power catalog cannot be persisted."""
+
+
+def _secure_file(path: Path) -> None:
+    try:
+        os.chmod(path, 0o600)
+    except OSError as exc:
+        raise PowerConfigError("power configuration permissions could not be secured") from exc
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PowerRuntime:
@@ -234,16 +245,10 @@ class PowerRuntime:
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            try:
-                os.chmod(temporary, 0o600)
-            except OSError:
-                pass
+            _secure_file(temporary)
             os.replace(temporary, self.config_path)
             temporary = None
-            try:
-                os.chmod(self.config_path, 0o600)
-            except OSError:
-                pass
+            _secure_file(self.config_path)
         except OSError as exc:
             raise PowerConfigError("power configuration could not be written") from exc
         finally:
@@ -251,7 +256,7 @@ class PowerRuntime:
                 try:
                     temporary.unlink()
                 except OSError:
-                    pass
+                    LOGGER.warning("Unable to remove temporary power configuration file")
 
     def operations(self, reservation_id: Optional[str] = None):
         if self.executor.operation_store is not None:

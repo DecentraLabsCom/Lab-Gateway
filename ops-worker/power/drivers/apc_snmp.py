@@ -42,13 +42,13 @@ SYS_DESCR_OID = "1.3.6.1.2.1.1.1.0"
 
 class SnmpClient(Protocol):
     def get(self, oid: str) -> Any:
-        ...
+        raise NotImplementedError
 
     def set(self, oid: str, value: int) -> Any:
-        ...
+        raise NotImplementedError
 
     def walk(self, oid: str) -> Iterable[Tuple[str, Any]]:
-        ...
+        raise NotImplementedError
 
 
 class ApcSnmpError(PowerDriverError):
@@ -204,13 +204,14 @@ class ApcPowerNetSnmpDriver:
     def _profile(self) -> str:
         if self._selected_profile:
             return self._selected_profile
+        count = 0
         try:
             count = _int(self._get(APC_LEGACY_OIDS["outlet_count"]), "outlet count")
             if count > 0:
                 self._selected_profile = "legacy"
                 return "legacy"
         except PowerDriverError:
-            pass
+            count = 0
         try:
             rows = self._walk(APC_RPDU2_OIDS["index"])
         except PowerDriverError as exc:
@@ -337,7 +338,6 @@ class ApcPowerNetSnmpDriver:
         outlet = str(outlet_id).strip()
         if not outlet.isdigit() or int(outlet) <= 0:
             raise PowerDriverError("APC outlet must be a positive integer")
-        profile = self._profile()
         command = 1 if desired == "on" else 2
         self._call("set", _oid(self._profile_oids()["command"], outlet), command)
         return {"outlet": outlet, "state": desired, "success": True}
@@ -384,7 +384,7 @@ class _PySnmpClient:
         def runner():
             try:
                 result.append(asyncio.run(coroutine))
-            except BaseException as exc:  # pragma: no cover - only active loop edge
+            except Exception as exc:  # pragma: no cover - only active loop edge
                 error.append(exc)
 
         thread = threading.Thread(target=runner, daemon=True)

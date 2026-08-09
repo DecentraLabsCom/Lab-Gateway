@@ -84,8 +84,8 @@ def update_power_policy(lab_id: str):
     policy.pop("lab_id", None)
     try:
         updated = runtime.update_policy(policy)
-    except ValidationError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+    except ValidationError:
+        return jsonify({"success": False, "error": "Power policy is invalid"}), 400
     except PowerConfigError:
         return jsonify({"success": False, "error": "Power policy could not be persisted"}), 503
     return jsonify({"success": True, "policy": updated})
@@ -123,12 +123,12 @@ def manual_power_command(controller_id: str, outlet_id: str):
             allow_protected=_bool(body.get("allowProtected", body.get("allow_protected"))),
             maintenance=_bool(body.get("maintenance")),
         )
-    except KeyError as exc:
-        return jsonify({"success": False, "error": str(exc).strip("'")}), 404
-    except PermissionError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 403
-    except (TypeError, ValueError, ValidationError) as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+    except KeyError:
+        return jsonify({"success": False, "error": "Power controller or outlet was not found"}), 404
+    except PermissionError:
+        return jsonify({"success": False, "error": "Power operation is not permitted"}), 403
+    except (TypeError, ValueError, ValidationError):
+        return jsonify({"success": False, "error": "Power command is invalid"}), 400
     except PowerDriverError:
         return jsonify({"success": False, "error": "Power controller command failed"}), 502
     return jsonify({
@@ -155,10 +155,10 @@ def _execute_lab_phase(lab_id: str, phase: str):
             dry_run=_bool(body.get("dryRun", body.get("dry_run"))),
             local_mode=False,
         )
-    except PermissionError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 403
-    except (ValidationError, KeyError) as exc:
-        return jsonify({"success": False, "error": str(exc)}), 422
+    except PermissionError:
+        return jsonify({"success": False, "error": "Power operation is not permitted"}), 403
+    except (ValidationError, KeyError):
+        return jsonify({"success": False, "error": "Power phase request is invalid"}), 422
     status = 200 if result["success"] else 502
     return jsonify({
         "success": result["success"],
