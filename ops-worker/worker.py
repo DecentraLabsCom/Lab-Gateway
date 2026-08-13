@@ -1043,6 +1043,7 @@ def _record_power_operation(operation: Dict[str, Any]) -> None:
 
 POWER_OPERATION_STORE = PowerOperationStore(DB_ENGINE) if DB_ENGINE else None
 POWER_CREDENTIAL_STORE = PowerCredentialStore.from_environment()
+APP.extensions["power_credential_store"] = POWER_CREDENTIAL_STORE
 try:
     POWER_RUNTIME = PowerRuntime.from_path(
         POWER_CONFIG_PATH,

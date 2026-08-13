@@ -328,6 +328,99 @@
                 <div class="card">
                     <div class="card-header">
                         <div>
+                            <h2>Energy Credentials</h2>
+                            <p>Store and rotate provider-local APC, SNMP and NETIO credentials without exposing secret values.</p>
+                        </div>
+                        <div class="actions inline-actions">
+                            <span class="pill soft" id="powerCredentialsStatus">Loading...</span>
+                            <button class="primary-btn" type="button" id="refreshPowerCredentialsBtn"><i class="fas fa-rotate-right"></i> Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-grid power-controller-config-grid">
+                            <label class="field">
+                                <span>Existing credential</span>
+                                <select id="powerCredentialSelect">
+                                    <option value="">New credential</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span>Credential reference</span>
+                                <input type="text" id="powerCredentialRef" maxlength="128" placeholder="netio-lab-01-http" autocomplete="off" required>
+                            </label>
+                            <label class="field">
+                                <span>Credential type</span>
+                                <select id="powerCredentialType">
+                                    <option value="netio-http-basic">NETIO HTTP Basic</option>
+                                    <option value="snmpv1">SNMP v1</option>
+                                    <option value="snmpv2c">SNMP v2c</option>
+                                    <option value="snmpv3">SNMP v3</option>
+                                </select>
+                            </label>
+                            <label class="field" id="powerCredentialUsernameField">
+                                <span>Username</span>
+                                <input type="text" id="powerCredentialUsername" maxlength="256" autocomplete="off">
+                            </label>
+                            <label class="field" id="powerCredentialPasswordField">
+                                <span>Password</span>
+                                <input type="password" id="powerCredentialPassword" maxlength="512" autocomplete="new-password">
+                            </label>
+                            <label class="field" id="powerCredentialCommunityField" hidden>
+                                <span>SNMP community</span>
+                                <input type="password" id="powerCredentialCommunity" maxlength="256" autocomplete="new-password">
+                            </label>
+                            <label class="field" id="powerCredentialAuthProtocolField" hidden>
+                                <span>SNMPv3 authentication</span>
+                                <select id="powerCredentialAuthProtocol">
+                                    <option value="NONE">None</option>
+                                    <option value="MD5">MD5</option>
+                                    <option value="SHA">SHA</option>
+                                    <option value="SHA224">SHA-224</option>
+                                    <option value="SHA256">SHA-256</option>
+                                    <option value="SHA384">SHA-384</option>
+                                    <option value="SHA512">SHA-512</option>
+                                </select>
+                            </label>
+                            <label class="field" id="powerCredentialAuthPasswordField" hidden>
+                                <span>Authentication password</span>
+                                <input type="password" id="powerCredentialAuthPassword" maxlength="512" autocomplete="new-password">
+                            </label>
+                            <label class="field" id="powerCredentialPrivProtocolField" hidden>
+                                <span>SNMPv3 privacy</span>
+                                <select id="powerCredentialPrivProtocol">
+                                    <option value="NONE">None</option>
+                                    <option value="DES">DES</option>
+                                    <option value="AES">AES</option>
+                                    <option value="AES128">AES-128</option>
+                                </select>
+                            </label>
+                            <label class="field" id="powerCredentialPrivPasswordField" hidden>
+                                <span>Privacy password</span>
+                                <input type="password" id="powerCredentialPrivPassword" maxlength="512" autocomplete="new-password">
+                            </label>
+                            <label class="field" id="powerCredentialContextNameField" hidden>
+                                <span>SNMPv3 context name</span>
+                                <input type="text" id="powerCredentialContextName" maxlength="256" autocomplete="off">
+                            </label>
+                        </div>
+                        <div class="hint power-controller-config-hint" id="powerCredentialsHint">
+                            Secret values are write-only in Lab Manager. Select an existing reference to rotate it; the current secret is never loaded into the browser.
+                        </div>
+                        <div class="power-controller-config-footer">
+                            <div class="hint" id="powerCredentialEditorHint" aria-live="polite">Configure a new provider-local credential.</div>
+                            <button class="primary-btn" type="button" id="powerCredentialSaveBtn"><i class="fas fa-key"></i> Save Credential</button>
+                        </div>
+                        <div class="power-controller-list mt-3" id="powerCredentialsList" aria-live="polite">
+                            <div class="empty">No power credentials loaded yet.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="grid single-column">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
                             <h2>Power Controllers</h2>
                             <p>Register and configure the provider-local smart power strips used by the lab policies.</p>
                         </div>

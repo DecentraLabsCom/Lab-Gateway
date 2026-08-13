@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
 
 from flask import Blueprint, current_app, jsonify, request
 
 from power.models import ValidationError
 
+from .credentials import (
+    PowerCredentialAlreadyExistsError,
+    PowerCredentialError,
+    PowerCredentialValidationError,
+)
 from .drivers.base import PowerDriverError
 from .service import PowerConfigError, PowerRuntime
 
 
 power_bp = Blueprint("power", __name__)
+LOGGER = logging.getLogger(__name__)
 
 
 def _runtime() -> Optional[PowerRuntime]:
@@ -21,6 +28,10 @@ def _runtime() -> Optional[PowerRuntime]:
 
 def _runtime_unavailable():
     return jsonify({"success": False, "error": "Power control is not configured"}), 503
+
+
+def _credential_store():
+    return current_app.extensions.get("power_credential_store")
 
 
 def _payload() -> Dict[str, Any]:
@@ -60,6 +71,64 @@ def list_power_controllers():
     if runtime is None:
         return _runtime_unavailable()
     return jsonify({"success": True, "controllers": runtime.describe_controllers()})
+
+
+@power_bp.get("/api/power/credentials")
+def list_power_credentials():
+    store = _credential_store()
+    if store is None:
+        return jsonify({"success": False, "error": "Power credential store is not configured"}), 503
+    try:
+        credentials = store.list()
+    except PowerCredentialError:
+        return jsonify({"success": False, "error": "Power credentials are unavailable"}), 503
+    return jsonify({"success": True, "credentials": credentials})
+
+
+@power_bp.post("/api/power/credentials")
+def save_power_credential():
+    store = _credential_store()
+    if store is None:
+        return jsonify({"success": False, "error": "Power credential store is not configured"}), 503
+    body = _payload()
+    if set(body) - {"credentialRef", "credential_ref", "type", "credentialType", "credentials", "overwrite"}:
+        return jsonify({"success": False, "error": "Power credential is invalid"}), 400
+    credential_ref = str(body.get("credentialRef") or body.get("credential_ref") or "").strip()
+    credential_type = str(body.get("type") or body.get("credentialType") or "").strip()
+    credentials = body.get("credentials")
+    overwrite = _bool(body.get("overwrite"), False)
+    try:
+        existing = {
+            item["credentialRef"]
+            for item in store.list()
+            if isinstance(item, dict) and item.get("credentialRef")
+        }
+        metadata = store.put(
+            credential_ref,
+            credential_type,
+            credentials,
+            overwrite=overwrite,
+        )
+    except PowerCredentialAlreadyExistsError:
+        return jsonify({"success": False, "error": "Power credential already exists; use rotation"}), 409
+    except PowerCredentialValidationError:
+        return jsonify({"success": False, "error": "Power credential is invalid"}), 400
+    except PowerCredentialError:
+        return jsonify({"success": False, "error": "Power credentials could not be saved"}), 503
+
+    runtime_reloaded = False
+    runtime = _runtime()
+    if runtime is not None:
+        try:
+            runtime_reloaded = runtime.reload_credentials(store.get)
+        except (PowerConfigError, PowerCredentialError, ValidationError):
+            LOGGER.warning("Power credential saved but runtime reload was deferred")
+    return jsonify({
+        "success": True,
+        "credential": metadata,
+        "rotated": metadata["credentialRef"] in existing,
+        "runtimeReloaded": runtime_reloaded,
+    }), 200 if metadata["credentialRef"] in existing else 201
 
 
 def _update_controller(runtime: PowerRuntime, controller_id: Optional[str] = None):

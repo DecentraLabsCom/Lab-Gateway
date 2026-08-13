@@ -319,6 +319,25 @@ class PowerRuntime:
             for controller in self.registry.all()
         )
 
+    def reload_credentials(self, credential_resolver: CredentialResolver) -> bool:
+        """Rebuild configured physical drivers after a credential rotation."""
+        if self.config_path is None:
+            self._credential_resolver = credential_resolver
+            return False
+        with self._config_lock:
+            candidate_runtime = PowerRuntime.from_path(
+                str(self.config_path),
+                record_operation=self._record_operation,
+                sleep_fn=self._sleep_fn,
+                operation_store=self._operation_store,
+                credential_resolver=credential_resolver,
+            )
+            self.registry = candidate_runtime.registry
+            self.policies = candidate_runtime.policies
+            self.executor.registry = self.registry
+            self._credential_resolver = credential_resolver
+        return True
+
     def update_controller(self, raw_controller: Mapping[str, Any]) -> Dict[str, Any]:
         """Validate, persist and activate one provider-local controller."""
         controller, outlets = _controller_payload(raw_controller)

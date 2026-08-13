@@ -57,6 +57,16 @@ export OPS_POLL_INTERVAL=60
 python worker.py
 ```
 
+### Local power-driver smoke tests
+
+The APC and NETIO drivers include deterministic local smoke tests. They start
+an in-process UDP/HTTP device double, perform discovery and outlet operations,
+and never contact physical hardware:
+
+```powershell
+python -m pytest tests/test_apc_smoke.py tests/test_netio_smoke.py -q
+```
+
 ## hosts.json example
 
 New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and password are saved separately from the host catalog.
@@ -115,6 +125,10 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Validates and atomically registers one provider-local controller and its outlets.
 - `PUT /api/power/controllers/{controllerId}`
   - Validates and atomically updates one provider-local controller and its outlets, then activates it in the current runtime.
+- `GET /api/power/credentials`
+  - Returns only provider-local credential references and types; decrypted values never leave the worker.
+- `POST /api/power/credentials`
+  - Creates or explicitly rotates one encrypted APC/SNMP/NETIO credential. The request accepts secret values only over the protected Lab Manager path and the response contains metadata only.
 - `GET /api/power/policies`
   - Returns the validated provider-local policy JSON without credentials.
 - `PUT /api/power/policies/{labId}`
@@ -188,9 +202,9 @@ Power configuration:
 - Start from `power-controllers.sample.json`; copy it to the writable `ops-data` directory and change only provider-local values.
 - The `mock` driver is available for development and CI. The `apc-powernet-snmp` driver supports legacy PowerNet and `rPDU2` profiles, while `netio-json` controls NETIO devices through their `/netio.json` HTTP(S) API. Physical activation remains gated on pilot hardware validation.
 - The catalog contains `controllers`, `outlets` and `policies`. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` can manage the validated controller/outlet catalog and power policies through protected endpoints; all data remains provider-local.
-- APC credentials are resolved by `credentialRef` from the encrypted, provider-local `power-credentials.json` store using `OPS_SECRETS_KEY`; the store is never returned by the API.
+- APC credentials are resolved by `credentialRef` from the encrypted, provider-local `power-credentials.json` store using `OPS_SECRETS_KEY`; the store is never returned by the API. Lab Manager can list references and rotate them without reading the current secret.
 - NETIO credentials, when enabled on the device, use the same encrypted store with a payload such as `{"username":"netio-api-user","password":"..."}`. The catalog may set `config.path` (default `/netio.json`), `config.useHttps`, `config.verifyTls`, `config.timeoutSeconds` and `config.retries`; it never contains the Basic-auth password.
-- Provision APC credentials locally with `power_credentials.py`; the secret JSON is read from stdin and the command prints only the reference and type:
+- Provision credentials locally with `power_credentials.py` when working outside Lab Manager; the secret JSON is read from stdin and the command prints only the reference and type:
 
   ```powershell
   '{"version":"v2c","community":"..."}' | python .\power_credentials.py set --ref pdu-lab-01-snmp --type snmpv2c

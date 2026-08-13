@@ -148,6 +148,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const addPowerControllerOutletBtn = $('#addPowerControllerOutletBtn');
     const savePowerControllerBtn = $('#savePowerControllerBtn');
     const powerControllerEditorHintEl = $('#powerControllerEditorHint');
+    const refreshPowerCredentialsBtn = $('#refreshPowerCredentialsBtn');
+    const powerCredentialsListEl = $('#powerCredentialsList');
+    const powerCredentialsStatusEl = $('#powerCredentialsStatus');
+    const powerCredentialsHintEl = $('#powerCredentialsHint');
+    const powerCredentialSelectEl = $('#powerCredentialSelect');
+    const powerCredentialRefEl = $('#powerCredentialRef');
+    const powerCredentialTypeEl = $('#powerCredentialType');
+    const powerCredentialUsernameEl = $('#powerCredentialUsername');
+    const powerCredentialPasswordEl = $('#powerCredentialPassword');
+    const powerCredentialCommunityEl = $('#powerCredentialCommunity');
+    const powerCredentialAuthProtocolEl = $('#powerCredentialAuthProtocol');
+    const powerCredentialAuthPasswordEl = $('#powerCredentialAuthPassword');
+    const powerCredentialPrivProtocolEl = $('#powerCredentialPrivProtocol');
+    const powerCredentialPrivPasswordEl = $('#powerCredentialPrivPassword');
+    const powerCredentialContextNameEl = $('#powerCredentialContextName');
+    const powerCredentialUsernameFieldEl = $('#powerCredentialUsernameField');
+    const powerCredentialPasswordFieldEl = $('#powerCredentialPasswordField');
+    const powerCredentialCommunityFieldEl = $('#powerCredentialCommunityField');
+    const powerCredentialAuthProtocolFieldEl = $('#powerCredentialAuthProtocolField');
+    const powerCredentialAuthPasswordFieldEl = $('#powerCredentialAuthPasswordField');
+    const powerCredentialPrivProtocolFieldEl = $('#powerCredentialPrivProtocolField');
+    const powerCredentialPrivPasswordFieldEl = $('#powerCredentialPrivPasswordField');
+    const powerCredentialContextNameFieldEl = $('#powerCredentialContextNameField');
+    const powerCredentialSaveBtn = $('#powerCredentialSaveBtn');
+    const powerCredentialEditorHintEl = $('#powerCredentialEditorHint');
     const powerOperationReasonEl = $('#powerOperationReason');
     const powerCycleSecondsEl = $('#powerCycleSeconds');
     const powerMaintenanceModeEl = $('#powerMaintenanceMode');
@@ -171,6 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let powerControllers = [];
     let powerControllerOutletDrafts = [];
     let lastPowerControllerDriver = 'mock';
+    let powerCredentials = [];
     let powerPolicies = [];
     let powerPolicyStepDrafts = [];
     let hostNames = [];
@@ -435,6 +461,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (savePowerControllerBtn) savePowerControllerBtn.addEventListener('click', savePowerController);
     if (powerControllerListEl || powerControllerSelectEl) loadPowerControllers({ skipAuthPrompt: true });
+    if (refreshPowerCredentialsBtn) refreshPowerCredentialsBtn.addEventListener('click', loadPowerCredentials);
+    if (powerCredentialSelectEl) powerCredentialSelectEl.addEventListener('change', loadSelectedPowerCredential);
+    if (powerCredentialTypeEl) powerCredentialTypeEl.addEventListener('change', updatePowerCredentialFields);
+    if (powerCredentialAuthProtocolEl) powerCredentialAuthProtocolEl.addEventListener('change', updatePowerCredentialFields);
+    if (powerCredentialPrivProtocolEl) powerCredentialPrivProtocolEl.addEventListener('change', updatePowerCredentialFields);
+    if (powerCredentialSaveBtn) powerCredentialSaveBtn.addEventListener('click', savePowerCredential);
+    if (powerCredentialsListEl) powerCredentialsListEl.addEventListener('click', handlePowerCredentialActions);
+    if (powerCredentialsListEl || powerCredentialSelectEl) loadPowerCredentials({ skipAuthPrompt: true });
+    updatePowerCredentialFields();
     if (powerPolicySelectEl) powerPolicySelectEl.addEventListener('change', loadSelectedPowerPolicy);
     if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.addEventListener('change', handlePowerPolicyLabChange);
     if (addPowerPolicyStepBtn) addPowerPolicyStepBtn.addEventListener('click', addPowerPolicyStep);
@@ -895,6 +930,240 @@ document.addEventListener('DOMContentLoaded', () => {
                 powerControllersStatusEl.className = 'pill bad';
             }
             if (powerControllersHintEl) powerControllersHintEl.textContent = 'Power controllers could not be loaded.';
+        }
+    }
+
+    function updatePowerCredentialFields() {
+        const type = powerCredentialTypeEl?.value || 'netio-http-basic';
+        const isNetio = type === 'netio-http-basic';
+        const isSnmpV1V2 = type === 'snmpv1' || type === 'snmpv2c';
+        const isSnmpV3 = type === 'snmpv3';
+        const authProtocol = powerCredentialAuthProtocolEl?.value || 'NONE';
+        const privProtocol = powerCredentialPrivProtocolEl?.value || 'NONE';
+        if (powerCredentialUsernameFieldEl) powerCredentialUsernameFieldEl.hidden = isSnmpV1V2;
+        if (powerCredentialPasswordFieldEl) powerCredentialPasswordFieldEl.hidden = !isNetio;
+        if (powerCredentialCommunityFieldEl) powerCredentialCommunityFieldEl.hidden = !isSnmpV1V2;
+        if (powerCredentialAuthProtocolFieldEl) powerCredentialAuthProtocolFieldEl.hidden = !isSnmpV3;
+        if (powerCredentialAuthPasswordFieldEl) powerCredentialAuthPasswordFieldEl.hidden = !isSnmpV3 || authProtocol === 'NONE';
+        if (powerCredentialPrivProtocolFieldEl) powerCredentialPrivProtocolFieldEl.hidden = !isSnmpV3;
+        if (powerCredentialPrivPasswordFieldEl) powerCredentialPrivPasswordFieldEl.hidden = !isSnmpV3 || privProtocol === 'NONE';
+        if (powerCredentialContextNameFieldEl) powerCredentialContextNameFieldEl.hidden = !isSnmpV3;
+    }
+
+    function resetPowerCredentialEditor() {
+        if (powerCredentialSelectEl) powerCredentialSelectEl.value = '';
+        if (powerCredentialRefEl) {
+            powerCredentialRefEl.value = '';
+            powerCredentialRefEl.disabled = false;
+        }
+        if (powerCredentialTypeEl) {
+            powerCredentialTypeEl.value = 'netio-http-basic';
+            powerCredentialTypeEl.disabled = false;
+        }
+        [
+            powerCredentialUsernameEl,
+            powerCredentialPasswordEl,
+            powerCredentialCommunityEl,
+            powerCredentialAuthPasswordEl,
+            powerCredentialPrivPasswordEl,
+            powerCredentialContextNameEl,
+        ].forEach(element => {
+            if (element) element.value = '';
+        });
+        if (powerCredentialAuthProtocolEl) powerCredentialAuthProtocolEl.value = 'NONE';
+        if (powerCredentialPrivProtocolEl) powerCredentialPrivProtocolEl.value = 'NONE';
+        updatePowerCredentialFields();
+        if (powerCredentialEditorHintEl) powerCredentialEditorHintEl.textContent = 'Configure a new provider-local credential.';
+    }
+
+    function populatePowerCredentialForm(credential) {
+        if (powerCredentialRefEl) {
+            powerCredentialRefEl.value = credential.credentialRef || '';
+            powerCredentialRefEl.disabled = true;
+        }
+        if (powerCredentialTypeEl) {
+            powerCredentialTypeEl.value = credential.type || 'netio-http-basic';
+            powerCredentialTypeEl.disabled = true;
+        }
+        [
+            powerCredentialUsernameEl,
+            powerCredentialPasswordEl,
+            powerCredentialCommunityEl,
+            powerCredentialAuthPasswordEl,
+            powerCredentialPrivPasswordEl,
+            powerCredentialContextNameEl,
+        ].forEach(element => {
+            if (element) element.value = '';
+        });
+        if (powerCredentialAuthProtocolEl) powerCredentialAuthProtocolEl.value = 'NONE';
+        if (powerCredentialPrivProtocolEl) powerCredentialPrivProtocolEl.value = 'NONE';
+        updatePowerCredentialFields();
+        if (powerCredentialEditorHintEl) powerCredentialEditorHintEl.textContent = 'Enter replacement secret values to rotate this credential. The current values are never loaded.';
+    }
+
+    function renderPowerCredentialOptions() {
+        if (!powerCredentialSelectEl) return;
+        const current = powerCredentialSelectEl.value;
+        powerCredentialSelectEl.innerHTML = '<option value="">New credential</option>';
+        powerCredentials.forEach(credential => {
+            const option = document.createElement('option');
+            option.value = credential.credentialRef || '';
+            option.textContent = `${credential.credentialRef || 'unknown'} · ${credential.type || 'unknown'}`;
+            powerCredentialSelectEl.appendChild(option);
+        });
+        const selected = powerCredentials.some(item => String(item.credentialRef) === String(current)) ? current : '';
+        powerCredentialSelectEl.value = selected;
+        if (selected) loadSelectedPowerCredential();
+        else resetPowerCredentialEditor();
+    }
+
+    function loadSelectedPowerCredential() {
+        const reference = powerCredentialSelectEl?.value || '';
+        const credential = powerCredentials.find(item => String(item.credentialRef || '') === String(reference));
+        if (credential) populatePowerCredentialForm(credential);
+        else resetPowerCredentialEditor();
+    }
+
+    function renderPowerCredentials() {
+        if (!powerCredentialsListEl) return;
+        if (!powerCredentials.length) {
+            powerCredentialsListEl.innerHTML = '<div class="empty">No energy credentials are configured.</div>';
+            return;
+        }
+        powerCredentialsListEl.innerHTML = powerCredentials.map(credential => `
+            <div class="power-controller-row">
+                <div>
+                    <strong>${escapeHtml(credential.credentialRef || 'unknown')}</strong>
+                    <div class="host-meta">Type: ${escapeHtml(credential.type || 'unknown')} · Secret values hidden</div>
+                </div>
+                <button class="mini-btn" type="button" data-power-credential-ref="${escapeHtml(credential.credentialRef || '')}">Rotate</button>
+            </div>
+        `).join('');
+    }
+
+    function handlePowerCredentialActions(event) {
+        const button = event.target?.closest?.('[data-power-credential-ref]');
+        const reference = button?.dataset?.powerCredentialRef;
+        if (!reference || !powerCredentialSelectEl) return;
+        powerCredentialSelectEl.value = reference;
+        loadSelectedPowerCredential();
+    }
+
+    function readPowerCredentialForm() {
+        const credentialRef = (powerCredentialRefEl?.value || '').trim().toLowerCase();
+        const type = (powerCredentialTypeEl?.value || '').trim().toLowerCase();
+        if (!credentialRef) throw new Error('Credential reference is required');
+        if (!/^[a-z0-9][a-z0-9._:-]{0,127}$/.test(credentialRef)) throw new Error('Credential reference contains invalid characters');
+        if (!['netio-http-basic', 'snmpv1', 'snmpv2c', 'snmpv3'].includes(type)) throw new Error('Select a supported credential type');
+
+        let credentials;
+        if (type === 'netio-http-basic') {
+            const username = (powerCredentialUsernameEl?.value || '').trim();
+            const password = powerCredentialPasswordEl?.value || '';
+            if (!username || !password) throw new Error('NETIO username and password are required');
+            credentials = { username, password };
+        } else if (type === 'snmpv1' || type === 'snmpv2c') {
+            const community = powerCredentialCommunityEl?.value || '';
+            if (!community) throw new Error('SNMP community is required');
+            credentials = { version: type.slice(4), community };
+        } else {
+            const username = (powerCredentialUsernameEl?.value || '').trim();
+            const authProtocol = powerCredentialAuthProtocolEl?.value || 'NONE';
+            const privProtocol = powerCredentialPrivProtocolEl?.value || 'NONE';
+            if (!username) throw new Error('SNMPv3 username is required');
+            if (privProtocol !== 'NONE' && authProtocol === 'NONE') throw new Error('SNMPv3 privacy requires authentication');
+            credentials = { version: 'v3', username, authProtocol, privProtocol };
+            if (authProtocol !== 'NONE') {
+                const authPassword = powerCredentialAuthPasswordEl?.value || '';
+                if (!authPassword) throw new Error('SNMPv3 authentication password is required');
+                credentials.authPassword = authPassword;
+            }
+            if (privProtocol !== 'NONE') {
+                const privPassword = powerCredentialPrivPasswordEl?.value || '';
+                if (!privPassword) throw new Error('SNMPv3 privacy password is required');
+                credentials.privPassword = privPassword;
+            }
+            const contextName = (powerCredentialContextNameEl?.value || '').trim();
+            if (contextName) credentials.contextName = contextName;
+        }
+        return {
+            credentialRef,
+            type,
+            credentials,
+            overwrite: Boolean(powerCredentialSelectEl?.value),
+        };
+    }
+
+    async function loadPowerCredentials(options = {}) {
+        if (powerCredentialsStatusEl) {
+            powerCredentialsStatusEl.textContent = 'Loading...';
+            powerCredentialsStatusEl.className = 'pill soft';
+        }
+        try {
+            const res = await fetch('/ops/api/power/credentials', options);
+            if (res.status === 403) {
+                showOpsWarning();
+                return;
+            }
+            if (res.status === 401) {
+                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load energy credentials', 'error');
+                return;
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            powerCredentials = Array.isArray(body.credentials) ? body.credentials : [];
+            renderPowerCredentials();
+            renderPowerCredentialOptions();
+            if (powerCredentialsStatusEl) {
+                powerCredentialsStatusEl.textContent = `${powerCredentials.length} credential${powerCredentials.length === 1 ? '' : 's'}`;
+                powerCredentialsStatusEl.className = 'pill good';
+            }
+            if (powerCredentialsHintEl) powerCredentialsHintEl.textContent = powerCredentials.length
+                ? 'Secret values are write-only. Select a reference to rotate it.'
+                : 'No energy credentials are configured.';
+        } catch (err) {
+            console.warn('Unable to load power credentials', err);
+            powerCredentials = [];
+            renderPowerCredentials();
+            renderPowerCredentialOptions();
+            if (powerCredentialsStatusEl) {
+                powerCredentialsStatusEl.textContent = 'Unavailable';
+                powerCredentialsStatusEl.className = 'pill bad';
+            }
+            if (powerCredentialsHintEl) powerCredentialsHintEl.textContent = 'Energy credentials could not be loaded.';
+        }
+    }
+
+    async function savePowerCredential() {
+        let credential;
+        try {
+            credential = readPowerCredentialForm();
+        } catch (err) {
+            showToast(`Energy credential is invalid: ${err.message}`, 'error');
+            return;
+        }
+        if (powerCredentialSaveBtn) powerCredentialSaveBtn.disabled = true;
+        try {
+            const res = await fetch('/ops/api/power/credentials', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(credential),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (res.status === 403) {
+                showOpsWarning();
+                return;
+            }
+            if (res.status === 401) throw new Error('Lab Manager session required');
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            showToast(`${credential.overwrite ? 'Energy credential rotated' : 'Energy credential saved'}: ${credential.credentialRef}`, 'success');
+            await loadPowerCredentials({ skipAuthPrompt: true });
+            if (powerCredentialSelectEl) powerCredentialSelectEl.value = credential.credentialRef;
+            loadSelectedPowerCredential();
+        } catch (err) {
+            showToast(`Energy credential save failed: ${err.message}`, 'error');
+        } finally {
+            if (powerCredentialSaveBtn) powerCredentialSaveBtn.disabled = false;
         }
     }
 

@@ -63,6 +63,11 @@ function loadLabManager({
     status: 200,
     json: async () => ({ controllers: [] }),
   }),
+  powerCredentialsResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ credentials: [] }),
+  }),
 }) {
   const ids = [
     'driver', 'enabled', 'from', 'fromName', 'defaultTo', 'timezone',
@@ -94,6 +99,12 @@ function loadLabManager({
     'powerControllerRetries', 'powerControllerOutlets', 'addPowerControllerOutletBtn',
     'powerControllerNetioPath', 'powerControllerNetioHttps', 'powerControllerNetioVerifyTls',
     'savePowerControllerBtn', 'powerControllerEditorHint',
+    'refreshPowerCredentialsBtn', 'powerCredentialsList', 'powerCredentialsStatus',
+    'powerCredentialsHint', 'powerCredentialSelect', 'powerCredentialRef',
+    'powerCredentialType', 'powerCredentialUsername', 'powerCredentialPassword',
+    'powerCredentialCommunity', 'powerCredentialAuthProtocol', 'powerCredentialAuthPassword',
+    'powerCredentialPrivProtocol', 'powerCredentialPrivPassword', 'powerCredentialContextName',
+    'powerCredentialSaveBtn', 'powerCredentialEditorHint',
     'powerMaintenanceMode', 'powerPolicySelect', 'powerPolicyLabSelect',
     'powerPolicyName', 'powerPolicyEnabled', 'powerPolicyRespectLocalMode',
     'powerPolicyMaintenanceMode', 'powerPolicyStartFailureMode',
@@ -152,6 +163,9 @@ function loadLabManager({
       }
       if (parsedUrl.pathname === '/ops/api/power/controllers' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerControllersResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/power/credentials' && (!options.method || options.method === 'GET')) {
+        return Promise.resolve(powerCredentialsResponse);
       }
       return parsedUrl.pathname === '/billing/admin/notifications'
         ? billingResponse
@@ -542,6 +556,67 @@ test('creates a NETIO JSON power controller with its HTTP API settings', async (
       defaultState: 'off',
     }],
   });
+});
+
+test('creates a NETIO power credential without exposing its password', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerCredentialRef').value = 'netio-lab-01-http';
+  elements.get('powerCredentialType').value = 'netio-http-basic';
+  elements.get('powerCredentialUsername').value = 'netio-api';
+  elements.get('powerCredentialPassword').value = 'secret-from-form';
+  elements.get('powerCredentialSaveBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const saveCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'POST' && url === '/ops/api/power/credentials');
+  assert.ok(saveCall);
+  assert.deepEqual(JSON.parse(saveCall.options.body), {
+    credentialRef: 'netio-lab-01-http',
+    type: 'netio-http-basic',
+    credentials: { username: 'netio-api', password: 'secret-from-form' },
+    overwrite: false,
+  });
+});
+
+test('loads an existing power credential and submits a replacement with overwrite', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    powerCredentialsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ credentials: [{
+        credentialRef: 'netio-lab-01-http',
+        type: 'netio-http-basic',
+      }] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerCredentialSelect').value = 'netio-lab-01-http';
+  elements.get('powerCredentialSelect').dispatchEvent({ type: 'change' });
+  assert.equal(elements.get('powerCredentialRef').value, 'netio-lab-01-http');
+  assert.equal(elements.get('powerCredentialRef').disabled, true);
+  elements.get('powerCredentialUsername').value = 'netio-api';
+  elements.get('powerCredentialPassword').value = 'rotated-secret';
+  elements.get('powerCredentialSaveBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const saveCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'POST' && url === '/ops/api/power/credentials');
+  assert.ok(saveCall);
+  assert.equal(JSON.parse(saveCall.options.body).overwrite, true);
 });
 
 test('loads an existing power controller and saves it through the update endpoint', async () => {
