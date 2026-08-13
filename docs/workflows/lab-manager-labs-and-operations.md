@@ -35,6 +35,8 @@ In `Labs` → `Detected Resources`:
 Detection only pre-fills values. Review `Access URI`, price, availability, and
 metadata before publishing.
 
+![Lab Manager Labs tab](../images/lab-manager-laboratories.png)
+
 ### Publish a physical laboratory
 
 1. Select `Remote lab` and an existing Guacamole connection.
@@ -107,6 +109,8 @@ In `Operations` → `Lab Station Ops`, the interface shows:
 
 Click `Refresh` after changing the inventory. The UI starts a heartbeat stream
 for each host when the browser and endpoint support it.
+
+![Lab Manager Operations tab](../images/lab-manager-operations.png)
 
 ### Discover and provision a host
 

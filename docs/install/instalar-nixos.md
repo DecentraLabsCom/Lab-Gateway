@@ -162,6 +162,8 @@ Si quieres incluir el gateway en tu propio flake en lugar de usar
 2. Introduce el `ADMIN_ACCESS_TOKEN` definido en `.env`.
 3. Crea o importa la cartera institucional.
 
+![Dashboard de cartera y facturacion](../images/wallet-dashboard.png)
+
 ## Paso 8 — Actualizar el despliegue
 
 Para aplicar cambios después de editar `.env` o descargar una nueva versión:

@@ -381,6 +381,8 @@ Ambos deben devolver JSON sin errores. La respuesta pública de salud está deli
 docker compose restart blockchain-services
 ```
 
+![Dashboard de cartera y facturacion](../images/wallet-dashboard.png)
+
 ## Paso 10 — Configurar conexiones de laboratorio en Guacamole
 
 Consulta [Conexiones Guacamole](../configuring-lab-connections/guacamole-connections.md).

@@ -21,6 +21,12 @@ AAS gives a resource a stable digital identity and a structured place for techni
 | Controls external AAS links and synchronization timing. | Does not need to configure AAS to reserve or use a resource. |
 | Keeps AAS data at the provider Gateway or configured external server. | Treats AAS as descriptive information, not as an authorization grant. |
 
+The Full Gateway exposes FMU/AAS synchronization from the `Digital Twins` tab
+in Lab Manager. The access-key selector is populated from the FMU inventory;
+an optional laboratory override anchors the shell identity to a stable `labId`.
+
+![Lab Manager Digital Twins tab](images/lab-manager-digital-twins.png)
+
 ## Architecture and deployment modes
 
 Each provider Gateway owns its AAS stack. Marketplace does not maintain an AAS database and must not use a resource's operational `accessURI` as the AAS base URL. The provider Gateway base is derived from the provider's canonical `authURI`; the stable shell ID is then requested from `/aas/shells/{aasId}`.

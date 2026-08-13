@@ -150,6 +150,8 @@ access-plane readiness. After opening a Lab Manager session, use
 3. Click **Create wallet** (new institution) or **Import wallet** (existing key).
 4. The encrypted wallet is stored in `blockchain-data/wallets.json` and loaded automatically on every restart.
 
+![Wallet and billing dashboard](../images/wallet-dashboard.png)
+
 ## Step 7 - Add your blockchain configuration
 
 Edit `blockchain-services/.env` and set:

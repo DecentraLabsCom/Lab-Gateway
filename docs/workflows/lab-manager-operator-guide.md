@@ -18,6 +18,13 @@ order therefore matters.
 The tabs are declared in [Lab Manager](../../web/lab-manager/index.html) and
 grouped dynamically by [lab-manager-tabs.js](../../web/assets/js/lab-manager-tabs.js).
 
+The shared header and tab bar look like this in a Full Gateway. The active
+panel changes which backend surface is queried; the access-policy badge remains
+visible so operators can tell whether the dashboard is restricted to localhost
+or an allowed private CIDR.
+
+![Lab Manager Laboratories tab](../images/lab-manager-laboratories.png)
+
 ## Full, Lite, and permissions
 
 | Capability | Full Gateway | Lite Gateway |

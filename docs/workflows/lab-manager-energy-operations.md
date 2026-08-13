@@ -48,6 +48,8 @@ require the Wallet/Admin token requested by `Notifications`. In Lite mode, the
 remote backend remains the control-plane authority, while controllers, Ops
 Worker, and the laboratory network remain local to the Lite Gateway.
 
+![Lab Manager Energy tab](../images/lab-manager-energy.png)
+
 ## Recommended procedure
 
 ### 1. Register the device credential
