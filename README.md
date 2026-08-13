@@ -145,6 +145,8 @@ network and operator model.
   files, required secrets, profiles, and validation.
 - [Operations and health](docs/reference/operations-and-health.md) — health
   endpoints, diagnostics, backups, and incident triage.
+- [Lab Manager energy operations](docs/workflows/lab-manager-energy-operations.md)
+  — credentials, APC/NETIO controllers, outlets, policies, testing, and rotation.
 - [First lab session](docs/tutorials/tutorial-first-lab-session.md) — provider
   journey from setup to an authenticated session.
 - [FMI/FMU support](docs/fmi-fmu-support.md) and [AAS support](docs/aas-support.md)

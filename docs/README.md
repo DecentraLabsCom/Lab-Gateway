@@ -62,9 +62,11 @@ For the complete design and trust requirements, read
    [Laboratory connectivity](workflows/laboratory-connectivity.md).
 2. Configure the Lab Station and the operations path in
    [Gateway and Lab Station operations](workflows/gateway-lab-station-operations.md).
-3. Create the local Guacamole connection and retain its `guac:id:<connection_id>`
+3. Register the local power controllers and configure the laboratory policy in
+   [Lab Manager energy operations](workflows/lab-manager-energy-operations.md).
+4. Create the local Guacamole connection and retain its `guac:id:<connection_id>`
    access key with [Guacamole connections](configuring-lab-connections/guacamole-connections.md).
-4. Follow the [first lab session tutorial](tutorials/tutorial-first-lab-session.md)
+5. Follow the [first lab session tutorial](tutorials/tutorial-first-lab-session.md)
    or its [Spanish version](tutorials/tutorial-primera-sesion-laboratorio.md).
 
 ### Integrate an institutional access flow
@@ -102,6 +104,7 @@ For the complete design and trust requirements, read
 | Browser/session access rules | [Check-in, access, and session workflow](workflows/institutional-check-in-access-sessions.md) |
 | Guacamole timeouts and session semantics | [Guacamole session policy](guacamole-session-policy.md) |
 | Station networking and lifecycle | [Laboratory connectivity](workflows/laboratory-connectivity.md) and [Gateway and Lab Station operations](workflows/gateway-lab-station-operations.md) |
+| Energy credentials, controllers, outlets, and Lab Manager policies | [Lab Manager energy operations](workflows/lab-manager-energy-operations.md) and [Ops Worker README](../ops-worker/README.md) |
 | Embedded backend APIs and security | [`blockchain-services` documentation](../blockchain-services/SUMMARY.md) |
 
 The canonical embedded backend path is `Lab Gateway/blockchain-services`.
