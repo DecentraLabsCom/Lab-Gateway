@@ -61,6 +61,8 @@ al Marketplace a completar el registro como proveedor en la cadena en tu nombre.
 
 ### 1.3 Aplicar el token en el dashboard de cartera
 
+![Dashboard de cartera y facturacion](../images/wallet-dashboard.png)
+
 1. Abre `https://lab.tu-institucion.edu/wallet-dashboard`.
 2. Introduce tu `ADMIN_ACCESS_TOKEN` cuando se te solicite.
 3. Encuentra la sección **Apply Provisioning Token** y pega el token que copiaste.

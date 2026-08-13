@@ -35,6 +35,12 @@ available. The endpoint returns `503` for a partial or unavailable gateway.
 }
 ```
 
+The browser view at `/gateway-health/` presents the same aggregate result and,
+after Lab Manager authentication, the service and infrastructure diagnostics.
+It is an operator aid, not a replacement for the public health contract.
+
+![Gateway Health dashboard](../images/lab-gateway-health.png)
+
 Use the normal Lab Manager authentication flow before opening a `details`
 endpoint. Do not add a token to the query string.
 

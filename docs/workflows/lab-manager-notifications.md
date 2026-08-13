@@ -15,6 +15,11 @@ Billing control plane, not a capability of the Lab Manager token.
 - In Lite mode the tab is disabled: configuration belongs to the Full Gateway
   or the remote backend acting as the control plane.
 
+When the operator opens the tab, Lab Manager keeps the panel behind a separate
+Wallet & Billing administrator-token prompt:
+
+![Lab Manager Notifications access prompt](../images/lab-manager-notifications.png)
+
 The endpoint set is:
 
 ```text

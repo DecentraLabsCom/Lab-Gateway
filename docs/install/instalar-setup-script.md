@@ -150,6 +150,8 @@ dependencias.
 3. Haz clic en **Create wallet** (institución nueva) o **Import wallet** (clave existente).
 4. La cartera cifrada se guarda en `blockchain-data/wallets.json` y se carga automáticamente en cada reinicio.
 
+![Dashboard de cartera y facturacion](../images/wallet-dashboard.png)
+
 ## Paso 7 - Anadir la configuracion de blockchain
 
 Edita `blockchain-services/.env` y establece:

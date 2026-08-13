@@ -381,6 +381,8 @@ health check alone does not test this write path.
 docker compose restart blockchain-services
 ```
 
+![Wallet and billing dashboard](../images/wallet-dashboard.png)
+
 ## Step 10 — Configure lab connections in Guacamole
 
 See [Guacamole Connections](../configuring-lab-connections/guacamole-connections.md).

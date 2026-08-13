@@ -53,6 +53,14 @@ flowchart LR
 serves the user's access. They can be different: a Full or standalone backend
 may authorize a session served by a Lite Gateway.
 
+## Gateway entry page
+
+The public entry page exposes the three main browser surfaces: Lab Manager,
+lab access through Guacamole, and Wallet & Billing. The status badge reflects
+the aggregate readiness reported by the running Gateway.
+
+![Lab Gateway entry page](docs/images/lab-gateway-home.png)
+
 ## Choose the deployment shape
 
 | Shape | Credential issuer and provider control | Local access plane | `ISSUER` |
