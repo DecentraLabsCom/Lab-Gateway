@@ -58,6 +58,11 @@ function loadLabManager({
     status: 200,
     json: async () => ({ policies: [] }),
   }),
+  powerControllersResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ controllers: [] }),
+  }),
 }) {
   const ids = [
     'driver', 'enabled', 'from', 'fromName', 'defaultTo', 'timezone',
@@ -82,8 +87,16 @@ function loadLabManager({
     'graphSection', 'toast', 'labManagerAccessBadge', 'opsHint', 'activityFeedList',
     'refreshPowerControllersBtn', 'powerControllerList', 'powerControllersStatus',
     'powerControllersHint', 'powerOperationReason', 'powerCycleSeconds',
-    'powerMaintenanceMode', 'refreshPowerPoliciesBtn', 'powerPolicySelect',
-    'powerPolicyLabSelect', 'powerPolicyJson', 'formatPowerPolicyBtn',
+    'powerControllerSelect', 'powerControllerId', 'powerControllerName',
+    'powerControllerDriver', 'powerControllerEnabled', 'powerControllerHost',
+    'powerControllerPort', 'powerControllerCredentialRef', 'powerControllerProfile',
+    'powerControllerSnmpVersion', 'powerControllerTimeoutSeconds',
+    'powerControllerRetries', 'powerControllerOutlets', 'addPowerControllerOutletBtn',
+    'savePowerControllerBtn', 'powerControllerEditorHint',
+    'powerMaintenanceMode', 'powerPolicySelect', 'powerPolicyLabSelect',
+    'powerPolicyName', 'powerPolicyEnabled', 'powerPolicyRespectLocalMode',
+    'powerPolicyMaintenanceMode', 'powerPolicyStartFailureMode',
+    'powerPolicyEndFailureMode', 'powerPolicySteps', 'addPowerPolicyStepBtn',
     'savePowerPolicyBtn', 'powerPoliciesStatus', 'powerPolicyEditorHint',
   ];
   const elements = new Map(ids.map((id) => [id, createElement(id)]));
@@ -135,6 +148,9 @@ function loadLabManager({
       }
       if (parsedUrl.pathname === '/ops/api/power/policies' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerPoliciesResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/power/controllers' && (!options.method || options.method === 'GET')) {
+        return Promise.resolve(powerControllersResponse);
       }
       return parsedUrl.pathname === '/billing/admin/notifications'
         ? billingResponse
@@ -315,6 +331,17 @@ test('loads power policy lab options from provider labs and saves the selected l
         ],
       }),
     }),
+    powerControllersResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        controllers: [{
+          id: 'pdu-1',
+          name: 'Bench PDU',
+          outlets: [{ outlet: '1', displayName: 'Bench outlet' }],
+        }],
+      }),
+    }),
   });
 
   await new Promise((resolve) => setImmediate(resolve));
@@ -326,18 +353,184 @@ test('loads power policy lab options from provider labs and saves the selected l
   );
 
   labSelect.value = '42';
-  elements.get('powerPolicyJson').value = JSON.stringify({
-    policyName: 'PLC policy',
-    enabled: true,
-    steps: [],
-  });
+  elements.get('powerPolicyName').value = 'PLC policy';
+  elements.get('powerPolicyEnabled').checked = true;
+  elements.get('powerPolicyRespectLocalMode').checked = true;
+  elements.get('powerPolicyMaintenanceMode').checked = false;
+  elements.get('powerPolicyStartFailureMode').value = 'fail_reservation_start';
+  elements.get('powerPolicyEndFailureMode').value = 'warn_and_continue';
+  elements.get('addPowerPolicyStepBtn').click();
+  assert.match(elements.get('powerPolicySteps').innerHTML, /data-step-field="controllerId"/);
   elements.get('savePowerPolicyBtn').click();
   await new Promise((resolve) => setImmediate(resolve));
 
   const saveCall = fetchCalls.find(({ url, options }) =>
     options.method === 'PUT' && url === '/ops/api/power/policies/42');
   assert.ok(saveCall);
-  assert.equal(JSON.parse(saveCall.options.body).labId, '42');
+  assert.deepEqual(JSON.parse(saveCall.options.body), {
+    labId: '42',
+    policyName: 'PLC policy',
+    enabled: true,
+    respectLocalMode: true,
+    maintenanceMode: false,
+    startFailureMode: 'fail_reservation_start',
+    endFailureMode: 'warn_and_continue',
+    steps: [{
+      phase: 'pre_start',
+      sequence: 10,
+      controllerId: 'pdu-1',
+      outlet: '1',
+      action: 'on',
+      required: true,
+      readBackRequired: true,
+      offSeconds: 10,
+      delayBeforeSeconds: 0,
+      delayAfterSeconds: 0,
+      timeoutSeconds: 20,
+      retryCount: 0,
+      allowProtected: false,
+      conditions: {},
+      desiredState: 'on',
+    }],
+  });
+});
+
+test('loads an existing power policy into the visual editor fields', async () => {
+  const { elements } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    powerPoliciesResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ policies: [{
+        labId: '42',
+        policyName: 'Existing policy',
+        enabled: false,
+        respectLocalMode: false,
+        maintenanceMode: true,
+        startFailureMode: 'warn_and_continue',
+        endFailureMode: 'fail_reservation_start',
+        steps: [{
+          phase: 'post_start',
+          sequence: 20,
+          controllerId: 'pdu-1',
+          outlet: '1',
+          action: 'cycle',
+          offSeconds: 30,
+          conditions: { after: 'boot' },
+        }],
+      }] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerPolicySelect').value = '42';
+  elements.get('powerPolicySelect').dispatchEvent({ type: 'change' });
+
+  assert.equal(elements.get('powerPolicyName').value, 'Existing policy');
+  assert.equal(elements.get('powerPolicyEnabled').checked, false);
+  assert.equal(elements.get('powerPolicyRespectLocalMode').checked, false);
+  assert.equal(elements.get('powerPolicyMaintenanceMode').checked, true);
+  assert.equal(elements.get('powerPolicyStartFailureMode').value, 'warn_and_continue');
+  assert.equal(elements.get('powerPolicyEndFailureMode').value, 'fail_reservation_start');
+  assert.match(elements.get('powerPolicySteps').innerHTML, /post_start/);
+  assert.doesNotMatch(fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8'), /id="refreshPowerPoliciesBtn"/);
+});
+
+test('creates a provider-local power controller from the controller form', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerControllerId').value = 'pdu-lab-01';
+  elements.get('powerControllerName').value = 'Bench PDU';
+  elements.get('powerControllerDriver').value = 'mock';
+  elements.get('powerControllerEnabled').checked = true;
+  elements.get('powerControllerHost').value = '';
+  elements.get('powerControllerPort').value = '161';
+  elements.get('powerControllerProfile').value = 'auto';
+  elements.get('powerControllerSnmpVersion').value = 'v2c';
+  elements.get('powerControllerTimeoutSeconds').value = '3';
+  elements.get('powerControllerRetries').value = '1';
+  elements.get('savePowerControllerBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const saveCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'POST' && url === '/ops/api/power/controllers');
+  assert.ok(saveCall);
+  assert.deepEqual(JSON.parse(saveCall.options.body), {
+    id: 'pdu-lab-01',
+    name: 'Bench PDU',
+    driver: 'mock',
+    enabled: true,
+    host: '',
+    port: 161,
+    credentialRef: '',
+    config: {
+      profile: 'auto',
+      snmpVersion: 'v2c',
+      timeoutSeconds: 3,
+      retries: 1,
+    },
+    outlets: [{
+      outlet: '1',
+      displayName: '',
+      logicalName: '',
+      protected: false,
+      critical: false,
+      defaultState: 'off',
+    }],
+  });
+});
+
+test('loads an existing power controller and saves it through the update endpoint', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    powerControllersResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'pdu-lab-01',
+        name: 'Bench PDU',
+        driver: 'mock',
+        enabled: true,
+        host: '',
+        port: 161,
+        credentialRef: '',
+        config: { profile: 'auto', timeoutSeconds: 2, retries: 1 },
+        outlets: [{ outlet: '1', logicalName: 'PLC', protected: true }],
+      }] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerControllerSelect').value = 'pdu-lab-01';
+  elements.get('powerControllerSelect').dispatchEvent({ type: 'change' });
+  assert.equal(elements.get('powerControllerId').value, 'pdu-lab-01');
+  assert.equal(elements.get('powerControllerId').disabled, true);
+  assert.equal(elements.get('powerControllerName').value, 'Bench PDU');
+  assert.match(elements.get('powerControllerOutlets').innerHTML, /PLC/);
+
+  elements.get('powerControllerName').value = 'Bench PDU Updated';
+  elements.get('savePowerControllerBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const saveCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'PUT' && url === '/ops/api/power/controllers/pdu-lab-01');
+  assert.ok(saveCall);
+  assert.equal(JSON.parse(saveCall.options.body).name, 'Bench PDU Updated');
 });
 
 test('loads FMU lab options and sends the selected lab as the AAS override', async () => {

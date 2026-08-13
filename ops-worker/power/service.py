@@ -30,6 +30,108 @@ def _secure_file(path: Path) -> None:
 
 LOGGER = logging.getLogger(__name__)
 
+_CONTROLLER_FIELDS = frozenset(
+    {"id", "name", "driver", "enabled", "host", "port", "credentialRef", "config", "outlets"}
+)
+_CONTROLLER_CONFIG_FIELDS = frozenset(
+    {"profile", "snmpVersion", "timeoutSeconds", "retries", "moduleIndex"}
+)
+
+
+def _controller_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"false", "0", "no", "off"}
+    return bool(value)
+
+
+def _controller_int(value: Any, field_name: str, *, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool):
+        raise ValidationError(f"{field_name} must be an integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{field_name} must be an integer") from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValidationError(f"{field_name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def _controller_payload(raw_controller: Mapping[str, Any]) -> tuple[Dict[str, Any], list[Dict[str, Any]]]:
+    if not isinstance(raw_controller, Mapping):
+        raise ValidationError("power controller must be an object")
+    unknown_fields = set(raw_controller) - _CONTROLLER_FIELDS
+    if unknown_fields:
+        raise ValidationError("power controller contains unsupported fields")
+
+    controller_id = str(raw_controller.get("id") or "").strip()
+    if not controller_id:
+        raise ValidationError("controller id is required")
+    name = str(raw_controller.get("name") or controller_id).strip()
+    if not name:
+        raise ValidationError("controller name is required")
+    driver = str(raw_controller.get("driver") or "").strip().lower()
+    if driver not in {"mock", "apc-powernet-snmp"}:
+        raise ValidationError("unsupported power driver")
+
+    raw_config = raw_controller.get("config") or {}
+    if not isinstance(raw_config, Mapping):
+        raise ValidationError("controller config must be an object")
+    if set(raw_config) - _CONTROLLER_CONFIG_FIELDS:
+        raise ValidationError("controller config contains unsupported fields")
+    config = {key: raw_config[key] for key in _CONTROLLER_CONFIG_FIELDS if key in raw_config}
+    if "profile" in config and str(config["profile"]).strip().lower() not in {"auto", "legacy", "rpdu2"}:
+        raise ValidationError("controller profile is invalid")
+    if "snmpVersion" in config and str(config["snmpVersion"]).strip().lower() not in {"v1", "v2c", "v3"}:
+        raise ValidationError("SNMP version is invalid")
+    if "timeoutSeconds" in config:
+        config["timeoutSeconds"] = _controller_int(config["timeoutSeconds"], "timeoutSeconds", minimum=1, maximum=60)
+    if "retries" in config:
+        config["retries"] = _controller_int(config["retries"], "retries", minimum=1, maximum=10)
+    if "moduleIndex" in config:
+        config["moduleIndex"] = _controller_int(config["moduleIndex"], "moduleIndex", minimum=1, maximum=65535)
+
+    raw_outlets = raw_controller.get("outlets")
+    if not isinstance(raw_outlets, list):
+        raise ValidationError("controller outlets must be an array")
+    outlets: list[Dict[str, Any]] = []
+    seen_outlets = set()
+    for raw_outlet in raw_outlets:
+        if not isinstance(raw_outlet, Mapping):
+            raise ValidationError("every controller outlet must be an object")
+        outlet_id = str(raw_outlet.get("outlet", raw_outlet.get("outletKey")) or "").strip()
+        if not outlet_id:
+            raise ValidationError("outlet is required")
+        if outlet_id in seen_outlets:
+            raise ValidationError(f"duplicate outlet {outlet_id} for controller {controller_id}")
+        seen_outlets.add(outlet_id)
+        outlets.append(
+            {
+                "controllerId": controller_id,
+                "outlet": outlet_id,
+                "displayName": str(raw_outlet.get("displayName") or "").strip() or None,
+                "logicalName": str(raw_outlet.get("logicalName") or "").strip() or None,
+                "protected": _controller_bool(raw_outlet.get("protected"), False),
+                "critical": _controller_bool(raw_outlet.get("critical"), False),
+                "defaultState": str(raw_outlet.get("defaultState") or "off").strip().lower(),
+            }
+        )
+
+    controller = {
+        "id": controller_id,
+        "name": name,
+        "driver": driver,
+        "enabled": _controller_bool(raw_controller.get("enabled"), True),
+        "host": str(raw_controller.get("host") or "").strip() or None,
+        "port": raw_controller.get("port"),
+        "credentialRef": str(raw_controller.get("credentialRef") or "").strip() or None,
+        "config": config,
+    }
+    return controller, outlets
+
 
 class PowerRuntime:
     def __init__(
@@ -40,12 +142,17 @@ class PowerRuntime:
         record_operation: Optional[OperationRecorder] = None,
         sleep_fn: Optional[Callable[[float], None]] = None,
         operation_store: Optional[PowerOperationStore] = None,
+        credential_resolver: Optional[CredentialResolver] = None,
         config_path: Optional[Path] = None,
     ) -> None:
         self.registry = registry
         self.policies = dict(policies)
         self.config_path = config_path
         self._config_lock = threading.RLock()
+        self._record_operation = record_operation
+        self._sleep_fn = sleep_fn
+        self._operation_store = operation_store
+        self._credential_resolver = credential_resolver
         self.executor = PowerPolicyExecutor(
             registry,
             record_operation=record_operation,
@@ -84,6 +191,7 @@ class PowerRuntime:
             record_operation=record_operation,
             sleep_fn=sleep_fn,
             operation_store=operation_store,
+            credential_resolver=credential_resolver,
             config_path=config_path,
         )
 
@@ -186,6 +294,66 @@ class PowerRuntime:
             self.registry.public_description(controller)
             for controller in self.registry.all()
         ]
+
+    def has_controller(self, controller_id: str) -> bool:
+        return any(
+            controller.definition.id == str(controller_id)
+            for controller in self.registry.all()
+        )
+
+    def update_controller(self, raw_controller: Mapping[str, Any]) -> Dict[str, Any]:
+        """Validate, persist and activate one provider-local controller."""
+        controller, outlets = _controller_payload(raw_controller)
+        if self.config_path is None:
+            raise PowerConfigError("power configuration persistence is not configured")
+
+        with self._config_lock:
+            config = self._read_config_for_update()
+            raw_controllers = config.get("controllers", [])
+            if not isinstance(raw_controllers, list):
+                raise ValidationError("controllers must be an array")
+            controllers = []
+            replaced = False
+            for existing in raw_controllers:
+                if not isinstance(existing, Mapping):
+                    raise ValidationError("every power controller must be an object")
+                if str(existing.get("id") or "").strip() == controller["id"]:
+                    controllers.append(controller)
+                    replaced = True
+                else:
+                    controllers.append(dict(existing))
+            if not replaced:
+                controllers.append(controller)
+
+            raw_outlets = config.get("outlets", [])
+            if not isinstance(raw_outlets, list):
+                raise ValidationError("outlets must be an array")
+            catalog_outlets = [
+                dict(existing)
+                for existing in raw_outlets
+                if isinstance(existing, Mapping)
+                and str(existing.get("controllerId", existing.get("controller_id")) or "").strip()
+                != controller["id"]
+            ]
+            catalog_outlets.extend(outlets)
+            candidate_config = dict(config)
+            candidate_config["controllers"] = controllers
+            candidate_config["outlets"] = catalog_outlets
+
+            candidate_runtime = PowerRuntime.from_config(
+                candidate_config,
+                record_operation=self._record_operation,
+                sleep_fn=self._sleep_fn,
+                operation_store=self._operation_store,
+                credential_resolver=self._credential_resolver,
+                config_path=self.config_path,
+            )
+            self._write_config(candidate_config)
+            self.registry = candidate_runtime.registry
+            self.policies = candidate_runtime.policies
+            self.executor.registry = self.registry
+
+        return self.registry.public_description(self.registry.get(controller["id"]))
 
     def describe_policies(self):
         return [

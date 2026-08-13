@@ -194,6 +194,12 @@ class PowerRegistry:
             "enabled": controller.definition.enabled,
             "host": controller.definition.host,
             "port": controller.definition.port,
+            "credentialRef": controller.definition.credential_ref,
+            "config": {
+                key: controller.definition.config[key]
+                for key in ("profile", "snmpVersion", "timeoutSeconds", "retries", "moduleIndex")
+                if key in controller.definition.config
+            },
             "capabilities": capabilities.to_dict(),
             "discovery": discovery,
             "outlets": [

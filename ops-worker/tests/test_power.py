@@ -257,6 +257,81 @@ def test_power_api_lists_controllers_runs_commands_and_executes_lab_phases(clien
     assert runtime.registry.get("mock-lab-01").driver.states == {"1": "off", "2": "off"}
 
 
+def test_power_controller_api_creates_and_updates_provider_catalog(client, tmp_path, monkeypatch):
+    config_path = tmp_path / "power-controllers.json"
+    config_path.write_text(
+        json.dumps({"controllers": [], "outlets": [], "policies": []}),
+        encoding="utf-8",
+    )
+    runtime = PowerRuntime.from_path(str(config_path))
+    monkeypatch.setitem(worker.APP.extensions, "power_runtime", runtime)
+
+    created = client.post(
+        "/api/power/controllers",
+        json={
+            "id": "pdu-lab-01",
+            "name": "Bench PDU",
+            "driver": "mock",
+            "enabled": True,
+            "config": {"timeoutSeconds": 3},
+            "outlets": [
+                {"outlet": "1", "logicalName": "PLC", "critical": True},
+            ],
+        },
+    )
+    assert created.status_code == 201
+    assert created.json["controller"]["id"] == "pdu-lab-01"
+    assert created.json["controller"]["outlets"][0]["logicalName"] == "PLC"
+
+    updated = client.put(
+        "/api/power/controllers/pdu-lab-01",
+        json={
+            "id": "pdu-lab-01",
+            "name": "Bench PDU Updated",
+            "driver": "mock",
+            "enabled": False,
+            "config": {"timeoutSeconds": 4},
+            "outlets": [
+                {"outlet": "1", "logicalName": "PLC", "critical": True},
+                {"outlet": "2", "logicalName": "HMI"},
+            ],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json["controller"]["name"] == "Bench PDU Updated"
+    assert updated.json["controller"]["enabled"] is False
+    assert [outlet["outlet"] for outlet in updated.json["controller"]["outlets"]] == ["1", "2"]
+    assert runtime.describe_controllers()[0]["name"] == "Bench PDU Updated"
+
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
+    assert persisted["controllers"][0]["name"] == "Bench PDU Updated"
+    assert [outlet["outlet"] for outlet in persisted["outlets"]] == ["1", "2"]
+
+
+def test_power_controller_api_rejects_secret_config_without_changing_catalog(client, tmp_path, monkeypatch):
+    config_path = tmp_path / "power-controllers.json"
+    original = {"controllers": [], "outlets": [], "policies": []}
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+    runtime = PowerRuntime.from_path(str(config_path))
+    monkeypatch.setitem(worker.APP.extensions, "power_runtime", runtime)
+
+    response = client.post(
+        "/api/power/controllers",
+        json={
+            "id": "pdu-lab-01",
+            "name": "Bench PDU",
+            "driver": "mock",
+            "config": {"community": "do-not-store-this"},
+            "outlets": [{"outlet": "1"}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json["error"] == "Power controller configuration is invalid"
+    assert "do-not-store-this" not in response.get_data(as_text=True)
+    assert json.loads(config_path.read_text(encoding="utf-8")) == original
+
+
 def test_power_api_requires_reservation_and_rejects_unknown_controller(client, monkeypatch):
     monkeypatch.setitem(worker.APP.extensions, "power_runtime", build_runtime())
 

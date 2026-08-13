@@ -918,6 +918,21 @@ body {
 .power-controls { margin-bottom: 14px; }
 .power-maintenance-field { align-items: center; }
 .power-maintenance-field > span { margin-bottom: 0; }
+.power-controller-config-grid { margin-bottom: 10px; }
+.power-controller-config-hint { margin-top: 4px; }
+.power-controller-outlets-editor { margin-top: 18px; }
+.power-controller-outlets-header,
+.power-controller-outlet-config-header,
+.power-controller-config-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.power-controller-outlets-header { margin-bottom: 10px; }
+.power-controller-outlets-header h3 { margin: 0 0 4px; }
+.power-controller-outlets { display: flex; flex-direction: column; gap: 12px; }
+.power-controller-outlet-config { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #0d1220; }
+.power-controller-outlet-config-header { margin-bottom: 12px; }
+.power-controller-outlet-fields { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.power-controller-outlet-options { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+.power-controller-config-footer { align-items: flex-end; margin-top: 14px; }
+.power-controller-config-footer .hint { margin: 0; }
 .power-controller-list { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
 .power-controller-row { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: #0f1422; }
 .power-controller-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -926,9 +941,23 @@ body {
 .power-outlet-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .power-policy-editor { margin-top: 16px; }
 .power-policy-toolbar { align-items: end; margin-top: 12px; }
-.power-policy-actions { align-self: end; padding-bottom: 1px; }
-.power-policy-json { width: 100%; min-height: 280px; margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #0d1220; color: var(--text); font: 0.86rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; resize: vertical; tab-size: 2; }
-.power-policy-json:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(77,225,255,0.1); outline: none; }
+.power-policy-steps-editor { margin-top: 16px; }
+.power-policy-steps-header,
+.power-policy-step-header,
+.power-policy-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.power-policy-steps-header { margin-bottom: 10px; }
+.power-policy-steps-header h4 { margin: 0 0 4px; }
+.power-policy-steps { display: flex; flex-direction: column; gap: 12px; }
+.power-policy-step { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #0d1220; }
+.power-policy-step-header { margin-bottom: 12px; }
+.power-policy-step-fields { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.power-policy-step-options { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+.check-field { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 0.9rem; }
+.check-field input { accent-color: var(--primary); }
+.power-policy-conditions { margin-top: 12px; }
+.power-policy-conditions textarea { min-height: 70px; font: 0.86rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+.power-policy-footer { align-items: flex-end; margin-top: 14px; }
+.power-policy-footer .hint { margin: 0; }
 .mini-btn {
     padding: 6px 10px;
     border-radius: 10px;
@@ -1086,6 +1115,7 @@ body {
 @media (max-width: 700px) {
     .power-controller-heading, .power-outlet-row { align-items: flex-start; flex-direction: column; }
     .power-outlet-actions { justify-content: flex-start; }
-    .power-policy-actions { align-self: start; }
+    .power-controller-config-footer { align-items: flex-start; flex-direction: column; }
+    .power-policy-footer { align-items: flex-start; flex-direction: column; }
 }
 .warning-icon { color: #856404; margin-right: 8px; }

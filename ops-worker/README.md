@@ -111,6 +111,10 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ reservationId, host, labId?, release?, releaseArgs?, powerAction? }`
 - `GET /api/power/controllers`
   - Returns configured power controllers, capabilities and outlet state.
+- `POST /api/power/controllers`
+  - Validates and atomically registers one provider-local controller and its outlets.
+- `PUT /api/power/controllers/{controllerId}`
+  - Validates and atomically updates one provider-local controller and its outlets, then activates it in the current runtime.
 - `GET /api/power/policies`
   - Returns the validated provider-local policy JSON without credentials.
 - `PUT /api/power/policies/{labId}`
@@ -183,7 +187,7 @@ Power configuration:
 - `OPS_POWER_CREDENTIALS_PATH` (compose default: `/app/data/power-credentials.json`)
 - Start from `power-controllers.sample.json`; copy it to the writable `ops-data` directory and change only provider-local values.
 - The `mock` driver is available for development and CI. The `apc-powernet-snmp` driver supports legacy PowerNet and `rPDU2` profiles, but physical activation remains gated on pilot hardware validation.
-- The catalog contains `controllers`, `outlets` and `policies`. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` can edit only the validated policy JSON through the protected policy endpoint; controllers and outlets remain provider-local configuration.
+- The catalog contains `controllers`, `outlets` and `policies`. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` can manage the validated controller/outlet catalog and power policies through protected endpoints; all data remains provider-local.
 - APC credentials are resolved by `credentialRef` from the encrypted, provider-local `power-credentials.json` store using `OPS_SECRETS_KEY`; the store is never returned by the API.
 - Provision APC credentials locally with `power_credentials.py`; the secret JSON is read from stdin and the command prints only the reference and type:
 

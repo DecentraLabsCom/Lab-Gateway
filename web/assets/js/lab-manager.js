@@ -124,14 +124,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const powerControllerListEl = $('#powerControllerList');
     const powerControllersStatusEl = $('#powerControllersStatus');
     const powerControllersHintEl = $('#powerControllersHint');
+    const powerControllerSelectEl = $('#powerControllerSelect');
+    const powerControllerIdEl = $('#powerControllerId');
+    const powerControllerNameEl = $('#powerControllerName');
+    const powerControllerDriverEl = $('#powerControllerDriver');
+    const powerControllerEnabledEl = $('#powerControllerEnabled');
+    const powerControllerHostEl = $('#powerControllerHost');
+    const powerControllerPortEl = $('#powerControllerPort');
+    const powerControllerCredentialRefEl = $('#powerControllerCredentialRef');
+    const powerControllerProfileEl = $('#powerControllerProfile');
+    const powerControllerSnmpVersionEl = $('#powerControllerSnmpVersion');
+    const powerControllerTimeoutSecondsEl = $('#powerControllerTimeoutSeconds');
+    const powerControllerRetriesEl = $('#powerControllerRetries');
+    const powerControllerOutletsEl = $('#powerControllerOutlets');
+    const addPowerControllerOutletBtn = $('#addPowerControllerOutletBtn');
+    const savePowerControllerBtn = $('#savePowerControllerBtn');
+    const powerControllerEditorHintEl = $('#powerControllerEditorHint');
     const powerOperationReasonEl = $('#powerOperationReason');
     const powerCycleSecondsEl = $('#powerCycleSeconds');
     const powerMaintenanceModeEl = $('#powerMaintenanceMode');
-    const refreshPowerPoliciesBtn = $('#refreshPowerPoliciesBtn');
     const powerPolicySelectEl = $('#powerPolicySelect');
     const powerPolicyLabSelectEl = $('#powerPolicyLabSelect');
-    const powerPolicyJsonEl = $('#powerPolicyJson');
-    const formatPowerPolicyBtn = $('#formatPowerPolicyBtn');
+    const powerPolicyNameEl = $('#powerPolicyName');
+    const powerPolicyEnabledEl = $('#powerPolicyEnabled');
+    const powerPolicyRespectLocalModeEl = $('#powerPolicyRespectLocalMode');
+    const powerPolicyMaintenanceModeEl = $('#powerPolicyMaintenanceMode');
+    const powerPolicyStartFailureModeEl = $('#powerPolicyStartFailureMode');
+    const powerPolicyEndFailureModeEl = $('#powerPolicyEndFailureMode');
+    const powerPolicyStepsEl = $('#powerPolicySteps');
+    const addPowerPolicyStepBtn = $('#addPowerPolicyStepBtn');
     const savePowerPolicyBtn = $('#savePowerPolicyBtn');
     const powerPoliciesStatusEl = $('#powerPoliciesStatus');
     const powerPolicyEditorHintEl = $('#powerPolicyEditorHint');
@@ -140,7 +161,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const guacamoleCandidateState = {};
     const heartbeatSources = {};
     let powerControllers = [];
+    let powerControllerOutletDrafts = [];
     let powerPolicies = [];
+    let powerPolicyStepDrafts = [];
     let hostNames = [];
     let guacamoleCandidates = [];
 
@@ -390,22 +413,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // briefly returns 401 while path-scoped session cookies settle.
         loadHostInventory({ skipAuthPrompt: true });
     }
-    if (powerControllerListEl) {
-        powerControllerListEl.addEventListener('click', handlePowerActions);
-        if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', loadPowerControllers);
-        loadPowerControllers({ skipAuthPrompt: true });
+    if (powerControllerListEl) powerControllerListEl.addEventListener('click', handlePowerActions);
+    if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', loadPowerControllers);
+    if (powerControllerSelectEl) powerControllerSelectEl.addEventListener('change', loadSelectedPowerController);
+    if (addPowerControllerOutletBtn) addPowerControllerOutletBtn.addEventListener('click', addPowerControllerOutlet);
+    if (powerControllerOutletsEl) {
+        powerControllerOutletsEl.addEventListener('change', handlePowerControllerOutletChange);
+        powerControllerOutletsEl.addEventListener('input', handlePowerControllerOutletChange);
+        powerControllerOutletsEl.addEventListener('click', handlePowerControllerOutletActions);
     }
+    if (savePowerControllerBtn) savePowerControllerBtn.addEventListener('click', savePowerController);
+    if (powerControllerListEl || powerControllerSelectEl) loadPowerControllers({ skipAuthPrompt: true });
     if (powerPolicySelectEl) powerPolicySelectEl.addEventListener('change', loadSelectedPowerPolicy);
     if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.addEventListener('change', handlePowerPolicyLabChange);
-    if (refreshPowerPoliciesBtn) {
-        refreshPowerPoliciesBtn.addEventListener('click', () => {
-            loadManagedLabs();
-            loadPowerPolicies();
-        });
+    if (addPowerPolicyStepBtn) addPowerPolicyStepBtn.addEventListener('click', addPowerPolicyStep);
+    if (powerPolicyStepsEl) {
+        powerPolicyStepsEl.addEventListener('change', handlePowerPolicyStepChange);
+        powerPolicyStepsEl.addEventListener('input', handlePowerPolicyStepChange);
+        powerPolicyStepsEl.addEventListener('click', handlePowerPolicyStepActions);
     }
-    if (formatPowerPolicyBtn) formatPowerPolicyBtn.addEventListener('click', formatPowerPolicy);
     if (savePowerPolicyBtn) savePowerPolicyBtn.addEventListener('click', savePowerPolicy);
-    if (powerPolicyJsonEl && !powerPolicyJsonEl.value) resetPowerPolicyEditor();
+    if (powerPolicyNameEl && !powerPolicyNameEl.value) resetPowerPolicyEditor();
     if (powerPolicyLabSelectEl || fmuSyncKeyEl || fmuSyncLabSelectEl || aasLinkLabSelectEl) loadManagedLabs({ skipAuthPrompt: true });
     if (powerPolicySelectEl) loadPowerPolicies({ skipAuthPrompt: true });
     if (guacamoleCandidateListEl) {
@@ -834,6 +862,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             powerControllers = Array.isArray(body.controllers) ? body.controllers : [];
             renderPowerControllers();
+            renderPowerControllerOptions();
+            renderPowerPolicySteps();
             if (powerControllersStatusEl) {
                 powerControllersStatusEl.textContent = `${powerControllers.length} controller${powerControllers.length === 1 ? '' : 's'}`;
                 powerControllersStatusEl.className = 'pill good';
@@ -847,6 +877,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('Unable to load power controllers', err);
             powerControllers = [];
             renderPowerControllers();
+            renderPowerControllerOptions();
+            renderPowerPolicySteps();
             if (powerControllersStatusEl) {
                 powerControllersStatusEl.textContent = 'Unavailable';
                 powerControllersStatusEl.className = 'pill bad';
@@ -1042,7 +1074,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const policy = powerPolicies.find(item => String(item.labId || '') === labId);
         if (policy) {
             if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.value = policy.labId || '';
-            if (powerPolicyJsonEl) powerPolicyJsonEl.value = JSON.stringify(policy, null, 2);
+            populatePowerPolicyForm(policy);
             if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Edit the policy and save it to the provider-local catalog.';
             return;
         }
@@ -1051,25 +1083,292 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function resetPowerPolicyEditor(clearLabId = true) {
         if (clearLabId && powerPolicyLabSelectEl) powerPolicyLabSelectEl.value = '';
-        if (powerPolicyJsonEl) {
-            powerPolicyJsonEl.value = JSON.stringify(
-                { policyName: 'New lab policy', enabled: true, steps: [] },
-                null,
-                2,
-            );
-        }
-        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Select a laboratory and enter a valid policy JSON object.';
+        if (powerPolicyNameEl) powerPolicyNameEl.value = 'New lab policy';
+        if (powerPolicyEnabledEl) powerPolicyEnabledEl.checked = true;
+        if (powerPolicyRespectLocalModeEl) powerPolicyRespectLocalModeEl.checked = true;
+        if (powerPolicyMaintenanceModeEl) powerPolicyMaintenanceModeEl.checked = false;
+        if (powerPolicyStartFailureModeEl) powerPolicyStartFailureModeEl.value = 'fail_reservation_start';
+        if (powerPolicyEndFailureModeEl) powerPolicyEndFailureModeEl.value = 'warn_and_continue';
+        powerPolicyStepDrafts = [];
+        renderPowerPolicySteps();
+        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Select a laboratory and configure the policy fields.';
     }
 
-    function formatPowerPolicy() {
-        if (!powerPolicyJsonEl) return;
-        try {
-            powerPolicyJsonEl.value = JSON.stringify(JSON.parse(powerPolicyJsonEl.value), null, 2);
-            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'JSON format is valid. Save to apply it.';
-        } catch (err) {
-            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = `Invalid JSON: ${err.message}`;
-            showToast('Power policy JSON is invalid', 'error');
+    function createPowerPolicyStepDraft(step = {}) {
+        const action = String(step.action || 'on').trim().toLowerCase();
+        const conditions = step.conditions && typeof step.conditions === 'object' && !Array.isArray(step.conditions)
+            ? step.conditions
+            : {};
+        const parsedSequence = Number.parseInt(step.sequence, 10);
+        const readInteger = (value, fallback) => {
+            const parsed = Number.parseInt(value, 10);
+            return Number.isInteger(parsed) ? parsed : fallback;
+        };
+        return {
+            id: String(step.id || step.stepId || '').trim(),
+            phase: String(step.phase || 'pre_start').trim().toLowerCase(),
+            sequence: Number.isInteger(parsedSequence) && parsedSequence >= 0 ? parsedSequence : 10,
+            controllerId: String(step.controllerId || step.controller_id || '').trim(),
+            outlet: String(step.outlet || step.outletKey || step.outlet_key || '').trim(),
+            logicalName: String(step.logicalName || step.logical_name || '').trim(),
+            action: ['on', 'off', 'cycle'].includes(action) ? action : 'on',
+            desiredState: step.desiredState || step.desired_state || (action === 'on' || action === 'off' ? action : ''),
+            required: step.required !== false,
+            readBackRequired: step.readBackRequired !== false && step.read_back_required !== false,
+            offSeconds: readInteger(step.offSeconds ?? step.off_seconds, 10),
+            delayBeforeSeconds: readInteger(step.delayBeforeSeconds ?? step.delay_before_seconds, 0),
+            delayAfterSeconds: readInteger(step.delayAfterSeconds ?? step.delay_after_seconds, 0),
+            timeoutSeconds: readInteger(step.timeoutSeconds ?? step.timeout_seconds, 20),
+            retryCount: readInteger(step.retryCount ?? step.retry_count, 0),
+            allowProtected: step.allowProtected === true || step.allow_protected === true,
+            conditionsText: JSON.stringify(conditions, null, 2),
+        };
+    }
+
+    function populatePowerPolicyForm(policy) {
+        if (powerPolicyNameEl) powerPolicyNameEl.value = policy.policyName || '';
+        if (powerPolicyEnabledEl) powerPolicyEnabledEl.checked = policy.enabled !== false;
+        if (powerPolicyRespectLocalModeEl) powerPolicyRespectLocalModeEl.checked = policy.respectLocalMode !== false;
+        if (powerPolicyMaintenanceModeEl) powerPolicyMaintenanceModeEl.checked = policy.maintenanceMode === true;
+        if (powerPolicyStartFailureModeEl) powerPolicyStartFailureModeEl.value = policy.startFailureMode || 'fail_reservation_start';
+        if (powerPolicyEndFailureModeEl) powerPolicyEndFailureModeEl.value = policy.endFailureMode || 'warn_and_continue';
+        powerPolicyStepDrafts = Array.isArray(policy.steps)
+            ? policy.steps.map(createPowerPolicyStepDraft)
+            : [];
+        renderPowerPolicySteps();
+    }
+
+    function powerPolicyControllerOptions(selectedId) {
+        const options = powerControllers.map(controller => {
+            const controllerId = String(controller.id || '').trim();
+            const label = controller.name || controllerId;
+            return `<option value="${escapeHtml(controllerId)}"${controllerId === selectedId ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+        }).join('');
+        return `<option value="">Select controller</option>${options}`;
+    }
+
+    function getPowerControllerOutlets(controllerId) {
+        const controller = powerControllers.find(item => String(item.id || '') === String(controllerId || ''));
+        return Array.isArray(controller?.outlets) ? controller.outlets : [];
+    }
+
+    function powerPolicyOutletOptions(step) {
+        const outlets = getPowerControllerOutlets(step.controllerId);
+        const options = outlets.map(outlet => {
+            const outletId = String(outlet.outlet || '').trim();
+            const label = outlet.displayName || outlet.logicalName || outletId;
+            return `<option value="${escapeHtml(outletId)}"${outletId === step.outlet ? ' selected' : ''}>${escapeHtml(label)} (${escapeHtml(outletId)})</option>`;
+        }).join('');
+        return `<option value="">${outlets.length ? 'Select outlet' : 'No outlets available'}</option>${options}`;
+    }
+
+    function powerPolicySelectOptions(values, selected, labels = {}) {
+        return values.map(value => `<option value="${value}"${value === selected ? ' selected' : ''}>${labels[value] || value}</option>`).join('');
+    }
+
+    function renderPowerPolicySteps() {
+        if (!powerPolicyStepsEl) return;
+        if (!powerPolicyStepDrafts.length) {
+            powerPolicyStepsEl.innerHTML = '<div class="empty">No steps configured. Add a step to control an outlet during a reservation phase.</div>';
+            return;
         }
+        const phases = ['pre_start', 'start', 'post_start', 'pre_end', 'end', 'post_end', 'manual', 'maintenance', 'emergency_stop'];
+        const phaseLabels = {
+            pre_start: 'Before start',
+            start: 'Start',
+            post_start: 'After start',
+            pre_end: 'Before end',
+            end: 'End',
+            post_end: 'After end',
+            manual: 'Manual',
+            maintenance: 'Maintenance',
+            emergency_stop: 'Emergency stop',
+        };
+        powerPolicyStepsEl.innerHTML = powerPolicyStepDrafts.map((step, index) => `
+            <div class="power-policy-step" data-step-index="${index}">
+                <div class="power-policy-step-header">
+                    <strong>Step ${index + 1}</strong>
+                    <button class="mini-btn danger" type="button" data-step-action="remove">Remove</button>
+                </div>
+                <div class="form-grid power-policy-step-fields">
+                    <label class="field">
+                        <span>Phase</span>
+                        <select data-step-field="phase">${powerPolicySelectOptions(phases, step.phase, phaseLabels)}</select>
+                    </label>
+                    <label class="field">
+                        <span>Sequence</span>
+                        <input type="number" min="0" max="1000000" data-step-field="sequence" value="${step.sequence}" inputmode="numeric">
+                    </label>
+                    <label class="field">
+                        <span>Controller</span>
+                        <select data-step-field="controllerId">${powerPolicyControllerOptions(step.controllerId)}</select>
+                    </label>
+                    <label class="field">
+                        <span>Outlet</span>
+                        <select data-step-field="outlet">${powerPolicyOutletOptions(step)}</select>
+                    </label>
+                    <label class="field">
+                        <span>Action</span>
+                        <select data-step-field="action">${powerPolicySelectOptions(['on', 'off', 'cycle'], step.action)}</select>
+                    </label>
+                    <label class="field">
+                        <span>Desired state</span>
+                        <select data-step-field="desiredState">${powerPolicySelectOptions(['', 'on', 'off', 'unknown'], step.desiredState, { '': 'Use action default' })}</select>
+                    </label>
+                    <label class="field">
+                        <span>Logical name</span>
+                        <input type="text" maxlength="160" data-step-field="logicalName" value="${escapeHtml(step.logicalName)}" placeholder="Optional label">
+                    </label>
+                    <label class="field">
+                        <span>Cycle off time (seconds)</span>
+                        <input type="number" min="0" max="3600" data-step-field="offSeconds" value="${step.offSeconds}" inputmode="numeric">
+                    </label>
+                    <label class="field">
+                        <span>Delay before (seconds)</span>
+                        <input type="number" min="0" max="3600" data-step-field="delayBeforeSeconds" value="${step.delayBeforeSeconds}" inputmode="numeric">
+                    </label>
+                    <label class="field">
+                        <span>Delay after (seconds)</span>
+                        <input type="number" min="0" max="3600" data-step-field="delayAfterSeconds" value="${step.delayAfterSeconds}" inputmode="numeric">
+                    </label>
+                    <label class="field">
+                        <span>Timeout (seconds)</span>
+                        <input type="number" min="0" max="300" data-step-field="timeoutSeconds" value="${step.timeoutSeconds}" inputmode="numeric">
+                    </label>
+                    <label class="field">
+                        <span>Retries</span>
+                        <input type="number" min="0" max="5" data-step-field="retryCount" value="${step.retryCount}" inputmode="numeric">
+                    </label>
+                </div>
+                <div class="power-policy-step-options">
+                    <label class="check-field"><input type="checkbox" data-step-field="required"${step.required ? ' checked' : ''}> Required</label>
+                    <label class="check-field"><input type="checkbox" data-step-field="readBackRequired"${step.readBackRequired ? ' checked' : ''}> Read back state</label>
+                    <label class="check-field"><input type="checkbox" data-step-field="allowProtected"${step.allowProtected ? ' checked' : ''}> Allow protected outlet</label>
+                </div>
+                <label class="field power-policy-conditions">
+                    <span>Conditions (advanced JSON, optional)</span>
+                    <textarea rows="3" data-step-field="conditions" spellcheck="false">${escapeHtml(step.conditionsText)}</textarea>
+                </label>
+            </div>
+        `).join('');
+    }
+
+    function getPowerPolicyStepIndex(target) {
+        const row = target?.closest?.('[data-step-index]');
+        const index = Number.parseInt(row?.dataset?.stepIndex, 10);
+        return Number.isInteger(index) && index >= 0 && index < powerPolicyStepDrafts.length ? index : -1;
+    }
+
+    function handlePowerPolicyStepChange(event) {
+        const field = event.target?.dataset?.stepField;
+        if (!field) return;
+        const index = getPowerPolicyStepIndex(event.target);
+        if (index < 0) return;
+        const step = powerPolicyStepDrafts[index];
+        step[field] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+        if (field === 'controllerId') {
+            step.outlet = '';
+            renderPowerPolicySteps();
+        } else if (field === 'action') {
+            if (event.target.value === 'on' || event.target.value === 'off') step.desiredState = event.target.value;
+            renderPowerPolicySteps();
+        }
+    }
+
+    function handlePowerPolicyStepActions(event) {
+        const button = event.target?.closest?.('[data-step-action]');
+        if (!button || button.dataset.stepAction !== 'remove') return;
+        const index = getPowerPolicyStepIndex(button);
+        if (index < 0) return;
+        powerPolicyStepDrafts.splice(index, 1);
+        renderPowerPolicySteps();
+    }
+
+    function addPowerPolicyStep() {
+        const phase = 'pre_start';
+        const phaseSequences = powerPolicyStepDrafts
+            .filter(step => step.phase === phase)
+            .map(step => Number(step.sequence) || 0);
+        const firstController = powerControllers[0];
+        const firstOutlet = Array.isArray(firstController?.outlets) ? firstController.outlets[0] : null;
+        powerPolicyStepDrafts.push(createPowerPolicyStepDraft({
+            phase,
+            sequence: (phaseSequences.length ? Math.max(...phaseSequences) : 0) + 10,
+            controllerId: firstController?.id || '',
+            outlet: firstOutlet?.outlet || '',
+        }));
+        renderPowerPolicySteps();
+    }
+
+    function parsePowerPolicyInteger(value, fieldName, maximum) {
+        const parsed = Number.parseInt(value, 10);
+        if (!Number.isInteger(parsed) || parsed < 0 || parsed > maximum) {
+            throw new Error(`${fieldName} must be between 0 and ${maximum}`);
+        }
+        return parsed;
+    }
+
+    function readPowerPolicyForm() {
+        const policyName = (powerPolicyNameEl?.value || '').trim();
+        if (!policyName) throw new Error('Policy name is required');
+        const steps = powerPolicyStepDrafts.map((step, index) => {
+            if (!step.phase) throw new Error(`Step ${index + 1}: phase is required`);
+            if (!step.controllerId) throw new Error(`Step ${index + 1}: select a controller`);
+            if (!step.outlet) throw new Error(`Step ${index + 1}: select an outlet`);
+            if (!['pre_start', 'start', 'post_start', 'pre_end', 'end', 'post_end', 'manual', 'maintenance', 'emergency_stop'].includes(step.phase)) {
+                throw new Error(`Step ${index + 1}: unsupported phase`);
+            }
+            if (!['on', 'off', 'cycle'].includes(step.action)) {
+                throw new Error(`Step ${index + 1}: unsupported action`);
+            }
+            if (step.desiredState && !['on', 'off', 'unknown'].includes(step.desiredState)) {
+                throw new Error(`Step ${index + 1}: unsupported desired state`);
+            }
+            let conditions = {};
+            if (step.conditionsText?.trim()) {
+                try {
+                    conditions = JSON.parse(step.conditionsText);
+                } catch (err) {
+                    throw new Error(`Step ${index + 1}: conditions JSON is invalid`);
+                }
+                if (!conditions || typeof conditions !== 'object' || Array.isArray(conditions)) {
+                    throw new Error(`Step ${index + 1}: conditions must be an object`);
+                }
+            }
+            const offSeconds = parsePowerPolicyInteger(step.offSeconds, 'Cycle off time', 3600);
+            if (step.action === 'cycle' && offSeconds === 0) {
+                throw new Error(`Step ${index + 1}: cycle off time must be greater than zero`);
+            }
+            const normalized = {
+                phase: step.phase,
+                sequence: parsePowerPolicyInteger(step.sequence, 'Sequence', 1000000),
+                controllerId: step.controllerId,
+                outlet: step.outlet,
+                action: step.action,
+                required: step.required === true,
+                readBackRequired: step.readBackRequired === true,
+                offSeconds,
+                delayBeforeSeconds: parsePowerPolicyInteger(step.delayBeforeSeconds, 'Delay before', 3600),
+                delayAfterSeconds: parsePowerPolicyInteger(step.delayAfterSeconds, 'Delay after', 3600),
+                timeoutSeconds: parsePowerPolicyInteger(step.timeoutSeconds, 'Timeout', 300),
+                retryCount: parsePowerPolicyInteger(step.retryCount, 'Retries', 5),
+                allowProtected: step.allowProtected === true,
+                conditions,
+            };
+            if (step.id) normalized.id = step.id;
+            if (step.logicalName) normalized.logicalName = step.logicalName;
+            if (step.desiredState) normalized.desiredState = step.desiredState;
+            return normalized;
+        });
+        return {
+            policyName,
+            enabled: powerPolicyEnabledEl?.checked !== false,
+            respectLocalMode: powerPolicyRespectLocalModeEl?.checked !== false,
+            maintenanceMode: powerPolicyMaintenanceModeEl?.checked === true,
+            startFailureMode: powerPolicyStartFailureModeEl?.value || 'fail_reservation_start',
+            endFailureMode: powerPolicyEndFailureModeEl?.value || 'warn_and_continue',
+            steps,
+        };
     }
 
     async function savePowerPolicy() {
@@ -1080,13 +1379,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         let policy;
         try {
-            policy = JSON.parse(powerPolicyJsonEl?.value || '{}');
+            policy = readPowerPolicyForm();
         } catch (err) {
-            showToast(`Power policy JSON is invalid: ${err.message}`, 'error');
-            return;
-        }
-        if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
-            showToast('Power policy must be a JSON object', 'error');
+            showToast(`Power policy is invalid: ${err.message}`, 'error');
             return;
         }
         policy.labId = labId;
@@ -1113,6 +1408,256 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Power policy save failed: ${err.message}`, 'error');
         } finally {
             if (savePowerPolicyBtn) savePowerPolicyBtn.disabled = false;
+        }
+    }
+
+    function createPowerControllerOutletDraft(outlet = {}) {
+        return {
+            outlet: String(outlet.outlet || outlet.outletKey || '').trim(),
+            displayName: String(outlet.displayName || '').trim(),
+            logicalName: String(outlet.logicalName || '').trim(),
+            protected: outlet.protected === true,
+            critical: outlet.critical === true,
+            defaultState: outlet.defaultState === 'on' ? 'on' : 'off',
+        };
+    }
+
+    function resetPowerControllerEditor() {
+        if (powerControllerSelectEl) powerControllerSelectEl.value = '';
+        if (powerControllerIdEl) {
+            powerControllerIdEl.value = '';
+            powerControllerIdEl.disabled = false;
+        }
+        if (powerControllerNameEl) powerControllerNameEl.value = '';
+        if (powerControllerDriverEl) powerControllerDriverEl.value = 'mock';
+        if (powerControllerEnabledEl) powerControllerEnabledEl.checked = true;
+        if (powerControllerHostEl) powerControllerHostEl.value = '';
+        if (powerControllerPortEl) powerControllerPortEl.value = '161';
+        if (powerControllerCredentialRefEl) powerControllerCredentialRefEl.value = '';
+        if (powerControllerProfileEl) powerControllerProfileEl.value = 'auto';
+        if (powerControllerSnmpVersionEl) powerControllerSnmpVersionEl.value = '';
+        if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = '2';
+        if (powerControllerRetriesEl) powerControllerRetriesEl.value = '1';
+        powerControllerOutletDrafts = [createPowerControllerOutletDraft({ outlet: '1' })];
+        renderPowerControllerOutlets();
+        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = 'Select an existing controller or configure a new one.';
+    }
+
+    function populatePowerControllerForm(controller) {
+        if (powerControllerIdEl) {
+            powerControllerIdEl.value = controller.id || '';
+            powerControllerIdEl.disabled = true;
+        }
+        if (powerControllerNameEl) powerControllerNameEl.value = controller.name || '';
+        if (powerControllerDriverEl) powerControllerDriverEl.value = controller.driver || 'mock';
+        if (powerControllerEnabledEl) powerControllerEnabledEl.checked = controller.enabled !== false;
+        if (powerControllerHostEl) powerControllerHostEl.value = controller.host || '';
+        if (powerControllerPortEl) powerControllerPortEl.value = controller.port || '161';
+        if (powerControllerCredentialRefEl) powerControllerCredentialRefEl.value = controller.credentialRef || '';
+        const config = controller.config || {};
+        if (powerControllerProfileEl) powerControllerProfileEl.value = config.profile || 'auto';
+        if (powerControllerSnmpVersionEl) powerControllerSnmpVersionEl.value = config.snmpVersion || '';
+        if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = config.timeoutSeconds || '2';
+        if (powerControllerRetriesEl) powerControllerRetriesEl.value = config.retries ?? '1';
+        powerControllerOutletDrafts = Array.isArray(controller.outlets)
+            ? controller.outlets.map(createPowerControllerOutletDraft)
+            : [];
+        renderPowerControllerOutlets();
+        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = 'Edit the provider-local controller and save it to apply the configuration.';
+    }
+
+    function renderPowerControllerOptions() {
+        if (!powerControllerSelectEl) return;
+        const current = powerControllerSelectEl.value;
+        powerControllerSelectEl.innerHTML = '<option value="">New controller</option>';
+        powerControllers.forEach(controller => {
+            const option = document.createElement('option');
+            option.value = controller.id || '';
+            option.textContent = `${controller.id || 'unknown'} Â· ${controller.name || 'Unnamed controller'}`;
+            powerControllerSelectEl.appendChild(option);
+        });
+        const selected = powerControllers.some(controller => String(controller.id) === String(current)) ? current : '';
+        powerControllerSelectEl.value = selected;
+        if (selected) {
+            loadSelectedPowerController();
+        } else {
+            resetPowerControllerEditor();
+        }
+    }
+
+    function loadSelectedPowerController() {
+        const controllerId = powerControllerSelectEl?.value || '';
+        const controller = powerControllers.find(item => String(item.id || '') === String(controllerId));
+        if (controller) {
+            populatePowerControllerForm(controller);
+            return;
+        }
+        resetPowerControllerEditor();
+    }
+
+    function renderPowerControllerOutlets() {
+        if (!powerControllerOutletsEl) return;
+        if (!powerControllerOutletDrafts.length) {
+            powerControllerOutletsEl.innerHTML = '<div class="empty">No outlets configured. Add at least one outlet before saving.</div>';
+            return;
+        }
+        powerControllerOutletsEl.innerHTML = powerControllerOutletDrafts.map((outlet, index) => `
+            <div class="power-controller-outlet-config" data-controller-outlet-index="${index}">
+                <div class="power-controller-outlet-config-header">
+                    <strong>Outlet ${index + 1}</strong>
+                    <button class="mini-btn danger" type="button" data-controller-outlet-action="remove">Remove</button>
+                </div>
+                <div class="form-grid power-controller-outlet-fields">
+                    <label class="field">
+                        <span>Outlet ID</span>
+                        <input type="text" maxlength="64" data-controller-outlet-field="outlet" value="${escapeHtml(outlet.outlet)}" placeholder="1">
+                    </label>
+                    <label class="field">
+                        <span>Display name</span>
+                        <input type="text" maxlength="160" data-controller-outlet-field="displayName" value="${escapeHtml(outlet.displayName)}" placeholder="PLC power">
+                    </label>
+                    <label class="field">
+                        <span>Logical name</span>
+                        <input type="text" maxlength="160" data-controller-outlet-field="logicalName" value="${escapeHtml(outlet.logicalName)}" placeholder="plc">
+                    </label>
+                    <label class="field">
+                        <span>Default state</span>
+                        <select data-controller-outlet-field="defaultState">
+                            <option value="off"${outlet.defaultState === 'off' ? ' selected' : ''}>Off</option>
+                            <option value="on"${outlet.defaultState === 'on' ? ' selected' : ''}>On</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="power-controller-outlet-options">
+                    <label class="check-field"><input type="checkbox" data-controller-outlet-field="protected"${outlet.protected ? ' checked' : ''}> Protected</label>
+                    <label class="check-field"><input type="checkbox" data-controller-outlet-field="critical"${outlet.critical ? ' checked' : ''}> Critical</label>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function getPowerControllerOutletIndex(target) {
+        const row = target?.closest?.('[data-controller-outlet-index]');
+        const index = Number.parseInt(row?.dataset?.controllerOutletIndex, 10);
+        return Number.isInteger(index) && index >= 0 && index < powerControllerOutletDrafts.length ? index : -1;
+    }
+
+    function handlePowerControllerOutletChange(event) {
+        const field = event.target?.dataset?.controllerOutletField;
+        if (!field) return;
+        const index = getPowerControllerOutletIndex(event.target);
+        if (index < 0) return;
+        powerControllerOutletDrafts[index][field] = event.target.type === 'checkbox'
+            ? event.target.checked
+            : event.target.value;
+    }
+
+    function handlePowerControllerOutletActions(event) {
+        const button = event.target?.closest?.('[data-controller-outlet-action]');
+        if (!button || button.dataset.controllerOutletAction !== 'remove') return;
+        const index = getPowerControllerOutletIndex(button);
+        if (index < 0) return;
+        powerControllerOutletDrafts.splice(index, 1);
+        renderPowerControllerOutlets();
+    }
+
+    function addPowerControllerOutlet() {
+        const usedIds = new Set(powerControllerOutletDrafts.map(outlet => outlet.outlet));
+        let nextId = 1;
+        while (usedIds.has(String(nextId))) nextId += 1;
+        powerControllerOutletDrafts.push(createPowerControllerOutletDraft({ outlet: String(nextId) }));
+        renderPowerControllerOutlets();
+    }
+
+    function readPowerControllerForm() {
+        const id = (powerControllerIdEl?.value || '').trim();
+        const name = (powerControllerNameEl?.value || '').trim();
+        const driver = (powerControllerDriverEl?.value || '').trim();
+        if (!id) throw new Error('Controller ID is required');
+        if (!/^[A-Za-z0-9._:-]+$/.test(id)) throw new Error('Controller ID contains invalid characters');
+        if (!name) throw new Error('Controller name is required');
+        if (!['mock', 'apc-powernet-snmp'].includes(driver)) throw new Error('Select a supported driver');
+        const port = Number.parseInt(powerControllerPortEl?.value || '161', 10);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port must be between 1 and 65535');
+        const timeoutSeconds = Number.parseInt(powerControllerTimeoutSecondsEl?.value || '2', 10);
+        if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 60) throw new Error('Timeout must be between 1 and 60 seconds');
+        const retries = Number.parseInt(powerControllerRetriesEl?.value || '1', 10);
+        if (!Number.isInteger(retries) || retries < 1 || retries > 10) throw new Error('Retries must be between 1 and 10');
+        const host = (powerControllerHostEl?.value || '').trim();
+        const credentialRef = (powerControllerCredentialRefEl?.value || '').trim();
+        if (driver === 'apc-powernet-snmp' && !host) throw new Error('Host is required for APC SNMP');
+        if (driver === 'apc-powernet-snmp' && !credentialRef) throw new Error('Credential reference is required for APC SNMP');
+
+        const outlets = powerControllerOutletDrafts.map((outlet, index) => {
+            const outletId = String(outlet.outlet || '').trim();
+            if (!outletId) throw new Error(`Outlet ${index + 1}: ID is required`);
+            return {
+                outlet: outletId,
+                displayName: outlet.displayName || '',
+                logicalName: outlet.logicalName || '',
+                protected: outlet.protected === true,
+                critical: outlet.critical === true,
+                defaultState: outlet.defaultState === 'on' ? 'on' : 'off',
+            };
+        });
+        if (!outlets.length) throw new Error('At least one outlet is required');
+        if (new Set(outlets.map(outlet => outlet.outlet)).size !== outlets.length) throw new Error('Outlet IDs must be unique');
+
+        const config = {
+            profile: powerControllerProfileEl?.value || 'auto',
+            snmpVersion: powerControllerSnmpVersionEl?.value || undefined,
+            timeoutSeconds,
+            retries,
+        };
+        if (!config.snmpVersion) delete config.snmpVersion;
+        return {
+            id,
+            name,
+            driver,
+            enabled: powerControllerEnabledEl?.checked !== false,
+            host,
+            port,
+            credentialRef,
+            config,
+            outlets,
+        };
+    }
+
+    async function savePowerController() {
+        let controller;
+        try {
+            controller = readPowerControllerForm();
+        } catch (err) {
+            showToast(`Power controller is invalid: ${err.message}`, 'error');
+            return;
+        }
+        const existingId = powerControllerSelectEl?.value || '';
+        const method = existingId ? 'PUT' : 'POST';
+        const url = existingId
+            ? `/ops/api/power/controllers/${encodeURIComponent(existingId)}`
+            : '/ops/api/power/controllers';
+        if (savePowerControllerBtn) savePowerControllerBtn.disabled = true;
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(controller),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (res.status === 403) {
+                showOpsWarning();
+                return;
+            }
+            if (res.status === 401) throw new Error('Lab Manager session required');
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            showToast(`Power controller ${controller.id} saved`, 'success');
+            await loadPowerControllers({ skipAuthPrompt: true });
+            if (powerControllerSelectEl) powerControllerSelectEl.value = controller.id;
+            loadSelectedPowerController();
+        } catch (err) {
+            showToast(`Power controller save failed: ${err.message}`, 'error');
+        } finally {
+            if (savePowerControllerBtn) savePowerControllerBtn.disabled = false;
         }
     }
 

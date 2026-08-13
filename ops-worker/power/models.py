@@ -138,6 +138,7 @@ class PowerOutlet:
             "logicalName": self.logical_name,
             "protected": self.protected,
             "critical": self.critical,
+            "defaultState": self.default_state,
             "state": state,
         }
 

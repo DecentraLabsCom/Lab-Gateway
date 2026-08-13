@@ -62,6 +62,46 @@ def list_power_controllers():
     return jsonify({"success": True, "controllers": runtime.describe_controllers()})
 
 
+def _update_controller(runtime: PowerRuntime, controller_id: Optional[str] = None):
+    body = _payload()
+    if controller_id is not None:
+        provided_id = str(body.get("id") or "").strip()
+        if provided_id and provided_id != str(controller_id):
+            return jsonify({"success": False, "error": "controller id does not match the URL"}), 400
+        body["id"] = str(controller_id)
+    try:
+        updated = runtime.update_controller(body)
+    except ValidationError:
+        return jsonify({"success": False, "error": "Power controller configuration is invalid"}), 400
+    except PowerConfigError:
+        return jsonify({"success": False, "error": "Power controller could not be persisted"}), 503
+    return jsonify({"success": True, "controller": updated})
+
+
+@power_bp.post("/api/power/controllers")
+def create_power_controller():
+    runtime = _runtime()
+    if runtime is None:
+        return _runtime_unavailable()
+    body = _payload()
+    controller_id = str(body.get("id") or "").strip()
+    if controller_id and runtime.has_controller(controller_id):
+        return jsonify({"success": False, "error": "Power controller already exists"}), 409
+    response = _update_controller(runtime)
+    if isinstance(response, tuple):
+        return response
+    response.status_code = 201
+    return response
+
+
+@power_bp.put("/api/power/controllers/<controller_id>")
+def update_power_controller(controller_id: str):
+    runtime = _runtime()
+    if runtime is None:
+        return _runtime_unavailable()
+    return _update_controller(runtime, controller_id)
+
+
 @power_bp.get("/api/power/policies")
 def list_power_policies():
     runtime = _runtime()
