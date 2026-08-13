@@ -23,6 +23,10 @@ table of contents.
 
 - [Laboratory connectivity](docs/workflows/laboratory-connectivity.md)
 - [Gateway and Lab Station operations](docs/workflows/gateway-lab-station-operations.md)
+- [Lab Manager operator guide](docs/workflows/lab-manager-operator-guide.md)
+- [Lab Manager: Labs and Operations](docs/workflows/lab-manager-labs-and-operations.md)
+- [Lab Manager: Notifications](docs/workflows/lab-manager-notifications.md)
+- [Lab Manager: Energy operations](docs/workflows/lab-manager-energy-operations.md)
 - [Guacamole connections](docs/configuring-lab-connections/guacamole-connections.md)
 - [Guacamole session policy](docs/guacamole-session-policy.md)
 - [Logging configuration](LOGGING.md)

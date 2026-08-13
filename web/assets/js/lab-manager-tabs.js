@@ -13,12 +13,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     tabs.forEach(tab => {
         const tabName = tab.dataset.lmTab;
-        const panel = document.createElement('div');
-        panel.id = `lm-panel-${tabName}`;
-        panel.className = 'lm-tab-panel';
+        const panelId = `lm-panel-${tabName}`;
+        const panel = document.getElementById(panelId) || document.createElement('div');
+        panel.id = panelId;
+        panel.classList.add('lm-tab-panel');
         panel.setAttribute('role', 'tabpanel');
         panel.setAttribute('aria-labelledby', tab.id);
         panel.hidden = true;
+
+        if (!panel.parentElement) main.appendChild(panel);
 
         sections
             .filter(section => section.dataset.lmTabSection === tabName)

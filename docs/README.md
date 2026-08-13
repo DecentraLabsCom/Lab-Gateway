@@ -69,6 +69,17 @@ For the complete design and trust requirements, read
 5. Follow the [first lab session tutorial](tutorials/tutorial-first-lab-session.md)
    or its [Spanish version](tutorials/tutorial-primera-sesion-laboratorio.md).
 
+### Operate Lab Manager
+
+- Start with the [Lab Manager operator guide](workflows/lab-manager-operator-guide.md)
+  for tabs, permissions, Full/Lite boundaries, identifiers, and recommended order.
+- Use [Labs and Operations](workflows/lab-manager-labs-and-operations.md) for
+  publication, host provisioning, WinRM, reservations, and timeline diagnosis.
+- Use [Notifications](workflows/lab-manager-notifications.md) for the separate
+  Wallet & Billing administrator flow.
+- Use [Energy operations](workflows/lab-manager-energy-operations.md) for
+  controllers, credentials, outlets, policies, and power tests.
+
 ### Integrate an institutional access flow
 
 - [eduGAIN federation](edugain/edugain-federation.md) explains the
@@ -104,6 +115,7 @@ For the complete design and trust requirements, read
 | Browser/session access rules | [Check-in, access, and session workflow](workflows/institutional-check-in-access-sessions.md) |
 | Guacamole timeouts and session semantics | [Guacamole session policy](guacamole-session-policy.md) |
 | Station networking and lifecycle | [Laboratory connectivity](workflows/laboratory-connectivity.md) and [Gateway and Lab Station operations](workflows/gateway-lab-station-operations.md) |
+| Lab Manager operator workflows | [Lab Manager operator guide](workflows/lab-manager-operator-guide.md), [Labs and Operations](workflows/lab-manager-labs-and-operations.md), and [Notifications](workflows/lab-manager-notifications.md) |
 | Energy credentials, controllers, outlets, and Lab Manager policies | [Lab Manager energy operations](workflows/lab-manager-energy-operations.md) and [Ops Worker README](../ops-worker/README.md) |
 | Embedded backend APIs and security | [`blockchain-services` documentation](../blockchain-services/SUMMARY.md) |
 

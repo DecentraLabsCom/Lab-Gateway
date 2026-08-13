@@ -20,6 +20,7 @@ test('Lab Manager exposes five accessible workflow tabs with mapped sections', (
   for (const tab of expectedTabs) {
     assert.match(html, new RegExp(`data-lm-tab="${tab}"`));
     assert.match(html, new RegExp(`aria-controls="lm-panel-${tab}"`));
+    assert.match(html, new RegExp(`id="lm-panel-${tab}"[^>]*role="tabpanel"`));
     assert.match(html, new RegExp(`data-lm-tab-section="${tab}"`));
   }
   assert.match(html, /data-lm-tab="digital-twins"[^>]*data-full-only="true"/);

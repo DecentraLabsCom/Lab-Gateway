@@ -147,6 +147,11 @@ network and operator model.
   endpoints, diagnostics, backups, and incident triage.
 - [Lab Manager energy operations](docs/workflows/lab-manager-energy-operations.md)
   — credentials, APC/NETIO controllers, outlets, policies, testing, and rotation.
+- [Lab Manager operator guide](docs/workflows/lab-manager-operator-guide.md) and
+  [Labs and Operations](docs/workflows/lab-manager-labs-and-operations.md) —
+  tab-by-tab administration, host provisioning, reservations, and diagnosis.
+- [Lab Manager notifications](docs/workflows/lab-manager-notifications.md) —
+  separate Wallet & Billing administrator configuration.
 - [First lab session](docs/tutorials/tutorial-first-lab-session.md) — provider
   journey from setup to an authenticated session.
 - [FMI/FMU support](docs/fmi-fmu-support.md) and [AAS support](docs/aas-support.md)

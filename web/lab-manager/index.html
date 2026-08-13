@@ -50,6 +50,12 @@
         </nav>
 
         <main class="lm-main">
+            <div id="lm-panel-laboratories" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-laboratories" hidden></div>
+            <div id="lm-panel-operations" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-operations" hidden></div>
+            <div id="lm-panel-energy" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-energy" hidden></div>
+            <div id="lm-panel-digital-twins" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-digital-twins" hidden></div>
+            <div id="lm-panel-notifications" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-notifications" hidden></div>
+
             <section class="grid single-column" data-lm-tab-section="laboratories" data-lm-order="10">
                 <div class="card">
                     <div class="card-header">
@@ -482,7 +488,7 @@
                             <div class="field toggle-field">
                                 <span>Enabled</span>
                                 <label class="switch" for="powerControllerEnabled">
-                                    <input type="checkbox" id="powerControllerEnabled" checked>
+                                    <input type="checkbox" id="powerControllerEnabled" aria-label="Enable power controller" checked>
                                     <span class="slider"></span>
                                 </label>
                             </div>
@@ -625,21 +631,21 @@
                                 <div class="field toggle-field">
                                     <span>Enabled</span>
                                     <label class="switch" for="powerPolicyEnabled">
-                                        <input type="checkbox" id="powerPolicyEnabled" checked>
+                                        <input type="checkbox" id="powerPolicyEnabled" aria-label="Enable power policy" checked>
                                         <span class="slider"></span>
                                     </label>
                                 </div>
                                 <div class="field toggle-field">
                                     <span>Respect local mode</span>
                                     <label class="switch" for="powerPolicyRespectLocalMode">
-                                        <input type="checkbox" id="powerPolicyRespectLocalMode" checked>
+                                        <input type="checkbox" id="powerPolicyRespectLocalMode" aria-label="Respect local station mode" checked>
                                         <span class="slider"></span>
                                     </label>
                                 </div>
                                 <div class="field toggle-field">
                                     <span>Maintenance mode</span>
                                     <label class="switch" for="powerPolicyMaintenanceMode">
-                                        <input type="checkbox" id="powerPolicyMaintenanceMode">
+                                        <input type="checkbox" id="powerPolicyMaintenanceMode" aria-label="Enable policy maintenance mode">
                                         <span class="slider"></span>
                                     </label>
                                 </div>
@@ -884,7 +890,7 @@
                             <h2>Recent Operations</h2>
                             <p>Review recent Lab Station and reservation orchestration activity.</p>
                         </div>
-                        <span class="pill soft">coming soon</span>
+                        <span class="pill soft">Live</span>
                     </div>
                     <div class="card-body list fixed-height" id="activityFeedList">
                         <div class="empty">Loading recent operations...</div>
