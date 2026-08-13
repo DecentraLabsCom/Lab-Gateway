@@ -13,6 +13,7 @@ function createElement(id) {
     id,
     value: '',
     checked: false,
+    disabled: false,
     hidden: false,
     textContent: '',
     innerHTML: '',
@@ -39,6 +40,7 @@ function createElement(id) {
     querySelector: () => null,
     contains: () => true,
     setAttribute: () => {},
+    removeAttribute: () => {},
     click: () => listeners.get('click')?.({ preventDefault() {} }),
     dispatchEvent: (event) => listeners.get(event.type)?.(event),
   };
@@ -46,7 +48,12 @@ function createElement(id) {
 }
 
 function loadLabManager({
-  billingResponse,
+  billingResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ config: {} }),
+  }),
+  activeTabs = ['operations', 'energy', 'digital-twins'],
   actionableResponse = null,
   labsResponse = Promise.resolve({
     ok: true,
@@ -110,11 +117,23 @@ function loadLabManager({
     'powerPolicyMaintenanceMode', 'powerPolicyStartFailureMode',
     'powerPolicyEndFailureMode', 'powerPolicySteps', 'addPowerPolicyStepBtn',
     'savePowerPolicyBtn', 'powerPoliciesStatus', 'powerPolicyEditorHint',
+    'notificationsAccessGate', 'notificationsConfigContent', 'unlockNotificationsBtn',
+    'smtpPasswordHint', 'graphClientSecretHint',
   ];
   const elements = new Map(ids.map((id) => [id, createElement(id)]));
+  const documentListeners = new Map();
   const document = {
     addEventListener: (type, handler) => {
-      if (type === 'DOMContentLoaded') handler();
+      if (type === 'DOMContentLoaded') {
+        handler();
+        return;
+      }
+      const handlers = documentListeners.get(type) || [];
+      handlers.push(handler);
+      documentListeners.set(type, handlers);
+    },
+    dispatchEvent: (event) => {
+      (documentListeners.get(event.type) || []).forEach((handler) => handler(event));
     },
     querySelector: (selector) => selector.startsWith('#')
       ? elements.get(selector.slice(1))
@@ -177,7 +196,13 @@ function loadLabManager({
     filename: 'lab-manager.js',
   });
 
-  return { elements, promptCalls, fetchCalls };
+  const activateTab = (tab) => document.dispatchEvent({
+    type: 'lab-manager:tab-activated',
+    detail: { tab, firstActivation: true },
+  });
+  activeTabs.forEach(activateTab);
+
+  return { elements, promptCalls, fetchCalls, activateTab };
 }
 
 test('forwards the actionable reservation resume cursor when loading more', async () => {
@@ -223,12 +248,41 @@ test('forwards the actionable reservation resume cursor when loading more', asyn
   assert.equal(actionableCalls[1].searchParams.get('cursor'), cursor);
 });
 
-test('reuses an existing billing session while the initial notifications check is pending', async () => {
+test('does not request or prompt for billing access until Notifications is opened', async () => {
+  const { fetchCalls, promptCalls, activateTab } = loadLabManager({
+    activeTabs: [],
+    billingResponse: Promise.resolve({
+      ok: false,
+      status: 401,
+      json: async () => ({}),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fetchCalls.some(({ url }) => url === '/billing/admin/notifications'), false);
+  assert.equal(promptCalls.length, 0);
+
+  activateTab('energy');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fetchCalls.some(({ url }) => url === '/billing/admin/notifications'), false);
+
+  activateTab('notifications');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fetchCalls.filter(({ url }) => url === '/billing/admin/notifications').length, 1);
+  assert.equal(promptCalls.length, 1);
+});
+
+test('reuses an existing billing session while the Notifications access check is pending', async () => {
   let resolveBilling;
   const billingResponse = new Promise((resolve) => {
     resolveBilling = resolve;
   });
-  const { elements, promptCalls } = loadLabManager({ billingResponse });
+  const { elements, promptCalls, activateTab } = loadLabManager({
+    billingResponse,
+    activeTabs: [],
+  });
+
+  activateTab('notifications');
 
   elements.get('configureBtn').click();
   assert.equal(promptCalls.length, 0);
@@ -242,6 +296,35 @@ test('reuses an existing billing session while the initial notifications check i
 
   assert.equal(promptCalls.length, 0);
   assert.equal(elements.get('configModal').classList.contains('show'), true);
+});
+
+test('omits blank notification secrets when saving an existing configuration', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    activeTabs: ['notifications'],
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        config: {
+          smtp: { passwordConfigured: true },
+          graph: { clientSecretConfigured: true },
+        },
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('smtpPass').value = '';
+  elements.get('graphClientSecret').value = '   ';
+  elements.get('saveConfigBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const saveCall = fetchCalls.find(({ url, options }) =>
+    url === '/billing/admin/notifications' && options.method === 'POST');
+  assert.ok(saveCall);
+  const body = JSON.parse(saveCall.options.body);
+  assert.equal(Object.hasOwn(body.smtp, 'password'), false);
+  assert.equal(Object.hasOwn(body.graph, 'clientSecret'), false);
 });
 
 test('cancellation click reads the reason from the reservation row and posts it', async () => {

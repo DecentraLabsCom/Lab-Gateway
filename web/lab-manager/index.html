@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=reservations-v6">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v1">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -14,7 +14,7 @@
                 <img src="../assets/images/LogoBannerDLabs.png" alt="DecentraLabs" class="brand-logo">
                 <div>
                     <div class="brand-title">Lab Manager</div>
-                    <div class="brand-subtitle">Notifications & Operations</div>
+                    <div class="brand-subtitle">Provider administration</div>
                 </div>
             </div>
             <div class="header-actions">
@@ -23,8 +23,34 @@
             </div>
         </header>
 
+        <nav class="lm-tabs" aria-label="Lab Manager sections">
+            <div class="lm-tab-list" role="tablist" aria-orientation="horizontal">
+                <button class="lm-tab" id="lm-tab-laboratories" role="tab" type="button"
+                    data-lm-tab="laboratories" aria-controls="lm-panel-laboratories" aria-selected="true" tabindex="0">
+                    <i class="fas fa-flask" aria-hidden="true"></i> Laboratories
+                </button>
+                <button class="lm-tab" id="lm-tab-operations" role="tab" type="button"
+                    data-lm-tab="operations" aria-controls="lm-panel-operations" aria-selected="false" tabindex="-1">
+                    <i class="fas fa-list-check" aria-hidden="true"></i> Operations
+                </button>
+                <button class="lm-tab" id="lm-tab-energy" role="tab" type="button"
+                    data-lm-tab="energy" aria-controls="lm-panel-energy" aria-selected="false" tabindex="-1">
+                    <i class="fas fa-bolt" aria-hidden="true"></i> Energy
+                </button>
+                <button class="lm-tab" id="lm-tab-digital-twins" role="tab" type="button"
+                    data-lm-tab="digital-twins" data-full-only="true" aria-controls="lm-panel-digital-twins" aria-selected="false" tabindex="-1">
+                    <i class="fas fa-cubes" aria-hidden="true"></i> Digital Twins
+                </button>
+                <button class="lm-tab" id="lm-tab-notifications" role="tab" type="button"
+                    data-lm-tab="notifications" data-full-only="true" aria-controls="lm-panel-notifications" aria-selected="false" tabindex="-1">
+                    <i class="fas fa-lock" aria-hidden="true"></i> Notifications
+                </button>
+            </div>
+            <p class="lm-tab-status" id="lmTabStatus" role="status" aria-live="polite"></p>
+        </nav>
+
         <main class="lm-main">
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="laboratories" data-lm-order="10">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -324,7 +350,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="energy" data-lm-order="10">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -417,7 +443,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="energy" data-lm-order="20">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -539,7 +565,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="energy" data-lm-order="30">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -653,7 +679,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="operations" data-lm-order="20">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -677,7 +703,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="digital-twins" data-lm-order="10">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -732,7 +758,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="digital-twins" data-lm-order="20">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -772,7 +798,7 @@
                 </div>
             </section>
 
-            <section class="grid two-columns">
+            <section class="grid single-column" data-lm-tab-section="notifications" data-lm-order="10">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -786,45 +812,57 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="form-grid">
-                            <label class="field inline-config">
-                                <span>Delivery</span>
-                                <div class="config-row">
-                                    <button class="ghost-btn" id="configureBtn"><i class="fas fa-sliders"></i> Configure</button>
-                                    <span class="pill soft small" id="driverSummary">NOOP</span>
-                                </div>
-                            </label>
-                            <label class="field action-field">
-                                <span>Test</span>
-                                <button class="ghost-btn" id="btnTestEmail"><i class="fas fa-paper-plane"></i> Send Test Email</button>
-                            </label>
-                            <label class="field">
-                                <span>From (email)</span>
-                                <input type="email" id="from" placeholder="notifications@yourdomain">
-                            </label>
-                            <label class="field">
-                                <span>From Name</span>
-                                <input type="text" id="fromName" placeholder="Lab Gateway">
-                            </label>
-                            <label class="field full">
-                                <span>Recipients (comma separated)</span>
-                                <input type="text" id="defaultTo" placeholder="ops@domain.com, alerts@domain.com">
-                            </label>
-                            <label class="field">
-                                <span>Timezone</span>
-                                <select id="timezone"></select>
-                            </label>
-                            <label class="field toggle-field toggle-right">
-                                <span>Enabled</span>
-                                <label class="switch" for="enabled">
-                                    <input type="checkbox" id="enabled" aria-label="Enable notifications">
-                                    <span class="slider"></span>
+                        <div class="notifications-access-gate" id="notificationsAccessGate">
+                            <i class="fas fa-lock" aria-hidden="true"></i>
+                            <div>
+                                <h3>Gateway administrator access required</h3>
+                                <p>Notification settings use the Wallet & Billing administrator token, separate from Lab Manager access.</p>
+                            </div>
+                            <button class="primary-btn" id="unlockNotificationsBtn" type="button">Unlock Notifications</button>
+                        </div>
+                        <div id="notificationsConfigContent" hidden>
+                            <div class="form-grid">
+                                <label class="field inline-config">
+                                    <span>Delivery</span>
+                                    <div class="config-row">
+                                        <button class="ghost-btn" id="configureBtn"><i class="fas fa-sliders"></i> Configure</button>
+                                        <span class="pill soft small" id="driverSummary">NOOP</span>
+                                    </div>
                                 </label>
-                            </label>
+                                <label class="field action-field">
+                                    <span>Test</span>
+                                    <button class="ghost-btn" id="btnTestEmail"><i class="fas fa-paper-plane"></i> Send Test Email</button>
+                                </label>
+                                <label class="field">
+                                    <span>From (email)</span>
+                                    <input type="email" id="from" placeholder="notifications@yourdomain">
+                                </label>
+                                <label class="field">
+                                    <span>From Name</span>
+                                    <input type="text" id="fromName" placeholder="Lab Gateway">
+                                </label>
+                                <label class="field full">
+                                    <span>Recipients (comma separated)</span>
+                                    <input type="text" id="defaultTo" placeholder="ops@domain.com, alerts@domain.com">
+                                </label>
+                                <label class="field">
+                                    <span>Timezone</span>
+                                    <select id="timezone"></select>
+                                </label>
+                                <label class="field toggle-field toggle-right">
+                                    <span>Enabled</span>
+                                    <label class="switch" for="enabled">
+                                        <input type="checkbox" id="enabled" aria-label="Enable notifications">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
+            </section>
 
+            <section class="grid single-column" data-lm-tab-section="operations" data-lm-order="10">
                 <div class="card reservation-card">
                     <div class="card-header">
                         <div>
@@ -839,12 +877,12 @@
                 </div>
             </section>
 
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="operations" data-lm-order="30">
                 <div class="card">
                     <div class="card-header">
                         <div>
-                            <h2>Activity & Logs</h2>
-                            <p>Keep track of notification attempts.</p>
+                            <h2>Recent Operations</h2>
+                            <p>Review recent Lab Station and reservation orchestration activity.</p>
                         </div>
                         <span class="pill soft">coming soon</span>
                     </div>
@@ -854,7 +892,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column">
+            <section class="grid single-column" data-lm-tab-section="operations" data-lm-order="40">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -922,7 +960,8 @@
                             </label>
                             <label class="field">
                                 <span>Password</span>
-                                <input type="password" id="smtpPass" placeholder="********">
+                                <input type="password" id="smtpPass" placeholder="Leave blank to keep the stored password" autocomplete="new-password">
+                                <small class="hint" id="smtpPasswordHint">No password is currently stored.</small>
                             </label>
                         </div>
                     </div>
@@ -942,7 +981,8 @@
                             </label>
                             <label class="field">
                                 <span>Client Secret</span>
-                                <input type="password" id="graphClientSecret" placeholder="********">
+                                <input type="password" id="graphClientSecret" placeholder="Leave blank to keep the stored secret" autocomplete="new-password">
+                                <small class="hint" id="graphClientSecretHint">No client secret is currently stored.</small>
                             </label>
                             <label class="field">
                                 <span>From (UPN/mailbox)</span>
@@ -1041,7 +1081,8 @@
     <div id="toast" class="toast"></div>
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v2"></script>
-    <script src="../assets/js/lab-manager.js?v=reservations-v6"></script>
-    <script src="../assets/js/lab-publisher.js?v=fmu-resource-autodetect-v2"></script>
+    <script src="../assets/js/lab-manager-tabs.js?v=workflow-tabs-v1"></script>
+    <script src="../assets/js/lab-manager.js?v=workflow-tabs-v1"></script>
+    <script src="../assets/js/lab-publisher.js?v=workflow-tabs-v1"></script>
 </body>
 </html>

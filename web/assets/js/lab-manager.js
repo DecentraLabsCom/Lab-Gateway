@@ -9,6 +9,7 @@ function escapeHtml(str) {
 document.addEventListener('DOMContentLoaded', () => {
     let billingAccessReady = false;
     let billingAccessPromise = null;
+    let billingTokenRequired = false;
 
     function hasBillingAccess() {
         return billingAccessReady;
@@ -50,6 +51,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const graphFromEl = $('#graphFrom');
     const driverSummary = $('#driverSummary');
     const configStatusEl = $('#configStatus');
+    const notificationsAccessGateEl = $('#notificationsAccessGate');
+    const notificationsConfigContentEl = $('#notificationsConfigContent');
+    const unlockNotificationsBtn = $('#unlockNotificationsBtn');
+    const smtpPasswordHintEl = $('#smtpPasswordHint');
+    const graphClientSecretHintEl = $('#graphClientSecretHint');
 
     // Modal controls
     const modal = $('#configModal');
@@ -107,14 +113,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cancelWinrmCredentialsBtn) cancelWinrmCredentialsBtn.addEventListener('click', closeWinrmCredentialsModal);
     if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.addEventListener('click', saveWinrmCredentials);
 
-    loadConfig();
     loadAccessPolicy();
-    checkOpsAvailability();
     updateBillingStatusAction();
-    // This is a non-critical startup read. The protected page has already
-    // authenticated the operator, so a transient 401 must not reopen the
-    // Lab Manager token modal during initial rendering.
-    loadActivityFeed(false, { skipAuthPrompt: true });
+    setNotificationsLocked(true);
+    if (unlockNotificationsBtn) unlockNotificationsBtn.addEventListener('click', requestNotificationsAccess);
 
     // Lab Station ops state
     const refreshHostsBtn = $('#refreshHostsBtn');
@@ -199,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let powerCredentials = [];
     let powerPolicies = [];
     let powerPolicyStepDrafts = [];
+    let managedLabsInitialized = false;
     let hostNames = [];
     let guacamoleCandidates = [];
 
@@ -442,11 +445,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hostListEl) {
         hostListEl.addEventListener('click', handleHostActions);
         renderHosts();
-        hostNames.forEach(startHeartbeatStream);
-        // The page itself has already passed the Lab Manager access guard.
-        // Do not open a second token dialog if an optional startup request
-        // briefly returns 401 while path-scoped session cookies settle.
-        loadHostInventory({ skipAuthPrompt: true });
     }
     if (powerControllerListEl) powerControllerListEl.addEventListener('click', handlePowerActions);
     if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', loadPowerControllers);
@@ -460,7 +458,6 @@ document.addEventListener('DOMContentLoaded', () => {
         powerControllerOutletsEl.addEventListener('click', handlePowerControllerOutletActions);
     }
     if (savePowerControllerBtn) savePowerControllerBtn.addEventListener('click', savePowerController);
-    if (powerControllerListEl || powerControllerSelectEl) loadPowerControllers({ skipAuthPrompt: true });
     if (refreshPowerCredentialsBtn) refreshPowerCredentialsBtn.addEventListener('click', loadPowerCredentials);
     if (powerCredentialSelectEl) powerCredentialSelectEl.addEventListener('change', loadSelectedPowerCredential);
     if (powerCredentialTypeEl) powerCredentialTypeEl.addEventListener('change', updatePowerCredentialFields);
@@ -468,7 +465,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (powerCredentialPrivProtocolEl) powerCredentialPrivProtocolEl.addEventListener('change', updatePowerCredentialFields);
     if (powerCredentialSaveBtn) powerCredentialSaveBtn.addEventListener('click', savePowerCredential);
     if (powerCredentialsListEl) powerCredentialsListEl.addEventListener('click', handlePowerCredentialActions);
-    if (powerCredentialsListEl || powerCredentialSelectEl) loadPowerCredentials({ skipAuthPrompt: true });
     updatePowerCredentialFields();
     if (powerPolicySelectEl) powerPolicySelectEl.addEventListener('change', loadSelectedPowerPolicy);
     if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.addEventListener('change', handlePowerPolicyLabChange);
@@ -480,8 +476,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (savePowerPolicyBtn) savePowerPolicyBtn.addEventListener('click', savePowerPolicy);
     if (powerPolicyNameEl && !powerPolicyNameEl.value) resetPowerPolicyEditor();
-    if (powerPolicyLabSelectEl || fmuSyncKeyEl || fmuSyncLabSelectEl || aasLinkLabSelectEl) loadManagedLabs({ skipAuthPrompt: true });
-    if (powerPolicySelectEl) loadPowerPolicies({ skipAuthPrompt: true });
     if (guacamoleCandidateListEl) {
         guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
     }
@@ -508,28 +502,10 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .then(data => {
                 billingAccessReady = true;
+                billingTokenRequired = false;
                 const cfg = data.config || {};
-                enabledEl.checked = !!cfg.enabled;
-                driverEl.value = cfg.driver || 'NOOP';
-                fromEl.value = cfg.from || '';
-                fromNameEl.value = cfg.fromName || '';
-                defaultToEl.value = (cfg.defaultTo || []).join(', ');
-                setTimezone(cfg.timezone || browserTimezone);
-                if (cfg.smtp) {
-                    smtpHostEl.value = cfg.smtp.host || '';
-                    smtpPortEl.value = cfg.smtp.port || '';
-                    smtpUserEl.value = cfg.smtp.username || '';
-                    smtpPassEl.value = cfg.smtp.password || '';
-                    smtpStartTlsEl.checked = cfg.smtp.startTls ?? true;
-                }
-                if (cfg.graph) {
-                    graphTenantEl.value = cfg.graph.tenantId || '';
-                    graphClientIdEl.value = cfg.graph.clientId || '';
-                    graphClientSecretEl.value = cfg.graph.clientSecret || '';
-                    graphFromEl.value = cfg.graph.from || '';
-                }
-                toggleSections();
-                updateDriverSummary();
+                applyNotificationConfig(cfg);
+                setNotificationsLocked(false);
                 setStatus('Loaded');
                 updateBillingStatusAction();
                 showToast('Configuration loaded', 'success');
@@ -539,9 +515,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return true;
             })
             .catch(err => {
-                console.error(err);
                 billingAccessReady = false;
                 const needsToken = err.message === 'HTTP 401';
+                if (!needsToken) console.error(err);
+                billingTokenRequired = needsToken;
+                setNotificationsLocked(true);
                 setStatus(needsToken ? 'Gateway administrator token required' : 'Error');
                 updateBillingStatusAction();
                 showToast(needsToken ? 'Enter the Gateway administrator token to load notifications' : 'Cannot load config (check administrator access)', 'error');
@@ -559,10 +537,100 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function applyNotificationConfig(cfg) {
+        enabledEl.checked = !!cfg.enabled;
+        driverEl.value = cfg.driver || 'NOOP';
+        fromEl.value = cfg.from || '';
+        fromNameEl.value = cfg.fromName || '';
+        defaultToEl.value = (cfg.defaultTo || []).join(', ');
+        setTimezone(cfg.timezone || browserTimezone);
+        const smtp = cfg.smtp || {};
+        smtpHostEl.value = smtp.host || '';
+        smtpPortEl.value = smtp.port || '';
+        smtpUserEl.value = smtp.username || '';
+        smtpPassEl.value = '';
+        smtpStartTlsEl.checked = smtp.startTls ?? true;
+        if (smtpPasswordHintEl) {
+            smtpPasswordHintEl.textContent = smtp.passwordConfigured
+                ? 'A password is stored. Leave blank to keep it.'
+                : 'No password is currently stored.';
+        }
+        const graph = cfg.graph || {};
+        graphTenantEl.value = graph.tenantId || '';
+        graphClientIdEl.value = graph.clientId || '';
+        graphClientSecretEl.value = '';
+        graphFromEl.value = graph.from || '';
+        if (graphClientSecretHintEl) {
+            graphClientSecretHintEl.textContent = graph.clientSecretConfigured
+                ? 'A client secret is stored. Leave blank to keep it.'
+                : 'No client secret is currently stored.';
+        }
+        toggleSections();
+        updateDriverSummary();
+    }
+
+    function setNotificationsLocked(locked) {
+        if (notificationsAccessGateEl) notificationsAccessGateEl.hidden = !locked;
+        if (notificationsConfigContentEl) notificationsConfigContentEl.hidden = locked;
+        [configureBtn, $('#btnTestLoad'), $('#saveConfigBtn'), $('#btnTestEmail')]
+            .filter(Boolean)
+            .forEach(button => { button.disabled = locked; });
+    }
+
+    function requestNotificationsAccess() {
+        loadConfig().then(accessReady => {
+            if (!accessReady && billingTokenRequired) {
+                promptBillingToken(() => loadConfig());
+            }
+        });
+    }
+
     if (upcomingReservationsListEl) {
         upcomingReservationsListEl.addEventListener('click', handleUpcomingReservationActions);
     }
-    loadActionableReservations();
+
+    const initializedManagerTabs = new Set();
+    document.addEventListener('lab-manager:tab-activated', event => {
+        initializeManagerTab(event.detail && event.detail.tab);
+    });
+    if (window.LabManagerTabs && window.LabManagerTabs.activeTab) {
+        initializeManagerTab(window.LabManagerTabs.activeTab);
+    }
+
+    function initializeManagerTab(tabName) {
+        if (!tabName || initializedManagerTabs.has(tabName)) return;
+        initializedManagerTabs.add(tabName);
+
+        if (tabName === 'operations') {
+            checkOpsAvailability();
+            if (hostListEl) loadHostInventory({ skipAuthPrompt: true });
+            if (upcomingReservationsListEl) loadActionableReservations();
+            loadActivityFeed(false, { skipAuthPrompt: true });
+            return;
+        }
+        if (tabName === 'energy') {
+            if (powerControllerListEl || powerControllerSelectEl) loadPowerControllers({ skipAuthPrompt: true });
+            if (powerCredentialsListEl || powerCredentialSelectEl) loadPowerCredentials({ skipAuthPrompt: true });
+            if (powerPolicyLabSelectEl) loadManagedLabsOnce();
+            if (powerPolicySelectEl) loadPowerPolicies({ skipAuthPrompt: true });
+            return;
+        }
+        if (tabName === 'digital-twins') {
+            if (fmuSyncKeyEl || fmuSyncLabSelectEl || aasLinkLabSelectEl) {
+                loadManagedLabsOnce();
+            }
+            return;
+        }
+        if (tabName === 'notifications') {
+            requestNotificationsAccess();
+        }
+    }
+
+    function loadManagedLabsOnce() {
+        if (managedLabsInitialized) return;
+        managedLabsInitialized = true;
+        loadManagedLabs({ skipAuthPrompt: true });
+    }
 
     function requireBillingAccess(onAuthenticated, onTokenAuthenticated) {
         if (hasBillingAccess()) {
@@ -575,7 +643,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof onAuthenticated === 'function') onAuthenticated();
                 return;
             }
-            promptBillingToken(onTokenAuthenticated || onAuthenticated);
+            if (billingTokenRequired) {
+                promptBillingToken(onTokenAuthenticated || onAuthenticated);
+            }
         });
     }
 
@@ -585,6 +655,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const smtpPassword = smtpPassEl.value.trim();
+        const graphClientSecret = graphClientSecretEl.value.trim();
         const payload = {
             enabled: enabledEl.checked,
             driver: driverEl.value,
@@ -596,16 +668,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 host: smtpHostEl.value.trim(),
                 port: smtpPortEl.value ? parseInt(smtpPortEl.value, 10) : null,
                 username: smtpUserEl.value.trim(),
-                password: smtpPassEl.value.trim(),
                 startTls: smtpStartTlsEl.checked
             },
             graph: {
                 tenantId: graphTenantEl.value.trim(),
                 clientId: graphClientIdEl.value.trim(),
-                clientSecret: graphClientSecretEl.value.trim(),
                 from: graphFromEl.value.trim()
             }
         };
+        if (smtpPassword) payload.smtp.password = smtpPassword;
+        if (graphClientSecret) payload.graph.clientSecret = graphClientSecret;
 
         fetch('/billing/admin/notifications', {
             method: 'POST',
@@ -617,7 +689,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
             })
-            .then(() => {
+            .then(data => {
+                applyNotificationConfig(data.config || {
+                    ...payload,
+                    smtp: { ...payload.smtp, passwordConfigured: Boolean(smtpPassword) },
+                    graph: { ...payload.graph, clientSecretConfigured: Boolean(graphClientSecret) }
+                });
                 setStatus('Saved');
                 showToast('Configuration saved', 'success');
             })

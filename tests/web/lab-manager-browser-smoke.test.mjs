@@ -19,9 +19,15 @@ function contentType(filePath) {
 
 function startSmokeServer() {
   const requests = [];
+  let liteMode = false;
   const server = http.createServer((request, response) => {
     const requestUrl = new URL(request.url, 'http://127.0.0.1');
     requests.push(requestUrl.pathname);
+    if (requestUrl.pathname === '/gateway/mode') {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ mode: liteMode ? 'lite' : 'full', lite: liteMode }));
+      return;
+    }
     if (requestUrl.pathname.startsWith('/ops/') || requestUrl.pathname.startsWith('/lab-admin/')) {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       if (requestUrl.pathname.endsWith('/power/controllers')) {
@@ -53,7 +59,12 @@ function startSmokeServer() {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
-      resolve({ server, url: `http://127.0.0.1:${address.port}/lab-manager/index.html`, requests });
+      resolve({
+        server,
+        url: `http://127.0.0.1:${address.port}/lab-manager/index.html`,
+        requests,
+        setLiteMode: (value) => { liteMode = Boolean(value); },
+      });
     });
   });
 }
@@ -110,32 +121,74 @@ async function runFirefoxScreenshot(browser, args, screenshot) {
   }
 }
 
-test('renders Lab Manager Power Controllers in a real headless browser', async (t) => {
+test('renders workflow tabs and lazily loads their data in a real headless browser', async (t) => {
   const browser = firefoxPath();
   if (!browser) {
     t.skip('Firefox is not installed; set LAB_MANAGER_FIREFOX to run the browser smoke test');
     return;
   }
 
-  const { server, url, requests } = await startSmokeServer();
+  const { server, url, requests, setLiteMode } = await startSmokeServer();
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'lab-manager-smoke-'));
-  const screenshot = path.join(tempDirectory, 'lab-manager.png');
+  const labsProfile = path.join(tempDirectory, 'labs-profile');
+  const energyProfile = path.join(tempDirectory, 'energy-profile');
+  const liteProfile = path.join(tempDirectory, 'lite-profile');
+  fs.mkdirSync(labsProfile);
+  fs.mkdirSync(energyProfile);
+  fs.mkdirSync(liteProfile);
+  const labsScreenshot = path.join(tempDirectory, 'laboratories.png');
+  const energyScreenshot = path.join(tempDirectory, 'energy.png');
+  const liteScreenshot = path.join(tempDirectory, 'lite.png');
   try {
-    const result = await runFirefoxScreenshot(browser, [
+    const labsResult = await runFirefoxScreenshot(browser, [
       '--headless',
       '--no-remote',
-      '--profile', tempDirectory,
+      '--profile', labsProfile,
       '--window-size', '1440,1200',
-      '--screenshot', screenshot,
+      '--screenshot', labsScreenshot,
       url,
-    ], screenshot);
-    assert.ok(result.status === 0 || result.screenshotReady, `${result.stdout}\n${result.stderr}`);
+    ], labsScreenshot);
+    assert.ok(labsResult.status === 0 || labsResult.screenshotReady, `${labsResult.stdout}\n${labsResult.stderr}`);
     assert.ok(
-      result.screenshotReady,
+      labsResult.screenshotReady,
       `Firefox did not produce a screenshot; files: ${fs.readdirSync(tempDirectory).join(', ')}`,
     );
-    assert.ok(fs.statSync(screenshot).size > 0, 'Firefox produced an empty screenshot');
+    assert.ok(fs.statSync(labsScreenshot).size > 0, 'Firefox produced an empty Laboratories screenshot');
+    assert.ok(requests.includes('/lab-admin/status'), 'The default Laboratories tab did not load publisher status');
+    assert.equal(requests.includes('/ops/api/power/controllers'), false, 'Energy loaded before its tab was opened');
+    assert.equal(requests.includes('/billing/admin/notifications'), false, 'Notifications loaded before its tab was opened');
+
+    requests.length = 0;
+    const energyResult = await runFirefoxScreenshot(browser, [
+      '--headless',
+      '--no-remote',
+      '--profile', energyProfile,
+      '--window-size', '1440,1200',
+      '--screenshot', energyScreenshot,
+      `${url}#energy`,
+    ], energyScreenshot);
+    assert.ok(energyResult.status === 0 || energyResult.screenshotReady, `${energyResult.stdout}\n${energyResult.stderr}`);
+    assert.ok(energyResult.screenshotReady, 'Firefox did not produce an Energy screenshot');
+    assert.ok(fs.statSync(energyScreenshot).size > 0, 'Firefox produced an empty Energy screenshot');
     assert.ok(requests.includes('/ops/api/power/controllers'), 'Lab Manager did not load power controllers');
+    assert.ok(requests.includes('/ops/api/power/credentials'), 'Lab Manager did not load power credentials');
+    assert.ok(requests.includes('/ops/api/power/policies'), 'Lab Manager did not load power policies');
+    assert.equal(requests.includes('/billing/admin/notifications'), false, 'Energy requested the Notifications admin session');
+
+    requests.length = 0;
+    setLiteMode(true);
+    const liteResult = await runFirefoxScreenshot(browser, [
+      '--headless',
+      '--no-remote',
+      '--profile', liteProfile,
+      '--window-size', '1440,1200',
+      '--screenshot', liteScreenshot,
+      `${url}#notifications`,
+    ], liteScreenshot);
+    assert.ok(liteResult.status === 0 || liteResult.screenshotReady, `${liteResult.stdout}\n${liteResult.stderr}`);
+    assert.ok(liteResult.screenshotReady, 'Firefox did not produce a Lite-mode screenshot');
+    assert.ok(requests.includes('/lab-admin/status'), 'A Full-only deep link did not fall back to Laboratories in Lite mode');
+    assert.equal(requests.includes('/billing/admin/notifications'), false, 'Lite mode attempted to open Full-only Notifications');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(tempDirectory, { recursive: true, force: true });

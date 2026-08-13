@@ -275,10 +275,18 @@
         syncSetupMode();
         syncResourceTypeFields();
         syncBookingModeFields();
-        // /lab-manager/ has already authenticated the operator. Publisher
-        // metadata is optional at startup and must not trigger a duplicate
-        // token dialog if one of its protected reads returns 401 briefly.
-        loadPublisherData({ skipAuthPrompt: true });
+        let publisherInitialized = false;
+        const initializePublisher = () => {
+            if (publisherInitialized) return;
+            publisherInitialized = true;
+            loadPublisherData({ skipAuthPrompt: true });
+        };
+        document.addEventListener('lab-manager:tab-activated', event => {
+            if (event.detail && event.detail.tab === 'laboratories') initializePublisher();
+        });
+        if (window.LabManagerTabs && window.LabManagerTabs.activeTab === 'laboratories') {
+            initializePublisher();
+        }
     });
 
     function initMarketplaceFields() {
