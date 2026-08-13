@@ -132,6 +132,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const powerControllerHostEl = $('#powerControllerHost');
     const powerControllerPortEl = $('#powerControllerPort');
     const powerControllerCredentialRefEl = $('#powerControllerCredentialRef');
+    const powerControllerNetioPathEl = $('#powerControllerNetioPath');
+    const powerControllerNetioHttpsEl = $('#powerControllerNetioHttps');
+    const powerControllerNetioVerifyTlsEl = $('#powerControllerNetioVerifyTls');
+    const powerControllerNetioPathFieldEl = $('#powerControllerNetioPathField');
+    const powerControllerNetioHttpsFieldEl = $('#powerControllerNetioHttpsField');
+    const powerControllerNetioVerifyTlsFieldEl = $('#powerControllerNetioVerifyTlsField');
+    const powerControllerProfileFieldEl = $('#powerControllerProfileField');
+    const powerControllerSnmpVersionFieldEl = $('#powerControllerSnmpVersionField');
     const powerControllerProfileEl = $('#powerControllerProfile');
     const powerControllerSnmpVersionEl = $('#powerControllerSnmpVersion');
     const powerControllerTimeoutSecondsEl = $('#powerControllerTimeoutSeconds');
@@ -162,6 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const heartbeatSources = {};
     let powerControllers = [];
     let powerControllerOutletDrafts = [];
+    let lastPowerControllerDriver = 'mock';
     let powerPolicies = [];
     let powerPolicyStepDrafts = [];
     let hostNames = [];
@@ -416,6 +425,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (powerControllerListEl) powerControllerListEl.addEventListener('click', handlePowerActions);
     if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', loadPowerControllers);
     if (powerControllerSelectEl) powerControllerSelectEl.addEventListener('change', loadSelectedPowerController);
+    if (powerControllerDriverEl) powerControllerDriverEl.addEventListener('change', updatePowerControllerDriverFields);
+    if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.addEventListener('change', updatePowerControllerNetioPort);
     if (addPowerControllerOutletBtn) addPowerControllerOutletBtn.addEventListener('click', addPowerControllerOutlet);
     if (powerControllerOutletsEl) {
         powerControllerOutletsEl.addEventListener('change', handlePowerControllerOutletChange);
@@ -1422,6 +1433,31 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function updatePowerControllerDriverFields() {
+        const driver = powerControllerDriverEl?.value || 'mock';
+        const isNetio = driver === 'netio-json';
+        const isApc = driver === 'apc-powernet-snmp';
+        const currentPort = String(powerControllerPortEl?.value || '');
+        if (powerControllerPortEl && driver === 'netio-json' && lastPowerControllerDriver !== 'netio-json' && currentPort === '161') {
+            powerControllerPortEl.value = powerControllerNetioHttpsEl?.checked === true ? '443' : '80';
+        } else if (powerControllerPortEl && driver !== 'netio-json' && lastPowerControllerDriver === 'netio-json' && ['80', '443'].includes(currentPort)) {
+            powerControllerPortEl.value = '161';
+        }
+        lastPowerControllerDriver = driver;
+        if (powerControllerNetioPathFieldEl) powerControllerNetioPathFieldEl.hidden = !isNetio;
+        if (powerControllerNetioHttpsFieldEl) powerControllerNetioHttpsFieldEl.hidden = !isNetio;
+        if (powerControllerNetioVerifyTlsFieldEl) powerControllerNetioVerifyTlsFieldEl.hidden = !isNetio;
+        if (powerControllerProfileFieldEl) powerControllerProfileFieldEl.hidden = !isApc;
+        if (powerControllerSnmpVersionFieldEl) powerControllerSnmpVersionFieldEl.hidden = !isApc;
+    }
+
+    function updatePowerControllerNetioPort() {
+        if (powerControllerDriverEl?.value !== 'netio-json' || !powerControllerPortEl) return;
+        if (['80', '443'].includes(String(powerControllerPortEl.value || ''))) {
+            powerControllerPortEl.value = powerControllerNetioHttpsEl?.checked === true ? '443' : '80';
+        }
+    }
+
     function resetPowerControllerEditor() {
         if (powerControllerSelectEl) powerControllerSelectEl.value = '';
         if (powerControllerIdEl) {
@@ -1434,10 +1470,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerHostEl) powerControllerHostEl.value = '';
         if (powerControllerPortEl) powerControllerPortEl.value = '161';
         if (powerControllerCredentialRefEl) powerControllerCredentialRefEl.value = '';
+        if (powerControllerNetioPathEl) powerControllerNetioPathEl.value = '/netio.json';
+        if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.checked = false;
+        if (powerControllerNetioVerifyTlsEl) powerControllerNetioVerifyTlsEl.checked = true;
         if (powerControllerProfileEl) powerControllerProfileEl.value = 'auto';
         if (powerControllerSnmpVersionEl) powerControllerSnmpVersionEl.value = '';
         if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = '2';
         if (powerControllerRetriesEl) powerControllerRetriesEl.value = '1';
+        updatePowerControllerDriverFields();
         powerControllerOutletDrafts = [createPowerControllerOutletDraft({ outlet: '1' })];
         renderPowerControllerOutlets();
         if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = 'Select an existing controller or configure a new one.';
@@ -1452,13 +1492,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerDriverEl) powerControllerDriverEl.value = controller.driver || 'mock';
         if (powerControllerEnabledEl) powerControllerEnabledEl.checked = controller.enabled !== false;
         if (powerControllerHostEl) powerControllerHostEl.value = controller.host || '';
-        if (powerControllerPortEl) powerControllerPortEl.value = controller.port || '161';
         if (powerControllerCredentialRefEl) powerControllerCredentialRefEl.value = controller.credentialRef || '';
         const config = controller.config || {};
+        const defaultPort = controller.driver === 'netio-json'
+            ? (config.useHttps === true ? '443' : '80')
+            : '161';
+        if (powerControllerPortEl) powerControllerPortEl.value = controller.port || defaultPort;
+        if (powerControllerNetioPathEl) powerControllerNetioPathEl.value = config.path || '/netio.json';
+        if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.checked = config.useHttps === true;
+        if (powerControllerNetioVerifyTlsEl) powerControllerNetioVerifyTlsEl.checked = config.verifyTls !== false;
         if (powerControllerProfileEl) powerControllerProfileEl.value = config.profile || 'auto';
         if (powerControllerSnmpVersionEl) powerControllerSnmpVersionEl.value = config.snmpVersion || '';
         if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = config.timeoutSeconds || '2';
         if (powerControllerRetriesEl) powerControllerRetriesEl.value = config.retries ?? '1';
+        updatePowerControllerDriverFields();
         powerControllerOutletDrafts = Array.isArray(controller.outlets)
             ? controller.outlets.map(createPowerControllerOutletDraft)
             : [];
@@ -1576,8 +1623,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!id) throw new Error('Controller ID is required');
         if (!/^[A-Za-z0-9._:-]+$/.test(id)) throw new Error('Controller ID contains invalid characters');
         if (!name) throw new Error('Controller name is required');
-        if (!['mock', 'apc-powernet-snmp'].includes(driver)) throw new Error('Select a supported driver');
-        const port = Number.parseInt(powerControllerPortEl?.value || '161', 10);
+        if (!['mock', 'apc-powernet-snmp', 'netio-json'].includes(driver)) throw new Error('Select a supported driver');
+        const useHttps = powerControllerNetioHttpsEl?.checked === true;
+        const defaultPort = driver === 'netio-json' ? (useHttps ? 443 : 80) : 161;
+        const port = Number.parseInt(powerControllerPortEl?.value || String(defaultPort), 10);
         if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port must be between 1 and 65535');
         const timeoutSeconds = Number.parseInt(powerControllerTimeoutSecondsEl?.value || '2', 10);
         if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 60) throw new Error('Timeout must be between 1 and 60 seconds');
@@ -1585,7 +1634,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!Number.isInteger(retries) || retries < 1 || retries > 10) throw new Error('Retries must be between 1 and 10');
         const host = (powerControllerHostEl?.value || '').trim();
         const credentialRef = (powerControllerCredentialRefEl?.value || '').trim();
-        if (driver === 'apc-powernet-snmp' && !host) throw new Error('Host is required for APC SNMP');
+        if (driver !== 'mock' && !host) throw new Error('Host is required for this driver');
         if (driver === 'apc-powernet-snmp' && !credentialRef) throw new Error('Credential reference is required for APC SNMP');
 
         const outlets = powerControllerOutletDrafts.map((outlet, index) => {
@@ -1603,12 +1652,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!outlets.length) throw new Error('At least one outlet is required');
         if (new Set(outlets.map(outlet => outlet.outlet)).size !== outlets.length) throw new Error('Outlet IDs must be unique');
 
-        const config = {
-            profile: powerControllerProfileEl?.value || 'auto',
-            snmpVersion: powerControllerSnmpVersionEl?.value || undefined,
-            timeoutSeconds,
-            retries,
-        };
+        const config = driver === 'netio-json'
+            ? {
+                path: (powerControllerNetioPathEl?.value || '/netio.json').trim(),
+                useHttps,
+                verifyTls: powerControllerNetioVerifyTlsEl?.checked !== false,
+                timeoutSeconds,
+                retries,
+            }
+            : {
+                profile: powerControllerProfileEl?.value || 'auto',
+                snmpVersion: powerControllerSnmpVersionEl?.value || undefined,
+                timeoutSeconds,
+                retries,
+            };
+        if (driver === 'netio-json' && (!config.path || !config.path.startsWith('/') || config.path.includes('\n') || config.path.includes('\r'))) {
+            throw new Error('NETIO API path must start with /');
+        }
         if (!config.snmpVersion) delete config.snmpVersion;
         return {
             id,

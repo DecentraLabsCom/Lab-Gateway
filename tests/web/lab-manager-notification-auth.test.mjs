@@ -92,6 +92,7 @@ function loadLabManager({
     'powerControllerPort', 'powerControllerCredentialRef', 'powerControllerProfile',
     'powerControllerSnmpVersion', 'powerControllerTimeoutSeconds',
     'powerControllerRetries', 'powerControllerOutlets', 'addPowerControllerOutletBtn',
+    'powerControllerNetioPath', 'powerControllerNetioHttps', 'powerControllerNetioVerifyTls',
     'savePowerControllerBtn', 'powerControllerEditorHint',
     'powerMaintenanceMode', 'powerPolicySelect', 'powerPolicyLabSelect',
     'powerPolicyName', 'powerPolicyEnabled', 'powerPolicyRespectLocalMode',
@@ -479,6 +480,58 @@ test('creates a provider-local power controller from the controller form', async
       snmpVersion: 'v2c',
       timeoutSeconds: 3,
       retries: 1,
+    },
+    outlets: [{
+      outlet: '1',
+      displayName: '',
+      logicalName: '',
+      protected: false,
+      critical: false,
+      defaultState: 'off',
+    }],
+  });
+});
+
+test('creates a NETIO JSON power controller with its HTTP API settings', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerControllerId').value = 'netio-lab-01';
+  elements.get('powerControllerName').value = 'NETIO Lab 01';
+  elements.get('powerControllerDriver').value = 'netio-json';
+  elements.get('powerControllerHost').value = '192.0.2.10';
+  elements.get('powerControllerPort').value = '443';
+  elements.get('powerControllerCredentialRef').value = 'netio-lab-01-http';
+  elements.get('powerControllerNetioPath').value = '/netio.json';
+  elements.get('powerControllerNetioHttps').checked = true;
+  elements.get('powerControllerTimeoutSeconds').value = '4';
+  elements.get('powerControllerRetries').value = '2';
+  elements.get('savePowerControllerBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const saveCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'POST' && url === '/ops/api/power/controllers');
+  assert.ok(saveCall);
+  assert.deepEqual(JSON.parse(saveCall.options.body), {
+    id: 'netio-lab-01',
+    name: 'NETIO Lab 01',
+    driver: 'netio-json',
+    enabled: true,
+    host: '192.0.2.10',
+    port: 443,
+    credentialRef: 'netio-lab-01-http',
+    config: {
+      path: '/netio.json',
+      useHttps: true,
+      verifyTls: true,
+      timeoutSeconds: 4,
+      retries: 2,
     },
     outlets: [{
       outlet: '1',

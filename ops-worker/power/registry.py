@@ -10,6 +10,7 @@ from power.models import PowerCapabilities, PowerController, PowerOutlet, Valida
 from .drivers.base import PowerDriver, PowerDriverError
 from .drivers.apc_snmp import ApcPowerNetSnmpDriver
 from .drivers.mock import MockPowerDriver
+from .drivers.netio_json import NetioJsonDriver
 
 
 CredentialResolver = Callable[[str], Mapping[str, Any]]
@@ -150,6 +151,32 @@ class PowerRegistry:
                     config=definition.config,
                     credentials=credentials,
                 )
+            elif definition.driver_name == "netio-json":
+                if not definition.host:
+                    raise ValidationError(f"controller {definition.id} requires a host")
+                credentials = {}
+                if definition.credential_ref:
+                    if credential_resolver is None:
+                        raise ValidationError(
+                            f"controller {definition.id} requires a power credential resolver"
+                        )
+                    try:
+                        credentials = credential_resolver(definition.credential_ref)
+                    except Exception as exc:
+                        raise ValidationError(
+                            f"controller {definition.id} power credentials could not be resolved"
+                        ) from exc
+                    if not isinstance(credentials, Mapping):
+                        raise ValidationError(f"controller {definition.id} power credentials are invalid")
+                use_https = _bool(definition.config.get("useHttps"), False)
+                driver = NetioJsonDriver(
+                    definition.id,
+                    definition.host,
+                    port=definition.port or (443 if use_https else 80),
+                    config=definition.config,
+                    credentials=credentials,
+                    sleep_fn=sleep_fn,
+                )
             else:
                 raise ValidationError(f"unsupported power driver '{definition.driver_name}'")
             registered.append(RegisteredController(definition, driver, controller_outlets))
@@ -197,7 +224,16 @@ class PowerRegistry:
             "credentialRef": controller.definition.credential_ref,
             "config": {
                 key: controller.definition.config[key]
-                for key in ("profile", "snmpVersion", "timeoutSeconds", "retries", "moduleIndex")
+                for key in (
+                    "profile",
+                    "snmpVersion",
+                    "timeoutSeconds",
+                    "retries",
+                    "moduleIndex",
+                    "path",
+                    "useHttps",
+                    "verifyTls",
+                )
                 if key in controller.definition.config
             },
             "capabilities": capabilities.to_dict(),

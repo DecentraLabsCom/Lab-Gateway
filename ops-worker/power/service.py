@@ -34,7 +34,16 @@ _CONTROLLER_FIELDS = frozenset(
     {"id", "name", "driver", "enabled", "host", "port", "credentialRef", "config", "outlets"}
 )
 _CONTROLLER_CONFIG_FIELDS = frozenset(
-    {"profile", "snmpVersion", "timeoutSeconds", "retries", "moduleIndex"}
+    {
+        "profile",
+        "snmpVersion",
+        "timeoutSeconds",
+        "retries",
+        "moduleIndex",
+        "path",
+        "useHttps",
+        "verifyTls",
+    }
 )
 
 
@@ -74,7 +83,7 @@ def _controller_payload(raw_controller: Mapping[str, Any]) -> tuple[Dict[str, An
     if not name:
         raise ValidationError("controller name is required")
     driver = str(raw_controller.get("driver") or "").strip().lower()
-    if driver not in {"mock", "apc-powernet-snmp"}:
+    if driver not in {"mock", "apc-powernet-snmp", "netio-json"}:
         raise ValidationError("unsupported power driver")
 
     raw_config = raw_controller.get("config") or {}
@@ -93,6 +102,15 @@ def _controller_payload(raw_controller: Mapping[str, Any]) -> tuple[Dict[str, An
         config["retries"] = _controller_int(config["retries"], "retries", minimum=1, maximum=10)
     if "moduleIndex" in config:
         config["moduleIndex"] = _controller_int(config["moduleIndex"], "moduleIndex", minimum=1, maximum=65535)
+    if "path" in config:
+        path = str(config["path"] or "").strip()
+        if not path.startswith("/") or len(path) > 255 or "\n" in path or "\r" in path:
+            raise ValidationError("controller API path is invalid")
+        config["path"] = path
+    if "useHttps" in config:
+        config["useHttps"] = _controller_bool(config["useHttps"], False)
+    if "verifyTls" in config:
+        config["verifyTls"] = _controller_bool(config["verifyTls"], True)
 
     raw_outlets = raw_controller.get("outlets")
     if not isinstance(raw_outlets, list):

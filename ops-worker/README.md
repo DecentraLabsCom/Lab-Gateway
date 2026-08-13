@@ -186,9 +186,10 @@ Power configuration:
 - `OPS_POWER_CONFIG` (compose default: `/app/data/power-controllers.json`)
 - `OPS_POWER_CREDENTIALS_PATH` (compose default: `/app/data/power-credentials.json`)
 - Start from `power-controllers.sample.json`; copy it to the writable `ops-data` directory and change only provider-local values.
-- The `mock` driver is available for development and CI. The `apc-powernet-snmp` driver supports legacy PowerNet and `rPDU2` profiles, but physical activation remains gated on pilot hardware validation.
+- The `mock` driver is available for development and CI. The `apc-powernet-snmp` driver supports legacy PowerNet and `rPDU2` profiles, while `netio-json` controls NETIO devices through their `/netio.json` HTTP(S) API. Physical activation remains gated on pilot hardware validation.
 - The catalog contains `controllers`, `outlets` and `policies`. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` can manage the validated controller/outlet catalog and power policies through protected endpoints; all data remains provider-local.
 - APC credentials are resolved by `credentialRef` from the encrypted, provider-local `power-credentials.json` store using `OPS_SECRETS_KEY`; the store is never returned by the API.
+- NETIO credentials, when enabled on the device, use the same encrypted store with a payload such as `{"username":"netio-api-user","password":"..."}`. The catalog may set `config.path` (default `/netio.json`), `config.useHttps`, `config.verifyTls`, `config.timeoutSeconds` and `config.retries`; it never contains the Basic-auth password.
 - Provision APC credentials locally with `power_credentials.py`; the secret JSON is read from stdin and the command prints only the reference and type:
 
   ```powershell

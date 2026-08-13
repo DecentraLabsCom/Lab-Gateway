@@ -357,6 +357,7 @@
                                 <select id="powerControllerDriver">
                                     <option value="mock">Mock (development)</option>
                                     <option value="apc-powernet-snmp">APC PowerNet SNMP</option>
+                                    <option value="netio-json">NETIO REST JSON</option>
                                 </select>
                             </label>
                             <div class="field toggle-field">
@@ -378,7 +379,25 @@
                                 <span>Credential reference</span>
                                 <input type="text" id="powerControllerCredentialRef" maxlength="128" placeholder="pdu-lab-01-snmp">
                             </label>
-                            <label class="field">
+                            <label class="field" id="powerControllerNetioPathField" hidden>
+                                <span>NETIO API path</span>
+                                <input type="text" id="powerControllerNetioPath" maxlength="255" value="/netio.json" placeholder="/netio.json">
+                            </label>
+                            <div class="field toggle-field" id="powerControllerNetioHttpsField" hidden>
+                                <span>Use HTTPS</span>
+                                <label class="switch" for="powerControllerNetioHttps">
+                                    <input type="checkbox" id="powerControllerNetioHttps">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="field toggle-field" id="powerControllerNetioVerifyTlsField" hidden>
+                                <span>Verify TLS certificate</span>
+                                <label class="switch" for="powerControllerNetioVerifyTls">
+                                    <input type="checkbox" id="powerControllerNetioVerifyTls" checked>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <label class="field" id="powerControllerProfileField">
                                 <span>APC profile</span>
                                 <select id="powerControllerProfile">
                                     <option value="auto">Auto-detect</option>
@@ -386,7 +405,7 @@
                                     <option value="rpdu2">rPDU2</option>
                                 </select>
                             </label>
-                            <label class="field">
+                            <label class="field" id="powerControllerSnmpVersionField">
                                 <span>SNMP version</span>
                                 <select id="powerControllerSnmpVersion">
                                     <option value="">Driver default</option>
@@ -405,7 +424,7 @@
                             </label>
                         </div>
                         <div class="hint power-controller-config-hint">
-                            The credential reference points to the encrypted provider-local store. Secret SNMP values are never entered or returned here.
+                            The credential reference points to the encrypted provider-local store. SNMP communities and NETIO passwords are never entered or returned here.
                         </div>
                         <div class="power-controller-outlets-editor">
                             <div class="power-controller-outlets-header">
