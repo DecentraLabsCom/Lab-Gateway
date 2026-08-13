@@ -376,8 +376,10 @@
                                     </select>
                                 </label>
                                 <label class="field">
-                                    <span>Lab ID</span>
-                                    <input type="text" id="powerPolicyLabId" maxlength="128" placeholder="lab-1">
+                                    <span>Laboratory</span>
+                                    <select id="powerPolicyLabSelect" required disabled>
+                                        <option value="">Loading laboratories...</option>
+                                    </select>
                                 </label>
                                 <div class="actions inline-actions power-policy-actions">
                                     <button class="ghost-btn" type="button" id="refreshPowerPoliciesBtn"><i class="fas fa-rotate-right"></i> Reload</button>
@@ -386,7 +388,7 @@
                                 </div>
                             </div>
                             <textarea id="powerPolicyJson" class="power-policy-json" rows="16" spellcheck="false" aria-label="Power policy JSON"></textarea>
-                            <div class="hint" id="powerPolicyEditorHint" aria-live="polite">Select an existing policy or enter a new Lab ID.</div>
+                            <div class="hint" id="powerPolicyEditorHint" aria-live="polite">Select an existing policy or a laboratory defined above.</div>
                         </div>
                     </div>
                 </div>
@@ -432,11 +434,15 @@
                         <div class="form-grid mt-3">
                             <label class="field">
                                 <span>Access Key</span>
-                                <input type="text" id="fmuSyncKey" placeholder="fmu-access-key">
+                                <select id="fmuSyncKey" disabled>
+                                    <option value="">Select an FMU access key</option>
+                                </select>
                             </label>
                             <label class="field">
-                                <span>Lab ID <span class="muted-text">(optional override)</span></span>
-                                <input type="text" id="fmuSyncLabId" placeholder="1">
+                                <span>Laboratory <span class="muted-text">(optional override)</span></span>
+                                <select id="fmuSyncLabSelect" disabled>
+                                    <option value="">No lab ID override</option>
+                                </select>
                             </label>
                             <label class="field full">
                                 <span>Upload .aasx <span class="muted-text">(optional — auto-generated from FMU if omitted)</span></span>
@@ -487,8 +493,10 @@
                                 <input type="text" id="aasLinkKey" placeholder="fmu-access-key">
                             </label>
                             <label class="field">
-                                <span class="inline-help-label">Lab ID <span class="muted-text">(on-chain ID — same as in FMU Sync)</span></span>
-                                <input type="text" id="aasLinkLabId" placeholder="42">
+                                <span class="inline-help-label">Laboratory <span class="muted-text">(optional on-chain ID)</span></span>
+                                <select id="aasLinkLabSelect" disabled>
+                                    <option value="">No lab ID override</option>
+                                </select>
                             </label>
                             <label class="field full">
                                 <span>External AAS ID <span class="muted-text">(the shell ID in your external/self-hosted server)</span></span>

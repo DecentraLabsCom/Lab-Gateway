@@ -129,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const powerMaintenanceModeEl = $('#powerMaintenanceMode');
     const refreshPowerPoliciesBtn = $('#refreshPowerPoliciesBtn');
     const powerPolicySelectEl = $('#powerPolicySelect');
-    const powerPolicyLabIdEl = $('#powerPolicyLabId');
+    const powerPolicyLabSelectEl = $('#powerPolicyLabSelect');
     const powerPolicyJsonEl = $('#powerPolicyJson');
     const formatPowerPolicyBtn = $('#formatPowerPolicyBtn');
     const savePowerPolicyBtn = $('#savePowerPolicyBtn');
@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // FMU AAS sync elements
     const fmuSyncBtn = $('#fmuSyncBtn');
     const fmuSyncKeyEl = $('#fmuSyncKey');
-    const fmuSyncLabIdEl = $('#fmuSyncLabId');
+    const fmuSyncLabSelectEl = $('#fmuSyncLabSelect');
     const fmuSyncFileEl = $('#fmuSyncFile');
     const fmuSyncResultEl = $('#fmuSyncResult');
     const fmuSyncDescriptionEl = $('#fmuSyncDescription');
@@ -213,21 +213,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (fmuSyncKeyEl) {
-        fmuSyncKeyEl.addEventListener('blur', () => {
-            const key = fmuSyncKeyEl.value.trim();
-            if (!key) { _clearAllFmuHints(); return; }
-            _fetchFmuHints(key);
-        });
         fmuSyncKeyEl.addEventListener('input', () => {
             // User is editing the key — clear any previous auto-filled locks
             _clearAllFmuHints();
         });
     }
 
+    if (fmuSyncKeyEl) {
+        fmuSyncKeyEl.addEventListener('change', () => {
+            const key = fmuSyncKeyEl.value.trim();
+            if (!key) { _clearAllFmuHints(); return; }
+            _fetchFmuHints(key);
+        });
+    }
+
     if (fmuSyncBtn) {
         fmuSyncBtn.addEventListener('click', () => {
             const accessKey = (fmuSyncKeyEl && fmuSyncKeyEl.value || '').trim();
-            const labId = (fmuSyncLabIdEl && fmuSyncLabIdEl.value || '').trim();
+            const labId = (fmuSyncLabSelectEl && fmuSyncLabSelectEl.value || '').trim();
             const file = fmuSyncFileEl && fmuSyncFileEl.files && fmuSyncFileEl.files[0];
             const description = (fmuSyncDescriptionEl && fmuSyncDescriptionEl.value || '').trim();
             const license = (fmuSyncLicenseEl && fmuSyncLicenseEl.value || '').trim();
@@ -239,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // AAS Link elements
     const aasLinkKeyEl = $('#aasLinkKey');
-    const aasLinkLabIdEl = $('#aasLinkLabId');
+    const aasLinkLabSelectEl = $('#aasLinkLabSelect');
     const aasLinkAasIdEl = $('#aasLinkAasId');
     const aasLinkSaveBtn = $('#aasLinkSaveBtn');
     const aasLinkCheckBtn = $('#aasLinkCheckBtn');
@@ -257,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (aasLinkSaveBtn) {
         aasLinkSaveBtn.addEventListener('click', async () => {
             const accessKey = (aasLinkKeyEl && aasLinkKeyEl.value || '').trim();
-            const labId = (aasLinkLabIdEl && aasLinkLabIdEl.value || '').trim();
+            const labId = (aasLinkLabSelectEl && aasLinkLabSelectEl.value || '').trim();
             const aasId = (aasLinkAasIdEl && aasLinkAasIdEl.value || '').trim();
             if (!accessKey) { showToast('Enter an access key', 'error'); return; }
             if (!aasId) { showToast('Enter an external AAS ID', 'error'); return; }
@@ -302,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 _aasLinkShowResult(`Current link: ${data.aasId}`, false);
                 if (aasLinkAasIdEl) aasLinkAasIdEl.value = data.aasId || '';
-                if (aasLinkLabIdEl) aasLinkLabIdEl.value = data.labId || '';
+                if (aasLinkLabSelectEl) aasLinkLabSelectEl.value = data.labId || '';
             } catch (err) {
                 _aasLinkShowResult(err.message, true);
             } finally {
@@ -393,10 +396,17 @@ document.addEventListener('DOMContentLoaded', () => {
         loadPowerControllers({ skipAuthPrompt: true });
     }
     if (powerPolicySelectEl) powerPolicySelectEl.addEventListener('change', loadSelectedPowerPolicy);
-    if (refreshPowerPoliciesBtn) refreshPowerPoliciesBtn.addEventListener('click', loadPowerPolicies);
+    if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.addEventListener('change', handlePowerPolicyLabChange);
+    if (refreshPowerPoliciesBtn) {
+        refreshPowerPoliciesBtn.addEventListener('click', () => {
+            loadManagedLabs();
+            loadPowerPolicies();
+        });
+    }
     if (formatPowerPolicyBtn) formatPowerPolicyBtn.addEventListener('click', formatPowerPolicy);
     if (savePowerPolicyBtn) savePowerPolicyBtn.addEventListener('click', savePowerPolicy);
     if (powerPolicyJsonEl && !powerPolicyJsonEl.value) resetPowerPolicyEditor();
+    if (powerPolicyLabSelectEl || fmuSyncKeyEl || fmuSyncLabSelectEl || aasLinkLabSelectEl) loadManagedLabs({ skipAuthPrompt: true });
     if (powerPolicySelectEl) loadPowerPolicies({ skipAuthPrompt: true });
     if (guacamoleCandidateListEl) {
         guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
@@ -845,13 +855,140 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function loadManagedLabs(options = {}) {
+        if (!powerPolicyLabSelectEl && !fmuSyncKeyEl && !fmuSyncLabSelectEl && !aasLinkLabSelectEl) return;
+        const selectedPowerPolicyLabId = powerPolicyLabSelectEl?.value || '';
+        const selectedFmuAccessKey = fmuSyncKeyEl?.value || '';
+        const selectedFmuLabId = fmuSyncLabSelectEl?.value || '';
+        const selectedAasLinkLabId = aasLinkLabSelectEl?.value || '';
+        try {
+            const res = await fetch('/lab-admin/labs', options);
+            if (res.status === 403) {
+                showOpsWarning();
+                renderPowerPolicyLabOptions([]);
+                renderFmuAccessKeyOptions([]);
+                renderFmuLabOptions(fmuSyncLabSelectEl, []);
+                renderFmuLabOptions(aasLinkLabSelectEl, []);
+                return;
+            }
+            if (res.status === 401) {
+                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load laboratories', 'error');
+                renderPowerPolicyLabOptions([]);
+                renderFmuAccessKeyOptions([]);
+                renderFmuLabOptions(fmuSyncLabSelectEl, []);
+                renderFmuLabOptions(aasLinkLabSelectEl, []);
+                return;
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            renderPowerPolicyLabOptions(body.labs, selectedPowerPolicyLabId);
+            renderFmuAccessKeyOptions(body.labs, selectedFmuAccessKey);
+            renderFmuLabOptions(fmuSyncLabSelectEl, body.labs, selectedFmuLabId);
+            renderFmuLabOptions(aasLinkLabSelectEl, body.labs, selectedAasLinkLabId);
+        } catch (err) {
+            console.warn('Unable to load provider laboratories', err);
+            renderPowerPolicyLabOptions([]);
+            renderFmuAccessKeyOptions([]);
+            renderFmuLabOptions(fmuSyncLabSelectEl, []);
+            renderFmuLabOptions(aasLinkLabSelectEl, []);
+        }
+    }
+
+    function renderPowerPolicyLabOptions(labs, preferredLabId = '') {
+        if (!powerPolicyLabSelectEl) return;
+        const current = powerPolicyLabSelectEl.value;
+        const validLabs = (Array.isArray(labs) ? labs : [])
+            .filter(lab => String(lab?.labId || '').trim())
+            .filter((lab, index, items) => items.findIndex(item => String(item.labId) === String(lab.labId)) === index);
+        powerPolicyLabSelectEl.innerHTML = validLabs.length
+            ? '<option value="">Select a laboratory</option>'
+            : '<option value="">No laboratories available</option>';
+        validLabs.forEach(lab => {
+            const labId = String(lab.labId).trim();
+            const option = document.createElement('option');
+            option.value = labId;
+            option.textContent = formatPowerPolicyLabLabel(lab);
+            powerPolicyLabSelectEl.appendChild(option);
+        });
+        const selected = preferredLabId || current || powerPolicySelectEl?.value || '';
+        powerPolicyLabSelectEl.value = validLabs.some(lab => String(lab.labId) === selected)
+            ? selected
+            : '';
+        powerPolicyLabSelectEl.disabled = validLabs.length === 0;
+    }
+
+    function renderFmuLabOptions(selectEl, labs, preferredLabId = '') {
+        if (!selectEl) return;
+        const current = selectEl.value;
+        const fmuLabs = (Array.isArray(labs) ? labs : [])
+            .filter(lab => Number(lab?.resourceType) === 1)
+            .filter(lab => String(lab?.labId || '').trim())
+            .filter((lab, index, items) => items.findIndex(item => String(item.labId) === String(lab.labId)) === index);
+        selectEl.innerHTML = fmuLabs.length
+            ? '<option value="">No lab ID override</option>'
+            : '<option value="">No FMU laboratories available</option>';
+        fmuLabs.forEach(lab => {
+            const labId = String(lab.labId).trim();
+            const option = document.createElement('option');
+            option.value = labId;
+            option.textContent = formatPowerPolicyLabLabel(lab);
+            selectEl.appendChild(option);
+        });
+        const selected = preferredLabId || current || '';
+        selectEl.value = fmuLabs.some(lab => String(lab.labId) === selected)
+            ? selected
+            : '';
+        selectEl.disabled = fmuLabs.length === 0;
+    }
+
+    function renderFmuAccessKeyOptions(labs, preferredAccessKey = '') {
+        if (!fmuSyncKeyEl) return;
+        const current = fmuSyncKeyEl.value;
+        const accessKeys = (Array.isArray(labs) ? labs : [])
+            .filter(lab => Number(lab?.resourceType) === 1)
+            .filter(lab => String(lab?.accessKey || '').trim())
+            .filter((lab, index, items) => items.findIndex(item => String(item.accessKey) === String(lab.accessKey)) === index);
+        fmuSyncKeyEl.innerHTML = accessKeys.length
+            ? '<option value="">Select an FMU access key</option>'
+            : '<option value="">No FMU access keys available</option>';
+        accessKeys.forEach(lab => {
+            const accessKey = String(lab.accessKey).trim();
+            const option = document.createElement('option');
+            option.value = accessKey;
+            option.textContent = `Lab #${String(lab.labId).trim()} · ${accessKey}`;
+            fmuSyncKeyEl.appendChild(option);
+        });
+        const selected = preferredAccessKey || current || '';
+        fmuSyncKeyEl.value = accessKeys.some(lab => String(lab.accessKey) === selected)
+            ? selected
+            : '';
+        fmuSyncKeyEl.disabled = accessKeys.length === 0;
+    }
+
+    function formatPowerPolicyLabLabel(lab) {
+        const labId = String(lab?.labId || '').trim();
+        const resourceType = Number(lab?.resourceType) === 1 ? 'FMU' : 'Remote';
+        const status = lab?.listed ? 'Listed' : 'Draft';
+        return `Lab #${labId} · ${resourceType} · ${status}`;
+    }
+
+    function handlePowerPolicyLabChange() {
+        const labId = powerPolicyLabSelectEl?.value || '';
+        if (powerPolicySelectEl) {
+            powerPolicySelectEl.value = powerPolicies.some(policy => String(policy.labId || '') === labId)
+                ? labId
+                : '';
+        }
+        loadSelectedPowerPolicy();
+    }
+
     async function loadPowerPolicies(options = {}) {
         if (powerPoliciesStatusEl) {
             powerPoliciesStatusEl.textContent = 'Loading...';
             powerPoliciesStatusEl.className = 'pill soft';
         }
         try {
-            const selectedLabId = powerPolicyLabIdEl?.value.trim() || powerPolicySelectEl?.value || '';
+            const selectedLabId = powerPolicyLabSelectEl?.value || powerPolicySelectEl?.value || '';
             const res = await fetch('/ops/api/power/policies', options);
             if (res.status === 403) {
                 showOpsWarning();
@@ -904,7 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const labId = powerPolicySelectEl?.value || '';
         const policy = powerPolicies.find(item => String(item.labId || '') === labId);
         if (policy) {
-            if (powerPolicyLabIdEl) powerPolicyLabIdEl.value = policy.labId || '';
+            if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.value = policy.labId || '';
             if (powerPolicyJsonEl) powerPolicyJsonEl.value = JSON.stringify(policy, null, 2);
             if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Edit the policy and save it to the provider-local catalog.';
             return;
@@ -913,7 +1050,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function resetPowerPolicyEditor(clearLabId = true) {
-        if (clearLabId && powerPolicyLabIdEl) powerPolicyLabIdEl.value = '';
+        if (clearLabId && powerPolicyLabSelectEl) powerPolicyLabSelectEl.value = '';
         if (powerPolicyJsonEl) {
             powerPolicyJsonEl.value = JSON.stringify(
                 { policyName: 'New lab policy', enabled: true, steps: [] },
@@ -921,7 +1058,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 2,
             );
         }
-        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Enter a Lab ID and a valid policy JSON object.';
+        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Select a laboratory and enter a valid policy JSON object.';
     }
 
     function formatPowerPolicy() {
@@ -936,9 +1073,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function savePowerPolicy() {
-        const labId = powerPolicyLabIdEl?.value.trim() || '';
+        const labId = powerPolicyLabSelectEl?.value || '';
         if (!labId) {
-            showToast('Enter a Lab ID before saving the policy', 'error');
+            showToast('Select a laboratory before saving the policy', 'error');
             return;
         }
         let policy;
@@ -950,10 +1087,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
             showToast('Power policy must be a JSON object', 'error');
-            return;
-        }
-        if (policy.labId && String(policy.labId) !== labId) {
-            showToast('The JSON labId must match the Lab ID field', 'error');
             return;
         }
         policy.labId = labId;

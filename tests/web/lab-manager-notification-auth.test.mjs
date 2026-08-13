@@ -45,7 +45,20 @@ function createElement(id) {
   return element;
 }
 
-function loadLabManager({ billingResponse, actionableResponse = null }) {
+function loadLabManager({
+  billingResponse,
+  actionableResponse = null,
+  labsResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ labs: [] }),
+  }),
+  powerPoliciesResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ policies: [] }),
+  }),
+}) {
   const ids = [
     'driver', 'enabled', 'from', 'fromName', 'defaultTo', 'timezone',
     'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'smtpStartTls',
@@ -59,14 +72,19 @@ function loadLabManager({ billingResponse, actionableResponse = null }) {
     'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac',
     'provisionHostLabs', 'provisionHostLabsSummary', 'provisionHeartbeatPath',
     'btnTestLoad', 'saveConfigBtn', 'btnTestEmail', 'refreshHostsBtn', 'hostList',
-    'guacamoleCandidateList', 'fmuSyncBtn', 'fmuSyncKey', 'fmuSyncLabId',
+    'guacamoleCandidateList', 'fmuSyncBtn', 'fmuSyncKey', 'fmuSyncLabSelect',
     'fmuSyncFile', 'fmuSyncResult', 'fmuSyncDescription', 'fmuSyncLicense',
     'fmuSyncDocsUrl', 'fmuSyncContactEmail', 'fmuSyncDescriptionHint',
-    'fmuSyncLicenseHint', 'aasLinkKey', 'aasLinkLabId', 'aasLinkAasId',
+    'fmuSyncLicenseHint', 'aasLinkKey', 'aasLinkLabSelect', 'aasLinkAasId',
     'aasLinkSaveBtn', 'aasLinkCheckBtn', 'aasLinkDeleteBtn', 'aasLinkResult',
     'timelineReservationId', 'loadTimelineBtn', 'timelineResult', 'upcomingReservationsList',
     'upcomingReservationsStatus', 'smtpSection',
     'graphSection', 'toast', 'labManagerAccessBadge', 'opsHint', 'activityFeedList',
+    'refreshPowerControllersBtn', 'powerControllerList', 'powerControllersStatus',
+    'powerControllersHint', 'powerOperationReason', 'powerCycleSeconds',
+    'powerMaintenanceMode', 'refreshPowerPoliciesBtn', 'powerPolicySelect',
+    'powerPolicyLabSelect', 'powerPolicyJson', 'formatPowerPolicyBtn',
+    'savePowerPolicyBtn', 'powerPoliciesStatus', 'powerPolicyEditorHint',
   ];
   const elements = new Map(ids.map((id) => [id, createElement(id)]));
   const document = {
@@ -111,6 +129,12 @@ function loadLabManager({ billingResponse, actionableResponse = null }) {
           ? actionableResponse(parsedUrl, fetchCalls.length)
           : actionableResponse;
         return Promise.resolve(response);
+      }
+      if (parsedUrl.pathname === '/lab-admin/labs') {
+        return Promise.resolve(labsResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/power/policies' && (!options.method || options.method === 'GET')) {
+        return Promise.resolve(powerPoliciesResponse);
       }
       return parsedUrl.pathname === '/billing/admin/notifications'
         ? billingResponse
@@ -272,4 +296,127 @@ test('renders the provider service-failure action for an access-authorized reser
   assert.match(rendered, /Report service failure/);
   assert.match(rendered, /data-action="cancel-reservation"/);
   assert.match(rendered, /data-action="load-more-actionable"/);
+});
+
+test('loads power policy lab options from provider labs and saves the selected lab', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    labsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        labs: [
+          { labId: '42', resourceType: 0, listed: true },
+          { labId: '7', resourceType: 1, listed: false },
+        ],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const labSelect = elements.get('powerPolicyLabSelect');
+  assert.deepEqual(
+    labSelect.options.map((option) => option.value),
+    ['42', '7'],
+  );
+
+  labSelect.value = '42';
+  elements.get('powerPolicyJson').value = JSON.stringify({
+    policyName: 'PLC policy',
+    enabled: true,
+    steps: [],
+  });
+  elements.get('savePowerPolicyBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const saveCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'PUT' && url === '/ops/api/power/policies/42');
+  assert.ok(saveCall);
+  assert.equal(JSON.parse(saveCall.options.body).labId, '42');
+});
+
+test('loads FMU lab options and sends the selected lab as the AAS override', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    labsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        labs: [
+          { labId: '42', resourceType: 0, listed: true },
+          { labId: '7', resourceType: 1, accessKey: 'spring-damper.fmu', listed: false },
+        ],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    elements.get('fmuSyncKey').options.map((option) => option.value),
+    ['spring-damper.fmu'],
+  );
+  const labSelect = elements.get('fmuSyncLabSelect');
+  assert.deepEqual(
+    labSelect.options.map((option) => option.value),
+    ['7'],
+  );
+
+  labSelect.value = '7';
+  elements.get('fmuSyncKey').value = 'spring-damper.fmu';
+  elements.get('fmuSyncBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const syncCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'POST' && url.startsWith('/aas-admin/fmu/spring-damper.fmu/sync?'));
+  assert.ok(syncCall);
+  assert.equal(new URLSearchParams(syncCall.url.split('?')[1]).get('labId'), '7');
+});
+
+test('loads AAS link FMU options and sends the selected lab when saving a link', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    labsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        labs: [
+          { labId: '42', resourceType: 0, listed: true },
+          { labId: '7', resourceType: 1, listed: false },
+        ],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const labSelect = elements.get('aasLinkLabSelect');
+  assert.deepEqual(
+    labSelect.options.map((option) => option.value),
+    ['7'],
+  );
+
+  labSelect.value = '7';
+  elements.get('aasLinkKey').value = 'spring-damper.fmu';
+  elements.get('aasLinkAasId').value = 'urn:example:aas:spring-damper';
+  elements.get('aasLinkSaveBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const linkCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'POST' && url === '/aas-admin/fmu/spring-damper.fmu/aas-link');
+  assert.ok(linkCall);
+  assert.equal(JSON.parse(linkCall.options.body).labId, '7');
 });
