@@ -190,6 +190,9 @@ Marketplace upload is disabled by design.
   `FMU_SESSION` is not a bypass.
 - `session.attach` checks the original subject, lab, access key,
   `reservationKey`, `pucHash` and `targetGatewayId`.
+- In station mode, a public WebSocket disconnect closes only the Gateway's
+  internal channel; Lab Station retains the FMU state for its configured
+  `FMU_ATTACH_GRACE_SECONDS` window so a new authenticated channel can attach.
 - A job is accepted and observed before the local executor or Station is
   released. If release or execution fails, the accepted job remains visible in
   history for retry/reconciliation.

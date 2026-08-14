@@ -261,6 +261,47 @@ def test_station_ws_session_create_redeems_ticket_and_forwards_context(monkeypat
     }]
 
 
+def test_station_ws_attach_after_public_disconnect_opens_a_new_station_channel(monkeypatch):
+    manager = _build_manager()
+    connections = []
+
+    async def _fake_connect(_headers):
+        connection = _FakeStationConnection()
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    monkeypatch.setattr(main, "_realtime_manager", manager)
+
+    with client.websocket_connect(
+        "/api/v1/fmu/sessions",
+        headers={"Authorization": "Bearer test-token"},
+    ) as ws:
+        ws.send_text(json.dumps({
+            "type": "session.create",
+            "requestId": "disconnect-create",
+            "labId": "1",
+            "reservationKey": "res-1",
+            "sessionTicket": "st_valid",
+        }))
+        created = ws.receive_json()
+
+    with client.websocket_connect(
+        "/api/v1/fmu/sessions",
+        headers={"Authorization": "Bearer test-token"},
+    ) as ws:
+        ws.send_text(json.dumps({
+            "type": "session.attach",
+            "requestId": "disconnect-attach",
+            "sessionId": created["sessionId"],
+        }))
+        attached = ws.receive_json()
+
+    assert attached["type"] == "session.attached"
+    assert len(connections) == 2
+    assert connections[1].sent_messages[0]["type"] == "session.attach"
+
+
 def test_station_bearer_create_issues_ticket_and_confirms_after_station_created(monkeypatch):
     manager = _build_manager()
     fake_station = _FakeStationConnection()

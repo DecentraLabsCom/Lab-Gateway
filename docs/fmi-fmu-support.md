@@ -197,7 +197,7 @@ session.ping             session.attach
 session.terminate
 ~~~
 
-Every request carries a `requestId`; responses and events echo it where applicable. `session.terminate` is idempotent. A session is forcibly closed when the reservation window expires.
+Every request carries a `requestId`; responses and events echo it where applicable. `session.terminate` is idempotent. A session is forcibly closed when the reservation window expires. In Station mode, an unexpected internal WebSocket disconnect detaches the FMU state temporarily; a new authenticated channel can use `session.attach` with the same session binding during the configured grace window.
 
 A ticket-based `session.create` is bound to the user, lab and reservation and has a short configurable TTL (default 120 seconds). It can be reused only while the ticket and the current on-chain reservation remain valid. Other expected errors include `SESSION_TICKET_INVALID`, `SESSION_TICKET_EXPIRED`, `RESERVATION_NOT_ACTIVE`, `SESSION_EXPIRED`, `SESSION_TICKET_RESERVATION_STATE_UNAVAILABLE`, `RATE_LIMITED` and `INTERNAL_ERROR`.
 
