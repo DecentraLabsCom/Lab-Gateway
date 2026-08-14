@@ -35,7 +35,8 @@ local specs = {
     "tests.unit.ops_access_config_spec",
     "tests.unit.demo_guard_spec",
     "tests.unit.demo_handoff_spec",
-    "tests.unit.access_audit_reporter_spec"
+    "tests.unit.access_audit_reporter_spec",
+    "tests.unit.access_code_exchange_spec"
 }
 
 for _, spec in ipairs(specs) do

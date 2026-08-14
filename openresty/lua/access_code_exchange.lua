@@ -2,6 +2,7 @@ local cjson = require "cjson.safe"
 local http = require "resty.http"
 local jwt = require "resty.jwt"
 local fmu_access_store = require "modules.fmu_access_store"
+local access_session_mapping = require "modules.access_session_mapping"
 
 local function fail(status, message)
     ngx.status = status
@@ -158,7 +159,8 @@ local claims = verified.payload or {}
 local jti = claims.jti
 local username = claims.sub
 local exp = tonumber(claims.exp)
-if not jti or not username or not exp or exp <= ngx.time() then
+if type(jti) ~= "string" or jti == "" or type(username) ~= "string" or username == ""
+    or not exp or exp <= ngx.time() then
     return local_fail(401, "Expired access credential")
 end
 if type(jti) ~= "string" or #jti < 16 or #jti > 512 or not jti:match("^[A-Za-z0-9_-]+$") then
@@ -196,6 +198,10 @@ if resource_type == "fmu" and not path:match("^/fmu[/]?") then
 elseif resource_type ~= "fmu" and resource_type ~= "lab" then
     return local_fail(400, "Unsupported access resource")
 end
+if resource_type == "lab"
+    and (type(claims.reservationKey) ~= "string" or claims.reservationKey == "") then
+    return local_fail(401, "Invalid access credential reservation")
+end
 
 local username_lower = string.lower(username)
 local remaining_lifetime = math.max(1, exp - ngx.time())
@@ -226,19 +232,21 @@ if resource_type == "fmu" then
     ngx.status = 204
     return ngx.exit(204)
 end
-if not commit_prepared() then
+local mapping_state, mapping_error = access_session_mapping.persist(ngx, cache, {
+    { key = "username:" .. jti, value = username_lower, ttl = remaining_lifetime },
+    { key = "exp:" .. username_lower, value = exp, ttl = remaining_lifetime },
+    { key = "guac_enforcement_exp:" .. username_lower, value = exp, ttl = enforcement_lifetime },
+    { key = "reservation:" .. jti, value = claims.reservationKey, ttl = remaining_lifetime }
+})
+if not mapping_state then
+    ngx.log(ngx.ERR, "Guacamole access mapping failed: " .. tostring(mapping_error))
     return local_fail(503, "Access session unavailable")
 end
----@diagnostic disable-next-line: redundant-parameter
-cache:set("username:" .. jti, username_lower, remaining_lifetime)
----@diagnostic disable-next-line: redundant-parameter
-cache:set("exp:" .. username_lower, exp, remaining_lifetime)
----@diagnostic disable-next-line: redundant-parameter
-cache:set("guac_enforcement_exp:" .. username_lower, exp, enforcement_lifetime)
-if claims.reservationKey then
-    ---@diagnostic disable-next-line: redundant-parameter
-    cache:set("reservation:" .. jti, claims.reservationKey, remaining_lifetime)
+if not commit_prepared() then
+    access_session_mapping.rollback(ngx, cache, mapping_state)
+    return local_fail(503, "Access session unavailable")
 end
+
 ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=" .. remaining_lifetime .. "; Path=/guacamole; Secure; HttpOnly; SameSite=Lax"
 ngx.header["Referrer-Policy"] = "no-referrer"
 
