@@ -395,6 +395,40 @@ def test_browser_observation_retries_confirmation_failure_before_caching():
     assert confirm.await_count == 2
 
 
+def test_browser_observation_uses_execution_scoped_session_id():
+    request = Request({
+        "type": "http",
+        "headers": [(b"authorization", b"Bearer token-123")],
+    })
+    first_claims = {
+        "labId": "42",
+        "reservationKey": "0xreservation-one",
+        "pucHash": "puc-same-user",
+    }
+    second_claims = {
+        "labId": "42",
+        "reservationKey": "0xreservation-two",
+        "pucHash": "puc-same-user",
+    }
+    issue = AsyncMock(side_effect=[
+        ("st_ticket_one", int(time.time()) + 30),
+        ("st_ticket_two", int(time.time()) + 30),
+    ])
+    redeem = AsyncMock(side_effect=[first_claims, second_claims])
+    confirm = AsyncMock(return_value=True)
+
+    with patch("main._issue_session_ticket", issue), \
+         patch("main._redeem_session_ticket", redeem), \
+         patch("main._confirm_fmu_session_started", confirm):
+        assert asyncio.run(_record_browser_session_started(request, first_claims, "sim-one")) is True
+        assert asyncio.run(_record_browser_session_started(request, second_claims, "sim-two")) is True
+
+    session_ids = [call.kwargs["session_id"] for call in redeem.await_args_list]
+    assert session_ids == ["fmu:sim-one", "fmu:sim-two"]
+    assert len(set(session_ids)) == 2
+    assert all(call.kwargs["session_id"].startswith("fmu:") for call in confirm.await_args_list)
+
+
 # ─── /api/v1/simulations/describe ───────────────────────────────────
 
 class MockModelDescription:

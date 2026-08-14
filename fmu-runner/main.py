@@ -1461,7 +1461,10 @@ async def _record_browser_session_started(request: Request, claims: dict, sim_id
         raise HTTPException(status_code=401, detail="Missing bearer token required for session observation")
 
     lab_id = str(claims.get("labId") or "").strip()
-    session_id = f"browser:{puc_hash[:96]}"
+    # The contract scopes SessionStarted uniqueness by gateway, sessionId and
+    # access type.  A PUC hash identifies a credential, not one execution, so
+    # it must never be reused as the on-chain session identifier.
+    session_id = f"fmu:{sim_id}"
     ticket, _expires_at = await _issue_session_ticket(
         authorization,
         lab_id=lab_id,
