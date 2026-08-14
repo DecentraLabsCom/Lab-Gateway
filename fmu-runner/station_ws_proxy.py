@@ -7,9 +7,18 @@ import secrets
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Optional
+from collections.abc import AsyncIterator
+from typing import Any, Awaitable, Callable, Optional, Protocol
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
+
+
+class _StationWebSocket(Protocol):
+    def __aiter__(self) -> AsyncIterator[str | bytes]: ...
+
+    async def send(self, message: Any, text: bool | None = None) -> None: ...
+
+    async def close(self) -> None: ...
 
 
 def _public_http_detail(exc: HTTPException, fallback: str) -> str:
@@ -33,6 +42,7 @@ class _GatewayStationSession:
     lab_id: Optional[str]
     access_key: str
     exp: Optional[int]
+    close_handler: Optional[Callable[[], Awaitable[None]]] = None
 
     def matches_claims(self, claims: dict, get_claim_lab_id) -> bool:
         return (
@@ -97,16 +107,39 @@ class StationRealtimeWsProxyManager:
             self._cleanup_task.cancel()
             self._cleanup_task = None
         async with self._sessions_lock:
+            sessions = list(self._sessions.values())
             self._sessions.clear()
+        for session in sessions:
+            if session.close_handler:
+                try:
+                    await session.close_handler()
+                except Exception:
+                    self.logger.warning(
+                        "Unable to close Station session during shutdown session_id=%s",
+                        session.session_id,
+                        exc_info=True,
+                    )
 
     async def _cleanup_loop(self):
         while True:
             await asyncio.sleep(self.ws_cleanup_seconds)
             now = int(time.time())
             async with self._sessions_lock:
-                expired = [session_id for session_id, session in self._sessions.items() if session.exp is not None and now >= session.exp]
-                for session_id in expired:
-                    self._sessions.pop(session_id, None)
+                expired = [
+                    self._sessions.pop(session_id)
+                    for session_id, session in list(self._sessions.items())
+                    if session.exp is not None and now >= session.exp
+                ]
+            for session in expired:
+                if session.close_handler:
+                    try:
+                        await session.close_handler()
+                    except Exception:
+                        self.logger.warning(
+                            "Unable to close expired Station session session_id=%s",
+                            session.session_id,
+                            exc_info=True,
+                        )
 
     def _allow_session_create(self, key: str) -> bool:
         if self.ws_create_rate_limit_per_minute <= 0:
@@ -171,7 +204,7 @@ class StationRealtimeWsProxyManager:
         async with send_lock:
             await websocket.send_json(payload)
 
-    async def _connect_station(self, headers: dict[str, str]):
+    async def _connect_station(self, headers: dict[str, str]) -> _StationWebSocket:
         try:
             import websockets
         except ModuleNotFoundError as exc:
@@ -194,7 +227,7 @@ class StationRealtimeWsProxyManager:
         local_request_cache: dict[str, dict] = {}
         pending_creates: dict[str, dict] = {}
         current_session_id: Optional[str] = None
-        station_ws = None
+        station_ws: Optional[_StationWebSocket] = None
         station_reader_task: Optional[asyncio.Task] = None
 
         authorization = websocket.headers.get("authorization", "")
@@ -205,13 +238,39 @@ class StationRealtimeWsProxyManager:
             if station_reader_task:
                 station_reader_task.cancel()
                 station_reader_task = None
-            if station_ws is not None:
+            connection = station_ws
+            if connection is not None:
                 try:
-                    await station_ws.close()
+                    await connection.close()
                 except Exception:
                     # The peer may already have closed the socket.
                     pass
                 station_ws = None
+
+        async def _close_expired_session(session_id: str, *, request_id: Optional[str] = None):
+            async with self._sessions_lock:
+                self._sessions.pop(session_id, None)
+            try:
+                await self._send_json(
+                    websocket,
+                    send_lock,
+                    self.error_payload(
+                        code="SESSION_EXPIRED",
+                        message="Session has expired",
+                        request_id=request_id,
+                        session_id=session_id,
+                    ),
+                )
+            except Exception:
+                # The client may already have disconnected; Station still
+                # must be closed so its FMU execution cannot outlive exp.
+                pass
+            finally:
+                await _close_station()
+            try:
+                await websocket.close(code=4003)
+            except Exception:
+                pass
 
         async def _ensure_station():
             nonlocal station_ws, station_reader_task
@@ -221,10 +280,19 @@ class StationRealtimeWsProxyManager:
             station_ws = await self._connect_station(station_headers)
             station_reader_task = asyncio.create_task(_station_reader())
 
+        async def _send_station(raw_message: str):
+            connection = station_ws
+            if connection is None:
+                raise HTTPException(status_code=503, detail="Station realtime channel is unavailable")
+            await connection.send(raw_message)
+
         async def _station_reader():
             nonlocal current_session_id
+            connection = station_ws
+            if connection is None:
+                return
             try:
-                async for raw_message in station_ws:
+                async for raw_message in connection:
                     if isinstance(raw_message, bytes):
                         raw_message = raw_message.decode("utf-8")
                     try:
@@ -240,6 +308,7 @@ class StationRealtimeWsProxyManager:
                     request_id = str(payload.get("requestId") or "").strip()
 
                     msg_type = str(payload.get("type") or "").strip()
+                    close_public_on_expiry = False
                     if msg_type == "session.created":
                         session_id = str(payload.get("sessionId") or "").strip()
                         create_context = pending_creates.pop(request_id, {"claims": claims or {}})
@@ -259,7 +328,7 @@ class StationRealtimeWsProxyManager:
                                     )
                                 except Exception as exc:
                                     try:
-                                        await station_ws.send(json.dumps({
+                                        await connection.send(json.dumps({
                                             "type": "session.terminate",
                                             "requestId": f"observation-failed-{request_id}",
                                             "sessionId": session_id,
@@ -290,6 +359,11 @@ class StationRealtimeWsProxyManager:
                                 access_key=access_key,
                                 exp=exp,
                             )
+
+                            async def _close_registered_session(session_id=session_id):
+                                await _close_expired_session(session_id)
+
+                            gateway_session.close_handler = _close_registered_session
                             async with self._sessions_lock:
                                 self._sessions[session_id] = gateway_session
                             current_session_id = session_id
@@ -304,10 +378,18 @@ class StationRealtimeWsProxyManager:
                                 self._sessions.pop(session_id, None)
                             if current_session_id == session_id:
                                 current_session_id = None
+                        if str(payload.get("reason") or "").strip().lower() == "expired":
+                            close_public_on_expiry = True
 
                     if request_id:
                         local_request_cache[request_id] = payload
                     await self._send_json(websocket, send_lock, payload)
+                    if close_public_on_expiry:
+                        try:
+                            await websocket.close(code=4003)
+                        except Exception:
+                            pass
+                        return
             except asyncio.CancelledError:
                 return
             except Exception as exc:
@@ -400,6 +482,8 @@ class StationRealtimeWsProxyManager:
                             continue
 
                     if not internal and not session_ticket:
+                        if create_claims is None:
+                            raise HTTPException(status_code=401, detail="Missing authenticated session claims")
                         claim_lab_id = self.get_claim_lab_id(create_claims)
                         if claim_lab_id and req_lab_id and claim_lab_id != req_lab_id:
                             response = self.error_payload(
@@ -556,7 +640,7 @@ class StationRealtimeWsProxyManager:
                             "session_ticket": session_ticket,
                             "reservation_key": reservation_key,
                         }
-                        await station_ws.send(json.dumps(forward_message))
+                        await _send_station(json.dumps(forward_message))
                         continue
                     except HTTPException as exc:
                         response = self.error_payload(
@@ -597,12 +681,8 @@ class StationRealtimeWsProxyManager:
                         local_request_cache[request_id] = response
                         continue
                     if session.exp is not None and int(time.time()) >= session.exp:
-                        async with self._sessions_lock:
-                            self._sessions.pop(session_id, None)
-                        response = self.error_payload(code="SESSION_EXPIRED", message="Session has expired", request_id=request_id)
-                        await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
-                        continue
+                        await _close_expired_session(session_id, request_id=request_id)
+                        return
                     if not session.matches_claims(claims, self.get_claim_lab_id):
                         response = self.error_payload(code="FORBIDDEN", message="Session ownership mismatch", request_id=request_id)
                         await self._send_json(websocket, send_lock, response)
@@ -612,7 +692,7 @@ class StationRealtimeWsProxyManager:
                     try:
                         await _ensure_station()
                         forward_message = self.station_backend.build_internal_session_message(message=message, claims=claims)
-                        await station_ws.send(json.dumps(forward_message))
+                        await _send_station(json.dumps(forward_message))
                         continue
                     except HTTPException as exc:
                         response = self.error_payload(
@@ -643,7 +723,13 @@ class StationRealtimeWsProxyManager:
                     local_request_cache[request_id] = response
                     continue
 
-                await station_ws.send(json.dumps(message))
+                async with self._sessions_lock:
+                    active_session = self._sessions.get(current_session_id)
+                if active_session and active_session.exp is not None and int(time.time()) >= active_session.exp:
+                    await _close_expired_session(current_session_id, request_id=request_id)
+                    return
+
+                await _send_station(json.dumps(message))
         except WebSocketDisconnect:
             return
         finally:

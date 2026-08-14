@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from fastapi import HTTPException, WebSocketDisconnect
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect
+from typing import cast
 
 from fmu_backend import StationFmuBackend
 from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession
@@ -73,6 +74,17 @@ class _FakeStationConnection:
     async def close(self):
         self.closed = True
         await self._queue.put(None)
+
+
+class _ExpiredStationConnection(_FakeStationConnection):
+    async def send(self, raw_message: str):
+        await super().send(raw_message)
+        if json.loads(raw_message).get("type") == "session.create":
+            await self._queue.put(json.dumps({
+                "type": "session.closed",
+                "sessionId": "sess_station_1",
+                "reason": "expired",
+            }))
 
 
 class _AsyncTestWebSocket:
@@ -384,8 +396,8 @@ def test_station_ws_attach_forwards_when_session_owned(monkeypatch):
 
 
 def test_station_proxy_extract_ws_token_rejects_query_and_cookie_credentials():
-    websocket_from_query = SimpleNamespace(headers={}, query_params={"token": "query-token"})
-    websocket_from_cookie = SimpleNamespace(headers={"cookie": "foo=bar; jti=cookie-token"}, query_params={})
+    websocket_from_query = cast(WebSocket, SimpleNamespace(headers={}, query_params={"token": "query-token"}))
+    websocket_from_cookie = cast(WebSocket, SimpleNamespace(headers={"cookie": "foo=bar; jti=cookie-token"}, query_params={}))
 
     for websocket in (websocket_from_query, websocket_from_cookie):
         with pytest.raises(HTTPException) as exc:
@@ -394,7 +406,7 @@ def test_station_proxy_extract_ws_token_rejects_query_and_cookie_credentials():
 
 
 def test_station_proxy_extract_ws_token_requires_credentials():
-    websocket = SimpleNamespace(headers={}, query_params={})
+    websocket = cast(WebSocket, SimpleNamespace(headers={}, query_params={}))
 
     with pytest.raises(HTTPException) as exc:
         StationRealtimeWsProxyManager.extract_ws_token(websocket)
@@ -404,7 +416,7 @@ def test_station_proxy_extract_ws_token_requires_credentials():
 
 
 def test_station_proxy_extract_ws_token_supports_bearer_header():
-    websocket = SimpleNamespace(headers={"authorization": "Bearer bearer-token"}, query_params={})
+    websocket = cast(WebSocket, SimpleNamespace(headers={"authorization": "Bearer bearer-token"}, query_params={}))
 
     assert StationRealtimeWsProxyManager.extract_ws_token(websocket) == "bearer-token"
 
@@ -452,6 +464,11 @@ def test_station_proxy_rate_limit_rejects_when_disabled():
 @pytest.mark.asyncio
 async def test_station_proxy_cleanup_loop_removes_expired_sessions(monkeypatch):
     manager = _build_manager()
+    expired_callbacks = []
+
+    async def _on_expire():
+        expired_callbacks.append("sess-expired")
+
     manager._sessions = {
         "sess-expired": _GatewayStationSession(
             session_id="sess-expired",
@@ -459,6 +476,7 @@ async def test_station_proxy_cleanup_loop_removes_expired_sessions(monkeypatch):
             lab_id="1",
             access_key="test.fmu",
             exp=10,
+            close_handler=_on_expire,
         ),
         "sess-active": _GatewayStationSession(
             session_id="sess-active",
@@ -483,6 +501,61 @@ async def test_station_proxy_cleanup_loop_removes_expired_sessions(monkeypatch):
         await manager._cleanup_loop()
 
     assert list(manager._sessions.keys()) == ["sess-active"]
+    assert expired_callbacks == ["sess-expired"]
+
+
+@pytest.mark.asyncio
+async def test_station_proxy_expired_attach_closes_the_client_channel(monkeypatch):
+    manager = _build_manager()
+    manager._sessions["sess-expired"] = _GatewayStationSession(
+        session_id="sess-expired",
+        claims=_claims(),
+        lab_id="1",
+        access_key="test.fmu",
+        exp=1,
+    )
+    monkeypatch.setattr("station_ws_proxy.time.time", lambda: 100)
+    websocket = _AsyncTestWebSocket(
+        messages=[json.dumps({
+            "type": "session.attach",
+            "requestId": "req-attach",
+            "sessionId": "sess-expired",
+        })],
+        headers={"authorization": "Bearer test-token"},
+    )
+
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=False)
+
+    assert websocket.sent_json[0]["code"] == "SESSION_EXPIRED"
+    assert websocket.closed_code == 4003
+
+
+@pytest.mark.asyncio
+async def test_station_proxy_closes_public_channel_when_station_expires(monkeypatch):
+    manager = _build_manager()
+    fake_station = _ExpiredStationConnection()
+
+    async def _fake_connect(_headers):
+        return fake_station
+
+    monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    websocket = _AsyncTestWebSocket(
+        messages=[json.dumps({
+            "type": "session.create",
+            "requestId": "req-create",
+            "labId": "1",
+        })],
+        headers={"authorization": "Bearer test-token"},
+    )
+
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=False)
+
+    assert [payload["type"] for payload in websocket.sent_json] == [
+        "session.created",
+        "session.closed",
+    ]
+    assert websocket.closed_code == 4003
+    assert fake_station.closed is True
 
 
 @pytest.mark.asyncio
@@ -789,7 +862,7 @@ async def test_station_proxy_handle_websocket_validates_basic_message_shape():
         headers={"authorization": "Bearer test-token"},
     )
 
-    await manager.handle_websocket(websocket, internal=False)
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=False)
 
     assert websocket.accepted is True
     assert [payload["message"] for payload in websocket.sent_json] == [
@@ -816,7 +889,7 @@ async def test_station_proxy_handle_websocket_caches_error_responses_for_duplica
         headers={},
     )
 
-    await manager.handle_websocket(websocket, internal=False)
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=False)
 
     assert len(websocket.sent_json) == 2
     assert websocket.sent_json[0] == websocket.sent_json[1]
@@ -839,7 +912,7 @@ async def test_station_proxy_handle_websocket_reader_maps_invalid_station_payloa
         headers={"authorization": "Bearer test-token"},
     )
 
-    await manager.handle_websocket(websocket, internal=False)
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=False)
 
     assert websocket.sent_json[0]["code"] == "INTERNAL_ERROR"
     assert websocket.sent_json[0]["message"] == "Station backend returned invalid websocket payload"
@@ -871,7 +944,7 @@ async def test_station_proxy_handle_websocket_reader_cleans_closed_sessions(monk
         headers={"authorization": "Bearer test-token"},
     )
 
-    await manager.handle_websocket(websocket, internal=False)
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=False)
 
     assert [payload["type"] for payload in websocket.sent_json[:2]] == ["session.created", "session.closed"]
     assert "sess_station_1" not in manager._sessions
@@ -897,7 +970,7 @@ async def test_station_proxy_handle_websocket_reader_reports_unexpected_station_
         headers={"authorization": "Bearer test-token"},
     )
 
-    await manager.handle_websocket(websocket, internal=False)
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=False)
 
     assert websocket.closed_code == 1011
     assert websocket.sent_json[0]["type"] == "session.created"
@@ -923,6 +996,6 @@ async def test_station_proxy_handle_websocket_tolerates_station_close_errors(mon
         headers={"authorization": "Bearer test-token"},
     )
 
-    await manager.handle_websocket(websocket, internal=False)
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=False)
 
     assert fake_station.sent_messages[0]["type"] == "session.create"
