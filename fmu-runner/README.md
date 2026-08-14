@@ -149,8 +149,9 @@ Marketplace upload is disabled by design.
 - `session.terminate` is idempotent.
 - `sim.outputs` includes `seq` and `dropped` for backpressure visibility.
 - Keepalive/telemetry events: `session.pong`, `session.heartbeat`, `session.expiring`.
-- External `session.create` always passes through a reservation-bounded, reusable `sessionTicket`. Ticket-only clients provide it directly; when a bearer is already present (for example from `FMU_SESSION`), the runner issues and redeems the ticket server-side. The durable session observation is recorded before `session.created` is returned. Internal Station hops do not issue a second ticket; the gateway proxy confirms the observation after Station accepts the session.
+- External `session.create` always passes through a short-lived, reservation-bounded `sessionTicket`. The ticket authorizes the handoff; it is not the FMU session or its reconnect handle. Ticket-only clients provide it directly; when a bearer is already present (for example from `FMU_SESSION`), the runner issues and redeems the ticket server-side. The durable session observation is recorded before `session.created` is returned. Internal Station hops do not issue a second ticket; the gateway proxy confirms the observation after Station accepts the session.
 - FMU HTTP and WebSocket JWT authentication accepts only `Authorization: Bearer <jwt>`; query-string and ambient cookie JWTs are rejected. Browser clients that cannot set a WebSocket header must use the opaque `sessionTicket` in `session.create`.
+- After `session.created`, reconnect with `session.attach` using the returned `sessionId` and the original validated context. Do not create a second FMU session or replay the ticket to reconnect; the Station attach grace period preserves the existing FMU state.
 - `session.attach` is bound to the original `sub`, lab, FMU access key, `reservationKey`, `pucHash`, and `targetGatewayId`; a bearer for another overlapping reservation cannot reattach to the session.
 - Explicit rate limits:
   - Proxy download endpoint (`PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE`, default `20`)
