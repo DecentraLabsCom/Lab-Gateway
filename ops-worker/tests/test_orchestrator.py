@@ -146,3 +146,52 @@ def test_orchestrator_scan_once_dispatches_candidates(db_engine, monkeypatch):
 
     assert start_dispatch.call_count == 1
     assert end_dispatch.call_count == 1
+
+
+def test_orchestrator_scan_once_uses_authenticated_remote_projection(db_engine, monkeypatch):
+    monkeypatch.setenv("OPS_RESERVATION_AUTOMATION", "true")
+    monkeypatch.setenv("OPS_RESERVATION_START_LEAD", "120")
+    monkeypatch.setenv("OPS_RESERVATION_END_DELAY", "60")
+    monkeypatch.setenv("OPS_RESERVATION_LOOKBACK", "21600")
+    monkeypatch.setenv("OPS_RESERVATION_RETRY_COOLDOWN", "60")
+    monkeypatch.setenv("RESERVATION_PROJECTION_URL", "https://full.example/reservations/projection")
+    monkeypatch.setenv("RESERVATION_PROJECTION_GATEWAY_ID", "lite.example")
+    monkeypatch.setenv("RESERVATION_PROJECTION_TOKEN", "rpr-test-token")
+
+    orchestrator = worker.ReservationOrchestrator(db_engine, worker.HostRegistry({"hosts": []}))
+    now = datetime.now(timezone.utc)
+    remote_body = {
+        "gatewayId": "lite.example",
+        "reservations": [
+            {
+                "transactionHash": "0xremote-start",
+                "labId": "42",
+                "startTime": (now + timedelta(seconds=30)).isoformat().replace("+00:00", "Z"),
+                "endTime": (now + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+                "status": "CONFIRMED",
+            },
+            {
+                "transactionHash": "0xremote-end",
+                "labId": "42",
+                "startTime": (now - timedelta(hours=2)).isoformat().replace("+00:00", "Z"),
+                "endTime": (now - timedelta(minutes=2)).isoformat().replace("+00:00", "Z"),
+                "status": "ACTIVE",
+            },
+        ],
+    }
+
+    with patch.object(worker.requests, "get") as remote_get:
+        remote_get.return_value.status_code = 200
+        remote_get.return_value.json.return_value = remote_body
+        with patch.object(orchestrator, "_dispatch_start") as start_dispatch, patch.object(
+            orchestrator, "_dispatch_end"
+        ) as end_dispatch:
+            orchestrator.scan_once()
+
+    remote_get.assert_called_once()
+    assert remote_get.call_args.kwargs["headers"] == {
+        "X-Gateway-ID": "lite.example",
+        "X-Reservation-Projection-Token": "rpr-test-token",
+    }
+    assert start_dispatch.call_count == 1
+    assert end_dispatch.call_count == 1

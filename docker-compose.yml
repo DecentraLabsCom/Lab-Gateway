@@ -24,6 +24,9 @@ services:
       # redeemer credentials accepted by
       # the embedded backend. The setup scripts generate it in the root .env.
       - ACCESS_CODE_REDEEMER_CREDENTIALS_JSON=${ACCESS_CODE_REDEEMER_CREDENTIALS_JSON:-}
+      # Full-only map of Lite gateway IDs to reservation projection credentials
+      # and their on-chain accessURI scope.
+      - RESERVATION_PROJECTION_CREDENTIALS_JSON=${RESERVATION_PROJECTION_CREDENTIALS_JSON:-}
       # Full-only map of canonical host[:non-default-port] gateway IDs to the
       # short-lived session-observer
       # credentials accepted by the embedded backend. The FMU runner signs
@@ -604,6 +607,9 @@ services:
       - OPS_INTERNAL_AUTH_HEADER=${OPS_INTERNAL_AUTH_HEADER:-X-Ops-Internal-Token}
       - GUACAMOLE_PROVISIONER_TOKEN_FILE=/run/secrets/guacamole_provisioner_token
       - GUACAMOLE_PROVISIONER_TOKEN_HEADER=${GUACAMOLE_PROVISIONER_TOKEN_HEADER:-X-Guacamole-Provisioner-Token}
+      - RESERVATION_PROJECTION_URL=${RESERVATION_PROJECTION_URL:-}
+      - RESERVATION_PROJECTION_GATEWAY_ID=${RESERVATION_PROJECTION_GATEWAY_ID:-}
+      - RESERVATION_PROJECTION_TOKEN_FILE=/run/secrets/reservation_projection_token
       - MYSQL_HOSTNAME=mysql
       - OPS_BACKEND_MYSQL_USER=${OPS_BACKEND_MYSQL_USER:?OPS_BACKEND_MYSQL_USER must be configured}
       - OPS_BACKEND_MYSQL_PASSWORD_FILE=/run/secrets/ops_backend_mysql_password
@@ -638,6 +644,7 @@ services:
       - ops_secrets_key
       - session_observer_signing_secret
       - guacamole_provisioner_token
+      - reservation_projection_token
       - session_observation_ingest_token
       - guac_admin_pass
       - aas_service_token
@@ -968,6 +975,8 @@ secrets:
     file: ./secrets/session_observation_ingest_token
   guacamole_provisioner_token:
     file: ./secrets/guacamole_provisioner_token
+  reservation_projection_token:
+    file: ./secrets/reservation_projection_token
   aas_service_token:
     file: ./secrets/aas_service_token
   lab_admin_backend_token:

@@ -39,6 +39,7 @@ $secretMappings = [ordered]@{
     fmu_station_internal_token = 'FMU_STATION_INTERNAL_TOKEN'
     auth_session_ticket_internal_token = 'AUTH_SESSION_TICKET_INTERNAL_TOKEN'
     session_observer_signing_secret = 'SESSION_OBSERVER_SIGNING_SECRET'
+    reservation_projection_token = 'RESERVATION_PROJECTION_TOKEN'
     fmu_proxy_signing_key = 'FMU_PROXY_SIGNING_KEY'
 }
 

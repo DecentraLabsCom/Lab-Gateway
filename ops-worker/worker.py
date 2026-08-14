@@ -21,7 +21,7 @@ from uuid import uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
 from flask import Flask, Response, jsonify, request, stream_with_context
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.exc import IntegrityError
@@ -61,6 +61,26 @@ def _env_or_secret_file(name: str, default: str = "") -> str:
 def _sanitize_log_value(value: Any) -> str:
     """Keep request-derived values on one physical log line."""
     return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
+def _as_utc_datetime(value: Any) -> Optional[datetime]:
+    """Normalize a reservation timestamp to an aware UTC datetime."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_reservation_datetime(value: Any) -> Optional[datetime]:
+    return _as_utc_datetime(value)
 
 
 def _is_valid_ping_target(target: str) -> bool:
@@ -3246,6 +3266,14 @@ class ReservationOrchestrator:
         self.end_delay = int(os.getenv("OPS_RESERVATION_END_DELAY", "60"))
         self.lookback = int(os.getenv("OPS_RESERVATION_LOOKBACK", "21600"))  # 6 hours
         self.retry_cooldown = int(os.getenv("OPS_RESERVATION_RETRY_COOLDOWN", "60"))
+        self.projection_url = os.getenv("RESERVATION_PROJECTION_URL", "").strip().rstrip("/")
+        self.projection_gateway_id = os.getenv("RESERVATION_PROJECTION_GATEWAY_ID", "").strip().lower()
+        self.projection_token = _env_or_secret_file("RESERVATION_PROJECTION_TOKEN")
+        if self.projection_url and not (self.projection_gateway_id and self.projection_token):
+            logging.error(
+                "Reservation projection is configured but gateway ID or token is missing; "
+                "remote reservation automation will remain unavailable"
+            )
 
     def register(self, scheduler: BackgroundScheduler) -> int:
         if not self.enabled:
@@ -3275,9 +3303,13 @@ class ReservationOrchestrator:
             return
         now = datetime.now(timezone.utc)
         try:
+            remote_rows = self._fetch_remote_candidates(now) if self.projection_url else None
             with self.engine.begin() as conn:
-                start_rows = self._fetch_start_candidates(conn, now)
-                end_rows = self._fetch_end_candidates(conn, now)
+                if self.projection_url:
+                    start_rows, end_rows = self._select_remote_candidates(conn, remote_rows, now)
+                else:
+                    start_rows = self._fetch_start_candidates(conn, now)
+                    end_rows = self._fetch_end_candidates(conn, now)
         except Exception as exc:
             logging.error("Reservation orchestrator query failed: %s", exc)
             return
@@ -3286,6 +3318,117 @@ class ReservationOrchestrator:
             self._dispatch_start(dict(row))
         for row in end_rows:
             self._dispatch_end(dict(row))
+
+    def _fetch_remote_candidates(self, now: datetime) -> List[Dict[str, Any]]:
+        if not self.projection_gateway_id or not self.projection_token:
+            raise RuntimeError("Reservation projection credentials are not configured")
+        window_lower = now - timedelta(seconds=self.lookback)
+        window_upper = now + timedelta(seconds=self.start_lead)
+        max_batch = min(500, max(1, int(os.getenv("OPS_RESERVATION_MAX_BATCH", "200"))))
+        response = requests.get(
+            self.projection_url,
+            headers={
+                "X-Gateway-ID": self.projection_gateway_id,
+                "X-Reservation-Projection-Token": self.projection_token,
+            },
+            params={
+                "from": window_lower.isoformat().replace("+00:00", "Z"),
+                "to": window_upper.isoformat().replace("+00:00", "Z"),
+                "limit": max_batch,
+            },
+            timeout=10,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"Reservation projection returned HTTP {response.status_code}")
+        body = response.json()
+        if not isinstance(body, dict) or str(body.get("gatewayId", "")).strip().lower() != self.projection_gateway_id:
+            raise RuntimeError("Reservation projection response is not scoped to this gateway")
+        reservations = body.get("reservations")
+        if not isinstance(reservations, list):
+            raise RuntimeError("Reservation projection response has an invalid reservations field")
+
+        rows: List[Dict[str, Any]] = []
+        for item in reservations:
+            if not isinstance(item, dict):
+                continue
+            transaction_hash = str(item.get("transactionHash") or item.get("transaction_hash") or "").strip()
+            lab_id = str(item.get("labId") or item.get("lab_id") or "").strip()
+            status = str(item.get("status") or "").strip().upper()
+            start_time = _parse_reservation_datetime(item.get("startTime") or item.get("start_time"))
+            end_time = _parse_reservation_datetime(item.get("endTime") or item.get("end_time"))
+            if not transaction_hash or not lab_id or status not in {"CONFIRMED", "ACTIVE"}:
+                continue
+            if start_time is None or end_time is None:
+                logging.warning("Ignoring remote reservation %s with invalid time window", transaction_hash)
+                continue
+            rows.append({
+                "transaction_hash": transaction_hash,
+                "lab_id": lab_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "status": status,
+            })
+        return rows
+
+    def _select_remote_candidates(
+        self,
+        conn: Connection,
+        rows: Sequence[Mapping[str, Any]],
+        now: datetime,
+    ) -> Tuple[List[Mapping[str, Any]], List[Mapping[str, Any]]]:
+        if not rows:
+            return [], []
+        reservation_ids = [str(row.get("transaction_hash")) for row in rows if row.get("transaction_hash")]
+        successful_actions = set()
+        recent_actions = set()
+        retry_cutoff = now - timedelta(seconds=self.retry_cooldown)
+        operation_query = text(
+            """
+            SELECT reservation_id, action, success, created_at
+            FROM reservation_operations
+            WHERE reservation_id IN :reservation_ids
+              AND action IN ('scheduler:start', 'scheduler:end')
+              AND (success = 1 OR created_at >= :retry_cutoff)
+            """
+        ).bindparams(bindparam("reservation_ids", expanding=True))
+        result = conn.execute(
+            operation_query,
+            {"reservation_ids": reservation_ids, "retry_cutoff": retry_cutoff},
+        )
+        for operation in result.mappings():
+            key = (str(operation["reservation_id"]), str(operation["action"]))
+            if bool(operation["success"]):
+                successful_actions.add(key)
+            else:
+                recent_actions.add(key)
+
+        window_upper = now + timedelta(seconds=self.start_lead)
+        window_lower = now - timedelta(seconds=self.lookback)
+        ready_time = now - timedelta(seconds=self.end_delay)
+        start_rows: List[Mapping[str, Any]] = []
+        end_rows: List[Mapping[str, Any]] = []
+        for row in rows:
+            reservation_id = str(row.get("transaction_hash"))
+            status = str(row.get("status") or "").upper()
+            start_time = _as_utc_datetime(row.get("start_time"))
+            end_time = _as_utc_datetime(row.get("end_time"))
+            if (
+                status == "CONFIRMED"
+                and start_time is not None
+                and window_lower <= start_time <= window_upper
+                and (reservation_id, "scheduler:start") not in successful_actions
+                and (reservation_id, "scheduler:start") not in recent_actions
+            ):
+                start_rows.append(row)
+            if (
+                status in {"CONFIRMED", "ACTIVE"}
+                and end_time is not None
+                and window_lower <= end_time <= ready_time
+                and (reservation_id, "scheduler:end") not in successful_actions
+                and (reservation_id, "scheduler:end") not in recent_actions
+            ):
+                end_rows.append(row)
+        return start_rows, end_rows
 
     def _fetch_start_candidates(self, conn: Connection, now: datetime):
         if conn.dialect.name == "mysql":
@@ -3448,7 +3591,10 @@ class ReservationOrchestrator:
         )
 
     def _update_status(self, reservation_id: str, current_status: Optional[str], new_status: str):
-        if not self.engine or not current_status:
+        # In projection mode the remote backend is authoritative and the local
+        # operation journal provides idempotency. Never mutate a local mirror
+        # that may not exist in Lite mode.
+        if self.projection_url or not self.engine or not current_status:
             return
         allowed = {
             ("CONFIRMED", "ACTIVE"),

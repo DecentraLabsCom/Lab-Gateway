@@ -53,11 +53,12 @@ output_file="${3:-lite-trust-${safe_gateway_id}.env}"
 redeemer="acr_$(openssl rand -hex 32)"
 secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
 provisioner="gpr_$(openssl rand -hex 32)"
+projection="rpr_$(openssl rand -hex 32)"
 
-python3 - "$env_file" "$lite_public_origin" "$gateway_id" "$secret" "$redeemer" "$provisioner" <<'PY'
+python3 - "$env_file" "$lite_public_origin" "$gateway_id" "$secret" "$redeemer" "$provisioner" "$projection" <<'PY'
 import json, pathlib, sys
 path = pathlib.Path(sys.argv[1])
-lite_origin, gateway_id, secret, redeemer, provisioner = sys.argv[2:]
+lite_origin, gateway_id, secret, redeemer, provisioner, projection = sys.argv[2:]
 lines = path.read_text(encoding="utf-8").splitlines()
 for key, value in (
     ("SESSION_OBSERVER_CREDENTIALS_JSON", secret),
@@ -87,6 +88,20 @@ lines = [replacement if line.startswith(routes_key + "=") else line for line in 
 if not found:
     lines.append(replacement)
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+projection_key = "RESERVATION_PROJECTION_CREDENTIALS_JSON"
+current = next((line.split("=", 1)[1] for line in lines if line.startswith(projection_key + "=")), "{}")
+projection_credentials = json.loads(current or "{}")
+projection_credentials[gateway_id.lower()] = {
+    "token": projection,
+    "accessUri": lite_origin,
+}
+replacement = projection_key + "=" + json.dumps(projection_credentials, separators=(",", ":"), sort_keys=True)
+found = any(line.startswith(projection_key + "=") for line in lines)
+lines = [replacement if line.startswith(projection_key + "=") else line for line in lines]
+if not found:
+    lines.append(replacement)
+path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
 umask 077
@@ -99,6 +114,9 @@ umask 077
     echo "SESSION_OBSERVER_SIGNING_SECRET=${secret}"
     echo "GUACAMOLE_PROVISIONER_TOKEN=${provisioner}"
     echo "GUACAMOLE_PROVISIONER_TOKEN_HEADER=X-Guacamole-Provisioner-Token"
+    echo "RESERVATION_PROJECTION_URL=${full_origin}/reservations/projection"
+    echo "RESERVATION_PROJECTION_GATEWAY_ID=${gateway_id}"
+    echo "RESERVATION_PROJECTION_TOKEN=${projection}"
     echo "FMU_GATEWAY_ID=${gateway_id}"
     echo "FMU_JWT_AUDIENCE=${lite_public_origin}/fmu"
     echo "AUTH_SESSION_TICKET_ISSUE_URL=${full_origin}/auth/fmu/session-ticket/issue"

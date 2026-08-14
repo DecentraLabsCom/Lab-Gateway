@@ -562,6 +562,9 @@ if "!issuer_value!"=="" (
     call :ReadEnvValue "!lite_trust_bundle!" "SESSION_OBSERVER_SIGNING_SECRET" bundle_observer_secret
     call :ReadEnvValue "!lite_trust_bundle!" "GUACAMOLE_PROVISIONER_TOKEN" bundle_guacamole_provisioner_token
     call :ReadEnvValue "!lite_trust_bundle!" "GUACAMOLE_PROVISIONER_TOKEN_HEADER" bundle_guacamole_provisioner_token_header
+    call :ReadEnvValue "!lite_trust_bundle!" "RESERVATION_PROJECTION_URL" bundle_reservation_projection_url
+    call :ReadEnvValue "!lite_trust_bundle!" "RESERVATION_PROJECTION_GATEWAY_ID" bundle_reservation_projection_gateway_id
+    call :ReadEnvValue "!lite_trust_bundle!" "RESERVATION_PROJECTION_TOKEN" bundle_reservation_projection_token
     call :ReadEnvValue "!lite_trust_bundle!" "FMU_GATEWAY_ID" bundle_fmu_gateway_id
     call :ReadEnvValue "!lite_trust_bundle!" "FMU_JWT_AUDIENCE" bundle_fmu_audience
     call :ReadEnvValue "!lite_trust_bundle!" "AUTH_SESSION_TICKET_ISSUE_URL" bundle_ticket_issue_url
@@ -574,6 +577,9 @@ if "!issuer_value!"=="" (
     if not defined bundle_observer_secret exit /b 1
     if not defined bundle_guacamole_provisioner_token exit /b 1
     if not defined bundle_guacamole_provisioner_token_header exit /b 1
+    if not defined bundle_reservation_projection_url exit /b 1
+    if not defined bundle_reservation_projection_gateway_id exit /b 1
+    if not defined bundle_reservation_projection_token exit /b 1
     if not defined bundle_fmu_gateway_id exit /b 1
     if not defined bundle_fmu_audience exit /b 1
     if not defined bundle_ticket_issue_url exit /b 1
@@ -594,17 +600,24 @@ if "!issuer_value!"=="" (
         echo Trust bundle FMU gateway ID does not match this Lite gateway.
         exit /b 1
     )
+    if /i not "!bundle_reservation_projection_gateway_id!"=="!gateway_identity!" (
+        echo Trust bundle reservation projection gateway ID does not match this Lite gateway.
+        exit /b 1
+    )
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_ACCESS_CODE_REDEEMER_TOKEN" "!bundle_redeemer!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_AUDIT_URL" "!bundle_audit_url!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" "!bundle_gateway_id!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" "!bundle_observer_secret!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "GUACAMOLE_PROVISIONER_TOKEN" "!bundle_guacamole_provisioner_token!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "GUACAMOLE_PROVISIONER_TOKEN_HEADER" "!bundle_guacamole_provisioner_token_header!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "RESERVATION_PROJECTION_URL" "!bundle_reservation_projection_url!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "RESERVATION_PROJECTION_GATEWAY_ID" "!bundle_reservation_projection_gateway_id!"
+    call :UpdateEnv "%ROOT_ENV_FILE%" "RESERVATION_PROJECTION_TOKEN" "!bundle_reservation_projection_token!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_GATEWAY_ID" "!bundle_fmu_gateway_id!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_ISSUE_URL" "!bundle_ticket_issue_url!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_REDEEM_URL" "!bundle_ticket_redeem_url!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" "{}"
-    echo    * Imported redeem, session-observation and Guacamole-provisioner credentials for !bundle_gateway_id!.
+    echo    * Imported redeem, session-observation, reservation-projection and Guacamole-provisioner credentials for !bundle_gateway_id!.
 )
 echo.
 
@@ -1098,6 +1111,7 @@ call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_BACKEND_MYSQL_USER"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_USER"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD"
+call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "RESERVATION_PROJECTION_CREDENTIALS_JSON"
 exit /b
 
 :MigrateSamlEnv
@@ -1133,6 +1147,7 @@ call :WriteComposeSecret "ops_secrets_key" "OPS_SECRETS_KEY"
 call :WriteComposeSecret "auth_access_code_redeemer_token" "AUTH_ACCESS_CODE_REDEEMER_TOKEN"
 call :WriteComposeSecret "session_observation_ingest_token" "SESSION_OBSERVATION_INGEST_TOKEN"
 call :WriteComposeSecret "guacamole_provisioner_token" "GUACAMOLE_PROVISIONER_TOKEN"
+call :WriteComposeSecret "reservation_projection_token" "RESERVATION_PROJECTION_TOKEN"
 call :WriteComposeSecret "aas_service_token" "AAS_SERVICE_TOKEN"
 call :WriteComposeSecret "lab_admin_backend_token" "LAB_ADMIN_BACKEND_TOKEN"
 call :WriteComposeSecret "fmu_station_internal_token" "FMU_STATION_INTERNAL_TOKEN"

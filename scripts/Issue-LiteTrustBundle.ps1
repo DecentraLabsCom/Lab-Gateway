@@ -47,6 +47,9 @@ $redeemer = 'acr_' + [Convert]::ToHexString($redeemerBytes).ToLowerInvariant()
 $provisionerBytes = New-Object byte[](32)
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($provisionerBytes)
 $provisioner = 'gpr_' + [Convert]::ToHexString($provisionerBytes).ToLowerInvariant()
+$projectionBytes = New-Object byte[](32)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($projectionBytes)
+$projection = 'rpr_' + [Convert]::ToHexString($projectionBytes).ToLowerInvariant()
 $credentials = @{}
 if (-not [string]::IsNullOrWhiteSpace($values['SESSION_OBSERVER_CREDENTIALS_JSON'])) {
     $parsed = $values['SESSION_OBSERVER_CREDENTIALS_JSON'] | ConvertFrom-Json
@@ -94,6 +97,29 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
 if (-not $found) { $lines += $routesReplacement }
 Set-Content -LiteralPath $envFile -Value $lines -Encoding Ascii
 
+$projectionCredentials = @{}
+if (-not [string]::IsNullOrWhiteSpace($values['RESERVATION_PROJECTION_CREDENTIALS_JSON'])) {
+    $parsed = $values['RESERVATION_PROJECTION_CREDENTIALS_JSON'] | ConvertFrom-Json
+    if ($parsed) {
+        $parsed.PSObject.Properties | ForEach-Object { $projectionCredentials[$_.Name] = $_.Value }
+    }
+}
+$projectionCredentials[$GatewayId.ToLowerInvariant()] = [ordered]@{
+    token = $projection
+    accessUri = $lite.Origin
+}
+$projectionReplacement = 'RESERVATION_PROJECTION_CREDENTIALS_JSON=' + ($projectionCredentials | ConvertTo-Json -Compress -Depth 5)
+$lines = @(Get-Content -LiteralPath $envFile)
+$found = $false
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '^RESERVATION_PROJECTION_CREDENTIALS_JSON=') {
+        $lines[$i] = $projectionReplacement
+        $found = $true
+    }
+}
+if (-not $found) { $lines += $projectionReplacement }
+Set-Content -LiteralPath $envFile -Value $lines -Encoding Ascii
+
 $redeemerCredentials = @{}
 if (-not [string]::IsNullOrWhiteSpace($values['ACCESS_CODE_REDEEMER_CREDENTIALS_JSON'])) {
     $parsed = $values['ACCESS_CODE_REDEEMER_CREDENTIALS_JSON'] | ConvertFrom-Json
@@ -124,6 +150,9 @@ $origin = $full.Origin
     "SESSION_OBSERVER_SIGNING_SECRET=$secret"
     "GUACAMOLE_PROVISIONER_TOKEN=$provisioner"
     "GUACAMOLE_PROVISIONER_TOKEN_HEADER=X-Guacamole-Provisioner-Token"
+    "RESERVATION_PROJECTION_URL=$origin/reservations/projection"
+    "RESERVATION_PROJECTION_GATEWAY_ID=$GatewayId"
+    "RESERVATION_PROJECTION_TOKEN=$projection"
     "FMU_GATEWAY_ID=$GatewayId"
     "FMU_JWT_AUDIENCE=$($lite.Origin)/fmu"
     "AUTH_SESSION_TICKET_ISSUE_URL=$origin/auth/fmu/session-ticket/issue"

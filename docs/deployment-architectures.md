@@ -131,7 +131,8 @@ LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 
 Use a Full-issued trust bundle whenever possible. It binds the Lite origin to
 `ISSUER`, `FMU_GATEWAY_ID`, `FMU_JWT_AUDIENCE`, the session-observer credential
-and the Guacamole provisioner credential. The technical gateway ID is the
+the Guacamole provisioner credential and the reservation projection feed. The
+technical gateway ID is the
 normalized public host plus `:port` for a non-default HTTPS port; `SERVER_NAME`
 stays hostname-only for local URL construction. A Lite setup without a remote
 `LAB_ADMIN_BACKEND_URL` deliberately blocks on-chain lab administration.
@@ -168,6 +169,14 @@ entry for every remote origin, or a single shared
 used by all Lite provisioner routes. The route map is fail-closed: an
 unmapped remote `accessURI` is rejected and is never sent to the Full local
 ops-worker.
+
+The trust-bundle script also registers a distinct
+`RESERVATION_PROJECTION_CREDENTIALS_JSON` entry. The Lite `ops-worker` polls
+`/reservations/projection` with that credential. The Full backend filters the
+response by the registered `accessURI`, so a Lite cannot request another
+gateway's reservations. The local worker keeps its durable operation journal;
+successful start/end actions are not replayed when the remote projection
+remains in `CONFIRMED`/`ACTIVE` state.
 
 ```mermaid
 sequenceDiagram

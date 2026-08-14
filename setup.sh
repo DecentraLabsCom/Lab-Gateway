@@ -169,6 +169,7 @@ sync_compose_secrets() {
     write_compose_secret auth_access_code_redeemer_token AUTH_ACCESS_CODE_REDEEMER_TOKEN "$host_uid" "$host_gid"
     write_compose_secret session_observation_ingest_token SESSION_OBSERVATION_INGEST_TOKEN "$host_uid" "$host_gid"
     write_compose_secret guacamole_provisioner_token GUACAMOLE_PROVISIONER_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret reservation_projection_token RESERVATION_PROJECTION_TOKEN "$host_uid" "$host_gid"
     write_compose_secret aas_service_token AAS_SERVICE_TOKEN "$host_uid" "$host_gid"
     write_compose_secret lab_admin_backend_token LAB_ADMIN_BACKEND_TOKEN "$host_uid" "$host_gid"
     write_compose_secret fmu_station_internal_token FMU_STATION_INTERNAL_TOKEN "$host_uid" "$host_gid"
@@ -242,6 +243,7 @@ remove_gateway_managed_backend_env() {
     remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_BACKEND_MYSQL_PASSWORD"
     remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_GUACAMOLE_MYSQL_USER"
     remove_env_var "$BLOCKCHAIN_ENV_FILE" "OPS_GUACAMOLE_MYSQL_PASSWORD"
+    remove_env_var "$BLOCKCHAIN_ENV_FILE" "RESERVATION_PROJECTION_CREDENTIALS_JSON"
 }
 
 # Check prerequisites
@@ -791,6 +793,9 @@ else
     bundle_observer_secret="$(get_env_default "SESSION_OBSERVER_SIGNING_SECRET" "$lite_trust_bundle")"
     bundle_guacamole_provisioner_token="$(get_env_default "GUACAMOLE_PROVISIONER_TOKEN" "$lite_trust_bundle")"
     bundle_guacamole_provisioner_token_header="$(get_env_default "GUACAMOLE_PROVISIONER_TOKEN_HEADER" "$lite_trust_bundle")"
+    bundle_reservation_projection_url="$(get_env_default "RESERVATION_PROJECTION_URL" "$lite_trust_bundle")"
+    bundle_reservation_projection_gateway_id="$(get_env_default "RESERVATION_PROJECTION_GATEWAY_ID" "$lite_trust_bundle")"
+    bundle_reservation_projection_token="$(get_env_default "RESERVATION_PROJECTION_TOKEN" "$lite_trust_bundle")"
     bundle_fmu_gateway_id="$(get_env_default "FMU_GATEWAY_ID" "$lite_trust_bundle")"
     bundle_fmu_audience="$(get_env_default "FMU_JWT_AUDIENCE" "$lite_trust_bundle")"
     bundle_ticket_issue_url="$(get_env_default "AUTH_SESSION_TICKET_ISSUE_URL" "$lite_trust_bundle")"
@@ -798,6 +803,8 @@ else
     if [ -z "$bundle_issuer" ] || [ -z "$bundle_redeemer" ] || [ -z "$bundle_audit_url" ] \
         || [ -z "$bundle_server_name" ] || [ -z "$bundle_gateway_id" ] || [ -z "$bundle_observer_secret" ] \
         || [ -z "$bundle_guacamole_provisioner_token" ] || [ -z "$bundle_guacamole_provisioner_token_header" ] \
+        || [ -z "$bundle_reservation_projection_url" ] || [ -z "$bundle_reservation_projection_gateway_id" ] \
+        || [ -z "$bundle_reservation_projection_token" ] \
         || [ -z "$bundle_fmu_gateway_id" ] || [ -z "$bundle_fmu_audience" ] \
         || [ -z "$bundle_ticket_issue_url" ] || [ -z "$bundle_ticket_redeem_url" ]; then
         echo "Trust bundle is incomplete or invalid." >&2
@@ -809,7 +816,8 @@ else
     fi
     if [ "$bundle_server_name" != "$gateway_identity_host" ] \
         || [ "$bundle_gateway_id" != "$gateway_identity" ] \
-        || [ "$bundle_fmu_gateway_id" != "$gateway_identity" ]; then
+        || [ "$bundle_fmu_gateway_id" != "$gateway_identity" ] \
+        || [ "$bundle_reservation_projection_gateway_id" != "$gateway_identity" ]; then
         echo "Trust bundle gateway identity does not match ${gateway_identity}." >&2
         exit 1
     fi
@@ -819,11 +827,14 @@ else
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_SIGNING_SECRET" "$bundle_observer_secret"
     update_env_var "$ROOT_ENV_FILE" "GUACAMOLE_PROVISIONER_TOKEN" "$bundle_guacamole_provisioner_token"
     update_env_var "$ROOT_ENV_FILE" "GUACAMOLE_PROVISIONER_TOKEN_HEADER" "$bundle_guacamole_provisioner_token_header"
+    update_env_var "$ROOT_ENV_FILE" "RESERVATION_PROJECTION_URL" "$bundle_reservation_projection_url"
+    update_env_var "$ROOT_ENV_FILE" "RESERVATION_PROJECTION_GATEWAY_ID" "$bundle_reservation_projection_gateway_id"
+    update_env_var "$ROOT_ENV_FILE" "RESERVATION_PROJECTION_TOKEN" "$bundle_reservation_projection_token"
     update_env_var "$ROOT_ENV_FILE" "FMU_GATEWAY_ID" "$bundle_fmu_gateway_id"
     update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_ISSUE_URL" "$bundle_ticket_issue_url"
     update_env_var "$ROOT_ENV_FILE" "AUTH_SESSION_TICKET_REDEEM_URL" "$bundle_ticket_redeem_url"
     update_env_var "$ROOT_ENV_FILE" "SESSION_OBSERVER_CREDENTIALS_JSON" "{}"
-    echo "   * Imported redeem, session-observation and Guacamole-provisioner credentials for ${bundle_gateway_id}."
+    echo "   * Imported redeem, session-observation, reservation-projection and Guacamole-provisioner credentials for ${bundle_gateway_id}."
 fi
 echo
 

@@ -82,11 +82,17 @@ OPS_RESERVATION_START_LEAD=120
 OPS_RESERVATION_END_DELAY=60
 ```
 
-It consumes the local `lab_reservations` projection, not the contract directly. Consequently, its local states are operational only:
+In Full mode it consumes the local `lab_reservations` projection, not the
+contract directly. In Lite mode it polls the authenticated
+`/reservations/projection` feed from the remote reservation backend. That feed
+is scoped to the Lite gateway's registered `accessURI`; the Lite keeps only
+its durable `reservation_operations` journal, so it does not need a local
+copy of the provider's reservation table. Consequently, these local states
+are operational only:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CONFIRMED: reservation projection
+    [*] --> CONFIRMED: local or remote reservation projection
     CONFIRMED --> ACTIVE: wake and prepare-session succeed
     ACTIVE --> COMPLETED: release-session succeeds
     CONFIRMED --> COMPLETED: reservation ends without active marker

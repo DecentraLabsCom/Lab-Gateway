@@ -55,6 +55,7 @@ GATEWAY_MANAGED_BACKEND_KEYS = [
     "OPS_BACKEND_MYSQL_PASSWORD",
     "OPS_GUACAMOLE_MYSQL_USER",
     "OPS_GUACAMOLE_MYSQL_PASSWORD",
+    "RESERVATION_PROJECTION_CREDENTIALS_JSON",
 ]
 
 
@@ -88,6 +89,10 @@ class SetupEnvContractTest(unittest.TestCase):
         backend_service = _service_block("blockchain-services", self.compose_file)
         self.assertIn(
             "- ACCESS_CODE_REDEEMER_CREDENTIALS_JSON=${ACCESS_CODE_REDEEMER_CREDENTIALS_JSON:-}",
+            backend_service,
+        )
+        self.assertIn(
+            "- RESERVATION_PROJECTION_CREDENTIALS_JSON=${RESERVATION_PROJECTION_CREDENTIALS_JSON:-}",
             backend_service,
         )
 
