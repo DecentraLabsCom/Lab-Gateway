@@ -8,17 +8,20 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
-from typing import Any, Awaitable, Callable, Optional, Protocol
+from typing import Any, Awaitable, Callable, Optional, Protocol, cast
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 
 class _StationWebSocket(Protocol):
-    def __aiter__(self) -> AsyncIterator[str | bytes]: ...
+    def __aiter__(self) -> AsyncIterator[str | bytes]:
+        raise NotImplementedError
 
-    async def send(self, message: Any, text: bool | None = None) -> None: ...
+    async def send(self, message: Any, text: bool | None = None) -> None:
+        raise NotImplementedError
 
-    async def close(self) -> None: ...
+    async def close(self) -> None:
+        raise NotImplementedError
 
 
 def _public_http_detail(exc: HTTPException, fallback: str) -> str:
@@ -270,6 +273,7 @@ class StationRealtimeWsProxyManager:
             try:
                 await websocket.close(code=4003)
             except Exception:
+                # The client may already have disconnected; closing is best effort.
                 pass
 
         async def _ensure_station():
@@ -388,6 +392,7 @@ class StationRealtimeWsProxyManager:
                         try:
                             await websocket.close(code=4003)
                         except Exception:
+                            # The client may already have disconnected; closing is best effort.
                             pass
                         return
             except asyncio.CancelledError:
@@ -490,9 +495,8 @@ class StationRealtimeWsProxyManager:
                             continue
 
                     if not internal and not session_ticket:
-                        if create_claims is None:
-                            raise HTTPException(status_code=401, detail="Missing authenticated session claims")
-                        claim_lab_id = self.get_claim_lab_id(create_claims)
+                        authenticated_claims = cast(dict[str, Any], create_claims)
+                        claim_lab_id = self.get_claim_lab_id(authenticated_claims)
                         if claim_lab_id and req_lab_id and claim_lab_id != req_lab_id:
                             response = self.error_payload(
                                 code="LAB_MISMATCH",
@@ -503,7 +507,7 @@ class StationRealtimeWsProxyManager:
                             await self._send_json(websocket, send_lock, response)
                             local_request_cache[request_id] = response
                             continue
-                        claim_reservation_key = str(create_claims.get("reservationKey") or "").strip()
+                        claim_reservation_key = str(authenticated_claims.get("reservationKey") or "").strip()
                         if reservation_key and claim_reservation_key and reservation_key.lower() != claim_reservation_key.lower():
                             response = self.error_payload(
                                 code="FORBIDDEN",
@@ -514,7 +518,7 @@ class StationRealtimeWsProxyManager:
                             await self._send_json(websocket, send_lock, response)
                             local_request_cache[request_id] = response
                             continue
-                        if not (create_claims.get("accessKey") or create_claims.get("fmuFileName")):
+                        if not (authenticated_claims.get("accessKey") or authenticated_claims.get("fmuFileName")):
                             response = self.error_payload(
                                 code="FORBIDDEN",
                                 message="Token has no authorised FMU file",
@@ -537,8 +541,8 @@ class StationRealtimeWsProxyManager:
                         try:
                             session_ticket, _ticket_expiry = await self.issue_session_ticket(
                                 authorization=self.extract_ws_authorization(websocket),
-                                lab_id=req_lab_id or self.get_claim_lab_id(create_claims),
-                                reservation_key=reservation_key or create_claims.get("reservationKey"),
+                                lab_id=req_lab_id or self.get_claim_lab_id(authenticated_claims),
+                                reservation_key=reservation_key or authenticated_claims.get("reservationKey"),
                                 request_id=request_id,
                             )
                             session_ticket = str(session_ticket or "").strip()
