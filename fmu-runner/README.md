@@ -56,6 +56,11 @@ does not change between these topologies.
 | WS | `/api/v1/fmu/sessions` | Realtime FMU session API (`requestId`, `model.describe`, control, subscribe/unsubscribe, ping/pong) |
 | WS (internal) | `/internal/fmu/sessions` | Internal realtime channel for Lab Station integration |
 
+The internal Runner WebSocket requires the non-empty `FMU_INTERNAL_WS_TOKEN`
+through `X-Internal-Session-Token`. If it is absent, the endpoint rejects every
+connection (fail-closed). The Station endpoint applies the same rule to
+`FMU_INTERNAL_TOKEN`; keep both services private even when the tokens are set.
+
 ## Backend Modes
 
 | Mode | Purpose | Real FMU location | Notes |

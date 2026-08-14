@@ -796,7 +796,14 @@ class RealtimeWsManager:
         local_request_cache: dict[str, dict] = {}
 
         try:
-            if internal and self.internal_ws_token:
+            if internal:
+                if not self.internal_ws_token:
+                    await self._send_direct(
+                        connection,
+                        self.error_payload(code="FORBIDDEN", message="Internal token is not configured"),
+                    )
+                    await websocket.close(code=1008)
+                    return
                 provided = websocket.headers.get("x-internal-session-token", "")
                 if not secrets.compare_digest(provided, self.internal_ws_token):
                     await self._send_direct(connection, self.error_payload(code="FORBIDDEN", message="Invalid internal token"))

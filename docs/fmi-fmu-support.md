@@ -223,7 +223,7 @@ GET  /internal/fmu/catalog  (X-FMU-Access-Key header)
 GET  /internal/fmu/describe  (X-FMU-Access-Key header)
 POST /internal/fmu/simulations/run       (JSON body: accessKey)
 POST /internal/fmu/simulations/stream    (JSON body: accessKey)
-WSS  /internal/fmu/sessions
+WSS  /internal/fmu/sessions       (X-Internal-Session-Token required)
 ~~~
 
 Gateway-to-Station messages preserve `requestId` and include a validated `gatewayContext` containing the effective `labId`, `accessKey`, `reservationKey` and claims. Station independently checks resource, reservation and expiry values before executing a model operation.

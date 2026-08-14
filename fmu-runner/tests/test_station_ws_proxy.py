@@ -890,6 +890,21 @@ def test_station_ws_internal_endpoint_rejects_invalid_internal_token(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_station_ws_internal_endpoint_rejects_when_internal_token_is_not_configured():
+    manager = _build_manager()
+    manager.internal_ws_token = ""
+    websocket = _AsyncTestWebSocket(
+        messages=[],
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    await manager.handle_websocket(cast(WebSocket, websocket), internal=True)
+
+    assert websocket.sent_json[0]["code"] == "FORBIDDEN"
+    assert websocket.closed_code == 1008
+
+
+@pytest.mark.asyncio
 async def test_station_proxy_handle_websocket_validates_basic_message_shape():
     manager = _build_manager()
     websocket = _AsyncTestWebSocket(

@@ -409,6 +409,39 @@ async def test_ws_internal_endpoint_rejects_invalid_internal_token():
     assert 1008 in websocket.close_calls
 
 
+@pytest.mark.asyncio
+async def test_ws_internal_endpoint_rejects_when_internal_token_is_not_configured():
+    manager = _build_manager()
+
+    class _WebSocket:
+        def __init__(self):
+            self.headers = {"authorization": "Bearer test-token"}
+            self.query_params = {}
+            self.client = SimpleNamespace(host="127.0.0.1")
+            self.sent = []
+            self.close_calls = []
+            self.accepted = False
+
+        async def accept(self):
+            self.accepted = True
+
+        async def send_json(self, payload):
+            self.sent.append(payload)
+
+        async def close(self, code=None):
+            self.close_calls.append(code)
+
+        async def receive_text(self):
+            raise AssertionError("receive_text should not be called when internal auth is unavailable")
+
+    websocket = _WebSocket()
+
+    await manager.handle_websocket(websocket, internal=True)
+
+    assert websocket.sent[0]["code"] == "FORBIDDEN"
+    assert 1008 in websocket.close_calls
+
+
 def test_ws_session_create_requires_ticket_when_unauthenticated(monkeypatch):
     async def _unauthorized(_token: str):
         raise HTTPException(status_code=401, detail="missing token")
