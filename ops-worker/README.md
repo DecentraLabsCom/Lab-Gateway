@@ -167,6 +167,11 @@ Reservation automation knobs:
 - `OPS_RESERVATION_LOOKBACK` (default `21600`)
 - `OPS_RESERVATION_RETRY_COOLDOWN` (default `60`)
 
+Guacamole temporary-user cleanup:
+
+- `GUACAMOLE_TEMP_USER_CLEANUP_ENABLED` (default `true`)
+- `GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS` (default `900`)
+
 When a lab has a configured power policy, reservation start executes `pre_start` before Wake-on-LAN and `post_start` after preparation. Reservation end executes `pre_end`, the existing release/power action, and `post_end`. The policy can skip these phases while the latest persisted Lab Station heartbeat reports local mode.
 
 Notification integration knobs:

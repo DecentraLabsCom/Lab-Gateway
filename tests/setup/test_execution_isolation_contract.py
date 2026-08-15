@@ -73,6 +73,13 @@ def test_blockchain_services_receives_session_observer_credentials():
     assert "SESSION_OBSERVER_CREDENTIALS_JSON=${SESSION_OBSERVER_CREDENTIALS_JSON:-}" in blockchain
 
 
+def test_ops_worker_configures_reservation_user_cleanup_every_900_seconds_by_default():
+    ops = _service_block("ops-worker")
+
+    assert "GUACAMOLE_TEMP_USER_CLEANUP_ENABLED=${GUACAMOLE_TEMP_USER_CLEANUP_ENABLED:-true}" in ops
+    assert "GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS=${GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS:-900}" in ops
+
+
 def test_mysql_healthcheck_reads_passwords_from_mounted_secrets():
     mysql = _service_block("mysql")
     healthcheck = (ROOT / "mysql" / "healthcheck.sh").read_text(encoding="utf-8")

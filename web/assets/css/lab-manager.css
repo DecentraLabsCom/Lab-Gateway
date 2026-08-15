@@ -739,7 +739,6 @@ body {
 }
 
 .toggle-field { align-items: center; }
-.toggle-field span { margin-bottom: 0; }
 .action-field { justify-content: flex-end; }
 .action-field span { visibility: hidden; }
 .inline-config .config-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

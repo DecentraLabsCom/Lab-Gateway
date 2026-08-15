@@ -31,4 +31,4 @@ RUN groupadd --gid "${OPS_GID}" opsworker \
 
 USER opsworker
 
-CMD ["sh", "-c", "waitress-serve --host=${OPS_BIND:-0.0.0.0} --port=${OPS_PORT:-8081} worker:APP"]
+CMD ["python", "-m", "worker"]

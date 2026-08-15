@@ -30,6 +30,7 @@ from wakeonlan import send_magic_packet
 import requests
 import winrm
 from apscheduler.schedulers.background import BackgroundScheduler
+from waitress import serve
 import aas_generator
 from power.api import power_bp
 from power.models import ValidationError as PowerValidationError
@@ -155,7 +156,7 @@ GUACAMOLE_TEMP_USER_CLEANUP_ENABLED = os.getenv(
 ).strip().lower() not in ("false", "0", "no", "off")
 GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS = max(
     60,
-    int(os.getenv("GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS", "300")),
+    int(os.getenv("GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS", "900")),
 )
 GUACAMOLE_PROVISIONER_TOKEN = (
     _env_or_secret_file("GUACAMOLE_PROVISIONER_TOKEN") or
@@ -4302,7 +4303,7 @@ def main():
     start_scheduler()
     bind = os.getenv("OPS_BIND", "0.0.0.0")
     port = int(os.getenv("OPS_PORT", "8081"))
-    APP.run(host=bind, port=port)
+    serve(APP, host=bind, port=port)
 
 
 if __name__ == "__main__":
