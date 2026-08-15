@@ -721,9 +721,9 @@ body {
 }
 .reservation-card .reservation-list {
     flex: 0 0 auto;
-    min-height: 520px;
-    height: 520px;
-    max-height: 520px;
+    min-height: 360px;
+    height: 360px;
+    max-height: 360px;
     overflow-y: auto;
 }
 .reservation-list {
@@ -733,9 +733,9 @@ body {
 @media (min-width: 701px) {
     .reservation-card .reservation-list {
         flex: 0 0 auto;
-        min-height: 720px;
-        height: 720px;
-        max-height: 720px;
+        min-height: 540px;
+        height: 540px;
+        max-height: 540px;
     }
 }
 .reservation-list::-webkit-scrollbar { width: 10px; }
