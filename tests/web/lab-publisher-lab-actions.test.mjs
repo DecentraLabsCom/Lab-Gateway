@@ -94,7 +94,7 @@ test('prefers the metadata lab name and falls back to the lab id', () => {
 test('cache-busts the lab manager assets after lab display updates', () => {
   const index = fs.readFileSync(indexPath, 'utf8');
 
-  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v4/);
-  assert.match(index, /lab-manager\.js\?v=workflow-tabs-v4/);
+  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v6/);
+  assert.match(index, /lab-manager\.js\?v=workflow-tabs-v6/);
   assert.match(index, /lab-publisher\.js\?v=workflow-tabs-v2/);
 });

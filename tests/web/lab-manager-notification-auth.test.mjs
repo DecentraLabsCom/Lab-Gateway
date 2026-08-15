@@ -90,7 +90,7 @@ function loadLabManager({
     'provisionHostLabs', 'provisionHostLabsSummary', 'provisionHeartbeatPath',
     'btnTestLoad', 'saveConfigBtn', 'btnTestEmail', 'refreshHostsBtn', 'hostList',
     'guacamoleCandidateList', 'fmuSyncBtn', 'fmuSyncKey', 'fmuSyncLabSelect',
-    'fmuSyncFile', 'fmuSyncResult', 'fmuSyncDescription', 'fmuSyncLicense',
+    'fmuSyncFile', 'fmuSyncFileName', 'fmuSyncResult', 'fmuSyncDescription', 'fmuSyncLicense',
     'fmuSyncDocsUrl', 'fmuSyncContactEmail', 'fmuSyncDescriptionHint',
     'fmuSyncLicenseHint', 'aasLinkKey', 'aasLinkLabSelect', 'aasLinkAasId',
     'aasLinkSaveBtn', 'aasLinkCheckBtn', 'aasLinkDeleteBtn', 'aasLinkResult',
@@ -282,7 +282,7 @@ test('reuses the existing Lab Manager session without prompting on Operations en
   const activityCall = fetchCalls.find(({ url }) => String(url).startsWith('/ops/api/operations/recent'));
   assert.ok(activityCall, 'Recent Operations should be loaded when Operations is activated');
   assert.equal(activityCall.options.credentials, 'include');
-  assert.equal(activityCall.options.skipAuthPrompt, true);
+  assert.equal(activityCall.options.skipAuthPrompt, undefined);
 
   const actionableCall = fetchCalls.find(({ url }) => String(url).startsWith('/lab-admin/reservations/actionable'));
   assert.ok(actionableCall, 'Actionable Reservations should be loaded when Operations is activated');
@@ -315,6 +315,28 @@ test('places the cancellation reason selector below the cancellation button', ()
     script,
     /data-action="cancel-reservation"[\s\S]*class="reservation-reason"/,
   );
+});
+
+test('styles AAS link removal and uses an English custom FMU file picker', () => {
+  const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+  const markup = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+
+  assert.match(stylesheet, /\.danger-btn\s*\{[^}]*background:[^}]*color:[^}]*border/);
+  assert.match(stylesheet, /\.file-picker\s*\{[^}]*display:\s*flex/);
+  assert.match(stylesheet, /\.file-picker-button\s*\{[^}]*cursor:\s*pointer/);
+  assert.match(markup, /<label class="file-picker-button" for="fmuSyncFile">Choose file<\/label>/);
+  assert.match(markup, /id="fmuSyncFileName"[^>]*>No file chosen<\/span>/);
+});
+
+test('updates the English FMU file picker name after choosing a file', () => {
+  const { elements } = loadLabManager({});
+  const fileInput = elements.get('fmuSyncFile');
+  const fileName = elements.get('fmuSyncFileName');
+
+  fileInput.files = [{ name: 'spring-damper.aasx' }];
+  fileInput.dispatchEvent({ type: 'change' });
+
+  assert.equal(fileName.textContent, 'spring-damper.aasx');
 });
 
 test('does not request or prompt for billing access until Notifications is opened', async () => {

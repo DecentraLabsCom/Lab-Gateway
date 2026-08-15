@@ -212,6 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fmuSyncKeyEl = $('#fmuSyncKey');
     const fmuSyncLabSelectEl = $('#fmuSyncLabSelect');
     const fmuSyncFileEl = $('#fmuSyncFile');
+    const fmuSyncFileNameEl = $('#fmuSyncFileName');
     const fmuSyncResultEl = $('#fmuSyncResult');
     const fmuSyncDescriptionEl = $('#fmuSyncDescription');
     const fmuSyncLicenseEl = $('#fmuSyncLicense');
@@ -287,6 +288,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const key = fmuSyncKeyEl.value.trim();
             if (!key) { _clearAllFmuHints(); return; }
             _fetchFmuHints(key);
+        });
+    }
+
+    if (fmuSyncFileEl) {
+        fmuSyncFileEl.addEventListener('change', () => {
+            const file = fmuSyncFileEl.files && fmuSyncFileEl.files[0];
+            if (fmuSyncFileNameEl) {
+                fmuSyncFileNameEl.textContent = file ? file.name : 'No file chosen';
+            }
         });
     }
 
@@ -626,7 +636,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 checkOpsAvailability();
                 if (hostListEl) loadHostInventory({ skipAuthPrompt: true });
                 if (upcomingReservationsListEl) loadActionableReservations({ skipAuthPrompt: true });
-                loadActivityFeed(false, { skipAuthPrompt: true });
+                // Let the shared auth handler recover an expired session and
+                // retry this request. A valid Lab Manager session does not
+                // prompt; suppressing the handler turns an expired session
+                // into a misleading visible HTTP 401.
+                loadActivityFeed(false);
             })();
             return;
         }

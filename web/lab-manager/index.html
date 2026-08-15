@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v4">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v6">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -737,7 +737,11 @@
                             </label>
                             <label class="field full">
                                 <span>Upload .aasx <span class="muted-text">(optional — auto-generated from FMU if omitted)</span></span>
-                                <input type="file" id="fmuSyncFile" accept=".aasx">
+                                <div class="file-picker">
+                                    <input class="file-picker-input" type="file" id="fmuSyncFile" accept=".aasx" aria-label="Upload AASX package">
+                                    <label class="file-picker-button" for="fmuSyncFile">Choose file</label>
+                                    <span class="file-picker-name" id="fmuSyncFileName" aria-live="polite">No file chosen</span>
+                                </div>
                             </label>
                             <label class="field full">
                                 <span>Description <span class="muted-text">(optional)</span> <span class="source-hint" id="fmuSyncDescriptionHint" hidden></span></span>
@@ -1088,7 +1092,7 @@
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v2"></script>
     <script src="../assets/js/lab-manager-tabs.js?v=workflow-tabs-v1"></script>
-    <script src="../assets/js/lab-manager.js?v=workflow-tabs-v4"></script>
+    <script src="../assets/js/lab-manager.js?v=workflow-tabs-v6"></script>
     <script src="../assets/js/lab-publisher.js?v=workflow-tabs-v2"></script>
 </body>
 </html>
