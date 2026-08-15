@@ -248,6 +248,30 @@ test('forwards the actionable reservation resume cursor when loading more', asyn
   assert.equal(actionableCalls[1].searchParams.get('cursor'), cursor);
 });
 
+test('does not suppress Lab Manager authentication for recent operations', async () => {
+  const { fetchCalls } = loadLabManager({});
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const activityCall = fetchCalls.find(({ url }) => String(url).startsWith('/ops/api/operations/recent'));
+  assert.ok(activityCall, 'Recent Operations should be loaded when Operations is activated');
+  assert.equal(activityCall.options.credentials, 'include');
+  assert.equal(activityCall.options.skipAuthPrompt, undefined);
+});
+
+test('reserves enough vertical space for actionable reservation details', () => {
+  const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(
+    stylesheet,
+    /\.reservation-card \.reservation-list\s*\{[\s\S]*max-height:\s*420px;/,
+  );
+  assert.match(
+    stylesheet,
+    /@media \(min-width: 701px\)[\s\S]*\.reservation-card \.reservation-list\s*\{[\s\S]*max-height:\s*560px;/,
+  );
+});
+
 test('does not request or prompt for billing access until Notifications is opened', async () => {
   const { fetchCalls, promptCalls, activateTab } = loadLabManager({
     activeTabs: [],

@@ -115,7 +115,14 @@ body {
     border: 1px solid var(--border);
     border-radius: 16px;
     background: rgba(17, 23, 39, 0.72);
-    scrollbar-width: thin;
+}
+
+.lm-tab-list::-webkit-scrollbar { height: 8px; }
+.lm-tab-list::-webkit-scrollbar-track { background: transparent; border-radius: 999px; }
+.lm-tab-list::-webkit-scrollbar-thumb {
+    background: var(--primary-2);
+    border: 2px solid rgba(17, 23, 39, 0.72);
+    border-radius: 999px;
 }
 
 .lm-tab {
@@ -715,17 +722,16 @@ body {
 .reservation-card .reservation-list {
     flex: 1 1 auto;
     min-height: 0;
+    max-height: 420px;
 }
 .reservation-list {
     padding-right: 4px;
     overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-color: var(--primary-2) #0d1220;
 }
 @media (min-width: 701px) {
     .reservation-card .reservation-list {
         flex: 1 1 0;
-        max-height: 340px;
+        max-height: 560px;
     }
 }
 .reservation-list::-webkit-scrollbar { width: 10px; }
@@ -1077,6 +1083,44 @@ body {
 .pill.good { border-color: var(--success); color: var(--success); }
 .pill.warn { border-color: var(--warning); color: var(--warning); }
 .pill.bad { border-color: #ff6b6b; color: #ffb3b3; }
+
+.lab-actions .mini-btn {
+    background: rgba(15, 20, 34, 0.9);
+    border-color: rgba(230, 236, 245, 0.45);
+    color: #f8fafc;
+    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+.lab-actions .mini-btn:hover {
+    background: rgba(31, 41, 64, 0.98);
+    border-color: var(--primary);
+    color: #fff;
+    transform: translateY(-1px);
+}
+.lab-actions .mini-btn.primary {
+    background: linear-gradient(135deg, #167eaa, #236fc0);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #fff;
+}
+.lab-actions .mini-btn.danger {
+    background: rgba(134, 31, 50, 0.5);
+    border-color: #ff8b8b;
+    color: #fff;
+}
+.lab-actions .mini-btn:focus-visible {
+    outline: 3px solid rgba(77, 225, 255, 0.45);
+    outline-offset: 2px;
+}
+.lab-action-icon {
+    display: block;
+    width: 1rem;
+    height: 1rem;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
 
 .toast {
     position: fixed;

@@ -605,7 +605,7 @@ document.addEventListener('DOMContentLoaded', () => {
             checkOpsAvailability();
             if (hostListEl) loadHostInventory({ skipAuthPrompt: true });
             if (upcomingReservationsListEl) loadActionableReservations();
-            loadActivityFeed(false, { skipAuthPrompt: true });
+            loadActivityFeed(false);
             return;
         }
         if (tabName === 'energy') {
@@ -2852,7 +2852,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 limit: String(activityFeedState.limit),
                 offset: String(activityFeedState.offset)
             });
-            const res = await fetch(`/ops/api/operations/recent?${params.toString()}`, options);
+            const res = await fetch(`/ops/api/operations/recent?${params.toString()}`, {
+                credentials: 'include',
+                ...options,
+            });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const body = await res.json();
             const entries = Array.isArray(body.operations) ? body.operations : [];

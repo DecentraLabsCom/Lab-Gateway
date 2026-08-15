@@ -1245,6 +1245,25 @@
         `).join('');
     }
 
+    function renderLabActionIcon(action) {
+        const attributes = 'class="lab-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false"';
+        if (action === 'edit') {
+            return `<svg ${attributes}><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
+        }
+        if (action === 'list') {
+            return `<svg ${attributes}><path d="M2.1 12s3.6-6 9.9-6 9.9 6 9.9 6-3.6 6-9.9 6-9.9-6-9.9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>`;
+        }
+        if (action === 'unlist') {
+            return `<svg ${attributes}><path d="M2.1 12s3.6-6 9.9-6 9.9 6 9.9 6-3.6 6-9.9 6-9.9-6-9.9-6Z"/><circle cx="12" cy="12" r="2.5"/><path d="m3 3 18 18"/></svg>`;
+        }
+        return `<svg ${attributes}><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>`;
+    }
+
+    function resolveLabDisplayName(lab) {
+        const name = typeof lab?.name === 'string' ? lab.name.trim() : '';
+        return name || `Lab #${String(lab?.labId ?? '').trim()}`;
+    }
+
     function renderLabs(labs) {
         const target = $('labPublisherList');
         if (!labs.length) {
@@ -1256,20 +1275,20 @@
         target.innerHTML = labs.map(lab => `
             <div class="lab-row">
                 <div>
-                    <div class="item-title">Lab #${escapeHtml(lab.labId)} ${Number(lab.resourceType) === 1 ? 'FMU' : 'Remote'} ${lab.listed ? '<span class="pill good">Listed</span>' : '<span class="pill soft">Draft</span>'}</div>
+                    <div class="item-title">${escapeHtml(resolveLabDisplayName(lab))} ${Number(lab.resourceType) === 1 ? 'FMU' : 'Remote'} ${lab.listed ? '<span class="pill good">Listed</span>' : '<span class="pill soft">Draft</span>'}</div>
                     <div class="item-meta">${escapeHtml(lab.accessKey || '')} - ${escapeHtml(lab.uri || '')}</div>
                 </div>
                 <div class="lab-row-side">
                     <div class="item-meta">${escapeHtml(formatRawPriceForUnit(lab.price || '0', resolveLabPriceUnit(lab)))} credits/${escapeHtml(resolveLabPriceUnit(lab))}</div>
                     <div class="lab-actions">
                         <button class="mini-btn primary" type="button" data-lab-action="edit" data-lab-id="${escapeAttr(lab.labId)}" title="Edit Lab #${escapeAttr(lab.labId)}" aria-label="Edit Lab #${escapeAttr(lab.labId)}">
-                            <i class="fas fa-pen"></i>
+                            ${renderLabActionIcon('edit')}
                         </button>
                         <button class="mini-btn" type="button" data-lab-action="${lab.listed ? 'unlist' : 'list'}" data-lab-id="${escapeAttr(lab.labId)}" title="${lab.listed ? 'Unlist' : 'List'} Lab #${escapeAttr(lab.labId)}" aria-label="${lab.listed ? 'Unlist' : 'List'} Lab #${escapeAttr(lab.labId)}">
-                            <i class="fas ${lab.listed ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                            ${renderLabActionIcon(lab.listed ? 'unlist' : 'list')}
                         </button>
                         <button class="mini-btn danger" type="button" data-lab-action="delete" data-lab-id="${escapeAttr(lab.labId)}" title="Delete Lab #${escapeAttr(lab.labId)} on-chain" aria-label="Delete Lab #${escapeAttr(lab.labId)} on-chain">
-                            <i class="fas fa-trash"></i>
+                            ${renderLabActionIcon('delete')}
                         </button>
                     </div>
                 </div>
