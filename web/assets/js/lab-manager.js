@@ -597,15 +597,34 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeManagerTab(window.LabManagerTabs.activeTab);
     }
 
+    async function refreshLabManagerSession() {
+        try {
+            // This protected Lab Manager request also refreshes the same
+            // short-lived session cookie across /lab-admin and /ops.
+            const res = await fetch('/lab-manager/access-policy', {
+                credentials: 'same-origin',
+                cache: 'no-store',
+                skipAuthPrompt: true,
+            });
+            return res.ok;
+        } catch (err) {
+            console.warn('Unable to refresh Lab Manager session', err);
+            return false;
+        }
+    }
+
     function initializeManagerTab(tabName) {
         if (!tabName || initializedManagerTabs.has(tabName)) return;
         initializedManagerTabs.add(tabName);
 
         if (tabName === 'operations') {
-            checkOpsAvailability();
-            if (hostListEl) loadHostInventory({ skipAuthPrompt: true });
-            if (upcomingReservationsListEl) loadActionableReservations();
-            loadActivityFeed(false);
+            void (async () => {
+                await refreshLabManagerSession();
+                checkOpsAvailability();
+                if (hostListEl) loadHostInventory({ skipAuthPrompt: true });
+                if (upcomingReservationsListEl) loadActionableReservations({ skipAuthPrompt: true });
+                loadActivityFeed(false, { skipAuthPrompt: true });
+            })();
             return;
         }
         if (tabName === 'energy') {
@@ -3109,7 +3128,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await requestTimelinePage(0, false);
     }
 
-    async function loadActionableReservations({ append = false } = {}) {
+    async function loadActionableReservations({ append = false, skipAuthPrompt = false } = {}) {
         if (!upcomingReservationsListEl) return;
         if (actionableReservationsState.loading) return;
         if (!append) {
@@ -3131,7 +3150,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (actionableReservationsState.cursor) {
                 params.set('cursor', actionableReservationsState.cursor);
             }
-            const res = await fetch(`/lab-admin/reservations/actionable?${params.toString()}`, { credentials: 'include' });
+            const res = await fetch(`/lab-admin/reservations/actionable?${params.toString()}`, {
+                credentials: 'include',
+                ...(skipAuthPrompt ? { skipAuthPrompt: true } : {}),
+            });
             if (res.status === 401) {
                 renderUpcomingReservationsMessage('Unauthorized: check LAB_MANAGER_TOKEN.');
                 setUpcomingReservationsStatus('Unauthorized', 'bad');

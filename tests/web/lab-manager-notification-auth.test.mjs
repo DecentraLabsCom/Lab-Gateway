@@ -248,27 +248,39 @@ test('forwards the actionable reservation resume cursor when loading more', asyn
   assert.equal(actionableCalls[1].searchParams.get('cursor'), cursor);
 });
 
-test('does not suppress Lab Manager authentication for recent operations', async () => {
+test('reuses the existing Lab Manager session without prompting on Operations entry', async () => {
   const { fetchCalls } = loadLabManager({});
 
   await new Promise((resolve) => setImmediate(resolve));
 
+  const accessPolicyCall = fetchCalls.find(({ url, options }) => (
+    String(url) === '/lab-manager/access-policy' && options.cache === 'no-store'
+  ));
+  assert.ok(accessPolicyCall, 'Operations should refresh the existing Lab Manager session before loading data');
+  assert.equal(accessPolicyCall.options.credentials, 'same-origin');
+  assert.equal(accessPolicyCall.options.skipAuthPrompt, true);
+
   const activityCall = fetchCalls.find(({ url }) => String(url).startsWith('/ops/api/operations/recent'));
   assert.ok(activityCall, 'Recent Operations should be loaded when Operations is activated');
   assert.equal(activityCall.options.credentials, 'include');
-  assert.equal(activityCall.options.skipAuthPrompt, undefined);
+  assert.equal(activityCall.options.skipAuthPrompt, true);
+
+  const actionableCall = fetchCalls.find(({ url }) => String(url).startsWith('/lab-admin/reservations/actionable'));
+  assert.ok(actionableCall, 'Actionable Reservations should be loaded when Operations is activated');
+  assert.equal(actionableCall.options.credentials, 'include');
+  assert.equal(actionableCall.options.skipAuthPrompt, true);
 });
 
-test('reserves enough vertical space for actionable reservation details', () => {
+test('reserves a tall, explicit scroll area for actionable reservation details', () => {
   const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
 
   assert.match(
     stylesheet,
-    /\.reservation-card \.reservation-list\s*\{[\s\S]*max-height:\s*420px;/,
+    /\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*520px;[\s\S]*height:\s*520px;[\s\S]*overflow-y:\s*auto;/,
   );
   assert.match(
     stylesheet,
-    /@media \(min-width: 701px\)[\s\S]*\.reservation-card \.reservation-list\s*\{[\s\S]*max-height:\s*560px;/,
+    /@media \(min-width: 701px\)[\s\S]*\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*720px;[\s\S]*height:\s*720px;[\s\S]*max-height:\s*720px;/,
   );
 });
 

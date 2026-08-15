@@ -720,9 +720,11 @@ body {
     min-height: 0;
 }
 .reservation-card .reservation-list {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: 420px;
+    flex: 0 0 auto;
+    min-height: 520px;
+    height: 520px;
+    max-height: 520px;
+    overflow-y: auto;
 }
 .reservation-list {
     padding-right: 4px;
@@ -730,8 +732,10 @@ body {
 }
 @media (min-width: 701px) {
     .reservation-card .reservation-list {
-        flex: 1 1 0;
-        max-height: 560px;
+        flex: 0 0 auto;
+        min-height: 720px;
+        height: 720px;
+        max-height: 720px;
     }
 }
 .reservation-list::-webkit-scrollbar { width: 10px; }
@@ -968,7 +972,7 @@ body {
 .activity-meta { color: var(--muted); font-size: 0.9rem; }
 .empty { padding: 14px; color: var(--muted); background: #0f1422; border: 1px dashed var(--border); border-radius: 10px; }
 .host-input {
-    min-width: 160px;
+    min-width: 280px;
     background: #0d1220;
     border: 1px solid var(--border);
     border-radius: 10px;
