@@ -220,6 +220,7 @@ end
 local uri = ngx.var.uri or ""
 local request_uri = ngx.var.request_uri or ""
 local is_lab_manager = is_lab_manager_path(uri) or is_lab_manager_path(request_uri)
+local is_ops_request = uri:sub(1, 5) == "/ops/" or request_uri:sub(1, 5) == "/ops/"
 
 local function deny_or_redirect(message)
     local is_page = uri == "/lab-manager" or uri == "/lab-manager/" or uri == "/lab-manager/index.html"
@@ -317,7 +318,7 @@ ngx.req.set_header(header_name, token)
 -- After the operator token has been validated, replace it with a separate
 -- gateway-to-worker credential.  This prevents the worker from trusting a
 -- browser-supplied management token or session cookie as service identity.
-if uri:sub(1, 5) == "/ops/" then
+if is_ops_request then
     local internal_token = os.getenv("OPS_INTERNAL_AUTH_TOKEN") or ""
     local internal_header = os.getenv("OPS_INTERNAL_AUTH_HEADER") or "X-Ops-Internal-Token"
     if internal_token == "" then
