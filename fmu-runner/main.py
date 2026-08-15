@@ -29,7 +29,7 @@ try:
 except ImportError:
     posix_resource = None  # Not available on Windows
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from concurrent.futures import ProcessPoolExecutor, Future
 from collections import defaultdict, deque
 from threading import Lock
@@ -42,6 +42,7 @@ from fmpy import read_model_description, simulate_fmu
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
 from fastapi.responses import StreamingResponse, Response, JSONResponse
 from pydantic import BaseModel, Field, field_validator
+from starlette.datastructures import UploadFile
 from xml.etree import ElementTree as ET
 
 from auth import _fetch_jwks, verify_jwt, verify_jwt_token, jwks_health
@@ -722,6 +723,11 @@ def _model_metadata_from_model_description(md) -> dict:
     default_start = float(default_experiment.startTime) if default_experiment and default_experiment.startTime is not None else 0.0
     default_stop = float(default_experiment.stopTime) if default_experiment and default_experiment.stopTime is not None else 1.0
     default_step = float(default_experiment.stepSize) if default_experiment and default_experiment.stepSize is not None else 0.01
+    default_tolerance: Optional[float] = None
+    if default_experiment is not None:
+        raw_tolerance = getattr(default_experiment, "tolerance", None)
+        if raw_tolerance is not None:
+            default_tolerance = float(raw_tolerance)
 
     variables = []
     for index, var in enumerate(getattr(md, "modelVariables", []), start=1):
@@ -838,8 +844,7 @@ def _model_metadata_from_model_description(md) -> dict:
         "defaultStartTime": default_start,
         "defaultStopTime": default_stop,
         "defaultStepSize": default_step,
-        "defaultTolerance": float(getattr(default_experiment, "tolerance", None))
-        if default_experiment and getattr(default_experiment, "tolerance", None) is not None else None,
+        "defaultTolerance": default_tolerance,
         "modelVariables": variables,
         # FMU-embedded descriptive metadata (populated when declared in modelDescription.xml)
         "description": _normalize_xml_value(getattr(md, "description", None)) or "",
@@ -1031,12 +1036,13 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
     instantiation_token = _normalize_xml_value(model_metadata.get("instantiationToken")) or guid
     model_identifier = _proxy_model_identifier(model_metadata)
     fmi_major_version = _parse_fmi_major_version(model_metadata.get("fmiVersion"))
-    declared_units = {
-        _normalize_xml_value(var.get("unit"))
-        for var in model_metadata.get("modelVariables", [])
-        if str(var.get("type", "Real") or "Real") in {"Real", "Float32", "Float64"}
-        and _normalize_xml_value(var.get("unit"))
-    }
+    declared_units: set[str] = set()
+    for variable in model_metadata.get("modelVariables", []):
+        if str(variable.get("type", "Real") or "Real") not in {"Real", "Float32", "Float64"}:
+            continue
+        unit_name = _normalize_xml_value(variable.get("unit"))
+        if unit_name is not None:
+            declared_units.add(unit_name)
 
     root_attributes = {
         "modelName": model_name,
@@ -1548,6 +1554,24 @@ def _extract_response_error_payload(response: httpx.Response) -> dict[str, Any]:
     return detail
 
 
+def _stream_error_payload(exc: Exception, *, sim_id: Optional[str] = None) -> dict[str, Any]:
+    """Build a safe public NDJSON error without exposing upstream responses."""
+    payload: dict[str, Any] = {"type": "error"}
+    if sim_id:
+        payload["simId"] = sim_id
+
+    detail = "Simulation failed"
+    if isinstance(exc, HTTPException) and isinstance(exc.detail, dict):
+        code = exc.detail.get("code")
+        message = exc.detail.get("error")
+        if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", code):
+            payload["code"] = code
+        if isinstance(message, str) and 0 < len(message) <= 256:
+            detail = message
+    payload["detail"] = detail
+    return payload
+
+
 _fmu_backend = _build_fmu_backend()
 
 
@@ -1639,15 +1663,16 @@ def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_siz
     # Apply resource limits inside the worker process (Linux only)
     try:
         if posix_resource is not None:
-            posix_resource.setrlimit(posix_resource.RLIMIT_CPU, (timeout, timeout + 5))
-            posix_resource.setrlimit(
-                posix_resource.RLIMIT_AS,
+            resource_api = cast(Any, posix_resource)
+            resource_api.setrlimit(resource_api.RLIMIT_CPU, (timeout, timeout + 5))
+            resource_api.setrlimit(
+                resource_api.RLIMIT_AS,
                 (FMU_WORKER_ADDRESS_SPACE_LIMIT, FMU_WORKER_ADDRESS_SPACE_LIMIT),
             )
     except Exception:
         pass  # May fail on non-Linux or if not root
 
-    sim_kwargs = dict(
+    sim_kwargs: dict[str, Any] = dict(
         start_time=start_time,
         stop_time=stop_time,
         step_size=step_size,
@@ -1661,7 +1686,10 @@ def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_siz
     result = simulate_fmu(fmu_path, **sim_kwargs)
 
     # result is a numpy structured array
-    col_names = list(result.dtype.names)
+    column_names = result.dtype.names
+    if column_names is None:
+        raise RuntimeError("FMU simulation returned no named result columns")
+    col_names = list(column_names)
     outputs = {}
     time_col = None
     for name in col_names:
@@ -1710,7 +1738,7 @@ async def aas_sync_fmu(access_key: str, request: Request):
         if raw_lab_id:
             lab_id = str(raw_lab_id)
         upload = form.get("file") or form.get("aasx")
-        if upload is not None:
+        if isinstance(upload, UploadFile):
             aasx_bytes = await upload.read()
         # Optional AAS metadata fields
         extra_info: dict = {}
@@ -2450,12 +2478,13 @@ async def stream_simulation(
             await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
                                 req.parameters, req.options, sim_result, elapsed)
 
-        except Exception:
+        except Exception as exc:
             logger.exception(
-                "Streaming simulation failed for lab %s",
+                "Streaming simulation failed for lab %s sim_id=%s",
                 str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+                sim_id,
             )
-            yield json.dumps({"type": "error", "detail": "Simulation failed"}) + "\n"
+            yield json.dumps(_stream_error_payload(exc, sim_id=sim_id)) + "\n"
         finally:
             _finalize_simulation_tracking(sim_id, lab_id)
 

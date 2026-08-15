@@ -309,7 +309,10 @@ def test_redeem_session_ticket_fails_closed_without_gateway_credentials():
     assert exc_info.value.status_code == 503
     detail = exc_info.value.detail
     assert isinstance(detail, dict)
-    assert detail["code"] == "SESSION_OBSERVER_NOT_CONFIGURED"
+    assert detail == {
+        "code": "SESSION_OBSERVER_NOT_CONFIGURED",
+        "error": "Session observer gateway credentials are not configured",
+    }
     assert fake_client.calls == []
 
 
@@ -1263,6 +1266,43 @@ def test_stream_logs_worker_exception_details(mock_exec, mock_md, mock_resolve, 
     assert response.status_code == 200
     assert "native FMU load failed" in caplog.text
     assert any(record.exc_info for record in caplog.records if record.name == "fmu-runner")
+
+
+@patch("main._resolve_fmu_path")
+@patch("main.read_model_description")
+@patch("main._executor")
+def test_stream_preserves_safe_structured_error_details(mock_exec, mock_md, mock_resolve):
+    mock_resolve.return_value = "/fake/path/spring.fmu"
+    mock_md_obj = MagicMock()
+    mock_md_obj.coSimulation = True
+    mock_md_obj.modelExchange = False
+    mock_md.return_value = mock_md_obj
+
+    async def fail_session_observation(*_args, **_kwargs):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "SESSION_OBSERVATION_UNAVAILABLE",
+                "error": "ACCESS_AUDIT_URL is not configured",
+            },
+        )
+
+    with patch("main._record_browser_session_started", fail_session_observation):
+        response = client.post("/api/v1/simulations/stream", json={
+            "labId": 1,
+            "parameters": {},
+            "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
+        })
+
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.strip().split("\n") if line.strip()]
+    assert len(events) == 1
+    assert events[0] == {
+        "type": "error",
+        "simId": events[0]["simId"],
+        "code": "SESSION_OBSERVATION_UNAVAILABLE",
+        "detail": "ACCESS_AUDIT_URL is not configured",
+    }
 
 
 # --- #29 - Simulation History ---
