@@ -140,7 +140,26 @@ function loadLabManager({
       : createElement(selector),
     getElementById: (id) => elements.get(id) || null,
     querySelectorAll: () => [],
-    createElement: () => createElement('created'),
+    createElement: (tagName) => {
+      const element = createElement(tagName);
+      if (tagName === 'div') {
+        let text = '';
+        Object.defineProperty(element, 'textContent', {
+          get: () => text,
+          set: (value) => { text = String(value ?? ''); },
+        });
+        Object.defineProperty(element, 'innerHTML', {
+          get: () => text
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;'),
+          set: () => {},
+        });
+      }
+      return element;
+    },
   };
   const promptCalls = [];
   const window = {
@@ -281,6 +300,20 @@ test('reserves a tall, explicit scroll area for actionable reservation details',
   assert.match(
     stylesheet,
     /@media \(min-width: 701px\)[\s\S]*\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*720px;[\s\S]*height:\s*720px;[\s\S]*max-height:\s*720px;/,
+  );
+});
+
+test('places the cancellation reason selector below the cancellation button', () => {
+  const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+  const script = fs.readFileSync(scriptPath, 'utf8');
+
+  assert.match(
+    stylesheet,
+    /\.reservation-item-actions\s*\{[^}]*flex-direction:\s*column;[^}]*align-items:\s*flex-end;/,
+  );
+  assert.match(
+    script,
+    /data-action="cancel-reservation"[\s\S]*class="reservation-reason"/,
   );
 });
 
@@ -820,6 +853,60 @@ test('loads FMU lab options and sends the selected lab as the AAS override', asy
     options.method === 'POST' && url.startsWith('/aas-admin/fmu/spring-damper.fmu/sync?'));
   assert.ok(syncCall);
   assert.equal(new URLSearchParams(syncCall.url.split('?')[1]).get('labId'), '7');
+});
+
+test('prefers managed lab names in operations reservations and lab selectors', async () => {
+  const { elements } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    labsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        labs: [
+          { labId: '1', name: 'State Space', resourceType: 1, accessKey: 'StateSpace.fmu', listed: true },
+          { labId: '2', name: 'Furuta Inverted Pendulum', resourceType: 0, accessKey: 'guac:id:2', listed: true },
+        ],
+      }),
+    }),
+    actionableResponse: {
+      ok: true,
+      status: 200,
+      json: async () => ({
+          reservations: [{
+            reservationKey: '0xreservation',
+            labId: '1',
+            status: 2,
+            statusLabel: 'ACCESS_AUTHORIZED',
+            start: 1_800_000_000,
+            end: 1_800_003_600,
+            priceCredits: '0.8',
+            providerShareCredits: '0.7',
+            renter: '0xrenter',
+            institutionAddress: '0xinstitution',
+            cancellable: false,
+            cancellationOptions: [],
+          }],
+          pagination: { returned: 1, hasMore: false, total: 1 },
+        }),
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(
+    elements.get('powerPolicyLabSelect').options.map((option) => option.textContent).join('\n'),
+    /State Space/,
+  );
+  assert.match(
+    elements.get('fmuSyncKey').options.map((option) => option.textContent).join('\n'),
+    /State Space/,
+  );
+  assert.match(elements.get('upcomingReservationsList').innerHTML, /State Space/);
+  assert.doesNotMatch(elements.get('upcomingReservationsList').innerHTML, /Lab #1/);
 });
 
 test('loads AAS link FMU options and sends the selected lab when saving a link', async () => {

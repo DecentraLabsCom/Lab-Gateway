@@ -819,7 +819,7 @@
             const editing = !!state.editingLabId;
 
             $('labPublisherSubmitBtn').disabled = true;
-            setStatus(editing ? `Updating Lab #${state.editingLabId} on-chain...` : 'Publishing lab on-chain...', false);
+            setStatus(editing ? `Updating ${resolveStateLabDisplayName(state.editingLabId)} on-chain...` : 'Publishing lab on-chain...', false);
             const result = await fetchJson(editing ? `/lab-admin/labs/${encodeURIComponent(state.editingLabId)}` : '/lab-admin/labs', {
                 method: editing ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -833,7 +833,8 @@
             const createLabel = result.action === 'existingLab' || result.status === 'already_exists'
                 ? 'Existing lab'
                 : action.includes('andlist') ? 'Listed' : 'Created';
-            setStatus(`${editing ? 'Updated' : createLabel}.${transactionMessage}${result.labId ? ' Lab #' + result.labId : ''}`, false);
+            const resultLabLabel = result.labId ? ` ${resolveStateLabDisplayName(result.labId)}` : '';
+            setStatus(`${editing ? 'Updated' : createLabel}.${transactionMessage}${resultLabLabel}`, false);
             if (editing) clearEditMode(false);
             await loadPublisherData();
         } catch (err) {
@@ -1260,8 +1261,20 @@
     }
 
     function resolveLabDisplayName(lab) {
-        const name = typeof lab?.name === 'string' ? lab.name.trim() : '';
+        const candidates = [
+            lab?.name,
+            lab?.labName,
+            lab?.metadataName,
+            lab?.metadata?.name,
+            lab?.metadata?.labName,
+        ];
+        const name = candidates.find(candidate => typeof candidate === 'string' && candidate.trim());
         return name || `Lab #${String(lab?.labId ?? '').trim()}`;
+    }
+
+    function resolveStateLabDisplayName(labId) {
+        const lab = state.labs.find(item => String(item?.labId) === String(labId));
+        return resolveLabDisplayName(lab || { labId });
     }
 
     function renderLabs(labs) {
@@ -1272,28 +1285,31 @@
             return;
         }
         target.classList.remove('empty');
-        target.innerHTML = labs.map(lab => `
+        target.innerHTML = labs.map(lab => {
+            const displayName = resolveLabDisplayName(lab);
+            return `
             <div class="lab-row">
                 <div>
-                    <div class="item-title">${escapeHtml(resolveLabDisplayName(lab))} ${Number(lab.resourceType) === 1 ? 'FMU' : 'Remote'} ${lab.listed ? '<span class="pill good">Listed</span>' : '<span class="pill soft">Draft</span>'}</div>
+                    <div class="item-title">${escapeHtml(displayName)} ${Number(lab.resourceType) === 1 ? 'FMU' : 'Remote'} ${lab.listed ? '<span class="pill good">Listed</span>' : '<span class="pill soft">Draft</span>'}</div>
                     <div class="item-meta">${escapeHtml(lab.accessKey || '')} - ${escapeHtml(lab.uri || '')}</div>
                 </div>
                 <div class="lab-row-side">
                     <div class="item-meta">${escapeHtml(formatRawPriceForUnit(lab.price || '0', resolveLabPriceUnit(lab)))} credits/${escapeHtml(resolveLabPriceUnit(lab))}</div>
                     <div class="lab-actions">
-                        <button class="mini-btn primary" type="button" data-lab-action="edit" data-lab-id="${escapeAttr(lab.labId)}" title="Edit Lab #${escapeAttr(lab.labId)}" aria-label="Edit Lab #${escapeAttr(lab.labId)}">
+                        <button class="mini-btn primary" type="button" data-lab-action="edit" data-lab-id="${escapeAttr(lab.labId)}" title="Edit ${escapeAttr(displayName)}" aria-label="Edit ${escapeAttr(displayName)}">
                             ${renderLabActionIcon('edit')}
                         </button>
-                        <button class="mini-btn" type="button" data-lab-action="${lab.listed ? 'unlist' : 'list'}" data-lab-id="${escapeAttr(lab.labId)}" title="${lab.listed ? 'Unlist' : 'List'} Lab #${escapeAttr(lab.labId)}" aria-label="${lab.listed ? 'Unlist' : 'List'} Lab #${escapeAttr(lab.labId)}">
+                        <button class="mini-btn" type="button" data-lab-action="${lab.listed ? 'unlist' : 'list'}" data-lab-id="${escapeAttr(lab.labId)}" title="${lab.listed ? 'Unlist' : 'List'} ${escapeAttr(displayName)}" aria-label="${lab.listed ? 'Unlist' : 'List'} ${escapeAttr(displayName)}">
                             ${renderLabActionIcon(lab.listed ? 'unlist' : 'list')}
                         </button>
-                        <button class="mini-btn danger" type="button" data-lab-action="delete" data-lab-id="${escapeAttr(lab.labId)}" title="Delete Lab #${escapeAttr(lab.labId)} on-chain" aria-label="Delete Lab #${escapeAttr(lab.labId)} on-chain">
+                        <button class="mini-btn danger" type="button" data-lab-action="delete" data-lab-id="${escapeAttr(lab.labId)}" title="Delete ${escapeAttr(displayName)} on-chain" aria-label="Delete ${escapeAttr(displayName)} on-chain">
                             ${renderLabActionIcon('delete')}
                         </button>
                     </div>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
     }
 
     async function handleLabListClick(event) {
@@ -1327,7 +1343,7 @@
         syncResourceTypeFields();
         syncBookingModeFields();
         updateEditControls();
-        setStatus(`Editing Lab #${lab.labId}. Use Save Lab to persist changes.`, false);
+        setStatus(`Editing ${resolveLabDisplayName(lab)}. Use Save Lab to persist changes.`, false);
         $('labName').focus();
     }
 
@@ -1362,7 +1378,7 @@
         } catch (err) {
             $('labSetupMode').value = 'quick';
             $('labMetadataUrl').value = metadataUrl;
-            setStatus(`Editing Lab #${lab.labId}. Metadata could not be loaded; quick URL mode enabled.`, true);
+            setStatus(`Editing ${resolveLabDisplayName(lab)}. Metadata could not be loaded; quick URL mode enabled.`, true);
         }
     }
 
@@ -1484,7 +1500,7 @@
                 method: 'POST',
             });
             assertLabMutationSuccess(result, shouldList ? 'List' : 'Unlist');
-            setStatus(`${shouldList ? 'Listed' : 'Unlisted'} Lab #${lab.labId}. Tx: ${result.transactionHash || 'pending'}`, false);
+            setStatus(`${shouldList ? 'Listed' : 'Unlisted'} ${resolveLabDisplayName(lab)}. Tx: ${result.transactionHash || 'pending'}`, false);
             await loadPublisherData();
         } catch (err) {
             setStatus(err.message || `${shouldList ? 'List' : 'Unlist'} failed`, true);
@@ -1494,13 +1510,13 @@
     }
 
     async function deleteLab(lab, button) {
-        if (!window.confirm(`Delete Lab #${lab.labId} on-chain? This burns the lab token and cannot be undone. Use Unlist to stop new bookings while preserving the lab record.`)) return;
+        if (!window.confirm(`Delete ${resolveLabDisplayName(lab)} on-chain? This burns the lab token and cannot be undone. Use Unlist to stop new bookings while preserving the lab record.`)) return;
         button.disabled = true;
         try {
             const result = await fetchJson(`/lab-admin/labs/${encodeURIComponent(lab.labId)}`, { method: 'DELETE' });
             assertLabMutationSuccess(result, 'Delete');
             if (state.editingLabId === String(lab.labId)) clearEditMode(false);
-            setStatus(`Deleted Lab #${lab.labId} on-chain. Gateway content is hidden and retained according to its purge policy. Tx: ${result.transactionHash || 'pending'}`, false);
+            setStatus(`Deleted ${resolveLabDisplayName(lab)} on-chain. Gateway content is hidden and retained according to its purge policy. Tx: ${result.transactionHash || 'pending'}`, false);
             await loadPublisherData();
         } catch (err) {
             setStatus(err.message || 'Delete failed', true);

@@ -6,6 +6,7 @@ import test from 'node:test';
 const repoRoot = new URL('../../', import.meta.url);
 const scriptPath = new URL('web/assets/js/lab-publisher.js', repoRoot);
 const stylesheetPath = new URL('web/assets/css/lab-manager.css', repoRoot);
+const indexPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function loadPublisherHooks() {
   const source = fs.readFileSync(scriptPath, 'utf8');
@@ -88,4 +89,12 @@ test('prefers the metadata lab name and falls back to the lab id', () => {
   assert.match(labList.innerHTML, /<div class="item-title">StateSpace FMU /);
   assert.doesNotMatch(labList.innerHTML, /Lab #1 FMU/);
   assert.match(labList.innerHTML, /<div class="item-title">Lab #2 Remote /);
+});
+
+test('cache-busts the lab manager assets after lab display updates', () => {
+  const index = fs.readFileSync(indexPath, 'utf8');
+
+  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v4/);
+  assert.match(index, /lab-manager\.js\?v=workflow-tabs-v4/);
+  assert.match(index, /lab-publisher\.js\?v=workflow-tabs-v2/);
 });

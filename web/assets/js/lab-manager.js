@@ -202,6 +202,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let powerPolicies = [];
     let powerPolicyStepDrafts = [];
     let managedLabsInitialized = false;
+    let managedLabsPromise = null;
+    let managedLabs = [];
     let hostNames = [];
     let guacamoleCandidates = [];
 
@@ -620,6 +622,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tabName === 'operations') {
             void (async () => {
                 await refreshLabManagerSession();
+                await loadManagedLabsOnce({ skipAuthPrompt: true });
                 checkOpsAvailability();
                 if (hostListEl) loadHostInventory({ skipAuthPrompt: true });
                 if (upcomingReservationsListEl) loadActionableReservations({ skipAuthPrompt: true });
@@ -645,10 +648,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function loadManagedLabsOnce() {
-        if (managedLabsInitialized) return;
+    function loadManagedLabsOnce(options = {}) {
+        if (managedLabsPromise) return managedLabsPromise;
+        if (managedLabsInitialized) return Promise.resolve();
         managedLabsInitialized = true;
-        loadManagedLabs({ skipAuthPrompt: true });
+        managedLabsPromise = loadManagedLabs(options);
+        return managedLabsPromise;
     }
 
     function requireBillingAccess(onAuthenticated, onTokenAuthenticated) {
@@ -1273,6 +1278,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/lab-admin/labs', options);
             if (res.status === 403) {
                 showOpsWarning();
+                managedLabs = [];
                 renderPowerPolicyLabOptions([]);
                 renderFmuAccessKeyOptions([]);
                 renderFmuLabOptions(fmuSyncLabSelectEl, []);
@@ -1281,6 +1287,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (res.status === 401) {
                 if (!options.skipAuthPrompt) showToast('Lab Manager session required to load laboratories', 'error');
+                managedLabs = [];
                 renderPowerPolicyLabOptions([]);
                 renderFmuAccessKeyOptions([]);
                 renderFmuLabOptions(fmuSyncLabSelectEl, []);
@@ -1289,12 +1296,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const body = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            renderPowerPolicyLabOptions(body.labs, selectedPowerPolicyLabId);
-            renderFmuAccessKeyOptions(body.labs, selectedFmuAccessKey);
-            renderFmuLabOptions(fmuSyncLabSelectEl, body.labs, selectedFmuLabId);
-            renderFmuLabOptions(aasLinkLabSelectEl, body.labs, selectedAasLinkLabId);
+            managedLabs = Array.isArray(body.labs) ? body.labs : [];
+            renderPowerPolicyLabOptions(managedLabs, selectedPowerPolicyLabId);
+            renderFmuAccessKeyOptions(managedLabs, selectedFmuAccessKey);
+            renderFmuLabOptions(fmuSyncLabSelectEl, managedLabs, selectedFmuLabId);
+            renderFmuLabOptions(aasLinkLabSelectEl, managedLabs, selectedAasLinkLabId);
         } catch (err) {
             console.warn('Unable to load provider laboratories', err);
+            managedLabs = [];
             renderPowerPolicyLabOptions([]);
             renderFmuAccessKeyOptions([]);
             renderFmuLabOptions(fmuSyncLabSelectEl, []);
@@ -1363,7 +1372,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const accessKey = String(lab.accessKey).trim();
             const option = document.createElement('option');
             option.value = accessKey;
-            option.textContent = `Lab #${String(lab.labId).trim()} · ${accessKey}`;
+            option.textContent = `${resolveLabDisplayName(lab)} · ${accessKey}`;
             fmuSyncKeyEl.appendChild(option);
         });
         const selected = preferredAccessKey || current || '';
@@ -1374,10 +1383,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatPowerPolicyLabLabel(lab) {
-        const labId = String(lab?.labId || '').trim();
         const resourceType = Number(lab?.resourceType) === 1 ? 'FMU' : 'Remote';
         const status = lab?.listed ? 'Listed' : 'Draft';
-        return `Lab #${labId} · ${resourceType} · ${status}`;
+        return `${resolveLabDisplayName(lab)} · ${resourceType} · ${status}`;
+    }
+
+    function resolveLabDisplayName(lab) {
+        const candidates = [
+            lab?.name,
+            lab?.labName,
+            lab?.metadataName,
+            lab?.metadata?.name,
+            lab?.metadata?.labName,
+        ];
+        const name = candidates.find(candidate => typeof candidate === 'string' && candidate.trim());
+        const labId = String(lab?.labId ?? '').trim();
+        return name ? name.trim() : `Lab #${labId}`;
+    }
+
+    function resolveReservationLabDisplayName(reservation) {
+        const directName = [reservation?.labName, reservation?.name]
+            .find(candidate => typeof candidate === 'string' && candidate.trim());
+        if (directName) return directName.trim();
+        const managedLab = managedLabs.find(lab => String(lab?.labId ?? '') === String(reservation?.labId ?? ''));
+        return resolveLabDisplayName(managedLab || reservation);
     }
 
     function handlePowerPolicyLabChange() {
@@ -1433,7 +1462,9 @@ document.addEventListener('DOMContentLoaded', () => {
         powerPolicies.forEach(policy => {
             const option = document.createElement('option');
             option.value = policy.labId || '';
-            option.textContent = `${policy.labId || 'unknown'} · ${policy.policyName || 'Unnamed policy'}`;
+            const lab = managedLabs.find(item => String(item?.labId || '') === String(policy.labId || ''))
+                || { labId: policy.labId };
+            option.textContent = `${resolveLabDisplayName(lab)} · ${policy.policyName || 'Unnamed policy'}`;
             powerPolicySelectEl.appendChild(option);
         });
         const selected = preferredLabId || current;
@@ -2529,8 +2560,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatProvisionLabLabel(lab) {
-        const labId = String(lab?.labId || '').trim();
-        return `Lab ${labId}${lab?.accessKey ? ` - ${lab.accessKey}` : ''}`;
+        return `${resolveLabDisplayName(lab)}${lab?.accessKey ? ` - ${lab.accessKey}` : ''}`;
     }
 
     function selectedProvisionLabIds() {
@@ -3250,6 +3280,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 : [];
             const actions = reservation.cancellable && reasonOptions.length
                 ? `<div class="reservation-item-actions">
+                    <button type="button" class="mini-btn danger" data-action="cancel-reservation" data-reservation-key="${escapeHtml(key)}">
+                        ${cancellationButtonLabel(numericStatus)}
+                    </button>
                     <select class="reservation-reason" aria-label="Cancellation reason" data-reservation-reason>
                         ${reasonOptions.map(option => {
                             const deadline = Number.isFinite(option.deadline)
@@ -3261,13 +3294,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             return `<option value="${option.code}">Reason ${option.code}: ${escapeHtml(option.label)} · ${escapeHtml(penalty)} · ${escapeHtml(deadline)}</option>`;
                         }).join('')}
                     </select>
-                    <button type="button" class="mini-btn danger" data-action="cancel-reservation" data-reservation-key="${escapeHtml(key)}">
-                        ${cancellationButtonLabel(numericStatus)}
-                    </button>
                 </div>`
                 : `<div class="reservation-cancel-note">Cancellation unavailable for this status.</div>`;
             const renter = shortAddress(reservation.renter);
-            const labLabel = reservation.labName || `Lab #${reservation.labId}`;
+            const labLabel = resolveReservationLabDisplayName(reservation);
             const institution = reservation.institutionName || shortAddress(reservation.institutionAddress);
             return `<article class="reservation-item" data-reservation-key="${escapeHtml(key)}" data-reservation-status="${numericStatus ?? ''}">
                 <div class="reservation-item-heading">
@@ -3520,9 +3550,11 @@ document.addEventListener('DOMContentLoaded', () => {
         function buildTimelineSummary(data) {
             const reservation = data.reservation || {};
             const host = data.host || {};
+            const labId = host.labId || reservation.labId;
+            const labName = host.labName || reservation.labName;
             const rows = [
                 { label: 'Reservation', value: reservation.reservationId || 'n/a', mono: true },
-                { label: 'Lab', value: host.labId || reservation.labId || 'n/a' },
+                { label: 'Lab', value: resolveReservationLabDisplayName({ labId, labName }) || 'n/a' },
                 { label: 'Host', value: host.name || 'n/a' },
                 { label: 'Status', value: reservation.status || 'unknown' },
                 { label: 'Schedule', value: formatRange(reservation.start, reservation.end) },
