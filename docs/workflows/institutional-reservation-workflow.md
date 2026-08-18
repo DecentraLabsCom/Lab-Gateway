@@ -8,7 +8,7 @@ This document describes the current institutional reservation process from a use
 | --- | --- |
 | User | Starts the reservation and completes the institutional WebAuthn ceremony. |
 | Marketplace | Validates the user session, prepares and signs an EIP-712 intent, registers it on chain, and orchestrates the authorization ceremony. |
-| Consumer backend | Validates the SAML and WebAuthn evidence, persists the accepted intent, and executes the institutional transaction. |
+| Consumer backend | Validates the institutional session credential, WebAuthn evidence and intent binding, persists the accepted intent, and executes the institutional transaction. |
 | Provider backend | Observes pending reservation requests and accepts or denies them according to its configured reservation automation. |
 | Smart contracts | Enforce intent consumption, reservation payload, price, state, and treasury rules. |
 
@@ -84,11 +84,11 @@ sequenceDiagram
     par Intent registration
         Marketplace->>Chain: Submit intent registration
     and Authorization setup
-        Marketplace->>Consumer: POST /intents/authorize with SAML-bound payload
+        Marketplace->>Consumer: POST /intents/authorize with institutional session credential and bound payload
     end
     Consumer-->>User: WebAuthn ceremony URL and session ID
     User->>Consumer: Complete WebAuthn assertion
-    Consumer->>Consumer: Validate SAML, PUC, WebAuthn and intent signature
+    Consumer->>Consumer: Validate institutional session, PUC, WebAuthn and intent signature
     Consumer->>Chain: Execute the accepted intent
     Chain-->>Consumer: Reservation event and transaction result
 ```
@@ -102,7 +102,14 @@ serializes signer access, and calls `cancelIntent` while the intent is still
 executed or cancelled intent is removed from the lifecycle store without a
 second transaction.
 
-The consumer backend accepts an intent only after validating its shape, SAML assertion and assertion-hash binding, replay rules, WebAuthn assertion, expiry, EIP-712 signature, and trusted-signer policy. Accepted intents are persisted and move through `QUEUED`, `AUTHORIZED_PENDING_REGISTRATION`, `IN_PROGRESS`, `EXECUTED`, `FAILED`, or `REJECTED` as applicable. `EXECUTED` means only that the intent transaction was mined successfully and consumed the registered intent; it is not a reservation confirmation.
+The consumer backend accepts an intent only after validating its shape,
+institutional session credential and assertion-hash binding, replay rules,
+WebAuthn assertion, expiry, EIP-712 signature, and trusted-signer policy.
+Accepted intents are persisted and move through `QUEUED`,
+`AUTHORIZED_PENDING_REGISTRATION`, `IN_PROGRESS`, `EXECUTED`, `FAILED`, or
+`REJECTED` as applicable. `EXECUTED` means only that the intent transaction was
+mined successfully and consumed the registered intent; it is not a reservation
+confirmation.
 
 Intent status responses therefore expose `reservationStatus` separately. The
 backend reads this value from `getReservation(reservationKey)` and reports

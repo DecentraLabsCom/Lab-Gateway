@@ -64,8 +64,8 @@ sequenceDiagram
 
     User->>Marketplace: Open a confirmed reservation
     Marketplace->>Marketplace: Validate SSO session, PUC and reservation context
-    Marketplace->>Consumer: POST /auth/checkin-institutional with bound JWT and SAML assertion
-    Consumer->>Consumer: Validate JWT, SAML, PUC, payer institution and reservation
+    Marketplace->>Consumer: POST /auth/checkin-institutional with bound JWT and institutional session credential
+    Consumer->>Consumer: Validate JWT, credential, PUC, payer institution and reservation
     Consumer->>Chain: Submit check-in / access authorization transaction
     Consumer-->>Marketplace: Accepted check-in and transaction hash
     Marketplace->>Provider: POST /auth/access-credential with bound provider JWT
@@ -89,11 +89,24 @@ sequenceDiagram
 
 Marketplace requires the active SSO session, the user's PUC, the reservation context, and the user's institutional affiliation. It resolves the payer institution wallet and signs Marketplace JWTs that are bound to the `purpose=lab_access`, `reservationKey`, `labId`, PUC, payer institution wallet, SAML assertion hash, and intended backend audience.
 
-The SAML assertion itself is sent only to the consumer backend for check-in validation. The provider receives the bound Marketplace JWT and does not need the full assertion for the provider access step.
+The raw SAML assertion is exchanged only during the Marketplace callback at
+`POST /auth/saml/session`; it is not sent during check-in or provider access.
+The provider receives a provider-audience Marketplace JWT and, when it must
+query a separate consumer, a distinct consumer-audience Marketplace JWT for
+that status lookup.
 
 ### 2. Consumer check-in is asynchronous with respect to mining
 
-`POST /auth/checkin-institutional` validates the Marketplace JWT, SAML binding, PUC, payer institution, reservation state, and reservation window before submitting the on-chain authorization transaction. It normally acknowledges the submission with a transaction hash; it does not keep the browser flow blocked waiting for a receipt. If the institutional wallet is temporarily occupied by another durable transaction, it returns `202 CHECKIN_QUEUED` with `Retry-After` instead of turning nonce contention into a `500`. Marketplace treats that response as an accepted check-in and continues to the provider flow; it does not create a second check-in operation.
+`POST /auth/checkin-institutional` validates the Marketplace JWT, institutional
+session credential and its assertion-hash binding, PUC, payer institution,
+reservation state, and reservation window before submitting the on-chain
+authorization transaction. It normally acknowledges the submission with a
+transaction hash; it does not keep the browser flow blocked waiting for a
+receipt. If the institutional wallet is temporarily occupied by another
+durable transaction, it returns `202 CHECKIN_QUEUED` with `Retry-After` instead
+of turning nonce contention into a `500`. Marketplace treats that response as
+an accepted check-in and continues to the provider flow; it does not create a
+second check-in operation.
 
 The institutional check-in outbox separates transaction submission from receipt monitoring. Its lifecycle is `PENDING`, `SUBMITTING`, `SUBMITTED`, `MINED_SUCCESS`, `MINED_FAILED`, `RETRY`, and `FAILED`. The request that creates a local check-in immediately claims and dispatches it before provider provisioning begins; the required scheduled worker handles retries and crash recovery. The signing wallet persists the signed raw transaction and its locally computed hash before the first RPC, so a later SQL failure cannot lose the broadcast identity. The signing wallet's nonce reservation and transaction broadcast are serialized durably per wallet, while provisioning and status polling remain concurrent across reservations.
 If a pre-broadcast failure occurs after nonce reservation, `FAILED` remains a wallet barrier and a validated user retry reuses that nonce. Only `MINED_FAILED`, whose nonce was consumed on-chain, starts a new nonce generation.
@@ -136,7 +149,7 @@ The browser submits the code to the gateway with `POST /auth/access`. OpenResty 
 
 FMU uses the same opaque credential but exchanges it server-to-server through the Marketplace BFF. The BFF captures the gateway session identifier as a reservation-scoped resource capability and stores up to six contexts in one encrypted, HttpOnly, same-site Marketplace cookie. Browser simulation, history, result, and proxy-FMU requests remain same-origin; the BFF selects exactly one unexpired capability by gateway, lab, and canonical reservation, then forwards only `FMU_SESSION=<selected id>` to the gateway.
 
-The capability is independent of the 30-minute Marketplace SSO session after
+The capability is independent of the 60-minute Marketplace SSO session after
 handoff. SSO is required to create the initial lab-access credential, but later
 FMU control-plane requests use the encrypted resource context until the
 gateway-issued resource expiration or logout removes it. This allows a valid
