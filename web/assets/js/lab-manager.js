@@ -599,6 +599,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (upcomingReservationsListEl) {
         upcomingReservationsListEl.addEventListener('click', handleUpcomingReservationActions);
+        upcomingReservationsListEl.addEventListener('change', handleUpcomingReservationReasonChange);
     }
 
     const initializedManagerTabs = new Set();
@@ -3281,7 +3282,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const key = String(reservation.reservationKey || '');
             const status = String(reservation.statusLabel || 'UNKNOWN');
             const numericStatus = normalizeReservationStatus(reservation.status);
-            const statusClass = numericStatus === 1 ? 'good' : numericStatus === 0 ? 'warn' : 'soft';
+            const accessWindowEnded = isReservationWindowEnded(reservation);
+            const displayedStatus = accessWindowEnded && !/access window ended/i.test(status)
+                ? `${status} · ACCESS WINDOW ENDED`
+                : status;
+            const statusClass = accessWindowEnded
+                ? 'warn'
+                : numericStatus === 1 ? 'good' : numericStatus === 0 ? 'warn' : 'soft';
             const reasonOptions = Array.isArray(reservation.cancellationOptions)
                 ? reservation.cancellationOptions
                     .map(option => ({
@@ -3292,10 +3299,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     }))
                     .filter(option => Number.isInteger(option.code))
                 : [];
+            const defaultReasonCode = reasonOptions[0]?.code;
             const actions = reservation.cancellable && reasonOptions.length
                 ? `<div class="reservation-item-actions">
                     <button type="button" class="mini-btn danger" data-action="cancel-reservation" data-reservation-key="${escapeHtml(key)}">
-                        ${cancellationButtonLabel(numericStatus)}
+                        ${cancellationButtonLabel(numericStatus, defaultReasonCode)}
                     </button>
                     <select class="reservation-reason" aria-label="Cancellation reason" data-reservation-reason>
                         ${reasonOptions.map(option => {
@@ -3317,7 +3325,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="reservation-item-heading">
                     <span class="item-title">${escapeHtml(labLabel)}</span>
                     <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
-                    <span class="pill ${statusClass}">${escapeHtml(status)}</span>
+                    <span class="pill ${statusClass}">${escapeHtml(displayedStatus)}</span>
                 </div>
                 <div class="reservation-item-schedule">
                     <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
@@ -3355,14 +3363,19 @@ document.addEventListener('DOMContentLoaded', () => {
             .format(new Date(timestamp * 1000));
     }
 
+    function isReservationWindowEnded(reservation) {
+        const end = Number(reservation?.end);
+        return Number.isFinite(end) && end > 0 && end <= Math.floor(Date.now() / 1000);
+    }
+
     function normalizeReservationStatus(status) {
         const numericStatus = Number(status);
         return Number.isInteger(numericStatus) ? numericStatus : null;
     }
 
-    function cancellationButtonLabel(status) {
+    function cancellationButtonLabel(status, reasonCode) {
         if (status === 0) return 'Decline request';
-        if (status === 2) return 'Report service failure';
+        if (status === 2 || reasonCode === 8) return 'Report service failure';
         return 'Cancel reservation';
     }
 
@@ -3370,6 +3383,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const text = String(value || '');
         if (text.length <= prefixLength + suffixLength + 3) return text;
         return `${text.slice(0, prefixLength)}…${text.slice(-suffixLength)}`;
+    }
+
+    function handleUpcomingReservationReasonChange(event) {
+        const reasonEl = event.target.closest('[data-reservation-reason]');
+        if (!reasonEl || !upcomingReservationsListEl.contains(reasonEl)) return;
+        const row = reasonEl.closest('.reservation-item');
+        const button = row?.querySelector('[data-action="cancel-reservation"]');
+        if (!button) return;
+        const reservationStatus = normalizeReservationStatus(row.dataset.reservationStatus);
+        button.textContent = cancellationButtonLabel(reservationStatus, Number(reasonEl.value));
     }
 
     async function handleUpcomingReservationActions(event) {
@@ -3386,8 +3409,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const reasonEl = row?.querySelector('[data-reservation-reason]');
         const reasonCode = Number(reasonEl?.value);
         if (!key || !Number.isInteger(reasonCode)) return;
-        const confirmationMessage = reservationStatus === 2
-            ? 'Report provider service failure for this access-authorized reservation? The full price returns as service credits.'
+        const confirmationMessage = reservationStatus === 2 || reasonCode === 8
+            ? reservationStatus === 2
+                ? 'Report provider service failure for this access-authorized reservation? The full price returns as service credits.'
+                : 'Report provider service failure for this confirmed reservation? The full price returns as service credits.'
             : 'Cancel this upcoming reservation? A confirmed reservation returns its full price as service credits.';
         if (!window.confirm(confirmationMessage)) {
             return;
@@ -3409,7 +3434,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.status === 401) throw new Error('Unauthorized: check LAB_MANAGER_TOKEN.');
             if (res.status === 403) throw new Error('Access denied: provider reservation administration is not available.');
             if (!res.ok) throw new Error(body.error || `Cancellation failed (HTTP ${res.status}).`);
-            showToast('Reservation cancellation submitted', 'success');
+            showToast(
+                reasonCode === 8
+                    ? 'Provider service-failure report submitted'
+                    : 'Reservation cancellation submitted',
+                'success'
+            );
             await loadActionableReservations();
         } catch (err) {
             console.error(err);

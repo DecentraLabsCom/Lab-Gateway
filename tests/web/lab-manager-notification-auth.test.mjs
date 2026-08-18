@@ -75,6 +75,7 @@ function loadLabManager({
     status: 200,
     json: async () => ({ credentials: [] }),
   }),
+  confirm = () => true,
 }) {
   const ids = [
     'driver', 'enabled', 'from', 'fromName', 'defaultTo', 'timezone',
@@ -163,7 +164,7 @@ function loadLabManager({
   };
   const promptCalls = [];
   const window = {
-    confirm: () => true,
+    confirm,
     AuthTokenHandler: {
       showTokenModal: (...args) => promptCalls.push(args),
       getTokenConfigForPath: () => ({ key: 'billing', login: '/admin/login' }),
@@ -452,6 +453,47 @@ test('cancellation click reads the reason from the reservation row and posts it'
   assert.deepEqual(JSON.parse(cancellation.options.body), { reasonCode: 1 });
 });
 
+test('confirms reason 8 as a provider service-failure report for a confirmed reservation', async () => {
+  const confirmationMessages = [];
+  const { elements, fetchCalls } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    confirm: (message) => {
+      confirmationMessages.push(message);
+      return true;
+    },
+  });
+  const reservationList = elements.get('upcomingReservationsList');
+  const row = {
+    dataset: {
+      reservationKey: `0x${'ba'.repeat(32)}`,
+      reservationStatus: '1',
+    },
+    querySelector: (selector) => selector === '[data-reservation-reason]'
+      ? { value: '8', disabled: false }
+      : null,
+  };
+  const button = {
+    disabled: false,
+    closest: (selector) => {
+      if (selector === '[data-action="cancel-reservation"]') return button;
+      if (selector === '.reservation-item') return row;
+      return null;
+    },
+  };
+
+  reservationList.dispatchEvent({ type: 'click', target: button });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(confirmationMessages[0], /Report provider service failure/);
+  const cancellation = fetchCalls.find(({ options }) => options.method === 'POST');
+  assert.deepEqual(JSON.parse(cancellation.options.body), { reasonCode: 8 });
+  assert.equal(elements.get('toast').textContent, 'Provider service-failure report submitted');
+});
+
 test('renders the provider service-failure action for an access-authorized reservation', async () => {
   const reservationKey = `0x${'cd'.repeat(32)}`;
   const { elements } = loadLabManager({
@@ -501,6 +543,67 @@ test('renders the provider service-failure action for an access-authorized reser
   assert.match(rendered, /Report service failure/);
   assert.match(rendered, /data-action="cancel-reservation"/);
   assert.match(rendered, /data-action="load-more-actionable"/);
+});
+
+test('renders the provider service-failure action for an expired confirmed reservation in the attestation grace period', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const { elements } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+    actionableResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        reservations: [{
+          reservationKey: `0x${'ef'.repeat(32)}`,
+          status: 1,
+          statusLabel: 'CONFIRMED',
+          cancellable: true,
+          start: now - 3600,
+          end: now - 1800,
+          cancellationOptions: [{
+            reasonCode: 8,
+            label: 'Service failure',
+            deadline: now + 3600,
+            reputationPenalty: -3,
+          }],
+        }],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const rendered = elements.get('upcomingReservationsList').innerHTML;
+  assert.match(rendered, /CONFIRMED · ACCESS WINDOW ENDED/);
+  assert.match(rendered, /Report service failure/);
+  assert.doesNotMatch(rendered, />\s*Cancel reservation\s*</);
+});
+
+test('updates the cancellation action label when reason 8 is selected', () => {
+  const { elements } = loadLabManager({});
+  const reservationList = elements.get('upcomingReservationsList');
+  const button = { textContent: 'Cancel reservation' };
+  const row = {
+    dataset: { reservationStatus: '1' },
+    querySelector: (selector) => selector === '[data-action="cancel-reservation"]'
+      ? button
+      : null,
+  };
+  const reason = {
+    value: '8',
+    closest: (selector) => selector === '[data-reservation-reason]' || selector === '.reservation-item'
+      ? selector === '.reservation-item' ? row : reason
+      : null,
+  };
+
+  reservationList.dispatchEvent({ type: 'change', target: reason });
+
+  assert.equal(button.textContent, 'Report service failure');
 });
 
 test('loads power policy lab options from provider labs and saves the selected lab', async () => {
