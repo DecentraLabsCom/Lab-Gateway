@@ -68,7 +68,7 @@ def _variable_flat_size(fmu, variable_by_vr, variable):
 
 
 def _read_outputs(fmu, model_description, variables):
-    variable_by_vr = _variable_by_value_reference(model_description)
+    variable_by_vr = _variables_by_value_reference(model_description)
     by_type = {}
     for variable in variables:
         variable_type = str(variable.type)
