@@ -125,6 +125,7 @@ JWT `iss`/`sub` must use that same canonical value.
 | Operator access | `ADMIN_ACCESS_TOKEN`, `LAB_MANAGER_TOKEN`, `ADMIN_*`, `SECURITY_ALLOW_PRIVATE_NETWORKS` | Use independent random tokens. Prefer explicit CIDRs/VPNs; never pass tokens in query strings. |
 | Backend and contracts | `CONTRACT_ADDRESS`, `ETHEREUM_*_RPC_URL`, `FEATURES_PROVIDERS_*`, `ALLOWED_ORIGINS` | These live in `blockchain-services/.env`. A Full provider deployment needs provider features enabled; only the current lab owner/authorized backend may automatically confirm or deny external requests. |
 | Lab metadata | `LAB_METADATA_MAX_BYTES`, `LAB_METADATA_HTTP_*`, `LAB_METADATA_MAX_CONCURRENT_FETCHES`, `LAB_METADATA_LOCAL_*` | The backend treats on-chain metadata as untrusted: only exact registered provider HTTPS origins are fetched. Keep local fixtures disabled in production. |
+| Demo laboratory | `MARKETPLACE_URL`, `DEMO_USER`, `DEMO_LAB_ID`, `DEMO_CONNECTION_ID`, `DEMO_HEARTBEAT_MAX_AGE_SECONDS`, `DEMO_SESSION_TTL_SECONDS`, `DEMO_RATE_LIMIT_PER_MINUTE`, `DEMO_STATION_TIMEOUT_SECONDS`, `DEMO_PENDING_LEASE_SECONDS` | Configure the lab and Guacamole connection together. OpenResty exposes the protected readiness result in `/gateway/health/details`; the demo hand-off stays fail-closed until it is `ready` and the physical lifecycle call completes. The pending lease is bounded to 30–60 seconds so an abandoned browser handoff cannot hold the demo slot for the full session TTL. |
 | Guacamole | `GUAC_ADMIN_*`, `API_SESSION_TIMEOUT`, `JWT_GUAC_IDLE_TIMEOUT_SECONDS`, `BAN_*` | Manual administrator login is an operations path, not the end-user hand-off. Keep anti-brute-force controls enabled. |
 | FMU | `FMU_RUNNER_ENABLED`, `FMU_BACKEND_MODE`, `FMU_LOCAL_DEV_MODE`, `FMU_JWT_AUDIENCE`, `AUTH_JWKS_URL`, `FMU_STATION_*`, `FMU_GATEWAY_ID` | The audience must be the exact public FMU `accessURI`. `FMU_GATEWAY_ID` uses the same host-plus-non-default-port identity as observer credentials. `FMU_BACKEND_MODE` selects local versus Lab Station execution; Full/Lite selects the JWKS source. `AUTH_JWKS_URL` is an optional explicit override and must use HTTPS, except for loopback/private hosts used by local Compose networking. |
 | Ops / Lab Station | `OPS_SECRETS_KEY`, `WINRM_MANAGEMENT_CIDRS`, `OPS_ALLOWED_COMMANDS` | Use TLS WinRM on 5986 and a restricted management network. Losing the stable Fernet key makes stored credentials unreadable. |
@@ -165,6 +166,30 @@ together.
 
 5. Check public readiness and, as an operator, the protected detailed health
    endpoints described in [Operations and health](operations-and-health.md).
+
+For a demo deployment, configure `DEMO_LAB_ID` and `DEMO_CONNECTION_ID` only
+after the on-chain lab and Guacamole connection have been created. Set
+`DEMO_USER` to the platform-managed principal (the recommended form is
+`demo-lab-<DEMO_LAB_ID>`). The MySQL startup reconciler records ownership in
+`decentralabs_demo_managed=true` and binds that principal to
+`decentralabs_demo_lab_id`; it fails closed on a name collision, a different
+lab binding, a missing connection, or any permission/group row outside the
+single allowed `READ` grant.
+The protected `services.demo.status` diagnostic then reports `disabled`,
+`misconfigured`, `unready`, `busy`, or `ready` and includes the local checks
+for the principal, connection, Station heartbeat, Marketplace authority and
+gateway access plane. Do not treat a configured binding as active until both
+`/gateway/health` is `UP` and this status is `ready`.
+
+After the hand-off reserves its local demo slot, OpenResty calls the internal
+Ops Worker demo contract. The worker resolves the Station host from the
+configured lab binding, performs Wake-on-LAN when the persisted heartbeat is
+not ready, runs `prepare-session`, and records the operation under
+`demo:<jti>`. Guacamole token issuance records the connection event. Expiry,
+failed preparation, or tunnel closure calls the matching `/api/demo/end`
+operation, which runs `release-session --reboot`. These operations are local
+audit records only; they never create an on-chain reservation or consume
+service credits.
 
 ## Related documents
 

@@ -297,6 +297,33 @@ runner.describe("OpenResty gateway_health.lua", function()
         runner.assert.equals("1.2.3", result.version)
     end)
 
+    runner.it("reports demo readiness only after the Station and Marketplace checks pass", function()
+        local opts = healthy_gateway_health_opts()
+        opts.config.demo_lab_id = "42"
+        opts.config.demo_connection_id = "7"
+        opts.config.demo_user = "demo"
+        opts.config.marketplace_url = "https://marketplace.example"
+        opts.captures["/__health_ops"].body.demo = {
+            status = "ready",
+            checks = {
+                connection = true,
+                principal = true,
+                permission = true,
+                physical_host = true
+            }
+        }
+        opts.http["https://marketplace.example/api/demo/eligibility?labId=42&start=5&end=35"] = {
+            status = 200,
+            body = { eligible = true, labId = "42", start = "5", ["end"] = "35" }
+        }
+
+        local result = run_gateway_health(opts)._body
+
+        runner.assert.equals("ready", result.services.demo.status)
+        runner.assert.equals(true, result.services.demo.checks.marketplace)
+        runner.assert.equals(true, result.services.demo.checks.gateway)
+    end)
+
     runner.it("marks lite auth as degraded when ISSUER points back to the local gateway", function()
         local opts = healthy_gateway_health_opts()
         opts.config.lite_mode = 1

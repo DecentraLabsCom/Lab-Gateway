@@ -150,6 +150,18 @@ OPS_MYSQL_USER = os.getenv("OPS_BACKEND_MYSQL_USER", "")
 OPS_MYSQL_PASSWORD = _env_or_secret_file("OPS_BACKEND_MYSQL_PASSWORD")
 GUACAMOLE_MYSQL_USER = os.getenv("OPS_GUACAMOLE_MYSQL_USER", "")
 GUACAMOLE_MYSQL_PASSWORD = _env_or_secret_file("OPS_GUACAMOLE_MYSQL_PASSWORD")
+DEMO_USER = (os.getenv("DEMO_USER") or "demo-lab-disabled").strip()
+DEMO_LAB_ID = (os.getenv("DEMO_LAB_ID") or "").strip()
+DEMO_CONNECTION_ID = (os.getenv("DEMO_CONNECTION_ID") or "").strip()
+DEMO_HEARTBEAT_MAX_AGE_SECONDS = max(30, int(os.getenv("DEMO_HEARTBEAT_MAX_AGE_SECONDS", "180")))
+DEMO_OPERATION_ID_RE = re.compile(r"^demo:[A-Za-z0-9_.-]{1,128}$")
+DEMO_EVENT_ACTIONS = {
+    "start": "demo_start",
+    "connected": "demo_connection",
+    "expired": "demo_expiry",
+    "failed": "demo_failure",
+    "disconnected": "demo_disconnect",
+}
 GUACAMOLE_TEMP_USER_CLEANUP_ENABLED = os.getenv(
     "GUACAMOLE_TEMP_USER_CLEANUP_ENABLED",
     "true",
@@ -1576,6 +1588,125 @@ def fernet_key_is_usable() -> bool:
         return False
 
 
+def demo_readiness() -> Dict[str, Any]:
+    """Validate the configured demo binding and its physical Station state.
+
+    The worker owns the Guacamole database and Station heartbeat, therefore it
+    is the authoritative local check for the connection, principal, exact READ
+    grant and physical host. Marketplace eligibility is checked by OpenResty
+    against the authority endpoint before a public hand-off.
+    """
+    raw_lab_id = DEMO_LAB_ID.strip()
+    raw_connection_id = DEMO_CONNECTION_ID.strip()
+    result: Dict[str, Any] = {
+        "status": "disabled",
+        "checks": {
+            "connection": False,
+            "principal": False,
+            "permission": False,
+            "physical_host": False,
+        },
+    }
+    if not raw_lab_id and not raw_connection_id:
+        return result
+
+    if (
+        not raw_lab_id.isdigit()
+        or not raw_connection_id.isdigit()
+        or int(raw_connection_id) <= 0
+        or not DEMO_USER
+        or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", DEMO_USER)
+    ):
+        result["status"] = "misconfigured"
+        return result
+
+    lab_id = str(int(raw_lab_id))
+    connection_id = int(raw_connection_id)
+    result["labId"] = lab_id
+    result["connectionId"] = connection_id
+    if not GUACAMOLE_DB_ENGINE:
+        result["status"] = "unready"
+        return result
+
+    try:
+        with GUACAMOLE_DB_ENGINE.begin() as conn:
+            connection_exists = int(conn.execute(
+                text("SELECT COUNT(*) FROM guacamole_connection WHERE connection_id=:connection_id"),
+                {"connection_id": connection_id},
+            ).scalar_one()) == 1
+            principal_exists = int(conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM guacamole_entity e
+                    JOIN guacamole_user u ON u.entity_id = e.entity_id
+                    WHERE e.name=:username AND e.type='USER'
+                    """
+                ),
+                {"username": DEMO_USER},
+            ).scalar_one()) == 1
+            permission_rows = conn.execute(
+                text(
+                    """
+                    SELECT cp.connection_id, cp.permission
+                    FROM guacamole_connection_permission cp
+                    JOIN guacamole_entity e ON e.entity_id = cp.entity_id
+                    WHERE e.name=:username AND e.type='USER'
+                    ORDER BY cp.connection_id, cp.permission
+                    """
+                ),
+                {"username": DEMO_USER},
+            ).mappings().all()
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Demo readiness Guacamole check failed: %s", exc)
+        result["status"] = "unready"
+        return result
+
+    result["checks"]["connection"] = connection_exists
+    result["checks"]["principal"] = principal_exists
+    result["checks"]["permission"] = (
+        len(permission_rows) == 1
+        and int(permission_rows[0]["connection_id"]) == connection_id
+        and str(permission_rows[0]["permission"]).upper() == "READ"
+    )
+    if not connection_exists or not principal_exists or not result["checks"]["permission"]:
+        result["status"] = "misconfigured"
+        return result
+
+    host = HOSTS.get_by_lab(lab_id)
+    if not host:
+        result["status"] = "misconfigured"
+        return result
+
+    heartbeat = None
+    if DB_ENGINE:
+        try:
+            with DB_ENGINE.begin() as conn:
+                heartbeat = _fetch_latest_heartbeat(conn, host.get("name", ""))
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.warning("Demo readiness Station heartbeat check failed: %s", exc)
+
+    if not heartbeat:
+        result["status"] = "unready"
+        return result
+    if heartbeat.get("localSession") or heartbeat.get("localMode"):
+        result["status"] = "busy"
+        return result
+
+    heartbeat_ts = to_utc(heartbeat.get("timestamp"))
+    heartbeat_age = (
+        (datetime.now(timezone.utc) - heartbeat_ts).total_seconds()
+        if heartbeat_ts else None
+    )
+    result["checks"]["physical_host"] = (
+        heartbeat.get("ready") is True
+        and heartbeat_age is not None
+        and 0 <= heartbeat_age <= DEMO_HEARTBEAT_MAX_AGE_SECONDS
+    )
+    result["status"] = "ready" if result["checks"]["physical_host"] else "unready"
+    return result
+
+
 @APP.route("/health", methods=["GET"])
 def health():
     db_ok = database_is_usable(DB_ENGINE, "SELECT 1")
@@ -1606,7 +1737,9 @@ def health():
             logging.warning("Health durable queue check failed: %s", exc)
     revocation_queue_ok = failed_revocations == 0
     observation_outbox_ok = failed_observations == 0
-    healthy = db_ok and fernet_ok and guacamole_schema_ok and revocation_queue_ok and observation_outbox_ok
+    demo = demo_readiness()
+    demo_ok = demo["status"] in ("disabled", "ready")
+    healthy = db_ok and fernet_ok and guacamole_schema_ok and revocation_queue_ok and observation_outbox_ok and demo_ok
     return jsonify({
         "status": "ok" if healthy else "degraded",
         "hosts_loaded": len(HOSTS.all_hosts()),
@@ -1617,6 +1750,7 @@ def health():
         "guacamole_revocation_queue": revocation_queue_ok,
         "session_observation_failed": failed_observations,
         "session_observation_outbox": observation_outbox_ok,
+        "demo": demo,
     }), 200 if healthy else 503
 
 
@@ -1760,6 +1894,236 @@ def _get_mandatory_field(payload: Dict[str, Any], *keys: str) -> Optional[str]:
         if value not in (None, ""):
             return value
     return None
+
+
+def _canonical_demo_lab_id(value: Any) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw.isdigit():
+        return None
+    return str(int(raw))
+
+
+def _demo_context(payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    demo_id = str(payload.get("demoId") or "").strip()
+    if not DEMO_OPERATION_ID_RE.fullmatch(demo_id):
+        return None, "demoId must be an operational identifier in the form demo:<jti>"
+
+    lab_id = _canonical_demo_lab_id(payload.get("labId"))
+    if lab_id is None:
+        return None, "labId must be a decimal identifier"
+    configured_lab_id = _canonical_demo_lab_id(DEMO_LAB_ID)
+    if configured_lab_id is None or configured_lab_id != lab_id:
+        return None, "labId does not match the configured demo binding"
+
+    host = HOSTS.get_by_lab(lab_id)
+    if not host:
+        return None, "no Lab Station host is bound to the demo laboratory"
+
+    if not DB_ENGINE:
+        return None, "demo lifecycle persistence is unavailable"
+
+    return {
+        "demo_id": demo_id,
+        "lab_id": lab_id,
+        "host": host,
+    }, None
+
+
+def _demo_operation_completed(demo_id: str, action: str) -> bool:
+    if not DB_ENGINE:
+        return False
+    try:
+        with DB_ENGINE.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT 1 FROM reservation_operations "
+                    "WHERE reservation_id=:reservation_id AND action=:action "
+                    "AND success=1 ORDER BY id DESC LIMIT 1"
+                ),
+                {"reservation_id": demo_id, "action": action},
+            ).first() is not None
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Demo lifecycle idempotency check failed: %s", type(exc).__name__)
+        return False
+
+
+def _record_demo_event(
+    context: Dict[str, Any],
+    event: str,
+    success: bool,
+    *,
+    payload: Optional[Dict[str, Any]] = None,
+    message: Optional[str] = None,
+) -> None:
+    action = "demo_cleanup" if event == "cleanup" else DEMO_EVENT_ACTIONS.get(event)
+    if not action:
+        raise ValueError("unsupported demo lifecycle event")
+    record_reservation_operation(
+        reservation_id=context["demo_id"],
+        lab_id=context["lab_id"],
+        host_name=context["host"].get("name", ""),
+        action=action,
+        status="completed" if success else "failed",
+        success=success,
+        response_code=200 if success else 502,
+        payload=payload,
+        message=message,
+    )
+
+
+def _demo_host_is_ready(host: Dict[str, Any]) -> bool:
+    if not DB_ENGINE:
+        return False
+    try:
+        with DB_ENGINE.connect() as conn:
+            heartbeat = _fetch_latest_heartbeat(conn, host.get("name", ""))
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Unable to inspect demo Station heartbeat: %s", type(exc).__name__)
+        return False
+    if not heartbeat or heartbeat.get("localMode") or heartbeat.get("localSession"):
+        return False
+    heartbeat_ts = to_utc(heartbeat.get("timestamp"))
+    if not heartbeat_ts:
+        return False
+    age = (datetime.now(timezone.utc) - heartbeat_ts).total_seconds()
+    return heartbeat.get("ready") is True and 0 <= age <= DEMO_HEARTBEAT_MAX_AGE_SECONDS
+
+
+def handle_demo_start(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    context, error = _demo_context(payload)
+    if error:
+        return {"success": False, "error": error}, 400
+    assert context is not None
+
+    demo_id = context["demo_id"]
+    if _demo_operation_completed(demo_id, "demo_cleanup"):
+        return {"success": False, "error": "demo operation has already been cleaned up"}, 409
+    if _demo_operation_completed(demo_id, "demo_start"):
+        return {
+            "success": True,
+            "alreadyStarted": True,
+            "operationId": demo_id,
+            "labId": context["lab_id"],
+            "host": context["host"].get("name"),
+            "steps": [],
+        }, 200
+
+    requested_wake = parse_bool(payload.get("wake", True), True)
+    wake = requested_wake and not _demo_host_is_ready(context["host"])
+    guard_grace = payload.get("guardGrace", 30)
+    try:
+        guard_grace = max(0, min(600, int(guard_grace)))
+    except (TypeError, ValueError):
+        return {"success": False, "error": "guardGrace must be an integer between 0 and 600"}, 400
+
+    reservation_response, reservation_status = handle_reservation_start({
+        "reservationId": demo_id,
+        "host": context["host"].get("name"),
+        "labId": context["lab_id"],
+        "wake": wake,
+        "wakeOptions": payload.get("wakeOptions") or {},
+        "prepare": True,
+        "prepareArgs": [
+            f"--guard-grace={guard_grace}",
+            "--guard-message=Demo access preparation",
+        ],
+        "guardGrace": guard_grace,
+        "power": payload.get("power", True),
+        "actor": "demo-lifecycle",
+    })
+    started = reservation_response.get("success") is True
+    _record_demo_event(
+        context,
+        "start",
+        started,
+        payload={"phase": "start", "steps": reservation_response.get("steps", [])},
+        message=None if started else "Demo physical preparation failed",
+    )
+    if not started:
+        cleanup_response, cleanup_status = handle_demo_end({
+            "demoId": demo_id,
+            "labId": context["lab_id"],
+            "reason": "failed",
+        })
+        reservation_response["cleanup"] = cleanup_response
+        if cleanup_status >= 500:
+            reservation_status = cleanup_status
+        return {
+            "success": False,
+            "operationId": demo_id,
+            "labId": context["lab_id"],
+            "host": context["host"].get("name"),
+            "steps": reservation_response.get("steps", []),
+            "cleanup": cleanup_response,
+        }, reservation_status
+
+    return {
+        "success": True,
+        "operationId": demo_id,
+        "labId": context["lab_id"],
+        "host": context["host"].get("name"),
+        "prepared": True,
+        "steps": reservation_response.get("steps", []),
+    }, 200
+
+
+def handle_demo_event(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    context, error = _demo_context(payload)
+    if error:
+        return {"success": False, "error": error}, 400
+    assert context is not None
+    event = str(payload.get("event") or "").strip().lower()
+    if event not in {"connected", "expired", "failed", "disconnected"}:
+        return {"success": False, "error": "unsupported demo lifecycle event"}, 400
+    if not _demo_operation_completed(context["demo_id"], "demo_start"):
+        return {"success": False, "error": "demo physical preparation has not completed"}, 409
+    action = DEMO_EVENT_ACTIONS[event]
+    if _demo_operation_completed(context["demo_id"], action):
+        return {"success": True, "alreadyRecorded": True, "operationId": context["demo_id"]}, 200
+    _record_demo_event(context, event, True, payload={"event": event})
+    return {"success": True, "operationId": context["demo_id"], "event": event}, 200
+
+
+def handle_demo_end(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    context, error = _demo_context(payload)
+    if error:
+        return {"success": False, "error": error}, 400
+    assert context is not None
+    demo_id = context["demo_id"]
+    if _demo_operation_completed(demo_id, "demo_cleanup"):
+        return {"success": True, "alreadyReleased": True, "operationId": demo_id}, 200
+
+    reason = str(payload.get("reason") or "disconnected").strip().lower()
+    if reason not in {"expired", "failed", "disconnected"}:
+        return {"success": False, "error": "reason must be expired, failed or disconnected"}, 400
+    reason_action = DEMO_EVENT_ACTIONS[reason]
+    if not _demo_operation_completed(demo_id, reason_action):
+        _record_demo_event(context, reason, True, payload={"reason": reason})
+
+    reservation_response, reservation_status = handle_reservation_end({
+        "reservationId": demo_id,
+        "host": context["host"].get("name"),
+        "labId": context["lab_id"],
+        "release": True,
+        "releaseArgs": ["--reboot"],
+        "power": payload.get("power", True),
+        "actor": "demo-lifecycle",
+    })
+    released = reservation_response.get("success") is True
+    _record_demo_event(
+        context,
+        "cleanup",
+        released,
+        payload={"reason": reason, "steps": reservation_response.get("steps", [])},
+        message=None if released else "Demo physical cleanup failed",
+    )
+    return {
+        "success": released,
+        "operationId": demo_id,
+        "labId": context["lab_id"],
+        "host": context["host"].get("name"),
+        "steps": reservation_response.get("steps", []),
+    }, reservation_status if not released else 200
 
 
 def handle_reservation_start(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
@@ -1915,6 +2279,27 @@ def api_reservation_start():
 def api_reservation_end():
     payload = request.get_json(force=True, silent=True) or {}
     response, status = handle_reservation_end(payload)
+    return jsonify(response), status
+
+
+@APP.route("/api/demo/start", methods=["POST"])
+def api_demo_start():
+    payload = request.get_json(force=True, silent=True) or {}
+    response, status = handle_demo_start(payload)
+    return jsonify(response), status
+
+
+@APP.route("/api/demo/event", methods=["POST"])
+def api_demo_event():
+    payload = request.get_json(force=True, silent=True) or {}
+    response, status = handle_demo_event(payload)
+    return jsonify(response), status
+
+
+@APP.route("/api/demo/end", methods=["POST"])
+def api_demo_end():
+    payload = request.get_json(force=True, silent=True) or {}
+    response, status = handle_demo_end(payload)
     return jsonify(response), status
 
 

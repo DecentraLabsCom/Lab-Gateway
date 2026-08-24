@@ -167,7 +167,7 @@ end
 
 -- Demo access configuration
 local demo_user = trim(os.getenv("DEMO_USER")) or ""
-if demo_user == "" then demo_user = "demo" end
+if demo_user == "" then demo_user = "demo-lab-disabled" end
 config:set("demo_user", demo_user)
 local demo_lab_id = trim(os.getenv("DEMO_LAB_ID")) or ""
 config:set("demo_lab_id", demo_lab_id)
@@ -179,6 +179,12 @@ config:set("demo_session_ttl_seconds", math.floor(math.min(600, demo_session_ttl
 local demo_rate_limit_per_minute = tonumber(trim(os.getenv("DEMO_RATE_LIMIT_PER_MINUTE")) or "") or 10
 if demo_rate_limit_per_minute < 1 then demo_rate_limit_per_minute = 10 end
 config:set("demo_rate_limit_per_minute", math.floor(demo_rate_limit_per_minute))
+local demo_station_timeout_seconds = tonumber(trim(os.getenv("DEMO_STATION_TIMEOUT_SECONDS")) or "") or 15
+if demo_station_timeout_seconds < 1 then demo_station_timeout_seconds = 15 end
+config:set("demo_station_timeout_seconds", math.floor(math.min(60, demo_station_timeout_seconds)))
+local demo_pending_lease_seconds = tonumber(trim(os.getenv("DEMO_PENDING_LEASE_SECONDS")) or "") or 45
+if demo_pending_lease_seconds < 30 then demo_pending_lease_seconds = 30 end
+config:set("demo_pending_lease_seconds", math.floor(math.min(60, demo_pending_lease_seconds)))
 local marketplace_url = (trim(os.getenv("MARKETPLACE_URL")) or ""):gsub("/+$", "")
 config:set("marketplace_url", marketplace_url)
 

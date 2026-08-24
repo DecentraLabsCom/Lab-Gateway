@@ -9,13 +9,14 @@ local DemoGuard     = require "modules.demo_guard"
 local function build_ngx(opts)
     opts = opts or {}
     -- Allow callers to pass "" explicitly; nil falls back to the defaults.
-    local lab_id         = opts.lab_id         ~= nil and opts.lab_id         or "lab42"
+    local lab_id         = opts.lab_id         ~= nil and opts.lab_id         or "42"
     local marketplace    = opts.marketplace_url ~= nil and opts.marketplace_url or "https://mp.example.com"
     local config = {
         demo_user       = opts.demo_user or "demo",
         demo_lab_id     = lab_id,
         marketplace_url = marketplace,
         demo_session_ttl_seconds = opts.demo_session_ttl_seconds or 600,
+        demo_pending_lease_seconds = opts.demo_pending_lease_seconds or 45,
     }
     local ngx = ngx_factory.new({
         config             = config,
@@ -35,9 +36,14 @@ local function build_ngx(opts)
     return ngx
 end
 
-local function make_http_stub(is_available)
+local function make_http_stub(is_available, start_time, end_time)
     return HttpClientStub.new({
-        { status = 200, body = cjson.encode({ isAvailable = is_available }) }
+        { status = 200, body = cjson.encode({
+            eligible = is_available,
+            labId = "42",
+            start = start_time or "1",
+            ["end"] = end_time or "600",
+        }) }
     })
 end
 
@@ -81,23 +87,24 @@ runner.describe("Demo guard", function()
         local ngx = build_ngx({ auth = "demo" })
         run(ngx, make_http_stub(true))
         runner.assert.equals(nil, ngx._exit_code)
-        runner.assert.equals(1, ngx.shared.demo_sessions:get("active"))
+        runner.assert.equals(1, ngx.shared.demo_sessions:get("occupied"))
+        runner.assert.equals("pending", ngx.shared.demo_sessions:get("session:" .. ngx.ctx.demo_jti))
     end)
 
     runner.it("checks the complete demo lifetime and starts just after the chain clock", function()
         local ngx = build_ngx({ auth = "demo", now = 200, exp = 800 })
-        local http_stub = make_http_stub(true)
+        local http_stub = make_http_stub(true, "201", "800")
         run(ngx, http_stub)
 
         runner.assert.equals(
-            "https://mp.example.com/api/contract/reservation/checkAvailable?labId=lab42&start=201&end=800",
+            "https://mp.example.com/api/demo/eligibility?labId=42&start=201&end=800",
             http_stub.calls[1].url
         )
     end)
 
     runner.it("rejects demo user with 503 when lab has an active reservation", function()
         local ngx = build_ngx({ auth = "demo" })
-        run(ngx, make_http_stub(false))   -- isAvailable = false → lab is busy
+        run(ngx, make_http_stub(false))   -- eligible = false → lab is busy
         runner.assert.equals(503, ngx.status)
         runner.assert.equals(503, ngx._exit_code)
     end)
@@ -133,7 +140,7 @@ runner.describe("Demo guard", function()
     end)
 
     runner.it("rejects demo user with 503 when a concurrent demo session is already active", function()
-        local ngx = build_ngx({ auth = "demo", demo_sessions = { active = 1, ["session:other-jti"] = "1" } })
+        local ngx = build_ngx({ auth = "demo", demo_sessions = { occupied = 1, ["session:other-jti"] = "active" } })
         run(ngx, make_http_stub(true))
         runner.assert.equals(503, ngx.status)
         runner.assert.equals(503, ngx._exit_code)
@@ -144,7 +151,7 @@ runner.describe("Demo guard", function()
         run(ngx, make_http_stub(true))
         -- Falls into the demo path; lab free and no session → allowed
         runner.assert.equals(nil, ngx._exit_code)
-        runner.assert.equals(1, ngx.shared.demo_sessions:get("active"))
+        runner.assert.equals(1, ngx.shared.demo_sessions:get("occupied"))
     end)
 
     runner.it("rejects demo user when the session counter cannot be updated", function()
@@ -164,16 +171,36 @@ runner.describe("Demo guard", function()
         local second = build_ngx({ auth = "demo", demo_sessions_dict = sessions, jti = "same-jti" })
         run(second, HttpClientStub.new({}))
         runner.assert.equals(nil, second._exit_code)
-        runner.assert.equals(1, sessions:get("active"))
-        runner.assert.equals("1", sessions:get("session:same-jti"))
+        runner.assert.equals(1, sessions:get("occupied"))
+        runner.assert.equals("pending", sessions:get("session:same-jti"))
+    end)
+
+    runner.it("keeps a pending handoff on a short lease and promotes it only after Guacamole", function()
+        local sessions = ngx_factory.new_shared_dict()
+        local ngx = build_ngx({
+            auth = "demo",
+            demo_sessions_dict = sessions,
+            now = 100,
+            exp = 700,
+        })
+        run(ngx, make_http_stub(true, "101", "700"))
+
+        runner.assert.equals("pending", sessions:get("session:demo-jti"))
+        runner.assert.equals(1, sessions:get("occupied"))
+        runner.assert.equals(145, ngx.shared.cache:get("demo_pending_exp:demo-jti"))
+
+        runner.assert.equals(true, DemoGuard.activate(ngx, "demo-jti", 700))
+        runner.assert.equals("active", sessions:get("session:demo-jti"))
+        runner.assert.equals(nil, ngx.shared.cache:get("demo_pending_exp:demo-jti"))
+        runner.assert.equals(600, sessions._ttls.occupied)
     end)
 
     runner.it("releases a registered demo JTI without making the active count negative", function()
-        local sessions = ngx_factory.new_shared_dict({ active = 1, ["session:demo-jti"] = "1" })
+        local sessions = ngx_factory.new_shared_dict({ occupied = 1, ["session:demo-jti"] = "active" })
         local ngx = build_ngx({ auth = "demo", demo_sessions_dict = sessions })
         runner.assert.truthy(DemoGuard.release(ngx, "demo-jti"))
         runner.assert.equals(nil, sessions:get("session:demo-jti"))
-        runner.assert.equals(0, sessions:get("active"))
+        runner.assert.equals(0, sessions:get("occupied"))
         runner.assert.equals(false, DemoGuard.release(ngx, "demo-jti"))
     end)
 

@@ -30,16 +30,102 @@ lab_stations = {
 
 # Simulated job tracking
 jobs = {}
+demo_events = []
+demo_sessions = {}
+DEMO_LAB_ID = "42"
+DEMO_CONNECTION_ID = "1"
+INTERNAL_TOKEN = "integration-ops-internal-secret"
+
+
+def demo_response(demo_id, lab_id, event, success=True, **extra):
+    if lab_id != DEMO_LAB_ID or not demo_id.startswith("demo:"):
+        return {"success": False, "error": "invalid demo binding"}
+    entry = {"demoId": demo_id, "labId": lab_id, "event": event}
+    demo_events.append(entry)
+    if event == "start":
+        demo_sessions[demo_id] = {"labId": lab_id, "status": "prepared"}
+    elif event == "connected":
+        demo_sessions.setdefault(demo_id, {"labId": lab_id})["status"] = "active"
+    elif event == "end":
+        demo_sessions.setdefault(demo_id, {"labId": lab_id})["status"] = "released"
+    return {"success": success, "operationId": demo_id, "event": event, **extra}
+
+
+def require_internal_token():
+    return request.headers.get("X-Ops-Internal-Token") == INTERNAL_TOKEN
 
 
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint."""
     return jsonify({
-        "status": "healthy",
+        "status": "ok",
         "service": "ops-worker-mock",
-        "version": "1.0.0-test"
+        "version": "1.0.0-test",
+        "db": True,
+        "guacamole_schema": True,
+        "demo": {
+            "status": "ready",
+            "labId": DEMO_LAB_ID,
+            "connectionId": DEMO_CONNECTION_ID,
+            "checks": {
+                "connection": True,
+                "principal": True,
+                "permission": True,
+                "physical_host": True,
+            },
+        },
     })
+
+
+@app.post('/api/demo/start')
+def demo_start():
+    if not require_internal_token():
+        return jsonify({"success": False, "error": "internal authentication required"}), 401
+    payload = request.get_json(silent=True) or {}
+    demo_id = str(payload.get("demoId") or "")
+    lab_id = str(payload.get("labId") or "")
+    return jsonify(demo_response(
+        demo_id,
+        lab_id,
+        "start",
+        steps=[{"action": "wake", "status": "completed"}, {"action": "prepare", "status": "completed"}],
+    ))
+
+
+@app.post('/api/demo/event')
+def demo_event():
+    if not require_internal_token():
+        return jsonify({"success": False, "error": "internal authentication required"}), 401
+    payload = request.get_json(silent=True) or {}
+    return jsonify(demo_response(
+        str(payload.get("demoId") or ""),
+        str(payload.get("labId") or ""),
+        str(payload.get("event") or "connected"),
+    ))
+
+
+@app.post('/api/demo/end')
+def demo_end():
+    if not require_internal_token():
+        return jsonify({"success": False, "error": "internal authentication required"}), 401
+    payload = request.get_json(silent=True) or {}
+    demo_id = str(payload.get("demoId") or "")
+    lab_id = str(payload.get("labId") or "")
+    if demo_id in demo_sessions and demo_sessions[demo_id].get("status") == "released":
+        return jsonify({"success": True, "alreadyReleased": True, "operationId": demo_id})
+    return jsonify(demo_response(
+        demo_id,
+        lab_id,
+        "end",
+        reason=str(payload.get("reason") or "disconnected"),
+        steps=[{"action": "release", "status": "completed"}],
+    ))
+
+
+@app.get('/api/demo/state')
+def demo_state():
+    return jsonify({"events": demo_events, "sessions": demo_sessions})
 
 
 @app.route('/ready', methods=['GET'])

@@ -39,7 +39,7 @@ runner.describe("Access handler one-time cookie policy", function()
                 ["demo_session:demo-jti"] = "demo",
                 ["demo_exp:demo-jti"] = "500",
             },
-            demo_sessions = { ["session:demo-jti"] = "1", active = 1 },
+            demo_sessions = { ["session:demo-jti"] = "active", occupied = 1 },
             var = { http_cookie = "DEMO_JTI=demo-jti" },
             now = 100,
         })

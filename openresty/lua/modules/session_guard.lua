@@ -1,6 +1,7 @@
 local ok_http, resty_http = pcall(require, "resty.http")
 local ok_cjson, cjson_safe = pcall(require, "cjson.safe")
 local ok_demo_guard, demo_guard = pcall(require, "modules.demo_guard")
+local ok_demo_station, demo_station = pcall(require, "modules.demo_station")
 
 local SessionGuard = {}
 SessionGuard.__index = SessionGuard
@@ -10,6 +11,16 @@ local INITIAL_DELAY_SECONDS = 10
 local EXPIRED_CHECK_INTERVAL = 10
 local DEMO_CHECK_INTERVAL = 2
 local DEMO_CHECK_TIMEOUT_MS = 3000
+
+local function canonical_lab_id(value)
+    if type(value) ~= "string" or not value:match("^%d+$") then
+        return nil
+    end
+
+    local normalized = value:gsub("^0+", "")
+    return normalized == "" and "0" or normalized
+end
+
 local TUNNEL_CHECK_INTERVAL = 2
 local DEFAULT_GUAC_API = "http://guacamole:8080/guacamole/api"
 
@@ -37,6 +48,7 @@ function SessionGuard.new(opts)
     self.config = opts.config or ngx_ctx.shared.config
     self.http_factory = opts.http_factory or default_http_factory
     self.cjson = opts.cjson or default_decoder()
+    self.demo_station = opts.demo_station or (ok_demo_station and demo_station or nil)
     self.admin_user = opts.admin_user or self.config:get("admin_user")
     self.admin_pass = opts.admin_pass or self.config:get("admin_pass")
     self.guac_uri = opts.guac_uri or (self.config:get("guac_uri") or "/guacamole")
@@ -70,6 +82,25 @@ local function clear_cached_user_token(dict, username, user_token)
         dict:delete("guac_reservation:" .. user_token)
         dict:delete("guac_demo:" .. user_token)
     end
+end
+
+local function clear_demo_session(dict, jti)
+    if not dict or not jti or jti == "" then return end
+    dict:delete("demo_session:" .. jti)
+    dict:delete("demo_exp:" .. jti)
+    dict:delete("demo_pending_exp:" .. jti)
+end
+
+function SessionGuard:finish_demo(jti, reason)
+    if not self.demo_station or not jti or jti == "" then
+        return true
+    end
+    local ok, finished, err = pcall(self.demo_station.finish, self.ngx, jti, reason)
+    if not ok or finished ~= true then
+        self.ngx.log(self.ngx.WARN, "Worker - Demo physical cleanup pending: " .. tostring(err or finished))
+        return false
+    end
+    return true
 end
 
 local function request_guac_token(self, httpc)
@@ -145,20 +176,41 @@ local function iterate_demo_tokens(dict)
     return demo_tokens
 end
 
+local function iterate_demo_operations(dict)
+    local operations = {}
+    local seen = {}
+    local function add(jti)
+        if jti ~= "" and not seen[jti] then
+            seen[jti] = true
+            operations[#operations + 1] = jti
+        end
+    end
+    for _, key in ipairs(dict:get_keys(0)) do
+        if key:match("^demo_operation:") then
+            add(key:sub(16))
+        elseif key:match("^demo_cleanup_pending:") then
+            add(key:sub(22))
+        elseif key:match("^demo_pending_exp:") then
+            add(key:sub(18))
+        end
+    end
+    return operations
+end
+
 local function request_demo_availability(self, httpc, exp)
     local config = self.config
     local marketplace_url = config:get("marketplace_url") or ""
-    local lab_id = config:get("demo_lab_id") or ""
+    local lab_id = canonical_lab_id(tostring(config:get("demo_lab_id") or ""))
     local now = self.ngx.time()
     local end_time = tonumber(exp)
 
-    if marketplace_url == "" or lab_id == "" or not end_time or now + 1 >= end_time then
+    if marketplace_url == "" or not lab_id or not end_time or now + 1 >= end_time then
         return nil, "demo availability is not configured or has expired"
     end
 
     httpc:set_timeout(DEMO_CHECK_TIMEOUT_MS)
     local url = marketplace_url
-        .. "/api/contract/reservation/checkAvailable"
+        .. "/api/demo/eligibility"
         .. "?labId=" .. self.ngx.escape_uri(tostring(lab_id))
         .. "&start=" .. tostring(now + 1)
         .. "&end=" .. tostring(end_time)
@@ -168,11 +220,15 @@ local function request_demo_availability(self, httpc, exp)
     end
 
     local body, parse_err = self.cjson.decode(res.body or "")
-    if parse_err or type(body) ~= "table" or type(body.isAvailable) ~= "boolean" then
+    if parse_err or type(body) ~= "table"
+        or body.labId ~= tostring(lab_id)
+        or body.start ~= tostring(now + 1)
+        or body["end"] ~= tostring(end_time)
+        or type(body.eligible) ~= "boolean" then
         return nil, "availability authority returned invalid JSON"
     end
 
-    return body.isAvailable == false, nil
+    return body.eligible ~= true, nil
 end
 
 local function revoke_explicit_token(self, httpc, auth_token, user_token, username)
@@ -189,9 +245,31 @@ local function revoke_explicit_token(self, httpc, auth_token, user_token, userna
     return true
 end
 
+function SessionGuard:check_expired_demo_operations()
+    local dict = self.dict
+    local now = self.ngx.time()
+    for _, jti in ipairs(iterate_demo_operations(dict)) do
+        local pending_reason = dict:get("demo_cleanup_pending:" .. jti)
+        local pending_exp = tonumber(dict:get("demo_pending_exp:" .. jti))
+        local exp = tonumber(dict:get("demo_exp:" .. jti))
+        local pending_abandoned = pending_exp and now >= pending_exp
+        if pending_reason or pending_abandoned or (exp and now >= exp) then
+            self:finish_demo(jti, pending_reason or (pending_abandoned and "failed") or "expired")
+            if ok_demo_guard then
+                demo_guard.release(self.ngx, jti)
+            end
+            -- Physical cleanup is independently retried through
+            -- demo_cleanup_pending; browser/session state must not keep the
+            -- gateway slot occupied while that retry is pending.
+            clear_demo_session(dict, jti)
+        end
+    end
+end
+
 function SessionGuard:check_expired_sessions()
     local ngx = self.ngx
     local dict = self.dict
+    self:check_expired_demo_operations()
     local httpc = self.http_factory()
     local auth_token, data_source = request_guac_token(self, httpc)
     if not auth_token then
@@ -263,10 +341,18 @@ function SessionGuard:check_expired_sessions()
     -- revoked even when Guacamole reports no active connection for its user.
     for _, user_token in ipairs(iterate_expired_jwt_tokens(dict, now)) do
         local username = dict:get(token_reverse_cache_key(user_token))
+        local demo_jti = dict:get("guac_demo:" .. user_token)
         if not username or not jwt_connection_close_failed[username] then
             if revoke_explicit_token(self, httpc, auth_token, user_token, username) then
                 clear_cached_user_token(dict, username, user_token)
             end
+        end
+        if demo_jti then
+            self:finish_demo(demo_jti, "expired")
+            if ok_demo_guard then
+                demo_guard.release(self.ngx, demo_jti)
+            end
+            clear_demo_session(dict, demo_jti)
         end
     end
 end
@@ -278,6 +364,7 @@ end
 function SessionGuard:check_demo_sessions()
     local dict = self.dict
     local ngx = self.ngx
+    self:check_expired_demo_operations()
     local demo_tokens = iterate_demo_tokens(dict)
     if #demo_tokens == 0 then
         return
@@ -340,8 +427,13 @@ function SessionGuard:check_demo_sessions()
 
                 if not close_failed then
                     if revoke_explicit_token(self, httpc, auth_token, user_token, username) then
-                        if ok_demo_guard then
-                            demo_guard.release(self.ngx, dict:get("guac_jti:" .. user_token))
+                        local demo_jti = dict:get("guac_jti:" .. user_token)
+                        if demo_jti then
+                            self:finish_demo(demo_jti, "failed")
+                            if ok_demo_guard then
+                                demo_guard.release(self.ngx, demo_jti)
+                            end
+                            clear_demo_session(dict, demo_jti)
                         end
                         clear_cached_user_token(dict, username, user_token)
                     end

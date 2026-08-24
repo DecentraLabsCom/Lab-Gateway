@@ -596,6 +596,49 @@ else
 fi
 echo
 
+echo "Demo Lab Access"
+echo "================"
+echo "The demo is fail-closed until its on-chain lab, Guacamole connection, Station heartbeat and Marketplace eligibility are ready."
+read -p "Enable anonymous demo binding now? [y/N]: " demo_enabled
+demo_enabled=$(echo "$demo_enabled" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+if [ "$demo_enabled" = "y" ] || [ "$demo_enabled" = "yes" ]; then
+    read -p "Demo lab ID (uint256): " demo_lab_id
+    demo_lab_id=$(echo "$demo_lab_id" | tr -d ' ')
+    read -p "Demo Guacamole connection_id (positive integer): " demo_connection_id
+    demo_connection_id=$(echo "$demo_connection_id" | tr -d ' ')
+    if ! [[ "$demo_lab_id" =~ ^[0-9]+$ ]] || ! [[ "$demo_connection_id" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Demo lab ID or connection_id is invalid; refusing to enable the demo." >&2
+        exit 1
+    fi
+    demo_user="demo-lab-${demo_lab_id}"
+    echo "Using platform-managed Guacamole principal: $demo_user"
+    demo_marketplace_url=$(get_env_default "MARKETPLACE_URL" "$ROOT_ENV_FILE")
+    demo_marketplace_url=${demo_marketplace_url:-https://marketplace-decentralabs.vercel.app}
+    read -p "Marketplace authority URL [$demo_marketplace_url]: " demo_marketplace_input
+    demo_marketplace_url=${demo_marketplace_input:-$demo_marketplace_url}
+    update_env_var "$ROOT_ENV_FILE" "DEMO_USER" "$demo_user"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_LAB_ID" "$demo_lab_id"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_CONNECTION_ID" "$demo_connection_id"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_HEARTBEAT_MAX_AGE_SECONDS" "180"
+    update_env_var "$ROOT_ENV_FILE" "MARKETPLACE_URL" "$demo_marketplace_url"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_SESSION_TTL_SECONDS" "600"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_RATE_LIMIT_PER_MINUTE" "10"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_STATION_TIMEOUT_SECONDS" "15"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_PENDING_LEASE_SECONDS" "45"
+    echo "Demo binding recorded. It will remain inactive until /gateway/health is UP and protected demo readiness is ready."
+else
+    update_env_var "$ROOT_ENV_FILE" "DEMO_USER" "demo-lab-disabled"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_LAB_ID" ""
+    update_env_var "$ROOT_ENV_FILE" "DEMO_CONNECTION_ID" ""
+    update_env_var "$ROOT_ENV_FILE" "DEMO_HEARTBEAT_MAX_AGE_SECONDS" "180"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_SESSION_TTL_SECONDS" "600"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_RATE_LIMIT_PER_MINUTE" "10"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_STATION_TIMEOUT_SECONDS" "15"
+    update_env_var "$ROOT_ENV_FILE" "DEMO_PENDING_LEASE_SECONDS" "45"
+    echo "Demo binding disabled."
+fi
+echo
+
 # Domain Configuration
 echo "Domain Configuration"
 echo "===================="

@@ -1,6 +1,8 @@
 local _M = {}
 
 local token_revocation_reporter = require "modules.token_revocation_reporter"
+local demo_station = require "modules.demo_station"
+local demo_guard = require "modules.demo_guard"
 
 local DEFAULT_TOKEN_SECURITY_RETENTION_SECONDS = 1200
 local DEFAULT_MAPPING_TTL_SECONDS = 7200
@@ -113,7 +115,14 @@ local function secure_reservation_token(ngx, dict, username, token, cjson, deps)
     return nil
 end
 
-local function secure_demo_token(ngx, dict, username, token, cjson)
+local function release_demo(ngx, jti, deps, reason)
+    local station = (deps and deps.demo_station) or demo_station
+    local guard = (deps and deps.demo_guard) or demo_guard
+    station.finish(ngx, jti, reason or "failed", deps)
+    guard.release(ngx, jti)
+end
+
+local function secure_demo_token(ngx, dict, username, token, cjson, deps)
     local demo_exp = tonumber(ngx.ctx.demo_exp)
     local demo_jti = ngx.ctx.demo_jti
     local demo_username = ngx.ctx.demo_username
@@ -121,6 +130,7 @@ local function secure_demo_token(ngx, dict, username, token, cjson)
         or string.lower(username) ~= string.lower(demo_username) then
         ngx.log(ngx.ERR, "Guacamole token - Incomplete demo security context")
         clear_mappings(dict, username, token)
+        release_demo(ngx, demo_jti, deps, "failed")
         return security_error(cjson)
     end
 
@@ -140,8 +150,29 @@ local function secure_demo_token(ngx, dict, username, token, cjson)
         if not set_mapping(ngx, dict, mapping[1], mapping[2], mapping_ttl) then
             clear_mappings(dict, username, token)
             dict:delete("guac_enforcement_exp:" .. username)
+            release_demo(ngx, demo_jti, deps, "failed")
             return security_error(cjson)
         end
+    end
+
+    local station = deps and deps.demo_station or demo_station
+    local connected, connected_err = station.connected(ngx, demo_jti, deps)
+    if not connected then
+        ngx.log(ngx.ERR, "Guacamole token - Demo physical lifecycle audit failed: " .. tostring(connected_err))
+        clear_mappings(dict, username, token)
+        dict:delete("guac_enforcement_exp:" .. username)
+        release_demo(ngx, demo_jti, deps, "failed")
+        return security_error(cjson)
+    end
+
+    local guard = deps and deps.demo_guard or demo_guard
+    local activated, activate_err = guard.activate(ngx, demo_jti, demo_exp)
+    if not activated then
+        ngx.log(ngx.ERR, "Guacamole token - Unable to promote demo session: " .. tostring(activate_err))
+        clear_mappings(dict, username, token)
+        dict:delete("guac_enforcement_exp:" .. username)
+        release_demo(ngx, demo_jti, deps, "failed")
+        return security_error(cjson)
     end
 
     ngx.log(ngx.INFO, "Guacamole token - Demo session secured for " .. username)
@@ -165,7 +196,7 @@ function _M.handle_response(ngx_ctx, response, deps)
     local dict = ngx.shared.cache
 
     if ngx.ctx and ngx.ctx.demo_authenticated then
-        local failed = secure_demo_token(ngx, dict, username, token, cjson)
+        local failed = secure_demo_token(ngx, dict, username, token, cjson, deps)
         if failed then
             return failed
         end

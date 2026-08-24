@@ -1,6 +1,7 @@
 local cjson = require "cjson.safe"
 local resolver = require "resty.dns.resolver"
 local ok_http, resty_http = pcall(require, "resty.http")
+local demo_readiness = require "demo_readiness"
 
 local PUBLIC_KEY_PATH = "/etc/ssl/private/public_key.pem"
 local FULLCHAIN_PATH = "/etc/ssl/private/fullchain.pem"
@@ -417,11 +418,21 @@ if aas_enabled then
     table.insert(status_checks, { ok = aas.ok, reachable = aas.reachable == true })
 end
 
+local gateway_status = overall_status(status_checks)
+local demo = demo_readiness.evaluate({
+    config = config,
+    core_ready = gateway_status == "UP",
+    ops = ops,
+    now = ngx.time(),
+    http_module = ok_http and resty_http or nil
+})
+
 -- Build structured response
 local result = {
     mode = lite_mode and "lite" or "full",
     lite = lite_mode,
-    status = overall_status(status_checks),
+    status = gateway_status,
+    demo = demo,
     services = {
         blockchain = {
             ok = blockchain_ok,
@@ -446,8 +457,10 @@ local result = {
             ok = ops.ok,
             status = ops.status,
             hosts = ops_body.hosts or ops_body.host_count,
-            poll_enabled = ops_body.polling_enabled or ops_body.polling
+            poll_enabled = ops_body.polling_enabled or ops_body.polling,
+            demo = ops_body.demo
         },
+        demo = demo,
         guacamole_schema = {
             ok = guacamole_schema_ok,
             checked_by = "ops-worker"

@@ -11,6 +11,7 @@ CERTS_DIR="$SCRIPT_DIR/certs"
 TEST_RESULTS=""
 PASSED=0
 FAILED=0
+DEMO_TMP_DIR="$(mktemp -d)"
 
 # Colors for output
 RED='\033[0;31m'
@@ -21,6 +22,7 @@ NC='\033[0m' # No Color
 function cleanup {
   echo -e "\n${YELLOW}Cleaning up...${NC}"
   docker compose -f "$COMPOSE_FILE" down -v >/dev/null 2>&1 || true
+  rm -rf "$DEMO_TMP_DIR"
 }
 
 trap cleanup EXIT
@@ -283,9 +285,75 @@ else
 fi
 
 # =================================================================
-# Test 16: Upstream unavailable returns gateway error
+# Test 16: Vertical demo flow (Marketplace -> Gateway -> Guacamole -> Ops)
 # =================================================================
-echo "Test 16: Auth upstream unavailable"
+echo "Test 16: Vertical demo flow"
+PUBLISH_STATUS=$(curl -sk -o "$DEMO_TMP_DIR/publish.json" -w "%{http_code}" \
+  -X POST "http://127.0.0.1:13000/api/test/publish" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Vertical Demo Lab","description":"controlled integration lab","demoEnabled":true,"unexpected":"discard"}')
+CATALOGUE=$(curl -sk "http://127.0.0.1:13000/api/market/labs?limit=1")
+PUBLISH_OK=false
+if [ "$PUBLISH_STATUS" = "201" ] \
+  && grep -q '"demoEnabled"[[:space:]]*:[[:space:]]*true' "$DEMO_TMP_DIR/publish.json" \
+  && ! grep -q 'unexpected' "$DEMO_TMP_DIR/publish.json" \
+  && echo "$CATALOGUE" | grep -q '"id"[[:space:]]*:[[:space:]]*42' \
+  && echo "$CATALOGUE" | grep -q '"demoEnabled"[[:space:]]*:[[:space:]]*true'; then
+  PUBLISH_OK=true
+fi
+
+HANDOFF_HEADERS="$DEMO_TMP_DIR/handoff.headers"
+COOKIE_JAR="$DEMO_TMP_DIR/demo.cookies"
+HANDOFF_STATUS=$(curl -sk -D "$HANDOFF_HEADERS" -o /dev/null -w "%{http_code}" \
+  -c "$COOKIE_JAR" "${BASE_URL}/auth/demo?labId=42")
+DEMO_COOKIE=$(grep -E '^[[:space:]]*#?HttpOnly_' "$COOKIE_JAR" | awk '$6 == "DEMO_JTI" {print $7}' | head -1 || true)
+REDIRECT_OK=$(grep -i '^Location: /guacamole/' "$HANDOFF_HEADERS" || true)
+if [ "$HANDOFF_STATUS" = "303" ] \
+  && [ -n "$DEMO_COOKIE" ] \
+  && [ -n "$REDIRECT_OK" ]; then
+  HANDOFF_OK=true
+else
+  HANDOFF_OK=false
+fi
+
+GUAC_ROOT_STATUS=$(curl -sk -b "$COOKIE_JAR" -o /dev/null -w "%{http_code}" "${BASE_URL}/guacamole/")
+TOKEN_RESPONSE=$(curl -sk -b "$COOKIE_JAR" -X POST "${BASE_URL}/guacamole/api/tokens" \
+  -H "Content-Type: application/x-www-form-urlencoded" --data '')
+DEMO_TOKEN=$(printf '%s' "$TOKEN_RESPONSE" | sed -n 's/.*"authToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+SESSION_RESPONSE=$(curl -sk -b "$COOKIE_JAR" -H "Guacamole-Token: $DEMO_TOKEN" \
+  "${BASE_URL}/guacamole/api/session")
+CONNECTIONS_RESPONSE=$(curl -sk -b "$COOKIE_JAR" -H "Guacamole-Token: $DEMO_TOKEN" \
+  "${BASE_URL}/guacamole/api/session/data/mysql/connections")
+OPS_STATE=$(curl -sk "http://127.0.0.1:5001/api/demo/state")
+
+if [ "$PUBLISH_OK" = true ] \
+  && [ "$HANDOFF_OK" = true ] \
+  && [ "$GUAC_ROOT_STATUS" = "200" ] \
+  && [ -n "$DEMO_TOKEN" ] \
+  && echo "$SESSION_RESPONSE" | grep -q 'demo-lab-42' \
+  && echo "$CONNECTIONS_RESPONSE" | grep -q 'Vertical Demo Connection' \
+  && ! echo "$CONNECTIONS_RESPONSE" | grep -q 'test-conn-2' \
+  && echo "$OPS_STATE" | grep -q '"event"[[:space:]]*:[[:space:]]*"start"' \
+  && echo "$OPS_STATE" | grep -q '"event"[[:space:]]*:[[:space:]]*"connected"'; then
+  log_pass "Marketplace publication/sanitation/catalogue, demo handoff, Guacamole session and Ops lifecycle agree"
+else
+  log_fail "Vertical demo flow failed: publish=$PUBLISH_STATUS handoff=$HANDOFF_STATUS guac=$GUAC_ROOT_STATUS token=${DEMO_TOKEN:+present} session=$SESSION_RESPONSE connections=$CONNECTIONS_RESPONSE ops=$OPS_STATE"
+fi
+
+# The first session owns the only slot. A second browser handoff must fail
+# closed until the short demo TTL is reaped by the Gateway timer.
+SECOND_HANDOFF_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
+  "${BASE_URL}/auth/demo?labId=42")
+if [ "$SECOND_HANDOFF_STATUS" = "503" ]; then
+  log_pass "Demo slot rejects a concurrent handoff"
+else
+  log_fail "Concurrent demo handoff should return 503, got: $SECOND_HANDOFF_STATUS"
+fi
+
+# =================================================================
+# Test 17: Auth upstream unavailable returns gateway error
+# =================================================================
+echo "Test 17: Auth upstream unavailable"
 docker compose -f "$COMPOSE_FILE" stop blockchain-services >/dev/null
 UPSTREAM_DOWN_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "${BASE_URL}/auth/jwks" || echo "000")
 if [ "$UPSTREAM_DOWN_STATUS" = "502" ] || [ "$UPSTREAM_DOWN_STATUS" = "504" ]; then

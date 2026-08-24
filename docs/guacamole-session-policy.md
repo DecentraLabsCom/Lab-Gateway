@@ -67,20 +67,31 @@ Reservation users are temporary users provisioned as `dlabs-res-...`.
 ## Demo Sessions and Reservation Overlap
 
 Demo access is disabled unless `DEMO_LAB_ID` and `DEMO_CONNECTION_ID` are
-configured. When enabled, the handoff checks the authoritative Marketplace
-calendar for the complete demo window, from one second after the current chain
-clock through the demo expiry (up to the default 600 seconds). The one-second
-offset is required because the on-chain availability method rejects ranges whose
-start is at or before `block.timestamp`.
+configured. The browser handoff must include `labId` and OpenResty requires its
+canonical numeric value to match `DEMO_LAB_ID` exactly. When enabled, the
+Gateway calls the Marketplace `/api/demo/eligibility` authority, which verifies
+the on-chain lab exists, is listed, is physical (`resourceType=0`), has
+`demoEnabled=true` in its canonical metadata and is available for the complete
+demo window. The one-second offset is required because the on-chain availability
+method rejects ranges whose start is at or before `block.timestamp`.
 
-The demo JTI remains isolated from reservation JTIs and the demo slot is still
-limited to one active session. Because the calendar read and a later paid
+The demo JTI remains isolated from reservation JTIs and the demo gateway slot is
+limited to one occupied handoff. A new handoff starts as `pending` with the
+short `DEMO_PENDING_LEASE_SECONDS` (30–60 seconds, default 45); it becomes
+`active` only after Guacamole issues the token and the physical connection is
+audited. Because the calendar read and a later paid
 reservation confirmation are separate transactions, OpenResty also polls the
 full remaining demo window every two seconds. If a confirmed reservation starts
 inside that window, active Guacamole tunnels are closed and their demo token is
 revoked. If the availability authority cannot be verified during that poll,
 the optional demo session is also closed fail-closed and the condition is
 logged for operations; the initial demo handoff always fails closed as well.
+
+The Guacamole principal is platform-managed and marked with
+`decentralabs_demo_managed=true` plus the configured `DEMO_LAB_ID`. Startup
+rejects an unmarked name collision or a different lab binding, removes all
+system/user/group/connection-group/sharing-profile permissions and group
+memberships, and leaves only `READ` for `DEMO_CONNECTION_ID`.
 
 For FMU access, OpenResty stores the short-lived `{sessionId, exp, token}`
 mapping encrypted with `ACCESS_CODE_ENCRYPTION_KEY` under

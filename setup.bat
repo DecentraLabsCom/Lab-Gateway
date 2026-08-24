@@ -377,6 +377,59 @@ if "!lab_manager_allowed_cidrs!"=="" (
 )
 echo.
 
+REM Demo Lab Access
+echo Demo Lab Access
+echo ================
+echo The demo is fail-closed until its on-chain lab, Guacamole connection, Station heartbeat and Marketplace eligibility are ready.
+set "demo_enabled="
+set /p "demo_enabled=Enable anonymous demo binding now? [y/N]: "
+if defined demo_enabled set "demo_enabled=!demo_enabled: =!"
+if /i "!demo_enabled!"=="y" goto ConfigureDemo
+if /i "!demo_enabled!"=="yes" goto ConfigureDemo
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_USER" "demo-lab-disabled"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_LAB_ID" ""
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_CONNECTION_ID" ""
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_HEARTBEAT_MAX_AGE_SECONDS" "180"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_SESSION_TTL_SECONDS" "600"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_RATE_LIMIT_PER_MINUTE" "10"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_STATION_TIMEOUT_SECONDS" "15"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_PENDING_LEASE_SECONDS" "45"
+echo Demo binding disabled.
+goto DemoConfigured
+
+:ConfigureDemo
+set "demo_lab_id="
+set /p "demo_lab_id=Demo lab ID (uint256): "
+if defined demo_lab_id set "demo_lab_id=!demo_lab_id: =!"
+set "demo_connection_id="
+set /p "demo_connection_id=Demo Guacamole connection_id (positive integer): "
+if defined demo_connection_id set "demo_connection_id=!demo_connection_id: =!"
+powershell -NoLogo -NoProfile -Command "if ('!demo_lab_id!' -notmatch '^[0-9]+$' -or '!demo_connection_id!' -notmatch '^[1-9][0-9]*$') { exit 1 }"
+if errorlevel 1 (
+    echo Demo lab ID or connection_id is invalid; refusing to enable the demo.
+    exit /b 1
+)
+set "demo_user=demo-lab-!demo_lab_id!"
+echo Using platform-managed Guacamole principal: !demo_user!
+call :ReadEnvValue "%ROOT_ENV_FILE%" "MARKETPLACE_URL" demo_marketplace_url
+if not defined demo_marketplace_url set "demo_marketplace_url=https://marketplace-decentralabs.vercel.app"
+set "demo_marketplace_input="
+set /p "demo_marketplace_input=Marketplace authority URL [!demo_marketplace_url!]: "
+if defined demo_marketplace_input set "demo_marketplace_url=!demo_marketplace_input!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_USER" "!demo_user!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_LAB_ID" "!demo_lab_id!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_CONNECTION_ID" "!demo_connection_id!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_HEARTBEAT_MAX_AGE_SECONDS" "180"
+call :UpdateEnv "%ROOT_ENV_FILE%" "MARKETPLACE_URL" "!demo_marketplace_url!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_SESSION_TTL_SECONDS" "600"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_RATE_LIMIT_PER_MINUTE" "10"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_STATION_TIMEOUT_SECONDS" "15"
+call :UpdateEnv "%ROOT_ENV_FILE%" "DEMO_PENDING_LEASE_SECONDS" "45"
+echo Demo binding recorded. It will remain inactive until /gateway/health is UP and protected demo readiness is ready.
+
+:DemoConfigured
+echo.
+
 
 
 REM Domain Configuration

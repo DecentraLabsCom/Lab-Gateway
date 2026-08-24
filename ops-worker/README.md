@@ -119,6 +119,18 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
 - `POST /api/reservations/end`
   - Body: `{ reservationId, host, labId?, release?, releaseArgs?, powerAction? }`
+- `POST /api/demo/start`
+  - Body: `{ demoId: "demo:<jti>", labId, expiresAt?, wake?, guardGrace? }`.
+    Resolves the host from the configured demo binding, performs Wake-on-LAN
+    when the persisted heartbeat is not ready, and always runs
+    `prepare-session`. The operation is recorded locally under `demo:<jti>`;
+    it is not an on-chain reservation.
+- `POST /api/demo/event`
+  - Body: `{ demoId: "demo:<jti>", labId, event: "connected" }`. Records the
+    successful hand-off after Guacamole issues the demo token.
+- `POST /api/demo/end`
+  - Body: `{ demoId: "demo:<jti>", labId, reason: "expired"|"failed"|"disconnected" }`.
+    Runs `release-session --reboot` and records the cleanup idempotently.
 - `GET /api/power/controllers`
   - Returns configured power controllers, capabilities and outlet state.
 - `POST /api/power/controllers`

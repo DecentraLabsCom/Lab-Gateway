@@ -205,3 +205,122 @@ def test_failed_reservation_start_triggers_notification(db_engine, client, monke
     assert notification_row is not None
     assert notification_row["status"] == "completed"
     assert bool(notification_row["success"]) is True
+
+
+def test_demo_lifecycle_prepares_connects_and_releases_without_onchain_reservation(
+    db_engine, client, monkeypatch
+):
+    host = {
+        "name": "demo-station",
+        "address": "192.168.1.50",
+        "mac": "00:11:22:33:44:55",
+        "labs": ["42"],
+    }
+    worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    monkeypatch.setattr(worker, "DEMO_LAB_ID", "42")
+    monkeypatch.setattr(worker, "wol_and_wait", lambda *args, **kwargs: (True, 1))
+    monkeypatch.setattr(
+        worker,
+        "run_labstation_command",
+        lambda *args, **kwargs: {"exit_code": 0, "stdout": "ok", "stderr": "", "duration_ms": 12},
+    )
+
+    start = client.post(
+        "/api/demo/start",
+        json={"demoId": "demo:abc123", "labId": "42", "expiresAt": 900},
+    )
+    assert start.status_code == 200
+    assert start.json["success"] is True
+    assert start.json["operationId"] == "demo:abc123"
+    assert [step["action"] for step in start.json["steps"]] == ["wake", "prepare"]
+
+    connected = client.post(
+        "/api/demo/event",
+        json={"demoId": "demo:abc123", "labId": "42", "event": "connected"},
+    )
+    assert connected.status_code == 200
+    assert connected.json["success"] is True
+
+    end = client.post(
+        "/api/demo/end",
+        json={"demoId": "demo:abc123", "labId": "42", "reason": "expired"},
+    )
+    assert end.status_code == 200
+    assert end.json["success"] is True
+
+    # Cleanup is idempotent and must not invoke release-session twice.
+    second_end = client.post(
+        "/api/demo/end",
+        json={"demoId": "demo:abc123", "labId": "42", "reason": "expired"},
+    )
+    assert second_end.status_code == 200
+    assert second_end.json["alreadyReleased"] is True
+
+    with db_engine.connect() as conn:
+        operations = conn.execute(
+            text(
+                "SELECT action, success FROM reservation_operations "
+                "WHERE reservation_id = :demo_id AND action NOT IN ('notification', 'alert') ORDER BY id"
+            ),
+            {"demo_id": "demo:abc123"},
+        ).mappings().all()
+        reservations = conn.execute(text("SELECT COUNT(*) FROM lab_reservations")).scalar_one()
+
+    assert [row["action"] for row in operations] == [
+        "wake",
+        "prepare",
+        "demo_start",
+        "demo_connection",
+        "demo_expiry",
+        "release",
+        "demo_cleanup",
+    ]
+    assert all(bool(row["success"]) for row in operations)
+    assert reservations == 0
+
+
+def test_demo_start_failure_attempts_physical_cleanup(db_engine, client, monkeypatch):
+    host = {
+        "name": "demo-station",
+        "address": "192.168.1.50",
+        "mac": "00:11:22:33:44:55",
+        "labs": ["42"],
+    }
+    worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    monkeypatch.setattr(worker, "DEMO_LAB_ID", "42")
+    monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ENABLED", False)
+    monkeypatch.setattr(worker, "wol_and_wait", lambda *args, **kwargs: (False, 3))
+    commands = []
+
+    def fake_command(*args, **kwargs):
+        commands.append(args[1])
+        return {"exit_code": 0, "stdout": "released", "stderr": "", "duration_ms": 5}
+
+    monkeypatch.setattr(worker, "run_labstation_command", fake_command)
+
+    response = client.post(
+        "/api/demo/start",
+        json={"demoId": "demo:failed", "labId": "42", "expiresAt": 900},
+    )
+
+    assert response.status_code == 502
+    assert response.json["success"] is False
+    assert commands == ["release-session"]
+
+    with db_engine.connect() as conn:
+        operations = conn.execute(
+            text(
+                "SELECT action, success FROM reservation_operations "
+                "WHERE reservation_id = :demo_id AND action NOT IN ('notification', 'alert') ORDER BY id"
+            ),
+            {"demo_id": "demo:failed"},
+        ).mappings().all()
+
+    assert [row["action"] for row in operations] == [
+        "wake",
+        "demo_start",
+        "demo_failure",
+        "release",
+        "demo_cleanup",
+    ]
+    assert bool(operations[1]["success"]) is False

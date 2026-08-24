@@ -947,6 +947,7 @@
             name: $('labName').value.trim(),
             description: $('labDescription').value.trim(),
             image: imageUrls[0] || '',
+            demoEnabled: $('labDemoEnabled').checked === true,
             attributes,
         };
     }

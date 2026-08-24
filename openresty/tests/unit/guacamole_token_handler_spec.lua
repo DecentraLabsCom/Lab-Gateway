@@ -39,6 +39,7 @@ runner.describe("Guacamole token content-phase handler", function()
                 demo_jti = "demo-jti",
                 demo_username = "demo",
             },
+            demo_sessions = { occupied = 1, ["session:demo-jti"] = "pending" },
             now = 100,
         })
         local demo_response = {
@@ -49,6 +50,10 @@ runner.describe("Guacamole token content-phase handler", function()
 
         local secured = handler.handle_response(ngx, demo_response, {
             cjson = cjson,
+            demo_station = {
+                connected = function() return true end,
+                finish = function() return true end,
+            },
             revocation_reporter = {
                 register = function()
                     error("demo sessions must not use the reservation queue")
@@ -60,6 +65,8 @@ runner.describe("Guacamole token content-phase handler", function()
         runner.assert.equals("demo-jti", ngx.shared.cache:get("guac_demo:demo-token"))
         runner.assert.equals(700, ngx.shared.cache:get("guac_jwt_exp:demo-token"))
         runner.assert.equals(700, ngx.shared.cache:get("guac_enforcement_exp:demo"))
+        runner.assert.equals("active", ngx.shared.demo_sessions:get("session:demo-jti"))
+        runner.assert.equals(1, ngx.shared.demo_sessions:get("occupied"))
     end)
 
     runner.it("registers JWT token revocation before exposing the token", function()
@@ -82,6 +89,44 @@ runner.describe("Guacamole token content-phase handler", function()
         runner.assert.equals("jwt-jti", ngx.shared.cache:get("guac_jti:guac-token"))
         runner.assert.equals("0xabc", registered.reservationKey)
         runner.assert.equals(1600, ngx.shared.cache._ttls["guac_jti:guac-token"])
+    end)
+
+    runner.it("fails closed and releases the station when demo connection audit fails", function()
+        local ngx = ngx_factory.new({
+            config = {
+                server_name = "lite.lab.example",
+                guac_token_security_retention_seconds = 1200,
+            },
+            ctx = {
+                demo_authenticated = true,
+                demo_exp = 700,
+                demo_jti = "demo-jti",
+                demo_username = "demo",
+            },
+            cache = { ["demo_operation:demo-jti"] = "42" },
+            demo_sessions = { occupied = 1, ["session:demo-jti"] = "pending" },
+            now = 100,
+        })
+        local finished = false
+        local demo_response = {
+            status = 200,
+            body = '{"authToken":"demo-token","username":"demo","dataSource":"mysql"}',
+            header = { ["Content-Type"] = "application/json" },
+        }
+
+        local secured = handler.handle_response(ngx, demo_response, {
+            cjson = cjson,
+            demo_station = {
+                connected = function() return false, "audit unavailable" end,
+                finish = function() finished = true return true end,
+            },
+        })
+
+        runner.assert.equals(503, secured.status)
+        runner.assert.equals(true, finished)
+        runner.assert.equals(nil, ngx.shared.cache:get("guac_demo:demo-token"))
+        runner.assert.equals(nil, ngx.shared.demo_sessions:get("session:demo-jti"))
+        runner.assert.equals(0, ngx.shared.demo_sessions:get("occupied"))
     end)
 
     runner.it("fails closed and removes mappings when durable registration fails", function()

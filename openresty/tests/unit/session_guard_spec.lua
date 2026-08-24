@@ -4,9 +4,10 @@ local HttpClientStub = require "tests.helpers.http_client_stub"
 local SessionGuard = require "modules.session_guard"
 local cjson = require "cjson.safe"
 
-local function build_guard(cache, responses)
+local function build_guard(cache, responses, demo_station, demo_sessions)
     local ngx = ngx_factory.new({
         cache = cache or {},
+        demo_sessions = demo_sessions or {},
         config = {
             admin_user = "admin",
             admin_pass = "secret",
@@ -25,7 +26,8 @@ local function build_guard(cache, responses)
         http_factory = function()
             return http_stub
         end,
-        cjson = cjson
+        cjson = cjson,
+        demo_station = demo_station,
     })
     return guard, http_stub, ngx
 end
@@ -149,7 +151,7 @@ runner.describe("Session guard", function()
         local responses = {
             { status = 200, body = cjson.encode({ authToken = "admin-token", dataSource = "mysql" }) },
             { status = 200, body = cjson.encode({ ["123"] = { username = "demo" } }) },
-            { status = 200, body = cjson.encode({ isAvailable = false }) },
+            { status = 200, body = cjson.encode({ eligible = false, labId = "42", start = "201", ["end"] = "800" }) },
             { status = 204 },
             { status = 204 }
         }
@@ -162,8 +164,81 @@ runner.describe("Session guard", function()
         runner.assert.equals(nil, store["guac_jwt_exp:token-1"])
         runner.assert.equals(nil, store["token:demo"])
         runner.assert.equals(5, #http_stub.calls)
+        runner.assert.truthy(http_stub.calls[3].url:match("/api/demo/eligibility"))
         runner.assert.truthy(http_stub.calls[3].url:match("start=201"))
         runner.assert.truthy(http_stub.calls[3].url:match("end=800"))
+    end)
+
+    runner.it("releases a prepared demo operation when its handoff expires before Guacamole", function()
+        local cache = {
+            ["demo_operation:demo-jti"] = "42",
+            ["demo_exp:demo-jti"] = "100",
+            ["demo_session:demo-jti"] = "demo",
+        }
+        local released = false
+        local guard, _, ngx = build_guard(cache, {}, {
+            finish = function(_, jti, reason)
+                released = jti == "demo-jti" and reason == "expired"
+                return true
+            end,
+        })
+        ngx.shared.demo_sessions:set("occupied", 1)
+        ngx.shared.demo_sessions:set("session:demo-jti", "pending")
+
+        guard:check_demo_sessions()
+
+        runner.assert.equals(true, released)
+        runner.assert.equals(nil, ngx.shared.cache:get("demo_session:demo-jti"))
+        runner.assert.equals(0, ngx.shared.demo_sessions:get("occupied"))
+    end)
+
+    runner.it("retries a pending physical cleanup before the demo expiry", function()
+        local cache = {
+            ["demo_operation:demo-jti"] = "42",
+            ["demo_cleanup_pending:demo-jti"] = "disconnected",
+            ["demo_exp:demo-jti"] = "800",
+        }
+        local released = false
+        local test_ngx
+        local guard, _, ngx = build_guard(cache, {}, {
+            finish = function(_, jti, reason)
+                released = jti == "demo-jti" and reason == "disconnected"
+                test_ngx.shared.cache:delete("demo_cleanup_pending:demo-jti")
+                return true
+            end,
+        })
+        test_ngx = ngx
+
+        guard:check_demo_sessions()
+
+        runner.assert.equals(true, released)
+        runner.assert.equals(nil, ngx.shared.cache:get("demo_cleanup_pending:demo-jti"))
+    end)
+
+    runner.it("releases an abandoned pending handoff after its short lease", function()
+        local cache = {
+            ["demo_pending_exp:demo-jti"] = "100",
+            ["demo_exp:demo-jti"] = "800",
+        }
+        local released = false
+        local test_ngx
+        local guard, _, ngx = build_guard(cache, {}, {
+            finish = function(_, jti, reason)
+                released = jti == "demo-jti" and reason == "failed"
+                return true
+            end,
+        }, {
+            occupied = 1,
+            ["session:demo-jti"] = "pending",
+        })
+        test_ngx = ngx
+
+        guard:check_demo_sessions()
+
+        runner.assert.equals(true, released)
+        runner.assert.equals(nil, test_ngx.shared.cache:get("demo_pending_exp:demo-jti"))
+        runner.assert.equals(nil, test_ngx.shared.demo_sessions:get("session:demo-jti"))
+        runner.assert.equals(0, test_ngx.shared.demo_sessions:get("occupied"))
     end)
 
     runner.it("processes tunnel closures and cleans pending flags", function()

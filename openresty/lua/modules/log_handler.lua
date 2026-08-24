@@ -1,5 +1,6 @@
 local _M = {}
 local demo_guard = require "modules.demo_guard"
+local demo_station = require "modules.demo_station"
 
 local function is_websocket_tunnel(uri)
     return uri and uri:match("/guacamole/websocket%-tunnel")
@@ -34,7 +35,25 @@ function _M.run(ngx_ctx, deps)
     -- the shared-dict TTL remains the hard fallback for unclean disconnects.
     local demo_jti = ngx.ctx and ngx.ctx.demo_session_jti
     if demo_jti and (not status or tonumber(status) == 101) then
-        demo_guard.release(ngx, demo_jti)
+        local station = deps and deps.demo_station or demo_station
+        local function finish_demo(premature)
+            if premature then return end
+            local released, release_err = station.finish(ngx, demo_jti, "disconnected")
+            -- Release the gateway slot immediately. A failed physical close
+            -- remains auditable/retryable through the Ops operation marker;
+            -- readiness still prevents reuse while the station is occupied.
+            demo_guard.release(ngx, demo_jti)
+            if released then
+                ngx.log(ngx.INFO, "Log - Demo physical lifecycle released after tunnel closure")
+            else
+                ngx.log(ngx.WARN, "Log - Demo physical cleanup pending: " .. tostring(release_err))
+            end
+        end
+        if ngx.timer and ngx.timer.at then
+            ngx.timer.at(0, finish_demo)
+        else
+            finish_demo(false)
+        end
     end
 
     local config = ngx.shared.config

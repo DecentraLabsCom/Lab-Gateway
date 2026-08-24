@@ -8,16 +8,37 @@
 local _M = {}
 
 local DEFAULT_DEMO_SESSION_TTL = 600
+local DEFAULT_PENDING_LEASE_SECONDS = 45
 local MARKETPLACE_CHECK_TIMEOUT_MS = 3000
-local ACTIVE_KEY = "active"
+local OCCUPIED_KEY = "occupied"
+local PENDING_EXP_PREFIX = "demo_pending_exp:"
 
-local function decrement_active(demo_sessions)
-    local remaining = demo_sessions:incr(ACTIVE_KEY, -1, 0)
+local function canonical_lab_id(value)
+    if type(value) ~= "string" or not value:match("^%d+$") then
+        return nil
+    end
+
+    local normalized = value:gsub("^0+", "")
+    return normalized == "" and "0" or normalized
+end
+
+local function decrement_occupied(demo_sessions)
+    local remaining = demo_sessions:incr(OCCUPIED_KEY, -1, 0)
     if remaining and remaining < 0 then
-        demo_sessions:set(ACTIVE_KEY, 0)
+        demo_sessions:set(OCCUPIED_KEY, 0)
         return 0
     end
     return remaining
+end
+
+local function configured_pending_lease(ngx)
+    local config = ngx.shared.config
+    local lease = tonumber(config and config:get("demo_pending_lease_seconds"))
+        or DEFAULT_PENDING_LEASE_SECONDS
+    if lease < 30 then
+        return 30
+    end
+    return math.floor(math.min(60, lease))
 end
 
 local function reject(ngx, message)
@@ -48,10 +69,20 @@ local function session_ttl(ngx, exp)
     return ttl
 end
 
+local function pending_ttl(ngx, exp)
+    local ttl = configured_pending_lease(ngx)
+    local expires_at = tonumber(exp)
+    if expires_at then
+        return math.max(1, math.min(ttl, expires_at - ngx.time()))
+    end
+    return ttl
+end
+
 -- Returns: busy (boolean), error (string|nil).  A nil busy value means the
 -- Marketplace authority could not provide a trustworthy answer.
 local function is_lab_busy(ngx, marketplace_url, lab_id, demo_exp, deps)
-    if not lab_id or lab_id == "" then
+    local normalized_lab_id = canonical_lab_id(tostring(lab_id or ""))
+    if not normalized_lab_id then
         return nil, "DEMO_LAB_ID is not configured"
     end
 
@@ -70,8 +101,8 @@ local function is_lab_busy(ngx, marketplace_url, lab_id, demo_exp, deps)
         return true, "demo session has no valid availability window"
     end
     local url = marketplace_url
-        .. "/api/contract/reservation/checkAvailable"
-        .. "?labId=" .. ngx.escape_uri(tostring(lab_id))
+        .. "/api/demo/eligibility"
+        .. "?labId=" .. ngx.escape_uri(normalized_lab_id)
         .. "&start=" .. tostring(start_time)
         .. "&end=" .. tostring(end_time)
 
@@ -88,11 +119,14 @@ local function is_lab_busy(ngx, marketplace_url, lab_id, demo_exp, deps)
     if parse_err or type(body) ~= "table" then
         return nil, "availability authority returned invalid JSON"
     end
-    if type(body.isAvailable) ~= "boolean" then
-        return nil, "availability authority returned no boolean availability"
+    if body.labId ~= normalized_lab_id
+        or body.start ~= tostring(start_time)
+        or body["end"] ~= tostring(end_time)
+        or type(body.eligible) ~= "boolean" then
+        return nil, "eligibility authority returned invalid JSON"
     end
 
-    return body.isAvailable == false, nil
+    return body.eligible ~= true, nil
 end
 
 function _M.check_availability(ngx_ctx, exp, deps)
@@ -119,6 +153,15 @@ function _M.start(ngx_ctx, jti, exp, deps)
         return nil, "demo session storage is unavailable"
     end
 
+    local session_key = "session:" .. jti
+    local existing_state = demo_sessions:get(session_key)
+    if existing_state == "pending" then
+        return session_ttl(ngx, exp)
+    end
+    if existing_state == "active" then
+        return session_ttl(ngx, exp)
+    end
+
     local busy, check_err = _M.check_availability(ngx, exp, deps)
     if check_err then
         ngx.log(ngx.WARN, "demo_guard: " .. check_err)
@@ -128,25 +171,89 @@ function _M.start(ngx_ctx, jti, exp, deps)
         return nil, "Lab currently reserved. Please try again later."
     end
 
-    local ttl = session_ttl(ngx, exp)
-    local active, incr_err = demo_sessions:incr(ACTIVE_KEY, 1, 0, ttl)
-    if not active then
-        ngx.log(ngx.ERR, "demo_guard: failed to increment active session set: " .. tostring(incr_err))
+    local ttl = pending_ttl(ngx, exp)
+    local occupied, incr_err = demo_sessions:incr(OCCUPIED_KEY, 1, 0, ttl)
+    if not occupied then
+        ngx.log(ngx.ERR, "demo_guard: failed to increment occupied demo slot: " .. tostring(incr_err))
         return nil, "Demo access is unavailable"
     end
-    if active > 1 then
-        decrement_active(demo_sessions)
+    if occupied > 1 then
+        decrement_occupied(demo_sessions)
         return nil, "A demo session is already in progress. Please try again later."
     end
+    local renewed, renew_err = demo_sessions:set(OCCUPIED_KEY, occupied, ttl)
+    if not renewed then
+        decrement_occupied(demo_sessions)
+        ngx.log(ngx.ERR, "demo_guard: failed to renew occupied demo slot: " .. tostring(renew_err))
+        return nil, "Demo access is unavailable"
+    end
 
-    local stored, store_err = demo_sessions:set("session:" .. jti, "1", ttl)
+    local stored, store_err = demo_sessions:set(session_key, "pending", ttl)
     if not stored then
-        decrement_active(demo_sessions)
+        decrement_occupied(demo_sessions)
         ngx.log(ngx.ERR, "demo_guard: failed to register demo JTI: " .. tostring(store_err))
         return nil, "Demo access is unavailable"
     end
 
-    return ttl
+    local cache = ngx.shared.cache
+    local pending_exp = ngx.time() + ttl
+    local cache_stored, cache_err = cache and cache:set(
+        PENDING_EXP_PREFIX .. jti,
+        pending_exp,
+        session_ttl(ngx, exp)
+    )
+    if not cache_stored then
+        demo_sessions:delete(session_key)
+        decrement_occupied(demo_sessions)
+        ngx.log(ngx.ERR, "demo_guard: failed to register pending lease: " .. tostring(cache_err))
+        return nil, "Demo access is unavailable"
+    end
+
+    -- The caller uses this return value for the browser/session TTL. The
+    -- shorter pending lease is an internal guard and must not shorten the
+    -- cookie or the eventual active session.
+    return session_ttl(ngx, exp)
+end
+
+-- Promote a pending handoff only after Guacamole has issued its token (or an
+-- equivalent tunnel observation has been accepted by the caller).
+function _M.activate(ngx_ctx, jti, exp)
+    local ngx = ngx_ctx or ngx
+    if type(jti) ~= "string" or jti == "" then
+        return false, "invalid demo session identifier"
+    end
+    local demo_sessions = ngx.shared.demo_sessions
+    local cache = ngx.shared.cache
+    if not demo_sessions or not cache then
+        return false, "demo session storage is unavailable"
+    end
+
+    local session_key = "session:" .. jti
+    local state = demo_sessions:get(session_key)
+    if state == "active" then
+        return true
+    end
+    if state ~= "pending" then
+        return false, "demo handoff is no longer pending"
+    end
+
+    local ttl = session_ttl(ngx, exp)
+    local stored, store_err = demo_sessions:set(session_key, "active", ttl)
+    if not stored then
+        return false, store_err or "unable to promote demo session"
+    end
+    local occupied = tonumber(demo_sessions:get(OCCUPIED_KEY))
+    if not occupied or occupied < 1 then
+        demo_sessions:set(session_key, "pending", pending_ttl(ngx, exp))
+        return false, "occupied demo slot is missing"
+    end
+    local renewed, renew_err = demo_sessions:set(OCCUPIED_KEY, occupied, ttl)
+    if not renewed then
+        demo_sessions:set(session_key, "pending", pending_ttl(ngx, exp))
+        return false, renew_err or "unable to renew demo slot"
+    end
+    cache:delete(PENDING_EXP_PREFIX .. jti)
+    return true
 end
 
 -- Public entry point.  A normal reservation request is always a pass-through;
@@ -165,7 +272,8 @@ function _M.run(ngx_ctx, deps)
     end
 
     local demo_sessions = ngx.shared.demo_sessions
-    if not demo_sessions or not demo_sessions:get("session:" .. jti) then
+    local state = demo_sessions and demo_sessions:get("session:" .. jti)
+    if state ~= "pending" and state ~= "active" then
         ngx.log(ngx.WARN, "demo_guard: demo session is no longer active")
         return reject(ngx, "Demo session is no longer active")
     end
@@ -174,8 +282,8 @@ function _M.run(ngx_ctx, deps)
     return true
 end
 
--- Release exactly one registered JTI.  The existence check makes repeated log
--- phase calls harmless and prevents the active count from going negative.
+-- Release exactly one registered JTI. The existence check makes repeated log
+-- phase calls harmless and prevents the occupied count from going negative.
 function _M.release(ngx_ctx, jti)
     local ngx = ngx_ctx or ngx
     if type(jti) ~= "string" or jti == "" then
@@ -187,7 +295,10 @@ function _M.release(ngx_ctx, jti)
         return false
     end
     demo_sessions:delete(session_key)
-    decrement_active(demo_sessions)
+    decrement_occupied(demo_sessions)
+    if ngx.shared.cache then
+        ngx.shared.cache:delete(PENDING_EXP_PREFIX .. jti)
+    end
     ngx.log(ngx.INFO, "demo_guard: demo session ended")
     return true
 end

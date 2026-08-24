@@ -10,6 +10,17 @@ app = Flask(__name__)
 
 # Simulated connections
 connections = {
+    "1": {
+        "identifier": "1",
+        "name": "Vertical Demo Connection",
+        "protocol": "rdp",
+        "parentIdentifier": "ROOT",
+        "parameters": {
+            "hostname": "192.168.1.100",
+            "port": "3389",
+            "username": "demo-user",
+        },
+    },
     "test-conn-1": {
         "identifier": "test-conn-1",
         "name": "Test RDP Connection",
@@ -52,6 +63,10 @@ def guacamole_root():
 @app.route('/api/session/data/mysql/connections', methods=['GET'])
 def list_connections():
     """List all connections."""
+    # The real header-auth extension scopes the demo principal to the single
+    # managed connection. Keep that boundary visible in the Docker E2E mock.
+    if request.headers.get("Authorization") == "demo-lab-42":
+        return jsonify({"1": connections["1"]})
     return jsonify(connections)
 
 @app.route('/guacamole/api/session/data/mysql/connections', methods=['GET'])
@@ -77,11 +92,11 @@ def get_connection_prefixed(conn_id):
 def create_token():
     """Simulate Guacamole authentication token creation."""
     data = request.form
-    username = data.get('username', '')
+    username = request.headers.get("Authorization", "") or data.get('username', '')
     password = data.get('password', '')
     
     # For testing, accept any credentials
-    if username and password:
+    if username and (password or request.headers.get("Authorization")):
         token = secrets.token_hex(32)
         return jsonify({
             "authToken": token,
@@ -104,7 +119,7 @@ def get_session():
     auth_header = request.headers.get('Guacamole-Token', '')
     if auth_header:
         return jsonify({
-            "username": "testuser",
+            "username": request.headers.get("Authorization") or "testuser",
             "dataSource": "mysql",
             "availableDataSources": ["mysql"]
         })

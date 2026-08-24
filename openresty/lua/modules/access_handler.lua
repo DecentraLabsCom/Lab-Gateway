@@ -80,6 +80,10 @@ function _M.run(ngx_ctx, deps)
     -- reservation key or durable economic-session registration.
     local demo_jti = cookie_value(cookies, "DEMO_JTI")
     if demo_jti and demo_jti ~= "" and dict:get("demo_session:" .. demo_jti) then
+        if dict:get("demo_ended:" .. demo_jti) then
+            reject(ngx, "Unauthorized: demo access session has ended")
+            return
+        end
         local demo_username = dict:get("demo_session:" .. demo_jti)
         local demo_exp = tonumber(dict:get("demo_exp:" .. demo_jti))
         if not demo_username or not demo_exp then

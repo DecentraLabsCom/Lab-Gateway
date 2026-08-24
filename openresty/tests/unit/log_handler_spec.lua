@@ -12,6 +12,7 @@ local function base_env(overrides)
             http_authorization = overrides.authorization
         },
         cache = overrides.cache or {},
+        demo_sessions = overrides.demo_sessions or {},
         config = overrides.config or {
             auto_logout_on_disconnect = true,
             admin_user = "guacadmin"
@@ -42,6 +43,47 @@ runner.describe("Log handler", function()
         })
         runner.assert.equals(false, reported)
         runner.assert.equals(nil, ngx.shared.cache._data["has_pending_closures"])
+    end)
+
+    runner.it("releases the physical demo lifecycle when the tunnel closes", function()
+        local ngx = base_env({
+            demo_sessions = { occupied = 1, ["session:demo-jti"] = "active" },
+        })
+        ngx.var.status = "101"
+        ngx.ctx.demo_session_jti = "demo-jti"
+        local released = false
+
+        handler.run(ngx, {
+            demo_station = {
+                finish = function(_, jti, reason)
+                    released = jti == "demo-jti" and reason == "disconnected"
+                    return true
+                end,
+            },
+        })
+        ngx._timer_calls.at[1].callback(false)
+
+        runner.assert.equals(true, released)
+        runner.assert.equals(nil, ngx.shared.demo_sessions:get("session:demo-jti"))
+        runner.assert.equals(0, ngx.shared.demo_sessions:get("occupied"))
+    end)
+
+    runner.it("releases the gateway slot even when physical close needs a retry", function()
+        local ngx = base_env({
+            demo_sessions = { occupied = 1, ["session:demo-jti"] = "active" },
+        })
+        ngx.var.status = "101"
+        ngx.ctx.demo_session_jti = "demo-jti"
+
+        handler.run(ngx, {
+            demo_station = {
+                finish = function() return false, "station unavailable" end,
+            },
+        })
+        ngx._timer_calls.at[1].callback(false)
+
+        runner.assert.equals(nil, ngx.shared.demo_sessions:get("session:demo-jti"))
+        runner.assert.equals(0, ngx.shared.demo_sessions:get("occupied"))
     end)
 
     runner.it("skips when auto logout disabled", function()

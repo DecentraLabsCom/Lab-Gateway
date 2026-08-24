@@ -267,66 +267,220 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     WHERE e.name = @default_admin AND @guac_admin_user <> @default_admin;
 EOSQL
 
-# ── Demo Guacamole user (header-auth only, password login disabled) ──────────
-# The user is pre-created and, when DEMO_CONNECTION_ID is configured below,
-# receives access to exactly one explicitly configured connection.
-DEMO_GUAC_USER="${DEMO_USER:-demo}"
+# ── Demo Guacamole principal (header-auth only, password login disabled) ────
+# The demo principal is platform-owned.  The marker attributes below are the
+# proof of ownership: a pre-existing name without the exact marker is a hard
+# collision and must never be adopted by the demo flow.  When the demo is
+# enabled, the second marker binds that principal to the configured lab.
+DEMO_GUAC_USER="${DEMO_USER:-demo-lab-disabled}"
+DEMO_LAB_ID="${DEMO_LAB_ID:-}"
 DEMO_CONNECTION_ID="${DEMO_CONNECTION_ID:-}"
+DEMO_MANAGED_ATTRIBUTE="decentralabs_demo_managed"
+DEMO_LAB_ATTRIBUTE="decentralabs_demo_lab_id"
+DEMO_MANAGED_VALUE="true"
 escaped_demo_user="$(escape_sql "$DEMO_GUAC_USER")"
-echo "Ensuring demo Guacamole user: ${DEMO_GUAC_USER}"
+escaped_demo_lab_id="$(escape_sql "$DEMO_LAB_ID")"
+echo "Ensuring managed demo Guacamole principal: ${DEMO_GUAC_USER}"
 
-mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
-    USE \`${MYSQL_DATABASE}\`;
+if ! [[ "$DEMO_GUAC_USER" =~ ^[A-Za-z0-9_.-]{1,128}$ ]]; then
+    echo "Invalid DEMO_USER; expected 1-128 letters, digits, dot, underscore or hyphen." >&2
+    exit 1
+fi
+if [ -n "$DEMO_LAB_ID" ] && ! [[ "$DEMO_LAB_ID" =~ ^[0-9]+$ ]]; then
+    echo "Invalid DEMO_LAB_ID; expected a non-negative numeric lab id." >&2
+    exit 1
+fi
+if [ -n "$DEMO_CONNECTION_ID" ] && ! [[ "$DEMO_CONNECTION_ID" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Invalid DEMO_CONNECTION_ID; expected a positive numeric connection_id." >&2
+    exit 1
+fi
+if [ -n "$DEMO_CONNECTION_ID" ] && [ -z "$DEMO_LAB_ID" ]; then
+    echo "DEMO_LAB_ID is required when DEMO_CONNECTION_ID enables the demo; refusing to start." >&2
+    exit 1
+fi
+if [ -n "$DEMO_CONNECTION_ID" ]; then
+    connection_exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+        "SELECT COUNT(*) FROM guacamole_connection WHERE connection_id = ${DEMO_CONNECTION_ID}")"
+    if [ "$connection_exists" != "1" ]; then
+        echo "Configured DEMO_CONNECTION_ID ${DEMO_CONNECTION_ID} does not exist in Guacamole; refusing to start." >&2
+        exit 1
+    fi
+fi
 
-    -- Random, non-guessable hash and salt so password login is effectively impossible.
-    -- Authentication happens via the Authorization header set by OpenResty.
+demo_entity_name_count="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+    "SELECT COUNT(*) FROM guacamole_entity WHERE name = '${escaped_demo_user}'")"
+demo_entity_count="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+    "SELECT COUNT(*) FROM guacamole_entity WHERE name = '${escaped_demo_user}' AND type = 'USER'")"
+demo_user_count="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+    "SELECT COUNT(*) FROM guacamole_user u JOIN guacamole_entity e ON e.entity_id = u.entity_id
+     WHERE e.name = '${escaped_demo_user}' AND e.type = 'USER'")"
+
+if [ "$demo_entity_name_count" = "0" ]; then
+    # A fresh principal is created explicitly; a concurrent or unexpected
+    # collision must abort the transaction.
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" <<-EOSQL
+        START TRANSACTION;
+        INSERT INTO guacamole_entity (name, type)
+        VALUES ('${escaped_demo_user}', 'USER');
+        SET @demo_entity_id = LAST_INSERT_ID();
+
+        -- Random, non-guessable hash and salt keep password login unusable.
+        SET @demo_salt = UNHEX(SHA2(CONCAT('demo-salt-', UUID()), 256));
+        SET @demo_hash = UNHEX(SHA2(CONCAT('demo-hash-', UUID()), 256));
+        INSERT INTO guacamole_user (entity_id, password_hash, password_salt, password_date)
+        VALUES (@demo_entity_id, @demo_hash, @demo_salt, NOW());
+        SET @demo_user_id = LAST_INSERT_ID();
+
+        INSERT INTO guacamole_user_attribute (user_id, attribute_name, attribute_value)
+        VALUES (@demo_user_id, '${DEMO_MANAGED_ATTRIBUTE}', '${DEMO_MANAGED_VALUE}');
+        INSERT INTO guacamole_user_attribute (user_id, attribute_name, attribute_value)
+        VALUES (@demo_user_id, '${DEMO_LAB_ATTRIBUTE}', '${escaped_demo_lab_id}');
+        COMMIT;
+EOSQL
+elif [ "$demo_entity_name_count" != "1" ] || [ "$demo_entity_count" != "1" ] || [ "$demo_user_count" != "1" ]; then
+    echo "Demo principal collision for ${DEMO_GUAC_USER}: existing entity is not one managed USER principal; refusing to start." >&2
+    exit 1
+else
+    demo_managed_count="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+        "SELECT COUNT(*) FROM guacamole_user_attribute ua
+         JOIN guacamole_user u ON u.user_id = ua.user_id
+         JOIN guacamole_entity e ON e.entity_id = u.entity_id
+         WHERE e.name = '${escaped_demo_user}' AND e.type = 'USER'
+           AND ua.attribute_name = '${DEMO_MANAGED_ATTRIBUTE}'
+           AND ua.attribute_value = '${DEMO_MANAGED_VALUE}'")"
+    demo_managed_values="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+        "SELECT COUNT(*) FROM guacamole_user_attribute ua
+         JOIN guacamole_user u ON u.user_id = ua.user_id
+         JOIN guacamole_entity e ON e.entity_id = u.entity_id
+         WHERE e.name = '${escaped_demo_user}' AND e.type = 'USER'
+           AND ua.attribute_name = '${DEMO_MANAGED_ATTRIBUTE}'")"
+    if [ "$demo_managed_count" != "1" ] || [ "$demo_managed_values" != "1" ]; then
+        echo "Demo principal collision for ${DEMO_GUAC_USER}: existing USER is not marked as platform-managed; refusing to start." >&2
+        exit 1
+    fi
+
+    if [ -n "$DEMO_LAB_ID" ]; then
+        demo_lab_marker_count="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+            "SELECT COUNT(*) FROM guacamole_user_attribute ua
+             JOIN guacamole_user u ON u.user_id = ua.user_id
+             JOIN guacamole_entity e ON e.entity_id = u.entity_id
+             WHERE e.name = '${escaped_demo_user}' AND e.type = 'USER'
+               AND ua.attribute_name = '${DEMO_LAB_ATTRIBUTE}'
+               AND ua.attribute_value = '${escaped_demo_lab_id}'")"
+        demo_lab_marker_values="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+            "SELECT COUNT(*) FROM guacamole_user_attribute ua
+             JOIN guacamole_user u ON u.user_id = ua.user_id
+             JOIN guacamole_entity e ON e.entity_id = u.entity_id
+             WHERE e.name = '${escaped_demo_user}' AND e.type = 'USER'
+               AND ua.attribute_name = '${DEMO_LAB_ATTRIBUTE}'")"
+        if [ "$demo_lab_marker_count" != "1" ] || [ "$demo_lab_marker_values" != "1" ]; then
+            echo "Demo principal collision for ${DEMO_GUAC_USER}: principal is not bound to DEMO_LAB_ID ${DEMO_LAB_ID}; refusing to start." >&2
+            exit 1
+        fi
+    fi
+fi
+
+demo_entity_id="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+    "SELECT entity_id FROM guacamole_entity WHERE name = '${escaped_demo_user}' AND type = 'USER'")"
+demo_user_id="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+    "SELECT user_id FROM guacamole_user WHERE entity_id = ${demo_entity_id}")"
+
+demo_connection_grant_sql="SET @demo_permission_rows = 0;"
+if [ -n "$DEMO_CONNECTION_ID" ]; then
+    demo_connection_grant_sql="INSERT INTO guacamole_connection_permission (entity_id, connection_id, permission)
+        VALUES (@demo_entity_id, ${DEMO_CONNECTION_ID}, 'READ');
+    SET @demo_permission_rows = ROW_COUNT();"
+fi
+
+# Reconcile identity metadata and every Guacamole permission surface in one
+# transaction.  Group membership is removed as well, otherwise group grants
+# would remain an implicit permission path after direct rows are deleted.
+demo_permission_inserted="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" <<-EOSQL
+    START TRANSACTION;
+    SET @demo_entity_id = ${demo_entity_id};
+    SET @demo_user_id = ${demo_user_id};
     SET @demo_salt = UNHEX(SHA2(CONCAT('demo-salt-', UUID()), 256));
     SET @demo_hash = UNHEX(SHA2(CONCAT('demo-hash-', UUID()), 256));
 
-    INSERT IGNORE INTO guacamole_entity (name, type)
-    VALUES ('${escaped_demo_user}', 'USER');
+    UPDATE guacamole_user
+    SET password_hash = @demo_hash,
+        password_salt = @demo_salt,
+        password_date = NOW(),
+        disabled = 0,
+        expired = 0
+    WHERE user_id = @demo_user_id;
 
-    INSERT IGNORE INTO guacamole_user (entity_id, password_hash, password_salt, password_date)
-    SELECT entity_id, @demo_hash, @demo_salt, NOW()
-    FROM guacamole_entity
-    WHERE name = '${escaped_demo_user}' AND type = 'USER';
+    DELETE FROM guacamole_user_attribute
+    WHERE user_id = @demo_user_id
+      AND attribute_name NOT IN ('${DEMO_MANAGED_ATTRIBUTE}', '${DEMO_LAB_ATTRIBUTE}');
+    INSERT INTO guacamole_user_attribute (user_id, attribute_name, attribute_value)
+    VALUES (@demo_user_id, '${DEMO_MANAGED_ATTRIBUTE}', '${DEMO_MANAGED_VALUE}')
+    ON DUPLICATE KEY UPDATE attribute_value = VALUES(attribute_value);
+    INSERT INTO guacamole_user_attribute (user_id, attribute_name, attribute_value)
+    VALUES (@demo_user_id, '${DEMO_LAB_ATTRIBUTE}', '${escaped_demo_lab_id}')
+    ON DUPLICATE KEY UPDATE attribute_value = VALUES(attribute_value);
+
+    DELETE FROM guacamole_connection_permission WHERE entity_id = @demo_entity_id;
+    DELETE FROM guacamole_connection_group_permission WHERE entity_id = @demo_entity_id;
+    DELETE FROM guacamole_sharing_profile_permission WHERE entity_id = @demo_entity_id;
+    DELETE FROM guacamole_system_permission WHERE entity_id = @demo_entity_id;
+    DELETE FROM guacamole_user_permission WHERE entity_id = @demo_entity_id;
+    DELETE FROM guacamole_user_group_permission WHERE entity_id = @demo_entity_id;
+    DELETE FROM guacamole_user_group_member WHERE member_entity_id = @demo_entity_id;
+
+    ${demo_connection_grant_sql}
+    COMMIT;
+    SELECT @demo_permission_rows;
 EOSQL
+)"
 
-# A demo token is useful only when the demo principal can see the configured
-# physical-lab connection.  Reconcile only this dedicated principal's
-# connection permissions, then grant the narrow READ permission and leave
-# every other Guacamole account/connection untouched.  The explicit
-# connection id prevents a public demo request from selecting an arbitrary
-# connection.
-if [ -n "$DEMO_CONNECTION_ID" ]; then
-    if ! [[ "$DEMO_CONNECTION_ID" =~ ^[1-9][0-9]*$ ]]; then
-        echo "Invalid DEMO_CONNECTION_ID; expected a positive numeric connection_id." >&2
+if [ "$demo_permission_inserted" != "1" ] && [ -n "$DEMO_CONNECTION_ID" ]; then
+    echo "Demo principal ${DEMO_GUAC_USER} did not insert exactly one READ permission; refusing to start." >&2
+    exit 1
+fi
+if [ -z "$DEMO_CONNECTION_ID" ] && [ "$demo_permission_inserted" != "0" ]; then
+    echo "Demo principal ${DEMO_GUAC_USER} has an unexpected permission result while disabled; refusing to start." >&2
+    exit 1
+fi
+
+demo_connection_permissions="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+    "SELECT COUNT(*) FROM guacamole_connection_permission WHERE entity_id = ${demo_entity_id}")"
+demo_target_permission="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+    "SELECT COUNT(*) FROM guacamole_connection_permission
+     WHERE entity_id = ${demo_entity_id}
+       AND connection_id = ${DEMO_CONNECTION_ID:-0} AND permission = 'READ'")"
+for permission_table in \
+    guacamole_connection_group_permission \
+    guacamole_sharing_profile_permission \
+    guacamole_system_permission \
+    guacamole_user_permission \
+    guacamole_user_group_permission; do
+    permission_count="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+        "SELECT COUNT(*) FROM ${permission_table} WHERE entity_id = ${demo_entity_id}")"
+    if [ "$permission_count" != "0" ]; then
+        echo "Demo principal ${DEMO_GUAC_USER} retains rows in ${permission_table}; refusing to start." >&2
         exit 1
     fi
-    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" <<-EOSQL
-        DELETE permission
-        FROM guacamole_connection_permission permission
-        INNER JOIN guacamole_entity entity ON entity.entity_id = permission.entity_id
-        WHERE entity.name = '${escaped_demo_user}' AND entity.type = 'USER';
+done
+demo_group_memberships="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B "${MYSQL_DATABASE}" -e \
+    "SELECT COUNT(*) FROM guacamole_user_group_member WHERE member_entity_id = ${demo_entity_id}")"
+if [ "$demo_group_memberships" != "0" ]; then
+    echo "Demo principal ${DEMO_GUAC_USER} retains group memberships; refusing to start." >&2
+    exit 1
+fi
 
-        INSERT IGNORE INTO guacamole_connection_permission (entity_id, connection_id, permission)
-        SELECT entity_id, ${DEMO_CONNECTION_ID}, 'READ'
-        FROM guacamole_entity
-        WHERE name = '${escaped_demo_user}' AND type = 'USER'
-          AND EXISTS (
-              SELECT 1 FROM guacamole_connection
-              WHERE connection_id = ${DEMO_CONNECTION_ID}
-          );
-EOSQL
-    echo "Ensured demo READ permission for Guacamole connection ${DEMO_CONNECTION_ID}."
+if [ -n "$DEMO_CONNECTION_ID" ]; then
+    if [ "$demo_connection_permissions" != "1" ] || [ "$demo_target_permission" != "1" ]; then
+        echo "Demo principal ${DEMO_GUAC_USER} does not have exactly one READ permission for connection ${DEMO_CONNECTION_ID}; refusing to start." >&2
+        exit 1
+    fi
+    echo "Ensured managed demo READ permission for Guacamole connection ${DEMO_CONNECTION_ID}."
 else
-    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" <<-EOSQL
-        DELETE permission
-        FROM guacamole_connection_permission permission
-        INNER JOIN guacamole_entity entity ON entity.entity_id = permission.entity_id
-        WHERE entity.name = '${escaped_demo_user}' AND entity.type = 'USER';
-EOSQL
-    echo "DEMO_CONNECTION_ID is empty; demo handoff remains disabled until a connection is configured."
+    if [ "$demo_connection_permissions" != "0" ] || [ "$demo_target_permission" != "0" ]; then
+        echo "Demo principal ${DEMO_GUAC_USER} retains connection permissions while disabled; refusing to start." >&2
+        exit 1
+    fi
+    echo "DEMO_CONNECTION_ID is empty; managed demo handoff remains disabled until a connection is configured."
 fi
 
 echo "=== User configuration completed successfully ==="

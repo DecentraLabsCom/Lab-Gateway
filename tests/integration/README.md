@@ -32,6 +32,9 @@ readiness timeout.
 - `/ops` token protection
 - Static files and HTTP->HTTPS redirect
 - Security headers
+- Vertical anonymous demo flow: Marketplace publication/sanitation/catalogue,
+  `/auth/demo`, `DEMO_JTI`, Guacamole token/session scoping, Ops lifecycle and
+  concurrent-slot rejection
 
 ## Prerequisites
 
@@ -48,6 +51,32 @@ readiness timeout.
 # Or inside tests/integration
 ./run-integration.sh
 ```
+
+The Docker gate uses a deterministic Marketplace authority and controlled
+Guacamole/Ops/Station mocks. It is the repeatable cross-container contract
+test; it does not replace the live hardware gate below.
+
+## Live demo browser gate
+
+The Marketplace repository contains an opt-in Cypress test for a deployed
+Marketplace and Gateway. It never fabricates catalogue or handoff responses;
+the configured lab must already be published, listed, physical, HTTPS-backed,
+and connected to a controlled Guacamole/Lab Station setup.
+
+```powershell
+$env:CYPRESS_DEMO_LIVE = "true"
+$env:CYPRESS_BASE_URL = "https://marketplace.example"
+$env:CYPRESS_DEMO_GATEWAY_URL = "https://gateway.example"
+$env:CYPRESS_DEMO_LAB_ID = "42"
+$env:CYPRESS_DEMO_CONNECTION_ID = "7"
+cd ..\..\Marketplace
+npm run test:e2e:demo
+```
+
+The gate verifies the real Marketplace catalogue, Gateway readiness, HTTPS
+handoff, Secure/HttpOnly `DEMO_JTI`, Guacamole token exchange, session identity
+and the single configured connection. It is deliberately disabled unless
+`CYPRESS_DEMO_LIVE=true` and all endpoints/IDs are supplied.
 
 ## FMU live stack verification
 

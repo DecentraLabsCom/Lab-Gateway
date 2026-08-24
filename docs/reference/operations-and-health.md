@@ -39,6 +39,38 @@ The browser view at `/gateway-health/` presents the same aggregate result and,
 after Lab Manager authentication, the service and infrastructure diagnostics.
 It is an operator aid, not a replacement for the public health contract.
 
+`GET /gateway/health/details` also exposes `services.demo` for the configured
+anonymous demo. Its status is one of:
+
+- `disabled`: both demo identifiers are empty;
+- `misconfigured`: the binding, Guacamole connection, managed principal, or
+  exact `READ` grant is invalid. The MySQL reconciler also rejects a name
+  collision, a different `DEMO_LAB_ID`, or any residual system/user/group,
+  connection-group, sharing-profile permission or group membership;
+- `unready`: the gateway, Marketplace authority, or Station heartbeat cannot
+  currently prove readiness;
+- `busy`: the Station has a local session/mode active or the Marketplace
+  authority denies the requested demo window;
+- `ready`: all local checks, the physical host and the Marketplace authority
+  agree for a short probe window.
+
+The endpoint is protected by the Lab Manager operator policy and never exposes
+Guacamole credentials. The public `/gateway/health` remains an aggregate edge
+signal; a demo hand-off is permitted only when it is `UP` and the protected
+demo status is `ready`.
+
+The demo hand-off also has a synchronous physical lifecycle. It calls the
+internal Ops Worker with `demo:<jti>`, which resolves the bound Station,
+performs Wake-on-LAN when needed, runs `prepare-session` before the Guacamole
+token is exposed, and runs `release-session --reboot` on expiry, failure or
+tunnel closure. The worker records `demo_start`, `demo_connection`,
+`demo_expiry`/`demo_failure`/`demo_disconnect`, and `demo_cleanup` alongside
+the low-level Station steps. OpenResty keeps the gateway slot in `pending` for
+the bounded `DEMO_PENDING_LEASE_SECONDS` window (30–60 seconds, default 45)
+and promotes it to `active` only after token issuance; failed or abandoned
+handoffs release the logical slot while physical cleanup remains retryable.
+This is an operational timeline, not a blockchain reservation.
+
 ![Gateway Health dashboard](../images/lab-gateway-health.png)
 
 Use the normal Lab Manager authentication flow before opening a `details`
