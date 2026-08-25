@@ -32,8 +32,18 @@ set_env HTTP_PORT 80 "$ROOT_ENV_FILE"
 set_env OPENRESTY_BIND_ADDRESS 127.0.0.1 "$ROOT_ENV_FILE"
 set_env OPENRESTY_BIND_HTTPS_PORT 18483 "$ROOT_ENV_FILE"
 set_env OPENRESTY_BIND_HTTP_PORT 18081 "$ROOT_ENV_FILE"
-set_env HOST_UID 1000 "$ROOT_ENV_FILE"
-set_env HOST_GID 1000 "$ROOT_ENV_FILE"
+# Compose runs the services that use bind-mounted state as this numeric user.
+# Match the runner and materialize the paths before Docker can create them as
+# root, otherwise blockchain-services cannot create its persisted keys and
+# OpenResty cannot create its development certificate/state files.
+host_uid="$(id -u)"
+host_gid="$(id -g)"
+set_env HOST_UID "$host_uid" "$ROOT_ENV_FILE"
+set_env HOST_GID "$host_gid" "$ROOT_ENV_FILE"
+mkdir -p "$ROOT_DIR/blockchain-data/keys" "$ROOT_DIR/certs" \
+  "$ROOT_DIR/fmu-access-state" "$ROOT_DIR/lab-content" "$ROOT_DIR/ops-data"
+chmod 700 "$ROOT_DIR/blockchain-data" "$ROOT_DIR/fmu-access-state" "$ROOT_DIR/ops-data"
+chmod 755 "$ROOT_DIR/certs" "$ROOT_DIR/lab-content"
 set_env BLOCKCHAIN_SERVICES_ENABLED true "$ROOT_ENV_FILE"
 set_env BLOCKCHAIN_SERVICES_MODE provider-consumer "$ROOT_ENV_FILE"
 set_env CONTRACT_VERIFICATION_ENABLED false "$ROOT_ENV_FILE"

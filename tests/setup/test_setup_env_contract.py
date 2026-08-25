@@ -17,6 +17,7 @@ ISSUE_LITE_PS1 = ROOT / "scripts" / "Issue-LiteTrustBundle.ps1"
 VALIDATE_GATEWAY_ENV_PY = ROOT / "scripts" / "validate-gateway-env.py"
 NGINX_CONF = ROOT / "openresty" / "nginx.conf"
 COMPOSE_FILE = ROOT / "docker-compose.yml"
+REAL_COMPOSE_PREPARE_SCRIPT = ROOT / "tests" / "integration" / "prepare-real-compose-ci.sh"
 
 
 def _service_block(service_name: str, compose_text: str) -> str:
@@ -70,6 +71,12 @@ class SetupEnvContractTest(unittest.TestCase):
         cls.validate_gateway_env_ps1 = (ROOT / "scripts" / "Validate-GatewayEnv.ps1").read_text(encoding="utf-8")
         cls.nginx_conf = NGINX_CONF.read_text(encoding="utf-8")
         cls.compose_file = COMPOSE_FILE.read_text(encoding="utf-8")
+        cls.gateway_tests_workflow = (
+            ROOT / ".github" / "workflows" / "gateway-tests.yml"
+        ).read_text(encoding="utf-8")
+        cls.real_compose_prepare_script = REAL_COMPOSE_PREPARE_SCRIPT.read_text(
+            encoding="utf-8"
+        )
         cls.init_ssl = (ROOT / "openresty" / "init-ssl.sh").read_text(encoding="utf-8")
 
     def test_gateway_managed_backend_keys_are_removed_from_embedded_backend_env(self):
@@ -404,7 +411,8 @@ class SetupEnvContractTest(unittest.TestCase):
             self.skipTest("bash is not executable in this environment")
 
         function_match = re.search(r"(?ms)^update_env_var\(\) \{.*?^\}", self.setup_sh)
-        self.assertIsNotNone(function_match)
+        if function_match is None:
+            raise AssertionError("update_env_var function should be present")
 
         value = r"a|b&c\d"
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -641,6 +649,23 @@ class SetupEnvContractTest(unittest.TestCase):
         dockerfile = (ROOT / "openresty" / "Dockerfile").read_text(encoding="utf-8")
 
         self.assertNotIn("lua-resty-string", dockerfile)
+
+    def test_web_tests_checkout_initializes_embedded_backend_submodule(self):
+        web_tests = self.gateway_tests_workflow.split("\n  web-tests:", 1)[1].split(
+            "\n  test-summary:", 1
+        )[0]
+
+        self.assertIn("submodules: recursive", web_tests)
+
+    def test_real_compose_ci_prepares_writable_state_for_the_runner_identity(self):
+        script = self.real_compose_prepare_script
+
+        self.assertIn('host_uid="$(id -u)"', script)
+        self.assertIn('host_gid="$(id -g)"', script)
+        self.assertIn('set_env HOST_UID "$host_uid" "$ROOT_ENV_FILE"', script)
+        self.assertIn('set_env HOST_GID "$host_gid" "$ROOT_ENV_FILE"', script)
+        self.assertIn('mkdir -p "$ROOT_DIR/blockchain-data/keys"', script)
+        self.assertIn('"$ROOT_DIR/ops-data"', script)
 
 if __name__ == "__main__":
     unittest.main()
