@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     env_file:
-      - ./blockchain-services/.env  # Blockchain-specific configuration (optional overrides)
+      - ${BLOCKCHAIN_SERVICES_ENV_FILE:-./blockchain-services/.env}  # Blockchain-specific configuration (optional overrides)
     environment:
       # auto => Full when ISSUER is empty, Lite when ISSUER points to an
       # external issuer. Set true/false explicitly for unattended deployments.
@@ -546,6 +546,9 @@ services:
       - gateway_guacamole
       - database_guacamole
       - guacd_net
+      # Ops Worker reconciles Guacamole sessions through the private
+      # ops_guacamole edge; keep that path separate from the public gateway.
+      - ops_guacamole
   guacd:
     image: guacamole/guacd:1.6.0
     healthcheck:

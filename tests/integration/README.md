@@ -2,13 +2,16 @@
 
 This suite validates OpenResty routing and security behavior against mock services.
 
-## Real Compose readiness smoke test
+## Real Compose resilience gate
 
-Use this separate smoke test to validate the database-dependent services in the
-real root Compose stack. It starts MySQL, the embedded blockchain-services,
-Guacamole, and Ops Worker, then waits for each service healthcheck to report
-`healthy`. It removes only the resources belonging to its temporary Compose
-project when it finishes.
+Use this gate to exercise the database-dependent services and the real edge in
+the root Compose stack. It starts MySQL, the embedded blockchain-services,
+Guacamole, guacd, Ops Worker, OpenResty, and the production FMU Runner. In
+addition to readiness it restarts OpenResty, checks that the edge recovers,
+inserts a real Guacamole history record and verifies that Ops Worker creates a
+durable session observation, and drives the production FMU queue past capacity
+to verify newest-event retention and drop accounting. It removes only the
+resources belonging to its temporary Compose project when it finishes.
 
 Prerequisites:
 
@@ -21,7 +24,10 @@ bash ./tests/integration/run-compose-stack-integration.sh
 ```
 
 Set `COMPOSE_STACK_TEST_TIMEOUT_SECONDS` to change the default 10-minute
-readiness timeout.
+resilience timeout. CI uses
+`tests/integration/prepare-real-compose-ci.sh` to create an isolated env,
+backend env, and Compose secret override; it never needs the developer's
+production `.env` or `secrets/` directory.
 
 ## What is covered
 
@@ -51,6 +57,35 @@ readiness timeout.
 # Or inside tests/integration
 ./run-integration.sh
 ```
+
+## Full/Lite access-plane gate
+
+Run the dedicated Full/Lite scenario when changing issuer trust, access-code
+redemption, Guacamole provisioning, observer credentials, or the `/auth/**`
+mode boundary:
+
+```bash
+./tests/integration/run-full-lite-access-integration.sh
+```
+
+This gate starts two real OpenResty edges. Its control-plane fixture signs
+RS256 credentials with a generated RSA key and models the contract states
+`CONFIRMED` and `ACCESS_AUTHORIZED`; the access-code endpoint remains closed
+until the latter. It then checks remote Lite key synchronization, a JWT issued
+by the remote authority, the server-side access-code prepare/commit flow,
+reservation-scoped Guacamole sessions, the explicit remote provisioner route,
+the scoped observer JWT, and the Full/Lite `/auth/**` distinction.
+
+The fixture is intentionally isolated from production secrets and databases.
+The canonical on-chain/backend semantics remain covered by the Foundry and
+Spring tests; this Docker gate covers the cross-service edge protocol that
+those tests cannot exercise.
+
+The gate also checks redemption lease expiry, concurrent access-code fencing,
+durable FMU mappings across an OpenResty restart, and Station outage followed
+by reconnection. Those cases use deterministic control-plane/Station
+fixtures, while the real Compose gate above covers the persistence and runtime
+boundaries that require MySQL, Guacamole, and the production worker.
 
 The Docker gate uses a deterministic Marketplace authority and controlled
 Guacamole/Ops/Station mocks. It is the repeatable cross-container contract
@@ -161,6 +196,7 @@ Notes:
 tests/integration/
 |- run-integration.sh
 |- run-compose-stack-integration.sh
+|- prepare-real-compose-ci.sh
 |- docker-compose.integration.yml
 |- certs/generate-certs.sh
 `- mocks/

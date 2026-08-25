@@ -296,11 +296,11 @@ test('reserves a tall, explicit scroll area for actionable reservation details',
 
   assert.match(
     stylesheet,
-    /\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*520px;[\s\S]*height:\s*520px;[\s\S]*overflow-y:\s*auto;/,
+    /\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*540px;[\s\S]*height:\s*540px;[\s\S]*overflow-y:\s*auto;/,
   );
   assert.match(
     stylesheet,
-    /@media \(min-width: 701px\)[\s\S]*\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*720px;[\s\S]*height:\s*720px;[\s\S]*max-height:\s*720px;/,
+    /@media \(min-width: 701px\)[\s\S]*\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*540px;[\s\S]*height:\s*540px;[\s\S]*max-height:\s*540px;/,
   );
 });
 

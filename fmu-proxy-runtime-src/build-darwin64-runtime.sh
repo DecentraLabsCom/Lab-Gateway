@@ -23,12 +23,12 @@ if [[ -z "$openssl_root" || ! -d "$openssl_root" ]]; then
   exit 1
 fi
 
-cmake -S "$script_dir" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR="$openssl_root"
+cmake -S "$script_dir" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DOPENSSL_ROOT_DIR="$openssl_root"
 cmake --build "$build_dir" -j
+ctest --test-dir "$build_dir" --output-on-failure
 
 if [[ "${1:-}" == "--promote" ]]; then
   mkdir -p "$(dirname "$runtime_output")"
   cp "$build_dir/libdecentralabs_proxy.dylib" "$runtime_output"
   ls -l "$runtime_output"
 fi
-

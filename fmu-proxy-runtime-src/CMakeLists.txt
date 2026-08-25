@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(decentralabs_proxy_runtime VERSION 0.1.0 LANGUAGES CXX)
 
+include(CTest)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   find_package(OpenSSL REQUIRED)
 endif()
@@ -85,3 +87,36 @@ set_target_properties(
     OUTPUT_NAME "decentralabs_proxy"
     POSITION_INDEPENDENT_CODE ON
 )
+
+if(BUILD_TESTING)
+  add_executable(
+    decentralabs_proxy_unit_tests
+    tests/unit_tests.cpp
+  )
+
+  target_compile_features(decentralabs_proxy_unit_tests PRIVATE cxx_std_17)
+
+  target_include_directories(
+    decentralabs_proxy_unit_tests
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  target_compile_options(
+    decentralabs_proxy_unit_tests
+    PRIVATE
+      $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
+      $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>
+  )
+
+  target_link_libraries(
+    decentralabs_proxy_unit_tests
+    PRIVATE
+      decentralabs_proxy_core
+  )
+
+  add_test(
+    NAME decentralabs_proxy_unit_tests
+    COMMAND decentralabs_proxy_unit_tests
+  )
+endif()

@@ -204,6 +204,13 @@ class ApcPowerNetSnmpDriver:
     def _legacy_outlet_count(self) -> Optional[int]:
         try:
             return _int(self._get(APC_LEGACY_OIDS["outlet_count"]), "outlet count")
+        except ApcSnmpError as exc:
+            # An unsupported legacy OID is the expected signal to probe rPDU2.
+            # Preserve transport/authentication failures so discovery does not
+            # misreport an unreachable controller as an unsupported device.
+            if exc.error_code == "OID_UNSUPPORTED":
+                return None
+            raise
         except PowerDriverError:
             return None
 

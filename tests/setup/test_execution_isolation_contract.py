@@ -125,6 +125,7 @@ def test_control_and_data_services_use_separate_internal_networks():
     assert "gateway_guacamole" in guacamole
     assert "database_guacamole" in guacamole
     assert "guacd_net" in guacamole
+    assert "ops_guacamole" in guacamole
     assert "guacnet" not in guacamole
     assert "guacd_net" in guacd
 

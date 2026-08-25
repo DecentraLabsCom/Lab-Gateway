@@ -67,6 +67,24 @@ and never contact physical hardware:
 python -m pytest tests/test_apc_smoke.py tests/test_netio_smoke.py -q
 ```
 
+### Test coverage
+
+The CI gate measures application modules only (tests are not included in the
+denominator) and requires at least 75% coverage:
+
+```powershell
+python -m pip install pytest pytest-cov
+python -m pytest tests `
+  --cov=worker `
+  --cov=aas_generator `
+  --cov=rotate_secrets `
+  --cov=power `
+  --cov=power_credentials `
+  --cov-report=term-missing `
+  --cov-report=xml:coverage.xml `
+  --cov-fail-under=75 -q
+```
+
 ## hosts.json example
 
 New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and password are saved separately from the host catalog.

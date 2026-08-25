@@ -26,7 +26,11 @@ jobs:
           docker run --rm \
             -v "${GITHUB_WORKSPACE}/fmu-proxy-runtime-src:/workspace" \
             decentralabs-proxy-builder:ci \
-            bash -lc 'cmake -S /workspace -B /workspace/build-ci -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build /workspace/build-ci -j2'
+            bash -lc 'cmake -S /workspace -B /workspace/build-ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON && cmake --build /workspace/build-ci -j2'
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/fmu-proxy-runtime-src:/workspace" \
+            decentralabs-proxy-builder:ci \
+            bash -lc 'ctest --test-dir /workspace/build-ci --output-on-failure'
           test -f fmu-proxy-runtime-src/build-ci/libdecentralabs_proxy.so
           cmp --silent \
             fmu-proxy-runtime-src/build-ci/libdecentralabs_proxy.so \
@@ -54,8 +58,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cmake -S fmu-proxy-runtime-src -B fmu-proxy-runtime-src/build-ci -A x64
+          cmake -S fmu-proxy-runtime-src -B fmu-proxy-runtime-src/build-ci -A x64 -DBUILD_TESTING=ON
           cmake --build fmu-proxy-runtime-src/build-ci --config Release --parallel
+          ctest --test-dir fmu-proxy-runtime-src/build-ci -C Release --output-on-failure
           $built = "fmu-proxy-runtime-src/build-ci/Release/decentralabs_proxy.dll"
           $promoted = "fmu-proxy-runtime/binaries/win64/decentralabs_proxy.dll"
           if (-not (Test-Path $built)) { throw "Source build did not produce $built" }
@@ -191,6 +196,12 @@ jobs:
           chmod +x tests/integration/run-integration.sh
           chmod +x tests/integration/certs/generate-certs.sh
           tests/integration/run-integration.sh
+
+      - name: Run Full/Lite access-plane integration suite
+        run: |
+          chmod +x tests/integration/run-full-lite-access-integration.sh
+          chmod +x tests/integration/certs/generate-certs.sh
+          tests/integration/run-full-lite-access-integration.sh
 
       - name: Run FMU integration suite
         run: |

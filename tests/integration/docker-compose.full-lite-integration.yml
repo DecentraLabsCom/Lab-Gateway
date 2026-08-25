@@ -1,0 +1,323 @@
+services:
+  jwt-key-material:
+    image: alpine:3.20
+    volumes:
+      - full_lite_jwt_keys:/keys
+    command:
+      - sh
+      - -c
+      - >-
+        apk add --no-cache openssl >/dev/null &&
+        openssl genrsa -out /keys/private_key.pem 2048 >/dev/null 2>&1 &&
+        openssl rsa -in /keys/private_key.pem -pubout -out /keys/public_key.pem >/dev/null 2>&1
+
+  lite-cert-material:
+    image: alpine:3.20
+    volumes:
+      - ./certs:/source:ro
+      - full_lite_lite_ssl:/ssl
+    command:
+      - sh
+      - -c
+      - >-
+        test -s /source/fullchain.pem && test -s /source/privkey.pem &&
+        cp /source/fullchain.pem /ssl/fullchain.pem &&
+        cp /source/privkey.pem /ssl/privkey.pem &&
+        cp /source/public_key.pem /ssl/public_key.pem
+
+  full-cert-material:
+    image: alpine:3.20
+    volumes:
+      - ./certs:/source:ro
+      - full_lite_full_ssl:/ssl
+    command:
+      - sh
+      - -c
+      - >-
+        test -s /source/fullchain.pem && test -s /source/privkey.pem &&
+        cp /source/fullchain.pem /ssl/fullchain.pem &&
+        cp /source/privkey.pem /ssl/privkey.pem
+
+  blockchain-services:
+    build:
+      context: ./mocks/full-lite-control-plane
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8080"
+      INITIAL_CONTRACT_STATUS: "1"
+      REDEMPTION_LEASE_SECONDS: "2"
+      REDEMPTION_PREPARE_DELAY_MS: "150"
+      JWT_PRIVATE_KEY_PATH: /keys/private_key.pem
+      REDEEMER_CREDENTIALS_JSON: '{"full.local":"full-redeemer","lite.local":"lite-redeemer"}'
+      ISSUER_BY_GATEWAY_JSON: '{"full.local":"https://full.local/auth","lite.local":"http://blockchain-services:8080/auth"}'
+      SESSION_OBSERVER_CREDENTIALS_JSON: '{"lite.local":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}'
+      LITE_PROVISIONER_TOKEN: lite-provisioner
+    volumes:
+      - full_lite_jwt_keys:/keys:ro
+    ports:
+      - "18081:8080"
+    networks:
+      full_edge:
+        aliases:
+          - blockchain-services
+      lite_edge:
+        aliases:
+          - blockchain-services
+    depends_on:
+      jwt-key-material:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  guacamole-full:
+    build:
+      context: ./mocks/guacamole
+      dockerfile: Dockerfile
+    networks:
+      full_edge:
+        aliases:
+          - guacamole
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  guacamole-lite:
+    build:
+      context: ./mocks/guacamole
+      dockerfile: Dockerfile
+    networks:
+      lite_edge:
+        aliases:
+          - guacamole
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  ops-full:
+    build:
+      context: ./mocks/ops-worker
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8081"
+      GUACAMOLE_PROVISIONER_TOKEN: full-provisioner
+      SESSION_OBSERVATION_INGEST_TOKEN: full-observation
+    ports:
+      - "15001:8081"
+    networks:
+      full_edge:
+        aliases:
+          - ops-worker
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  ops-lite:
+    build:
+      context: ./mocks/ops-worker
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8081"
+      GUACAMOLE_PROVISIONER_TOKEN: lite-provisioner
+      SESSION_OBSERVATION_INGEST_TOKEN: lite-observation
+    ports:
+      - "15002:8081"
+    networks:
+      lite_edge:
+        aliases:
+          - ops-worker
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  fmu-runner:
+    build:
+      context: ./mocks/fmu-runner
+      dockerfile: Dockerfile
+    networks:
+      full_edge:
+        aliases:
+          - fmu-runner
+      lite_edge:
+        aliases:
+          - fmu-runner
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  guacd-full:
+    image: alpine:3.20
+    command: ["sh", "-c", "apk add --no-cache netcat-openbsd >/dev/null && exec nc -lk -p 4822"]
+    networks:
+      full_edge:
+        aliases:
+          - guacd
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  guacd-lite:
+    image: alpine:3.20
+    command: ["sh", "-c", "apk add --no-cache netcat-openbsd >/dev/null && exec nc -lk -p 4822"]
+    networks:
+      lite_edge:
+        aliases:
+          - guacd
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  full-gateway:
+    build:
+      context: ../../openresty
+      dockerfile: Dockerfile
+    environment:
+      GUAC_ADMIN_USER: admin
+      GUAC_ADMIN_PASS: integration-full-pass
+      SERVER_NAME: full.local
+      HTTPS_PORT: "443"
+      HTTP_PORT: "80"
+      ISSUER: ""
+      GUAC_API_URL: http://guacamole:8080/guacamole/api
+      AUTH_ACCESS_CODE_REDEEM_URL: http://blockchain-services:8080/auth/access-code/redeem
+      AUTH_ACCESS_CODE_REDEEMER_TOKEN: full-redeemer
+      OPS_API_URL: http://ops-worker:8081
+      OPS_SESSION_OBSERVATION_INGEST_URL: http://ops-worker:8081/internal/session-observations
+      OPS_GUACAMOLE_TOKEN_INGEST_URL: http://ops-worker:8081/internal/guacamole-token-revocations
+      SESSION_OBSERVATION_INGEST_TOKEN: full-observation
+      GUACAMOLE_PROVISIONER_TOKEN: full-provisioner
+      FMU_RUNNER_ENABLED: "true"
+      ACCESS_CODE_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      FMU_ACCESS_STATE_PATH: /var/lib/openresty/fmu-access
+      LAB_MANAGER_TOKEN: full-lab-manager
+      OPS_INTERNAL_AUTH_TOKEN: full-ops-internal
+      OPS_INTERNAL_AUTH_HEADER: X-Ops-Internal-Token
+      ADMIN_DASHBOARD_ALLOW_PRIVATE: "true"
+      SECURITY_ALLOW_PRIVATE_NETWORKS: "true"
+      CORS_ALLOWED_ORIGINS: https://full.local
+    volumes:
+      - full_lite_full_ssl:/etc/ssl/private
+      - full_lite_jwt_keys:/etc/openresty/jwt-keys:ro
+      - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
+      - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ../../openresty/lua:/etc/openresty/lua:ro
+      - ../../web:/var/www/html:ro
+      - full_lite_fmu_state:/var/lib/openresty/fmu-access
+    ports:
+      - "18443:443"
+      - "18080:80"
+    networks:
+      full_edge:
+        aliases:
+          - full-gateway
+    depends_on:
+      jwt-key-material:
+        condition: service_completed_successfully
+      full-cert-material:
+        condition: service_completed_successfully
+      blockchain-services:
+        condition: service_healthy
+      guacamole-full:
+        condition: service_healthy
+      ops-full:
+        condition: service_healthy
+      fmu-runner:
+        condition: service_healthy
+      guacd-full:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -k https://localhost/ -H 'Host: full.local' --connect-timeout 3"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  lite-gateway:
+    build:
+      context: ../../openresty
+      dockerfile: Dockerfile
+    environment:
+      GUAC_ADMIN_USER: admin
+      GUAC_ADMIN_PASS: integration-lite-pass
+      SERVER_NAME: lite.local
+      HTTPS_PORT: "443"
+      HTTP_PORT: "80"
+      ISSUER: http://blockchain-services:8080/auth
+      GUAC_API_URL: http://guacamole:8080/guacamole/api
+      AUTH_ACCESS_CODE_REDEEM_URL: http://blockchain-services:8080/auth/access-code/redeem
+      AUTH_ACCESS_CODE_REDEEMER_TOKEN: lite-redeemer
+      OPS_API_URL: http://ops-worker:8081
+      OPS_SESSION_OBSERVATION_INGEST_URL: http://ops-worker:8081/internal/session-observations
+      OPS_GUACAMOLE_TOKEN_INGEST_URL: http://ops-worker:8081/internal/guacamole-token-revocations
+      SESSION_OBSERVATION_INGEST_TOKEN: lite-observation
+      GUACAMOLE_PROVISIONER_TOKEN: lite-provisioner
+      FMU_RUNNER_ENABLED: "true"
+      ACCESS_CODE_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      FMU_ACCESS_STATE_PATH: /var/lib/openresty/fmu-access
+      LAB_MANAGER_TOKEN: lite-lab-manager
+      OPS_INTERNAL_AUTH_TOKEN: lite-ops-internal
+      OPS_INTERNAL_AUTH_HEADER: X-Ops-Internal-Token
+      ADMIN_DASHBOARD_ALLOW_PRIVATE: "true"
+      SECURITY_ALLOW_PRIVATE_NETWORKS: "true"
+      CORS_ALLOWED_ORIGINS: https://lite.local
+    volumes:
+      - full_lite_lite_ssl:/etc/ssl/private
+      - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
+      - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ../../openresty/lua:/etc/openresty/lua:ro
+      - ../../web:/var/www/html:ro
+      - full_lite_fmu_state:/var/lib/openresty/fmu-access
+    ports:
+      - "18444:443"
+      - "18082:80"
+    networks:
+      lite_edge:
+        aliases:
+          - lite-gateway
+    depends_on:
+      lite-cert-material:
+        condition: service_completed_successfully
+      blockchain-services:
+        condition: service_healthy
+      guacamole-lite:
+        condition: service_healthy
+      ops-lite:
+        condition: service_healthy
+      fmu-runner:
+        condition: service_healthy
+      guacd-lite:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -k https://localhost/ -H 'Host: lite.local' --connect-timeout 3"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  full_lite_jwt_keys:
+  full_lite_full_ssl:
+  full_lite_lite_ssl:
+  full_lite_fmu_state:
+
+networks:
+  full_edge:
+    driver: bridge
+  lite_edge:
+    driver: bridge

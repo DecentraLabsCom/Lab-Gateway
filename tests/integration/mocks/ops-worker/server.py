@@ -3,6 +3,7 @@ Mock ops-worker server for integration testing.
 Simulates the lab station operations service.
 """
 
+import os
 import secrets
 from flask import Flask, jsonify, request
 
@@ -35,6 +36,12 @@ demo_sessions = {}
 DEMO_LAB_ID = "42"
 DEMO_CONNECTION_ID = "1"
 INTERNAL_TOKEN = "integration-ops-internal-secret"
+PROVISIONER_TOKEN = os.getenv("GUACAMOLE_PROVISIONER_TOKEN", "integration-test-secret")
+OBSERVATION_TOKEN = os.getenv("SESSION_OBSERVATION_INGEST_TOKEN", "integration-observation-token")
+provisioner_events = []
+session_observations = []
+guacamole_revocations = []
+station_available = True
 
 
 def demo_response(demo_id, lab_id, event, success=True, **extra):
@@ -53,6 +60,10 @@ def demo_response(demo_id, lab_id, event, success=True, **extra):
 
 def require_internal_token():
     return request.headers.get("X-Ops-Internal-Token") == INTERNAL_TOKEN
+
+
+def require_observation_token():
+    return request.headers.get("X-Gateway-Observation-Token") == OBSERVATION_TOKEN
 
 
 @app.route('/health', methods=['GET'])
@@ -85,6 +96,13 @@ def demo_start():
     payload = request.get_json(silent=True) or {}
     demo_id = str(payload.get("demoId") or "")
     lab_id = str(payload.get("labId") or "")
+    if not station_available:
+        return jsonify({
+            "success": False,
+            "error": "station unavailable",
+            "operationId": demo_id,
+            "event": "start",
+        }), 503
     return jsonify(demo_response(
         demo_id,
         lab_id,
@@ -125,7 +143,82 @@ def demo_end():
 
 @app.get('/api/demo/state')
 def demo_state():
-    return jsonify({"events": demo_events, "sessions": demo_sessions})
+    return jsonify({"events": demo_events, "sessions": demo_sessions, "stationAvailable": station_available})
+
+
+@app.post('/api/test/station')
+def set_station_state():
+    """Test-only station outage switch for deterministic reconnect checks."""
+    global station_available
+    payload = request.get_json(silent=True) or {}
+    station_available = bool(payload.get("available"))
+    return jsonify({"available": station_available})
+
+
+@app.post('/internal/guacamole/provision')
+def provision_guacamole_user():
+    if request.headers.get("X-Guacamole-Provisioner-Token") != PROVISIONER_TOKEN:
+        return jsonify({"success": False, "error": "provisioner authentication required"}), 401
+    payload = request.get_json(silent=True) or {}
+    selector = str(payload.get("selector") or "")
+    session_id = str(payload.get("sessionId") or "")
+    if not selector.startswith("guac:id:") or not session_id:
+        return jsonify({"success": False, "error": "invalid provisioning request"}), 400
+    event = {"selector": selector, "sessionId": session_id, "activate": bool(payload.get("activate"))}
+    provisioner_events.append(event)
+    return jsonify({
+        "success": True,
+        "sessionId": session_id,
+        "username": f"dlabs-res-{session_id}",
+        "connection": {
+            "id": 7,
+            "selector": selector,
+            "name": "Remote provisioned connection",
+            "protocol": "rdp",
+            "hostname": "192.0.2.7",
+            "port": "3389",
+        },
+    })
+
+
+@app.delete('/internal/guacamole/provision/<session_id>')
+def release_guacamole_user(session_id):
+    if request.headers.get("X-Guacamole-Provisioner-Token") != PROVISIONER_TOKEN:
+        return jsonify({"success": False, "error": "provisioner authentication required"}), 401
+    provisioner_events.append({"sessionId": session_id, "released": True})
+    return jsonify({"success": True, "sessionId": session_id})
+
+
+@app.get('/internal/guacamole/connections')
+def list_provisionable_connections():
+    if request.headers.get("X-Guacamole-Provisioner-Token") != PROVISIONER_TOKEN:
+        return jsonify({"success": False, "error": "provisioner authentication required"}), 401
+    return jsonify({"success": True, "connections": [{"id": 7, "selector": "guac:id:7"}]})
+
+
+@app.post('/internal/session-observations')
+def ingest_session_observation():
+    if not require_observation_token():
+        return jsonify({"success": False, "error": "observation authentication required"}), 401
+    session_observations.append(request.get_json(silent=True) or {})
+    return jsonify({"recorded": True}), 202
+
+
+@app.post('/internal/guacamole-token-revocations')
+def ingest_guacamole_revocation():
+    if not require_observation_token():
+        return jsonify({"success": False, "error": "observation authentication required"}), 401
+    guacamole_revocations.append(request.get_json(silent=True) or {})
+    return jsonify({"recorded": True}), 202
+
+
+@app.get('/api/integration/state')
+def integration_state():
+    return jsonify({
+        "provisionerEvents": provisioner_events,
+        "sessionObservations": session_observations,
+        "guacamoleRevocations": guacamole_revocations,
+    })
 
 
 @app.route('/ready', methods=['GET'])
@@ -248,5 +341,6 @@ def get_telemetry():
 
 
 if __name__ == '__main__':
-    print("Starting mock ops-worker server on port 5001...")
-    app.run(host='0.0.0.0', port=5001)
+    port = int(os.getenv("PORT", "5001"))
+    print(f"Starting mock ops-worker server on port {port}...")
+    app.run(host='0.0.0.0', port=port)

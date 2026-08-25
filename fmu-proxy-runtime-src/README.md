@@ -32,6 +32,7 @@ The files here now implement a functional `win64` runtime:
 - native `WSS` transport on Linux via OpenSSL + raw sockets/WebSocket framing
 - native POSIX/OpenSSL `WSS` source path shared by Linux and Darwin
 - certificate-chain and hostname validation for every WSS connection (including loopback)
+- self-contained C++ unit tests for parsing, protocol, transport and runtime lifecycle
 - a compiled `win64` DLL build in `build-win64/`
 - a reproducible `linux64` build in `build-linux64/`
 - end-to-end validation against the live Lab Gateway stack with `fmpy`
@@ -74,6 +75,19 @@ This uses `docker/linux64-builder.Dockerfile` and produces:
 - `build-linux64/libdecentralabs_proxy.so`
 - optionally `../fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so`
 
+## Native unit tests
+
+The native runtime tests use CTest and do not require a live Gateway or an external test framework:
+
+```bash
+cmake -S . -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build build-tests
+ctest --test-dir build-tests --output-on-failure
+```
+
+The suite exercises JSON/configuration parsing, FMI model metadata, protocol and session-state transitions,
+scripted transport behavior, Gateway request correlation and the complete local runtime lifecycle.
+
 ## Deploying the linux64 binary to a Lab Gateway server
 
 The compiled binaries (`decentralabs_proxy.so`, `.dll`, `.dylib`) are committed to the repository.
@@ -111,7 +125,9 @@ docker run --rm \
   -v "$(pwd):/workspace" \
   fmu-proxy-builder:local \
   bash -lc "cmake -S /workspace -B /workspace/build-linux64 -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release && cmake --build /workspace/build-linux64 -j"
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON && \
+            cmake --build /workspace/build-linux64 -j && \
+            ctest --test-dir /workspace/build-linux64 --output-on-failure"
 
 cp build-linux64/libdecentralabs_proxy.so \
    /opt/Lab-Gateway/fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so
@@ -146,7 +162,7 @@ fmu-proxy-runtime-src/
 |  |- runtime.hpp
 |  |- transport.hpp
 |  `- session_state.hpp
-`- src/
+|- src/
    |- fmi2_exports.cpp
    |- gateway_client.cpp
    |- json.cpp
@@ -156,7 +172,9 @@ fmu-proxy-runtime-src/
    |- runtime_config.cpp
    |- session_state.cpp
    |- transport.cpp
-   `- transport_linux.cpp
+|  `- transport_linux.cpp
+`- tests/
+   `- unit_tests.cpp
 ```
 
 ## Remaining validation milestones

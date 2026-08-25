@@ -96,7 +96,7 @@ function stopFirefoxProcessTree(pid) {
   }
 }
 
-async function runFirefoxScreenshot(browser, args, screenshot) {
+async function runFirefoxScreenshot(browser, args, screenshot, isReady = () => true) {
   const child = spawn(browser, args, { windowsHide: true, stdio: 'pipe' });
   let stdout = '';
   let stderr = '';
@@ -109,6 +109,10 @@ async function runFirefoxScreenshot(browser, args, screenshot) {
   const deadline = Date.now() + 15000;
   try {
     while (!fs.existsSync(screenshot) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const readinessDeadline = Date.now() + 15000;
+    while (fs.existsSync(screenshot) && !isReady() && Date.now() < readinessDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     const result = await Promise.race([
@@ -147,7 +151,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
       '--window-size', '1440,1200',
       '--screenshot', labsScreenshot,
       url,
-    ], labsScreenshot);
+    ], labsScreenshot, () => requests.includes('/lab-admin/status'));
     assert.ok(labsResult.status === 0 || labsResult.screenshotReady, `${labsResult.stdout}\n${labsResult.stderr}`);
     assert.ok(
       labsResult.screenshotReady,
@@ -166,7 +170,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
       '--window-size', '1440,1200',
       '--screenshot', energyScreenshot,
       `${url}#energy`,
-    ], energyScreenshot);
+    ], energyScreenshot, () => requests.includes('/ops/api/power/policies'));
     assert.ok(energyResult.status === 0 || energyResult.screenshotReady, `${energyResult.stdout}\n${energyResult.stderr}`);
     assert.ok(energyResult.screenshotReady, 'Firefox did not produce an Energy screenshot');
     assert.ok(fs.statSync(energyScreenshot).size > 0, 'Firefox produced an empty Energy screenshot');
@@ -184,13 +188,18 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
       '--window-size', '1440,1200',
       '--screenshot', liteScreenshot,
       `${url}#notifications`,
-    ], liteScreenshot);
+    ], liteScreenshot, () => requests.includes('/lab-admin/status'));
     assert.ok(liteResult.status === 0 || liteResult.screenshotReady, `${liteResult.stdout}\n${liteResult.stderr}`);
     assert.ok(liteResult.screenshotReady, 'Firefox did not produce a Lite-mode screenshot');
     assert.ok(requests.includes('/lab-admin/status'), 'A Full-only deep link did not fall back to Laboratories in Lite mode');
     assert.equal(requests.includes('/billing/admin/notifications'), false, 'Lite mode attempted to open Full-only Notifications');
   } finally {
     await new Promise((resolve) => server.close(resolve));
-    fs.rmSync(tempDirectory, { recursive: true, force: true });
+    fs.rmSync(tempDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 200,
+    });
   }
 });

@@ -25,6 +25,7 @@ RUN luarocks --tree=$TREE install lua-resty-http && \
 
 # Directory for custom scripts and SSL certificates
 RUN mkdir -p /etc/openresty/lua /etc/openresty/jwt-keys /etc/ssl/private /var/lib/openresty/fmu-access \
+    && chown nobody:nobody /var/lib/openresty/fmu-access \
     && chmod 700 /var/lib/openresty/fmu-access
 
 # Copy SSL initialization script

@@ -13,6 +13,7 @@ permissions:
 
 env:
   FMU_RUNNER_COVERAGE_MIN: "75"
+  OPS_WORKER_COVERAGE_MIN: "75"
   REPO_COVERAGE_MIN: "85"
 
 jobs:
@@ -172,6 +173,102 @@ jobs:
       - name: Run setup script contract tests
         run: python -m unittest tests.setup.test_setup_env_contract
 
+  embedded-backend-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+
+      - name: Set up Temurin JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: blockchain-services/pom.xml
+
+      - name: Verify Docker is available for MySQL integration tests
+        run: docker info
+
+      - name: Build and run canonical backend tests
+        id: run_embedded_backend_tests
+        continue-on-error: true
+        working-directory: blockchain-services
+        run: |
+          set -o pipefail
+          mkdir -p ../.ci-logs
+          ./mvnw -B -ntp verify | tee ../.ci-logs/embedded-backend.log
+
+      - name: Require MySQL integration tests to execute
+        id: require_mysql_backend_tests
+        if: always()
+        working-directory: blockchain-services
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          reports=(
+            target/surefire-reports/TEST-decentralabs.blockchain.service.auth.InstitutionalConcurrencyMySqlIntegrationTest.xml
+            target/surefire-reports/TEST-decentralabs.blockchain.service.intent.IntentAuthorizationSessionPersistenceMySqlIntegrationTest.xml
+            target/surefire-reports/TEST-decentralabs.blockchain.service.provider.DistributedReservationAvailabilityLockServiceMySqlIntegrationTest.xml
+          )
+
+          for report in "${reports[@]}"; do
+            if [[ ! -f "$report" ]]; then
+              echo "Missing MySQL integration test report: $report" >&2
+              exit 1
+            fi
+
+            if ! grep -q 'skipped="0"' "$report"; then
+              echo "MySQL integration tests were skipped: $report" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload canonical backend test artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: embedded-backend-test-results
+          path: |
+            .ci-logs/embedded-backend.log
+            blockchain-services/target/surefire-reports
+
+      - name: Fail job if canonical backend tests failed
+        if: steps.run_embedded_backend_tests.outcome != 'success' || steps.require_mysql_backend_tests.outcome != 'success'
+        run: exit 1
+
+  native-runtime-unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install native runtime build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake ninja-build libssl-dev
+
+      - name: Configure native runtime tests
+        run: >-
+          cmake -S fmu-proxy-runtime-src
+          -B fmu-proxy-runtime-src/build-tests
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTING=ON
+
+      - name: Build native runtime tests
+        run: cmake --build fmu-proxy-runtime-src/build-tests --parallel 2
+
+      - name: Run native runtime tests
+        run: ctest --test-dir fmu-proxy-runtime-src/build-tests --output-on-failure
+
   ops-worker-tests:
     runs-on: ubuntu-latest
     services:
@@ -206,7 +303,7 @@ jobs:
         working-directory: ops-worker
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pytest
+          python -m pip install -r requirements.txt pytest pytest-cov
 
       - name: Run Ops Worker tests
         id: run_ops_worker_tests
@@ -216,7 +313,17 @@ jobs:
           GUACAMOLE_MARIADB_TEST_URL: mysql+pymysql://root:test-root-password@127.0.0.1:3306/guacamole_test
         run: |
           set -o pipefail
-          python -m pytest tests --junitxml=pytest-results.xml -q | tee pytest.log
+          python -m pytest tests \
+            --cov=worker \
+            --cov=aas_generator \
+            --cov=rotate_secrets \
+            --cov=power \
+            --cov=power_credentials \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --junitxml=pytest-results.xml \
+            --cov-fail-under=${OPS_WORKER_COVERAGE_MIN} \
+            -q | tee pytest.log
 
       - name: Build Ops Worker suite summary
         if: always() && hashFiles('.github/scripts/test_summary.py') != ''
@@ -226,8 +333,20 @@ jobs:
             --suite-name "Ops Worker" \
             --kind pytest \
             --junit ops-worker/pytest-results.xml \
+            --coverage-xml ops-worker/coverage.xml \
+            --coverage-label "coverage.py" \
             --exit-code ${{ steps.run_ops_worker_tests.outcome != 'success' && '1' || '0' }} \
             --output .ci-summary/ops-worker.json
+
+      - name: Upload Ops Worker coverage artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ops-worker-coverage
+          path: |
+            ops-worker/coverage.xml
+            ops-worker/pytest.log
+            ops-worker/pytest-results.xml
 
       - name: Upload Ops Worker summary artifact
         if: always() && hashFiles('.github/scripts/test_summary.py') != ''
@@ -278,6 +397,68 @@ jobs:
 
       - name: Fail job if integration tests failed
         if: steps.run_integration_tests.outcome != 'success'
+        run: exit 1
+
+  full-lite-access-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+
+      - name: Run Full/Lite access-plane integration suite
+        id: run_full_lite_access_integration
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p .ci-logs
+          chmod +x tests/integration/run-full-lite-access-integration.sh
+          chmod +x tests/integration/certs/generate-certs.sh
+          tests/integration/run-full-lite-access-integration.sh | tee .ci-logs/full-lite-access-integration.log
+
+      - name: Upload Full/Lite access integration log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: full-lite-access-integration-log
+          path: .ci-logs/full-lite-access-integration.log
+
+      - name: Fail job if Full/Lite access integration failed
+        if: steps.run_full_lite_access_integration.outcome != 'success'
+        run: exit 1
+
+  real-compose-resilience:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+
+      - name: Prepare isolated real Compose configuration
+        run: bash tests/integration/prepare-real-compose-ci.sh
+
+      - name: Run real Compose resilience suite
+        id: run_real_compose_resilience
+        continue-on-error: true
+        env:
+          COMPOSE_STACK_TEST_TIMEOUT_SECONDS: "900"
+        run: |
+          set -o pipefail
+          mkdir -p .ci-logs
+          bash tests/integration/run-compose-stack-integration.sh | tee .ci-logs/real-compose-resilience.log
+
+      - name: Upload real Compose resilience log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: real-compose-resilience-log
+          path: .ci-logs/real-compose-resilience.log
+
+      - name: Fail job if real Compose resilience failed
+        if: steps.run_real_compose_resilience.outcome != 'success'
         run: exit 1
 
   fmu-integration-tests:
@@ -366,6 +547,38 @@ jobs:
         if: steps.run_smoke_tests.outcome != 'success'
         run: exit 1
 
+  web-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+
+      - name: Run web contract and browser tests
+        id: run_web_tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p .ci-logs
+          node --test --test-concurrency=1 tests/web/*.test.mjs | tee .ci-logs/web-tests.log
+
+      - name: Upload web test log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: web-tests-log
+          path: .ci-logs/web-tests.log
+
+      - name: Fail job if web tests failed
+        if: steps.run_web_tests.outcome != 'success'
+        run: exit 1
+
   test-summary:
     runs-on: ubuntu-latest
     if: always()
@@ -373,10 +586,15 @@ jobs:
       - python-unit-coverage
       - lua-unit-coverage
       - setup-contract-tests
+      - embedded-backend-tests
+      - native-runtime-unit-tests
       - ops-worker-tests
       - integration-tests
+      - full-lite-access-integration
+      - real-compose-resilience
       - fmu-integration-tests
       - smoke-tests
+      - web-tests
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

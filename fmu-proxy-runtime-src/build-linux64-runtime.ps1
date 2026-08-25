@@ -22,7 +22,7 @@ if (Test-Path $BuildDir) {
 docker run --rm `
   -v "${ScriptDir}:/workspace" `
   $ImageTag `
-  bash -lc "cmake -S /workspace -B /workspace/build-linux64 -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build /workspace/build-linux64 -j"
+  bash -lc "cmake -S /workspace -B /workspace/build-linux64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON && cmake --build /workspace/build-linux64 -j && ctest --test-dir /workspace/build-linux64 --output-on-failure"
 
 $BuiltLibrary = Join-Path $BuildDir "libdecentralabs_proxy.so"
 if (-not (Test-Path $BuiltLibrary)) {
