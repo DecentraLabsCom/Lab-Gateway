@@ -2,7 +2,6 @@ import asyncio
 import importlib
 import os
 import sys
-import types
 
 import pytest
 

@@ -26,12 +26,14 @@ blockchain_password="$(read_secret /run/secrets/blockchain_mysql_password)"
 : "${BLOCKCHAIN_MYSQL_DATABASE:?BLOCKCHAIN_MYSQL_DATABASE must be configured}"
 
 mysqladmin ping \
-  -h localhost \
+  --protocol=tcp \
+  -h 127.0.0.1 \
   -u root \
   -p"$root_password"
 
 mysql \
-  -h localhost \
+  --protocol=tcp \
+  -h 127.0.0.1 \
   -u"$BLOCKCHAIN_MYSQL_USER" \
   -p"$blockchain_password" \
   "$BLOCKCHAIN_MYSQL_DATABASE" \

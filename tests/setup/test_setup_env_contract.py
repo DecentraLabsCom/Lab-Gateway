@@ -548,6 +548,22 @@ class SetupEnvContractTest(unittest.TestCase):
         self.assertIn("load_secret MYSQL_ROOT_PASSWORD /run/secrets/mysql_root_password", entrypoint)
         self.assertIn("unset MYSQL_ROOT_PASSWORD_FILE", entrypoint)
 
+    def test_mysql_reconciler_runs_after_official_initialization(self):
+        entrypoint = (ROOT / "mysql" / "ensure-user-entrypoint.sh").read_text(encoding="utf-8")
+
+        self.assertIn('ENSURE_SCRIPT="/usr/local/bin/ensure-user.sh"', entrypoint)
+        self.assertIn("mysql --protocol=tcp -h 127.0.0.1", entrypoint)
+        self.assertIn("set -Eeo pipefail", entrypoint)
+        self.assertNotIn("set -Eeuo pipefail", entrypoint)
+        self.assertIn(
+            "./mysql/000-ensure-user.sh:/usr/local/bin/ensure-user.sh:ro",
+            self.compose_file,
+        )
+        self.assertNotIn(
+            "./mysql/000-ensure-user.sh:/docker-entrypoint-initdb.d/000-ensure-user.sh:ro",
+            self.compose_file,
+        )
+
     def test_lite_does_not_start_embedded_backend_or_cross_fallback_jwt_keys(self):
         self.assertIn("BLOCKCHAIN_SERVICES_ENABLED", self.compose_file)
         self.assertIn("- ISSUER=${ISSUER:-}", self.compose_file)

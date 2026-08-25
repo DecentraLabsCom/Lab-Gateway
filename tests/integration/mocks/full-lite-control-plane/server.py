@@ -92,6 +92,14 @@ def gateway_origin(value: str | None) -> str:
     return origin
 
 
+def json_response(payload: dict, status: int = 200, headers: dict[str, str] | None = None):
+    response = jsonify(payload)
+    response.status_code = status
+    if headers:
+        response.headers.update(headers)
+    return response
+
+
 def public_jwks() -> dict:
     numbers = PUBLIC_KEY.public_numbers()
     modulus = numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big")
@@ -181,33 +189,33 @@ def access_credential():
     gateway = gateway_id(body.get("gatewayId"))
     try:
         origin = gateway_origin(body.get("gatewayOrigin"))
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    except ValueError:
+        return json_response({"error": "invalid gateway origin"}, 400)
 
     if body.get("marketplaceToken") != "integration-marketplace-token":
-        return jsonify({"error": "invalid marketplace token"}), 401
+        return json_response({"error": "invalid marketplace token"}, 401)
     if contract_status in (3, 4):
-        return jsonify({
+        return json_response({
             "error": "ACCESS_AUTHORIZATION_REJECTED",
             "reservationStatus": status_name(contract_status),
             "retryable": False,
-        }), 409
+        }, 409)
     if contract_status != 2:
-        return jsonify({
+        return json_response({
             "error": "ACCESS_AUTHORIZATION_PENDING",
             "reservationStatus": status_name(contract_status),
             "retryable": True,
-        }), 503, {"Retry-After": "1"}
+        }, 503, {"Retry-After": "1"})
     if not gateway or gateway not in REDEEMERS:
-        return jsonify({"error": "unknown gateway"}), 403
+        return json_response({"error": "unknown gateway"}, 403)
 
     resource_type = str(body.get("resourceType") or "lab").strip().lower()
     if resource_type not in {"lab", "fmu"}:
-        return jsonify({"error": "unsupported resourceType"}), 400
+        return json_response({"error": "unsupported resourceType"}, 400)
     reservation_key = str(body.get("reservationKey") or "").strip()
     lab_id = str(body.get("labId") or "").strip()
     if not reservation_key or not lab_id:
-        return jsonify({"error": "reservationKey and labId are required"}), 400
+        return json_response({"error": "reservationKey and labId are required"}, 400)
 
     code = f"access-code-{gateway}-{uuid.uuid4().hex[:12]}"
     access_codes[code] = {
@@ -221,7 +229,7 @@ def access_credential():
         "committed": False,
     }
     resource_url = f"{origin}/fmu/" if resource_type == "fmu" else f"{origin}/guacamole/"
-    return jsonify({"accessCode": code, "labURL": resource_url, "resourceType": resource_type})
+    return json_response({"accessCode": code, "labURL": resource_url, "resourceType": resource_type})
 
 
 @app.post("/auth/access-code/redeem")
@@ -374,8 +382,8 @@ def provision_lite():
         with urlopen(req, context=ssl._create_unverified_context(), timeout=10) as response:
             payload = response.read().decode("utf-8")
             return app.response_class(payload, status=response.status, mimetype="application/json")
-    except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 502
+    except Exception:
+        return json_response({"success": False, "error": "Lite provisioning failed"}, 502)
 
 
 if __name__ == "__main__":

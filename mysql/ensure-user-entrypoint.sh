@@ -1,8 +1,8 @@
 #!/bin/bash
-set -euo pipefail
+set -Eeo pipefail
 
 ORIGINAL_ENTRYPOINT="/usr/local/bin/docker-entrypoint.sh"
-ENSURE_SCRIPT="/docker-entrypoint-initdb.d/000-ensure-user.sh"
+ENSURE_SCRIPT="/usr/local/bin/ensure-user.sh"
 
 load_secret() {
   local variable="$1"
@@ -59,7 +59,7 @@ if [[ -f "${ENSURE_SCRIPT}" ]]; then
 
   # Wait up to max_wait seconds for MySQL to be ready
   for (( i=1; i<=max_wait; i++ )); do
-    if mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
+    if mysql --protocol=tcp -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
       echo "MySQL is ready. Running ensure-user script..."
       if [[ -x "${ENSURE_SCRIPT}" ]]; then
         "${ENSURE_SCRIPT}"

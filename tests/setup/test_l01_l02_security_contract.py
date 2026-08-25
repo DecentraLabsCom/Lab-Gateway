@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 
@@ -24,6 +25,26 @@ def test_gateway_error_contract_does_not_return_exception_text():
     assert 'message=str(exc)' not in realtime
     assert 'message=str(exc.detail)' not in station
     assert 'message=str(detail)' not in station
+
+
+def test_full_lite_fixture_does_not_expose_exception_text_or_vary_response_tuples():
+    fixture_path = ROOT / "tests" / "integration" / "mocks" / "full-lite-control-plane" / "server.py"
+    fixture = fixture_path.read_text(encoding="utf-8")
+
+    assert 'jsonify({"error": str(exc)}), 400' not in fixture
+    assert 'jsonify({"success": False, "error": str(exc)}), 502' not in fixture
+    assert "import types" not in fixture
+
+    module = ast.parse(fixture, filename=str(fixture_path))
+    access_credential = next(
+        node for node in ast.walk(module)
+        if isinstance(node, ast.FunctionDef) and node.name == "access_credential"
+    )
+    assert not any(
+        isinstance(node.value, ast.Tuple)
+        for node in ast.walk(access_credential)
+        if isinstance(node, ast.Return)
+    )
 
 
 def test_guacamole_proxy_normalizes_connection_upgrade_header():

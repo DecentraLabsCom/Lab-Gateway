@@ -90,8 +90,10 @@ def test_mysql_healthcheck_reads_passwords_from_mounted_secrets():
     assert 'blockchain_password="$(read_secret /run/secrets/blockchain_mysql_password)"' in healthcheck
     assert 'value="$(cat "$path")"' in healthcheck
     assert "mysqladmin ping" in healthcheck
+    assert "--protocol=tcp" in healthcheck
+    assert "-h 127.0.0.1" in healthcheck
     assert '-p"$root_password"' in healthcheck
-    assert "mysql \\\n  -h localhost" in healthcheck
+    assert "mysql \\\n  --protocol=tcp \\\n  -h 127.0.0.1" in healthcheck
     assert '-u"$BLOCKCHAIN_MYSQL_USER"' in healthcheck
     assert '-p"$blockchain_password"' in healthcheck
     assert '-p"$${MYSQL_ROOT_PASSWORD}"' not in mysql
