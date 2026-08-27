@@ -562,6 +562,15 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Report Firefox runtime
+        run: |
+          if command -v firefox >/dev/null 2>&1; then
+            command -v firefox
+            firefox --version
+          else
+            echo "Firefox is not installed; browser smoke test will be skipped"
+          fi
+
       - name: Run web contract and browser tests
         id: run_web_tests
         continue-on-error: true

@@ -9,6 +9,7 @@ import test from 'node:test';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const webRoot = path.join(repoRoot, 'web');
+const FIREFOX_SCREENSHOT_ATTEMPTS = 2;
 
 function contentType(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -96,8 +97,12 @@ function stopFirefoxProcessTree(pid) {
   }
 }
 
-async function runFirefoxScreenshot(browser, args, screenshot, isReady = () => true) {
-  const child = spawn(browser, args, { windowsHide: true, stdio: 'pipe' });
+async function runFirefoxScreenshotOnce(browser, args, screenshot, isReady = () => true) {
+  const child = spawn(browser, args, {
+    cwd: path.dirname(screenshot),
+    windowsHide: true,
+    stdio: 'pipe',
+  });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
@@ -125,6 +130,40 @@ async function runFirefoxScreenshot(browser, args, screenshot, isReady = () => t
   }
 }
 
+async function runFirefoxScreenshot(browser, args, screenshot, isReady = () => true) {
+  let result;
+  for (let attempt = 1; attempt <= FIREFOX_SCREENSHOT_ATTEMPTS; attempt += 1) {
+    fs.rmSync(screenshot, { force: true });
+    result = await runFirefoxScreenshotOnce(browser, args, screenshot, isReady);
+    result.attempts = attempt;
+    if (result.screenshotReady) return result;
+  }
+  return result;
+}
+
+function firefoxScreenshotArgs(profile, url) {
+  return [
+    '--headless',
+    '--no-remote',
+    '--profile', profile,
+    '--window-size', '1440,1200',
+    '--screenshot',
+    url,
+  ];
+}
+
+function firefoxFailureMessage(result, screenshot, directory) {
+  return [
+    `Firefox did not produce ${screenshot} after ${result.attempts} attempt(s)`,
+    `status=${result.status ?? 'unknown'}`,
+    `signal=${result.signal ?? 'none'}`,
+    `screenshotReady=${result.screenshotReady}`,
+    `files=${fs.readdirSync(directory).join(', ')}`,
+    `stdout=${result.stdout}`,
+    `stderr=${result.stderr}`,
+  ].join('\n');
+}
+
 test('renders workflow tabs and lazily loads their data in a real headless browser', async (t) => {
   const browser = firefoxPath();
   if (!browser) {
@@ -137,42 +176,39 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
   const labsProfile = path.join(tempDirectory, 'labs-profile');
   const energyProfile = path.join(tempDirectory, 'energy-profile');
   const liteProfile = path.join(tempDirectory, 'lite-profile');
+  const labsOutput = path.join(tempDirectory, 'labs-output');
+  const energyOutput = path.join(tempDirectory, 'energy-output');
+  const liteOutput = path.join(tempDirectory, 'lite-output');
   fs.mkdirSync(labsProfile);
   fs.mkdirSync(energyProfile);
   fs.mkdirSync(liteProfile);
-  const labsScreenshot = path.join(tempDirectory, 'laboratories.png');
-  const energyScreenshot = path.join(tempDirectory, 'energy.png');
-  const liteScreenshot = path.join(tempDirectory, 'lite.png');
+  fs.mkdirSync(labsOutput);
+  fs.mkdirSync(energyOutput);
+  fs.mkdirSync(liteOutput);
+  const labsScreenshot = path.join(labsOutput, 'screenshot.png');
+  const energyScreenshot = path.join(energyOutput, 'screenshot.png');
+  const liteScreenshot = path.join(liteOutput, 'screenshot.png');
   try {
-    const labsResult = await runFirefoxScreenshot(browser, [
-      '--headless',
-      '--no-remote',
-      '--profile', labsProfile,
-      '--window-size', '1440,1200',
-      '--screenshot', labsScreenshot,
-      url,
-    ], labsScreenshot, () => requests.includes('/lab-admin/status'));
-    assert.ok(labsResult.status === 0 || labsResult.screenshotReady, `${labsResult.stdout}\n${labsResult.stderr}`);
-    assert.ok(
-      labsResult.screenshotReady,
-      `Firefox did not produce a screenshot; files: ${fs.readdirSync(tempDirectory).join(', ')}`,
+    const labsResult = await runFirefoxScreenshot(
+      browser,
+      firefoxScreenshotArgs(labsProfile, url),
+      labsScreenshot,
+      () => requests.includes('/lab-admin/status'),
     );
+    assert.ok(labsResult.screenshotReady, firefoxFailureMessage(labsResult, labsScreenshot, tempDirectory));
     assert.ok(fs.statSync(labsScreenshot).size > 0, 'Firefox produced an empty Laboratories screenshot');
     assert.ok(requests.includes('/lab-admin/status'), 'The default Laboratories tab did not load publisher status');
     assert.equal(requests.includes('/ops/api/power/controllers'), false, 'Energy loaded before its tab was opened');
     assert.equal(requests.includes('/billing/admin/notifications'), false, 'Notifications loaded before its tab was opened');
 
     requests.length = 0;
-    const energyResult = await runFirefoxScreenshot(browser, [
-      '--headless',
-      '--no-remote',
-      '--profile', energyProfile,
-      '--window-size', '1440,1200',
-      '--screenshot', energyScreenshot,
-      `${url}#energy`,
-    ], energyScreenshot, () => requests.includes('/ops/api/power/policies'));
-    assert.ok(energyResult.status === 0 || energyResult.screenshotReady, `${energyResult.stdout}\n${energyResult.stderr}`);
-    assert.ok(energyResult.screenshotReady, 'Firefox did not produce an Energy screenshot');
+    const energyResult = await runFirefoxScreenshot(
+      browser,
+      firefoxScreenshotArgs(energyProfile, `${url}#energy`),
+      energyScreenshot,
+      () => requests.includes('/ops/api/power/policies'),
+    );
+    assert.ok(energyResult.screenshotReady, firefoxFailureMessage(energyResult, energyScreenshot, tempDirectory));
     assert.ok(fs.statSync(energyScreenshot).size > 0, 'Firefox produced an empty Energy screenshot');
     assert.ok(requests.includes('/ops/api/power/controllers'), 'Lab Manager did not load power controllers');
     assert.ok(requests.includes('/ops/api/power/credentials'), 'Lab Manager did not load power credentials');
@@ -181,16 +217,13 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
 
     requests.length = 0;
     setLiteMode(true);
-    const liteResult = await runFirefoxScreenshot(browser, [
-      '--headless',
-      '--no-remote',
-      '--profile', liteProfile,
-      '--window-size', '1440,1200',
-      '--screenshot', liteScreenshot,
-      `${url}#notifications`,
-    ], liteScreenshot, () => requests.includes('/lab-admin/status'));
-    assert.ok(liteResult.status === 0 || liteResult.screenshotReady, `${liteResult.stdout}\n${liteResult.stderr}`);
-    assert.ok(liteResult.screenshotReady, 'Firefox did not produce a Lite-mode screenshot');
+    const liteResult = await runFirefoxScreenshot(
+      browser,
+      firefoxScreenshotArgs(liteProfile, `${url}#notifications`),
+      liteScreenshot,
+      () => requests.includes('/lab-admin/status'),
+    );
+    assert.ok(liteResult.screenshotReady, firefoxFailureMessage(liteResult, liteScreenshot, tempDirectory));
     assert.ok(requests.includes('/lab-admin/status'), 'A Full-only deep link did not fall back to Laboratories in Lite mode');
     assert.equal(requests.includes('/billing/admin/notifications'), false, 'Lite mode attempted to open Full-only Notifications');
   } finally {
