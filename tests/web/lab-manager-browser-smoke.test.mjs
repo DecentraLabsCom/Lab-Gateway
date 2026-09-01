@@ -120,11 +120,12 @@ async function runFirefoxScreenshotOnce(browser, args, screenshot, isReady = () 
     while (fs.existsSync(screenshot) && !isReady() && Date.now() < readinessDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    const ready = isReady();
     const result = await Promise.race([
       close,
       new Promise((resolve) => setTimeout(() => resolve({ status: null, signal: null, stdout, stderr }), 1000)),
     ]);
-    return { ...result, screenshotReady: fs.existsSync(screenshot) };
+    return { ...result, screenshotReady: fs.existsSync(screenshot), ready };
   } finally {
     stopFirefoxProcessTree(child.pid);
   }
@@ -136,7 +137,7 @@ async function runFirefoxScreenshot(browser, args, screenshot, isReady = () => t
     fs.rmSync(screenshot, { force: true });
     result = await runFirefoxScreenshotOnce(browser, args, screenshot, isReady);
     result.attempts = attempt;
-    if (result.screenshotReady) return result;
+    if (result.screenshotReady && result.ready) return result;
   }
   return result;
 }
