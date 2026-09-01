@@ -21,12 +21,35 @@ function contentType(filePath) {
 function startSmokeServer() {
   const requests = [];
   let liteMode = false;
+  let screenshotReadyPath = null;
+  const screenshotHoldResponses = new Set();
+
+  function releaseScreenshotHolds() {
+    for (const response of screenshotHoldResponses) {
+      screenshotHoldResponses.delete(response);
+      if (!response.writableEnded) response.end('ready');
+    }
+  }
+
   const server = http.createServer((request, response) => {
     const requestUrl = new URL(request.url, 'http://127.0.0.1');
     requests.push(requestUrl.pathname);
+    if (screenshotReadyPath && requestUrl.pathname === screenshotReadyPath) {
+      releaseScreenshotHolds();
+    }
     if (requestUrl.pathname === '/gateway/mode') {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ mode: liteMode ? 'lite' : 'full', lite: liteMode }));
+      return;
+    }
+    if (requestUrl.pathname === '/__lab-manager-smoke-hold') {
+      response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      if (screenshotReadyPath && requests.includes(screenshotReadyPath)) {
+        response.end('ready');
+        return;
+      }
+      screenshotHoldResponses.add(response);
+      response.once('close', () => screenshotHoldResponses.delete(response));
       return;
     }
     if (requestUrl.pathname.startsWith('/ops/') || requestUrl.pathname.startsWith('/lab-admin/')) {
@@ -53,6 +76,14 @@ function startSmokeServer() {
       return;
     }
     response.writeHead(200, { 'Content-Type': contentType(filePath) });
+    if (requestUrl.pathname === '/lab-manager/index.html') {
+      const html = fs.readFileSync(filePath, 'utf8').replace(
+        '</body>',
+        '<iframe src="/__lab-manager-smoke-hold" title="smoke readiness hold" hidden></iframe></body>',
+      );
+      response.end(html);
+      return;
+    }
     response.end(fs.readFileSync(filePath));
   });
 
@@ -65,6 +96,10 @@ function startSmokeServer() {
         url: `http://127.0.0.1:${address.port}/lab-manager/index.html`,
         requests,
         setLiteMode: (value) => { liteMode = Boolean(value); },
+        setScreenshotReadyPath: (value) => {
+          if (screenshotReadyPath !== value) releaseScreenshotHolds();
+          screenshotReadyPath = value;
+        },
       });
     });
   });
@@ -172,7 +207,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
     return;
   }
 
-  const { server, url, requests, setLiteMode } = await startSmokeServer();
+  const { server, url, requests, setLiteMode, setScreenshotReadyPath } = await startSmokeServer();
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'lab-manager-smoke-'));
   const labsProfile = path.join(tempDirectory, 'labs-profile');
   const energyProfile = path.join(tempDirectory, 'energy-profile');
@@ -190,6 +225,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
   const energyScreenshot = path.join(energyOutput, 'screenshot.png');
   const liteScreenshot = path.join(liteOutput, 'screenshot.png');
   try {
+    setScreenshotReadyPath('/lab-admin/status');
     const labsResult = await runFirefoxScreenshot(
       browser,
       firefoxScreenshotArgs(labsProfile, url),
@@ -203,6 +239,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
     assert.equal(requests.includes('/billing/admin/notifications'), false, 'Notifications loaded before its tab was opened');
 
     requests.length = 0;
+    setScreenshotReadyPath('/ops/api/power/policies');
     const energyResult = await runFirefoxScreenshot(
       browser,
       firefoxScreenshotArgs(energyProfile, `${url}#energy`),
@@ -218,6 +255,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
 
     requests.length = 0;
     setLiteMode(true);
+    setScreenshotReadyPath('/lab-admin/status');
     const liteResult = await runFirefoxScreenshot(
       browser,
       firefoxScreenshotArgs(liteProfile, `${url}#notifications`),
@@ -228,6 +266,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
     assert.ok(requests.includes('/lab-admin/status'), 'A Full-only deep link did not fall back to Laboratories in Lite mode');
     assert.equal(requests.includes('/billing/admin/notifications'), false, 'Lite mode attempted to open Full-only Notifications');
   } finally {
+    setScreenshotReadyPath(null);
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(tempDirectory, {
       recursive: true,
