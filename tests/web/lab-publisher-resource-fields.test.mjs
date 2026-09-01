@@ -272,11 +272,19 @@ autoDetect.document.getElementById('labCloses').value = '2026-12-31';
 autoDetect.document.getElementById('labAvailableHoursStart').value = '09:00';
 autoDetect.document.getElementById('labAvailableHoursEnd').value = '17:00';
 autoDetect.document.getElementById('labTimezone').value = 'Europe/Madrid';
+autoDetect.document.getElementById('labTermsUrl').value = 'https://gateway.example/terms.pdf';
+autoDetect.document.getElementById('labTermsVersion').value = '1.0';
+autoDetect.document.getElementById('labTermsEffectiveDate').value = '2026-01-01';
 const metadata = autoDetect.hooks.buildMetadata();
 assert.equal(metadata.demoEnabled, true);
 const maxConcurrentAttribute = metadata.attributes.find((attr) => attr.trait_type === 'maxConcurrentUsers');
 assert.equal(maxConcurrentAttribute?.value, 8);
 assert.equal(metadata.attributes.find((attr) => attr.trait_type === 'resourceType')?.value, 'fmu');
+assert.equal(
+  metadata.attributes.find((attr) => attr.trait_type === 'termsOfUse')?.value.effectiveDate,
+  1767225600,
+  'Terms dates must use UTC Unix seconds, matching Marketplace metadata'
+);
 
 autoDetect.document.getElementById('labPriceUnit').value = 'week';
 autoDetect.document.getElementById('labAllowedPeriodMin').value = '1';
