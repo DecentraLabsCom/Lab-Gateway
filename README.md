@@ -87,7 +87,23 @@ cd Lab-Gateway
 
 For a non-interactive deployment, copy `.env.example` and
 `blockchain-services/.env.example`, configure the required secrets and public
-origin, then run:
+origin, and complete the persistent-directory prerequisites in the [manual
+Compose installation guide](docs/install/install-manual-compose.md) before
+materializing the Compose secret files:
+
+```bash
+# Linux/macOS/WSL
+python3 scripts/validate-gateway-env.py --env .env
+bash scripts/sync-compose-secrets.sh
+```
+
+```powershell
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\Validate-GatewayEnv.ps1 -EnvPath .\.env
+powershell -ExecutionPolicy Bypass -File .\scripts\Sync-ComposeSecrets.ps1
+```
+
+Then run:
 
 ```bash
 docker compose up -d --build

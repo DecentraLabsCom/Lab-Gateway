@@ -1,9 +1,10 @@
 # Configuration reference
 
 This reference explains the configuration contract for the Compose-managed Lab
-Gateway. It complements `.env.example`, which is the exhaustive list of
-variables and defaults. Do not copy deployment secrets into documentation or
-commit either `.env` file.
+Gateway. It complements `.env.example`, which is the primary list of root
+gateway variables and defaults; component-specific variables are called out in
+their service documentation. Do not copy deployment secrets into documentation
+or commit either `.env` file.
 
 ## Configuration files and responsibilities
 
@@ -128,9 +129,25 @@ JWT `iss`/`sub` must use that same canonical value.
 | Demo laboratory | `MARKETPLACE_URL`, `DEMO_USER`, `DEMO_LAB_ID`, `DEMO_CONNECTION_ID`, `DEMO_HEARTBEAT_MAX_AGE_SECONDS`, `DEMO_SESSION_TTL_SECONDS`, `DEMO_RATE_LIMIT_PER_MINUTE`, `DEMO_STATION_TIMEOUT_SECONDS`, `DEMO_PENDING_LEASE_SECONDS` | Configure the lab and Guacamole connection together. OpenResty exposes the protected readiness result in `/gateway/health/details`; the demo hand-off stays fail-closed until it is `ready` and the physical lifecycle call completes. The pending lease is bounded to 30–60 seconds so an abandoned browser handoff cannot hold the demo slot for the full session TTL. |
 | Guacamole | `GUAC_ADMIN_*`, `API_SESSION_TIMEOUT`, `JWT_GUAC_IDLE_TIMEOUT_SECONDS`, `BAN_*` | Manual administrator login is an operations path, not the end-user hand-off. Keep anti-brute-force controls enabled. |
 | FMU | `FMU_RUNNER_ENABLED`, `FMU_BACKEND_MODE`, `FMU_LOCAL_DEV_MODE`, `FMU_JWT_AUDIENCE`, `AUTH_JWKS_URL`, `FMU_STATION_*`, `FMU_GATEWAY_ID` | The audience must be the exact public FMU `accessURI`. `FMU_GATEWAY_ID` uses the same host-plus-non-default-port identity as observer credentials. `FMU_BACKEND_MODE` selects local versus Lab Station execution; Full/Lite selects the JWKS source. `AUTH_JWKS_URL` is an optional explicit override and must use HTTPS, except for loopback/private hosts used by local Compose networking. |
-| Ops / Lab Station | `OPS_SECRETS_KEY`, `WINRM_MANAGEMENT_CIDRS`, `OPS_ALLOWED_COMMANDS` | Use TLS WinRM on 5986 and a restricted management network. Losing the stable Fernet key makes stored credentials unreadable. |
+| Ops / Lab Station | `OPS_SECRETS_KEY`, `WINRM_MANAGEMENT_CIDRS`, `OPS_ALLOWED_COMMANDS`, `OPS_RESERVATION_*`, `OPS_DISCOVERY_*`, `NOTIFICATION_SERVICE_*` | Use TLS WinRM on 5986 and a restricted management network. Losing the stable Fernet key makes stored credentials unreadable. The scheduler, timeline, discovery and notification controls are forwarded to `ops-worker` from the root `.env`. |
 | AAS | `BASYX_AAS_URL`, `AAS_ALLOWED_HOSTS`, `AAS_SERVICE_TOKEN` | Use `https://` and exact host allow-listing for an external AAS. Caller JWTs are not forwarded. |
-| CORS and proxies | `CORS_ALLOWED_ORIGINS`, `TRUST_PROXY_HEADERS` | Keep origins explicit. Trust forwarded client-IP headers only from a controlled upstream proxy. |
+| CORS and proxies | `CORS_ALLOWED_ORIGINS`, `ADMIN_TRUST_FORWARDED_IP` | Keep origins explicit. Set `ADMIN_TRUST_FORWARDED_IP=true` only when forwarded client-IP headers come from a controlled upstream proxy; set it false when OpenResty is the public edge. The template default `true` assumes a private upstream proxy and must be changed for direct public exposure. |
+
+The Compose-managed Ops Worker exposes the following optional tuning controls
+from the root `.env`: `OPS_ALLOWED_COMMANDS`, `OPS_POLL_ENABLED`,
+`OPS_POLL_INTERVAL`, `OPS_RESERVATION_AUTOMATION`,
+`OPS_RESERVATION_SCAN_INTERVAL`, `OPS_RESERVATION_START_LEAD`,
+`OPS_RESERVATION_END_DELAY`, `OPS_RESERVATION_LOOKBACK`,
+`OPS_RESERVATION_RETRY_COOLDOWN`, `OPS_RESERVATION_MAX_BATCH`,
+`OPS_TIMELINE_MAX_OPS`, `OPS_TIMELINE_DEFAULT_LIMIT`,
+`OPS_TIMELINE_PHASE_LOOKBACK`, `NOTIFICATION_SERVICE_ENABLED`,
+`NOTIFICATION_SERVICE_URL`, `NOTIFICATION_SERVICE_RECIPIENTS`,
+`NOTIFICATION_SERVICE_RETRY_ATTEMPTS`,
+`NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS`,
+`OPS_DISCOVERY_TIMEOUT_SECONDS`, `OPS_DISCOVERY_LABSTATION_PORTS` and
+`OPS_DISCOVERY_LABSTATION_PATHS`. Defaults are kept in `.env.example` and in
+the Compose interpolation expressions so the service documentation and the
+deployed container use the same contract.
 
 ## Optional Compose profiles
 

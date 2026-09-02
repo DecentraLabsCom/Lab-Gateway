@@ -30,6 +30,57 @@ def test_documentation_contract_is_reachable_from_canonical_indexes():
         assert "documentation-contract.md" in _read(marketplace_guide)
 
 
+def test_quick_start_explains_compose_secret_materialization():
+    readme = _read(GATEWAY_ROOT / "README.md")
+    assert "validate-gateway-env.py" in readme
+    assert "sync-compose-secrets.sh" in readme
+    assert "Validate-GatewayEnv.ps1" in readme
+    assert "Sync-ComposeSecrets.ps1" in readme
+
+
+def test_gateway_configuration_uses_the_implemented_forwarded_ip_setting():
+    configuration = _read(GATEWAY_ROOT / "docs" / "reference" / "configuration.md")
+    assert "ADMIN_TRUST_FORWARDED_IP" in configuration
+    assert "TRUST_PROXY_HEADERS" not in configuration
+
+
+def test_documented_ops_controls_are_exposed_by_compose():
+    compose = _read(GATEWAY_ROOT / "docker-compose.yml")
+    for variable in (
+        "OPS_ALLOWED_COMMANDS",
+        "OPS_RESERVATION_LOOKBACK",
+        "OPS_RESERVATION_RETRY_COOLDOWN",
+        "OPS_RESERVATION_MAX_BATCH",
+        "NOTIFICATION_SERVICE_URL",
+        "NOTIFICATION_SERVICE_RECIPIENTS",
+        "NOTIFICATION_SERVICE_RETRY_ATTEMPTS",
+        "NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS",
+        "OPS_DISCOVERY_TIMEOUT_SECONDS",
+        "OPS_DISCOVERY_LABSTATION_PORTS",
+        "OPS_DISCOVERY_LABSTATION_PATHS",
+    ):
+        assert f"{variable}=" in compose
+
+
+def test_primary_summary_points_to_embedded_backend_documentation():
+    summary = _read(GATEWAY_ROOT / "SUMMARY.md")
+    assert "blockchain-services/SUMMARY.md" in summary
+
+
+def test_root_environment_template_describes_current_gateway_modes():
+    env_example = _read(GATEWAY_ROOT / ".env.example")
+    header = "\n".join(env_example.splitlines()[:4]).lower()
+    assert "full/lite" in header
+    assert "auth2" not in header
+
+
+def test_oidc_integration_scope_distinguishes_mock_coverage_from_production_support():
+    integration = _read(GATEWAY_ROOT / "tests" / "integration" / "README.md")
+    assert "OIDC discovery" in integration
+    assert "provider mode" in integration
+    assert "mock backend" in integration
+
+
 def test_contract_records_two_phase_access_code_invariant():
     contract = _read(CONTRACT)
     assert "REDEMPTION_PREPARED" in contract

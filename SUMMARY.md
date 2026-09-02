@@ -61,5 +61,7 @@ table of contents.
 
 The embedded canonical backend lives in `blockchain-services/`. Its detailed
 API, security, wallet, deployment, and operations documentation starts at
-the standalone repository's
-[blockchain-services documentation](https://github.com/DecentraLabsCom/blockchain-services/blob/main/SUMMARY.md).
+the [local embedded backend documentation](blockchain-services/SUMMARY.md).
+The [upstream backend repository](https://github.com/DecentraLabsCom/blockchain-services)
+is useful for source history, but the checked-out submodule is the canonical
+documentation for this Gateway revision.
