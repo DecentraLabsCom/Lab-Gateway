@@ -117,8 +117,8 @@ For the complete design and trust requirements, read
 | Station networking and lifecycle | [Laboratory connectivity](workflows/laboratory-connectivity.md) and [Gateway and Lab Station operations](workflows/gateway-lab-station-operations.md) |
 | Lab Manager operator workflows | [Lab Manager operator guide](workflows/lab-manager-operator-guide.md), [Labs and Operations](workflows/lab-manager-labs-and-operations.md), and [Notifications](workflows/lab-manager-notifications.md) |
 | Energy credentials, controllers, outlets, and Lab Manager policies | [Lab Manager energy operations](workflows/lab-manager-energy-operations.md) and [Ops Worker README](../ops-worker/README.md) |
-| Embedded backend APIs and security | [`blockchain-services` documentation](../blockchain-services/SUMMARY.md) |
+| Backend APIs and security | [`blockchain-services` documentation](../blockchain-services/SUMMARY.md) |
 
-The canonical embedded backend path is `Lab Gateway/blockchain-services`.
-`Blockchain-Services/` at the workspace root is a parallel standalone variant,
-not the default documentation or implementation target for this repository.
+The backend documentation and implementation are under
+`blockchain-services/`. Its standalone and Gateway-integrated deployment modes
+are described in the backend deployment guide.

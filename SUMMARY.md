@@ -57,11 +57,8 @@ table of contents.
 - [OpenResty Lua unit tests](openresty/tests/README.md)
 - [Integration tests](tests/integration/README.md)
 
-## Embedded backend
+## Backend service
 
-The embedded canonical backend lives in `blockchain-services/`. Its detailed
+The `blockchain-services/` backend contains detailed
 API, security, wallet, deployment, and operations documentation starts at
-the [local embedded backend documentation](blockchain-services/SUMMARY.md).
-The [upstream backend repository](https://github.com/DecentraLabsCom/blockchain-services)
-is useful for source history, but the checked-out submodule is the canonical
-documentation for this Gateway revision.
+the [backend documentation index](blockchain-services/SUMMARY.md).

@@ -87,9 +87,9 @@ ALLOWED_ORIGINS=https://lab.your-institution.edu,https://marketplace-decentralab
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem
 ```
 
-Keep Gateway/OpenResty orchestration values only in `.env`. The root `docker-compose.yml` injects those values into the embedded backend from `.env`.
+Keep Gateway/OpenResty orchestration values only in `.env`. The root `docker-compose.yml` injects those values into the `blockchain-services` backend from `.env`.
 
-In Lite mode, the embedded backend is not the local JWT authority: OpenResty
+In Lite mode, the backend service is not the local JWT authority: OpenResty
 blocks its `/auth` issuer routes and trusts the remote `ISSUER`. For composite
 Full + N Lite or standalone-backend + N Lite deployments, provision each Lite
 with its own trust bundle and remote provisioner route. See

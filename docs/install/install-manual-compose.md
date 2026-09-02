@@ -347,7 +347,7 @@ selected. Keep it `false` for the station-backed production profile. See the
 curl -k https://localhost/health
 
 # Blockchain services
-curl -k https://localhost/auth/.well-known/openid-configuration
+curl -k https://localhost/.well-known/openid-configuration
 ```
 
 Both should return JSON without errors. The public health response is intentionally redacted; Lab Manager operators can use `/health/details` with the configured `LAB_MANAGER_TOKEN` for backend diagnostics.

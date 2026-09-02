@@ -13,7 +13,7 @@ or dependency diagnostics.
 | Endpoint | Audience | Meaning |
 | --- | --- | --- |
 | `GET /health` | Public | Liveness/readiness of the public gateway edge. |
-| `GET /gateway/health` | Public | Aggregate readiness of the local access-plane dependencies. In Full mode it also requires the embedded backend; in Lite mode the remote issuer-trust check is available through the protected details endpoint. |
+| `GET /gateway/health` | Public | Aggregate readiness of the local access-plane dependencies. In Full mode it also requires the backend service; in Lite mode the remote issuer-trust check is available through the protected details endpoint. |
 | `GET /ops/health` | Public | Aggregate Ops Worker readiness. |
 | `GET /health/details` | Lab Manager operator | Detailed backend, network, certificate, and configuration diagnostics. |
 | `GET /gateway/health/details` | Lab Manager operator | Detailed local dependency and Lite issuer-trust diagnostics. |

@@ -8,8 +8,8 @@ This document describes the production connectivity model between Marketplace, t
 | --- | --- |
 | Marketplace | Public discovery and browser-facing orchestration of institutional reservation and access flows. |
 | Smart contracts | Shared source of truth for providers, laboratories, reservations, access authorization, and service-credit settlement. |
-| Full Lab Gateway | Local access plane plus embedded `blockchain-services`, Guacamole, OpenResty, ops worker, and optional FMU runner. |
-| Lite Lab Gateway | Local access plane with OpenResty, Guacamole, ops worker, and optional FMU runner; it trusts a remote JWT issuer. The embedded backend remains dormant and is not used as the issuer. |
+| Full Lab Gateway | Local access plane plus `blockchain-services`, Guacamole, OpenResty, ops worker, and optional FMU runner. |
+| Lite Lab Gateway | Local access plane with OpenResty, Guacamole, ops worker, and optional FMU runner; it trusts a remote JWT issuer. The backend service is not the local issuer in this mode. |
 | Standalone `blockchain-services` | Remote control plane that can issue access credentials and administer providers without a local Guacamole access plane. |
 | Lab Station | Windows host that runs the physical-lab control software and, when used, the internal FMU execution plane. |
 
@@ -19,8 +19,8 @@ This document describes the production connectivity model between Marketplace, t
 
 | Shape | Authentication/control plane | Browser access plane |
 | --- | --- | --- |
-| Full-only | Embedded `blockchain-services` in one Full gateway | The same Full gateway. |
-| Full plus N Lite | Full gateway / embedded backend | Full gateway and N Lite gateways, selected per lab by `accessURI`. |
+| Full-only | `blockchain-services` in one Full gateway | The same Full gateway. |
+| Full plus N Lite | Full gateway / backend service | Full gateway and N Lite gateways, selected per lab by `accessURI`. |
 | Standalone plus N Lite | Standalone `blockchain-services` | N Lite gateways, selected per lab by `accessURI`. |
 
 In Lite mode, the gateway validates JWTs against the remote issuer's JWKS. Lite mode does not mean that laboratory access, Guacamole, FMU, or station operations are disabled; it only removes the gateway as the primary credential issuer and provider control plane.

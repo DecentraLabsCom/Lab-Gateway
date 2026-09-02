@@ -1,6 +1,6 @@
 # Institutional Check-in, Lab Access, and Session Workflow
 
-This document describes the current institutional flow from an already confirmed reservation to access delivery and session-start attestation. It covers the canonical `Lab Gateway/blockchain-services` backend in both consumer and provider roles.
+This document describes the current institutional flow from an already confirmed reservation to access delivery and session-start attestation. It covers the `blockchain-services` backend in both consumer and provider roles.
 
 For reservation creation and confirmation, see [Institutional Reservation Workflow](institutional-reservation-workflow.md). For Guacamole-specific session policy, see [Guacamole Session Policy](../guacamole-session-policy.md).
 
@@ -223,7 +223,7 @@ For the normal provider settlement path, the on-chain reservation must be `ACCES
 ## Multiple sessions per reservation
 
 The current contract is `MULTI_SESSION` for one authorised reservation principal:
-reconnections and parallel runtime connections are permitted until reservation
+reconnections and concurrent runtime connections are permitted until reservation
 expiry. Credential regeneration affects future entry but does not pretend to
 terminate an already accepted Guacamole tunnel or FMU context. This does not
 weaken exclusive booking: a different reservation or principal remains barred.

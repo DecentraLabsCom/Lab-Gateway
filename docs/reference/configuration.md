@@ -10,7 +10,7 @@ or commit either `.env` file.
 
 | File | Owns | Do not place here |
 | --- | --- | --- |
-| `.env` | Gateway origin, edge ports, Compose services, MySQL credentials, operator tokens, Lite trust settings, FMU, Ops Worker, AAS, and CORS at the edge. | Contract RPC/wallet configuration owned by the embedded backend. |
+| `.env` | Gateway origin, edge ports, Compose services, MySQL credentials, operator tokens, Lite trust settings, FMU, Ops Worker, AAS, and CORS at the edge. | Contract RPC/wallet configuration owned by the `blockchain-services` backend. |
 | `blockchain-services/.env` | Smart-contract/RPC settings, backend wallet behavior, provider features, and backend CORS/security configuration. | Gateway-only OpenResty and Compose orchestration values. |
 | `ops-worker/hosts.json` or configured host catalog | Non-secret Station addresses, lab mappings, and a `credential_ref`. | WinRM passwords or tokens. |
 
@@ -24,7 +24,7 @@ flowchart LR
     Env[.env] --> Edge[OpenResty and Compose]
     Env --> Ops[Ops Worker]
     Env --> Optional[FMU / AAS profiles]
-    BackendEnv[blockchain-services/.env] --> Backend[Embedded backend]
+    BackendEnv[blockchain-services/.env] --> Backend[blockchain-services backend]
     Hosts[Host catalog + credential references] --> Ops
     Edge --> Backend
 ```
@@ -215,4 +215,4 @@ service credits.
 - [Gateway and Lab Station operations](../workflows/gateway-lab-station-operations.md)
 - [FMI/FMU support](../fmi-fmu-support.md)
 - [AAS support](../aas-support.md)
-- [Embedded backend deployment guide](../../blockchain-services/docs/configuration/DEPLOYMENT.md)
+- [Backend deployment guide](../../blockchain-services/docs/configuration/DEPLOYMENT.md)

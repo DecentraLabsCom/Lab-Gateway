@@ -345,7 +345,7 @@ Station. Consulta la
 curl -k https://localhost/health
 
 # Servicios de blockchain
-curl -k https://localhost/auth/.well-known/openid-configuration
+curl -k https://localhost/.well-known/openid-configuration
 ```
 
 Si FMU esta habilitado, verifica tambien el runner seleccionado y el montaje

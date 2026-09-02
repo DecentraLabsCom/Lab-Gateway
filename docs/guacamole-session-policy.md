@@ -2,7 +2,7 @@
 
 Lab Gateway has three Guacamole session classes. They intentionally behave differently.
 
-The policy is local to each access gateway. In Full mode the embedded backend
+The policy is local to each access gateway. In Full mode the backend service
 owns the reservation credential and observation authority. In Lite mode the
 same Guacamole rules apply locally, but the credential issuer, access-code
 redemption and session-observation destination are remote; the Lite's gateway
