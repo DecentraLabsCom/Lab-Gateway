@@ -4,6 +4,6 @@ fmpy==0.3.31
 pyjwt[crypto]==2.13.0
 httpx==0.28.1
 websockets==17.1
-pydantic==2.13.4
+pydantic==2.13.5
 aiosqlite==0.22.1
 python-multipart==0.0.32
