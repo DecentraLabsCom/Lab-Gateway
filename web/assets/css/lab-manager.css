@@ -1091,6 +1091,22 @@ body {
     align-items: center;
 }
 .host-title { font-weight: 700; }
+.host-title-row { display: flex; align-items: center; gap: 8px; }
+.host-edit-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #151c2d;
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+.host-edit-btn:hover,
+.host-edit-btn:focus-visible { color: var(--text); border-color: var(--primary); }
 .host-meta { color: var(--muted); font-size: 0.9rem; }
 .candidate-station-status {
     align-self: start;

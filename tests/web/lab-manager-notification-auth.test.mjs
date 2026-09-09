@@ -67,6 +67,7 @@ function loadLabManager({
     json: async () => ({}),
   }),
   provisionResponse = null,
+  editHostResponse = null,
   labsResponse = Promise.resolve({
     ok: true,
     status: 200,
@@ -87,6 +88,7 @@ function loadLabManager({
     status: 200,
     json: async () => ({ credentials: [] }),
   }),
+  eventSource = null,
   confirm = () => true,
 }) {
   const ids = [
@@ -101,6 +103,9 @@ function loadLabManager({
     'winrmCredentialPassword', 'provisionConnectionId', 'provisionHostName',
     'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac',
     'provisionHeartbeatPath',
+    'editHostModal', 'closeEditHostModal', 'cancelEditHost', 'saveEditHost',
+    'editHostOriginalName', 'editHostName', 'editHostAddress', 'editHostMac',
+    'editHeartbeatPath',
     'btnTestLoad', 'saveConfigBtn', 'btnTestEmail', 'refreshHostsBtn', 'hostList',
     'guacamoleCandidateList', 'fmuSyncBtn', 'fmuSyncKey', 'fmuSyncLabSelect',
     'fmuSyncFile', 'fmuSyncFileName', 'fmuSyncResult', 'fmuSyncDescription', 'fmuSyncLicense',
@@ -185,6 +190,7 @@ function loadLabManager({
       showTokenModal: (...args) => promptCalls.push(args),
       getTokenConfigForPath: () => ({ key: 'billing', login: '/admin/login' }),
     },
+    ...(eventSource ? { EventSource: eventSource } : {}),
   };
   const fetchCalls = [];
   const context = vm.createContext({
@@ -218,6 +224,12 @@ function loadLabManager({
       }
       if (parsedUrl.pathname === '/ops/api/hosts/discover') {
         return Promise.resolve(discoverResponse);
+      }
+      if (parsedUrl.pathname.startsWith('/ops/api/hosts/') && options.method === 'PATCH' && editHostResponse) {
+        const response = typeof editHostResponse === 'function'
+          ? editHostResponse(parsedUrl, fetchCalls.length)
+          : editHostResponse;
+        return Promise.resolve(response);
       }
       if (parsedUrl.pathname === '/ops/api/hosts/provision' && provisionResponse) {
         return Promise.resolve(provisionResponse);
@@ -1297,6 +1309,106 @@ test('shows the provisioning request id when the backend reports an internal fai
     elements.get('toast').textContent,
     'Configure host failed: Internal server error (request ID ops-request-45)',
   );
+});
+
+test('edits a dynamic ops host from the pencil action', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: '10.192.38.82',
+          address: '10.192.38.82',
+          mac: '00:11:22:33:44:55',
+          heartbeatPath: 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json',
+          editable: true,
+          winrmConfigured: false,
+          guacamole: { status: 'ambiguous', connections: [] },
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+    editHostResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ host: { name: 'siemens-admin' } }),
+    }),
+  });
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  const hostList = elements.get('hostList');
+  const row = hostList.options.at(-1);
+  const editButton = {
+    dataset: { action: 'edit-host' },
+    closest: (selector) => selector === 'button[data-action]' ? editButton : row,
+  };
+  hostList.dispatchEvent({ type: 'click', target: editButton });
+
+  assert.equal(elements.get('editHostModal').classList.contains('show'), true);
+  assert.equal(elements.get('editHostName').value, '10.192.38.82');
+  assert.equal(elements.get('editHostAddress').value, '10.192.38.82');
+  assert.equal(elements.get('editHostMac').value, '00:11:22:33:44:55');
+  assert.equal(
+    elements.get('editHeartbeatPath').value,
+    'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json',
+  );
+
+  elements.get('editHostName').value = 'siemens-admin';
+  elements.get('editHostMac').value = '00-22-33-44-55-66';
+  elements.get('editHeartbeatPath').value = 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json';
+  elements.get('saveEditHost').click();
+  await flush();
+  await flush();
+
+  const editCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'PATCH' && url === '/ops/api/hosts/10.192.38.82');
+  assert.ok(editCall, 'Editing a host should call the host update endpoint');
+  assert.deepEqual(JSON.parse(editCall.options.body), {
+    name: 'siemens-admin',
+    mac: '00-22-33-44-55-66',
+    heartbeatPath: 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json',
+  });
+  assert.equal(elements.get('editHostModal').classList.contains('show'), false);
+});
+
+test('does not open heartbeat streams for hosts without WinRM credentials', async () => {
+  class FakeEventSource {
+    static instances = [];
+    static CLOSED = 2;
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = 1;
+      FakeEventSource.instances.push(this);
+    }
+
+    addEventListener() {}
+    close() { this.readyState = FakeEventSource.CLOSED; }
+  }
+
+  loadLabManager({
+    activeTabs: ['operations'],
+    eventSource: FakeEventSource,
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: '10.192.38.82',
+          address: '10.192.38.82',
+          winrmConfigured: false,
+          editable: true,
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(FakeEventSource.instances.length, 0);
 });
 
 test('loads AAS link FMU options and sends the selected lab when saving a link', async () => {

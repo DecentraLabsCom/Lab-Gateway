@@ -130,6 +130,9 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ connectionId, name?, address?, mac?, labs?, credentialRef?, heartbeatPath? }`
   - Re-runs discovery and only provisions candidates with Lab Station HTTP health or reachable WinRM.
   - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). Raw WinRM credentials are saved separately.
+- `PATCH /api/hosts/{hostName}`
+  - Body: `{ name?, mac?, heartbeatPath? }`
+  - Updates only a host from the writable dynamic catalog. The address, WinRM policy, credential reference, events path, and lab associations are preserved. Static catalog hosts must be edited in `hosts.json`.
 - `POST /api/hosts/winrm-credentials`
   - Body: `{ credentialRef, user, password }`
   - Encrypts and stores WinRM credentials for the configured host. Credentials are never accepted through `/api/winrm` or stored in the host catalog.

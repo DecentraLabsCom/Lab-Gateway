@@ -728,13 +728,20 @@ def _winrm_connection_policy(
     return effective_ssl, effective_port, effective_transport
 
 
+WINRM_CREDENTIALS_REQUIRED_MESSAGE = "WinRM credentials are required"
+
+
 def _winrm_credentials(host: Dict[str, Any], user: Optional[str], password: Optional[str]) -> Tuple[str, str]:
     if user or password:
         raise ValueError("WinRM credentials must be stored through the credentials endpoint")
     credentials = load_winrm_credentials(credential_ref_for_host(host))
     if not credentials:
-        raise ValueError("WinRM credentials are required")
+        raise ValueError(WINRM_CREDENTIALS_REQUIRED_MESSAGE)
     return credentials["user"], credentials["password"]
+
+
+def is_missing_winrm_credentials_error(exc: BaseException) -> bool:
+    return isinstance(exc, ValueError) and str(exc) == WINRM_CREDENTIALS_REQUIRED_MESSAGE
 
 
 def winrm_endpoint(host: Dict[str, Any], use_ssl: Optional[bool], port: Optional[int]) -> str:
@@ -798,7 +805,8 @@ def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], passw
 
     _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
     endpoint = f"https://{host.get('address')}:{effective_port}/wsman"
-    ps = f"Get-Content -LiteralPath '{path}' -Raw -Encoding UTF8"
+    escaped_path = str(path or "").replace("'", "''")
+    ps = f"Get-Content -LiteralPath '{escaped_path}' -Raw -Encoding UTF8"
 
     session = winrm.Session(endpoint, auth=(user, password), transport=transport)
     result = session.run_ps(ps)
@@ -1840,6 +1848,14 @@ def api_poll_heartbeat():
         data["duration_ms"] = int((time.time() - start) * 1000)
         data["host"] = host_name
         return jsonify(data)
+    except ValueError as exc:
+        if is_missing_winrm_credentials_error(exc):
+            return jsonify({
+                "error": WINRM_CREDENTIALS_REQUIRED_MESSAGE,
+                "code": "WINRM_CREDENTIALS_REQUIRED",
+                "host": host_name,
+            }), 409
+        return internal_error_response("Heartbeat poll failed", exc)
     except Exception as exc:
         return internal_error_response("Heartbeat poll failed", exc)
 
@@ -1854,6 +1870,35 @@ def generate_heartbeat_stream(host: Dict[str, Any], include_events: bool):
             data = poll_heartbeat(host, include_events=include_events)
             data["host"] = host.get("name")
             yield _format_sse_event("heartbeat", json.dumps(data))
+        except ValueError as exc:
+            if is_missing_winrm_credentials_error(exc):
+                logging.info(
+                    "Heartbeat stream paused for %s: WinRM credentials are required",
+                    _sanitize_log_value(host.get("name")),
+                )
+                yield _format_sse_event(
+                    "error",
+                    json.dumps({
+                        "error": WINRM_CREDENTIALS_REQUIRED_MESSAGE,
+                        "code": "WINRM_CREDENTIALS_REQUIRED",
+                        "host": host.get("name"),
+                    }),
+                )
+                return
+            request_id = _request_id()
+            logging.exception(
+                "Heartbeat stream failed request_id=%s",
+                str(request_id).replace("\r", "\\r").replace("\n", "\\n"),
+            )
+            yield _format_sse_event(
+                "error",
+                json.dumps({
+                    "error": "Internal server error",
+                    "code": "INTERNAL_ERROR",
+                    "requestId": request_id,
+                    "host": host.get("name"),
+                }),
+            )
         except Exception as exc:
             request_id = _request_id()
             logging.exception(
@@ -2971,15 +3016,67 @@ def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) 
     return host_config, None
 
 
-def safe_host_inventory_entry(host: Dict[str, Any]) -> Dict[str, Any]:
+def update_dynamic_host(host_name: str, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    config = load_dynamic_config()
+    hosts = [host for host in config.get("hosts", []) if isinstance(host, dict)]
+    original_key = normalize_match_key(host_name)
+    host_index = next(
+        (
+            index for index, host in enumerate(hosts)
+            if normalize_match_key(host.get("name")) == original_key
+        ),
+        None,
+    )
+    if host_index is None:
+        return None, "host is defined in the static catalog; edit ops-worker/hosts.json manually"
+
+    current = dict(hosts[host_index])
+    name, error = sanitize_host_name(payload.get("name"), current.get("name"))
+    if error:
+        return None, error
+    if normalize_match_key(name) != original_key:
+        existing = HOSTS.get(name)
+        if existing and normalize_match_key(existing.get("name")) != original_key:
+            return None, f"host {name} already exists"
+
+    updated = dict(current)
+    updated["name"] = name
+
+    if "mac" in payload:
+        raw_mac = str(payload.get("mac") or "").strip()
+        if raw_mac:
+            mac = normalize_mac(raw_mac)
+            if not mac:
+                return None, "mac must use format 00:11:22:33:44:55 or 00-11-22-33-44-55"
+            updated["mac"] = mac
+        else:
+            updated.pop("mac", None)
+
+    if "heartbeatPath" in payload:
+        heartbeat_path = str(payload.get("heartbeatPath") or "").strip()
+        if not heartbeat_path:
+            return None, "heartbeatPath is required"
+        if len(heartbeat_path) > 1024 or any(ord(char) < 32 for char in heartbeat_path):
+            return None, "heartbeatPath must be a valid Windows path"
+        updated["heartbeat_path"] = heartbeat_path
+
+    hosts[host_index] = updated
+    config["hosts"] = hosts
+    write_dynamic_config(config)
+    return updated, None
+
+
+def safe_host_inventory_entry(host: Dict[str, Any], *, editable: bool = False) -> Dict[str, Any]:
     credential_ref = credential_ref_for_host(host)
     return {
         "name": host.get("name"),
         "address": host.get("address"),
         "credentialRef": credential_ref,
         "mac": host.get("mac"),
+        "heartbeatPath": host.get("heartbeat_path", r"C:\LabStation\labstation\data\telemetry\heartbeat.json"),
         "mode": host.get("mode"),
         "labs": [str(lab) for lab in host.get("labs", [])],
+        "editable": editable,
         "winrmConfigured": bool(host.get("winrm_user") and host.get("winrm_pass")) or winrm_credentials_configured(credential_ref),
     }
 
@@ -3265,6 +3362,11 @@ def cleanup_expired_guacamole_temp_users() -> int:
 def build_host_inventory() -> Dict[str, Any]:
     with HOSTS_LOCK:
         hosts = HOSTS.all_hosts()
+    dynamic_host_names = {
+        normalize_match_key(host.get("name"))
+        for host in load_dynamic_config().get("hosts", [])
+        if isinstance(host, dict) and normalize_match_key(host.get("name"))
+    }
     guacamole_connections, guacamole_error = load_guacamole_connections()
     claimed_ids = set()
     host_entries = []
@@ -3289,7 +3391,10 @@ def build_host_inventory() -> Dict[str, Any]:
         else:
             status = "missing"
 
-        entry = safe_host_inventory_entry(host)
+        entry = safe_host_inventory_entry(
+            host,
+            editable=normalize_match_key(host.get("name")) in dynamic_host_names,
+        )
         entry["guacamole"] = {
             "status": status,
             "connections": matches,
@@ -3443,8 +3548,47 @@ def api_hosts_provision():
     return jsonify({
         "provisioned": True,
         "hosts": count,
-        "host": safe_host_inventory_entry(host_config),
+        "host": safe_host_inventory_entry(host_config, editable=True),
         "discoveryStatus": discovery.get("status"),
+    })
+
+
+@APP.route("/api/hosts/<host_name>", methods=["PATCH"])
+def api_hosts_update(host_name: str):
+    payload = request.get_json(force=True, silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "host update payload must be an object"}), 400
+
+    try:
+        host_config, error = update_dynamic_host(host_name, payload)
+        if error:
+            status = 409 if "static catalog" in error or "already exists" in error else 400
+            return jsonify({"error": error}), status
+        if host_config is None:
+            return jsonify({"error": "host configuration could not be updated"}), 400
+        count, reload_error = reload_hosts()
+    except PermissionError:
+        return jsonify({
+            "error": "Ops host catalog is not writable; check the ops-data mount permissions",
+            "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
+        }), 503
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+            return jsonify({
+                "error": "Ops host catalog is not writable; check the ops-data mount permissions",
+                "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
+            }), 503
+        return internal_error_response("Failed to update ops host", exc)
+    except Exception as exc:
+        return internal_error_response("Failed to update ops host", exc)
+
+    if reload_error:
+        return jsonify({"error": "Hosts configuration reload failed"}), 500
+
+    return jsonify({
+        "updated": True,
+        "hosts": count,
+        "host": safe_host_inventory_entry(host_config, editable=True),
     })
 
 

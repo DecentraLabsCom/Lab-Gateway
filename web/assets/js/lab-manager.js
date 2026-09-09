@@ -70,6 +70,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeWinrmCredentialsModalBtn = $('#closeWinrmCredentialsModal');
     const cancelWinrmCredentialsBtn = $('#cancelWinrmCredentials');
     const saveWinrmCredentialsBtn = $('#saveWinrmCredentials');
+    const editHostModal = $('#editHostModal');
+    const closeEditHostModalBtn = $('#closeEditHostModal');
+    const cancelEditHostBtn = $('#cancelEditHost');
+    const saveEditHostBtn = $('#saveEditHost');
     const winrmCredentialRefEl = $('#winrmCredentialRef');
     const winrmCredentialAddressEl = $('#winrmCredentialAddress');
     const winrmCredentialUserEl = $('#winrmCredentialUser');
@@ -80,6 +84,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const provisionHostAddressEl = $('#provisionHostAddress');
     const provisionHostMacEl = $('#provisionHostMac');
     const provisionHeartbeatPathEl = $('#provisionHeartbeatPath');
+    const editHostOriginalNameEl = $('#editHostOriginalName');
+    const editHostNameEl = $('#editHostName');
+    const editHostAddressEl = $('#editHostAddress');
+    const editHostMacEl = $('#editHostMac');
+    const editHeartbeatPathEl = $('#editHeartbeatPath');
 
     populateTimezones();
 
@@ -110,6 +119,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeWinrmCredentialsModalBtn) closeWinrmCredentialsModalBtn.addEventListener('click', closeWinrmCredentialsModal);
     if (cancelWinrmCredentialsBtn) cancelWinrmCredentialsBtn.addEventListener('click', closeWinrmCredentialsModal);
     if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.addEventListener('click', saveWinrmCredentials);
+    if (closeEditHostModalBtn) closeEditHostModalBtn.addEventListener('click', closeEditHostModal);
+    if (cancelEditHostBtn) cancelEditHostBtn.addEventListener('click', closeEditHostModal);
+    if (saveEditHostBtn) saveEditHostBtn.addEventListener('click', saveEditedHost);
 
     loadAccessPolicy();
     updateBillingStatusAction();
@@ -193,6 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostMetadata = {};
     const guacamoleCandidateState = {};
     const heartbeatSources = {};
+    const heartbeatStreamErrorShown = {};
     let powerControllers = [];
     let powerControllerOutletDrafts = [];
     let lastPowerControllerDriver = 'mock';
@@ -2247,18 +2260,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function startHeartbeatStream(host) {
-        if (!host || !window.EventSource || heartbeatSources[host]) return;
+        const meta = hostMetadata[host] || {};
+        const EventSourceCtor = window.EventSource;
+        if (!host || !EventSourceCtor || heartbeatSources[host] || meta.winrmConfigured !== true) return;
         const url = new URL('/ops/api/heartbeat/stream', window.location.origin);
         url.searchParams.set('host', host);
         url.searchParams.set('include_events', 'false');
 
-        const source = new EventSource(url.toString());
+        const source = new EventSourceCtor(url.toString());
         heartbeatSources[host] = source;
 
         source.addEventListener('heartbeat', evt => {
             try {
                 const data = JSON.parse(evt.data || '{}');
                 hostState[host] = data;
+                delete heartbeatStreamErrorShown[host];
                 renderHosts();
                 loadActivityFeed();
             } catch (err) {
@@ -2267,11 +2283,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         source.addEventListener('error', evt => {
-            const errorText = evt?.data || 'Heartbeat SSE connection error';
-            if (source.readyState === EventSource.CLOSED) {
+            let errorPayload = null;
+            try {
+                errorPayload = JSON.parse(evt?.data || '');
+            } catch (_) {
+                // Browser connection errors do not always include a payload.
+            }
+            if (errorPayload?.code === 'WINRM_CREDENTIALS_REQUIRED') {
+                stopHeartbeatStream(host);
+                showToast(`Heartbeat unavailable for ${host}: WinRM credentials are required`, 'error');
+                return;
+            }
+            if (source.readyState === EventSourceCtor.CLOSED) {
                 stopHeartbeatStream(host);
             }
-            showToast(`Heartbeat stream error for ${host}: ${errorText}`, 'error');
+            if (!heartbeatStreamErrorShown[host]) {
+                const errorText = evt?.data || 'Heartbeat SSE connection error';
+                heartbeatStreamErrorShown[host] = true;
+                showToast(`Heartbeat stream error for ${host}: ${errorText}`, 'error');
+            }
         });
     }
 
@@ -2284,6 +2314,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // ignore
         }
         delete heartbeatSources[host];
+        delete heartbeatStreamErrorShown[host];
     }
 
     function renderHosts() {
@@ -2316,6 +2347,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Escape all user-controlled data to prevent XSS
         const safeHost = escapeHtml(host);
+        const canEdit = meta.editable === true;
         const safeUpdated = escapeHtml(updated) || 'n/a';
         const safeLastForcedTs = escapeHtml(lastForced && lastForced.timestamp) || 'n/a';
         const safeLastPowerMode = escapeHtml(lastPower && lastPower.mode);
@@ -2329,7 +2361,10 @@ document.addEventListener('DOMContentLoaded', () => {
         row.dataset.host = host;
         row.innerHTML = `
             <div>
-                <div class="host-title">${safeHost}</div>
+                <div class="host-title-row">
+                    <div class="host-title">${safeHost}</div>
+                    ${canEdit ? '<button class="host-edit-btn" data-action="edit-host" title="Edit host" aria-label="Edit host"><i class="fas fa-pen" aria-hidden="true"></i></button>' : ''}
+                </div>
                 <div class="host-meta">Updated: ${safeUpdated}</div>
                 <div class="host-meta">Guacamole: <span class="pill ${guacamoleClass}">${safeGuacamole}</span></div>
                 <div class="host-meta">WinRM credentials: <span class="pill ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></div>
@@ -2650,6 +2685,91 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function openEditHostModal(host) {
+        const meta = hostMetadata[host] || {};
+        if (
+            !meta.editable ||
+            !editHostModal ||
+            !editHostOriginalNameEl ||
+            !editHostNameEl ||
+            !editHostAddressEl ||
+            !editHostMacEl ||
+            !editHeartbeatPathEl
+        ) {
+            showToast('Only dynamically configured hosts can be edited', 'error');
+            return;
+        }
+        editHostOriginalNameEl.value = host;
+        editHostNameEl.value = meta.name || host;
+        editHostAddressEl.value = meta.address || host;
+        editHostMacEl.value = meta.mac || '';
+        editHeartbeatPathEl.value = meta.heartbeatPath || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
+        editHostModal.classList.add('show');
+    }
+
+    function closeEditHostModal() {
+        if (editHostModal) {
+            editHostModal.classList.remove('show');
+        }
+    }
+
+    async function saveEditedHost() {
+        if (
+            !editHostOriginalNameEl ||
+            !editHostNameEl ||
+            !editHostMacEl ||
+            !editHeartbeatPathEl
+        ) {
+            showToast('Host edit modal is unavailable', 'error');
+            return;
+        }
+        const originalName = editHostOriginalNameEl.value.trim();
+        const payload = {
+            name: editHostNameEl.value.trim(),
+            mac: editHostMacEl.value.trim(),
+            heartbeatPath: editHeartbeatPathEl.value.trim(),
+        };
+        if (!originalName || !payload.name) {
+            showToast('Name is required', 'error');
+            return;
+        }
+        if (!/^[A-Za-z0-9._-]+$/.test(payload.name)) {
+            showToast('Name must contain only letters, numbers, dots, underscores, and hyphens', 'error');
+            return;
+        }
+        if (payload.mac && !/^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(payload.mac)) {
+            showToast('MAC must use format 00:11:22:33:44:55 or 00-11-22-33-44-55', 'error');
+            return;
+        }
+        if (!payload.heartbeatPath) {
+            showToast('Heartbeat path is required', 'error');
+            return;
+        }
+        if (saveEditHostBtn) saveEditHostBtn.disabled = true;
+        try {
+            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(originalName)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const requestSuffix = body.requestId ? ` (request ID ${body.requestId})` : '';
+                throw new Error(`${body.error || `HTTP ${res.status}`}${requestSuffix}`);
+            }
+            stopHeartbeatStream(originalName);
+            delete hostState[originalName];
+            closeEditHostModal();
+            showToast(`Ops host ${body.host?.name || payload.name} updated`, 'success');
+            await loadHostInventory({ skipAuthPrompt: true });
+        } catch (err) {
+            console.error(err);
+            showToast(`Edit host failed: ${err.message}`, 'error');
+        } finally {
+            if (saveEditHostBtn) saveEditHostBtn.disabled = false;
+        }
+    }
+
     function openWinrmCredentialsModal(host) {
         const meta = hostMetadata[host] || {};
         const credentialRef = meta.credentialRef || meta.address || host;
@@ -2793,6 +2913,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const host = btn.closest('.host-row')?.dataset.host;
         if (!host) return;
         const action = btn.dataset.action;
+        if (action === 'edit-host') {
+            openEditHostModal(host);
+            return;
+        }
         if (action === 'poll') {
             pollHeartbeat(host);
             return;
@@ -2827,11 +2951,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function refreshAllHosts() {
-        loadHostInventory();
+    async function refreshAllHosts() {
+        await loadHostInventory();
         if (window.EventSource) {
-            hostNames.forEach(startHeartbeatStream);
-            showToast('Heartbeat streaming started for all hosts', 'success');
+            const streamableHosts = hostNames.filter(host => hostMetadata[host]?.winrmConfigured === true);
+            streamableHosts.forEach(startHeartbeatStream);
+            showToast(
+                streamableHosts.length
+                    ? 'Heartbeat streaming started for configured hosts'
+                    : 'Heartbeat streaming unavailable: configure WinRM credentials',
+                streamableHosts.length ? 'success' : 'error',
+            );
             return;
         }
         hostNames.forEach(pollHeartbeat);
@@ -2852,8 +2982,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
                 return;
             }
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
             hostState[host] = data;
             renderHosts();
             loadActivityFeed();

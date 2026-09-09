@@ -61,6 +61,7 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `GET /ops/api/hosts` | Read configured and discovered host information. |
 | `POST /ops/api/hosts/discover` | Probe a Guacamole connection candidate for managed-host signals. |
 | `POST /ops/api/hosts/provision` | Create or update a dynamic host after successful discovery. |
+| `PATCH /ops/api/hosts/{hostName}` | Update the name, MAC, or heartbeat path of a dynamic host. |
 | `POST /ops/api/hosts/winrm-credentials` | Store encrypted credentials for a host reference. |
 | `POST /ops/api/hosts/reload` | Reload the static/dynamic host catalog. |
 | `POST /ops/api/hosts/local-mode` | Set the station local-mode operational flag. |

@@ -108,7 +108,9 @@ In `Operations` → `Lab Station Ops`, the interface shows:
 - Guacamole connections that are not yet associated with an Ops host.
 
 Click `Refresh` after changing the inventory. The UI starts a heartbeat stream
-for each host when the browser and endpoint support it.
+for each host with WinRM credentials when the browser and endpoint support it.
+Hosts created through the Lab Manager are editable with the pencil action next
+to their name; the address remains read-only.
 
 ![Lab Manager Operations tab](../images/lab-manager-operations.png)
 
@@ -120,21 +122,27 @@ For a Guacamole connection without an Ops host:
 2. Review the address, candidate name, MAC address, and Lab Station signals.
 3. Click `Configure` and complete:
    - `Name`: stable host identifier;
-   - `Address`: detected private address;
+   - `Address`: detected private address (read-only);
    - `MAC`: required for WoL;
-   - `Labs`: laboratories served by the station; and
    - `Heartbeat path`: normally `C:\LabStation\labstation\data\telemetry\heartbeat.json`.
 4. Save the host and reload the inventory.
 
-The `Labs` assignment connects the host to an operational `labId`. It is not
-the same relationship as the Guacamole connection: one station can serve more
-than one lab, and a connection may not yet have station operations configured.
+When published labs match the discovered Guacamole connections, the gateway
+stores those lab associations during provisioning. The association is not a
+manual choice in the station form: one station can serve multiple labs, while
+other Guacamole connections on the same station can remain administrative.
+
+For a provisioned host, use the pencil action to change its name, MAC, or
+heartbeat path. Static entries from `ops-worker/hosts.json` must still be
+edited in that catalog.
 
 ### Store WinRM credentials
 
 From the host credential action, open `Set WinRM Credentials` and save the user
 and password for its `credential_ref`. The password is stored in the encrypted
 Ops Worker credential store, not in `hosts.json`.
+
+Until credentials are saved, heartbeat streaming is not started for that host.
 
 WinRM must use HTTPS/TLS on port `5986`, and the address must belong to
 `WINRM_MANAGEMENT_CIDRS`. Do not publish the listener or Ops Worker to the
