@@ -75,6 +75,24 @@ CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 ```
 
+`WINRM_MANAGEMENT_CIDRS` is the private management-network allowlist for the
+Ops Worker to reach Lab Stations through WinRM HTTPS on port 5986. It is
+required before configuring any Ops host, and every configured Station address
+must belong to one of these networks. This value is a security policy, not a
+value inferred from Guacamole: Guacamole may also contain administration-only
+desktop connections and does not provide the authorized network mask.
+
+Use the actual management VLAN CIDR. If only one Station is authorized, use a
+host-specific `/32`, for example:
+
+```env
+WINRM_MANAGEMENT_CIDRS=10.192.38.82/32
+```
+
+For several Stations on the same `/24`, use that actual subnet instead, for
+example `10.192.38.0/24`. On a Lite gateway, configure the CIDR of the local
+Stations managed by that Lite gateway.
+
 For a Full gateway, configure the credentials used by opaque access-code
 redemption and FMU session observation. The JSON values must be valid JSON
 objects. `SERVER_NAME` remains hostname-only for URL construction; the

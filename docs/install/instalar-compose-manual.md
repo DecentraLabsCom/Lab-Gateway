@@ -75,6 +75,25 @@ CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
 
+`WINRM_MANAGEMENT_CIDRS` es la lista de redes privadas desde las que Ops
+Worker puede alcanzar las Lab Stations mediante WinRM HTTPS por el puerto
+5986. Es obligatoria antes de configurar cualquier host de Ops, y la dirección
+de cada estación debe pertenecer a una de esas redes. Es una política de
+seguridad y no se deduce de Guacamole: Guacamole también puede contener
+conexiones de escritorio exclusivamente administrativas y no proporciona la
+máscara de red autorizada.
+
+Usa el CIDR real de la VLAN de gestión. Si solo se autoriza una estación, usa
+un `/32` específico, por ejemplo:
+
+```env
+WINRM_MANAGEMENT_CIDRS=10.192.38.82/32
+```
+
+Para varias estaciones de la misma `/24`, usa la subred real, por ejemplo
+`10.192.38.0/24`. En un gateway Lite, configura el CIDR de las estaciones
+locales gestionadas por ese gateway Lite.
+
 En un gateway Full, configura tambien las credenciales usadas para el canje de
 codigos de acceso opacos y la observacion de sesiones FMU. Los valores JSON
 deben ser objetos JSON validos. `SERVER_NAME` sigue siendo solo el hostname para

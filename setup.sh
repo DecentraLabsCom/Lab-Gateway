@@ -596,6 +596,22 @@ else
 fi
 echo
 
+echo "Lab Station WinRM Management Network"
+echo "===================================="
+echo "This restricts Ops Worker WinRM access to the private management network used by Lab Stations."
+echo "Enter comma-separated CIDRs. Leave empty only if no Ops hosts will be configured yet."
+winrm_management_cidrs_default="$(get_env_default "WINRM_MANAGEMENT_CIDRS" "$ROOT_ENV_FILE")"
+read -p "WINRM_MANAGEMENT_CIDRS [${winrm_management_cidrs_default:-empty -> configure before adding hosts}]: " winrm_management_cidrs
+winrm_management_cidrs="${winrm_management_cidrs:-$winrm_management_cidrs_default}"
+winrm_management_cidrs=$(echo "$winrm_management_cidrs" | sed 's/[[:space:]]//g')
+update_env_var "$ROOT_ENV_FILE" "WINRM_MANAGEMENT_CIDRS" "$winrm_management_cidrs"
+if [ -z "$winrm_management_cidrs" ]; then
+    echo "   * WINRM_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts."
+else
+    echo "   * WINRM_MANAGEMENT_CIDRS set to: $winrm_management_cidrs"
+fi
+echo
+
 echo "Demo Lab Access"
 echo "================"
 echo "The demo is fail-closed until its on-chain lab, Guacamole connection, Station heartbeat and Marketplace eligibility are ready."

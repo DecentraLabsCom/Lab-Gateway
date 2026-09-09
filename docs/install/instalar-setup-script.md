@@ -99,8 +99,11 @@ El script te guía automáticamente por los siguientes pasos:
 4. **Selecciona el modo Full o Lite**: `ISSUER` vacío crea un Gateway Full;
    un `ISSUER` externo selecciona Lite. Lite exige un trust bundle coincidente
    emitido por el plano de control Full remoto.
-5. **Configura capacidades opcionales**: FMU y, únicamente en Full, AAS
-   integrado, externo o deshabilitado.
+5. **Configura las operaciones de Lab Station y capacidades opcionales**: pide
+   la lista privada `WINRM_MANAGEMENT_CIDRS` usada por las estaciones locales
+   y después configura FMU y, únicamente en Full, AAS integrado, externo o
+   deshabilitado. Déjala vacía solo si todavía no se van a configurar hosts de
+   Ops.
 6. **Ofrece Cloudflare Tunnel** y arranca los servicios de Compose elegidos.
 
 El script es interactivo deliberadamente. Para un cambio repetible y no

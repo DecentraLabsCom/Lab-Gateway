@@ -323,6 +323,43 @@ class SetupEnvContractTest(unittest.TestCase):
             with self.subTest(script="setup.bat", snippet=snippet):
                 self.assertIn(snippet, self.setup_bat)
 
+    def test_setup_prompts_for_winrm_management_cidrs(self):
+        expected_shell = [
+            'read -p "WINRM_MANAGEMENT_CIDRS',
+            'update_env_var "$ROOT_ENV_FILE" "WINRM_MANAGEMENT_CIDRS"',
+            "private management network",
+        ]
+        expected_bat = [
+            'set /p "winrm_management_cidrs=WINRM_MANAGEMENT_CIDRS',
+            'call :UpdateEnv "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS"',
+            "private management network",
+        ]
+        for snippet in expected_shell:
+            with self.subTest(script="setup.sh", snippet=snippet):
+                self.assertIn(snippet, self.setup_sh)
+        for snippet in expected_bat:
+            with self.subTest(script="setup.bat", snippet=snippet):
+                self.assertIn(snippet, self.setup_bat)
+
+    def test_manual_install_documents_winrm_management_cidrs_policy(self):
+        expected_by_document = {
+            "install-manual-compose.md": [
+                "WINRM_MANAGEMENT_CIDRS",
+                "inferred from Guacamole",
+                "/32",
+            ],
+            "instalar-compose-manual.md": [
+                "WINRM_MANAGEMENT_CIDRS",
+                "no se deduce de Guacamole",
+                "/32",
+            ],
+        }
+        for name, expected in expected_by_document.items():
+            document = (ROOT / "docs" / "install" / name).read_text(encoding="utf-8")
+            for snippet in expected:
+                with self.subTest(document=name, snippet=snippet):
+                    self.assertIn(snippet, document)
+
     def test_lite_remote_lab_admin_prompts_only_for_url_and_token(self):
         self.assertIn("Lite /lab-admin Remote Backend", self.setup_sh)
         self.assertIn("Lite /lab-admin Remote Backend", self.setup_bat)
