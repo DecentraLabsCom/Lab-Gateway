@@ -722,6 +722,60 @@ def test_provision_uses_discovered_mac_when_payload_mac_blank(client):
     assert saved["hosts"][0]["mac"] == "00:11:22:33:44:55"
 
 
+def test_provision_rejects_invalid_mac(client):
+    guacamole = [{
+        "id": 16,
+        "name": "Provisionable With Invalid MAC",
+        "protocol": "rdp",
+        "hostname": "lab-ws-16",
+        "port": "3389",
+    }]
+
+    with with_dynamic_inventory_state([], guacamole) as state, \
+            patch("worker.discover_labstation_candidate", return_value={
+                "connection": guacamole[0],
+                "status": "winrm-reachable",
+                "checks": {},
+            }):
+        response = client.post("/api/hosts/provision", json={
+            "connectionId": 16,
+            "name": "lab-ws-16",
+            "mac": "not-a-mac",
+        })
+
+    assert response.status_code == 400
+    assert "mac" in response.get_data(as_text=True).lower()
+    assert not os.path.exists(state.dynamic_path)
+
+
+def test_provision_reports_unwritable_dynamic_catalog(client):
+    guacamole = [{
+        "id": 20,
+        "name": "Provisionable With Unwritable Catalog",
+        "protocol": "rdp",
+        "hostname": "lab-ws-20",
+        "port": "3389",
+    }]
+
+    with with_dynamic_inventory_state([], guacamole), \
+            patch("worker.discover_labstation_candidate", return_value={
+                "connection": guacamole[0],
+                "status": "winrm-reachable",
+                "checks": {},
+            }), \
+            patch("worker.upsert_dynamic_host", side_effect=PermissionError("read-only catalog")):
+        response = client.post("/api/hosts/provision", json={
+            "connectionId": 20,
+            "name": "lab-ws-20",
+        })
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "error": "Ops host catalog is not writable; check the ops-data mount permissions",
+        "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
+    }
+
+
 def test_save_winrm_credentials_stores_secret_and_reloads(client, monkeypatch, tmp_path):
     guacamole = [{
         "id": 15,

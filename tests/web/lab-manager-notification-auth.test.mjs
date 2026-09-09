@@ -66,6 +66,7 @@ function loadLabManager({
     status: 200,
     json: async () => ({}),
   }),
+  provisionResponse = null,
   labsResponse = Promise.resolve({
     ok: true,
     status: 200,
@@ -217,6 +218,9 @@ function loadLabManager({
       }
       if (parsedUrl.pathname === '/ops/api/hosts/discover') {
         return Promise.resolve(discoverResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/hosts/provision' && provisionResponse) {
+        return Promise.resolve(provisionResponse);
       }
       if (parsedUrl.pathname === '/ops/api/power/policies' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerPoliciesResponse);
@@ -1225,6 +1229,74 @@ test('does not require an administrative connection to have a published lab', as
   const provisionPayload = JSON.parse(provisionCall.options.body);
   assert.deepEqual(provisionPayload.labs, []);
   assert.equal('validLabIds' in provisionPayload, false);
+});
+
+test('shows the provisioning request id when the backend reports an internal failure', async () => {
+  const connection = {
+    id: 45,
+    name: 'Station With Backend Failure',
+    protocol: 'rdp',
+    hostname: '10.192.38.91',
+    port: '3389',
+  };
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [],
+        guacamoleAvailable: true,
+        guacamoleUnmatched: [connection],
+      }),
+    }),
+    discoverResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'winrm-reachable',
+        connection,
+        checks: { winrm: { '5986': true } },
+        opsHostDraft: { address: connection.hostname },
+      }),
+    }),
+    provisionResponse: Promise.resolve({
+      ok: false,
+      status: 500,
+      json: async () => ({
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+        requestId: 'ops-request-45',
+      }),
+    }),
+  });
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  const candidateList = elements.get('guacamoleCandidateList');
+  const row = candidateList.options.at(-1);
+  const checkButton = {
+    dataset: { action: 'probe-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? checkButton : row,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: checkButton });
+  await flush();
+  await flush();
+
+  const configuredRow = candidateList.options.at(-1);
+  const configureButton = {
+    dataset: { action: 'configure-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? configureButton : configuredRow,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: configureButton });
+  await flush();
+  elements.get('saveProvisionHost').click();
+  await flush();
+
+  assert.equal(
+    elements.get('toast').textContent,
+    'Configure host failed: Internal server error (request ID ops-request-45)',
+  );
 });
 
 test('loads AAS link FMU options and sends the selected lab when saving a link', async () => {

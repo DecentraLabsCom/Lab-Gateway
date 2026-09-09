@@ -3,6 +3,7 @@
 Ops worker: WoL + WinRM wrapper + heartbeat poller for Lab Station hosts.
 Exposes a small Flask API and optional scheduler.
 """
+import errno
 import json
 import hmac
 import hashlib
@@ -2943,6 +2944,10 @@ def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) 
     if labs_error:
         return None, labs_error
     credential_ref = str(payload.get("credentialRef") or address).strip()
+    raw_mac = str(payload.get("mac") or "").strip()
+    mac = normalize_mac(raw_mac) if raw_mac else ""
+    if raw_mac and not mac:
+        return None, "mac must use format 00:11:22:33:44:55 or 00-11-22-33-44-55"
 
     host_config = {
         "name": name,
@@ -2961,7 +2966,6 @@ def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) 
         ),
         "labs": labs,
     }
-    mac = str(payload.get("mac") or "").strip()
     if mac:
         host_config["mac"] = mac
     return host_config, None
@@ -3418,6 +3422,18 @@ def api_hosts_provision():
     try:
         upsert_dynamic_host(host_config)
         count, reload_error = reload_hosts()
+    except PermissionError:
+        return jsonify({
+            "error": "Ops host catalog is not writable; check the ops-data mount permissions",
+            "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
+        }), 503
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+            return jsonify({
+                "error": "Ops host catalog is not writable; check the ops-data mount permissions",
+                "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
+            }), 503
+        return internal_error_response("Failed to provision ops host", exc)
     except Exception as exc:
         return internal_error_response("Failed to provision ops host", exc)
 

@@ -2751,7 +2751,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const body = await res.json().catch(() => ({}));
             if (!res.ok) {
-                throw new Error(body.error || `HTTP ${res.status}`);
+                const requestSuffix = body.requestId ? ` (request ID ${body.requestId})` : '';
+                throw new Error(`${body.error || `HTTP ${res.status}`}${requestSuffix}`);
             }
             closeProvisionHostModal();
             showToast(`Ops host ${body.host?.name || payload.name} configured`, 'success');
