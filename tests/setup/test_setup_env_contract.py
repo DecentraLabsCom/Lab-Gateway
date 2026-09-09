@@ -380,6 +380,12 @@ class SetupEnvContractTest(unittest.TestCase):
             with self.subTest(script="setup.bat", snippet=snippet):
                 self.assertIn(snippet, self.setup_bat)
 
+    def test_setup_assigns_ops_data_to_the_compose_runner_identity(self):
+        self.assertIn(
+            'chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content ops-data',
+            self.setup_sh,
+        )
+
     def test_setup_derives_exact_fmu_audience_from_public_gateway_origin(self):
         expected_shell = [
             'update_env_var "$ROOT_ENV_FILE" "FMU_JWT_AUDIENCE" "${gateway_public_origin}/fmu"',

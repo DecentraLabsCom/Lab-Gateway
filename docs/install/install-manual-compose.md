@@ -241,7 +241,7 @@ mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
   ops-data/guac-revocation-spool
 
 sudo chown -R "${gateway_uid}:${gateway_gid}" \
-  blockchain-data certs fmu-access-state lab-content
+  blockchain-data certs fmu-access-state lab-content ops-data
 chmod 700 fmu-access-state
 chmod 755 lab-content fmu-data fmu-proxy-runtime \
   fmu-proxy-runtime/binaries fmu-proxy-runtime/binaries/linux64 \

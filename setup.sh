@@ -1112,11 +1112,11 @@ if [ -n "$host_uid" ] && [ -n "$host_gid" ]; then
 
     # Align permissions so containers can write to bind mounts without manual chmod.
     if command -v chown >/dev/null 2>&1; then
-        if chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content 2>/dev/null \
+        if chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content ops-data 2>/dev/null \
             && chown -R "${host_uid}:${host_gid}" fmu-access-state 2>/dev/null; then
-            echo "Adjusted ownership of certs/, blockchain-data/, fmu-access-state/, and lab-content/ to ${host_uid}:${host_gid}"
+            echo "Adjusted ownership of certs/, blockchain-data/, fmu-access-state/, lab-content/, and ops-data/ to ${host_uid}:${host_gid}"
         else
-            echo "Warning: Unable to change ownership of certs/, blockchain-data/, fmu-access-state/, or lab-content/. Run chown manually if needed." >&2
+            echo "Warning: Unable to change ownership of certs/, blockchain-data/, fmu-access-state/, lab-content/, or ops-data/. Run chown manually if needed." >&2
         fi
     fi
 else
