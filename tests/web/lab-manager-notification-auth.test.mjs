@@ -99,7 +99,7 @@ function loadLabManager({
     'winrmCredentialRef', 'winrmCredentialAddress', 'winrmCredentialUser',
     'winrmCredentialPassword', 'provisionConnectionId', 'provisionHostName',
     'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac',
-    'provisionHostLabs', 'provisionHostLabsSummary', 'provisionHeartbeatPath',
+    'provisionHeartbeatPath',
     'btnTestLoad', 'saveConfigBtn', 'btnTestEmail', 'refreshHostsBtn', 'hostList',
     'guacamoleCandidateList', 'fmuSyncBtn', 'fmuSyncKey', 'fmuSyncLabSelect',
     'fmuSyncFile', 'fmuSyncFileName', 'fmuSyncResult', 'fmuSyncDescription', 'fmuSyncLicense',
@@ -175,6 +175,10 @@ function loadLabManager({
   };
   const promptCalls = [];
   const window = {
+    location: {
+      origin: 'https://sarlab.dia.uned.es',
+      href: 'https://sarlab.dia.uned.es/lab-manager/',
+    },
     confirm,
     AuthTokenHandler: {
       showTokenModal: (...args) => promptCalls.push(args),
@@ -1051,7 +1055,7 @@ test('prefers managed lab names in operations reservations and lab selectors', a
   assert.doesNotMatch(elements.get('upcomingReservationsList').innerHTML, /Lab #1/);
 });
 
-test('matches a physical lab access key to its numeric Guacamole connection id when configuring an ops host', async () => {
+test('groups connections by station and automatically links its local physical labs', async () => {
   const connection = {
     id: 42,
     name: 'Siemens Admin',
@@ -1059,7 +1063,14 @@ test('matches a physical lab access key to its numeric Guacamole connection id w
     hostname: '10.192.38.82',
     port: '3389',
   };
-  const { elements } = loadLabManager({
+  const secondConnection = {
+    id: 43,
+    name: 'Siemens LABUSER',
+    protocol: 'rdp',
+    hostname: '10.192.38.82',
+    port: '3389',
+  };
+  const { elements, fetchCalls } = loadLabManager({
     activeTabs: ['operations'],
     hostInventoryResponse: Promise.resolve({
       ok: true,
@@ -1067,7 +1078,7 @@ test('matches a physical lab access key to its numeric Guacamole connection id w
       json: async () => ({
         hosts: [],
         guacamoleAvailable: true,
-        guacamoleUnmatched: [connection],
+        guacamoleUnmatched: [connection, secondConnection],
       }),
     }),
     discoverResponse: Promise.resolve({
@@ -1091,6 +1102,27 @@ test('matches a physical lab access key to its numeric Guacamole connection id w
           accessURI: 'https://sarlab.dia.uned.es/guacamole',
           accessKey: 'guac:id:42',
           listed: true,
+        }, {
+          labId: '10',
+          name: 'Siemens LABUSER',
+          resourceType: 0,
+          accessURI: 'https://sarlab.dia.uned.es/guacamole',
+          accessKey: 'guac:id:43',
+          listed: true,
+        }, {
+          labId: '8',
+          name: 'Siemens Admin on Lite A',
+          resourceType: 0,
+          accessURI: 'https://lite-a.example.edu/guacamole',
+          accessKey: 'guac:id:42',
+          listed: true,
+        }, {
+          labId: '9',
+          name: 'Another local lab',
+          resourceType: 0,
+          accessURI: 'https://sarlab.dia.uned.es/guacamole',
+          accessKey: 'guac:id:7',
+          listed: true,
         }],
       }),
     }),
@@ -1099,6 +1131,8 @@ test('matches a physical lab access key to its numeric Guacamole connection id w
   const flush = () => new Promise((resolve) => setImmediate(resolve));
   await flush();
   const candidateList = elements.get('guacamoleCandidateList');
+  assert.equal(candidateList.options.length, 1, 'Connections targeting one station should render as one candidate');
+  assert.match(elements.get('opsHint').textContent, /1 Lab Station candidate awaiting configuration\./);
   const initialRow = candidateList.options.at(-1);
   const checkButton = {
     dataset: { action: 'probe-candidate' },
@@ -1117,11 +1151,80 @@ test('matches a physical lab access key to its numeric Guacamole connection id w
   await flush();
 
   assert.equal(elements.get('provisionHostModal').classList.contains('show'), true);
-  assert.equal(elements.get('provisionHostLabs').disabled, false);
-  assert.ok(
-    elements.get('provisionHostLabs').options.some((option) => option.value === '7'),
-    'The lab linked with guac:id:42 should be selectable for connection 42',
-  );
+  assert.equal(elements.get('provisionHostLabs'), undefined, 'Lab selection should not be exposed in the station modal');
+
+  elements.get('saveProvisionHost').click();
+  await flush();
+
+  const provisionCall = fetchCalls.find(({ url }) => String(url) === '/ops/api/hosts/provision');
+  assert.ok(provisionCall, 'Saving a station should call the provisioning endpoint');
+  const provisionPayload = JSON.parse(provisionCall.options.body);
+  assert.deepEqual(provisionPayload.labs, ['7', '10']);
+  assert.deepEqual(provisionPayload.validLabIds, ['7', '10']);
+});
+
+test('does not require an administrative connection to have a published lab', async () => {
+  const connection = {
+    id: 44,
+    name: 'Siemens Administration',
+    protocol: 'rdp',
+    hostname: '10.192.38.90',
+    port: '3389',
+  };
+  const { elements, fetchCalls } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [],
+        guacamoleAvailable: true,
+        guacamoleUnmatched: [connection],
+      }),
+    }),
+    discoverResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'winrm-reachable',
+        connection,
+        checks: { winrm: { '5986': true } },
+        opsHostDraft: { address: connection.hostname },
+      }),
+    }),
+    labsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ labs: [] }),
+    }),
+  });
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  const candidateList = elements.get('guacamoleCandidateList');
+  const row = candidateList.options.at(-1);
+  const checkButton = {
+    dataset: { action: 'probe-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? checkButton : row,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: checkButton });
+  await flush();
+  await flush();
+
+  const configuredRow = candidateList.options.at(-1);
+  const configureButton = {
+    dataset: { action: 'configure-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? configureButton : configuredRow,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: configureButton });
+  await flush();
+  elements.get('saveProvisionHost').click();
+  await flush();
+
+  const provisionCall = fetchCalls.find(({ url }) => String(url) === '/ops/api/hosts/provision');
+  const provisionPayload = JSON.parse(provisionCall.options.body);
+  assert.deepEqual(provisionPayload.labs, []);
+  assert.equal('validLabIds' in provisionPayload, false);
 });
 
 test('loads AAS link FMU options and sends the selected lab when saving a link', async () => {

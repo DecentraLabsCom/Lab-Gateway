@@ -79,8 +79,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const provisionHostNameCandidatesEl = $('#provisionHostNameCandidates');
     const provisionHostAddressEl = $('#provisionHostAddress');
     const provisionHostMacEl = $('#provisionHostMac');
-    const provisionHostLabsEl = $('#provisionHostLabs');
-    const provisionHostLabsSummaryEl = $('#provisionHostLabsSummary');
     const provisionHeartbeatPathEl = $('#provisionHeartbeatPath');
 
     populateTimezones();
@@ -206,6 +204,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let managedLabs = [];
     let hostNames = [];
     let guacamoleCandidates = [];
+    let guacamoleStationCandidates = [];
+    let provisionStationKey = '';
+    let provisionLabsLoading = false;
 
     // FMU AAS sync elements
     const fmuSyncBtn = $('#fmuSyncBtn');
@@ -980,9 +981,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 .forEach(stopHeartbeatStream);
             hostNames = nextHostNames;
             renderHosts();
-            guacamoleCandidates = data.guacamoleUnmatched || [];
+            guacamoleCandidates = Array.isArray(data.guacamoleUnmatched) ? data.guacamoleUnmatched : [];
             guacamoleCandidates.forEach(rememberGuacamoleCandidate);
-            renderGuacamoleCandidates(guacamoleCandidates);
+            guacamoleStationCandidates = groupGuacamoleCandidates(guacamoleCandidates);
+            renderGuacamoleCandidates(guacamoleStationCandidates);
             hostNames.forEach(startHeartbeatStream);
             updateOpsHint(data);
         } catch (err) {
@@ -998,9 +1000,9 @@ document.addEventListener('DOMContentLoaded', () => {
             opsHint.textContent = 'The ops inventory could not be loaded.';
             return;
         }
-        const unmatchedCount = Array.isArray(data.guacamoleUnmatched) ? data.guacamoleUnmatched.length : 0;
+        const stationCount = groupGuacamoleCandidates(data.guacamoleUnmatched).length;
         const guacStatus = data.guacamoleAvailable
-            ? `${unmatchedCount} Guacamole connection${unmatchedCount === 1 ? '' : 's'} not linked to an ops host.`
+            ? `${stationCount} Lab Station candidate${stationCount === 1 ? '' : 's'} awaiting configuration.`
             : 'Guacamole inventory unavailable.';
         opsHint.textContent = `Hosts are loaded from ops-worker/hosts.json and ops-data/hosts.json. ${guacStatus}`;
     }
@@ -2357,31 +2359,35 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!guacamoleCandidateListEl) return;
         guacamoleCandidateListEl.innerHTML = '';
         if (!Array.isArray(candidates) || !candidates.length) {
-            guacamoleCandidateListEl.innerHTML = '<div class="empty">All Guacamole connections are linked or no connections are configured.</div>';
+            guacamoleCandidateListEl.innerHTML = '<div class="empty">All Lab Station candidates are configured or no connections are available.</div>';
             return;
         }
-        candidates.forEach(candidate => {
-            guacamoleCandidateListEl.appendChild(buildGuacamoleCandidateRow(candidate));
+        candidates.forEach(station => {
+            guacamoleCandidateListEl.appendChild(buildGuacamoleCandidateRow(station));
         });
     }
 
-    function buildGuacamoleCandidateRow(candidate) {
-        const id = String(candidate.id ?? '');
-        const state = guacamoleCandidateState[id] || {};
-        const safeName = escapeHtml(candidate.name || 'Unnamed connection');
-        const safeHost = escapeHtml(candidate.hostname || 'n/a');
-        const safeProtocol = escapeHtml(candidate.protocol || 'unknown');
-        const safePort = escapeHtml(candidate.port || 'n/a');
+    function buildGuacamoleCandidateRow(station) {
+        const state = guacamoleCandidateState[station.key] || {};
+        const safeName = escapeHtml(station.address || station.nameCandidates[0] || 'Unnamed station');
+        const safeConnections = escapeHtml(station.nameCandidates.join(', ') || 'Unnamed connection');
+        const safeHost = escapeHtml(station.address || 'n/a');
+        const connectionSummary = station.connections
+            .map(connection => `${connection.protocol || 'unknown'}:${connection.port || 'n/a'}`)
+            .filter((value, index, values) => values.indexOf(value) === index)
+            .join(', ');
+        const safeProtocol = escapeHtml(connectionSummary || 'unknown');
         const statusText = formatDiscoveryStatus(state.status);
         const statusClass = discoveryStatusClass(state.status);
         const row = document.createElement('div');
         row.className = 'host-row';
-        row.dataset.connectionId = id;
+        row.dataset.stationKey = station.key;
         row.innerHTML = `
             <div>
                 <div class="host-title">${safeName}</div>
                 <div class="host-meta">Host: ${safeHost}</div>
-                <div class="host-meta">Protocol: ${safeProtocol} · Port: ${safePort}</div>
+                <div class="host-meta">Connections: ${safeConnections}</div>
+                <div class="host-meta">Protocol / port: ${safeProtocol}</div>
             </div>
             <div class="candidate-station-status">
                 <span class="pill ${statusClass}">Lab Station: ${escapeHtml(statusText)}</span>
@@ -2420,26 +2426,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const btn = e.target.closest('button[data-action]');
         if (!btn) return;
         const row = btn.closest('.host-row');
-        const connectionId = row?.dataset.connectionId;
-        if (!connectionId) return;
+        const stationKey = row?.dataset.stationKey;
+        if (!stationKey) return;
         if (btn.dataset.action === 'configure-candidate') {
-            openProvisionHostModal(connectionId);
+            openProvisionHostModal(stationKey);
             return;
         }
         if (btn.dataset.action !== 'probe-candidate') return;
-        const candidate = findGuacamoleCandidate(connectionId);
-        guacamoleCandidateState[connectionId] = {
-            ...(guacamoleCandidateState[connectionId] || {}),
-            candidate,
+        const station = findGuacamoleStationCandidate(stationKey);
+        if (!station) return;
+        const representative = station.connections[0];
+        guacamoleCandidateState[stationKey] = {
+            ...(guacamoleCandidateState[stationKey] || {}),
+            candidate: representative,
+            connectionId: representative?.id,
             status: 'checking'
         };
         btn.disabled = true;
-        renderGuacamoleCandidates(guacamoleCandidates);
+        renderGuacamoleCandidates(guacamoleStationCandidates);
         try {
             const res = await fetch('/ops/api/hosts/discover', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ connectionId })
+                body: JSON.stringify({ connectionId: representative?.id })
             });
             const body = await res.json().catch(() => ({}));
             if (!res.ok) {
@@ -2454,19 +2463,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 : winrmOpen.length
                     ? `Open WinRM port${winrmOpen.length === 1 ? '' : 's'}: ${winrmOpen.join(', ')}`
                     : 'No Lab Station health endpoint or WinRM port detected.';
-            guacamoleCandidateState[connectionId] = {
-                ...(guacamoleCandidateState[connectionId] || {}),
-                candidate: body.connection || candidate,
+            guacamoleCandidateState[stationKey] = {
+                ...(guacamoleCandidateState[stationKey] || {}),
+                candidate: body.connection || representative,
+                connectionId: body.connection?.id || representative?.id,
                 status: body.status,
                 detail: suggestedMac ? `${detail} Suggested MAC: ${suggestedMac}` : detail,
                 opsHostDraft: body.opsHostDraft || {}
             };
-            showToast(`Discovery finished for ${body.connection?.hostname || connectionId}`, 'success');
+            showToast(`Discovery finished for ${body.connection?.hostname || station.address || representative?.id}`, 'success');
         } catch (err) {
             console.error(err);
-            guacamoleCandidateState[connectionId] = {
-                ...(guacamoleCandidateState[connectionId] || {}),
-                candidate,
+            guacamoleCandidateState[stationKey] = {
+                ...(guacamoleCandidateState[stationKey] || {}),
+                candidate: representative,
+                connectionId: representative?.id,
                 status: 'error',
                 detail: err.message
             };
@@ -2476,19 +2487,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function findGuacamoleCandidate(connectionId) {
-        const key = String(connectionId);
-        return guacamoleCandidates.find(candidate => String(candidate.id ?? '') === key)
-            || guacamoleCandidateState[key]?.candidate
+    function stationCandidateKey(candidate) {
+        const address = normalizeMatchValue(candidate?.hostname);
+        return address ? `host:${address}` : `connection:${String(candidate?.id ?? '')}`;
+    }
+
+    function groupGuacamoleCandidates(candidates) {
+        const groups = new Map();
+        (Array.isArray(candidates) ? candidates : []).forEach(candidate => {
+            const key = stationCandidateKey(candidate);
+            if (!key || key.endsWith(':')) return;
+            let station = groups.get(key);
+            if (!station) {
+                station = {
+                    key,
+                    address: candidate?.hostname || '',
+                    nameCandidates: [],
+                    connections: []
+                };
+                groups.set(key, station);
+            }
+            station.connections.push(candidate);
+            const name = String(candidate?.name || '').trim();
+            if (name && !station.nameCandidates.includes(name)) {
+                station.nameCandidates.push(name);
+            }
+        });
+        return Array.from(groups.values());
+    }
+
+    function findGuacamoleStationCandidate(stationKey) {
+        return guacamoleStationCandidates.find(station => station.key === stationKey)
             || null;
     }
 
     function rememberGuacamoleCandidate(candidate) {
-        const id = String(candidate?.id ?? '');
-        if (!id) return;
-        guacamoleCandidateState[id] = {
-            ...(guacamoleCandidateState[id] || {}),
-            candidate
+        const key = stationCandidateKey(candidate);
+        if (!key || key.endsWith(':')) return;
+        guacamoleCandidateState[key] = {
+            ...(guacamoleCandidateState[key] || {}),
+            candidate: guacamoleCandidateState[key]?.candidate || candidate,
+            connectionId: guacamoleCandidateState[key]?.connectionId || candidate?.id
         };
     }
 
@@ -2496,43 +2535,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return (value || '').toString().trim().toLowerCase();
     }
 
-    function normalizeLooseValue(value) {
-        return normalizeMatchValue(value).replace(/[^a-z0-9]+/g, '');
-    }
-
-    function urlHost(value) {
+    function urlOrigin(value) {
         const raw = (value || '').toString().trim();
         if (!raw) return '';
         try {
-            return new URL(raw, window.location.origin).hostname.toLowerCase();
+            return normalizeMatchValue(new URL(raw, window.location.origin).origin);
         } catch (_) {
             return '';
         }
     }
 
-    function labMatchesConnection(lab, connection) {
-        const connectionTokens = [
-            connection.id,
-            connection.name,
-            connection.hostname
-        ].map(normalizeMatchValue).filter(Boolean);
-        const looseConnectionTokens = connectionTokens.map(normalizeLooseValue).filter(Boolean);
-        const connectionAccessKeys = [
-            connection.selector,
-            connection.id ? `guac:id:${connection.id}` : ''
-        ].map(normalizeMatchValue).filter(Boolean);
-        const labTokens = [
-            lab.accessKey,
-            lab.accessURI,
-            urlHost(lab.accessURI)
-        ].map(normalizeMatchValue).filter(Boolean);
-        const looseLabTokens = labTokens.map(normalizeLooseValue).filter(Boolean);
+    function currentGatewayOrigin() {
+        return urlOrigin(window.location.origin);
+    }
 
-        if (connectionAccessKeys.some(accessKey => labTokens.includes(accessKey))) return true;
-        if (labTokens.some(token => connectionTokens.includes(token))) return true;
-        if (looseLabTokens.some(token => looseConnectionTokens.includes(token))) return true;
-        if (connection.hostname && urlHost(lab.accessURI) === normalizeMatchValue(connection.hostname)) return true;
-        return false;
+    function labMatchesConnection(lab, connection) {
+        if (Number(lab?.resourceType) !== 0) return false;
+
+        const expectedAccessKey = normalizeMatchValue(
+            connection?.selector || (connection?.id ? `guac:id:${connection.id}` : '')
+        );
+        const labAccessKey = normalizeMatchValue(lab?.accessKey);
+        if (!expectedAccessKey || labAccessKey !== expectedAccessKey) return false;
+
+        const gatewayOrigin = currentGatewayOrigin();
+        const labOrigin = urlOrigin(lab?.accessURI);
+        return Boolean(gatewayOrigin && labOrigin && labOrigin === gatewayOrigin);
     }
 
     async function loadLabCandidates() {
@@ -2540,61 +2568,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const body = await res.json().catch(() => ({}));
         return Array.isArray(body.labs) ? body.labs : [];
-    }
-
-    function renderProvisionLabOptions(labs, selectedIds = []) {
-        if (!provisionHostLabsEl) return;
-        provisionHostLabsEl.innerHTML = '';
-        if (provisionHostLabsSummaryEl) {
-            provisionHostLabsSummaryEl.hidden = true;
-            provisionHostLabsSummaryEl.textContent = '';
-        }
-        provisionHostLabsEl.hidden = false;
-        const selectedSet = new Set(selectedIds.map(String));
-        const validLabs = (Array.isArray(labs) ? labs : [])
-            .filter(lab => String(lab?.labId || '').trim());
-        if (!validLabs.length) {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'No matching labs found';
-            option.disabled = true;
-            provisionHostLabsEl.appendChild(option);
-            provisionHostLabsEl.disabled = true;
-            return;
-        }
-        provisionHostLabsEl.disabled = false;
-        const singleLab = validLabs.length === 1;
-        validLabs.forEach(lab => {
-            const labId = String(lab.labId || '').trim();
-            const option = document.createElement('option');
-            option.value = labId;
-            option.textContent = formatProvisionLabLabel(lab);
-            option.selected = singleLab || selectedSet.has(labId);
-            provisionHostLabsEl.appendChild(option);
-        });
-        if (singleLab && provisionHostLabsSummaryEl) {
-            provisionHostLabsSummaryEl.textContent = formatProvisionLabLabel(validLabs[0]);
-            provisionHostLabsSummaryEl.hidden = false;
-            provisionHostLabsEl.hidden = true;
-        }
-    }
-
-    function formatProvisionLabLabel(lab) {
-        return `${resolveLabDisplayName(lab)}${lab?.accessKey ? ` - ${lab.accessKey}` : ''}`;
-    }
-
-    function selectedProvisionLabIds() {
-        if (!provisionHostLabsEl) return [];
-        return Array.from(provisionHostLabsEl.selectedOptions || [])
-            .map(option => option.value.trim())
-            .filter(Boolean);
-    }
-
-    function provisionLabCandidateIds() {
-        if (!provisionHostLabsEl) return [];
-        return Array.from(provisionHostLabsEl.options || [])
-            .map(option => option.value.trim())
-            .filter(Boolean);
     }
 
     function renderProvisionNameCandidates(candidates) {
@@ -2611,54 +2584,62 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function populateProvisionLabCandidates(connectionId, candidate, draft) {
-        renderProvisionLabOptions([], []);
-        provisionHostLabsEl.disabled = true;
-        const loading = document.createElement('option');
-        loading.value = '';
-        loading.textContent = 'Loading lab candidates...';
-        loading.disabled = true;
-        provisionHostLabsEl.innerHTML = '';
-        provisionHostLabsEl.appendChild(loading);
+    async function populateProvisionLabCandidates(stationKey, station) {
+        provisionLabsLoading = true;
+        if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = true;
         try {
             const labs = await loadLabCandidates();
-            const candidateLabs = labs.filter(lab => labMatchesConnection(lab, candidate));
-            renderProvisionLabOptions(candidateLabs, draft.labs || []);
+            const candidateLabs = labs.filter(lab => station.connections.some(connection => (
+                labMatchesConnection(lab, connection)
+            )));
+            const labIds = candidateLabs
+                .map(lab => String(lab?.labId || '').trim())
+                .filter(Boolean)
+                .filter((labId, index, values) => values.indexOf(labId) === index);
+            guacamoleCandidateState[stationKey] = {
+                ...(guacamoleCandidateState[stationKey] || {}),
+                labs: labIds,
+                labCandidatesLoaded: true
+            };
         } catch (err) {
             console.warn('Unable to load lab candidates', err);
-            provisionHostLabsEl.innerHTML = '';
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'Unable to load lab candidates';
-            option.disabled = true;
-            provisionHostLabsEl.appendChild(option);
-            provisionHostLabsEl.disabled = true;
+            guacamoleCandidateState[stationKey] = {
+                ...(guacamoleCandidateState[stationKey] || {}),
+                labs: [],
+                labCandidatesLoaded: true,
+                labCandidatesError: err.message
+            };
+        } finally {
+            provisionLabsLoading = false;
+            if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = false;
         }
     }
 
-    function openProvisionHostModal(connectionId) {
-        const candidate = findGuacamoleCandidate(connectionId);
+    function openProvisionHostModal(stationKey) {
+        const station = findGuacamoleStationCandidate(stationKey);
         if (
-            !candidate ||
+            !station ||
             !provisionHostModal ||
             !provisionConnectionIdEl ||
             !provisionHostNameEl ||
             !provisionHostAddressEl ||
             !provisionHostMacEl ||
-            !provisionHostLabsEl ||
             !provisionHeartbeatPathEl
         ) {
             showToast('Host provisioning modal is unavailable', 'error');
             return;
         }
-        const host = candidate.name || candidate.hostname || '';
-        const draft = guacamoleCandidateState[String(connectionId)]?.opsHostDraft || {};
-        provisionConnectionIdEl.value = String(connectionId);
+        const representative = station.connections[0];
+        const state = guacamoleCandidateState[stationKey] || {};
+        const draft = state.opsHostDraft || {};
+        const host = station.address || station.nameCandidates[0] || '';
+        provisionStationKey = stationKey;
+        provisionConnectionIdEl.value = String(state.connectionId || representative?.id || '');
         provisionHostNameEl.value = draft.name || host;
-        renderProvisionNameCandidates(draft.nameCandidates || [candidate.name, candidate.hostname].filter(Boolean));
-        provisionHostAddressEl.value = draft.address || candidate.hostname || '';
+        renderProvisionNameCandidates(draft.nameCandidates || station.nameCandidates);
+        provisionHostAddressEl.value = draft.address || station.address || '';
         provisionHostMacEl.value = draft.mac || '';
-        populateProvisionLabCandidates(connectionId, candidate, draft);
+        populateProvisionLabCandidates(stationKey, station);
         provisionHeartbeatPathEl.value = draft.heartbeat_path || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
         provisionHostModal.classList.add('show');
     }
@@ -2736,28 +2717,29 @@ document.addEventListener('DOMContentLoaded', () => {
             !provisionHostNameEl ||
             !provisionHostAddressEl ||
             !provisionHostMacEl ||
-            !provisionHostLabsEl ||
             !provisionHeartbeatPathEl
         ) {
             showToast('Host provisioning modal is unavailable', 'error');
             return;
         }
+        if (provisionLabsLoading) {
+            showToast('Lab associations are still loading', 'error');
+            return;
+        }
+        const state = guacamoleCandidateState[provisionStationKey] || {};
+        const labs = Array.isArray(state.labs) ? state.labs : [];
         const payload = {
             connectionId: provisionConnectionIdEl.value,
             name: provisionHostNameEl.value.trim(),
             address: provisionHostAddressEl.value.trim(),
             mac: provisionHostMacEl.value.trim(),
-            labs: selectedProvisionLabIds(),
-            validLabIds: provisionLabCandidateIds(),
+            labs,
             credentialRef: provisionHostAddressEl.value.trim(),
             heartbeatPath: provisionHeartbeatPathEl.value.trim()
         };
+        if (labs.length) payload.validLabIds = labs;
         if (!payload.connectionId || !payload.name || !payload.address) {
             showToast('Name and address are required', 'error');
-            return;
-        }
-        if (!payload.labs.length) {
-            showToast('Select at least one matching lab', 'error');
             return;
         }
         if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = true;

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v7">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v9">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -701,9 +701,9 @@
                         <div class="host-list" id="hostList">
                             <div class="empty">No ops hosts loaded yet.</div>
                         </div>
-                        <div class="hint mt-4">Guacamole connections without an ops host</div>
+                        <div class="hint mt-4">Lab Station candidates awaiting configuration</div>
                         <div class="host-list" id="guacamoleCandidateList">
-                            <div class="empty">No Guacamole candidates loaded yet.</div>
+                            <div class="empty">No Lab Station candidates loaded yet.</div>
                         </div>
                     </div>
                 </div>
@@ -1018,33 +1018,26 @@
             </div>
             <div class="modal-body">
                 <input type="hidden" id="provisionConnectionId">
-                <div class="form-grid provision-host-grid">
-                    <div class="provision-host-left">
-                        <label class="field">
-                            <span>Name</span>
-                            <input type="text" id="provisionHostName" list="provisionHostNameCandidates" placeholder="lab-ws-01">
-                            <datalist id="provisionHostNameCandidates"></datalist>
+                    <div class="form-grid provision-host-grid">
+                        <div class="provision-host-left">
+                            <label class="field">
+                                <span>Name</span>
+                                <input type="text" id="provisionHostName" list="provisionHostNameCandidates" placeholder="lab-ws-01">
+                                <datalist id="provisionHostNameCandidates"></datalist>
+                            </label>
+                            <label class="field">
+                                <span>Address</span>
+                                <input type="text" id="provisionHostAddress" placeholder="lab-ws-01" readonly aria-readonly="true">
+                            </label>
+                            <label class="field">
+                                <span>MAC</span>
+                                <input type="text" id="provisionHostMac" placeholder="00:11:22:33:44:55">
+                            </label>
+                        </div>
+                        <label class="field full">
+                            <span>Heartbeat path</span>
+                            <input type="text" id="provisionHeartbeatPath" placeholder="C:\LabStation\labstation\data\telemetry\heartbeat.json">
                         </label>
-                        <label class="field">
-                            <span>Address</span>
-                            <input type="text" id="provisionHostAddress" placeholder="lab-ws-01" readonly aria-readonly="true">
-                        </label>
-                        <label class="field">
-                            <span>MAC</span>
-                            <input type="text" id="provisionHostMac" placeholder="00:11:22:33:44:55">
-                        </label>
-                    </div>
-                    <label class="field provision-labs-field">
-                        <span>Labs</span>
-                        <div class="readonly-value provision-labs-summary" id="provisionHostLabsSummary" hidden></div>
-                        <select id="provisionHostLabs" multiple size="4">
-                            <option value="">Check Lab Station to load candidates</option>
-                        </select>
-                    </label>
-                    <label class="field full">
-                        <span>Heartbeat path</span>
-                        <input type="text" id="provisionHeartbeatPath" placeholder="C:\LabStation\labstation\data\telemetry\heartbeat.json">
-                    </label>
                 </div>
             </div>
             <div class="modal-footer">
@@ -1092,7 +1085,7 @@
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v2"></script>
     <script src="../assets/js/lab-manager-tabs.js?v=workflow-tabs-v1"></script>
-    <script src="../assets/js/lab-manager.js?v=workflow-tabs-v7"></script>
+    <script src="../assets/js/lab-manager.js?v=workflow-tabs-v9"></script>
     <script src="../assets/js/lab-publisher.js?v=workflow-tabs-v2"></script>
 </body>
 </html>

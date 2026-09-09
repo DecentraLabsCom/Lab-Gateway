@@ -478,26 +478,14 @@ body {
 .field.full { grid-column: 1 / -1; }
 .field.is-hidden { display: none; }
 .provision-host-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
 }
 .provision-host-left {
     display: grid;
-    grid-template-rows: repeat(3, minmax(0, auto));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 14px;
     min-width: 0;
-}
-.provision-labs-field {
-    min-width: 0;
-    height: 100%;
-}
-.provision-labs-field select {
-    flex: 1 1 auto;
-    min-height: 0;
-}
-.provision-labs-summary {
-    flex: 1 1 auto;
-    align-items: flex-start;
 }
 .inline-readonly-field {
     flex-direction: row;
@@ -1032,9 +1020,8 @@ body {
         grid-template-columns: 1fr;
     }
 
-    .provision-labs-field select,
-    .provision-labs-summary {
-        min-height: 120px;
+    .provision-host-left {
+        grid-template-columns: 1fr;
     }
 
     .lab-row {
