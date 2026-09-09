@@ -243,17 +243,18 @@ jobs:
         run: exit 1
 
   native-runtime-unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install native runtime build dependencies
+      - name: Verify native runtime toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes cmake ninja-build libssl-dev
+          cmake --version
+          ninja --version
+          test -f /usr/include/openssl/ssl.h
 
       - name: Configure native runtime tests
         run: >-

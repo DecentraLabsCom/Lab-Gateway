@@ -15,7 +15,7 @@ on:
 jobs:
   codeql:
     name: CodeQL Analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       security-events: write
       contents: read
@@ -34,10 +34,14 @@ jobs:
           languages: actions,javascript,python,cpp
           config-file: .github/codeql/codeql-config.yml
 
+      - name: Verify native runtime toolchain
+        run: |
+          cmake --version
+          ninja --version
+          test -f /usr/include/openssl/ssl.h
+
       - name: Build native proxy for CodeQL
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libssl-dev ninja-build
           cmake -S fmu-proxy-runtime-src -B fmu-proxy-runtime-src/build-codeql -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build fmu-proxy-runtime-src/build-codeql --parallel 2
 
