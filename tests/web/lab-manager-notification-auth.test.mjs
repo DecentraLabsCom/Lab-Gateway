@@ -1388,6 +1388,32 @@ test('edits a dynamic ops host from the pencil action', async () => {
   assert.equal(elements.get('editHostModal').classList.contains('show'), false);
 });
 
+test('uses a self-contained visible pencil icon for editable ops hosts', () => {
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(
+    script,
+    /host-edit-btn[\s\S]*host-edit-icon[\s\S]*<path d="M3 17\.25V21h3\.75L17\.81 9\.94l-3\.75-3\.75L3 17\.25z/,
+  );
+  assert.match(styles, /\.host-edit-icon[\s\S]*width: 16px[\s\S]*height: 16px[\s\S]*fill: currentColor/);
+});
+
+test('renders host statuses without pills and reveals ambiguous Guacamole matches on hover or focus', () => {
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(script, /host-status-text/);
+  assert.doesNotMatch(script, /Guacamole: <span class="pill \$\{guacamoleClass\}"/);
+  assert.match(script, /guacamole-match-trigger/);
+  assert.match(script, /guacamole-match-popover/);
+  assert.match(script, /Matching connections/);
+  assert.match(script, /connection\?\.name/);
+  assert.match(styles, /\.host-status-text\.warn[\s\S]*color: var\(--warning\)/);
+  assert.match(styles, /\.guacamole-match-trigger:hover[\s\S]*guacamole-match-popover/);
+  assert.match(styles, /\.guacamole-match-trigger:focus-within[\s\S]*guacamole-match-popover/);
+});
+
 test('does not open heartbeat streams for hosts without WinRM credentials', async () => {
   class FakeEventSource {
     static instances = [];

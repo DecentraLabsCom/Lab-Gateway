@@ -1107,6 +1107,64 @@ body {
 }
 .host-edit-btn:hover,
 .host-edit-btn:focus-visible { color: var(--text); border-color: var(--primary); }
+.host-edit-icon {
+    width: 16px;
+    height: 16px;
+    display: block;
+    fill: currentColor;
+    pointer-events: none;
+}
+.host-status-text { color: var(--muted); }
+.host-status-text.good { color: var(--success); }
+.host-status-text.warn { color: var(--warning); }
+.host-status-text.bad { color: #ffb3b3; }
+.guacamole-match-trigger {
+    position: relative;
+    display: inline-block;
+    outline: none;
+}
+.guacamole-match-trigger > .host-status-text {
+    cursor: help;
+    text-decoration: underline dotted currentColor;
+    text-underline-offset: 3px;
+}
+.guacamole-match-trigger:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+    border-radius: 4px;
+}
+.guacamole-match-popover {
+    display: none;
+    min-width: 280px;
+    max-width: min(420px, calc(100vw - 48px));
+    margin-top: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #101827;
+    box-shadow: var(--shadow);
+    color: var(--text);
+}
+.guacamole-match-trigger:hover .guacamole-match-popover,
+.guacamole-match-trigger:focus-within .guacamole-match-popover {
+    display: block;
+}
+.guacamole-match-details-title {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+.guacamole-match-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+}
+.guacamole-match-name { color: var(--text); }
+.guacamole-match-meta { color: var(--muted); font-size: 0.82rem; }
 .host-meta { color: var(--muted); font-size: 0.9rem; }
 .candidate-station-status {
     align-self: start;

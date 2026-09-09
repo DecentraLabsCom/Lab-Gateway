@@ -2355,6 +2355,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const safeLastPower = safeLastPowerMode ? `${safeLastPowerMode} @ ${safeLastPowerTs}` : 'n/a';
         const safeGuacamole = escapeHtml(formatGuacamoleStatus(guacamole));
         const guacamoleClass = guacamoleStatusClass(guacamole.status);
+        const guacamoleConnections = Array.isArray(guacamole.connections) ? guacamole.connections : [];
+        const hasGuacamoleMatchDetails = guacamole.status === 'ambiguous' && guacamoleConnections.length > 0;
+        const guacamoleDetailsId = 'guacamole-matches-'
+            + String(host).replace(/[^A-Za-z0-9_-]/g, '-');
+        const guacamoleMatchMarkup = hasGuacamoleMatchDetails
+            ? guacamoleConnections.map((connection, index) => {
+                const safeName = escapeHtml(
+                    connection?.name || connection?.hostname || 'Connection ' + (index + 1),
+                );
+                const safeProtocol = escapeHtml(connection?.protocol || 'unknown');
+                const safePort = escapeHtml(connection?.port || 'n/a');
+                return '<div class="guacamole-match-item">'
+                    + '<strong class="guacamole-match-name">' + safeName + '</strong>'
+                    + '<span class="guacamole-match-meta">' + safeProtocol + ' · Port: ' + safePort + '</span>'
+                    + '</div>';
+            }).join('')
+            : '';
+        const guacamoleStatusMarkup = hasGuacamoleMatchDetails
+            ? '<span class="guacamole-match-trigger" tabindex="0"'
+                + ' aria-describedby="' + escapeHtml(guacamoleDetailsId) + '">'
+                + '<span class="host-status-text ' + guacamoleClass + '">' + safeGuacamole + '</span>'
+                + '<span class="guacamole-match-popover" id="' + escapeHtml(guacamoleDetailsId) + '" role="tooltip">'
+                + '<span class="guacamole-match-details-title">Matching connections</span>'
+                + guacamoleMatchMarkup
+                + '</span></span>'
+            : '<span class="host-status-text ' + guacamoleClass + '">' + safeGuacamole + '</span>';
 
         const row = document.createElement('div');
         row.className = 'host-row';
@@ -2363,11 +2389,11 @@ document.addEventListener('DOMContentLoaded', () => {
             <div>
                 <div class="host-title-row">
                     <div class="host-title">${safeHost}</div>
-                    ${canEdit ? '<button class="host-edit-btn" data-action="edit-host" title="Edit host" aria-label="Edit host"><i class="fas fa-pen" aria-hidden="true"></i></button>' : ''}
+                    ${canEdit ? '<button class="host-edit-btn" data-action="edit-host" title="Edit host" aria-label="Edit host"><svg class="host-edit-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg></button>' : ''}
                 </div>
                 <div class="host-meta">Updated: ${safeUpdated}</div>
-                <div class="host-meta">Guacamole: <span class="pill ${guacamoleClass}">${safeGuacamole}</span></div>
-                <div class="host-meta">WinRM credentials: <span class="pill ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></div>
+                <div class="host-meta">Guacamole: ${guacamoleStatusMarkup}</div>
+                <div class="host-meta">WinRM credentials: <span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></div>
                 <div class="host-meta">Last forced logoff: ${safeLastForcedTs}</div>
                 <div class="host-meta">Last power: ${safeLastPower}</div>
             </div>
