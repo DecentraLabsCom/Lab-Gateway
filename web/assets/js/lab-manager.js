@@ -204,6 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostState = {};
     const hostMetadata = {};
     const guacamoleCandidateState = {};
+    const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
     const heartbeatStreamErrorShown = {};
     let powerControllers = [];
@@ -2317,8 +2318,98 @@ document.addEventListener('DOMContentLoaded', () => {
         delete heartbeatStreamErrorShown[host];
     }
 
+    function closeAllGuacamoleMatchPopovers() {
+        Array.from(guacamolePopoverClosers).forEach(closePopover => closePopover());
+    }
+
+    function setupGuacamoleMatchPopover(row) {
+        const trigger = row.querySelector?.('.guacamole-match-trigger');
+        const popover = row.querySelector?.('.guacamole-match-popover');
+        if (!trigger || !popover || !document.body) return;
+
+        let hideTimer = null;
+        let isShown = false;
+
+        function clearHideTimer() {
+            if (hideTimer === null) return;
+            window.clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+
+        function positionPopover() {
+            if (!isShown) return;
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+            const viewportMargin = 12;
+            const popoverWidth = popover.offsetWidth;
+            const popoverHeight = popover.offsetHeight;
+            let left = triggerRect.left;
+            let top = triggerRect.bottom + 8;
+
+            if (
+                top + popoverHeight > viewportHeight - viewportMargin
+                && triggerRect.top - popoverHeight - 8 >= viewportMargin
+            ) {
+                top = triggerRect.top - popoverHeight - 8;
+            }
+            left = Math.min(
+                Math.max(viewportMargin, left),
+                Math.max(viewportMargin, viewportWidth - popoverWidth - viewportMargin),
+            );
+            popover.style.left = Math.round(left) + 'px';
+            popover.style.top = Math.round(top) + 'px';
+        }
+
+        function closePopover() {
+            clearHideTimer();
+            isShown = false;
+            popover.classList.remove('is-visible');
+            popover.style.left = '';
+            popover.style.top = '';
+            if (popover.parentElement === document.body) popover.remove();
+            window.removeEventListener('resize', positionPopover);
+            window.removeEventListener('scroll', positionPopover, true);
+            guacamolePopoverClosers.delete(closePopover);
+        }
+
+        function showPopover() {
+            clearHideTimer();
+            if (popover.parentElement !== document.body) document.body.appendChild(popover);
+            isShown = true;
+            guacamolePopoverClosers.add(closePopover);
+            popover.classList.add('is-visible');
+            positionPopover();
+            window.addEventListener('resize', positionPopover);
+            window.addEventListener('scroll', positionPopover, true);
+        }
+
+        function scheduleClosePopover() {
+            clearHideTimer();
+            hideTimer = window.setTimeout(() => {
+                const triggerHovered = trigger.matches?.(':hover');
+                const popoverHovered = popover.matches?.(':hover');
+                const triggerFocused = document.activeElement === trigger;
+                if (triggerHovered || popoverHovered || triggerFocused) return;
+                closePopover();
+            }, 120);
+        }
+
+        trigger.addEventListener('mouseenter', showPopover);
+        trigger.addEventListener('mouseleave', scheduleClosePopover);
+        trigger.addEventListener('focusin', showPopover);
+        trigger.addEventListener('focusout', scheduleClosePopover);
+        trigger.addEventListener('keydown', event => {
+            if (event.key === 'Escape') closePopover();
+        });
+        popover.addEventListener('mouseenter', showPopover);
+        popover.addEventListener('mouseleave', scheduleClosePopover);
+    }
+
     function renderHosts() {
         if (!hostListEl) return;
+        closeAllGuacamoleMatchPopovers();
         hostListEl.innerHTML = '';
         if (!hostNames.length) {
             hostListEl.innerHTML = '<div class="empty">No ops hosts loaded. Configure ops-worker/hosts.json.</div>';
@@ -2413,6 +2504,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS</button>
             </div>
         `;
+        setupGuacamoleMatchPopover(row);
         return row;
     }
 

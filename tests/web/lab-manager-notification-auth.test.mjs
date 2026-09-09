@@ -1410,8 +1410,11 @@ test('renders host statuses without pills and reveals ambiguous Guacamole matche
   assert.match(script, /Matching connections/);
   assert.match(script, /connection\?\.name/);
   assert.match(styles, /\.host-status-text\.warn[\s\S]*color: var\(--warning\)/);
-  assert.match(styles, /\.guacamole-match-trigger:hover[\s\S]*guacamole-match-popover/);
-  assert.match(styles, /\.guacamole-match-trigger:focus-within[\s\S]*guacamole-match-popover/);
+  assert.match(script, /setupGuacamoleMatchPopover/);
+  assert.match(script, /addEventListener\('mouseenter'/);
+  assert.match(script, /addEventListener\('focusin'/);
+  assert.match(styles, /\.guacamole-match-popover[\s\S]*position: fixed/);
+  assert.match(styles, /\.guacamole-match-popover\.is-visible[\s\S]*opacity: 1/);
 });
 
 test('does not open heartbeat streams for hosts without WinRM credentials', async () => {

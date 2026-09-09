@@ -1119,7 +1119,6 @@ body {
 .host-status-text.warn { color: var(--warning); }
 .host-status-text.bad { color: #ffb3b3; }
 .guacamole-match-trigger {
-    position: relative;
     display: inline-block;
     outline: none;
 }
@@ -1134,20 +1133,28 @@ body {
     border-radius: 4px;
 }
 .guacamole-match-popover {
-    display: none;
+    position: fixed;
+    z-index: 1000;
+    display: block;
     min-width: 280px;
     max-width: min(420px, calc(100vw - 48px));
-    margin-top: 8px;
     padding: 10px 12px;
     border: 1px solid var(--border);
     border-radius: 10px;
     background: #101827;
     box-shadow: var(--shadow);
     color: var(--text);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-4px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
 }
-.guacamole-match-trigger:hover .guacamole-match-popover,
-.guacamole-match-trigger:focus-within .guacamole-match-popover {
-    display: block;
+.guacamole-match-popover.is-visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
 }
 .guacamole-match-details-title {
     display: block;
