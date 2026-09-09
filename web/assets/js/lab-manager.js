@@ -2517,6 +2517,10 @@ document.addEventListener('DOMContentLoaded', () => {
             connection.hostname
         ].map(normalizeMatchValue).filter(Boolean);
         const looseConnectionTokens = connectionTokens.map(normalizeLooseValue).filter(Boolean);
+        const connectionAccessKeys = [
+            connection.selector,
+            connection.id ? `guac:id:${connection.id}` : ''
+        ].map(normalizeMatchValue).filter(Boolean);
         const labTokens = [
             lab.accessKey,
             lab.accessURI,
@@ -2524,6 +2528,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ].map(normalizeMatchValue).filter(Boolean);
         const looseLabTokens = labTokens.map(normalizeLooseValue).filter(Boolean);
 
+        if (connectionAccessKeys.some(accessKey => labTokens.includes(accessKey))) return true;
         if (labTokens.some(token => connectionTokens.includes(token))) return true;
         if (looseLabTokens.some(token => looseConnectionTokens.includes(token))) return true;
         if (connection.hostname && urlHost(lab.accessURI) === normalizeMatchValue(connection.hostname)) return true;

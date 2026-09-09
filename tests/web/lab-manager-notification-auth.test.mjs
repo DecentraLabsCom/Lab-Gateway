@@ -11,6 +11,7 @@ function createElement(id) {
   const classes = new Set();
   const element = {
     id,
+    dataset: {},
     value: '',
     checked: false,
     disabled: false,
@@ -55,6 +56,16 @@ function loadLabManager({
   }),
   activeTabs = ['operations', 'energy', 'digital-twins'],
   actionableResponse = null,
+  hostInventoryResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ hosts: [], guacamoleUnmatched: [] }),
+  }),
+  discoverResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({}),
+  }),
   labsResponse = Promise.resolve({
     ok: true,
     status: 200,
@@ -196,6 +207,12 @@ function loadLabManager({
       }
       if (parsedUrl.pathname === '/lab-admin/labs') {
         return Promise.resolve(labsResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/hosts') {
+        return Promise.resolve(hostInventoryResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/hosts/discover') {
+        return Promise.resolve(discoverResponse);
       }
       if (parsedUrl.pathname === '/ops/api/power/policies' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerPoliciesResponse);
@@ -1032,6 +1049,79 @@ test('prefers managed lab names in operations reservations and lab selectors', a
   );
   assert.match(elements.get('upcomingReservationsList').innerHTML, /State Space/);
   assert.doesNotMatch(elements.get('upcomingReservationsList').innerHTML, /Lab #1/);
+});
+
+test('matches a physical lab access key to its numeric Guacamole connection id when configuring an ops host', async () => {
+  const connection = {
+    id: 42,
+    name: 'Siemens Admin',
+    protocol: 'rdp',
+    hostname: '10.192.38.82',
+    port: '3389',
+  };
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [],
+        guacamoleAvailable: true,
+        guacamoleUnmatched: [connection],
+      }),
+    }),
+    discoverResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'winrm-reachable',
+        connection,
+        checks: { winrm: { '5986': true } },
+        opsHostDraft: { address: connection.hostname },
+      }),
+    }),
+    labsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        labs: [{
+          labId: '7',
+          name: 'Siemens Admin',
+          resourceType: 0,
+          accessURI: 'https://sarlab.dia.uned.es/guacamole',
+          accessKey: 'guac:id:42',
+          listed: true,
+        }],
+      }),
+    }),
+  });
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  const candidateList = elements.get('guacamoleCandidateList');
+  const initialRow = candidateList.options.at(-1);
+  const checkButton = {
+    dataset: { action: 'probe-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? checkButton : initialRow,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: checkButton });
+  await flush();
+  await flush();
+
+  const configuredRow = candidateList.options.at(-1);
+  const configureButton = {
+    dataset: { action: 'configure-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? configureButton : configuredRow,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: configureButton });
+  await flush();
+
+  assert.equal(elements.get('provisionHostModal').classList.contains('show'), true);
+  assert.equal(elements.get('provisionHostLabs').disabled, false);
+  assert.ok(
+    elements.get('provisionHostLabs').options.some((option) => option.value === '7'),
+    'The lab linked with guac:id:42 should be selectable for connection 42',
+  );
 });
 
 test('loads AAS link FMU options and sends the selected lab when saving a link', async () => {
