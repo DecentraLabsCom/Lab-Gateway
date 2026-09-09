@@ -328,6 +328,20 @@ test('reuses the existing Lab Manager session without prompting on Operations en
   assert.equal(actionableCall.options.skipAuthPrompt, true);
 });
 
+test('places Lab Station Ops before Actionable Reservations', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const sectionOrderFor = (title) => {
+    const titlePosition = html.indexOf(`<h2>${title}</h2>`);
+    assert.ok(titlePosition >= 0);
+    const sectionStart = html.lastIndexOf('<section', titlePosition);
+    const sectionEnd = html.indexOf('>', sectionStart);
+    const order = html.slice(sectionStart, sectionEnd).match(/data-lm-order="(\d+)"/);
+    assert.ok(order);
+    return Number(order[1]);
+  };
+  assert.ok(sectionOrderFor('Lab Station Ops') < sectionOrderFor('Actionable Reservations'));
+});
+
 test('reserves a tall, explicit scroll area for actionable reservation details', () => {
   const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
 
