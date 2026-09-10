@@ -599,6 +599,7 @@ services:
       - OPS_WINRM_TRUST_PATH=${OPS_WINRM_TRUST_PATH:-/app/data/winrm-certificates}
       - OPS_POWER_CONFIG=${OPS_POWER_CONFIG:-/app/data/power-controllers.json}
       - OPS_POWER_CREDENTIALS_PATH=${OPS_POWER_CREDENTIALS_PATH:-/app/data/power-credentials.json}
+      - OPS_POWER_STATUS_CACHE_SECONDS=${OPS_POWER_STATUS_CACHE_SECONDS:-5}
       - OPS_SECRETS_KEY_FILE=/run/secrets/ops_secrets_key
       - OPS_POLL_ENABLED=${OPS_POLL_ENABLED:-true}
       - OPS_POLL_INTERVAL=${OPS_POLL_INTERVAL:-60}

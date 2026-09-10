@@ -85,6 +85,11 @@ function loadLabManager({
     status: 200,
     json: async () => ({ controllers: [] }),
   }),
+  powerControllerStatusResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ controllers: [] }),
+  }),
   powerCredentialsResponse = Promise.resolve({
     ok: true,
     status: 200,
@@ -248,6 +253,9 @@ function loadLabManager({
       }
       if (parsedUrl.pathname === '/ops/api/power/controllers' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerControllersResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/power/controllers/status' && (!options.method || options.method === 'GET')) {
+        return Promise.resolve(powerControllerStatusResponse);
       }
       if (parsedUrl.pathname === '/ops/api/power/credentials' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerCredentialsResponse);
@@ -863,6 +871,139 @@ test('suggests a stable controller ID from the selected driver and host', async 
   elements.get('powerControllerHost').value = '10.192.38.81';
   elements.get('powerControllerHost').dispatchEvent({ type: 'input' });
   assert.equal(elements.get('powerControllerId').value, 'lab-pdu-main');
+});
+
+test('offers compatible stored credentials in the controller reference selector', async () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  assert.match(html, /<select id="powerControllerCredentialRef">/);
+  assert.doesNotMatch(html, /<input[^>]+id="powerControllerCredentialRef"/);
+
+  const { elements } = loadLabManager({
+    powerCredentialsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ credentials: [
+        { credentialRef: 'apc-ap7920-snmp', type: 'snmpv3' },
+        { credentialRef: 'netio-lab-01-http', type: 'netio-http-basic' },
+      ] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerControllerDriver').value = 'apc-powernet-snmp';
+  elements.get('powerControllerDriver').dispatchEvent({ type: 'change' });
+  const credentialSelect = elements.get('powerControllerCredentialRef');
+  assert.match(credentialSelect.innerHTML, /apc-ap7920-snmp/);
+  assert.doesNotMatch(credentialSelect.innerHTML, /netio-lab-01-http/);
+
+  elements.get('powerControllerDriver').value = 'netio-json';
+  elements.get('powerControllerDriver').dispatchEvent({ type: 'change' });
+  assert.match(credentialSelect.innerHTML, /netio-lab-01-http/);
+  assert.doesNotMatch(credentialSelect.innerHTML, /apc-ap7920-snmp/);
+});
+
+test('shows only controller names in the existing controller selector', async () => {
+  const { elements } = loadLabManager({
+    powerControllersResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'apc-10-192-38-80',
+        name: 'APC AP7920',
+        driver: 'apc-powernet-snmp',
+        enabled: true,
+        host: '10.192.38.80',
+        port: 161,
+        credentialRef: 'apc-ap7920-snmp',
+        config: { profile: 'legacy', timeoutSeconds: 2, retries: 1 },
+        outlets: [{ outlet: '1' }],
+      }] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const controllerOption = elements.get('powerControllerSelect').options.find(option =>
+    option.value === 'apc-10-192-38-80');
+  assert.ok(controllerOption);
+  assert.equal(controllerOption.textContent, 'APC AP7920');
+});
+
+test('renders the controller catalog before loading live power status', async () => {
+  let resolveStatus;
+  const statusResponse = new Promise((resolve) => {
+    resolveStatus = resolve;
+  });
+  const { elements, fetchCalls } = loadLabManager({
+    powerControllersResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'pdu-lab-01',
+        name: 'Bench PDU',
+        driver: 'apc-powernet-snmp',
+        outlets: [{ outlet: '1', displayName: 'Bench outlet' }],
+      }] }),
+    }),
+    powerControllerStatusResponse: statusResponse,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const controllerOption = elements.get('powerControllerSelect').options.find(option =>
+    option.value === 'pdu-lab-01');
+  assert.ok(controllerOption, 'catalog should populate the existing controller selector');
+  assert.match(elements.get('powerControllerList').options.at(-1).rawInnerHTML, /checking/);
+  assert.equal(
+    fetchCalls.some(({ url }) => url === '/ops/api/power/controllers/status'),
+    true,
+  );
+
+  resolveStatus({
+    ok: true,
+    status: 200,
+    json: async () => ({ controllers: [{
+      id: 'pdu-lab-01',
+      discovery: { reachable: true },
+      outlets: [{ outlet: '1', state: 'off' }],
+    }] }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(elements.get('powerControllerList').options.at(-1).rawInnerHTML, /reachable/);
+  assert.match(elements.get('powerControllerList').options.at(-1).rawInnerHTML, />off</);
+});
+
+test('forces a live status refresh from the power controller refresh button', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    powerControllersResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'pdu-lab-01',
+        name: 'Bench PDU',
+        driver: 'mock',
+        outlets: [{ outlet: '1' }],
+      }] }),
+    }),
+    powerControllerStatusResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'pdu-lab-01',
+        discovery: { reachable: true },
+        outlets: [{ outlet: '1', state: 'off' }],
+      }] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('refreshPowerControllersBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const statusCalls = fetchCalls.filter(({ url }) => String(url).startsWith('/ops/api/power/controllers/status'));
+  assert.ok(statusCalls.length >= 2);
+  assert.match(statusCalls.at(-1).url, /[?&]refresh=true/);
 });
 
 test('orders controller fields so host and driver precede the generated ID', () => {
@@ -1597,6 +1738,113 @@ test('does not open heartbeat streams for hosts without WinRM credentials', asyn
 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(FakeEventSource.instances.length, 0);
+});
+
+test('renders classified heartbeat stream errors without exposing the JSON payload', async () => {
+  class FakeEventSource {
+    static instances = [];
+    static CLOSED = 2;
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = 1;
+      this.listeners = new Map();
+      FakeEventSource.instances.push(this);
+    }
+
+    addEventListener(type, handler) { this.listeners.set(type, handler); }
+    emit(type, event) { this.listeners.get(type)?.(event); }
+    close() { this.readyState = FakeEventSource.CLOSED; }
+  }
+
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    eventSource: FakeEventSource,
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: 'PC-Siemens',
+          address: '192.168.1.52',
+          winrmConfigured: true,
+          winrmTrustConfigured: false,
+          winrmTrustStatus: 'missing',
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(FakeEventSource.instances.length, 1);
+  FakeEventSource.instances[0].emit('error', {
+    data: JSON.stringify({
+      error: 'WinRM certificate trust is required',
+      code: 'WINRM_TRUST_REQUIRED',
+      requestId: 'trust-request-1',
+      host: 'PC-Siemens',
+    }),
+  });
+
+  assert.equal(
+    elements.get('toast').textContent,
+    'Heartbeat unavailable for PC-Siemens: WinRM certificate trust is required',
+  );
+  assert.doesNotMatch(elements.get('toast').textContent, /\{"error"/);
+});
+
+test('keeps the request ID only as a short reference for generic heartbeat errors', async () => {
+  class FakeEventSource {
+    static instances = [];
+    static CLOSED = 2;
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = 1;
+      this.listeners = new Map();
+      FakeEventSource.instances.push(this);
+    }
+
+    addEventListener(type, handler) { this.listeners.set(type, handler); }
+    emit(type, event) { this.listeners.get(type)?.(event); }
+    close() { this.readyState = FakeEventSource.CLOSED; }
+  }
+
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    eventSource: FakeEventSource,
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: 'PC-Siemens',
+          address: '192.168.1.52',
+          winrmConfigured: true,
+          winrmTrustConfigured: true,
+          winrmTrustStatus: 'ready',
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  FakeEventSource.instances[0].emit('error', {
+    data: JSON.stringify({
+      error: 'Internal server error',
+      code: 'INTERNAL_ERROR',
+      requestId: 'f33bb129cf1e475f8bc3db34ce2fe5dc',
+      host: 'PC-Siemens',
+    }),
+  });
+
+  assert.equal(
+    elements.get('toast').textContent,
+    'Heartbeat unavailable for PC-Siemens: temporary Ops Worker error (request ID f33bb129cf1e475f8bc3db34ce2fe5dc)',
+  );
+  assert.doesNotMatch(elements.get('toast').textContent, /\{"error"/);
 });
 
 test('loads AAS link FMU options and sends the selected lab when saving a link', async () => {

@@ -161,6 +161,14 @@ The host card reports credentials and certificate trust separately:
 needed to prove network reachability, authentication, and that the certificate
 served by the Station matches the trusted certificate.
 
+These two prerequisites are independent. Until WinRM credentials are saved,
+the Lab Manager does not open a heartbeat stream for the host. If credentials
+exist but certificate trust is missing or invalid, the host remains unable to
+produce a heartbeat until the certificate is installed or corrected. Use the
+`WinRM credentials` and `WinRM TLS trust` statuses on the host card to decide
+which step is missing; do not treat an incomplete host as a Station or Gateway
+failure.
+
 To bootstrap certificate trust before the Lab Manager upload control is
 available, copy the public certificate exported by Lab Station to the Gateway
 host:
@@ -194,6 +202,12 @@ For each host, operators can:
 - execute only Lab Station commands allowed by `OPS_ALLOWED_COMMANDS`;
 - enable or disable local mode according to the operating procedure; and
 - inspect preparation state, the last operation, power state, and WoL NIC data.
+
+Heartbeat streaming starts automatically only for hosts with configured WinRM
+credentials. A missing or invalid certificate prevents the authenticated
+heartbeat even when the Station is powered on. If a stream error includes a
+`requestId`, keep it for the Ops Worker logs; the browser message is not a
+substitute for the host-card credential and TLS trust statuses.
 
 Destructive or power actions require an authorized maintenance window and a
 clear operational reason. For the Windows command contract, see

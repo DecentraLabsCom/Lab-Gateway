@@ -79,10 +79,13 @@ class PowerRegistry:
         for raw_controller in raw_controllers:
             if not isinstance(raw_controller, Mapping):
                 raise ValidationError("every power controller must be an object")
+            controller_id = str(raw_controller.get("id") or "")
+            controller_name = str(raw_controller.get("name") or controller_id)
+            driver_name = str(raw_controller.get("driver") or "")
             definition = PowerController(
-                id=raw_controller.get("id"),
-                name=raw_controller.get("name") or raw_controller.get("id"),
-                driver_name=raw_controller.get("driver"),
+                id=controller_id,
+                name=controller_name,
+                driver_name=driver_name,
                 enabled=_bool(raw_controller.get("enabled"), True),
                 host=(str(raw_controller.get("host") or "").strip() or None),
                 port=raw_controller.get("port"),
@@ -198,22 +201,8 @@ class PowerRegistry:
             raise KeyError(f"outlet '{outlet_id}' not found on controller '{controller_id}'")
         return controller, outlet
 
-    def public_description(self, controller: RegisteredController) -> Dict[str, Any]:
-        try:
-            states = {
-                item["outlet"]: item.get("state", "unknown")
-                for item in controller.driver.list_outlets()
-            }
-        except PowerDriverError:
-            states = {}
-        capabilities = getattr(controller.driver, "capabilities", PowerCapabilities())
-        try:
-            discovery = controller.driver.discover()
-        except PowerDriverError as exc:
-            discovery = {
-                "reachable": False,
-                "errorCode": getattr(exc, "error_code", "DRIVER_ERROR"),
-            }
+    @staticmethod
+    def _public_metadata(controller: RegisteredController) -> Dict[str, Any]:
         return {
             "id": controller.definition.id,
             "name": controller.definition.name,
@@ -236,10 +225,43 @@ class PowerRegistry:
                 )
                 if key in controller.definition.config
             },
-            "capabilities": capabilities.to_dict(),
-            "discovery": discovery,
-            "outlets": [
-                outlet.to_dict(states.get(outlet_id, "unknown"))
-                for outlet_id, outlet in sorted(controller.outlets.items())
-            ],
+            "capabilities": getattr(
+                controller.driver,
+                "capabilities",
+                PowerCapabilities(),
+            ).to_dict(),
         }
+
+    def public_catalog_description(self, controller: RegisteredController) -> Dict[str, Any]:
+        """Return local controller configuration without contacting hardware."""
+        public = self._public_metadata(controller)
+        public["discovery"] = {}
+        public["outlets"] = [
+            outlet.to_dict("unknown")
+            for _, outlet in sorted(controller.outlets.items())
+        ]
+        return public
+
+    def public_description(self, controller: RegisteredController) -> Dict[str, Any]:
+        """Return controller configuration enriched with live hardware state."""
+        try:
+            states = {
+                item["outlet"]: item.get("state", "unknown")
+                for item in controller.driver.list_outlets()
+            }
+        except PowerDriverError:
+            states = {}
+        try:
+            discovery = controller.driver.discover()
+        except PowerDriverError as exc:
+            discovery = {
+                "reachable": False,
+                "errorCode": getattr(exc, "error_code", "DRIVER_ERROR"),
+            }
+        public = self._public_metadata(controller)
+        public["discovery"] = discovery
+        public["outlets"] = [
+            outlet.to_dict(states.get(outlet_id, "unknown"))
+            for outlet_id, outlet in sorted(controller.outlets.items())
+        ]
+        return public

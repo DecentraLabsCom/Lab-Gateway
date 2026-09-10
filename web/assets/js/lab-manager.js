@@ -205,7 +205,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
     const heartbeatStreamErrorShown = {};
+    const heartbeatStreamErrorMessages = {
+        WINRM_CREDENTIALS_REQUIRED: 'WinRM credentials are required',
+        WINRM_TRUST_REQUIRED: 'WinRM certificate trust is required',
+        WINRM_TRUST_INVALID: 'WinRM certificate trust is invalid',
+        WINRM_CERTIFICATE_INVALID: 'WinRM certificate trust is invalid',
+        WINRM_CERTIFICATE_EXPIRED: 'WinRM certificate is expired',
+        WINRM_CERTIFICATE_NOT_YET_VALID: 'WinRM certificate is not yet valid',
+        WINRM_TLS_FAILED: 'WinRM TLS validation failed',
+        WINRM_TRUST_STORAGE_UNAVAILABLE: 'WinRM certificate trust storage is unavailable',
+        INTERNAL_ERROR: 'temporary Ops Worker error',
+    };
+    const heartbeatConfigurationErrorCodes = new Set([
+        'WINRM_CREDENTIALS_REQUIRED',
+        'WINRM_TRUST_REQUIRED',
+        'WINRM_TRUST_INVALID',
+        'WINRM_CERTIFICATE_INVALID',
+        'WINRM_CERTIFICATE_EXPIRED',
+        'WINRM_CERTIFICATE_NOT_YET_VALID',
+        'WINRM_TLS_FAILED',
+        'WINRM_TRUST_STORAGE_UNAVAILABLE',
+    ]);
     let powerControllers = [];
+    let powerControllerStatusLoading = false;
+    let powerControllerStatusError = false;
+    let powerControllerStatusRequestId = 0;
     let powerControllerOutletDrafts = [];
     let powerControllerIdWasSuggested = false;
     let lastPowerControllerDriver = 'mock';
@@ -473,11 +497,14 @@ document.addEventListener('DOMContentLoaded', () => {
         renderHosts();
     }
     if (powerControllerListEl) powerControllerListEl.addEventListener('click', handlePowerActions);
-    if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', loadPowerControllers);
+    if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', () => {
+        loadPowerControllers({ forceStatusRefresh: true });
+    });
     if (powerControllerSelectEl) powerControllerSelectEl.addEventListener('change', loadSelectedPowerController);
     if (powerControllerDriverEl) {
         powerControllerDriverEl.addEventListener('change', updatePowerControllerDriverFields);
         powerControllerDriverEl.addEventListener('change', suggestPowerControllerId);
+        powerControllerDriverEl.addEventListener('change', renderPowerControllerCredentialOptions);
     }
     if (powerControllerHostEl) powerControllerHostEl.addEventListener('input', suggestPowerControllerId);
     if (powerControllerIdEl) {
@@ -1030,23 +1057,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadPowerControllers(options = {}) {
+        const { forceStatusRefresh = false, ...fetchOptions } = options;
+        fetchOptions.cache = 'no-store';
+        powerControllerStatusRequestId += 1;
         if (powerControllersStatusEl) {
             powerControllersStatusEl.textContent = 'Loading...';
             powerControllersStatusEl.className = 'pill soft';
         }
         try {
-            const res = await fetch('/ops/api/power/controllers', options);
+            const res = await fetch('/ops/api/power/controllers', fetchOptions);
             if (res.status === 403) {
                 showOpsWarning();
-                return;
+                return false;
             }
             if (res.status === 401) {
                 if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power controllers', 'error');
-                return;
+                return false;
             }
             const body = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             powerControllers = Array.isArray(body.controllers) ? body.controllers : [];
+            powerControllerStatusLoading = powerControllers.length > 0;
+            powerControllerStatusError = false;
             renderPowerControllers();
             renderPowerControllerOptions();
             renderPowerPolicySteps();
@@ -1059,9 +1091,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? 'Protected outlets require an explicit maintenance mode toggle. Physical activation remains subject to provider hardware validation.'
                     : 'No controller is configured. Add one to the provider-local power catalog before using this panel.';
             }
+            if (powerControllers.length) {
+                void loadPowerControllerStatuses({
+                    forceRefresh: forceStatusRefresh,
+                    skipAuthPrompt: options.skipAuthPrompt,
+                });
+            }
+            return true;
         } catch (err) {
             console.warn('Unable to load power controllers', err);
             powerControllers = [];
+            powerControllerStatusLoading = false;
+            powerControllerStatusError = false;
             renderPowerControllers();
             renderPowerControllerOptions();
             renderPowerPolicySteps();
@@ -1070,6 +1111,70 @@ document.addEventListener('DOMContentLoaded', () => {
                 powerControllersStatusEl.className = 'pill bad';
             }
             if (powerControllersHintEl) powerControllersHintEl.textContent = 'Power controllers could not be loaded.';
+            return false;
+        }
+    }
+
+    async function loadPowerControllerStatuses(options = {}) {
+        const { forceRefresh = false, ...fetchOptions } = options;
+        fetchOptions.cache = 'no-store';
+        const requestId = ++powerControllerStatusRequestId;
+        if (!powerControllers.length) {
+            powerControllerStatusLoading = false;
+            powerControllerStatusError = false;
+            renderPowerControllers();
+            return;
+        }
+        powerControllerStatusLoading = true;
+        powerControllerStatusError = false;
+        renderPowerControllers();
+        const query = forceRefresh ? '?refresh=true' : '';
+        try {
+            const res = await fetch(`/ops/api/power/controllers/status${query}`, fetchOptions);
+            if (res.status === 403) {
+                showOpsWarning();
+                throw new Error('Power controller status access denied');
+            }
+            if (res.status === 401) {
+                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power controller status', 'error');
+                throw new Error('Lab Manager session required');
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            if (!Array.isArray(body.controllers)) throw new Error('Power controller status is invalid');
+            if (requestId !== powerControllerStatusRequestId) return;
+            const statuses = new Map(
+                body.controllers
+                    .filter(controller => controller && controller.id)
+                    .map(controller => [String(controller.id), controller]),
+            );
+            powerControllers = powerControllers.map(controller => {
+                const status = statuses.get(String(controller.id));
+                if (!status) return controller;
+                const statusOutlets = new Map(
+                    (Array.isArray(status.outlets) ? status.outlets : [])
+                        .filter(outlet => outlet && outlet.outlet !== undefined)
+                        .map(outlet => [String(outlet.outlet), outlet]),
+                );
+                return {
+                    ...controller,
+                    discovery: status.discovery || {},
+                    outlets: (Array.isArray(controller.outlets) ? controller.outlets : []).map(outlet => ({
+                        ...outlet,
+                        state: statusOutlets.get(String(outlet.outlet))?.state || 'unknown',
+                    })),
+                };
+            });
+            powerControllerStatusError = false;
+        } catch (err) {
+            if (requestId !== powerControllerStatusRequestId) return;
+            console.warn('Unable to load power controller status', err);
+            powerControllerStatusError = true;
+        } finally {
+            if (requestId === powerControllerStatusRequestId) {
+                powerControllerStatusLoading = false;
+                renderPowerControllers();
+            }
         }
     }
 
@@ -1254,6 +1359,7 @@ document.addEventListener('DOMContentLoaded', () => {
             powerCredentials = Array.isArray(body.credentials) ? body.credentials : [];
             renderPowerCredentials();
             renderPowerCredentialOptions();
+            renderPowerControllerCredentialOptions();
             if (powerCredentialsStatusEl) {
                 powerCredentialsStatusEl.textContent = `${powerCredentials.length} credential${powerCredentials.length === 1 ? '' : 's'}`;
                 powerCredentialsStatusEl.className = 'pill good';
@@ -1266,6 +1372,7 @@ document.addEventListener('DOMContentLoaded', () => {
             powerCredentials = [];
             renderPowerCredentials();
             renderPowerCredentialOptions();
+            renderPowerControllerCredentialOptions();
             if (powerCredentialsStatusEl) {
                 powerCredentialsStatusEl.textContent = 'Unavailable';
                 powerCredentialsStatusEl.className = 'pill bad';
@@ -1298,6 +1405,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             showToast(`${credential.overwrite ? 'Energy credential rotated' : 'Energy credential saved'}: ${credential.credentialRef}`, 'success');
             await loadPowerCredentials({ skipAuthPrompt: true });
+            void loadPowerControllerStatuses({ forceRefresh: true, skipAuthPrompt: true });
             if (powerCredentialSelectEl) powerCredentialSelectEl.value = credential.credentialRef;
             loadSelectedPowerCredential();
         } catch (err) {
@@ -1938,6 +2046,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = '2';
         if (powerControllerRetriesEl) powerControllerRetriesEl.value = '1';
         updatePowerControllerDriverFields();
+        renderPowerControllerCredentialOptions();
         powerControllerOutletDrafts = [createPowerControllerOutletDraft({ outlet: '1' })];
         renderPowerControllerOutlets();
         if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = '';
@@ -1966,11 +2075,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = config.timeoutSeconds || '2';
         if (powerControllerRetriesEl) powerControllerRetriesEl.value = config.retries ?? '1';
         updatePowerControllerDriverFields();
+        renderPowerControllerCredentialOptions();
         powerControllerOutletDrafts = Array.isArray(controller.outlets)
             ? controller.outlets.map(createPowerControllerOutletDraft)
             : [];
         renderPowerControllerOutlets();
-        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = 'Edit the provider-local controller and save it to apply the configuration.';
     }
 
     function renderPowerControllerOptions() {
@@ -1980,7 +2089,7 @@ document.addEventListener('DOMContentLoaded', () => {
         powerControllers.forEach(controller => {
             const option = document.createElement('option');
             option.value = controller.id || '';
-            option.textContent = `${controller.id || 'unknown'} Â· ${controller.name || 'Unnamed controller'}`;
+            option.textContent = controller.name || controller.id || 'Unnamed controller';
             powerControllerSelectEl.appendChild(option);
         });
         const selected = powerControllers.some(controller => String(controller.id) === String(current)) ? current : '';
@@ -2000,6 +2109,40 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         resetPowerControllerEditor();
+    }
+
+    function renderPowerControllerCredentialOptions() {
+        if (!powerControllerCredentialRefEl) return;
+        const driver = powerControllerDriverEl?.value || 'mock';
+        const current = String(powerControllerCredentialRefEl.value || '').trim();
+        const compatibleTypes = driver === 'apc-powernet-snmp'
+            ? new Set(['snmpv1', 'snmpv2c', 'snmpv3'])
+            : driver === 'netio-json'
+                ? new Set(['netio-http-basic'])
+                : null;
+        const credentials = powerCredentials.filter(credential => {
+            const reference = String(credential?.credentialRef || '').trim();
+            if (!reference) return false;
+            return !compatibleTypes || compatibleTypes.has(String(credential.type || '').trim().toLowerCase());
+        });
+        const currentIsCompatible = credentials.some(credential =>
+            String(credential.credentialRef || '').trim() === current);
+        const emptyLabel = driver === 'apc-powernet-snmp'
+            ? 'Select SNMP credential'
+            : driver === 'netio-json'
+                ? 'No credential (optional)'
+                : 'No credential required';
+        const options = [`<option value="">${emptyLabel}</option>`];
+        if (current && !currentIsCompatible) {
+            options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)} — unavailable for this driver</option>`);
+        }
+        credentials.forEach(credential => {
+            const reference = String(credential.credentialRef || '').trim();
+            const type = String(credential.type || 'unknown').trim();
+            options.push(`<option value="${escapeHtml(reference)}">${escapeHtml(reference)} · ${escapeHtml(type)}</option>`);
+        });
+        powerControllerCredentialRefEl.innerHTML = options.join('');
+        powerControllerCredentialRefEl.value = current;
     }
 
     function renderPowerControllerOutlets() {
@@ -2169,7 +2312,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.status === 401) throw new Error('Lab Manager session required');
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             showToast(`Power controller ${controller.id} saved`, 'success');
-            await loadPowerControllers({ skipAuthPrompt: true });
+            await loadPowerControllers({ skipAuthPrompt: true, forceStatusRefresh: true });
             if (powerControllerSelectEl) powerControllerSelectEl.value = controller.id;
             loadSelectedPowerController();
         } catch (err) {
@@ -2191,9 +2334,18 @@ document.addEventListener('DOMContentLoaded', () => {
             row.className = 'power-controller-row';
             const discovery = controller.discovery || {};
             const reachable = discovery.reachable === true;
-            const discoveryText = reachable
-                ? 'reachable'
-                : discovery.errorCode ? `unreachable (${discovery.errorCode})` : 'unknown reachability';
+            const discoveryText = powerControllerStatusLoading
+                ? 'checking'
+                : powerControllerStatusError
+                    ? 'status unavailable'
+                    : reachable
+                        ? 'reachable'
+                        : discovery.errorCode ? `unreachable (${discovery.errorCode})` : 'unknown reachability';
+            const discoveryClass = powerControllerStatusLoading
+                ? 'soft'
+                : powerControllerStatusError
+                    ? 'warn'
+                    : reachable ? 'good' : 'warn';
             const safeControllerId = escapeHtml(controller.id);
             const safeName = escapeHtml(controller.name || controller.id);
             const safeDriver = escapeHtml(controller.driver);
@@ -2206,7 +2358,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="host-title">${safeName}</div>
                         <div class="host-meta mono">${safeControllerId} · ${safeDriver} · ${safeHost}</div>
                     </div>
-                    <span class="pill ${reachable ? 'good' : 'warn'}">${safeDiscovery}</span>
+                    <span class="pill ${discoveryClass}">${safeDiscovery}</span>
                 </div>
                 <div class="power-outlet-list">
                     ${outlets.length ? outlets.map(outlet => renderPowerOutlet(controller, outlet)).join('') : '<div class="empty">No outlets configured.</div>'}
@@ -2278,7 +2430,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.status === 401) throw new Error('Lab Manager session required');
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             showToast(`Power ${action} completed for outlet ${outletId}`, 'success');
-            await loadPowerControllers({ skipAuthPrompt: true });
+            void loadPowerControllerStatuses({ forceRefresh: true, skipAuthPrompt: true });
         } catch (err) {
             showToast(`Power ${action} failed: ${err.message}`, 'error');
         } finally {
@@ -2289,6 +2441,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function createPowerIdempotencyKey() {
         if (window.crypto?.randomUUID) return `lab-manager:${window.crypto.randomUUID()}`;
         return `lab-manager:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    }
+
+    function formatHeartbeatStreamError(host, payload) {
+        const code = String(payload?.code || '').trim().toUpperCase();
+        const message = heartbeatStreamErrorMessages[code] || 'connection error';
+        const requestId = String(payload?.requestId || '').trim();
+        const safeRequestId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? requestId : '';
+        const requestSuffix = code === 'INTERNAL_ERROR' && safeRequestId
+            ? ` (request ID ${safeRequestId})`
+            : '';
+        return `Heartbeat unavailable for ${host}: ${message}${requestSuffix}`;
     }
 
     function startHeartbeatStream(host) {
@@ -2321,18 +2484,17 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (_) {
                 // Browser connection errors do not always include a payload.
             }
-            if (errorPayload?.code === 'WINRM_CREDENTIALS_REQUIRED') {
+            if (heartbeatConfigurationErrorCodes.has(String(errorPayload?.code || '').trim().toUpperCase())) {
                 stopHeartbeatStream(host);
-                showToast(`Heartbeat unavailable for ${host}: WinRM credentials are required`, 'error');
+                showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
                 return;
             }
             if (source.readyState === EventSourceCtor.CLOSED) {
                 stopHeartbeatStream(host);
             }
             if (!heartbeatStreamErrorShown[host]) {
-                const errorText = evt?.data || 'Heartbeat SSE connection error';
                 heartbeatStreamErrorShown[host] = true;
-                showToast(`Heartbeat stream error for ${host}: ${errorText}`, 'error');
+                showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
             }
         });
     }

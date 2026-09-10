@@ -142,6 +142,10 @@ DYNAMIC_CONFIG_PATH = os.getenv("OPS_DYNAMIC_CONFIG", "/app/data/hosts.json")
 OPS_CREDENTIALS_PATH = os.getenv("OPS_CREDENTIALS_PATH", "/app/data/winrm-credentials.json")
 OPS_WINRM_TRUST_PATH = os.getenv("OPS_WINRM_TRUST_PATH", "/app/data/winrm-certificates")
 POWER_CONFIG_PATH = os.getenv("OPS_POWER_CONFIG", "/app/data/power-controllers.json")
+POWER_STATUS_CACHE_SECONDS = max(
+    0.0,
+    float(os.getenv("OPS_POWER_STATUS_CACHE_SECONDS", "5")),
+)
 MYSQL_DSN = os.getenv("MYSQL_DSN")
 GUACAMOLE_MYSQL_DSN = os.getenv("GUACAMOLE_MYSQL_DSN")
 OPS_MYSQL_DATABASE = os.getenv("OPS_MYSQL_DATABASE") or os.getenv("BLOCKCHAIN_MYSQL_DATABASE")
@@ -1438,6 +1442,7 @@ try:
         record_operation=_record_power_operation,
         operation_store=POWER_OPERATION_STORE,
         credential_resolver=POWER_CREDENTIAL_STORE.get,
+        status_cache_ttl_seconds=POWER_STATUS_CACHE_SECONDS,
     )
 except Exception as exc:
     # A malformed or unavailable power catalog must fail closed for power
@@ -1449,6 +1454,7 @@ except Exception as exc:
         record_operation=_record_power_operation,
         operation_store=POWER_OPERATION_STORE,
         credential_resolver=POWER_CREDENTIAL_STORE.get,
+        status_cache_ttl_seconds=POWER_STATUS_CACHE_SECONDS,
     )
 APP.extensions["power_runtime"] = POWER_RUNTIME
 APP.register_blueprint(power_bp)

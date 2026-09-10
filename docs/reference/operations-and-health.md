@@ -39,6 +39,14 @@ The browser view at `/gateway-health/` presents the same aggregate result and,
 after Lab Manager authentication, the service and infrastructure diagnostics.
 It is an operator aid, not a replacement for the public health contract.
 
+Power-controller reachability is intentionally not folded into the aggregate
+`/ops/health` result. A PDU can be offline or temporarily unreachable while the
+Ops Worker and the rest of the access plane remain healthy. Inspect configured
+controllers in Lab Manager `Energy`: the local catalog loads independently,
+while live discovery and outlet state are checked in the background. Use the
+controller `Refresh` action to force a fresh status request when diagnosing a
+private-network or SNMP issue.
+
 `GET /gateway/health/details` also exposes `services.demo` for the configured
 anonymous demo. Its status is one of:
 
@@ -112,6 +120,8 @@ flowchart TD
 | End user sees Guacamole login | Access-code redemption and reservation state | Use the access-code flow, not a browser JWT or a manual Guacamole account. |
 | Guacamole connection fails | `guacd` and the private RDP/VNC/SSH route | Test only from the controlled lab network and verify the selected local connection ID. |
 | Ops action fails | `/ops/health/details`, host catalog, WinRM TLS and CIDR policy | Confirm host address is allowed by `WINRM_MANAGEMENT_CIDRS`; verify the encrypted credential reference. |
+| Power controller is `checking`, `unknown`, or `unreachable` | Lab Manager `Energy` status, controller host/port, private route, credentials and Ops Worker logs | Wait for the background status check, then use `Refresh`; for APC verify UDP `161`, the source-IP authorization and the credential's SNMP version. |
+| Heartbeat stream fails for an incomplete Station | Host-card `WinRM credentials` and `WinRM TLS trust` statuses, then `/ops/health/details` and Ops Worker logs | Save the WinRM credential and install the Station certificate before retrying heartbeat; retain any `requestId` for log correlation. |
 | FMU route returns `503` | `FMU_RUNNER_ENABLED` and active profile | Start exactly one FMU profile and verify the public audience and, for production, Station connectivity. |
 
 ## Useful Compose commands
@@ -164,6 +174,7 @@ rotation. Use the institution's approved encrypted backup process.
 | `blockchain-data/` | Encrypted institutional wallets and backend key material. |
 | `.env` and `blockchain-services/.env` | Deployment configuration and secret references. Keep outside source control. |
 | `OPS_SECRETS_KEY` | Required to decrypt stored WinRM credentials. It must be stable and recoverable. |
+| `OPS_POWER_CONFIG`, `OPS_POWER_CREDENTIALS_PATH`, and `OPS_SECRETS_KEY` | Provider-local power-controller catalog and encrypted APC/SNMP/NETIO credentials. Back them up together through the approved encrypted process; never expose the credential store or copy it into an unprotected backup. |
 | MySQL data volume | Guacamole, backend operational, and Ops Worker state. |
 | `lab-content/` | Lab Manager-generated metadata and uploaded provider content. |
 | AAS/FMU volumes when enabled | BaSyx shell data and FMU history, according to provider retention policy. |

@@ -78,20 +78,36 @@ runtime is reloaded when possible.
 
 ### 2. Register the controller and outlets
 
-In `Energy` → `Power Controllers`, select `New controller` and complete:
+In `Energy` → `Power Controllers`, select `New controller`. The `Existing
+controller` selector is populated from the provider-local catalog; it does not
+contact the physical device. Complete the fields in the order shown by the UI:
 
-- `Controller ID`: stable identifier used by policies, for example `pdu-lab-01`;
 - `Name`: operator-friendly name;
 - `Driver`: `APC PowerNet SNMP`, `NETIO REST JSON`, or `Mock (development)`;
-- `Enabled`, `Host / IP address`, `Port`, and `Credential reference`; and
+- `Host / IP address` and `Enabled`;
+- `Controller ID (generated)`: after entering the driver and host, accept the
+  suggested stable local identifier, for example `apc-10-192-38-80`, unless
+  the laboratory has an established naming convention. When editing an
+  existing controller, this identifier is fixed because policies reference it;
+- `Port` and `Credential reference`; and
 - `Timeout (seconds)` and `Retries` appropriate for the private network.
+
+The controller `Credential reference` is a dropdown populated with saved
+credentials compatible with the selected driver. Save the credential first;
+the APC driver accepts `SNMP v1`, `SNMP v2c`, and `SNMP v3` references, while
+NETIO uses `NETIO HTTP Basic`. The controller catalog never contains the
+community, passwords, or SNMPv3 passphrases.
 
 For APC:
 
 - normally use SNMP port `161`;
 - select `APC profile`: `Auto-detect`, `Legacy PowerNet`, or `rPDU2`;
-- set `SNMP version` when the driver default should not be used; and
-- use an SNMP credential matching that version.
+- do not configure a second SNMP version on the controller: the selected
+  credential type determines whether the driver uses v1, v2c, or v3; and
+- start with `Auto-detect` unless the device documentation identifies a
+  profile. Older PowerNet cards such as the AP7920 may use `Legacy PowerNet`.
+  A `TIMEOUT` normally indicates a network, UDP/161, source-IP authorization,
+  or credential problem; verify those before changing the profile.
 
 For NETIO:
 
@@ -116,6 +132,14 @@ Controller`. The catalog is written to `OPS_POWER_CONFIG` and the worker
 reloads its runtime. If the physical controller is unavailable during reload,
 the configuration may still persist, but actions will fail until connectivity
 or credentials are fixed.
+
+The catalog and live hardware status are loaded separately. The controller
+selector and configuration cards can render from the local catalog before the
+Gateway contacts the device. The status card may briefly show `checking` or
+`unknown` while discovery and outlet read-back run in the background. The
+`Refresh` button reloads the catalog and forces a live status refresh; normal
+status requests use a short cache of five seconds by default, configurable
+with `OPS_POWER_STATUS_CACHE_SECONDS`.
 
 ### 3. Create the laboratory policy
 
@@ -161,10 +185,12 @@ the visible laboratory name. Renaming the lab must not create a second policy.
 
 ### 4. Run a controlled test
 
-Start with a non-critical outlet and a clear `Operation reason`.
+Start with a non-critical outlet and a clear `Operation reason`. Wait for the
+controller status to finish checking; an initial `checking` or `unknown` state
+does not by itself mean that the device is unreachable.
 
-1. In `Lab Power Control`, confirm that the controller appears, its outlets
-   have the expected names, and their state is not `unknown`.
+1. In `Lab Power Control`, confirm that the controller appears as `reachable`,
+   its outlets have the expected names, and their state is not `unknown`.
 2. Run `On`, wait for the equipment to start, and verify the read-back state.
 3. Run `Off` only when the equipment tolerates that test.
 4. Use `Cycle` only when `Cycle off time` is safe for the equipment.
@@ -236,9 +262,10 @@ operation.
 
 | Symptom | Checks |
 | --- | --- |
+| `Existing controller` or `Credential reference` is slow or empty | These selectors use the local Ops Worker catalogs, not the physical device. Check the corresponding `OPS_POWER_*` path, volume permissions, session, and worker logs. |
+| Controller remains `checking` or `unknown` | Wait for the background status request, then use `Refresh`. If it persists, check the host/IP, UDP port `161`, private route, APC profile, source-IP authorization, and credential type/values. |
 | `Laboratory` does not show the lab | Publish it in `Labs`, verify the Lab Manager session, and reload the list. |
 | No credentials appear | Check `OPS_POWER_CREDENTIALS_PATH`, `OPS_SECRETS_KEY`, volume permissions, and Ops Worker logs. |
-| Controller appears but is `unknown` | Check host/IP, port, private route, driver, profile/version, and credential reference. |
 | An outlet is missing from the policy | Save it inside the controller and use the device's actual outlet identifier. |
 | A protected outlet is rejected | Enable `Maintenance mode` for an authorized test; do not unprotect it merely to bypass the control. |
 | Policy saves but does not run | Check `Enabled`, `labId`, migration `003`, reservation automation, and `Respect local mode`. |

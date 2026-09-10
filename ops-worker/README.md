@@ -82,6 +82,13 @@ certificate validation.
 
 ### Local power-driver smoke tests
 
+The power controller catalog and live hardware status are separate operations.
+`GET /api/power/controllers` returns the provider-local catalog without
+contacting hardware. `GET /api/power/controllers/status` performs live driver
+checks and reuses the status snapshot for five seconds by default; append
+`?refresh=true` to bypass that cache. Configure the cache duration with
+`OPS_POWER_STATUS_CACHE_SECONDS`.
+
 The APC and NETIO drivers include deterministic local smoke tests. They start
 an in-process UDP/HTTP device double, perform discovery and outlet operations,
 and never contact physical hardware:
@@ -176,7 +183,9 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ demoId: "demo:<jti>", labId, reason: "expired"|"failed"|"disconnected" }`.
     Runs `release-session --reboot` and records the cleanup idempotently.
 - `GET /api/power/controllers`
-  - Returns configured power controllers, capabilities and outlet state.
+  - Returns the local power controller catalog, capabilities and configured outlets without contacting hardware.
+- `GET /api/power/controllers/status`
+  - Returns live controller discovery and outlet state; `?refresh=true` bypasses the short status cache.
 - `POST /api/power/controllers`
   - Validates and atomically registers one provider-local controller and its outlets.
 - `PUT /api/power/controllers/{controllerId}`
@@ -260,6 +269,9 @@ Power configuration:
 
 - `OPS_POWER_CONFIG` (compose default: `/app/data/power-controllers.json`)
 - `OPS_POWER_CREDENTIALS_PATH` (compose default: `/app/data/power-credentials.json`)
+- `OPS_POWER_STATUS_CACHE_SECONDS` (compose default: `5`); controls the
+  short-lived cache used by live controller status checks. Set it to `0` to
+  disable the cache for diagnostics.
 - Start from `power-controllers.sample.json`; copy it to the writable `ops-data` directory and change only provider-local values.
 - The `mock` driver is available for development and CI. The `apc-powernet-snmp` driver supports legacy PowerNet and `rPDU2` profiles, while `netio-json` controls NETIO devices through their `/netio.json` HTTP(S) API. Physical activation remains gated on pilot hardware validation.
 - The catalog contains `controllers`, `outlets` and `policies`. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` can manage the validated controller/outlet catalog and power policies through protected endpoints; all data remains provider-local.
