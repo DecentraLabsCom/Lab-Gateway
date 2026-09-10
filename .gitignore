@@ -101,6 +101,7 @@ ops-data/winrm-credentials.json
 ops-data/power-credentials.json
 ops-data/power-controllers.json
 ops-data/ops-secrets.key
+ops-data/winrm-certificates/
 
 # Smart contracts
 contracts/

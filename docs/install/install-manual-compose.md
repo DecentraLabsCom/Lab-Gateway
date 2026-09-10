@@ -57,6 +57,7 @@ OPS_BACKEND_MYSQL_USER=ops_backend
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_SECRETS_KEY=<stable-fernet-key>
 WINRM_MANAGEMENT_CIDRS=10.7.74.0/24
+OPS_WINRM_TRUST_PATH=/app/data/winrm-certificates
 
 # Guacamole admin (do not use 'guacadmin' in production)
 GUAC_ADMIN_USER=admin
@@ -256,7 +257,8 @@ mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
   fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 \
   fmu-proxy-runtime/binaries/darwin64 \
-  ops-data/guac-revocation-spool
+  ops-data/guac-revocation-spool \
+  ops-data/winrm-certificates
 
 sudo chown -R "${gateway_uid}:${gateway_gid}" \
   blockchain-data certs fmu-access-state lab-content ops-data
@@ -264,7 +266,7 @@ chmod 700 fmu-access-state
 chmod 755 lab-content fmu-data fmu-proxy-runtime \
   fmu-proxy-runtime/binaries fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 fmu-proxy-runtime/binaries/darwin64
-chmod 700 ops-data ops-data/guac-revocation-spool
+chmod 700 ops-data ops-data/guac-revocation-spool ops-data/winrm-certificates
 ```
 
 If you run the stack through `sudo`, preserve the deployment account's

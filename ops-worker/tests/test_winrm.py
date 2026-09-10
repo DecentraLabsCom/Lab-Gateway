@@ -1,14 +1,48 @@
 import os
+import ssl
 import sys
-from unittest.mock import patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import worker
+
+
+def make_winrm_certificate(address="192.168.1.50", *, expired=False):
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    not_before = now - timedelta(days=30)
+    not_after = now - timedelta(days=1) if expired else now + timedelta(days=365)
+    subject = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, "LAB-WS-01"),
+    ])
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(not_before)
+        .not_valid_after(not_after)
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("LAB-WS-01"),
+                x509.IPAddress(worker.ipaddress.ip_address(address)),
+            ]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    return certificate.public_bytes(serialization.Encoding.DER)
 
 
 def test_api_winrm_requires_host_and_command(client):
@@ -130,3 +164,130 @@ def test_winrm_catalog_fails_closed_on_transport_or_management_vlan():
             worker.validate_winrm_catalog({"hosts": [outside_host]})
     finally:
         worker.WINRM_MANAGEMENT_CIDRS = original_cidrs
+
+
+def test_winrm_trust_store_discovers_certificate_for_host(tmp_path, monkeypatch):
+    certificate_dir = tmp_path / "pc-siemens"
+    certificate_dir.mkdir()
+    (certificate_dir / "server.cer").write_bytes(make_winrm_certificate())
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+
+    host = {
+        "name": "PC-Siemens",
+        "address": "192.168.1.50",
+        "winrm_trust_ref": "pc-siemens",
+    }
+    result = worker.refresh_winrm_trust_store([host])
+
+    assert result["PC-Siemens"]["configured"] is True
+    assert result["PC-Siemens"]["status"] == "ready"
+    assert result["PC-Siemens"]["trustRef"] == "pc-siemens"
+    assert len(result["PC-Siemens"]["fingerprintSha256"]) == 64
+    assert result["PC-Siemens"]["sanIpAddresses"] == ["192.168.1.50"]
+
+
+def test_winrm_session_uses_host_certificate_and_keeps_validation_enabled(tmp_path, monkeypatch):
+    certificate_dir = tmp_path / "pc-siemens"
+    certificate_dir.mkdir()
+    (certificate_dir / "server.cer").write_bytes(make_winrm_certificate())
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    monkeypatch.setattr(worker, "_winrm_credentials", lambda *args: ("user", "password"))
+
+    session = MagicMock()
+    session.run_ps.return_value.status_code = 0
+    session.run_ps.return_value.std_out = b"ok"
+    session_factory = patch("worker.winrm.Session", return_value=session)
+    host = {
+        "name": "PC-Siemens",
+        "address": "192.168.1.50",
+        "winrm_trust_ref": "pc-siemens",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }
+    with session_factory as mock_session:
+        worker.run_remote_powershell(host, "Write-Output ok", None, None, None, None, None)
+
+    kwargs = mock_session.call_args.kwargs
+    assert kwargs["ca_trust_path"] == str(certificate_dir / "server.pem")
+    assert kwargs["server_cert_validation"] == "validate"
+    assert (certificate_dir / "server.pem").read_bytes().startswith(b"-----BEGIN CERTIFICATE-----")
+    ssl.create_default_context(cafile=str(certificate_dir / "server.pem"))
+
+
+def test_winrm_session_requires_host_certificate(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    monkeypatch.setattr(worker, "_winrm_credentials", lambda *args: ("user", "password"))
+    host = {
+        "name": "PC-Siemens",
+        "address": "192.168.1.50",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }
+
+    with pytest.raises(worker.WinRMTrustError) as exc_info:
+        worker.run_remote_powershell(host, "Write-Output ok", None, None, None, None, None)
+
+    assert exc_info.value.code == "WINRM_TRUST_REQUIRED"
+
+
+def test_winrm_tls_failure_is_classified(tmp_path, monkeypatch):
+    certificate_dir = tmp_path / "pc-siemens"
+    certificate_dir.mkdir()
+    (certificate_dir / "server.cer").write_bytes(make_winrm_certificate())
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    monkeypatch.setattr(worker, "_winrm_credentials", lambda *args: ("user", "password"))
+    session = MagicMock()
+    session.run_ps.side_effect = worker.requests.exceptions.SSLError("certificate verify failed")
+    host = {
+        "name": "PC-Siemens",
+        "address": "192.168.1.50",
+        "winrm_trust_ref": "pc-siemens",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }
+
+    with patch("worker.winrm.Session", return_value=session), pytest.raises(worker.WinRMTrustError) as exc_info:
+        worker.run_remote_powershell(host, "Write-Output ok", None, None, None, None, None)
+
+    assert exc_info.value.code == "WINRM_TLS_FAILED"
+
+
+def test_winrm_trust_store_reports_expired_certificate(tmp_path, monkeypatch):
+    certificate_dir = tmp_path / "pc-siemens"
+    certificate_dir.mkdir()
+    (certificate_dir / "server.cer").write_bytes(make_winrm_certificate(expired=True))
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+
+    result = worker.refresh_winrm_trust_store([{
+        "name": "PC-Siemens",
+        "address": "192.168.1.50",
+        "winrm_trust_ref": "pc-siemens",
+    }])
+
+    assert result["PC-Siemens"]["configured"] is True
+    assert result["PC-Siemens"]["status"] == "expired"
+    assert result["PC-Siemens"]["errorCode"] == "WINRM_CERTIFICATE_EXPIRED"
+
+
+def test_api_heartbeat_reports_missing_winrm_trust(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    monkeypatch.setattr(worker, "_winrm_credentials", lambda *args: ("user", "password"))
+    original_hosts = worker.HOSTS
+    worker.HOSTS = worker.HostRegistry({"hosts": [{
+        "name": "PC-Siemens",
+        "address": "192.168.1.50",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }]})
+    try:
+        response = client.post("/api/heartbeat/poll", json={"host": "PC-Siemens"})
+    finally:
+        worker.HOSTS = original_hosts
+
+    assert response.status_code == 409
+    assert response.json["code"] == "WINRM_TRUST_REQUIRED"
+    assert response.json["host"] == "PC-Siemens"

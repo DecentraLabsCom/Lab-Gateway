@@ -94,15 +94,15 @@ test('prefers the metadata lab name and falls back to the lab id', () => {
 test('cache-busts the lab manager assets after lab display updates', () => {
   const index = fs.readFileSync(indexPath, 'utf8');
 
-  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v14/);
-  assert.match(index, /lab-manager\.js\?v=workflow-tabs-v14/);
+  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v17/);
+  assert.match(index, /lab-manager\.js\?v=workflow-tabs-v17/);
   assert.match(index, /lab-publisher\.js\?v=workflow-tabs-v2/);
 });
 
 test('labels pending station candidates and does not expose a manual lab selector', () => {
   const index = fs.readFileSync(indexPath, 'utf8');
 
-  assert.match(index, /Lab Station candidates awaiting configuration/);
+  assert.match(index, /Lab Station candidates awaiting configuration:/);
   assert.doesNotMatch(index, /Guacamole connections without an ops host/);
   assert.doesNotMatch(index, /id="provisionHostLabs"/);
 });

@@ -778,6 +778,7 @@ body {
 .actions { display: flex; flex-direction: column; gap: 12px; }
 .inline-actions { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
 .hint { color: var(--muted); font-size: 0.9rem; }
+.hint-spaced { margin-bottom: 0.75rem; }
 .mt-3 { margin-top: 0.75rem; }
 .mt-4 { margin-top: 1rem; }
 .isced-suggestions {
@@ -1092,6 +1093,7 @@ body {
 }
 .host-title { font-weight: 700; }
 .host-title-row { display: flex; align-items: center; gap: 8px; }
+.host-address .mono { color: var(--text); }
 .host-edit-btn {
     width: 30px;
     height: 30px;
@@ -1118,6 +1120,27 @@ body {
 .host-status-text.good { color: var(--success); }
 .host-status-text.warn { color: var(--warning); }
 .host-status-text.bad { color: #ffb3b3; }
+.host-status-action {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline dotted currentColor;
+    text-underline-offset: 3px;
+}
+.host-status-action:hover,
+.host-status-action:focus-visible {
+    color: var(--text);
+}
+.host-status-action:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+    border-radius: 4px;
+}
 .guacamole-match-trigger {
     display: inline-block;
     outline: none;
@@ -1173,6 +1196,34 @@ body {
 .guacamole-match-name { color: var(--text); }
 .guacamole-match-meta { color: var(--muted); font-size: 0.82rem; }
 .host-meta { color: var(--muted); font-size: 0.9rem; }
+.host-state-column {
+    display: flex;
+    flex-direction: column;
+    align-self: start;
+    gap: 8px;
+}
+.host-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+.host-history {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.host-history-label {
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+.host-history-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+}
+.host-history-item { overflow-wrap: anywhere; }
 .candidate-station-status {
     align-self: start;
     display: flex;

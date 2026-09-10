@@ -181,7 +181,7 @@ def test_host_inventory_links_guacamole_connection_by_hostname(client):
     assert response.status_code == 200
     body = response.get_json()
     assert body["hosts"][0]["name"] == "lab-ws-01"
-    assert body["hosts"][0]["guacamole"]["status"] == "linked"
+    assert body["hosts"][0]["guacamole"]["status"] == "single"
     assert body["hosts"][0]["guacamole"]["connections"][0]["name"] == "RDP Lab 01"
     assert body["hosts"][0]["guacamole"]["connections"][0]["selector"] == "guac:id:7"
     assert body["hosts"][0]["guacamole"]["connections"][0]["hostname"] == "lab-ws-01"
@@ -349,12 +349,12 @@ def test_host_inventory_marks_missing_when_no_connection_matches(client):
 
     assert response.status_code == 200
     body = response.get_json()
-    assert body["hosts"][0]["guacamole"]["status"] == "missing"
+    assert body["hosts"][0]["guacamole"]["status"] == "none"
     assert body["hosts"][0]["guacamole"]["connections"] == []
     assert body["guacamoleUnmatched"][0]["name"] == "Other Desktop"
 
 
-def test_host_inventory_marks_ambiguous_when_multiple_connections_match(client):
+def test_host_inventory_marks_multiple_when_multiple_connections_match(client):
     hosts = [{
         "name": "lab-ws-03",
         "address": "192.168.1.52",
@@ -383,7 +383,7 @@ def test_host_inventory_marks_ambiguous_when_multiple_connections_match(client):
 
     assert response.status_code == 200
     guacamole_status = response.get_json()["hosts"][0]["guacamole"]
-    assert guacamole_status["status"] == "ambiguous"
+    assert guacamole_status["status"] == "multiple"
     assert [conn["name"] for conn in guacamole_status["connections"]] == ["Primary RDP", "Backup RDP"]
 
 

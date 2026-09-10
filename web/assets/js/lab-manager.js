@@ -2435,19 +2435,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const lastForced = operations.lastForcedLogoff;
         const lastPower = operations.lastPowerAction;
         const updated = heartbeat.timestamp;
+        const hasHeartbeat = Boolean(updated);
+        const winrmTrust = getWinrmTrustDisplay(meta);
 
         // Escape all user-controlled data to prevent XSS
         const safeHost = escapeHtml(host);
+        const safeAddress = escapeHtml(meta.address) || 'n/a';
         const canEdit = meta.editable === true;
-        const safeUpdated = escapeHtml(updated) || 'n/a';
-        const safeLastForcedTs = escapeHtml(lastForced && lastForced.timestamp) || 'n/a';
-        const safeLastPowerMode = escapeHtml(lastPower && lastPower.mode);
-        const safeLastPowerTs = escapeHtml(lastPower && lastPower.timestamp);
-        const safeLastPower = safeLastPowerMode ? `${safeLastPowerMode} @ ${safeLastPowerTs}` : 'n/a';
-        const safeGuacamole = escapeHtml(formatGuacamoleStatus(guacamole));
-        const guacamoleClass = guacamoleStatusClass(guacamole.status);
+        const safeUpdated = escapeHtml(formatHostDate(updated, hasHeartbeat));
+        const safeLastForced = escapeHtml(formatLastForcedLogoff(lastForced, hasHeartbeat));
+        const safeLastPower = escapeHtml(formatLastPowerAction(lastPower, hasHeartbeat));
         const guacamoleConnections = Array.isArray(guacamole.connections) ? guacamole.connections : [];
-        const hasGuacamoleMatchDetails = guacamole.status === 'ambiguous' && guacamoleConnections.length > 0;
+        const safeConnections = escapeHtml(formatConnectionsStatus(guacamoleConnections));
+        const connectionsClass = connectionsStatusClass(guacamole);
+        const hasGuacamoleMatchDetails = guacamoleConnections.length > 1;
         const guacamoleDetailsId = 'guacamole-matches-'
             + String(host).replace(/[^A-Za-z0-9_-]/g, '-');
         const guacamoleMatchMarkup = hasGuacamoleMatchDetails
@@ -2466,12 +2467,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const guacamoleStatusMarkup = hasGuacamoleMatchDetails
             ? '<span class="guacamole-match-trigger" tabindex="0"'
                 + ' aria-describedby="' + escapeHtml(guacamoleDetailsId) + '">'
-                + '<span class="host-status-text ' + guacamoleClass + '">' + safeGuacamole + '</span>'
+                + '<span class="host-status-text ' + connectionsClass + '">' + safeConnections + '</span>'
                 + '<span class="guacamole-match-popover" id="' + escapeHtml(guacamoleDetailsId) + '" role="tooltip">'
-                + '<span class="guacamole-match-details-title">Matching connections</span>'
+                + '<span class="guacamole-match-details-title">Connections for this station</span>'
                 + guacamoleMatchMarkup
                 + '</span></span>'
-            : '<span class="host-status-text ' + guacamoleClass + '">' + safeGuacamole + '</span>';
+            : '<span class="host-status-text ' + connectionsClass + '">' + safeConnections + '</span>';
 
         const row = document.createElement('div');
         row.className = 'host-row';
@@ -2482,16 +2483,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="host-title">${safeHost}</div>
                     ${canEdit ? '<button class="host-edit-btn" data-action="edit-host" title="Edit host" aria-label="Edit host"><svg class="host-edit-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg></button>' : ''}
                 </div>
-                <div class="host-meta">Updated: ${safeUpdated}</div>
-                <div class="host-meta">Guacamole: ${guacamoleStatusMarkup}</div>
-                <div class="host-meta">WinRM credentials: <span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></div>
-                <div class="host-meta">Last forced logoff: ${safeLastForcedTs}</div>
-                <div class="host-meta">Last power: ${safeLastPower}</div>
+                <div class="host-meta host-address">Address: <span class="mono">${safeAddress}</span></div>
+                <div class="host-meta">Last heartbeat: ${safeUpdated}</div>
+                <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
+                <div class="host-meta">WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update WinRM credentials" aria-label="Set or update WinRM credentials"><span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></button></div>
+                <div class="host-meta">WinRM TLS trust: <span class="host-status-text ${winrmTrust.className}">${winrmTrust.label}</span></div>
             </div>
-            <div class="host-meta">
-                <span class="pill ${ready === true ? 'good' : ready === false ? 'bad' : ''}">Ready: ${ready === undefined ? 'n/a' : ready}</span>
-                <span class="pill ${localSession ? 'warn' : 'soft'}">Local session: ${localSession ? 'yes' : 'no'}</span>
-                <span class="pill ${localMode ? 'warn' : 'soft'}">Local mode: ${localMode ? 'on' : 'off'}</span>
+            <div class="host-state-column">
+                <div class="host-meta host-state" aria-label="Current station state">
+                    <span class="pill ${ready === true ? 'good' : ready === false ? 'bad' : 'soft'}">Ready: ${formatBool(ready)}</span>
+                    <span class="pill ${localSession === true ? 'warn' : 'soft'}">Local session: ${formatBool(localSession)}</span>
+                    <span class="pill ${localMode === true ? 'warn' : 'soft'}">Local mode: ${formatBool(localMode)}</span>
+                </div>
+                <div class="host-meta host-history">
+                    <span class="host-history-label">Last activity:</span>
+                    <span class="host-history-items">
+                        <span class="host-history-item">Forced logoff: ${safeLastForced}</span>
+                        <span class="host-history-item">Power action: ${safeLastPower}</span>
+                    </span>
+                </div>
             </div>
             <div class="host-actions">
                 <button class="mini-btn" data-action="poll">Heartbeat</button>
@@ -2500,7 +2510,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="mini-btn" data-action="release">Release</button>
                 <button class="mini-btn danger" data-action="shutdown">Shutdown</button>
                 <button class="mini-btn secondary" data-action="toggle-local-mode">${localMode ? 'Disable' : 'Enable'} Local</button>
-                <button class="mini-btn" data-action="set-winrm-credentials">WinRM Credentials</button>
                 <button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS</button>
             </div>
         `;
@@ -3003,26 +3012,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function formatGuacamoleStatus(guacamole) {
-        const connections = Array.isArray(guacamole.connections) ? guacamole.connections : [];
-        if (guacamole.status === 'linked' && connections[0]) {
-            const conn = connections[0];
-            return `linked - ${conn.name || conn.hostname || 'connection'} (${conn.protocol || 'unknown'})`;
-        }
-        if (guacamole.status === 'ambiguous') {
-            return `ambiguous - ${connections.length} matches`;
-        }
-        if (guacamole.status === 'missing') {
-            return 'missing';
-        }
-        return 'unknown';
+    function formatConnectionsStatus(connections) {
+        if (!connections.length) return 'No connections';
+        if (connections.length > 1) return `${connections.length} connections`;
+
+        const connection = connections[0] || {};
+        const name = connection.name || connection.hostname;
+        const protocol = connection.protocol;
+        if (!name) return '1 connection';
+        return `1 connection - ${name}${protocol ? ` (${protocol})` : ''}`;
     }
 
-    function guacamoleStatusClass(status) {
-        if (status === 'linked') return 'good';
-        if (status === 'ambiguous') return 'warn';
-        if (status === 'missing') return 'bad';
+    function connectionsStatusClass(guacamole) {
+        if (guacamole.status === 'none') return 'bad';
+        if (guacamole.status === 'single' || guacamole.status === 'multiple') return 'good';
         return 'soft';
+    }
+
+    function getWinrmTrustDisplay(meta) {
+        const status = String(meta.winrmTrustStatus || '').trim().toLowerCase()
+            || (meta.winrmTrustConfigured === true ? 'ready' : 'missing');
+        const states = {
+            missing: { label: 'missing', className: 'warn' },
+            ready: { label: 'ready', className: 'good' },
+            expired: { label: 'expired', className: 'bad' },
+            'not-yet-valid': { label: 'not yet valid', className: 'bad' },
+            invalid: { label: 'invalid', className: 'bad' },
+        };
+        return states[status] || { label: 'unavailable', className: 'warn' };
+    }
+
+    function formatHostDate(value, hasHeartbeat) {
+        return value ? formatDate(value) : hasHeartbeat ? 'never' : 'not available';
+    }
+
+    function formatLastForcedLogoff(info, hasHeartbeat) {
+        if (!info || !info.timestamp) return hasHeartbeat ? 'never' : 'not available';
+        const parts = [formatDate(info.timestamp)];
+        if (info.user) parts.push(info.user);
+        return parts.join(' - ');
+    }
+
+    function formatLastPowerAction(info, hasHeartbeat) {
+        if (!info || (!info.timestamp && !info.mode)) return hasHeartbeat ? 'never' : 'not available';
+        const parts = [];
+        if (info.mode) parts.push(info.mode);
+        if (info.timestamp) parts.push(formatDate(info.timestamp));
+        return parts.join(' - ');
     }
 
     function handleHostActions(e) {

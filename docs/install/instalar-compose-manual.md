@@ -57,6 +57,7 @@ OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_GUACAMOLE_MYSQL_PASSWORD=cambia_a_contraseña_segura
 OPS_SECRETS_KEY=<clave-fernet-estable>
 WINRM_MANAGEMENT_CIDRS=10.7.74.0/24
+OPS_WINRM_TRUST_PATH=/app/data/winrm-certificates
 
 # Administrador de Guacamole (no uses 'guacadmin' en producción)
 GUAC_ADMIN_USER=admin
@@ -249,7 +250,8 @@ mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
   fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 \
   fmu-proxy-runtime/binaries/darwin64 \
-  ops-data/guac-revocation-spool
+  ops-data/guac-revocation-spool \
+  ops-data/winrm-certificates
 
 sudo chown -R "${gateway_uid}:${gateway_gid}" \
   blockchain-data certs fmu-access-state lab-content ops-data
@@ -257,7 +259,7 @@ chmod 700 fmu-access-state
 chmod 755 lab-content fmu-data fmu-proxy-runtime \
   fmu-proxy-runtime/binaries fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 fmu-proxy-runtime/binaries/darwin64
-chmod 700 ops-data ops-data/guac-revocation-spool
+chmod 700 ops-data ops-data/guac-revocation-spool ops-data/winrm-certificates
 ```
 
 En particular, `fmu-access-state` debe ser escribible por el UID de OpenResty

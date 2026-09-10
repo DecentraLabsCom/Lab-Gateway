@@ -104,7 +104,9 @@ publication or deletion until the current state and transaction are checked.
 In `Operations` → `Lab Station Ops`, the interface shows:
 
 - hosts configured in `ops-worker/hosts.json` and `ops-data/hosts.json`;
-- heartbeat, preparation state, local session, and WoL diagnostics; and
+- the station address, last heartbeat, current readiness/local-session/local-mode
+  state, and the last forced-logoff and power-action information;
+- the number of matching remote-access connections; and
 - Guacamole connections that are not yet associated with an Ops host.
 
 Click `Refresh` after changing the inventory. The UI starts a heartbeat stream
@@ -138,11 +140,46 @@ edited in that catalog.
 
 ### Store WinRM credentials
 
-From the host credential action, open `Set WinRM Credentials` and save the user
-and password for its `credential_ref`. The password is stored in the encrypted
+Click the `missing` or `configured` WinRM credential status in the host card,
+open `Set WinRM Credentials`, and save the user and password for its
+`credential_ref`. The password is stored in the encrypted
 Ops Worker credential store, not in `hosts.json`.
 
 Until credentials are saved, heartbeat streaming is not started for that host.
+
+The host card reports credentials and certificate trust separately:
+
+- `WinRM credentials: missing` means no user/password is stored;
+- `WinRM TLS trust: missing` means credentials exist but the Station certificate
+  has not been copied to the Gateway;
+- `WinRM TLS trust: ready` means the Gateway can parse the local certificate and
+  it is currently within its validity period; and
+- `expired`, `not yet valid`, or `invalid` identify a certificate that cannot be
+  used.
+
+`ready` describes the local trust prerequisite. A successful heartbeat is still
+needed to prove network reachability, authentication, and that the certificate
+served by the Station matches the trusted certificate.
+
+To bootstrap certificate trust before the Lab Manager upload control is
+available, copy the public certificate exported by Lab Station to the Gateway
+host:
+
+```text
+ops-data/winrm-certificates/<lower-case-host-name>/server.cer
+```
+
+For example, the certificate for `PC-Siemens` is copied from
+`C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer` to
+`ops-data/winrm-certificates/pc-siemens/server.cer`. The ops worker discovers
+the file when it starts or when the host catalog is reloaded, validates its
+format and dates, calculates the fingerprints, generates the local PEM trust
+copy when necessary and uses it only for that host's WinRM sessions. `GET /ops/api/hosts` reports the resulting
+`winrmTrustStatus`, fingerprint and certificate metadata.
+
+If the certificate is missing, malformed or expired, the heartbeat reports a
+specific trust error instead of treating the failure as an authentication
+problem. Do not disable TLS validation or configure `TrustedHosts`.
 
 WinRM must use HTTPS/TLS on port `5986`, and the address must belong to
 `WINRM_MANAGEMENT_CIDRS`. Do not publish the listener or Ops Worker to the

@@ -129,7 +129,7 @@ JWT `iss`/`sub` must use that same canonical value.
 | Demo laboratory | `MARKETPLACE_URL`, `DEMO_USER`, `DEMO_LAB_ID`, `DEMO_CONNECTION_ID`, `DEMO_HEARTBEAT_MAX_AGE_SECONDS`, `DEMO_SESSION_TTL_SECONDS`, `DEMO_RATE_LIMIT_PER_MINUTE`, `DEMO_STATION_TIMEOUT_SECONDS`, `DEMO_PENDING_LEASE_SECONDS` | Configure the lab and Guacamole connection together. OpenResty exposes the protected readiness result in `/gateway/health/details`; the demo hand-off stays fail-closed until it is `ready` and the physical lifecycle call completes. The pending lease is bounded to 30–60 seconds so an abandoned browser handoff cannot hold the demo slot for the full session TTL. |
 | Guacamole | `GUAC_ADMIN_*`, `API_SESSION_TIMEOUT`, `JWT_GUAC_IDLE_TIMEOUT_SECONDS`, `BAN_*` | Manual administrator login is an operations path, not the end-user hand-off. Keep anti-brute-force controls enabled. |
 | FMU | `FMU_RUNNER_ENABLED`, `FMU_BACKEND_MODE`, `FMU_LOCAL_DEV_MODE`, `FMU_JWT_AUDIENCE`, `AUTH_JWKS_URL`, `FMU_STATION_*`, `FMU_GATEWAY_ID` | The audience must be the exact public FMU `accessURI`. `FMU_GATEWAY_ID` uses the same host-plus-non-default-port identity as observer credentials. `FMU_BACKEND_MODE` selects local versus Lab Station execution; Full/Lite selects the JWKS source. `AUTH_JWKS_URL` is an optional explicit override and must use HTTPS, except for loopback/private hosts used by local Compose networking. |
-| Ops / Lab Station | `OPS_SECRETS_KEY`, `WINRM_MANAGEMENT_CIDRS`, `OPS_ALLOWED_COMMANDS`, `OPS_RESERVATION_*`, `OPS_DISCOVERY_*`, `NOTIFICATION_SERVICE_*` | Use TLS WinRM on 5986 and a restricted management network. Losing the stable Fernet key makes stored credentials unreadable. The scheduler, timeline, discovery and notification controls are forwarded to `ops-worker` from the root `.env`. |
+| Ops / Lab Station | `OPS_SECRETS_KEY`, `OPS_WINRM_TRUST_PATH`, `WINRM_MANAGEMENT_CIDRS`, `OPS_ALLOWED_COMMANDS`, `OPS_RESERVATION_*`, `OPS_DISCOVERY_*`, `NOTIFICATION_SERVICE_*` | Use TLS WinRM on 5986 and a restricted management network. Losing the stable Fernet key makes stored credentials unreadable. The scheduler, timeline, discovery, notification controls and per-host certificate trust path are forwarded to `ops-worker` from the root `.env`. |
 | AAS | `BASYX_AAS_URL`, `AAS_ALLOWED_HOSTS`, `AAS_SERVICE_TOKEN` | Use `https://` and exact host allow-listing for an external AAS. Caller JWTs are not forwarded. |
 | CORS and proxies | `CORS_ALLOWED_ORIGINS`, `ADMIN_TRUST_FORWARDED_IP` | Keep origins explicit. Set `ADMIN_TRUST_FORWARDED_IP=true` only when forwarded client-IP headers come from a controlled upstream proxy; set it false when OpenResty is the public edge. The template default `true` assumes a private upstream proxy and must be changed for direct public exposure. |
 
@@ -145,9 +145,16 @@ from the root `.env`: `OPS_ALLOWED_COMMANDS`, `OPS_POLL_ENABLED`,
 `NOTIFICATION_SERVICE_RETRY_ATTEMPTS`,
 `NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS`,
 `OPS_DISCOVERY_TIMEOUT_SECONDS`, `OPS_DISCOVERY_LABSTATION_PORTS` and
-`OPS_DISCOVERY_LABSTATION_PATHS`. Defaults are kept in `.env.example` and in
+`OPS_DISCOVERY_LABSTATION_PATHS`, plus `OPS_WINRM_TRUST_PATH`. Defaults are kept in `.env.example` and in
 the Compose interpolation expressions so the service documentation and the
 deployed container use the same contract.
+
+`OPS_WINRM_TRUST_PATH` defaults to `/app/data/winrm-certificates`, which is
+inside the persistent `ops-data` bind mount. Each host certificate is placed
+under `<lower-case-winrm-trust-ref>/server.cer`; the worker creates the host
+directories at startup/reload, materializes a PEM copy for Requests/OpenSSL
+and applies it as a per-host Requests/pywinrm trust path. This is an
+application trust store, not a global container CA installation.
 
 ## Optional Compose profiles
 

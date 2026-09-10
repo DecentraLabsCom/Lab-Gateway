@@ -1099,6 +1099,7 @@ mkdir -p fmu-proxy-runtime/binaries/linux64
 mkdir -p fmu-proxy-runtime/binaries/win64
 mkdir -p fmu-proxy-runtime/binaries/darwin64
 mkdir -p ops-data/guac-revocation-spool
+mkdir -p ops-data/winrm-certificates
 chmod 700 certs 2>/dev/null || true
 chmod 700 blockchain-data 2>/dev/null || true
 chmod 700 fmu-access-state 2>/dev/null || true
@@ -1110,6 +1111,7 @@ chmod 755 fmu-proxy-runtime/binaries/linux64 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/win64 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/darwin64 2>/dev/null || true
 chmod 700 ops-data/guac-revocation-spool 2>/dev/null || true
+chmod 700 ops-data/winrm-certificates 2>/dev/null || true
 secure_gateway_state
 
 echo

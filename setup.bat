@@ -911,6 +911,7 @@ if not exist fmu-proxy-runtime\binaries\win64 mkdir fmu-proxy-runtime\binaries\w
 if not exist fmu-proxy-runtime\binaries\darwin64 mkdir fmu-proxy-runtime\binaries\darwin64
 if not exist ops-data mkdir ops-data
 if not exist ops-data\guac-revocation-spool mkdir ops-data\guac-revocation-spool
+if not exist ops-data\winrm-certificates mkdir ops-data\winrm-certificates
 if not exist secrets mkdir secrets
 if not exist certs\.gitkeep type nul > certs\.gitkeep
 call :SecureEnvFile "%ROOT_ENV_FILE%"

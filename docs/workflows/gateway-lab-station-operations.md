@@ -30,6 +30,39 @@ each Lite owns the complete local management path.
 
 WinRM credentials are deliberately separate from `hosts.json`. A host refers to a `credential_ref`; the ops worker encrypts the corresponding credentials using the required `OPS_SECRETS_KEY`.
 
+WinRM certificate trust is also separate from the credentials. The first
+implementation uses the persistent `ops-data` bind mount. For a host whose
+name is `PC-Siemens`, copy the public certificate exported by Lab Station to:
+
+```text
+ops-data/winrm-certificates/pc-siemens/server.cer
+```
+
+The directory name is the lower-case `winrm_trust_ref`; when that field is not
+present in the host catalog, it defaults to the host name. On startup and
+after `POST /ops/api/hosts/reload`, ops-worker creates the directory layout and
+inspects the certificate. If the Windows export is DER, the worker also
+materializes a `server.pem` copy next to it because Requests/OpenSSL consumes
+the PEM form. Every WinRM session then passes that generated PEM as its
+per-host `ca_trust_path` while keeping TLS validation enabled. A certificate
+is never installed as a global trust override and is never trusted for another
+host.
+
+The manual bootstrap procedure is:
+
+1. Run `LabStation.exe winrm configure` on the Windows station.
+2. Copy `C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer` to the
+   matching host directory under `ops-data/winrm-certificates/`.
+3. Confirm the certificate thumbprint out of band. For PC-Siemens the current
+   SHA-1 thumbprint is `DAD0D2C0835FC00796BB5AFCA4D69A88E7EE0799`.
+4. Restart ops-worker or call `POST /ops/api/hosts/reload`.
+5. Check `GET /ops/api/hosts` for `winrmTrustStatus=ready` and run a heartbeat.
+
+The certificate file must be the public CER/DER or PEM export only. Do not
+copy a private key, use `verify=false`, or use `TrustedHosts` as a substitute
+for certificate validation. The future Lab Manager upload flow will manage
+the same per-host trust store; it does not change this trust boundary.
+
 ## Host inventory and telemetry
 
 An ops host records the managed address, optional MAC address, credential reference, telemetry paths, and the laboratory IDs assigned to that host. A minimal entry is:

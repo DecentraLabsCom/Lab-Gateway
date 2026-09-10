@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 const repoRoot = new URL('../../', import.meta.url);
 const scriptPath = new URL('web/assets/js/lab-manager.js', repoRoot);
+const indexPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement(id) {
   const listeners = new Map();
@@ -18,6 +19,7 @@ function createElement(id) {
     hidden: false,
     textContent: '',
     innerHTML: '',
+    rawInnerHTML: '',
     style: {},
     options: [],
     files: [],
@@ -162,18 +164,25 @@ function loadLabManager({
       const element = createElement(tagName);
       if (tagName === 'div') {
         let text = '';
+        let html = null;
         Object.defineProperty(element, 'textContent', {
           get: () => text,
-          set: (value) => { text = String(value ?? ''); },
+          set: (value) => {
+            text = String(value ?? '');
+            html = null;
+          },
         });
         Object.defineProperty(element, 'innerHTML', {
-          get: () => text
+          get: () => html ?? text
             .replaceAll('&', '&amp;')
             .replaceAll('<', '&lt;')
             .replaceAll('>', '&gt;')
             .replaceAll('"', '&quot;')
             .replaceAll("'", '&#39;'),
-          set: () => {},
+          set: (value) => {
+            html = String(value ?? '');
+            element.rawInnerHTML = html;
+          },
         });
       }
       return element;
@@ -1339,7 +1348,7 @@ test('edits a dynamic ops host from the pencil action', async () => {
           heartbeatPath: 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json',
           editable: true,
           winrmConfigured: false,
-          guacamole: { status: 'ambiguous', connections: [] },
+          guacamole: { status: 'none', connections: [] },
         }],
         guacamoleUnmatched: [],
       }),
@@ -1399,22 +1408,92 @@ test('uses a self-contained visible pencil icon for editable ops hosts', () => {
   assert.match(styles, /\.host-edit-icon[\s\S]*width: 16px[\s\S]*height: 16px[\s\S]*fill: currentColor/);
 });
 
-test('renders host statuses without pills and reveals ambiguous Guacamole matches on hover or focus', () => {
+test('renders station identity, connection counts, operation history and WinRM trust states', () => {
   const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
   const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
 
   assert.match(script, /host-status-text/);
-  assert.doesNotMatch(script, /Guacamole: <span class="pill \$\{guacamoleClass\}"/);
+  assert.match(script, /Address: <span class="mono">\$\{safeAddress\}/);
+  assert.match(script, /Last heartbeat: \$\{safeUpdated\}/);
+  assert.match(script, /Last activity:/);
+  assert.match(script, /WinRM TLS trust:/);
+  assert.match(script, /formatConnectionsStatus/);
+  assert.match(script, /return 'No connections'/);
+  assert.match(script, /\$\{connections\.length\} connections/);
+  assert.match(script, /meta\.winrmTrustStatus/);
+  assert.match(script, /formatBool\(localSession\)/);
+  assert.match(script, /formatBool\(localMode\)/);
+  assert.match(script, /host-state-column/);
+  assert.match(script, /host-status-action/);
+  assert.doesNotMatch(script, /<button class="mini-btn" data-action="set-winrm-credentials">WinRM Credentials<\/button>/);
+  assert.doesNotMatch(script, /Guacamole: \$\{guacamoleStatusMarkup\}/);
+  assert.doesNotMatch(script, /ambiguous - \$\{connections\.length\} matches/);
   assert.match(script, /guacamole-match-trigger/);
   assert.match(script, /guacamole-match-popover/);
-  assert.match(script, /Matching connections/);
+  assert.match(script, /Connections for this station/);
   assert.match(script, /connection\?\.name/);
   assert.match(styles, /\.host-status-text\.warn[\s\S]*color: var\(--warning\)/);
+  assert.match(styles, /\.host-status-action[\s\S]*display: inline/);
+  assert.match(styles, /\.host-state-column[\s\S]*display: flex/);
+  assert.match(styles, /\.host-history[\s\S]*display: flex/);
   assert.match(script, /setupGuacamoleMatchPopover/);
   assert.match(script, /addEventListener\('mouseenter'/);
   assert.match(script, /addEventListener\('focusin'/);
   assert.match(styles, /\.guacamole-match-popover[\s\S]*position: fixed/);
   assert.match(styles, /\.guacamole-match-popover\.is-visible[\s\S]*opacity: 1/);
+});
+
+test('adds spacing below operations and reservation timeline hints', () => {
+  const index = fs.readFileSync(indexPath, 'utf8');
+  const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(index, /<div class="hint hint-spaced" id="opsHint">/);
+  assert.match(index, /<div class="hint mt-4 hint-spaced">Lab Station candidates awaiting configuration:<\/div>/);
+  assert.match(index, /<div class="hint hint-spaced">Paste the on-chain reservation key/);
+  assert.match(styles, /\.hint-spaced\s*\{\s*margin-bottom: 0\.75rem;/);
+});
+
+test('renders the complete station status card with truthful empty and configured states', async () => {
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: 'PC-Siemens',
+          address: '192.168.1.52',
+          winrmConfigured: true,
+          winrmTrustConfigured: true,
+          winrmTrustStatus: 'ready',
+          guacamole: {
+            status: 'multiple',
+            connections: [
+              { name: 'Primary RDP', protocol: 'rdp', port: 3389 },
+              { name: 'Backup RDP', protocol: 'rdp', port: 3390 },
+            ],
+          },
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const row = elements.get('hostList').options.at(-1);
+  assert.match(row.rawInnerHTML, /Address: <span class="mono">192\.168\.1\.52<\/span>/);
+  assert.match(row.rawInnerHTML, /Last heartbeat: not available/);
+  assert.match(row.rawInnerHTML, />2 connections<\/span>/);
+  assert.doesNotMatch(row.rawInnerHTML, /ambiguous/);
+  assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:/);
+  assert.match(row.rawInnerHTML, /WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials"[^>]*>[\s\S]*<span class="host-status-text good">configured<\/span>/);
+  assert.doesNotMatch(row.rawInnerHTML, /class="mini-btn" data-action="set-winrm-credentials"/);
+  assert.match(row.rawInnerHTML, /WinRM TLS trust: <span class="host-status-text good">ready<\/span>/);
+  assert.match(row.rawInnerHTML, /Forced logoff: not available/);
+  assert.match(row.rawInnerHTML, /Power action: not available/);
+  assert.match(row.rawInnerHTML, /Ready: n\/a/);
+  assert.match(row.rawInnerHTML, /Local session: n\/a/);
+  assert.match(row.rawInnerHTML, /Local mode: n\/a/);
 });
 
 test('does not open heartbeat streams for hosts without WinRM credentials', async () => {

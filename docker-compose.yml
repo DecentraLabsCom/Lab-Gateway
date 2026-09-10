@@ -596,6 +596,7 @@ services:
       - OPS_CONFIG=/app/hosts.json
       - OPS_DYNAMIC_CONFIG=/app/data/hosts.json
       - OPS_CREDENTIALS_PATH=${OPS_CREDENTIALS_PATH:-/app/data/winrm-credentials.json}
+      - OPS_WINRM_TRUST_PATH=${OPS_WINRM_TRUST_PATH:-/app/data/winrm-certificates}
       - OPS_POWER_CONFIG=${OPS_POWER_CONFIG:-/app/data/power-controllers.json}
       - OPS_POWER_CREDENTIALS_PATH=${OPS_POWER_CREDENTIALS_PATH:-/app/data/power-credentials.json}
       - OPS_SECRETS_KEY_FILE=/run/secrets/ops_secrets_key
