@@ -151,9 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const powerControllerNetioHttpsFieldEl = $('#powerControllerNetioHttpsField');
     const powerControllerNetioVerifyTlsFieldEl = $('#powerControllerNetioVerifyTlsField');
     const powerControllerProfileFieldEl = $('#powerControllerProfileField');
-    const powerControllerSnmpVersionFieldEl = $('#powerControllerSnmpVersionField');
     const powerControllerProfileEl = $('#powerControllerProfile');
-    const powerControllerSnmpVersionEl = $('#powerControllerSnmpVersion');
     const powerControllerTimeoutSecondsEl = $('#powerControllerTimeoutSeconds');
     const powerControllerRetriesEl = $('#powerControllerRetries');
     const powerControllerOutletsEl = $('#powerControllerOutlets');
@@ -1539,7 +1537,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerPolicyEndFailureModeEl) powerPolicyEndFailureModeEl.value = 'warn_and_continue';
         powerPolicyStepDrafts = [];
         renderPowerPolicySteps();
-        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Select a laboratory and configure the policy fields.';
+        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = '';
     }
 
     function createPowerPolicyStepDraft(step = {}) {
@@ -1885,7 +1883,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerNetioHttpsFieldEl) powerControllerNetioHttpsFieldEl.hidden = !isNetio;
         if (powerControllerNetioVerifyTlsFieldEl) powerControllerNetioVerifyTlsFieldEl.hidden = !isNetio;
         if (powerControllerProfileFieldEl) powerControllerProfileFieldEl.hidden = !isApc;
-        if (powerControllerSnmpVersionFieldEl) powerControllerSnmpVersionFieldEl.hidden = !isApc;
     }
 
     function updatePowerControllerNetioPort() {
@@ -1938,13 +1935,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.checked = false;
         if (powerControllerNetioVerifyTlsEl) powerControllerNetioVerifyTlsEl.checked = true;
         if (powerControllerProfileEl) powerControllerProfileEl.value = 'auto';
-        if (powerControllerSnmpVersionEl) powerControllerSnmpVersionEl.value = '';
         if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = '2';
         if (powerControllerRetriesEl) powerControllerRetriesEl.value = '1';
         updatePowerControllerDriverFields();
         powerControllerOutletDrafts = [createPowerControllerOutletDraft({ outlet: '1' })];
         renderPowerControllerOutlets();
-        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = 'Select an existing controller or configure a new one.';
+        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = '';
     }
 
     function populatePowerControllerForm(controller) {
@@ -1967,7 +1963,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.checked = config.useHttps === true;
         if (powerControllerNetioVerifyTlsEl) powerControllerNetioVerifyTlsEl.checked = config.verifyTls !== false;
         if (powerControllerProfileEl) powerControllerProfileEl.value = config.profile || 'auto';
-        if (powerControllerSnmpVersionEl) powerControllerSnmpVersionEl.value = config.snmpVersion || '';
         if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = config.timeoutSeconds || '2';
         if (powerControllerRetriesEl) powerControllerRetriesEl.value = config.retries ?? '1';
         updatePowerControllerDriverFields();
@@ -2127,14 +2122,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             : {
                 profile: powerControllerProfileEl?.value || 'auto',
-                snmpVersion: powerControllerSnmpVersionEl?.value || undefined,
                 timeoutSeconds,
                 retries,
             };
         if (driver === 'netio-json' && (!config.path || !config.path.startsWith('/') || config.path.includes('\n') || config.path.includes('\r'))) {
             throw new Error('NETIO API path must start with /');
         }
-        if (!config.snmpVersion) delete config.snmpVersion;
         return {
             id,
             name,

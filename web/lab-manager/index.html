@@ -530,15 +530,6 @@
                                     <option value="rpdu2">rPDU2</option>
                                 </select>
                             </label>
-                            <label class="field" id="powerControllerSnmpVersionField">
-                                <span>SNMP version</span>
-                                <select id="powerControllerSnmpVersion">
-                                    <option value="">Driver default</option>
-                                    <option value="v1">v1</option>
-                                    <option value="v2c">v2c</option>
-                                    <option value="v3">v3</option>
-                                </select>
-                            </label>
                             <label class="field">
                                 <span>Timeout (seconds)</span>
                                 <input type="number" id="powerControllerTimeoutSeconds" min="1" max="60" value="2" inputmode="numeric">
@@ -549,7 +540,7 @@
                             </label>
                         </div>
                         <div class="hint power-controller-config-hint">
-                            The credential reference points to the encrypted provider-local store. The controller ID is generated from the driver and host; you can override it when needed. SNMP communities and NETIO passwords are never entered or returned here.
+                            The credential reference points to the encrypted provider-local store. The controller ID is generated from the driver and host; you can override it when needed.
                         </div>
                         <div class="power-controller-outlets-editor">
                             <div class="power-controller-outlets-header">
@@ -564,7 +555,7 @@
                             </div>
                         </div>
                         <div class="power-controller-config-footer">
-                            <div class="hint" id="powerControllerEditorHint" aria-live="polite">Select an existing controller or configure a new one.</div>
+                            <div class="hint" id="powerControllerEditorHint" aria-live="polite"></div>
                             <button class="primary-btn" type="button" id="savePowerControllerBtn"><i class="fas fa-save"></i> Save Controller</button>
                         </div>
                     </div>
@@ -677,7 +668,7 @@
                                 </div>
                             </div>
                             <div class="power-policy-footer">
-                                <div class="hint" id="powerPolicyEditorHint" aria-live="polite">Select an existing policy or a laboratory defined above.</div>
+                                <div class="hint" id="powerPolicyEditorHint" aria-live="polite"></div>
                                 <button class="primary-btn" type="button" id="savePowerPolicyBtn"><i class="fas fa-save"></i> Save Policy</button>
                             </div>
                         </div>

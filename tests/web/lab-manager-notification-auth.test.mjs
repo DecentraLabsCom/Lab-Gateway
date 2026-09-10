@@ -122,7 +122,7 @@ function loadLabManager({
     'powerControllerSelect', 'powerControllerId', 'powerControllerName',
     'powerControllerDriver', 'powerControllerEnabled', 'powerControllerHost',
     'powerControllerPort', 'powerControllerCredentialRef', 'powerControllerProfile',
-    'powerControllerSnmpVersion', 'powerControllerTimeoutSeconds',
+    'powerControllerTimeoutSeconds',
     'powerControllerRetries', 'powerControllerOutlets', 'addPowerControllerOutletBtn',
     'powerControllerNetioPath', 'powerControllerNetioHttps', 'powerControllerNetioVerifyTls',
     'savePowerControllerBtn', 'powerControllerEditorHint',
@@ -809,7 +809,6 @@ test('creates a provider-local power controller from the controller form', async
   elements.get('powerControllerHost').value = '';
   elements.get('powerControllerPort').value = '161';
   elements.get('powerControllerProfile').value = 'auto';
-  elements.get('powerControllerSnmpVersion').value = 'v2c';
   elements.get('powerControllerTimeoutSeconds').value = '3';
   elements.get('powerControllerRetries').value = '1';
   elements.get('savePowerControllerBtn').click();
@@ -828,7 +827,6 @@ test('creates a provider-local power controller from the controller form', async
     credentialRef: '',
     config: {
       profile: 'auto',
-      snmpVersion: 'v2c',
       timeoutSeconds: 3,
       retries: 1,
     },
@@ -885,6 +883,22 @@ test('orders controller fields so host and driver precede the generated ID', () 
   const positions = orderedFields.map(id => form.indexOf(`id="${id}"`));
   assert.ok(positions.every(position => position >= 0));
   assert.deepEqual(positions, [...positions].sort((left, right) => left - right));
+});
+
+test('removes the redundant controller SNMP version and default editor prompt', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  assert.doesNotMatch(html, /powerControllerSnmpVersion/);
+  assert.doesNotMatch(script, /powerControllerSnmpVersion/);
+  assert.doesNotMatch(html, /Select an existing controller or configure a new one\./);
+  assert.doesNotMatch(script, /Select an existing controller or configure a new one\./);
+});
+
+test('removes the default power policy editor prompt', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  assert.doesNotMatch(html, /Select an existing policy or a laboratory defined above\./);
+  assert.doesNotMatch(script, /Select a laboratory and configure the policy fields\./);
 });
 
 test('creates a NETIO JSON power controller with its HTTP API settings', async () => {
