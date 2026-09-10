@@ -138,6 +138,14 @@ def test_winrm_request_cannot_override_host_transport_or_port():
         assert "transport" in str(exc)
 
 
+def test_winrm_trust_reference_rejects_path_traversal_components():
+    with pytest.raises(ValueError, match="winrm_trust_ref"):
+        worker.normalize_winrm_trust_ref("station..\\..\\outside")
+
+    with pytest.raises(ValueError, match="winrm_trust_ref"):
+        worker.normalize_winrm_trust_ref("station..outside")
+
+
 def test_winrm_catalog_fails_closed_on_transport_or_management_vlan():
     secure_host = {
         "name": "lab-ws-01",

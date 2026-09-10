@@ -27,6 +27,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.exc import IntegrityError
 from werkzeug.exceptions import HTTPException as WerkzeugHTTPException
+from werkzeug.utils import secure_filename
 from wakeonlan import send_magic_packet
 import requests
 import winrm
@@ -467,6 +468,15 @@ WINRM_CERTIFICATE_INVALID_MESSAGE = "WinRM certificate trust is invalid"
 WINRM_CERTIFICATE_EXPIRED_MESSAGE = "WinRM certificate is expired"
 WINRM_CERTIFICATE_NOT_YET_VALID_MESSAGE = "WinRM certificate is not yet valid"
 WINRM_TLS_FAILED_MESSAGE = "WinRM TLS validation failed"
+WINRM_TRUST_ERROR_MESSAGES = {
+    WINRM_TRUST_REQUIRED_CODE: WINRM_TRUST_REQUIRED_MESSAGE,
+    "WINRM_TRUST_INVALID": WINRM_CERTIFICATE_INVALID_MESSAGE,
+    "WINRM_CERTIFICATE_INVALID": WINRM_CERTIFICATE_INVALID_MESSAGE,
+    "WINRM_CERTIFICATE_EXPIRED": WINRM_CERTIFICATE_EXPIRED_MESSAGE,
+    "WINRM_CERTIFICATE_NOT_YET_VALID": WINRM_CERTIFICATE_NOT_YET_VALID_MESSAGE,
+    "WINRM_TLS_FAILED": WINRM_TLS_FAILED_MESSAGE,
+    "WINRM_TRUST_STORAGE_UNAVAILABLE": "WinRM certificate trust storage is unavailable",
+}
 WINRM_TRUST_CERTIFICATE_NAME = "server.cer"
 WINRM_TRUST_PEM_NAME = "server.pem"
 WINRM_CERTIFICATE_MAX_BYTES = 64 * 1024
@@ -474,8 +484,11 @@ WINRM_CERTIFICATE_MAX_BYTES = 64 * 1024
 
 def normalize_winrm_trust_ref(value: Any) -> str:
     """Return a safe, case-insensitive directory identifier for Station trust."""
-    ref = str(value or "").strip().lower()
-    if not WINRM_TRUST_REF_RE.fullmatch(ref):
+    raw_ref = str(value or "").strip().lower()
+    # secure_filename removes path separators and traversal markers. Reject a
+    # changed value instead of silently mapping two hosts to one trust store.
+    ref = secure_filename(raw_ref)
+    if ref != raw_ref or ".." in raw_ref or not WINRM_TRUST_REF_RE.fullmatch(ref):
         raise ValueError("winrm_trust_ref must contain only letters, numbers, dots, underscores, and hyphens")
     return ref
 
@@ -497,11 +510,9 @@ def _winrm_trust_file_path(host: Dict[str, Any], filename: str) -> str:
     ref = winrm_trust_ref_for_host(host)
     root = _winrm_trust_root()
     candidate = os.path.realpath(os.path.join(root, ref, filename))
-    try:
-        inside_root = os.path.commonpath((root, candidate)) == root
-    except ValueError:
-        inside_root = False
-    if not inside_root:
+    root_prefix = os.path.join(root, "")
+    # realpath removes symlink and traversal escapes before this containment check.
+    if not candidate.startswith(root_prefix):
         raise WinRMTrustError("WINRM_TRUST_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE)
     return candidate
 
@@ -574,10 +585,12 @@ def _materialize_winrm_pem(host: Dict[str, Any], certificate: x509.Certificate) 
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
                 except OSError:
+                    # Cleanup is best-effort after the canonical file is in place.
                     pass
             try:
                 os.chmod(pem_path, 0o600)
             except OSError:
+                # Permission hardening is best-effort on bind mounts and Windows filesystems.
                 pass
     except OSError as exc:
         raise WinRMTrustError(
@@ -600,6 +613,7 @@ def _winrm_certificate_metadata(
         san_dns_names = [str(value) for value in san.get_values_for_type(x509.DNSName)]
         san_ip_addresses = [str(value) for value in san.get_values_for_type(x509.IPAddress)]
     except x509.ExtensionNotFound:
+        # A certificate without a SAN is still parseable; report empty SAN metadata.
         pass
 
     now = datetime.now(timezone.utc)
@@ -1021,10 +1035,11 @@ def is_missing_winrm_credentials_error(exc: BaseException) -> bool:
     return isinstance(exc, ValueError) and str(exc) == WINRM_CREDENTIALS_REQUIRED_MESSAGE
 
 
-def _winrm_trust_error_payload(host_name: Any, exc: WinRMTrustError) -> Dict[str, Any]:
+def _winrm_trust_error_payload(host_name: Any, code: str) -> Dict[str, Any]:
+    code = code if code in WINRM_TRUST_ERROR_MESSAGES else "WINRM_TRUST_INVALID"
     return {
-        "error": str(exc),
-        "code": exc.code,
+        "error": WINRM_TRUST_ERROR_MESSAGES[code],
+        "code": code,
         "host": host_name,
         "requestId": _request_id(),
     }
@@ -2184,7 +2199,7 @@ def api_winrm():
         return jsonify(result)
     except Exception as exc:
         if isinstance(exc, WinRMTrustError):
-            return jsonify(_winrm_trust_error_payload(host_name, exc)), 409
+            return jsonify(_winrm_trust_error_payload(host_name, exc.code)), 409
         return internal_error_response("WinRM exec failed", exc)
 
 
@@ -2205,7 +2220,7 @@ def api_poll_heartbeat():
         data["host"] = host_name
         return jsonify(data)
     except WinRMTrustError as exc:
-        return jsonify(_winrm_trust_error_payload(host_name, exc)), 409
+        return jsonify(_winrm_trust_error_payload(host_name, exc.code)), 409
     except ValueError as exc:
         if is_missing_winrm_credentials_error(exc):
             return jsonify({
@@ -2236,7 +2251,7 @@ def generate_heartbeat_stream(host: Dict[str, Any], include_events: bool):
             )
             yield _format_sse_event(
                 "error",
-                json.dumps(_winrm_trust_error_payload(host.get("name"), exc)),
+                json.dumps(_winrm_trust_error_payload(host.get("name"), exc.code)),
             )
             return
         except ValueError as exc:
