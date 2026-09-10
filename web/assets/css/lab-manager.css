@@ -1260,6 +1260,7 @@ body {
 .power-controller-config-footer .hint { margin: 0; }
 .power-controller-list { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
 .power-controller-row { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: #0f1422; }
+.power-credential-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .power-controller-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .power-outlet-list { display: flex; flex-direction: column; gap: 8px; }
 .power-outlet-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #0d1220; }

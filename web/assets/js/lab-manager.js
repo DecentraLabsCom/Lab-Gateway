@@ -209,6 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const heartbeatStreamErrorShown = {};
     let powerControllers = [];
     let powerControllerOutletDrafts = [];
+    let powerControllerIdWasSuggested = false;
     let lastPowerControllerDriver = 'mock';
     let powerCredentials = [];
     let powerPolicies = [];
@@ -476,7 +477,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (powerControllerListEl) powerControllerListEl.addEventListener('click', handlePowerActions);
     if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', loadPowerControllers);
     if (powerControllerSelectEl) powerControllerSelectEl.addEventListener('change', loadSelectedPowerController);
-    if (powerControllerDriverEl) powerControllerDriverEl.addEventListener('change', updatePowerControllerDriverFields);
+    if (powerControllerDriverEl) {
+        powerControllerDriverEl.addEventListener('change', updatePowerControllerDriverFields);
+        powerControllerDriverEl.addEventListener('change', suggestPowerControllerId);
+    }
+    if (powerControllerHostEl) powerControllerHostEl.addEventListener('input', suggestPowerControllerId);
+    if (powerControllerIdEl) {
+        powerControllerIdEl.addEventListener('input', () => {
+            powerControllerIdWasSuggested = false;
+        });
+    }
     if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.addEventListener('change', updatePowerControllerNetioPort);
     if (addPowerControllerOutletBtn) addPowerControllerOutletBtn.addEventListener('click', addPowerControllerOutlet);
     if (powerControllerOutletsEl) {
@@ -1163,7 +1173,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         powerCredentialsListEl.innerHTML = powerCredentials.map(credential => `
-            <div class="power-controller-row">
+            <div class="power-controller-row power-credential-row">
                 <div>
                     <strong>${escapeHtml(credential.credentialRef || 'unknown')}</strong>
                     <div class="host-meta">Type: ${escapeHtml(credential.type || 'unknown')} · Secret values hidden</div>
@@ -1885,8 +1895,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function suggestPowerControllerId() {
+        if (!powerControllerIdEl || powerControllerSelectEl?.value) return;
+        const host = String(powerControllerHostEl?.value || '').trim().toLowerCase();
+        if (!host) {
+            if (powerControllerIdWasSuggested) {
+                powerControllerIdEl.value = '';
+                powerControllerIdWasSuggested = false;
+            }
+            return;
+        }
+        const driver = powerControllerDriverEl?.value || 'mock';
+        const prefix = driver === 'apc-powernet-snmp'
+            ? 'apc'
+            : driver === 'netio-json'
+                ? 'netio'
+                : 'power';
+        const hostSlug = host.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 110);
+        if (!hostSlug) return;
+        const suggestion = `${prefix}-${hostSlug}`;
+        const current = String(powerControllerIdEl.value || '').trim();
+        if (!current || powerControllerIdWasSuggested) {
+            powerControllerIdEl.value = suggestion;
+            powerControllerIdWasSuggested = true;
+        }
+    }
+
     function resetPowerControllerEditor() {
         if (powerControllerSelectEl) powerControllerSelectEl.value = '';
+        powerControllerIdWasSuggested = false;
         if (powerControllerIdEl) {
             powerControllerIdEl.value = '';
             powerControllerIdEl.disabled = false;
@@ -1911,6 +1948,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function populatePowerControllerForm(controller) {
+        powerControllerIdWasSuggested = false;
         if (powerControllerIdEl) {
             powerControllerIdEl.value = controller.id || '';
             powerControllerIdEl.disabled = true;

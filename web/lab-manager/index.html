@@ -470,10 +470,6 @@
                                 </select>
                             </label>
                             <label class="field">
-                                <span>Controller ID</span>
-                                <input type="text" id="powerControllerId" maxlength="128" placeholder="pdu-lab-01" required>
-                            </label>
-                            <label class="field">
                                 <span>Name</span>
                                 <input type="text" id="powerControllerName" maxlength="160" placeholder="APC Lab 01" required>
                             </label>
@@ -485,6 +481,10 @@
                                     <option value="netio-json">NETIO REST JSON</option>
                                 </select>
                             </label>
+                            <label class="field">
+                                <span>Host / IP address</span>
+                                <input type="text" id="powerControllerHost" maxlength="255" placeholder="192.168.1.50">
+                            </label>
                             <div class="field toggle-field">
                                 <span>Enabled</span>
                                 <label class="switch" for="powerControllerEnabled">
@@ -493,8 +493,8 @@
                                 </label>
                             </div>
                             <label class="field">
-                                <span>Host / IP address</span>
-                                <input type="text" id="powerControllerHost" maxlength="255" placeholder="192.168.1.50">
+                                <span>Controller ID (generated)</span>
+                                <input type="text" id="powerControllerId" maxlength="128" placeholder="apc-10-192-38-80" required>
                             </label>
                             <label class="field">
                                 <span>Port</span>
@@ -549,7 +549,7 @@
                             </label>
                         </div>
                         <div class="hint power-controller-config-hint">
-                            The credential reference points to the encrypted provider-local store. SNMP communities and NETIO passwords are never entered or returned here.
+                            The credential reference points to the encrypted provider-local store. The controller ID is generated from the driver and host; you can override it when needed. SNMP communities and NETIO passwords are never entered or returned here.
                         </div>
                         <div class="power-controller-outlets-editor">
                             <div class="power-controller-outlets-header">

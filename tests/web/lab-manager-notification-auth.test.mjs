@@ -843,6 +843,50 @@ test('creates a provider-local power controller from the controller form', async
   });
 });
 
+test('suggests a stable controller ID from the selected driver and host', async () => {
+  const { elements } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerControllerDriver').value = 'apc-powernet-snmp';
+  elements.get('powerControllerDriver').dispatchEvent({ type: 'change' });
+  elements.get('powerControllerHost').value = '10.192.38.80';
+  elements.get('powerControllerHost').dispatchEvent({ type: 'input' });
+
+  assert.equal(elements.get('powerControllerId').value, 'apc-10-192-38-80');
+
+  elements.get('powerControllerId').value = 'lab-pdu-main';
+  elements.get('powerControllerId').dispatchEvent({ type: 'input' });
+  elements.get('powerControllerHost').value = '10.192.38.81';
+  elements.get('powerControllerHost').dispatchEvent({ type: 'input' });
+  assert.equal(elements.get('powerControllerId').value, 'lab-pdu-main');
+});
+
+test('orders controller fields so host and driver precede the generated ID', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const formStart = html.indexOf('id="powerControllerSelect"');
+  const formEnd = html.indexOf('id="powerControllerNetioPathField"');
+  const form = html.slice(formStart, formEnd);
+  const orderedFields = [
+    'powerControllerSelect',
+    'powerControllerName',
+    'powerControllerDriver',
+    'powerControllerHost',
+    'powerControllerEnabled',
+    'powerControllerId',
+    'powerControllerPort',
+    'powerControllerCredentialRef',
+  ];
+  const positions = orderedFields.map(id => form.indexOf(`id="${id}"`));
+  assert.ok(positions.every(position => position >= 0));
+  assert.deepEqual(positions, [...positions].sort((left, right) => left - right));
+});
+
 test('creates a NETIO JSON power controller with its HTTP API settings', async () => {
   const { elements, fetchCalls } = loadLabManager({
     billingResponse: Promise.resolve({
@@ -1451,6 +1495,14 @@ test('adds spacing below operations and reservation timeline hints', () => {
   assert.match(index, /<div class="hint mt-4 hint-spaced">Lab Station candidates awaiting configuration:<\/div>/);
   assert.match(index, /<div class="hint hint-spaced">Paste the on-chain reservation key/);
   assert.match(styles, /\.hint-spaced\s*\{\s*margin-bottom: 0\.75rem;/);
+});
+
+test('keeps energy credential metadata separated from its rotate action', () => {
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(script, /<div class="power-controller-row power-credential-row">/);
+  assert.match(styles, /\.power-credential-row\s*\{[\s\S]*display:\s*flex;[\s\S]*gap:\s*12px;/);
 });
 
 test('renders the complete station status card with truthful empty and configured states', async () => {
