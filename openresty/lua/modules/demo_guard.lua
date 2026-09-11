@@ -197,11 +197,15 @@ function _M.start(ngx_ctx, jti, exp, deps)
 
     local cache = ngx.shared.cache
     local pending_exp = ngx.time() + ttl
-    local cache_stored, cache_err = cache and cache:set(
-        PENDING_EXP_PREFIX .. jti,
-        pending_exp,
-        session_ttl(ngx, exp)
-    )
+    local cache_stored = false
+    local cache_err
+    if cache then
+        cache_stored, cache_err = cache:set(
+            PENDING_EXP_PREFIX .. jti,
+            pending_exp,
+            session_ttl(ngx, exp)
+        )
+    end
     if not cache_stored then
         demo_sessions:delete(session_key)
         decrement_occupied(demo_sessions)
