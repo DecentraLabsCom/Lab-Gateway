@@ -19,7 +19,7 @@ if ROOT not in sys.path:
 import worker
 
 
-def make_winrm_certificate(address="192.168.1.50", *, expired=False):
+def make_winrm_certificate(address="192.168.1.50", *, expired=False, ip_as_dns=False):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     not_before = now - timedelta(days=30)
@@ -27,6 +27,8 @@ def make_winrm_certificate(address="192.168.1.50", *, expired=False):
     subject = x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, "LAB-WS-01"),
     ])
+    san_values = [x509.DNSName("LAB-WS-01")]
+    san_values.append(x509.DNSName(address) if ip_as_dns else x509.IPAddress(worker.ipaddress.ip_address(address)))
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -37,8 +39,7 @@ def make_winrm_certificate(address="192.168.1.50", *, expired=False):
         .not_valid_after(not_after)
         .add_extension(
             x509.SubjectAlternativeName([
-                x509.DNSName("LAB-WS-01"),
-                x509.IPAddress(worker.ipaddress.ip_address(address)),
+                *san_values,
             ]),
             critical=False,
         )
@@ -294,6 +295,18 @@ def test_winrm_trust_store_reports_certificate_host_mismatch(tmp_path, monkeypat
     assert result["PC-Siemens"]["errorCode"] == "WINRM_CERTIFICATE_HOST_MISMATCH"
 
 
+def test_winrm_trust_store_rejects_ip_encoded_as_dns(tmp_path, monkeypatch):
+    certificate_dir = tmp_path / "pc-siemens"
+    certificate_dir.mkdir()
+    (certificate_dir / "server.cer").write_bytes(make_winrm_certificate(ip_as_dns=True))
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+
+    result = worker.refresh_winrm_trust_store([_winrm_test_host()])
+
+    assert result["PC-Siemens"]["status"] == "invalid"
+    assert result["PC-Siemens"]["errorCode"] == "WINRM_CERTIFICATE_HOST_MISMATCH"
+
+
 def test_api_heartbeat_reports_missing_winrm_trust(client, tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
     monkeypatch.setattr(worker, "_winrm_credentials", lambda *args: ("user", "password"))
@@ -382,6 +395,23 @@ def test_api_winrm_trust_preview_rejects_host_mismatch(client, tmp_path, monkeyp
     assert response.status_code == 422
     assert response.json["code"] == "WINRM_CERTIFICATE_HOST_MISMATCH"
     assert response.json["preview"]["sanIpAddresses"] == ["192.168.1.51"]
+
+
+def test_api_winrm_trust_preview_rejects_ip_encoded_as_dns(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    original_hosts = _install_winrm_test_host(_winrm_test_host())
+    try:
+        response = client.post(
+            "/api/hosts/PC-Siemens/winrm-trust/preview",
+            data=_certificate_upload(make_winrm_certificate(ip_as_dns=True)),
+            content_type="multipart/form-data",
+        )
+    finally:
+        worker.HOSTS = original_hosts
+
+    assert response.status_code == 422
+    assert response.json["code"] == "WINRM_CERTIFICATE_HOST_MISMATCH"
+    assert response.json["preview"]["sanIpAddresses"] == []
 
 
 def test_api_winrm_trust_save_requires_fingerprint_confirmation(client, tmp_path, monkeypatch):

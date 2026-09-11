@@ -683,16 +683,21 @@ def _certificate_matches_host(certificate: x509.Certificate, host: Dict[str, Any
     if san_has_values:
         if address_ip is not None:
             normalized_address = str(address_ip)
+            # TLS hostname verification treats an IP literal as an IP
+            # identity.  A matching dNSName value is not equivalent to an
+            # iPAddress SAN and would be rejected by OpenSSL/Requests.
             return any(
                 str(ipaddress.ip_address(value)) == normalized_address
                 for value in san_ip_addresses
                 if _is_valid_ip_address(value)
-            ) or any(
-                _dns_name_matches(value, address) for value in san_dns_names
             )
         return any(_dns_name_matches(value, address) for value in san_dns_names)
 
     common_names = certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    if address_ip is not None:
+        # Do not fall back to a textual CN for an IP endpoint.  WinRM uses
+        # strict TLS identity checking, which requires a typed iPAddress SAN.
+        return False
     return any(_dns_name_matches(attribute.value, address) for attribute in common_names)
 
 

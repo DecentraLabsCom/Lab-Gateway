@@ -65,6 +65,9 @@ for certificate validation. Lab Manager now manages the same per-host trust
 store from the `WinRM TLS trust` indicator on each host card. It previews the
 certificate, validates SAN/CN identity and validity dates, requires an explicit
 SHA-256 confirmation, and never returns the certificate contents after saving.
+When the managed address is an IP literal, the certificate must contain that
+address as an `iPAddress` SAN entry; a `dNSName` entry containing the same text
+does not satisfy WinRM/OpenSSL hostname verification.
 
 ## Host inventory and telemetry
 
