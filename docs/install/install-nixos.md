@@ -71,10 +71,19 @@ LAB_ADMIN_BACKEND_URL=
 LAB_ADMIN_BACKEND_TOKEN=
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
+# Numeric owner of the Compose bind-mounted state (use `id -u` / `id -g`)
+HOST_UID=1000
+HOST_GID=1000
 ```
 
 For environment ownership, Lite trust values, and profile-specific requirements,
 also read the [configuration reference](../reference/configuration.md).
+
+`ops-worker`, OpenResty and the embedded backend run as non-root users whose
+numeric identity comes from `HOST_UID`/`HOST_GID`. The NixOS module prepares and
+chowns the writable bind-mounted state, including `ops-data`, before Compose
+starts. Do not run `docker compose up` manually before the first
+`nixos-rebuild`, because Docker may create missing directories as `root:root`.
 
 ```env
 # blockchain-services/.env
@@ -123,6 +132,14 @@ Check health:
 
 ```bash
 curl -k https://localhost/health
+```
+
+Verify the WinRM trust mount from the running worker:
+
+```bash
+cd /srv/lab-gateway
+docker compose exec -T ops-worker sh -c \
+  'set -eu; test -w /app/data/winrm-certificates; echo writable'
 ```
 
 This public endpoint reports aggregate readiness only. Authenticate as a Lab
@@ -184,6 +201,11 @@ journalctl -u lab-gateway.service -f
 
 # Restart the gateway stack
 systemctl restart lab-gateway.service
+
+# The restart reapplies ownership from HOST_UID/HOST_GID in .env
+cd /srv/lab-gateway
+docker compose exec -T ops-worker sh -c \
+  'set -eu; test -w /app/data/winrm-certificates; echo writable'
 
 # Stop the gateway stack
 systemctl stop lab-gateway.service

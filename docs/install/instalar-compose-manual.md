@@ -262,6 +262,22 @@ chmod 755 lab-content fmu-data fmu-proxy-runtime \
 chmod 700 ops-data ops-data/guac-revocation-spool ops-data/winrm-certificates
 ```
 
+No inicies Compose si esta comprobacion falla. Un bind mount creado por Docker
+antes de este paso suele quedar como `root:root`, mientras que `ops-worker`
+ejecuta con la identidad no root `HOST_UID:HOST_GID`:
+
+```bash
+test -w ops-data/winrm-certificates || {
+  echo "ops-data/winrm-certificates no es escribible por el usuario de despliegue" >&2
+  exit 1
+}
+```
+
+En una instalacion existente, repite el `chown` despues de actualizar: Git, las
+reconstrucciones de imagen y los reinicios de contenedores no cambian la
+propiedad de los bind mounts del host. Si el directorio ya pertenece a root,
+ejecuta la reparacion con `sudo` antes de ejecutar `docker compose`.
+
 En particular, `fmu-access-state` debe ser escribible por el UID de OpenResty
 porque almacena los mapeos FMU cifrados y persistentes. Si ejecutas el stack
 mediante `sudo`, conserva el `HOST_UID` y `HOST_GID` de la cuenta de despliegue;
@@ -406,6 +422,16 @@ docker compose exec -T openresty sh -c '
 El UID/GID de OpenResty debe coincidir con el propietario de
 `fmu-access-state`. Un health check correcto por si solo no prueba esta ruta de
 escritura.
+
+Comprueba tambien el bind mount del Ops Worker:
+
+```bash
+docker compose exec -T ops-worker sh -c '
+  set -eu
+  test -w /app/data/winrm-certificates
+  echo "ops-worker puede escribir el estado de confianza WinRM"
+'
+```
 
 Ambos deben devolver JSON sin errores. La respuesta pública de salud está deliberadamente reducida; los operadores de Lab Manager pueden usar `/health/details` con el `LAB_MANAGER_TOKEN` configurado para obtener el diagnóstico detallado.
 

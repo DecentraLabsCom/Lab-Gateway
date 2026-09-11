@@ -21,6 +21,7 @@ function createElement(id) {
     innerHTML: '',
     rawInnerHTML: '',
     style: {},
+    children: [],
     options: [],
     files: [],
     classList: {
@@ -38,6 +39,13 @@ function createElement(id) {
     appendChild: (child) => {
       if (Array.isArray(element.options)) element.options.push(child);
       return child;
+    },
+    append: (...children) => {
+      element.children.push(...children);
+    },
+    replaceChildren: (...children) => {
+      element.children = children;
+      element.options = children;
     },
     querySelectorAll: () => [],
     querySelector: () => null,
@@ -95,6 +103,16 @@ function loadLabManager({
     status: 200,
     json: async () => ({ credentials: [] }),
   }),
+  winrmTrustResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ trust: { status: 'missing' } }),
+  }),
+  winrmTrustPreviewResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ preview: { status: 'ready', valid: true } }),
+  }),
   eventSource = null,
   confirm = () => true,
 }) {
@@ -144,6 +162,10 @@ function loadLabManager({
     'savePowerPolicyBtn', 'powerPoliciesStatus', 'powerPolicyEditorHint',
     'notificationsAccessGate', 'notificationsConfigContent', 'unlockNotificationsBtn',
     'smtpPasswordHint', 'graphClientSecretHint',
+    'winrmTrustModal', 'closeWinrmTrustModal', 'cancelWinrmTrust', 'previewWinrmTrust',
+    'saveWinrmTrust', 'verifyWinrmTrust', 'deleteWinrmTrust', 'winrmTrustModalHost',
+    'winrmTrustCurrent', 'winrmTrustCertificate', 'winrmTrustCertificateName',
+    'winrmTrustPreview', 'winrmTrustPreviewDetails', 'winrmTrustFingerprintConfirmed',
   ];
   const elements = new Map(ids.map((id) => [id, createElement(id)]));
   const documentListeners = new Map();
@@ -217,6 +239,9 @@ function loadLabManager({
     Promise,
     setTimeout,
     clearTimeout,
+    FormData: class FormData {
+      append() {}
+    },
     Option: function Option(text, value) {
       this.textContent = text;
       this.value = value;
@@ -259,6 +284,12 @@ function loadLabManager({
       }
       if (parsedUrl.pathname === '/ops/api/power/credentials' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerCredentialsResponse);
+      }
+      if (parsedUrl.pathname.endsWith('/winrm-trust/preview') && options.method === 'POST') {
+        return Promise.resolve(winrmTrustPreviewResponse);
+      }
+      if (parsedUrl.pathname.endsWith('/winrm-trust') && (!options.method || options.method === 'GET')) {
+        return Promise.resolve(winrmTrustResponse);
       }
       return parsedUrl.pathname === '/billing/admin/notifications'
         ? billingResponse
@@ -1701,6 +1732,149 @@ test('renders the complete station status card with truthful empty and configure
   assert.match(row.rawInnerHTML, /Ready: n\/a/);
   assert.match(row.rawInnerHTML, /Local session: n\/a/);
   assert.match(row.rawInnerHTML, /Local mode: n\/a/);
+});
+
+test('enables Verify connection only for saved ready trust and configured credentials', async () => {
+  const trustStatuses = ['missing', 'invalid', 'expired', 'not-yet-valid'];
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+  const { elements: missingCredentialsElements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{ name: 'PC-Siemens', address: '192.168.1.52', winrmConfigured: false }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+    winrmTrustResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ trust: { status: 'ready' } }),
+    }),
+  });
+
+  await flush();
+  const missingCredentialsRow = missingCredentialsElements.get('hostList').options.at(-1);
+  const missingCredentialsManageButton = {
+    dataset: { action: 'manage-winrm-trust' },
+    closest: (selector) => selector === 'button[data-action]' ? missingCredentialsManageButton : missingCredentialsRow,
+  };
+  missingCredentialsElements.get('hostList').dispatchEvent({
+    type: 'click',
+    target: missingCredentialsManageButton,
+  });
+  await flush();
+  assert.equal(missingCredentialsElements.get('verifyWinrmTrust').disabled, true, 'credentials are required');
+
+  for (const status of trustStatuses) {
+    const { elements } = loadLabManager({
+      activeTabs: ['operations'],
+      hostInventoryResponse: Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          hosts: [{ name: 'PC-Siemens', address: '192.168.1.52', winrmConfigured: true }],
+          guacamoleUnmatched: [],
+        }),
+      }),
+      winrmTrustResponse: Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ trust: { status } }),
+      }),
+    });
+
+    await flush();
+    const row = elements.get('hostList').options.at(-1);
+    const manageButton = {
+      dataset: { action: 'manage-winrm-trust' },
+      closest: (selector) => selector === 'button[data-action]' ? manageButton : row,
+    };
+    elements.get('hostList').dispatchEvent({ type: 'click', target: manageButton });
+    await flush();
+
+    assert.equal(elements.get('verifyWinrmTrust').disabled, true, `status=${status}`);
+  }
+
+  const { elements, fetchCalls } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{ name: 'PC-Siemens', address: '192.168.1.52', winrmConfigured: true }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+    winrmTrustResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ trust: { status: 'ready' } }),
+    }),
+  });
+
+  await flush();
+  const row = elements.get('hostList').options.at(-1);
+  const manageButton = {
+    dataset: { action: 'manage-winrm-trust' },
+    closest: (selector) => selector === 'button[data-action]' ? manageButton : row,
+  };
+  elements.get('hostList').dispatchEvent({ type: 'click', target: manageButton });
+  await flush();
+  assert.match(elements.get('winrmTrustCurrent').children[0]?.textContent || '', /Current trust: ready/);
+  assert.equal(elements.get('verifyWinrmTrust').disabled, false);
+
+  elements.get('winrmTrustCertificate').files = [{ name: 'winrm-server.cer' }];
+  elements.get('winrmTrustCertificate').dispatchEvent({ type: 'change' });
+  elements.get('previewWinrmTrust').click();
+  await flush();
+  assert.equal(elements.get('verifyWinrmTrust').disabled, false, 'preview must not revoke an existing saved trust');
+
+  const heartbeatCallsBeforeVerify = fetchCalls.filter(({ url }) => String(url) === '/ops/api/heartbeat/poll').length;
+  elements.get('verifyWinrmTrust').click();
+  await flush();
+  assert.equal(
+    fetchCalls.filter(({ url }) => String(url) === '/ops/api/heartbeat/poll').length,
+    heartbeatCallsBeforeVerify + 1,
+  );
+});
+
+test('keeps Verify connection disabled while the saved trust state is loading', async () => {
+  let resolveTrust;
+  const pendingTrustResponse = new Promise((resolve) => {
+    resolveTrust = resolve;
+  });
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{ name: 'PC-Siemens', address: '192.168.1.52', winrmConfigured: true }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+    winrmTrustResponse: pendingTrustResponse,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const row = elements.get('hostList').options.at(-1);
+  const manageButton = {
+    dataset: { action: 'manage-winrm-trust' },
+    closest: (selector) => selector === 'button[data-action]' ? manageButton : row,
+  };
+  elements.get('hostList').dispatchEvent({ type: 'click', target: manageButton });
+  assert.equal(elements.get('verifyWinrmTrust').disabled, true);
+
+  resolveTrust({
+    ok: true,
+    status: 200,
+    json: async () => ({ trust: { status: 'ready' } }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(elements.get('verifyWinrmTrust').disabled, false);
 });
 
 test('does not open heartbeat streams for hosts without WinRM prerequisites', async () => {

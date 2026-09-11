@@ -226,6 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostState = {};
     const hostMetadata = {};
     let activeWinrmTrustHost = '';
+    let savedWinrmTrustStatus = 'loading';
     let activeWinrmTrustFile = null;
     let activeWinrmTrustPreview = null;
     const guacamoleCandidateState = {};
@@ -3222,8 +3223,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderWinrmTrustState(trust) {
+        const status = String(trust?.status || (trust?.configured ? 'ready' : 'missing'))
+            .trim()
+            .toLowerCase();
+        savedWinrmTrustStatus = status;
+        updateWinrmTrustVerifyState();
         if (!winrmTrustCurrentEl) return;
-        const status = String(trust?.status || (trust?.configured ? 'ready' : 'missing')).toLowerCase();
         winrmTrustCurrentEl.className = `winrm-trust-current ${winrmTrustStatusClass(status)}`;
         winrmTrustCurrentEl.replaceChildren();
 
@@ -3267,6 +3272,15 @@ document.addEventListener('DOMContentLoaded', () => {
         updateWinrmTrustSaveState();
     }
 
+    function updateWinrmTrustVerifyState() {
+        if (!verifyWinrmTrustBtn) return;
+        verifyWinrmTrustBtn.disabled = !(
+            activeWinrmTrustHost &&
+            hostMetadata[activeWinrmTrustHost]?.winrmConfigured === true &&
+            savedWinrmTrustStatus === 'ready'
+        );
+    }
+
     function updateWinrmTrustSaveState() {
         if (previewWinrmTrustBtn) previewWinrmTrustBtn.disabled = !activeWinrmTrustFile;
         if (saveWinrmTrustBtn) {
@@ -3276,6 +3290,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 winrmTrustFingerprintConfirmedEl?.checked === true
             );
         }
+        updateWinrmTrustVerifyState();
     }
 
     function handleWinrmTrustCertificateSelected() {
@@ -3300,6 +3315,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         activeWinrmTrustHost = host;
+        savedWinrmTrustStatus = 'loading';
         activeWinrmTrustFile = null;
         activeWinrmTrustPreview = null;
         winrmTrustCertificateEl.value = '';
@@ -3325,6 +3341,8 @@ document.addEventListener('DOMContentLoaded', () => {
             renderWinrmTrustState(body.trust || body);
         } catch (err) {
             if (activeWinrmTrustHost === host) {
+                savedWinrmTrustStatus = 'unavailable';
+                updateWinrmTrustVerifyState();
                 if (winrmTrustCurrentEl) winrmTrustCurrentEl.textContent = `Unable to load trust: ${err.message}`;
                 showToast(`WinRM trust status failed: ${err.message}`, 'error');
             }
@@ -3334,8 +3352,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function closeWinrmTrustModal() {
         if (winrmTrustModal) winrmTrustModal.classList.remove('show');
         activeWinrmTrustHost = '';
+        savedWinrmTrustStatus = 'unavailable';
         activeWinrmTrustFile = null;
         activeWinrmTrustPreview = null;
+        updateWinrmTrustSaveState();
     }
 
     async function previewWinrmTrust() {
@@ -3401,7 +3421,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function verifyWinrmTrust() {
-        if (!activeWinrmTrustHost) return;
+        if (!activeWinrmTrustHost || verifyWinrmTrustBtn?.disabled) return;
         await pollHeartbeat(activeWinrmTrustHost);
     }
 

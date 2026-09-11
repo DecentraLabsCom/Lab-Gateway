@@ -18,6 +18,12 @@ VALIDATE_GATEWAY_ENV_PY = ROOT / "scripts" / "validate-gateway-env.py"
 NGINX_CONF = ROOT / "openresty" / "nginx.conf"
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 REAL_COMPOSE_PREPARE_SCRIPT = ROOT / "tests" / "integration" / "prepare-real-compose-ci.sh"
+NIXOS_MODULE = ROOT / "nix" / "nixos-module.nix"
+NIXOS_HOST = ROOT / "nix" / "hosts" / "gateway.nix"
+MANUAL_INSTALL_EN = ROOT / "docs" / "install" / "install-manual-compose.md"
+MANUAL_INSTALL_ES = ROOT / "docs" / "install" / "instalar-compose-manual.md"
+NIXOS_INSTALL_EN = ROOT / "docs" / "install" / "install-nixos.md"
+NIXOS_INSTALL_ES = ROOT / "docs" / "install" / "instalar-nixos.md"
 
 
 def _service_block(service_name: str, compose_text: str) -> str:
@@ -78,6 +84,12 @@ class SetupEnvContractTest(unittest.TestCase):
             encoding="utf-8"
         )
         cls.init_ssl = (ROOT / "openresty" / "init-ssl.sh").read_text(encoding="utf-8")
+        cls.nixos_module = NIXOS_MODULE.read_text(encoding="utf-8")
+        cls.nixos_host = NIXOS_HOST.read_text(encoding="utf-8")
+        cls.manual_install_en = MANUAL_INSTALL_EN.read_text(encoding="utf-8")
+        cls.manual_install_es = MANUAL_INSTALL_ES.read_text(encoding="utf-8")
+        cls.nixos_install_en = NIXOS_INSTALL_EN.read_text(encoding="utf-8")
+        cls.nixos_install_es = NIXOS_INSTALL_ES.read_text(encoding="utf-8")
 
     def test_gateway_managed_backend_keys_are_removed_from_embedded_backend_env(self):
         for key in GATEWAY_MANAGED_BACKEND_KEYS:
@@ -405,7 +417,7 @@ class SetupEnvContractTest(unittest.TestCase):
         expected_shell = [
             "mkdir -p lab-content",
             "chmod 755 lab-content",
-            'chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content',
+            "for state_path in certs blockchain-data fmu-access-state lab-content ops-data; do",
         ]
         expected_bat = [
             "if not exist lab-content mkdir lab-content",
@@ -419,9 +431,52 @@ class SetupEnvContractTest(unittest.TestCase):
 
     def test_setup_assigns_ops_data_to_the_compose_runner_identity(self):
         self.assertIn(
-            'chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content ops-data',
+            "for state_path in certs blockchain-data fmu-access-state lab-content ops-data; do",
             self.setup_sh,
         )
+        self.assertIn('chown -R "${host_uid}:${host_gid}" "$state_path"', self.setup_sh)
+
+    def test_setup_repairs_existing_state_before_permission_hardening(self):
+        first_permission_repair = self.setup_sh.index(
+            'chown -R "${host_uid}:${host_gid}" "$state_path"'
+        )
+        first_setup_permission_hardening = self.setup_sh.index("\nsecure_gateway_state\n")
+        self.assertLess(first_permission_repair, first_setup_permission_hardening)
+
+    def test_nixos_prepares_all_compose_state_for_the_configured_uid(self):
+        for snippet in (
+            "preStart = ''",
+            "HOST_UID",
+            "HOST_GID",
+            'mkdir -p "$project_dir/ops-data/guac-revocation-spool"',
+            'chown -R "$host_uid:$host_gid" "$state_dir"',
+            "sed -n -E 's/^HOST_UID=([0-9]+)[[:space:]]*$/\\1/p'",
+            '"$project_dir/fmu-access-state" "$project_dir/ops-data"',
+        ):
+            self.assertIn(snippet, self.nixos_module)
+        self.assertLess(
+            self.nixos_module.index('mkdir -p "$project_dir/ops-data/guac-revocation-spool"'),
+            self.nixos_module.index('chown -R "$host_uid:$host_gid" "$state_dir"'),
+        )
+
+    def test_nixos_declares_ops_data_directories_before_compose_starts(self):
+        for snippet in (
+            '"d /srv/lab-gateway/ops-data 0700 root root -"',
+            '"d /srv/lab-gateway/ops-data/guac-revocation-spool 0700 root root -"',
+            '"d /srv/lab-gateway/ops-data/winrm-certificates 0700 root root -"',
+        ):
+            self.assertIn(snippet, self.nixos_host)
+
+    def test_install_guides_require_a_writable_ops_data_preflight(self):
+        for guide in (self.manual_install_en, self.manual_install_es):
+            self.assertIn("test -w ops-data/winrm-certificates", guide)
+            self.assertIn("docker compose exec -T ops-worker", guide)
+
+    def test_nixos_guides_explain_state_preparation_and_recovery(self):
+        for guide in (self.nixos_install_en, self.nixos_install_es):
+            self.assertIn("HOST_UID", guide)
+            self.assertIn("ops-data", guide)
+            self.assertIn("systemctl restart lab-gateway.service", guide)
 
     def test_setup_derives_exact_fmu_audience_from_public_gateway_origin(self):
         expected_shell = [

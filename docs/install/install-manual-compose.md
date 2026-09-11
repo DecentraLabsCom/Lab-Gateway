@@ -269,6 +269,22 @@ chmod 755 lab-content fmu-data fmu-proxy-runtime \
 chmod 700 ops-data ops-data/guac-revocation-spool ops-data/winrm-certificates
 ```
 
+Do not start Compose if this preflight fails. A bind mount created by Docker
+before this step is commonly owned by `root:root`, while `ops-worker` runs as
+the non-root `HOST_UID:HOST_GID` identity:
+
+```bash
+test -w ops-data/winrm-certificates || {
+  echo "ops-data/winrm-certificates is not writable by the deployment user" >&2
+  exit 1
+}
+```
+
+On an existing installation, repeat the `chown` command after an upgrade: Git,
+image rebuilds and container restarts do not change ownership of host bind
+mounts. If the directory is already owned by root, run the repair with `sudo`
+before running `docker compose`.
+
 If you run the stack through `sudo`, preserve the deployment account's
 `HOST_UID` and `HOST_GID`; do not silently replace them with root's IDs.
 
@@ -411,6 +427,16 @@ docker compose exec -T openresty sh -c '
 
 The OpenResty UID/GID must match the owner of `fmu-access-state`. A successful
 health check alone does not test this write path.
+
+Verify the Ops Worker bind mount as well:
+
+```bash
+docker compose exec -T ops-worker sh -c '
+  set -eu
+  test -w /app/data/winrm-certificates
+  echo "ops-worker can write WinRM trust state"
+'
+```
 
 ## Step 9 — Create the institutional wallet
 
