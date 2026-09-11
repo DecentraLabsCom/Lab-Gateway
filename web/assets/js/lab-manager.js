@@ -1664,7 +1664,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (policy) {
             if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.value = policy.labId || '';
             populatePowerPolicyForm(policy);
-            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Edit the policy and save it to the provider-local catalog.';
             return;
         }
         resetPowerPolicyEditor(false);

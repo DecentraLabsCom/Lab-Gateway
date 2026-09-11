@@ -602,6 +602,7 @@ def _write_winrm_trust_bytes(path: str, content: bytes) -> None:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
         except OSError:
+            # Cleanup is best-effort; preserve the write/replace outcome.
             pass
     try:
         os.chmod(path, 0o600)
@@ -671,6 +672,7 @@ def _certificate_matches_host(certificate: x509.Certificate, host: Dict[str, Any
         san_ip_addresses = [str(value) for value in san.get_values_for_type(x509.IPAddress)]
         san_has_values = bool(san_dns_names or san_ip_addresses)
     except x509.ExtensionNotFound:
+        # Certificates without SAN entries use the subject CN fallback below.
         pass
 
     try:
@@ -766,7 +768,6 @@ def _store_winrm_trust_certificate(
     host: Dict[str, Any],
     certificate: x509.Certificate,
 ) -> Dict[str, Any]:
-    trust_ref = winrm_trust_ref_for_host(host)
     metadata = _winrm_certificate_response_metadata(certificate, host, "DER")
     metadata.update({
         "uploadedAt": _format_certificate_datetime(datetime.now(timezone.utc)),

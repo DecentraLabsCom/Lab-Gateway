@@ -461,7 +461,6 @@ def test_api_winrm_trust_delete_is_idempotent_and_does_not_affect_another_host(c
     }
     original_hosts = _install_winrm_test_host(first_host)
     certificate = make_winrm_certificate()
-    fingerprint = _certificate_fingerprint(certificate)
     try:
         worker.HOSTS = worker.HostRegistry({"hosts": [first_host, second_host]})
         first_path = tmp_path / "pc-siemens"
