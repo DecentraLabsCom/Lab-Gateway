@@ -173,7 +173,7 @@ application trust store, not a global container CA installation.
 | `fmu-runner` | Station-only production FMU facade | Set `FMU_RUNNER_ENABLED=true`, `FMU_JWT_AUDIENCE`, `FMU_STATION_BASE_URL`, and `FMU_STATION_INTERNAL_TOKEN`. |
 | `fmu-local-dev` | Isolated native local FMU executor | Development/test only. It is deliberately isolated from Station and control-plane credentials, but shares the dedicated internal `fmu_auth` network with `blockchain-services` for Full-mode JWKS retrieval. |
 | `aas` | Bundled BaSyx and MongoDB | Set non-default BaSyx Mongo secrets. Omit it when using a valid configured external AAS. |
-| `certbot` | ACME certificate services | Set `CERTBOT_DOMAINS`, `CERTBOT_EMAIL`, and optionally `CERTBOT_STAGING`. |
+| `certbot` | ACME certificate services | Set `CERTBOT_DOMAINS`, `CERTBOT_EMAIL`, and optionally `CERTBOT_STAGING`. The first domain must match `SERVER_NAME`; HTTP-01 requires public port 80. The deploy hook promotes the managed lineage to `certs/fullchain.pem` and `certs/privkey.pem`, and OpenResty reloads the validated pair automatically. |
 | `cloudflare` / `cloudflare-token` | Cloudflare Tunnel | Choose the profile described by the setup script; do not expose internal services through the tunnel. |
 
 The two FMU profiles use the same internal `fmu-runner` alias. Never run them

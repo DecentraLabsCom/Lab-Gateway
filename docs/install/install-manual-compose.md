@@ -282,6 +282,11 @@ certs/
 └── privkey.pem     # Private key
 ```
 
+These are the stable paths consumed by OpenResty. If Certbot is enabled, its
+managed lineage is stored separately under
+`certs/live/<primary-domain>/`; the deploy hook validates a renewed pair and
+promotes it to the stable paths before OpenResty reloads it.
+
 **Let's Encrypt (automated)** — set in `.env` and start with the `certbot` profile:
 
 ```env
@@ -291,7 +296,24 @@ CERTBOT_STAGING=0
 ```
 
 ```bash
-docker compose --profile certbot up -d
+docker compose --profile certbot up -d certbot-init certbot-renew
+```
+
+The domain must resolve to this gateway and HTTP port 80 must be reachable for
+the HTTP-01 challenge.
+
+`certbot-renew` checks twice daily. On renewal, OpenResty validates the matching
+certificate/key pair and reloads automatically (60 seconds by default), so no
+manual restart is required. A valid CA certificate already present in the
+stable `certs/` paths is preserved until the Certbot profile is deliberately
+enabled; enabling it performs the migration to Let's Encrypt after the first
+successful issuance.
+
+To verify the renewal configuration without replacing the live certificate:
+
+```bash
+docker compose run --rm --profile certbot certbot renew --dry-run \
+  --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
 ```
 
 **Development** — self-signed certificates are generated automatically on first start

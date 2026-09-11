@@ -285,8 +285,26 @@ CERTBOT_EMAIL=admin@tu-institucion.edu
 CERTBOT_STAGING=0
 ```
 
+Estas son las rutas estables que consume OpenResty. Si se habilita Certbot, su
+linaje administrado se guarda aparte en `certs/live/<dominio-principal>/`; el
+deploy hook valida el par renovado y lo promueve a las rutas estables antes de
+que OpenResty lo recargue.
+
+El dominio debe resolver hacia este gateway y el puerto HTTP 80 debe ser
+accesible para el desafio HTTP-01. `certbot-renew` comprueba dos veces al dia y
+OpenResty recarga automaticamente el par validado (60 segundos por defecto),
+sin reinicio manual. Un certificado valido de una CA que ya este en `certs/` se
+conserva hasta habilitar deliberadamente el perfil Certbot.
+
 ```bash
-docker compose --profile certbot up -d
+docker compose --profile certbot up -d certbot-init certbot-renew
+```
+
+Para verificar la configuracion sin reemplazar el certificado actual:
+
+```bash
+docker compose run --rm --profile certbot certbot renew --dry-run \
+  --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
 ```
 
 **Desarrollo** — los certificados autofirmados se generan automáticamente al primer arranque

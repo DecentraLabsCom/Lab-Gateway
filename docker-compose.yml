@@ -204,6 +204,10 @@ services:
       - HTTPS_PORT=${HTTPS_PORT}
       - HTTP_PORT=${HTTP_PORT}
       - ISSUER=${ISSUER}
+      # Certbot owns the ACME lineage below certs/live. OpenResty uses this
+      # value only to locate the matching lineage during startup fallback.
+      - CERTBOT_DOMAINS=${CERTBOT_DOMAINS:-}
+      - TLS_RELOAD_INTERVAL_SECONDS=${TLS_RELOAD_INTERVAL_SECONDS:-60}
       - AUTH_ACCESS_CODE_REDEEM_URL=${AUTH_ACCESS_CODE_REDEEM_URL:-}
       - AUTH_ACCESS_CODE_REDEEMER_TOKEN_FILE=/run/secrets/auth_access_code_redeemer_token
       - ACCESS_CODE_ENCRYPTION_KEY=${ACCESS_CODE_ENCRYPTION_KEY:-}
@@ -383,50 +387,87 @@ services:
   certbot:
     image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
-    entrypoint: ["sh", "-c", "certbot --version"]
+    entrypoint: ["certbot"]
+    command: ["--version"]
+    environment:
+      - TLS_CERT_HOSTNAME=${SERVER_NAME:-}
+      - TLS_CERT_UID=${HOST_UID:-1000}
+      - TLS_CERT_GID=${HOST_GID:-1000}
     volumes:
       - ./certs:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
+      - ./certbot/deploy-hook.sh:/usr/local/bin/deploy-hook.sh:ro
     # Usage example:
-    # docker compose run --rm --profile certbot certbot certonly --webroot -w /var/www/certbot -d your.domain --email you@example.com --agree-tos --no-eff-email
+    # docker compose run --rm --profile certbot certbot certonly --webroot -w /var/www/certbot -d your.domain --email you@example.com --agree-tos --no-eff-email --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
 
   certbot-renew:
     image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
     restart: unless-stopped
-    entrypoint: ["sh", "-c", "while true; do certbot renew --webroot -w /var/www/certbot --quiet || true; sleep 12h; done"]
+    depends_on:
+      certbot-init:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        while true; do
+          if ! certbot renew --webroot -w /var/www/certbot --quiet \
+              --deploy-hook "sh /usr/local/bin/deploy-hook.sh"; then
+            echo "Certbot renewal attempt failed; retrying in 12 hours" >&2
+          fi
+          sleep 43200
+        done
+    environment:
+      - TLS_CERT_HOSTNAME=${SERVER_NAME:-}
+      - TLS_CERT_UID=${HOST_UID:-1000}
+      - TLS_CERT_GID=${HOST_GID:-1000}
     volumes:
       - ./certs:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
+      - ./certbot/deploy-hook.sh:/usr/local/bin/deploy-hook.sh:ro
 
   certbot-init:
     image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
     restart: "no"
+    depends_on:
+      openresty:
+        condition: service_started
     entrypoint: >
       sh -c '
       if [ -z "$$CERTBOT_DOMAINS" ] || [ -z "$$CERTBOT_EMAIL" ]; then
         echo "CERTBOT_DOMAINS or CERTBOT_EMAIL not set; skipping initial cert issuance";
         exit 0;
       fi;
-      primary_domain=$${CERTBOT_DOMAINS%%,*};
-      if [ -f "/etc/letsencrypt/live/$$primary_domain/fullchain.pem" ]; then
-        echo "Certificate already present for $$primary_domain; skipping issuance";
+      primary_domain=$$(printf '%s' "$$CERTBOT_DOMAINS" | cut -d',' -f1 | tr -d ' ');
+      live_cert="/etc/letsencrypt/live/$$primary_domain/fullchain.pem";
+      live_key="/etc/letsencrypt/live/$$primary_domain/privkey.pem";
+      if [ -s "$$live_cert" ] && [ -s "$$live_key" ] &&
+         openssl x509 -in "$$live_cert" -checkend 0 -noout >/dev/null 2>&1 &&
+         openssl pkey -in "$$live_key" -noout >/dev/null 2>&1; then
+        echo "Valid certificate already present for $$primary_domain; promoting it to the canonical TLS paths";
+        RENEWED_LINEAGE="/etc/letsencrypt/live/$$primary_domain" sh /usr/local/bin/deploy-hook.sh;
         exit 0;
       fi;
       domains="";
-      for d in $${CERTBOT_DOMAINS//,/ }; do domains="$$domains -d $$d"; done;
+      for d in $$(printf '%s' "$$CERTBOT_DOMAINS" | tr ',' ' '); do domains="$$domains -d $$d"; done;
       staging="";
       if [ "$$CERTBOT_STAGING" = "1" ]; then staging="--staging"; fi;
-      certbot certonly --non-interactive --agree-tos $$staging --webroot -w /var/www/certbot $$domains -m "$$CERTBOT_EMAIL"
+      certbot certonly --non-interactive --agree-tos $$staging --webroot -w /var/www/certbot $$domains -m "$$CERTBOT_EMAIL" --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
       '
     environment:
       - CERTBOT_DOMAINS=${CERTBOT_DOMAINS}
       - CERTBOT_EMAIL=${CERTBOT_EMAIL}
       - CERTBOT_STAGING=${CERTBOT_STAGING:-0}
+      - TLS_CERT_HOSTNAME=${SERVER_NAME:-}
+      - TLS_CERT_UID=${HOST_UID:-1000}
+      - TLS_CERT_GID=${HOST_GID:-1000}
     volumes:
       - ./certs:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
+      - ./certbot/deploy-hook.sh:/usr/local/bin/deploy-hook.sh:ro
 
   mysql:
     image: mysql:8.0.41
