@@ -13,9 +13,7 @@ import time
 import json
 import logging
 import tempfile
-import shutil
 import asyncio
-import math
 import io
 import zipfile
 import hashlib
@@ -35,20 +33,100 @@ from collections import defaultdict, deque
 from threading import Lock
 from uuid import uuid4
 
-import aiosqlite
 import httpx
 import jwt
 from fmpy import read_model_description, simulate_fmu
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
-from fastapi.responses import StreamingResponse, Response, JSONResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import UploadFile
 from xml.etree import ElementTree as ET
 
 from auth import _fetch_jwks, verify_jwt, verify_jwt_token, jwks_health
+from claim_values import (
+    claim_reservation_key as _claim_reservation_key_value,
+    coerce_epoch_seconds as _coerce_epoch_seconds_value,
+    get_claim_lab_id as _get_claim_lab_id_value,
+    normalize_lab_id as _normalize_lab_id_value,
+)
 from fmu_backend import LocalFmuBackend, StationFmuBackend
+from execution_adapters import (
+    ensure_local_execution_backend as _ensure_local_execution_backend_adapter,
+    simulation_request_payload as _simulation_request_payload_adapter,
+)
+from execution_lifecycle import (
+    create_simulation_executor as _create_simulation_executor_impl,
+    preload_jwks_if_enabled as _preload_jwks_if_enabled_impl,
+    shutdown_simulation_executor as _shutdown_simulation_executor_impl,
+    submit_simulation as _submit_simulation_impl,
+)
+from execution_slots import ConcurrencySlots
+from execution_tracking import SimulationRegistry
+from timeout_policy import effective_timeout_seconds as _effective_timeout_seconds_policy
+from local_fmu_catalog import (
+    _list_local_fmus_payload as _catalog_list_local_fmus_payload,
+    _load_local_model_metadata as _catalog_load_local_model_metadata,
+    _local_backend_health_payload as _catalog_local_backend_health_payload,
+)
+from metadata import (
+    _collect_declared_type_definitions,
+    _collect_variable_dimensions,
+    _format_fmi3_binary_start_value,
+    _format_fmi_start_value,
+    _model_metadata_from_model_description,
+    _normalize_metadata_value,
+    _normalize_proxy_fmi3_type,
+    _normalize_xml_value,
+    _parse_fmi_major_version,
+    _public_model_metadata,
+)
+from proxy_fmu import (
+    _build_proxy_model_description_xml,
+    _collect_runtime_files as _collect_proxy_runtime_files,
+    _proxy_model_identifier,
+    _validate_proxy_generation_supported,
+)
+from simulation_history import (
+    get_history_result as _get_history_result,
+    init_history_db as _init_history_db,
+    list_history as _list_history,
+    save_history as _save_history_to_db,
+)
+from stream_errors import build_stream_error_payload as _build_stream_error_payload
 from realtime_ws import RealtimeWsManager
 from station_ws_proxy import StationRealtimeWsProxyManager
+from temp_cleanup import cleanup_fmu_temp_files
+from session_ticket_responses import (
+    extract_error_payload as _extract_error_payload,
+    extract_error_text as _extract_error_text,
+)
+from session_ticket_payloads import (
+    build_issue_session_ticket_payload as _build_issue_session_ticket_payload,
+    build_redeem_session_ticket_payload as _build_redeem_session_ticket_payload,
+)
+from session_ticket_service import (
+    issue_session_ticket as _issue_session_ticket_service,
+    redeem_session_ticket as _redeem_session_ticket_service,
+)
+from session_ticket_transport import (
+    build_session_ticket_headers as _build_session_ticket_headers_transport,
+    post_session_ticket_request as _post_session_ticket_request_transport,
+)
+from session_ticket_values import normalize_ticket_id as _normalize_ticket_id_value
+from session_observation_payloads import (
+    build_session_observation_payload as _build_session_observation_payload,
+)
+from session_observation_service import (
+    confirm_session_started as _confirm_session_started_service,
+    confirm_session_started_with_retries as _confirm_session_started_with_retries,
+    record_browser_session_started as _record_browser_session_started_service,
+)
+from health_router import create_health_router
+from catalog_router import create_catalog_router
+from history_router import create_history_router
+from aas_link_router import create_aas_link_router
+from aas_hints_router import create_aas_hints_router
+from aas_sync_router import create_aas_sync_router
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -136,7 +214,7 @@ FMU_SESSION_OBSERVATION_MAX_ATTEMPTS = max(
 PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE = int(os.getenv("PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE", "20"))
 WS_CREATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("WS_CREATE_RATE_LIMIT_PER_MINUTE", "30"))
 
-# ---- Structured JSON logging (#23) ----
+# ---- Structured JSON logging ----
 
 class _JsonFormatter(logging.Formatter):
     def format(self, record):
@@ -161,8 +239,9 @@ logger.setLevel(logging.INFO)
 # Concurrency tracking
 # ---------------------------------------------------------------------------
 
-_active_counts: dict[str, int] = defaultdict(int)
-_active_lock = Lock()
+_active_slots = ConcurrencySlots()
+_active_counts = _active_slots.counts
+_active_lock = _active_slots.lock
 
 _proxy_download_hits: dict[str, deque[float]] = defaultdict(deque)
 _proxy_download_lock = Lock()
@@ -171,12 +250,7 @@ _browser_observation_lock = Lock()
 
 
 def _normalize_ticket_id(session_ticket: Optional[str]) -> Optional[str]:
-    if not session_ticket:
-        return None
-    token = str(session_ticket).strip()
-    if token.startswith("st_"):
-        token = token[3:]
-    return token[:10] if token else None
+    return _normalize_ticket_id_value(session_ticket)
 
 
 def _allow_proxy_download(key: str) -> bool:
@@ -194,19 +268,11 @@ def _allow_proxy_download(key: str) -> bool:
 
 
 def _acquire_slot(lab_id: str):
-    """Acquire a concurrency slot for *lab_id*. Raises 429 if limit reached."""
-    with _active_lock:
-        if _active_counts[lab_id] >= MAX_CONCURRENT_PER_MODEL:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Concurrency limit ({MAX_CONCURRENT_PER_MODEL}) reached for this FMU. Try again shortly.",
-            )
-        _active_counts[lab_id] += 1
+    return _active_slots.acquire(lab_id, MAX_CONCURRENT_PER_MODEL)
 
 
 def _release_slot(lab_id: str):
-    with _active_lock:
-        _active_counts[lab_id] = max(0, _active_counts[lab_id] - 1)
+    return _active_slots.release(lab_id)
 
 
 # ---------------------------------------------------------------------------
@@ -214,24 +280,18 @@ def _release_slot(lab_id: str):
 # ---------------------------------------------------------------------------
 
 def _create_executor():
-    try:
-        return ProcessPoolExecutor(max_workers=4)
-    except (PermissionError, OSError) as exc:
-        # Never run native FMU code in an ASGI thread. A thread cannot be
-        # force-terminated when an FMU blocks in a native call, so fail closed
-        # and let the API report that local execution is unavailable.
-        logger.error("ProcessPoolExecutor unavailable; local FMU execution disabled: %s", exc)
-        return None
+    return _create_simulation_executor_impl(logger=logger)
 
 
 _executor = _create_executor()
 
 # ---------------------------------------------------------------------------
-# Running-simulation registry (for cancellation — #17)
+# Running-simulation registry (for cancellation)
 # ---------------------------------------------------------------------------
 
-_running_futures: dict[str, tuple[Future, str, str, str, Optional[ProcessPoolExecutor]]] = {}
-_running_lock = Lock()
+_running_registry = SimulationRegistry()
+_running_futures = _running_registry.entries
+_running_lock = _running_registry.lock
 
 
 def _track_running_future(
@@ -241,61 +301,39 @@ def _track_running_future(
     claims: dict,
     executor: Optional[ProcessPoolExecutor] = None,
 ):
-    with _running_lock:
-        _running_futures[sim_id] = (
-            future,
-            lab_id,
-            str(claims.get("reservationKey") or "").strip().lower(),
-            str(claims.get("pucHash") or "").strip().lower(),
-            executor,
-        )
+    _running_registry.register(sim_id, future, lab_id, claims, executor)
 
 
 def _shutdown_simulation_executor(executor: Any, *, force: bool = False) -> None:
-    """Stop one isolated worker pool, killing native workers on cancellation."""
-    if not isinstance(executor, ProcessPoolExecutor):
-        return
-    if force:
-        processes = getattr(executor, "_processes", {}) or {}
-        for process in list(processes.values()):
-            try:
-                if process.is_alive():
-                    killer = getattr(process, "kill", None) or process.terminate
-                    killer()
-            except Exception as exc:
-                logger.warning("Unable to terminate FMU worker process: %s", exc)
-    executor.shutdown(wait=False, cancel_futures=True)
+    return _shutdown_simulation_executor_impl(executor, force=force)
 
 
 def _submit_simulation(*args):
-    """Submit work to a fresh one-process pool in production.
+    return _submit_simulation_impl(
+        _executor,
+        _run_simulation,
+        _shutdown_simulation_executor,
+        *args,
+        process_pool_type=ProcessPoolExecutor,
+        process_pool_factory=ProcessPoolExecutor,
+    )
 
-    Tests may replace ``_executor`` with a lightweight fake; in
-    that case the replacement is used directly so the contract remains easy
-    to exercise without spawning processes.
-    """
-    if _executor is None:
-        raise RuntimeError("isolated FMU worker pool is unavailable")
-    if isinstance(_executor, ProcessPoolExecutor):
-        try:
-            executor = ProcessPoolExecutor(max_workers=1)
-        except (PermissionError, OSError) as exc:
-            raise RuntimeError("isolated FMU worker pool is unavailable") from exc
-        try:
-            future = executor.submit(_run_simulation, *args)
-        except Exception:
-            _shutdown_simulation_executor(executor, force=True)
-            raise
-        return executor, future
-    return _executor, _executor.submit(_run_simulation, *args)
+
+async def _preload_jwks_if_enabled():
+    enabled = os.getenv("JWKS_PRELOAD_ON_STARTUP", "true").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+    return await _preload_jwks_if_enabled_impl(
+        fetch_jwks=_fetch_jwks,
+        enabled=enabled,
+    )
 
 
 def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = None):
     """Remove simulation from registry and release one concurrency slot."""
     lab_to_release = lab_id_fallback
     executor = None
-    with _running_lock:
-        entry = _running_futures.pop(sim_id, None)
+    entry = _running_registry.pop(sim_id)
     if entry is not None:
         _, lab_to_release, _, _, executor = entry
         _shutdown_simulation_executor(executor)
@@ -309,11 +347,7 @@ def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     await _init_db()
-    if os.getenv("JWKS_PRELOAD_ON_STARTUP", "true").strip().lower() not in {"0", "false", "no", "off"}:
-        try:
-            await _fetch_jwks(force=True)
-        except HTTPException:
-            logging.warning("JWKS preload failed; health will remain DOWN until keys are loaded")
+    await _preload_jwks_if_enabled()
     if _realtime_manager is not None:
         await _realtime_manager.start()
     try:
@@ -325,74 +359,154 @@ async def _lifespan(_app: FastAPI):
         await _cleanup_temp_files()
 
 
+async def _health_backend_payload():
+    return await _fmu_backend.health()
+
+
+async def _refresh_health_jwks():
+    return await _fetch_jwks()
+
+
+def _health_auth_status():
+    return jwks_health()
+
+
+def _catalog_enforce_fmu_claim(claims: dict, *, allow_provider_describe: bool = False):
+    return _enforce_fmu_claim(claims, allow_provider_describe=allow_provider_describe)
+
+
+async def _catalog_get_authorized_model_metadata(*, claims: dict, requested_fmu_filename: Optional[str] = None):
+    return await _fmu_backend.get_authorized_model_metadata(
+        claims=claims,
+        requested_fmu_filename=requested_fmu_filename,
+    )
+
+
+def _catalog_public_model_metadata(metadata: dict):
+    return _public_model_metadata(metadata)
+
+
+async def _catalog_list_authorized_fmu(*, claims: dict):
+    return await _fmu_backend.list_authorized_fmu(claims=claims)
+
+
+def _history_enforce_fmu_claim(claims: dict):
+    return _enforce_fmu_claim(claims)
+
+
+def _history_ensure_local_execution_backend(feature_name: str):
+    return _ensure_local_execution_backend(feature_name)
+
+
+def _history_get_claim_lab_id(claims: dict):
+    return _get_claim_lab_id(claims)
+
+
+def _history_normalize_lab_id(value):
+    return _normalize_lab_id(value)
+
+
+def _history_claim_reservation_key(claims: dict):
+    return _claim_reservation_key(claims)
+
+
+def _history_db_path():
+    return HISTORY_DB_PATH
+
+
+def _aas_link_path_for_router(access_key: str) -> Path:
+    return _aas_link_path(access_key)
+
+
+def _aas_hints_resolve_fmu_path(access_key: str):
+    return _resolve_fmu_path(access_key)
+
+
+def _aas_hints_read_model_description(fmu_path):
+    return read_model_description(str(fmu_path))
+
+
+def _aas_sync_resolve_fmu_path(access_key: str):
+    return _resolve_fmu_path(access_key)
+
+
+def _aas_sync_read_model_description(fmu_path):
+    return read_model_description(str(fmu_path))
+
+
+def _aas_sync_metadata_builder(model_description):
+    return _model_metadata_from_model_description(model_description)
+
+
+async def _aas_sync_to_basyx(**kwargs):
+    from aas_generator import sync_fmu_to_basyx
+
+    return await sync_fmu_to_basyx(**kwargs)
+
+
 app = FastAPI(title="FMU Runner", version="0.2.0", lifespan=_lifespan)
+app.include_router(create_health_router(
+    backend_health=_health_backend_payload,
+    refresh_jwks=_refresh_health_jwks,
+    auth_health=_health_auth_status,
+))
+app.include_router(create_catalog_router(
+    verify_jwt=verify_jwt,
+    enforce_fmu_claim=_catalog_enforce_fmu_claim,
+    get_authorized_model_metadata=_catalog_get_authorized_model_metadata,
+    public_model_metadata=_catalog_public_model_metadata,
+    list_authorized_fmu=_catalog_list_authorized_fmu,
+))
+app.include_router(create_history_router(
+    verify_jwt=verify_jwt,
+    enforce_fmu_claim=_history_enforce_fmu_claim,
+    ensure_local_execution_backend=_history_ensure_local_execution_backend,
+    get_claim_lab_id=_history_get_claim_lab_id,
+    normalize_lab_id=_history_normalize_lab_id,
+    claim_reservation_key=_history_claim_reservation_key,
+    get_history_db_path=_history_db_path,
+    list_history=_list_history,
+    get_history_result=_get_history_result,
+))
+app.include_router(create_aas_link_router(get_link_path=_aas_link_path_for_router))
+app.include_router(create_aas_hints_router(
+    resolve_fmu_path=_aas_hints_resolve_fmu_path,
+    read_model_description=_aas_hints_read_model_description,
+    normalize_xml_value=_normalize_xml_value,
+    logger=logger,
+))
+app.include_router(create_aas_sync_router(
+    resolve_fmu_path=_aas_sync_resolve_fmu_path,
+    read_model_description=_aas_sync_read_model_description,
+    metadata_builder=_aas_sync_metadata_builder,
+    sync_fmu_to_basyx=_aas_sync_to_basyx,
+    logger=logger,
+))
 
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# #29 — Simulation history (SQLite)
+# Simulation history persistence (SQLite)
 # ---------------------------------------------------------------------------
 
 async def _init_db():
-    """Create history DB schema if needed."""
-    os.makedirs(os.path.dirname(HISTORY_DB_PATH) or ".", exist_ok=True)
-    async with aiosqlite.connect(HISTORY_DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS simulation_history (
-                id TEXT PRIMARY KEY,
-                lab_id TEXT NOT NULL,
-                user_sub TEXT,
-                reservation_key TEXT,
-                puc_hash TEXT,
-                credential_hash TEXT,
-                fmu_filename TEXT,
-                fmi_type TEXT DEFAULT 'CoSimulation',
-                parameters TEXT,
-                options TEXT,
-                result TEXT,
-                elapsed_seconds REAL,
-                status TEXT DEFAULT 'completed',
-                created_at TEXT DEFAULT (datetime('now'))
-            )
-        """)
-        cursor = await db.execute("PRAGMA table_info(simulation_history)")
-        columns = {row[1] for row in await cursor.fetchall()}
-        for name in ("reservation_key", "puc_hash", "credential_hash"):
-            if name not in columns:
-                await db.execute(f"ALTER TABLE simulation_history ADD COLUMN {name} TEXT")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_history_lab ON simulation_history(lab_id)")
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_history_reservation ON simulation_history(lab_id, reservation_key)"
-        )
-        await db.commit()
+    return await _init_history_db(HISTORY_DB_PATH)
 
 
 async def _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type, params, options, result, elapsed):
-    """Persist a completed simulation to SQLite."""
-    try:
-        async with aiosqlite.connect(HISTORY_DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO simulation_history "
-                "(id,lab_id,user_sub,reservation_key,puc_hash,credential_hash,fmu_filename,fmi_type,parameters,options,result,elapsed_seconds) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    sim_id,
-                    str(lab_id),
-                    claims.get("sub"),
-                    claims.get("reservationKey"),
-                    claims.get("pucHash"),
-                    claims.get("_credentialHash"),
-                    fmu_filename,
-                    fmi_type,
-                    json.dumps(params),
-                    json.dumps(options),
-                    json.dumps(result),
-                    elapsed,
-                ),
-            )
-            await db.commit()
-    except Exception as exc:
-        logger.error("Failed to save simulation history: %s", exc)
+    return await _save_history_to_db(
+        HISTORY_DB_PATH,
+        sim_id=sim_id,
+        lab_id=lab_id,
+        claims=claims,
+        fmu_filename=fmu_filename,
+        fmi_type=fmi_type,
+        params=params,
+        options=options,
+        result=result,
+        elapsed=elapsed,
+        logger=logger,
+    )
 
 
 # ----- models -----
@@ -422,14 +536,11 @@ def _is_within_base(base: Path, candidate: Path) -> bool:
 
 
 def _normalize_lab_id(value) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+    return _normalize_lab_id_value(value)
 
 
 def _get_claim_lab_id(claims: dict) -> Optional[str]:
-    return _normalize_lab_id(claims.get("labId"))
+    return _get_claim_lab_id_value(claims, normalizer=_normalize_lab_id)
 
 
 _PROVIDER_DESCRIBE_SCOPE = "fmu:describe"
@@ -460,7 +571,7 @@ def _enforce_fmu_claim(claims: dict, *, allow_provider_describe: bool = False):
 
 
 def _claim_reservation_key(claims: dict) -> str:
-    return str(claims.get("reservationKey") or "").strip().lower()
+    return _claim_reservation_key_value(claims)
 
 
 def _enforce_requested_reservation(claims: dict, requested: Optional[str]) -> str:
@@ -472,34 +583,16 @@ def _enforce_requested_reservation(claims: dict, requested: Optional[str]) -> st
 
 
 def _coerce_epoch_seconds(value) -> Optional[int]:
-    """Best-effort conversion of JWT epoch-like values to integer seconds."""
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        # Handles integer and decimal numeric strings.
-        return int(float(text))
-    except ValueError:
-        return None
+    return _coerce_epoch_seconds_value(value)
 
 
 def _effective_timeout_seconds(requested_timeout: int, claims: dict) -> int:
-    """Clamp timeout by configured max and JWT reservation expiry (exp), if present."""
-    capped_timeout = min(requested_timeout, MAX_SIMULATION_TIMEOUT)
-    exp_ts = _coerce_epoch_seconds(claims.get("exp"))
-    if exp_ts is None:
-        return capped_timeout
-
-    remaining = int(math.ceil(exp_ts - time.time()))
-    if remaining <= 0:
-        raise HTTPException(status_code=401, detail="Reservation token has expired")
-    return min(capped_timeout, remaining)
+    return _effective_timeout_seconds_policy(
+        requested_timeout,
+        max_timeout=MAX_SIMULATION_TIMEOUT,
+        exp_ts=_coerce_epoch_seconds(claims.get("exp")),
+        now=time.time(),
+    )
 
 
 def _resolve_fmu_path(fmu_filename: str) -> Path:
@@ -564,375 +657,30 @@ def _derive_gateway_ws_url(claims: dict) -> str:
     return urlunparse((ws_scheme, parsed.netloc, "/fmu/api/v1/fmu/sessions", "", "", ""))
 
 
-def _normalize_xml_value(value) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text if text else None
-
-
-def _parse_fmi_major_version(value) -> int:
-    text = str(value or "").strip()
-    if not text:
-        return 2
-    try:
-        return int(text.split(".", 1)[0])
-    except ValueError:
-        return 2
-
-
-def _proxy_model_identifier(model_metadata: dict) -> str:
-    # Keep a stable identifier so the native runtime binary name stays generic.
-    return "decentralabs_proxy"
-
-
-def _normalize_proxy_fmi3_type(type_name: Optional[str]) -> str:
-    normalized = str(type_name or "").strip()
-    if normalized in {"Float32", "Float64", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64", "Boolean", "String", "Binary", "Clock"}:
-        return normalized
-    if normalized == "Enumeration":
-        return "Int32"
-    if normalized == "Integer":
-        return "Int32"
-    if normalized:
-        return normalized
-    return "Float64"
-
-
-def _format_fmi_start_value(value) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, (bytes, bytearray)):
-        return base64.b64encode(bytes(value)).decode("ascii")
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (list, tuple)):
-        return " ".join(_format_fmi_start_value(item) or "" for item in value)
-    return str(value)
-
-
-def _format_fmi3_binary_start_value(raw_value, formatted_value: str) -> str:
-    """Serialize a Binary start value using FMI 3's hexBinary representation.
-
-    Metadata transported through JSON uses canonical base64 for raw bytes. The
-    generated modelDescription.xml must convert that transport representation
-    back to hexadecimal for the FMI 3 schema.
-    """
-    if isinstance(raw_value, (bytes, bytearray)):
-        return bytes(raw_value).hex()
-    if isinstance(raw_value, str):
-        try:
-            return base64.b64decode(raw_value, validate=True).hex()
-        except ValueError:
-            return formatted_value
-    return formatted_value
-
-
-def _collect_declared_type_definitions(model_metadata: dict) -> dict[str, dict]:
-    definitions: dict[str, dict] = {}
-    for variable in model_metadata.get("modelVariables", []):
-        declared_type = variable.get("declaredType")
-        if not isinstance(declared_type, dict):
-            continue
-        type_name = _normalize_xml_value(declared_type.get("name"))
-        if not type_name:
-            continue
-        definitions.setdefault(type_name, declared_type)
-    return definitions
-
-
-def _normalize_metadata_value(value, variable_type: Optional[str] = None):
-    if isinstance(value, (bytes, bytearray)):
-        return base64.b64encode(bytes(value)).decode("ascii")
-    if variable_type in {"Int64", "UInt64"}:
-        if isinstance(value, (list, tuple)):
-            return [str(int(item)) for item in value]
-        return str(int(value))
-    if isinstance(value, (list, tuple)):
-        return [_normalize_metadata_value(item, variable_type=variable_type) for item in value]
-    return value
-
-
-def _collect_variable_dimensions(var) -> list[dict]:
-    dimensions = []
-    for dimension in getattr(var, "dimensions", []) or []:
-        entry = {}
-        if getattr(dimension, "start", None) is not None:
-            entry["start"] = int(dimension.start)
-        if getattr(dimension, "valueReference", None) is not None:
-            entry["valueReference"] = int(dimension.valueReference)
-        variable = getattr(dimension, "variable", None)
-        if variable is not None and getattr(variable, "name", None):
-            entry["variableName"] = variable.name
-        if entry:
-            dimensions.append(entry)
-    return dimensions
-
-
-def _validate_proxy_generation_supported(model_metadata: dict):
-    simulation_kind = str(model_metadata.get("simulationKind") or "coSimulation").lower()
-    if simulation_kind != "cosimulation":
-        raise HTTPException(status_code=422, detail="Generated proxy FMUs currently support only Co-Simulation models")
-
-    if _parse_fmi_major_version(model_metadata.get("fmiVersion")) < 3:
-        return
-
-    supported_types = {
-        "Float32",
-        "Float64",
-        "Int8",
-        "UInt8",
-        "Int16",
-        "UInt16",
-        "Int32",
-        "UInt32",
-        "Int64",
-        "UInt64",
-        "Boolean",
-        "String",
-        "Binary",
-        "Clock",
-    }
-    for variable in model_metadata.get("modelVariables", []):
-        normalized_type = _normalize_proxy_fmi3_type(variable.get("type"))
-        if normalized_type not in supported_types:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Generated FMI 3 proxy FMUs do not yet support variable type: {variable.get('type')}",
-            )
-        if normalized_type == "Clock" and (variable.get("dimensions") or []):
-            raise HTTPException(
-                status_code=422,
-                detail=f"Generated FMI 3 proxy FMUs do not yet support dimensioned Clock variables: {variable.get('name')}",
-            )
-        for dimension in variable.get("dimensions", []) or []:
-            if "start" not in dimension and "valueReference" not in dimension:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Generated FMI 3 proxy FMUs require dimension metadata for variable: {variable.get('name')}",
-                )
-
-
-def _model_metadata_from_model_description(md) -> dict:
-    supports_cs = bool(getattr(md, "coSimulation", None))
-    supports_me = bool(getattr(md, "modelExchange", None))
-    simulation_kind = "coSimulation" if supports_cs else ("modelExchange" if supports_me else "unknown")
-    simulation_type = "CoSimulation" if supports_cs else ("ModelExchange" if supports_me else "Unknown")
-
-    default_experiment = getattr(md, "defaultExperiment", None)
-    default_start = float(default_experiment.startTime) if default_experiment and default_experiment.startTime is not None else 0.0
-    default_stop = float(default_experiment.stopTime) if default_experiment and default_experiment.stopTime is not None else 1.0
-    default_step = float(default_experiment.stepSize) if default_experiment and default_experiment.stepSize is not None else 0.01
-    default_tolerance: Optional[float] = None
-    if default_experiment is not None:
-        raw_tolerance = getattr(default_experiment, "tolerance", None)
-        if raw_tolerance is not None:
-            default_tolerance = float(raw_tolerance)
-
-    variables = []
-    for index, var in enumerate(getattr(md, "modelVariables", []), start=1):
-        entry = {
-            "name": var.name,
-            "causality": var.causality or "local",
-            "type": str(var.type),
-            "variability": getattr(var, "variability", None) or "continuous",
-            "valueReference": int(getattr(var, "valueReference", index)),
-        }
-        if hasattr(var, "initial") and var.initial:
-            entry["initial"] = var.initial
-        if hasattr(var, "unit") and var.unit:
-            entry["unit"] = var.unit
-        if hasattr(var, "start") and var.start is not None:
-            entry["start"] = _normalize_metadata_value(var.start, variable_type=str(var.type))
-        if hasattr(var, "min") and var.min is not None:
-            entry["min"] = var.min
-        if hasattr(var, "max") and var.max is not None:
-            entry["max"] = var.max
-        if hasattr(var, "description") and var.description:
-            entry["description"] = var.description
-        if hasattr(var, "quantity") and var.quantity:
-            entry["quantity"] = var.quantity
-        if hasattr(var, "displayUnit") and var.displayUnit:
-            entry["displayUnit"] = var.displayUnit
-        if hasattr(var, "nominal") and var.nominal is not None:
-            entry["nominal"] = var.nominal
-        declared_type = getattr(var, "declaredType", None)
-        if declared_type is not None and getattr(declared_type, "name", None):
-            declared_type_entry = {
-                "name": declared_type.name,
-                "type": str(getattr(declared_type, "type", None) or var.type),
-            }
-            if getattr(declared_type, "description", None):
-                declared_type_entry["description"] = declared_type.description
-            items = []
-            for item in getattr(declared_type, "items", []) or []:
-                item_entry = {
-                    "name": str(getattr(item, "name", "") or ""),
-                    "value": str(getattr(item, "value", "") or ""),
-                }
-                if getattr(item, "description", None):
-                    item_entry["description"] = item.description
-                items.append(item_entry)
-            if items:
-                declared_type_entry["items"] = items
-            entry["declaredType"] = declared_type_entry
-        dimensions = _collect_variable_dimensions(var)
-        if dimensions:
-            entry["dimensions"] = dimensions
-        variables.append(entry)
-
-    # Capabilities from the primary interface (CoSimulation preferred over ModelExchange)
-    _iface = getattr(md, "coSimulation", None) or getattr(md, "modelExchange", None)
-    capabilities: dict = {}
-    if _iface:
-        for _attr in (
-            "canGetAndSetFMUstate",
-            "canSerializeFMUstate",
-            "canHandleVariableCommunicationStepSize",
-            "providesDirectionalDerivative",
-            "providesAdjointDerivatives",
-        ):
-            val = getattr(_iface, _attr, None)
-            if val is not None:
-                capabilities[_attr] = bool(val)
-        fixed = getattr(_iface, "fixedInternalStepSize", None)
-        if fixed is not None:
-            capabilities["fixedInternalStepSize"] = float(fixed)
-
-    # Unit definitions (physical units used by model variables)
-    unit_defs: list = []
-    for unit in getattr(md, "unitDefinitions", []) or []:
-        u: dict = {"name": unit.name}
-        base_unit = getattr(unit, "baseUnit", None)
-        if base_unit is not None:
-            base: dict = {}
-            for exp in ("kg", "m", "s", "A", "K", "mol", "cd", "rad"):
-                val = int(getattr(base_unit, exp, 0) or 0)
-                if val != 0:
-                    base[exp] = val
-            factor = getattr(base_unit, "factor", None)
-            if factor is not None and float(factor) != 1.0:
-                base["factor"] = float(factor)
-            offset = getattr(base_unit, "offset", None)
-            if offset is not None and float(offset) != 0.0:
-                base["offset"] = float(offset)
-            if base:
-                u["baseUnit"] = base
-        display_units: list = []
-        for du in getattr(unit, "displayUnits", []) or []:
-            d: dict = {"name": du.name}
-            f = getattr(du, "factor", None)
-            if f is not None and float(f) != 1.0:
-                d["factor"] = float(f)
-            o = getattr(du, "offset", None)
-            if o is not None and float(o) != 0.0:
-                d["offset"] = float(o)
-            display_units.append(d)
-        if display_units:
-            u["displayUnits"] = display_units
-        unit_defs.append(u)
-
-    metadata = {
-        "modelName": _normalize_xml_value(getattr(md, "modelName", None)) or "DecentraLabsProxy",
-        "guid": _normalize_xml_value(getattr(md, "guid", None)),
-        "instantiationToken": _normalize_xml_value(getattr(md, "instantiationToken", None)),
-        "fmiVersion": md.fmiVersion,
-        "simulationKind": simulation_kind,
-        "simulationType": simulation_type,
-        "supportsCoSimulation": supports_cs,
-        "supportsModelExchange": supports_me,
-        "defaultStartTime": default_start,
-        "defaultStopTime": default_stop,
-        "defaultStepSize": default_step,
-        "defaultTolerance": default_tolerance,
-        "modelVariables": variables,
-        # FMU-embedded descriptive metadata (populated when declared in modelDescription.xml)
-        "description": _normalize_xml_value(getattr(md, "description", None)) or "",
-        "author": _normalize_xml_value(getattr(md, "author", None)) or "",
-        "version": _normalize_xml_value(getattr(md, "version", None)) or "",
-        "license": _normalize_xml_value(getattr(md, "license", None)) or "",
-        "generationTool": _normalize_xml_value(getattr(md, "generationTool", None)) or "",
-        "capabilities": capabilities,
-        "unitDefinitions": unit_defs,
-    }
-    return metadata
-
-
-def _public_model_metadata(metadata: dict) -> dict:
-    variables = []
-    for variable in metadata.get("modelVariables", []):
-        entry = {
-            "name": variable.get("name"),
-            "causality": variable.get("causality", "local"),
-            "type": variable.get("type", "Real"),
-            "variability": variable.get("variability", "continuous"),
-        }
-        for optional_key in ("initial", "unit", "start", "min", "max", "dimensions"):
-            if optional_key in variable:
-                entry[optional_key] = variable[optional_key]
-        variables.append(entry)
-
-    payload = {
-        "fmiVersion": metadata.get("fmiVersion", "2.0"),
-        "simulationKind": metadata.get("simulationKind", "unknown"),
-        "simulationType": metadata.get("simulationType", "Unknown"),
-        "supportsCoSimulation": bool(metadata.get("supportsCoSimulation")),
-        "supportsModelExchange": bool(metadata.get("supportsModelExchange")),
-        "defaultStartTime": float(metadata.get("defaultStartTime", 0.0)),
-        "defaultStopTime": float(metadata.get("defaultStopTime", 1.0)),
-        "defaultStepSize": float(metadata.get("defaultStepSize", 0.01)),
-        "modelVariables": variables,
-    }
-    if metadata.get("instantiationToken"):
-        payload["instantiationToken"] = metadata["instantiationToken"]
-    return payload
-
-
 def _local_backend_health_payload() -> dict:
-    checks = {"fmuDataPath": False, "executor": False}
-    base = Path(FMU_DATA_PATH)
-    checks["fmuDataPath"] = base.is_dir()
-    fmu_count = sum(1 for _ in base.rglob("*.fmu")) if checks["fmuDataPath"] else 0
-    try:
-        checks["executor"] = (
-            _executor is not None
-            and (not _executor._broken if hasattr(_executor, "_broken") else True)
-        )
-    except Exception:
-        checks["executor"] = False
-    overall = all(checks.values())
-    return {
-        "status": "UP" if overall else "DEGRADED",
-        "checks": checks,
-        "fmuCount": fmu_count,
-        "backendMode": "local",
-    }
+    return _catalog_local_backend_health_payload(
+        data_path=FMU_DATA_PATH,
+        executor=_executor,
+    )
 
 
 def _load_local_model_metadata(fmu_filename: str) -> dict:
-    fmu_path = _resolve_fmu_path(fmu_filename)
-    try:
-        md = read_model_description(str(fmu_path))
-    except Exception as exc:
-        logger.error("Failed to read model description for %s: %s", fmu_filename, exc)
-        raise HTTPException(status_code=422, detail="Cannot parse FMU") from exc
-    return _model_metadata_from_model_description(md)
+    return _catalog_load_local_model_metadata(
+        fmu_filename,
+        resolve_fmu_path=_resolve_fmu_path,
+        model_description_reader=read_model_description,
+        model_metadata_builder=_model_metadata_from_model_description,
+        logger=logger,
+    )
 
 
 def _list_local_fmus_payload(claimed_file: str) -> dict:
-    resolved = _resolve_fmu_path(claimed_file)
-    base = Path(FMU_DATA_PATH).resolve()
-    if not _is_within_base(base, resolved):
-        return {"fmus": []}
-    rel = resolved.relative_to(base)
-    return {
-        "fmus": [{
-            "filename": resolved.name,
-            "path": str(rel),
-            "sizeBytes": resolved.stat().st_size,
-            "source": "provisioned",
-        }]
-    }
+    return _catalog_list_local_fmus_payload(
+        claimed_file,
+        data_path=FMU_DATA_PATH,
+        resolve_fmu_path=_resolve_fmu_path,
+        is_within_base=_is_within_base,
+    )
 
 
 def _build_fmu_backend():
@@ -972,28 +720,17 @@ def _get_station_backend() -> StationFmuBackend:
 
 
 def _simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = None) -> dict:
-    payload = {
-        "reservationKey": req.reservationKey,
-        "labId": req.labId,
-        "parameters": req.parameters,
-        "options": req.options,
-    }
-    if sim_id:
-        payload["simId"] = sim_id
-    return payload
+    return _simulation_request_payload_adapter(
+        reservation_key=req.reservationKey,
+        lab_id=req.labId,
+        parameters=req.parameters,
+        options=req.options,
+        sim_id=sim_id,
+    )
 
 
 def _ensure_local_execution_backend(feature_name: str):
-    if _fmu_backend.supports_local_execution:
-        return
-    raise HTTPException(
-        status_code=501,
-        detail=(
-            f"{feature_name} is not wired for FMU_BACKEND_MODE={_fmu_backend.mode}. "
-            "Use FMU_BACKEND_MODE=station in production, or explicitly set "
-            "FMU_BACKEND_MODE=local and FMU_LOCAL_DEV_MODE=true for isolated development."
-        ),
-    )
+    return _ensure_local_execution_backend_adapter(feature_name, _fmu_backend)
 
 
 async def _stream_station_simulation(request: Request, req: SimulationRequest, claims: dict):
@@ -1028,253 +765,12 @@ async def _stream_station_simulation(request: Request, req: SimulationRequest, c
     return StreamingResponse(_forward_stream(), media_type=media_type)
 
 
-def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
-    _validate_proxy_generation_supported(model_metadata)
-
-    model_name = _normalize_xml_value(model_metadata.get("modelName")) or "DecentraLabsProxy"
-    guid = _normalize_xml_value(model_metadata.get("guid")) or "{" + uuid4().hex + "}"
-    instantiation_token = _normalize_xml_value(model_metadata.get("instantiationToken")) or guid
-    model_identifier = _proxy_model_identifier(model_metadata)
-    fmi_major_version = _parse_fmi_major_version(model_metadata.get("fmiVersion"))
-    declared_units: set[str] = set()
-    for variable in model_metadata.get("modelVariables", []):
-        if str(variable.get("type", "Real") or "Real") not in {"Real", "Float32", "Float64"}:
-            continue
-        unit_name = _normalize_xml_value(variable.get("unit"))
-        if unit_name is not None:
-            declared_units.add(unit_name)
-
-    root_attributes = {
-        "modelName": model_name,
-        "generationTool": "DecentraLabs FMU Proxy Generator",
-        "generationDateAndTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    if fmi_major_version >= 3:
-        root_attributes["fmiVersion"] = "3.0"
-        root_attributes["instantiationToken"] = instantiation_token
-    else:
-        root_attributes.update({
-            "fmiVersion": "2.0",
-            "guid": guid,
-            "variableNamingConvention": "flat",
-            "numberOfEventIndicators": "0",
-        })
-    root = ET.Element("fmiModelDescription", root_attributes)
-
-    if fmi_major_version >= 3:
-        ET.SubElement(
-            root,
-            "CoSimulation",
-            {
-                "modelIdentifier": model_identifier,
-                "canHandleVariableCommunicationStepSize": "true",
-                "canGetAndSetFMUState": "false",
-                "canSerializeFMUState": "false",
-            },
-        )
-    else:
-        ET.SubElement(
-            root,
-            "CoSimulation",
-            {
-                "modelIdentifier": model_identifier,
-                "canHandleVariableCommunicationStepSize": "true",
-                "canInterpolateInputs": "false",
-                "maxOutputDerivativeOrder": "0",
-                "canRunAsynchronuously": "false",
-                "canBeInstantiatedOnlyOncePerProcess": "false",
-                "canNotUseMemoryManagementFunctions": "true",
-                "canGetAndSetFMUstate": "false",
-                "canSerializeFMUstate": "false",
-                "providesDirectionalDerivative": "false",
-            },
-        )
-
-    if declared_units:
-        unit_definitions = ET.SubElement(root, "UnitDefinitions")
-        for unit_name in sorted(declared_units):
-            ET.SubElement(unit_definitions, "Unit", {"name": unit_name})
-
-    if fmi_major_version < 3:
-        declared_type_definitions = _collect_declared_type_definitions(model_metadata)
-        if declared_type_definitions:
-            type_definitions = ET.SubElement(root, "TypeDefinitions")
-            for type_name in sorted(declared_type_definitions):
-                declared_type = declared_type_definitions[type_name]
-                simple_type_attrs = {"name": type_name}
-                description = _normalize_xml_value(declared_type.get("description"))
-                if description:
-                    simple_type_attrs["description"] = description
-                simple_type = ET.SubElement(type_definitions, "SimpleType", simple_type_attrs)
-                type_tag = str(declared_type.get("type") or "Enumeration")
-                typed_definition = ET.SubElement(simple_type, type_tag)
-                if type_tag == "Enumeration":
-                    for item in declared_type.get("items", []) or []:
-                        item_attrs = {
-                            "name": str(item.get("name") or ""),
-                            "value": str(item.get("value") or ""),
-                        }
-                        item_description = _normalize_xml_value(item.get("description"))
-                        if item_description:
-                            item_attrs["description"] = item_description
-                        ET.SubElement(typed_definition, "Item", item_attrs)
-
-    attrs = {}
-    if model_metadata.get("defaultStartTime") is not None:
-        attrs["startTime"] = str(model_metadata["defaultStartTime"])
-    if model_metadata.get("defaultStopTime") is not None:
-        attrs["stopTime"] = str(model_metadata["defaultStopTime"])
-    if model_metadata.get("defaultStepSize") is not None:
-        attrs["stepSize"] = str(model_metadata["defaultStepSize"])
-    if attrs:
-        ET.SubElement(root, "DefaultExperiment", attrs)
-
-    model_variables = ET.SubElement(root, "ModelVariables")
-    output_indexes = []
-    written_index = 0  # 1-based position in ModelVariables (independent vars excluded)
-
-    for index, var in enumerate(model_metadata.get("modelVariables", []), start=1):
-        # FMI 2: skip independent variables (time) — OpenModelica's FMI2XML parser rejects the
-        # modelDescription.xml when an independent variable lacks a start attribute, even though
-        # start is N.A. for that causality/variability combination per the FMI 2.0 spec.
-        # FMI 3 keeps independent variables because parsers handle them correctly there.
-        if fmi_major_version < 3 and (var.get("causality") or "").lower() == "independent":
-            continue
-        written_index += 1
-        var_type = str(var.get("type", "Real") or "Real")
-        value_reference = var.get("valueReference")
-        if value_reference is None:
-            value_reference = index
-        scalar_attrs = {
-            "name": str(var.get("name") or f"var_{index}"),
-            "valueReference": str(value_reference),
-        }
-        causality = _normalize_xml_value(var.get("causality"))
-        variability = _normalize_xml_value(var.get("variability"))
-        initial = _normalize_xml_value(var.get("initial"))
-        if causality:
-            scalar_attrs["causality"] = causality
-        if variability:
-            scalar_attrs["variability"] = variability
-        if initial:
-            scalar_attrs["initial"] = initial
-
-        type_attrs = {}
-        unit = _normalize_xml_value(var.get("unit"))
-        normalized_fmi3_type = _normalize_proxy_fmi3_type(var_type)
-        if unit and (var_type == "Real" or normalized_fmi3_type in {"Float32", "Float64"}):
-            type_attrs["unit"] = unit
-        start_value = _format_fmi_start_value(var.get("start"))
-        # FMI 2: start is required by spec when causality=parameter/input or initial=exact/approx.
-        # Provide a safe default if the source FMU metadata omitted it.
-        if fmi_major_version < 3 and start_value is None:
-            _requires_start = (
-                (causality or "").lower() in {"parameter", "input"}
-                or (initial or "").lower() in {"exact", "approx"}
-            )
-            if _requires_start:
-                if var_type == "Boolean":
-                    start_value = "false"
-                elif var_type == "String":
-                    start_value = ""
-                elif var_type == "Enumeration":
-                    start_value = "1"
-                else:
-                    start_value = "0"
-        # FMI 3: Binary and String use <Start value="..."/> child elements,
-        # Clock has no start at all.  Other types use a start attribute.
-        _fmi3_start_child_types = {"Binary", "String"}
-        if start_value is not None and (initial or "").lower() != "calculated":
-            if fmi_major_version >= 3 and normalized_fmi3_type in _fmi3_start_child_types:
-                pass  # handled after element creation below
-            elif fmi_major_version >= 3 and normalized_fmi3_type == "Clock":
-                pass  # Clock has no start in FMI 3 schema
-            else:
-                type_attrs["start"] = start_value
-        declared_type_name = _normalize_xml_value((var.get("declaredType") or {}).get("name"))
-        if declared_type_name and fmi_major_version < 3:
-            type_attrs["declaredType"] = declared_type_name
-
-        if fmi_major_version >= 3:
-            type_attrs.update(scalar_attrs)
-            typed_variable = ET.SubElement(model_variables, normalized_fmi3_type, type_attrs)
-            # Binary/String: emit <Start value="..."/> child element(s)
-            if start_value is not None and (initial or "").lower() != "calculated":
-                if normalized_fmi3_type == "Binary":
-                    raw = var.get("start")
-                    hex_value = _format_fmi3_binary_start_value(raw, start_value)
-                    ET.SubElement(typed_variable, "Start", {"value": hex_value})
-                elif normalized_fmi3_type == "String":
-                    ET.SubElement(typed_variable, "Start", {"value": start_value})
-            for dimension in var.get("dimensions", []) or []:
-                dimension_attrs = {}
-                if dimension.get("start") is not None:
-                    dimension_attrs["start"] = str(dimension["start"])
-                elif dimension.get("valueReference") is not None:
-                    dimension_attrs["valueReference"] = str(dimension["valueReference"])
-                if dimension_attrs:
-                    ET.SubElement(typed_variable, "Dimension", dimension_attrs)
-        else:
-            scalar = ET.SubElement(model_variables, "ScalarVariable", scalar_attrs)
-            if var_type in ("Integer", "Boolean", "String", "Enumeration"):
-                ET.SubElement(scalar, var_type, type_attrs)
-            else:
-                ET.SubElement(scalar, "Real", type_attrs)
-
-        if (causality or "").lower() == "output":
-            output_indexes.append((written_index, value_reference))
-
-    model_structure = ET.SubElement(root, "ModelStructure")
-    if output_indexes:
-        if fmi_major_version >= 3:
-            for _, value_reference in output_indexes:
-                ET.SubElement(model_structure, "Output", {"valueReference": str(value_reference)})
-        else:
-            outputs = ET.SubElement(model_structure, "Outputs")
-            for idx, _ in output_indexes:
-                ET.SubElement(outputs, "Unknown", {"index": str(idx)})
-
-    xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
-    return xml_bytes
-
-
 def _collect_runtime_files(*, fmi_version: str, model_identifier: str) -> list[tuple[Path, str]]:
-    runtime_root = Path(FMU_PROXY_RUNTIME_PATH).resolve()
-    binaries_root = (runtime_root / "binaries").resolve()
-    if not binaries_root.exists() or not binaries_root.is_dir():
-        raise HTTPException(
-            status_code=503,
-            detail="FMU proxy runtime binaries are not provisioned on Lab Gateway",
-        )
-    files: list[tuple[Path, str]] = []
-    fmi_major_version = _parse_fmi_major_version(fmi_version)
-    fmi3_platform_map = {
-        "win64": ("x86_64-windows", ".dll"),
-        "linux64": ("x86_64-linux", ".so"),
-        "darwin64": ("x86_64-darwin", ".dylib"),
-    }
-    for file_path in binaries_root.rglob("*"):
-        if file_path.is_file() and not file_path.name.startswith("."):
-            rel_path = file_path.relative_to(binaries_root)
-            if fmi_major_version >= 3:
-                parts = rel_path.parts
-                if not parts:
-                    continue
-                platform = fmi3_platform_map.get(parts[0])
-                if platform is None:
-                    continue
-                platform_dir, expected_suffix = platform
-                archive_name = f"binaries/{platform_dir}/{model_identifier}{expected_suffix}"
-            else:
-                archive_name = file_path.relative_to(runtime_root).as_posix()
-            rel = archive_name
-            files.append((file_path, rel))
-    if not files:
-        raise HTTPException(
-            status_code=503,
-            detail="FMU proxy runtime binaries are not provisioned on Lab Gateway",
-        )
-    return files
+    return _collect_proxy_runtime_files(
+        runtime_path=FMU_PROXY_RUNTIME_PATH,
+        fmi_version=fmi_version,
+        model_identifier=model_identifier,
+    )
 
 
 async def _issue_session_ticket(
@@ -1284,36 +780,19 @@ async def _issue_session_ticket(
     reservation_key: Optional[str],
     request_id: Optional[str] = None,
 ) -> tuple[str, int]:
-    payload = {"labId": str(lab_id)}
-    if reservation_key:
-        payload["reservationKey"] = reservation_key
-
-    response = await _post_session_ticket_request(
-        AUTH_SESSION_TICKET_ISSUE_URL,
-        payload=payload,
-        authorization=authorization,
+    return await _issue_session_ticket_service(
+        authorization,
+        lab_id=lab_id,
+        reservation_key=reservation_key,
+        request_id=request_id,
+        issue_url=AUTH_SESSION_TICKET_ISSUE_URL,
+        build_payload=_build_issue_session_ticket_payload,
+        post_request=_post_session_ticket_request,
+        extract_error_text=_extract_response_error_text,
+        coerce_epoch_seconds=_coerce_epoch_seconds,
+        normalize_ticket_id=_normalize_ticket_id,
+        logger=logger,
     )
-
-    if response.status_code >= 400:
-        raise HTTPException(
-            status_code=response.status_code,
-            detail=f"Unable to issue session ticket: {_extract_response_error_text(response)}",
-        )
-
-    data = response.json()
-    session_ticket = str(data.get("sessionTicket") or "").strip()
-    expires_at = _coerce_epoch_seconds(data.get("expiresAt"))
-    if not session_ticket or expires_at is None:
-        raise HTTPException(status_code=500, detail="Invalid session ticket response from auth service")
-    logger.info(
-        "Issued FMU session ticket request_id=%s lab_id=%s reservation_key=%s ticket_id=%s expires_at=%s",
-        str(request_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
-        str(reservation_key or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        str(_normalize_ticket_id(session_ticket) or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        expires_at,
-    )
-    return session_ticket, expires_at
 
 
 async def _redeem_session_ticket(
@@ -1324,34 +803,20 @@ async def _redeem_session_ticket(
     session_id: Optional[str] = None,
     request_id: Optional[str] = None,
 ) -> dict:
-    payload = {"sessionTicket": session_ticket}
-    if lab_id:
-        payload["labId"] = str(lab_id)
-    if reservation_key:
-        payload["reservationKey"] = str(reservation_key)
-
-    response = await _post_session_ticket_request(
-        AUTH_SESSION_TICKET_REDEEM_URL,
-        payload=payload,
-        authorization=_session_observer_authorization(),
+    return await _redeem_session_ticket_service(
+        session_ticket=session_ticket,
+        lab_id=lab_id,
+        reservation_key=reservation_key,
+        session_id=session_id,
+        request_id=request_id,
+        redeem_url=AUTH_SESSION_TICKET_REDEEM_URL,
+        build_payload=_build_redeem_session_ticket_payload,
+        post_request=_post_session_ticket_request,
+        observer_authorization=_session_observer_authorization,
+        extract_error_payload=_extract_response_error_payload,
+        normalize_ticket_id=_normalize_ticket_id,
+        logger=logger,
     )
-
-    if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=_extract_response_error_payload(response))
-
-    payload = response.json()
-    claims = payload.get("claims") if isinstance(payload, dict) else None
-    if not isinstance(claims, dict):
-        raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "error": "Invalid ticket redeem response"})
-    logger.info(
-        "Redeemed FMU session ticket request_id=%s session_id=%s lab_id=%s reservation_key=%s ticket_id=%s",
-        str(request_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        str(session_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        str(lab_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        str(reservation_key or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        str(_normalize_ticket_id(session_ticket) or "-").replace("\r", "\\r").replace("\n", "\\n"),
-    )
-    return claims
 
 
 def _session_observer_authorization() -> str:
@@ -1401,119 +866,46 @@ async def _confirm_fmu_session_started(
     reservation_key: Optional[str] = None,
     request_id: Optional[str] = None,
 ) -> bool:
-    claim_reservation_key = str(claims.get("reservationKey") or "").strip()
-    if not claim_reservation_key:
-        raise HTTPException(status_code=403, detail="Redeemed FMU ticket has no reservationKey")
-    if reservation_key and claim_reservation_key.lower() != str(reservation_key).strip().lower():
-        raise HTTPException(status_code=403, detail="Redeemed FMU ticket reservation mismatch")
-    if not ACCESS_AUDIT_URL:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "SESSION_OBSERVATION_UNAVAILABLE", "error": "ACCESS_AUDIT_URL is not configured"},
-        )
-
-    body = {
-        "reservationKey": claim_reservation_key,
-        "fmuTicketId": hashlib.sha256(session_ticket.encode("utf-8")).hexdigest(),
-        "sessionId": session_id,
-        "accessType": "fmu",
-        "observedAt": int(time.time()),
-    }
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(
-            ACCESS_AUDIT_URL,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": _session_observer_authorization(),
-            },
-            json=body,
-        )
-    if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=_extract_response_error_payload(response))
-    payload = response.json()
-    if not isinstance(payload, dict) or payload.get("recorded") is not True:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "SESSION_OBSERVATION_FAILED",
-                "error": "Session observation was not durably recorded",
-                "auditRecorded": payload.get("auditRecorded") if isinstance(payload, dict) else False,
-                "attestationRecorded": payload.get("attestationRecorded") if isinstance(payload, dict) else False,
-            },
-        )
-    logger.info(
-        "Confirmed FMU session request_id=%s session_id=%s reservation_key=%s ticket_id=%s",
-        str(request_id or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        str(session_id).replace("\r", "\\r").replace("\n", "\\n"),
-        str(claim_reservation_key).replace("\r", "\\r").replace("\n", "\\n"),
-        str(_normalize_ticket_id(session_ticket) or "-").replace("\r", "\\r").replace("\n", "\\n"),
+    return await _confirm_session_started_service(
+        session_ticket=session_ticket,
+        claims=claims,
+        session_id=session_id,
+        reservation_key=reservation_key,
+        request_id=request_id,
+        audit_url=ACCESS_AUDIT_URL,
+        build_payload=_build_session_observation_payload,
+        post_observation=_post_session_observation,
+        observer_authorization=_session_observer_authorization,
+        extract_error_payload=_extract_response_error_payload,
+        observed_at=lambda: int(time.time()),
+        normalize_ticket_id=_normalize_ticket_id,
+        logger=logger,
     )
-    return True
 
 
 async def _record_browser_session_started(request: Request, claims: dict, sim_id: str) -> bool:
     """Durably observe the first accepted browser execution for one credential."""
-    puc_hash = str(claims.get("pucHash") or "").strip().lower()
-    reservation_key = str(claims.get("reservationKey") or "").strip().lower()
-    if not puc_hash or not reservation_key:
-        raise HTTPException(status_code=403, detail="Missing credential identity for session observation")
-    observation_key = f"{reservation_key}:{puc_hash}"
-    with _browser_observation_lock:
-        if observation_key in _browser_observed_credentials:
-            return False
-
-    authorization = _extract_authorization_header(request)
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing bearer token required for session observation")
-
-    lab_id = str(claims.get("labId") or "").strip()
-    # The contract scopes SessionStarted uniqueness by gateway, sessionId and
-    # access type.  A PUC hash identifies a credential, not one execution, so
-    # it must never be reused as the on-chain session identifier.
-    session_id = f"fmu:{sim_id}"
-    ticket, _expires_at = await _issue_session_ticket(
-        authorization,
-        lab_id=lab_id,
-        reservation_key=reservation_key,
-        request_id=f"browser_{sim_id[:12]}",
+    return await _record_browser_session_started_service(
+        request,
+        claims,
+        sim_id,
+        observation_lock=_browser_observation_lock,
+        observed_credentials=_browser_observed_credentials,
+        extract_authorization=_extract_authorization_header,
+        issue_session_ticket=_issue_session_ticket,
+        redeem_session_ticket=_redeem_session_ticket,
+        retry_confirmation=_confirm_session_started_with_retries,
+        confirm_session=_confirm_fmu_session_started,
+        max_attempts=FMU_SESSION_OBSERVATION_MAX_ATTEMPTS,
+        sleep=asyncio.sleep,
     )
-    redeemed_claims = await _redeem_session_ticket(
-        session_ticket=ticket,
-        lab_id=lab_id,
-        reservation_key=reservation_key,
-        session_id=session_id,
-        request_id=f"browser_{sim_id[:12]}",
-    )
-    for attempt in range(FMU_SESSION_OBSERVATION_MAX_ATTEMPTS):
-        try:
-            await _confirm_fmu_session_started(
-                session_ticket=ticket,
-                claims=redeemed_claims,
-                reservation_key=reservation_key,
-                session_id=session_id,
-                request_id=f"browser_{sim_id[:12]}",
-            )
-            break
-        except HTTPException as exc:
-            if exc.status_code < 500 or attempt + 1 >= FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:
-                raise
-            await asyncio.sleep(0.2 * (2 ** attempt))
-        except httpx.HTTPError:
-            if attempt + 1 >= FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:
-                raise
-            await asyncio.sleep(0.2 * (2 ** attempt))
-    with _browser_observation_lock:
-        _browser_observed_credentials.add(observation_key)
-    return True
 
 
 def _build_session_ticket_headers(*, authorization: Optional[str] = None) -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
-    if authorization:
-        headers["Authorization"] = authorization
-    if AUTH_SESSION_TICKET_INTERNAL_TOKEN:
-        headers["X-Access-Token"] = AUTH_SESSION_TICKET_INTERNAL_TOKEN
-    return headers
+    return _build_session_ticket_headers_transport(
+        authorization=authorization,
+        internal_token=AUTH_SESSION_TICKET_INTERNAL_TOKEN,
+    )
 
 
 async def _post_session_ticket_request(
@@ -1522,54 +914,34 @@ async def _post_session_ticket_request(
     payload: dict[str, Any],
     authorization: Optional[str] = None,
 ) -> httpx.Response:
+    return await _post_session_ticket_request_transport(
+        url,
+        payload=payload,
+        authorization=authorization,
+        internal_token=AUTH_SESSION_TICKET_INTERNAL_TOKEN,
+    )
+
+
+async def _post_session_observation(
+    url: str,
+    *,
+    headers: dict[str, str],
+    json: dict[str, Any],
+) -> httpx.Response:
     async with httpx.AsyncClient(timeout=10) as client:
-        return await client.post(
-            url,
-            headers=_build_session_ticket_headers(authorization=authorization),
-            json=payload,
-        )
+        return await client.post(url, headers=headers, json=json)
 
 
 def _extract_response_error_text(response: httpx.Response) -> str:
-    detail_text = response.text
-    try:
-        detail_json = response.json()
-        if isinstance(detail_json, dict):
-            detail_text = detail_json.get("error") or detail_json.get("message") or detail_text
-    except Exception:
-        # The upstream error body is optional and may not be JSON.
-        pass
-    return detail_text
+    return _extract_error_text(response)
 
 
 def _extract_response_error_payload(response: httpx.Response) -> dict[str, Any]:
-    detail = {"error": response.text}
-    try:
-        payload = response.json()
-        if isinstance(payload, dict):
-            detail = payload
-    except Exception:
-        # Preserve the stable error contract when the upstream body is malformed.
-        pass
-    return detail
+    return _extract_error_payload(response)
 
 
 def _stream_error_payload(exc: Exception, *, sim_id: Optional[str] = None) -> dict[str, Any]:
-    """Build a safe public NDJSON error without exposing upstream responses."""
-    payload: dict[str, Any] = {"type": "error"}
-    if sim_id:
-        payload["simId"] = sim_id
-
-    detail = "Simulation failed"
-    if isinstance(exc, HTTPException) and isinstance(exc.detail, dict):
-        code = exc.detail.get("code")
-        message = exc.detail.get("error")
-        if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", code):
-            payload["code"] = code
-        if isinstance(message, str) and 0 < len(message) <= 256:
-            detail = message
-    payload["detail"] = detail
-    return payload
+    return _build_stream_error_payload(exc, sim_id=sim_id)
 
 
 _fmu_backend = _build_fmu_backend()
@@ -1711,123 +1083,6 @@ def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_siz
 
 # ── AAS Admin ────────────────────────────────────────────────────────
 # Protected by OpenResty lab_manager_admin_access.lua — no JWT needed here.
-
-@app.post("/aas-admin/fmu/{access_key}/sync")
-async def aas_sync_fmu(access_key: str, request: Request):
-    """
-    Sync (create or update) the AAS shell and SimulationModels submodel
-    for the given FMU access key.  This is the admin trigger called from
-    lab-manager — it does NOT require a booking JWT.
-
-    Accepts two request styles:
-    * Plain POST (no body / query params only) — auto-generates shell +
-      submodel from the FMU's model description.
-    * Multipart/form-data with an optional ``file`` field (.aasx) — parses
-      the package and uploads the contained shells / submodels to BaSyx.
-      ``labId`` may also be supplied as a form field.
-    """
-    from aas_generator import sync_fmu_to_basyx
-
-    aasx_bytes: Optional[bytes] = None
-    lab_id: str = access_key  # default; may be overridden below
-
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" in content_type:
-        form = await request.form()
-        raw_lab_id = form.get("labId") or request.query_params.get("labId")
-        if raw_lab_id:
-            lab_id = str(raw_lab_id)
-        upload = form.get("file") or form.get("aasx")
-        if isinstance(upload, UploadFile):
-            aasx_bytes = await upload.read()
-        # Optional AAS metadata fields
-        extra_info: dict = {}
-        for field in ("description", "license", "documentationUrl", "contactEmail"):
-            val = str(form.get(field) or request.query_params.get(field, "")).strip()
-            if val:
-                extra_info[field] = val
-    else:
-        raw_lab_id = request.query_params.get("labId")
-        if raw_lab_id:
-            lab_id = raw_lab_id
-        extra_info = {}
-        for field in ("description", "license", "documentationUrl", "contactEmail"):
-            val = request.query_params.get(field, "").strip()
-            if val:
-                extra_info[field] = val
-
-    metadata: dict = {}
-    fmu_path: Optional[Path] = None  # set in the metadata (non-AASX) path below
-    if not aasx_bytes:
-        # Need FMU metadata for the auto-generation path
-        fmu_path = _resolve_fmu_path(access_key)
-        try:
-            md = read_model_description(str(fmu_path))
-        except Exception as exc:
-            logger.error(
-                "AAS sync: cannot read FMU %s: %s",
-                str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
-                type(exc).__name__,
-            )
-            raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
-        metadata = _model_metadata_from_model_description(md)
-
-        # Use FMU-embedded description/license as fallback when the provider
-        # has not filled them in the form (user-supplied values take precedence).
-        auto_fallback = {k: metadata.get(k, "") for k in ("description", "license") if metadata.get(k, "")}
-        merged_extra_info = {**auto_fallback, **(extra_info or {})}
-        merged_extra_info = {k: v for k, v in merged_extra_info.items() if v}
-    else:
-        merged_extra_info = {k: v for k, v in (extra_info or {}).items() if v}
-
-    result = await sync_fmu_to_basyx(
-        lab_id=lab_id,
-        access_key=access_key,
-        metadata=metadata,
-        aasx_bytes=aasx_bytes,
-        extra_info=merged_extra_info or None,
-        fmu_path=fmu_path,
-        unit_definitions=metadata.get("unitDefinitions", []),
-    )
-
-    if "error" in result:
-        raise HTTPException(status_code=502, detail=result["error"])
-
-    return result
-
-
-@app.get("/aas-admin/fmu/{access_key}/hints")
-async def aas_hints_fmu(access_key: str):
-    """
-    Return FMU-embedded metadata hints for pre-filling the AAS sync form.
-
-    Reads modelDescription.xml and returns any of: description, license,
-    author, version, generationTool — only the fields that are non-empty.
-    Protected by OpenResty lab_manager_admin_access.lua.
-    """
-    fmu_path = _resolve_fmu_path(access_key)
-    try:
-        md = read_model_description(str(fmu_path))
-    except Exception as exc:
-        logger.error(
-            "Cannot read FMU model description for %s: %s",
-            str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
-            type(exc).__name__,
-        )
-        raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
-    hints: dict = {}
-    for field_name, attr in (
-        ("description", "description"),
-        ("license", "license"),
-        ("author", "author"),
-        ("version", "version"),
-        ("generationTool", "generationTool"),
-    ):
-        val = _normalize_xml_value(getattr(md, attr, None))
-        if val:
-            hints[field_name] = val
-    return hints
-
 
 # ── AAS Link: map a lab/FMU to an externally-managed AAS ─────────────
 
@@ -1997,35 +1252,6 @@ async def resolve_aas_id(shellId: str = Query(...)):
     return {"targetId": shellId, "override": False}
 
 
-@app.get("/health")
-async def health():
-    """Backend-aware health check for the active FMU backend mode."""
-    payload = await _fmu_backend.health()
-    # Keep the JWKS cache alive even when the runner receives no authenticated
-    # traffic.  Without this refresh, jwks_health() eventually marks an
-    # otherwise healthy runner as DOWN solely because the cached keys aged past
-    # JWKS_STALE_IF_ERROR_MAX_SECONDS.
-    try:
-        await _fetch_jwks()
-    except HTTPException:
-        # jwks_health() below reports the appropriate UP/DEGRADED/DOWN state
-        # from the cache, including the configured stale-if-error window.
-        pass
-    auth_status = jwks_health()
-    checks = dict(payload.get("checks") or {})
-    checks["jwks"] = auth_status["status"] == "UP"
-    payload["checks"] = checks
-    payload["auth"] = auth_status
-    if auth_status["status"] == "DOWN":
-        payload["status"] = "DOWN"
-    elif auth_status["status"] != "UP":
-        payload["status"] = "DEGRADED"
-    return JSONResponse(
-        content=payload,
-        status_code=503 if payload.get("status") == "DOWN" else 200,
-    )
-
-
 @app.websocket("/api/v1/fmu/sessions")
 async def fmu_realtime_sessions(websocket: WebSocket):
     await _realtime_manager.handle_websocket(websocket, internal=False)
@@ -2138,20 +1364,6 @@ async def download_proxy_fmu(
     return Response(content=archive_bytes, media_type="application/octet-stream", headers=headers)
 
 
-@app.get("/api/v1/simulations/describe")
-async def describe(
-    fmuFileName: str = Query(..., description="Name of the .fmu file"),
-    claims: dict = Depends(verify_jwt),
-):
-    """Return model metadata parsed from the FMU's modelDescription.xml."""
-    _enforce_fmu_claim(claims, allow_provider_describe=True)
-    metadata = await _fmu_backend.get_authorized_model_metadata(
-        claims=claims,
-        requested_fmu_filename=fmuFileName,
-    )
-    return _public_model_metadata(metadata)
-
-
 @app.post("/api/v1/simulations/run")
 async def run_simulation(
     req: SimulationRequest,
@@ -2160,7 +1372,7 @@ async def run_simulation(
 ):
     """Execute an FMU simulation and return results.
 
-    Supports CoSimulation and ModelExchange (#31). Auto-detects FMI type from
+    Supports CoSimulation and ModelExchange. Auto-detects FMI type from
     model description when ``options.fmiType`` is absent.
     """
     _enforce_fmu_claim(claims)
@@ -2217,13 +1429,13 @@ async def run_simulation(
     if requested_timeout <= 0:
         raise HTTPException(status_code=400, detail="timeout must be positive")
     timeout = _effective_timeout_seconds(requested_timeout, claims)
-    # Upper/lower safety bounds (#24)
+    # Upper/lower safety bounds
     if stop_time > MAX_STOP_TIME:
         raise HTTPException(status_code=400, detail=f"stopTime exceeds maximum ({MAX_STOP_TIME}s)")
     if step_size < MIN_STEP_SIZE:
         raise HTTPException(status_code=400, detail=f"stepSize below minimum ({MIN_STEP_SIZE}s)")
 
-    # --- FMI type auto-detection (#31) ---
+    # --- FMI type auto-detection ---
     fmi_type = req.options.get("fmiType", None)
     solver_name = req.options.get("solver", "Euler")
     if not fmi_type:
@@ -2255,6 +1467,8 @@ async def run_simulation(
             fmi_type,
             solver_name,
         )
+        if future is None:
+            raise RuntimeError("simulation executor returned no future")
         _track_running_future(sim_id, future, lab_id, claims, job_executor)
         try:
             sim_result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
@@ -2286,7 +1500,7 @@ async def run_simulation(
         elapsed,
     )
 
-    # Persist to history DB (#29)
+    # Persist to history DB
     await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
                         req.parameters, req.options, sim_result, elapsed)
 
@@ -2300,18 +1514,7 @@ async def run_simulation(
 
 
 # ---------------------------------------------------------------------------
-# #16 — List available FMU files
-# ---------------------------------------------------------------------------
-
-@app.get("/api/v1/fmu/list")
-async def list_fmus(claims: dict = Depends(verify_jwt)):
-    """Return only the FMU file authorised by the caller token."""
-    _enforce_fmu_claim(claims)
-    return await _fmu_backend.list_authorized_fmu(claims=claims)
-
-
-# ---------------------------------------------------------------------------
-# #17 — Cancel a running simulation
+# Cancel a running simulation
 # ---------------------------------------------------------------------------
 
 @app.post("/api/v1/simulations/{sim_id}/cancel")
@@ -2336,28 +1539,18 @@ async def cancel_simulation(sim_id: str, claims: dict = Depends(verify_jwt)):
     return {"status": "cancelled"}
 
 # ---------------------------------------------------------------------------
-# #20 — Temp file cleanup (FMPy extracts FMUs to tempdir)
+# Temp file cleanup (FMPy extracts FMUs to tempdir)
 # ---------------------------------------------------------------------------
 
 async def _cleanup_temp_files():
     """Best-effort cleanup of FMPy temp dirs on shutdown."""
-    tmp = Path(tempfile.gettempdir())
-    removed = 0
-    for entry in tmp.iterdir():
-        # FMPy creates dirs matching the pattern tmp* containing modelDescription.xml
-        if entry.is_dir() and entry.name.startswith("tmp") and (entry / "modelDescription.xml").exists():
-            try:
-                shutil.rmtree(entry)
-                removed += 1
-            except Exception:
-                # A failed cleanup must not mask the completed simulation.
-                pass
+    removed = cleanup_fmu_temp_files(Path(tempfile.gettempdir()))
     if removed:
         logger.info("Cleaned up %d FMPy temp directories", removed)
 
 
 # ---------------------------------------------------------------------------
-# #18 — NDJSON Streaming endpoint
+# NDJSON Streaming endpoint
 # ---------------------------------------------------------------------------
 
 @app.post("/api/v1/simulations/stream")
@@ -2436,6 +1629,8 @@ async def stream_simulation(
                 str(fmu_path), start_time, stop_time, step_size,
                 req.parameters, timeout, fmi_type, solver_name,
             )
+            if future is None:
+                raise RuntimeError("simulation executor returned no future")
             _track_running_future(sim_id, future, lab_id, claims, job_executor)
             yield json.dumps({"type": "started", "simId": sim_id}) + "\n"
 
@@ -2489,66 +1684,3 @@ async def stream_simulation(
             _finalize_simulation_tracking(sim_id, lab_id)
 
     return StreamingResponse(_event_stream(), media_type="application/x-ndjson")
-
-
-# ---------------------------------------------------------------------------
-# #29 — Simulation history endpoints
-# ---------------------------------------------------------------------------
-
-@app.get("/api/v1/simulations/history")
-async def get_history(
-    labId: Optional[str] = Query(None),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    claims: dict = Depends(verify_jwt),
-):
-    """Return paginated simulation history for the lab authorised in the token."""
-    _enforce_fmu_claim(claims)
-    _ensure_local_execution_backend("Simulation history endpoint")
-    claim_lab_id = _get_claim_lab_id(claims)
-    if not claim_lab_id:
-        raise HTTPException(status_code=403, detail="Token has no authorised labId")
-    requested_lab_id = _normalize_lab_id(labId)
-    if requested_lab_id and requested_lab_id != claim_lab_id:
-        raise HTTPException(status_code=403, detail="Token is not authorised for requested labId")
-    effective_lab_id = requested_lab_id or claim_lab_id
-    reservation_key = _claim_reservation_key(claims)
-
-    async with aiosqlite.connect(HISTORY_DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT id, lab_id, user_sub, fmu_filename, fmi_type, elapsed_seconds, status, created_at "
-            "FROM simulation_history WHERE lab_id = ? AND lower(reservation_key) = ? AND lower(puc_hash) = ? "
-            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (effective_lab_id, reservation_key, str(claims.get("pucHash") or "").strip().lower(), limit, offset),
-        )
-        rows = await cursor.fetchall()
-        return {"simulations": [dict(row) for row in rows]}
-
-
-@app.get("/api/v1/simulations/{sim_id}/result")
-async def get_simulation_result(sim_id: str, claims: dict = Depends(verify_jwt)):
-    """Retrieve full simulation result by ID."""
-    _enforce_fmu_claim(claims)
-    _ensure_local_execution_backend("Simulation result endpoint")
-    claim_lab_id = _get_claim_lab_id(claims)
-    if not claim_lab_id:
-        raise HTTPException(status_code=403, detail="Token has no authorised labId")
-
-    async with aiosqlite.connect(HISTORY_DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM simulation_history WHERE id = ? AND lab_id = ? AND lower(reservation_key) = ? AND lower(puc_hash) = ?",
-            (sim_id, claim_lab_id, _claim_reservation_key(claims), str(claims.get("pucHash") or "").strip().lower()),
-        )
-        row = await cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-    result = dict(row)
-    for key in ("parameters", "options", "result"):
-        if result.get(key):
-            result[key] = json.loads(result[key])
-    return result
-
-
-

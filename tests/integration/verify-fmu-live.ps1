@@ -46,22 +46,22 @@ $SessionTicket = $null
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-function Log-Pass([string]$Message) {
+function Write-CheckPass([string]$Message) {
     Write-Host "  PASS: $Message" -ForegroundColor Green
     $script:Passed++
 }
 
-function Log-Fail([string]$Message) {
+function Write-CheckFail([string]$Message) {
     Write-Host "  FAIL: $Message" -ForegroundColor Red
     $script:Failed++
 }
 
-function Log-Skip([string]$Message) {
+function Write-CheckSkip([string]$Message) {
     Write-Host "  SKIP: $Message" -ForegroundColor Yellow
     $script:Skipped++
 }
 
-function Quote-CommandArg([string]$Value) {
+function ConvertTo-CommandLineArgument([string]$Value) {
     if ($Value -match '[\s"]') {
         return '"' + ($Value -replace '"', '\"') + '"'
     }
@@ -140,7 +140,7 @@ function Invoke-HttpJson {
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = "curl.exe"
-        $psi.Arguments = (($argList | ForEach-Object { Quote-CommandArg $_ }) -join " ")
+        $psi.Arguments = (($argList | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join " ")
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.UseShellExecute = $false
@@ -184,7 +184,7 @@ function Invoke-ComposeCapture {
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "docker"
-    $psi.Arguments = (($quotedArgs | ForEach-Object { Quote-CommandArg $_ }) -join " ")
+    $psi.Arguments = (($quotedArgs | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join " ")
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -205,7 +205,7 @@ function Invoke-ComposeCapture {
     }
 }
 
-function Parse-JsonOrNull([string]$Text) {
+function ConvertFrom-JsonOrNull([string]$Text) {
     if ([string]::IsNullOrWhiteSpace($Text)) {
         return $null
     }
@@ -217,12 +217,12 @@ function Parse-JsonOrNull([string]$Text) {
     }
 }
 
-function Normalize-DescribeStartValue($Value) {
+function ConvertTo-NormalizedDescribeStartValue($Value) {
     if ($null -eq $Value) {
         return $null
     }
     if ($Value -is [System.Array]) {
-        return (($Value | ForEach-Object { Normalize-DescribeStartValue $_ }) -join " ")
+        return (($Value | ForEach-Object { ConvertTo-NormalizedDescribeStartValue $_ }) -join " ")
     }
     if ($Value -is [bool]) {
         return $Value.ToString().ToLowerInvariant()
@@ -230,7 +230,7 @@ function Normalize-DescribeStartValue($Value) {
     return [string]$Value
 }
 
-function Normalize-VariableType([string]$TypeName, [string]$FmiVersion) {
+function ConvertTo-NormalizedVariableType([string]$TypeName, [string]$FmiVersion) {
     if ($FmiVersion -like "3*" -and $TypeName -eq "Integer") {
         return "Int32"
     }
@@ -288,7 +288,7 @@ function Get-ProxyModelDescriptionSnapshot([string]$ProxyPath) {
         }
         $variables[$node.Attributes["name"].Value] = [ordered]@{
             name = $node.Attributes["name"].Value
-            type = Normalize-VariableType $typeName $root.fmiVersion
+            type = ConvertTo-NormalizedVariableType $typeName $root.fmiVersion
             causality = if ($node.Attributes["causality"]) { $node.Attributes["causality"].Value } else { "local" }
             variability = if ($node.Attributes["variability"]) { $node.Attributes["variability"].Value } else { "continuous" }
             initial = if ($node.Attributes["initial"]) { $node.Attributes["initial"].Value } else { $null }
@@ -316,11 +316,11 @@ function Get-HashtableValue($Hashtable, [string]$Key) {
 function Assert-ComposeExecSuccess([string[]]$ComposeArgs, [string]$SuccessMessage, [string]$FailureMessage) {
     $result = Invoke-ComposeCapture -ComposeArgs $ComposeArgs
     if ($result.ExitCode -eq 0) {
-        Log-Pass $SuccessMessage
+        Write-CheckPass $SuccessMessage
         return $result.Output
     }
 
-    Log-Fail "$FailureMessage`n$result.Output"
+    Write-CheckFail "$FailureMessage`n$result.Output"
     return $null
 }
 
@@ -337,27 +337,27 @@ Write-Host ""
 
 $psResult = Invoke-ComposeCapture -ComposeArgs @("ps")
 if ($psResult.ExitCode -eq 0) {
-    Log-Pass "docker compose is reachable for the live stack"
+    Write-CheckPass "docker compose is reachable for the live stack"
 } else {
-    Log-Fail "docker compose is not reachable for the live stack`n$($psResult.Output)"
+    Write-CheckFail "docker compose is not reachable for the live stack`n$($psResult.Output)"
 }
 
 $healthResponse = Invoke-HttpJson -Uri "$BaseUrl/fmu/health"
-$healthJson = Parse-JsonOrNull $healthResponse.Body
+$healthJson = ConvertFrom-JsonOrNull $healthResponse.Body
 if ($healthResponse.StatusCode -eq 200 -and $healthJson -and $healthJson.status -eq "UP") {
-    Log-Pass "FMU runner health is UP through the gateway"
+    Write-CheckPass "FMU runner health is UP through the gateway"
 } else {
-    Log-Fail "Unexpected /fmu/health response: status=$($healthResponse.StatusCode) body=$($healthResponse.Body)"
+    Write-CheckFail "Unexpected /fmu/health response: status=$($healthResponse.StatusCode) body=$($healthResponse.Body)"
 }
 
 if ($healthJson -and $null -ne $healthJson.fmuCount) {
     if ([int]$healthJson.fmuCount -ge $ExpectedFmuCount) {
-        Log-Pass "FMU runner exposes $($healthJson.fmuCount) FMUs (expected at least $ExpectedFmuCount)"
+        Write-CheckPass "FMU runner exposes $($healthJson.fmuCount) FMUs (expected at least $ExpectedFmuCount)"
     } else {
-        Log-Fail "FMU runner exposes $($healthJson.fmuCount) FMUs, expected at least $ExpectedFmuCount"
+        Write-CheckFail "FMU runner exposes $($healthJson.fmuCount) FMUs, expected at least $ExpectedFmuCount"
     }
 } else {
-    Log-Fail "FMU runner health payload does not include fmuCount"
+    Write-CheckFail "FMU runner health payload does not include fmuCount"
 }
 
 $runtimeFiles = Assert-ComposeExecSuccess `
@@ -367,13 +367,13 @@ $runtimeFiles = Assert-ComposeExecSuccess `
 
 if ($null -ne $runtimeFiles) {
     if ([string]::IsNullOrWhiteSpace($runtimeFiles)) {
-        Log-Fail "No proxy runtime binaries found in /app/fmu-proxy-runtime/binaries"
+        Write-CheckFail "No proxy runtime binaries found in /app/fmu-proxy-runtime/binaries"
     } else {
         $runtimeList = $runtimeFiles -split "`r?`n" | Where-Object { $_ -like "/app/*" }
         if ($runtimeList.Count -gt 0) {
-            Log-Pass "Proxy runtime binaries present: $($runtimeList.Count)"
+            Write-CheckPass "Proxy runtime binaries present: $($runtimeList.Count)"
         } else {
-            Log-Fail "No proxy runtime binaries found in /app/fmu-proxy-runtime/binaries"
+            Write-CheckFail "No proxy runtime binaries found in /app/fmu-proxy-runtime/binaries"
         }
     }
 }
@@ -385,13 +385,13 @@ $fmuFiles = Assert-ComposeExecSuccess `
 
 if ($null -ne $fmuFiles) {
     if ([string]::IsNullOrWhiteSpace($fmuFiles)) {
-        Log-Fail "No .fmu files found in /app/fmu-data"
+        Write-CheckFail "No .fmu files found in /app/fmu-data"
     } else {
         $fmuList = $fmuFiles -split "`r?`n" | Where-Object { $_ -like "/app/*" }
         if ($fmuList.Count -gt 0) {
-            Log-Pass "Provisioned FMUs present: $($fmuList.Count)"
+            Write-CheckPass "Provisioned FMUs present: $($fmuList.Count)"
         } else {
-            Log-Fail "No .fmu files found in /app/fmu-data"
+            Write-CheckFail "No .fmu files found in /app/fmu-data"
         }
     }
 }
@@ -403,33 +403,32 @@ if ($fmuList -and $fmuList.Count -gt 0) {
         $expiryAccessKey = [System.IO.Path]::GetFileName($fmuList[0])
         $expiryOutput = & $shellPath -NoProfile -ExecutionPolicy Bypass -File $expiryScript -Port $Port -LabId $LabId -AccessKey $expiryAccessKey 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Log-Pass "Forced expiry closes attached realtime sessions with reason=expired"
+            Write-CheckPass "Forced expiry closes attached realtime sessions with reason=expired"
         } else {
-            Log-Fail ("Forced expiry verification failed`n" + ($expiryOutput -join "`n"))
+            Write-CheckFail ("Forced expiry verification failed`n" + ($expiryOutput -join "`n"))
         }
     } else {
-        Log-Skip "Forced expiry verification helper is missing"
+        Write-CheckSkip "Forced expiry verification helper is missing"
     }
 }
 
 $issueWithoutAuth = Invoke-HttpJson -Uri "$BaseUrl/auth/fmu/session-ticket/issue" -Method "POST" -Body "{}"
-$issueWithoutAuthJson = Parse-JsonOrNull $issueWithoutAuth.Body
+$issueWithoutAuthJson = ConvertFrom-JsonOrNull $issueWithoutAuth.Body
 if ($issueWithoutAuth.StatusCode -eq 401 -and $issueWithoutAuthJson.code -eq "UNAUTHORIZED") {
-    Log-Pass "Session ticket issue endpoint is exposed and rejects missing bearer tokens with 401"
+    Write-CheckPass "Session ticket issue endpoint is exposed and rejects missing bearer tokens with 401"
 } else {
-    Log-Fail "Unexpected issue response without auth: status=$($issueWithoutAuth.StatusCode) body=$($issueWithoutAuth.Body)"
+    Write-CheckFail "Unexpected issue response without auth: status=$($issueWithoutAuth.StatusCode) body=$($issueWithoutAuth.Body)"
 }
 
 $redeemWithoutTicket = Invoke-HttpJson -Uri "$BaseUrl/auth/fmu/session-ticket/redeem" -Method "POST" -Body "{}"
-$redeemWithoutTicketJson = Parse-JsonOrNull $redeemWithoutTicket.Body
 if ($redeemWithoutTicket.StatusCode -in @(401, 403)) {
-    Log-Pass "Session ticket redeem rejects unauthenticated callers"
+    Write-CheckPass "Session ticket redeem rejects unauthenticated callers"
 } else {
-    Log-Fail "Unauthenticated redeem should be rejected: status=$($redeemWithoutTicket.StatusCode) body=$($redeemWithoutTicket.Body)"
+    Write-CheckFail "Unauthenticated redeem should be rejected: status=$($redeemWithoutTicket.StatusCode) body=$($redeemWithoutTicket.Body)"
 }
 
 if ([string]::IsNullOrWhiteSpace($BearerToken)) {
-    Log-Skip "Token-dependent checks skipped. Pass -BearerToken with a valid FMU booking JWT to verify issue, redeem and proxy download."
+    Write-CheckSkip "Token-dependent checks skipped. Pass -BearerToken with a valid FMU booking JWT to verify issue, redeem and proxy download."
 } else {
     $authHeaders = @{ Authorization = "Bearer $BearerToken" }
     $issueBody = @{
@@ -438,12 +437,12 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
     } | ConvertTo-Json -Compress
 
     $issueWithAuth = Invoke-HttpJson -Uri "$BaseUrl/auth/fmu/session-ticket/issue" -Method "POST" -Headers $authHeaders -Body $issueBody
-    $issueWithAuthJson = Parse-JsonOrNull $issueWithAuth.Body
+    $issueWithAuthJson = ConvertFrom-JsonOrNull $issueWithAuth.Body
     if ($issueWithAuth.StatusCode -eq 200 -and $issueWithAuthJson.sessionTicket) {
         $SessionTicket = [string]$issueWithAuthJson.sessionTicket
-        Log-Pass "Session ticket issued successfully for labId=$LabId reservationKey=$ReservationKey"
+        Write-CheckPass "Session ticket issued successfully for labId=$LabId reservationKey=$ReservationKey"
     } else {
-        Log-Fail "Session ticket issue failed: status=$($issueWithAuth.StatusCode) body=$($issueWithAuth.Body)"
+        Write-CheckFail "Session ticket issue failed: status=$($issueWithAuth.StatusCode) body=$($issueWithAuth.Body)"
     }
 
     if ($SessionTicket -and -not [string]::IsNullOrWhiteSpace($SessionObserverGatewayId) -and
@@ -458,7 +457,7 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
             Authorization = New-SessionObserverAuthorization $SessionObserverGatewayId $SessionObserverSigningSecret
         }
         $redeemWithTicket = Invoke-HttpJson -Uri "$BaseUrl/auth/fmu/session-ticket/redeem" -Method "POST" -Headers $observerHeaders -Body $redeemBody
-        $redeemWithTicketJson = Parse-JsonOrNull $redeemWithTicket.Body
+        $redeemWithTicketJson = ConvertFrom-JsonOrNull $redeemWithTicket.Body
         $redeemClaims = $redeemWithTicketJson.claims
 
         if (
@@ -467,16 +466,16 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
             [string]$redeemClaims.labId -eq $LabId -and
             [string]$redeemClaims.reservationKey -eq $ReservationKey
         ) {
-            Log-Pass "Session ticket redeem returns claims for the expected labId and reservationKey"
+            Write-CheckPass "Session ticket redeem returns claims for the expected labId and reservationKey"
         } else {
-            Log-Fail "Session ticket redeem failed: status=$($redeemWithTicket.StatusCode) body=$($redeemWithTicket.Body)"
+            Write-CheckFail "Session ticket redeem failed: status=$($redeemWithTicket.StatusCode) body=$($redeemWithTicket.Body)"
         }
     } elseif ($SessionTicket) {
-        Log-Skip "Direct redeem skipped because no session-observer credential was supplied or found in .env"
+        Write-CheckSkip "Direct redeem skipped because no session-observer credential was supplied or found in .env"
     }
 
     if ($SkipProxyDownload) {
-        Log-Skip "Proxy FMU download skipped by request"
+        Write-CheckSkip "Proxy FMU download skipped by request"
     } else {
         if (Test-Path $ProxyOutputPath) {
             Remove-Item $ProxyOutputPath -Force
@@ -485,39 +484,39 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
         $proxyUri = "$BaseUrl/fmu/api/v1/fmu/proxy/${LabId}?reservationKey=$ReservationKey"
         $proxyResponse = Invoke-HttpJson -Uri $proxyUri -Headers $authHeaders -OutFile $ProxyOutputPath
         if ($proxyResponse.StatusCode -eq 200 -and (Test-Path $ProxyOutputPath)) {
-            Log-Pass "Proxy FMU downloaded successfully to $ProxyOutputPath"
+            Write-CheckPass "Proxy FMU downloaded successfully to $ProxyOutputPath"
             try {
                 $archive = [System.IO.Compression.ZipFile]::OpenRead($ProxyOutputPath)
                 $entryNames = $archive.Entries | ForEach-Object { $_.FullName }
                 $archive.Dispose()
 
                 if ($entryNames -contains "modelDescription.xml") {
-                    Log-Pass "Downloaded proxy FMU contains modelDescription.xml"
+                    Write-CheckPass "Downloaded proxy FMU contains modelDescription.xml"
                 } else {
-                    Log-Fail "Downloaded proxy FMU is missing modelDescription.xml"
+                    Write-CheckFail "Downloaded proxy FMU is missing modelDescription.xml"
                 }
 
                 if ($entryNames -contains "resources/config.json") {
-                    Log-Pass "Downloaded proxy FMU contains resources/config.json"
+                    Write-CheckPass "Downloaded proxy FMU contains resources/config.json"
                 } else {
-                    Log-Fail "Downloaded proxy FMU is missing resources/config.json"
+                    Write-CheckFail "Downloaded proxy FMU is missing resources/config.json"
                 }
 
                 if (($entryNames | Where-Object { $_ -like "binaries/*/*" }).Count -gt 0) {
-                    Log-Pass "Downloaded proxy FMU contains runtime binaries"
+                    Write-CheckPass "Downloaded proxy FMU contains runtime binaries"
                 } else {
-                    Log-Fail "Downloaded proxy FMU does not contain runtime binaries"
+                    Write-CheckFail "Downloaded proxy FMU does not contain runtime binaries"
                 }
 
                 $authorizedAccessKey = [string]$redeemClaims.accessKey
                 if ([string]::IsNullOrWhiteSpace($authorizedAccessKey)) {
-                    Log-Skip "Describe parity check skipped because redeem claims do not include accessKey"
+                    Write-CheckSkip "Describe parity check skipped because redeem claims do not include accessKey"
                 } else {
                     $describeUri = "$BaseUrl/fmu/api/v1/simulations/describe?fmuFileName=$([Uri]::EscapeDataString($authorizedAccessKey))"
                     $describeResponse = Invoke-HttpJson -Uri $describeUri -Headers $authHeaders
-                    $describeJson = Parse-JsonOrNull $describeResponse.Body
+                    $describeJson = ConvertFrom-JsonOrNull $describeResponse.Body
                     if ($describeResponse.StatusCode -ne 200 -or $null -eq $describeJson) {
-                        Log-Fail "Describe parity check failed to load /api/v1/simulations/describe: status=$($describeResponse.StatusCode) body=$($describeResponse.Body)"
+                        Write-CheckFail "Describe parity check failed to load /api/v1/simulations/describe: status=$($describeResponse.StatusCode) body=$($describeResponse.Body)"
                     } else {
                         $proxySnapshot = Get-ProxyModelDescriptionSnapshot -ProxyPath $ProxyOutputPath
                         $describeVariables = @{}
@@ -535,11 +534,11 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
                             }
                             $describeVariables[[string]$variable.name] = [ordered]@{
                                 name = [string]$variable.name
-                                type = Normalize-VariableType ([string]$variable.type) ([string]$describeJson.fmiVersion)
+                                type = ConvertTo-NormalizedVariableType ([string]$variable.type) ([string]$describeJson.fmiVersion)
                                 causality = [string]$variable.causality
                                 variability = [string]$variable.variability
                                 initial = if ($null -ne $variable.initial) { [string]$variable.initial } else { $null }
-                                start = Normalize-DescribeStartValue $variable.start
+                                start = ConvertTo-NormalizedDescribeStartValue $variable.start
                                 dimensions = $dimensions
                             }
                         }
@@ -570,17 +569,17 @@ if ([string]::IsNullOrWhiteSpace($BearerToken)) {
                         }
 
                         if ($parityErrors.Count -eq 0) {
-                            Log-Pass "Describe payload matches the generated proxy modelDescription.xml"
+                            Write-CheckPass "Describe payload matches the generated proxy modelDescription.xml"
                         } else {
-                            Log-Fail ("Describe/modelDescription parity failed`n" + ($parityErrors -join "`n"))
+                            Write-CheckFail ("Describe/modelDescription parity failed`n" + ($parityErrors -join "`n"))
                         }
                     }
                 }
             } catch {
-                Log-Fail "Downloaded proxy FMU could not be inspected as a ZIP archive: $($_.Exception.Message)"
+                Write-CheckFail "Downloaded proxy FMU could not be inspected as a ZIP archive: $($_.Exception.Message)"
             }
         } else {
-            Log-Fail "Proxy FMU download failed: status=$($proxyResponse.StatusCode) error=$($proxyResponse.Error)"
+            Write-CheckFail "Proxy FMU download failed: status=$($proxyResponse.StatusCode) error=$($proxyResponse.Error)"
         }
     }
 }
