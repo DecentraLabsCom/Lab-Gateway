@@ -35,6 +35,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _redeem_session_ticket,
         _confirm_fmu_session_started,
         _record_browser_session_started,
+        _preload_jwks_if_enabled,
         _validate_proxy_generation_supported,
         _shutdown_simulation_executor,
         _resolve_fmu_path,
@@ -66,6 +67,25 @@ def _fake_jwt(**claims):
 app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 client = TestClient(app)
+
+
+def test_preload_jwks_is_enabled_by_default(monkeypatch):
+    fetch_jwks = AsyncMock()
+    monkeypatch.delenv("JWKS_PRELOAD_ON_STARTUP", raising=False)
+    monkeypatch.setattr("main._fetch_jwks", fetch_jwks)
+
+    assert asyncio.run(_preload_jwks_if_enabled()) is True
+    fetch_jwks.assert_awaited_once_with(force=True)
+
+
+@pytest.mark.parametrize("disabled_value", ["0", "false", "no", "off"])
+def test_preload_jwks_accepts_disabled_environment_values(monkeypatch, disabled_value):
+    fetch_jwks = AsyncMock()
+    monkeypatch.setenv("JWKS_PRELOAD_ON_STARTUP", disabled_value)
+    monkeypatch.setattr("main._fetch_jwks", fetch_jwks)
+
+    assert asyncio.run(_preload_jwks_if_enabled()) is False
+    fetch_jwks.assert_not_awaited()
 
 
 def test_provider_describe_claims_are_allowed_only_for_metadata():
@@ -1209,7 +1229,7 @@ def test_run_returns_429_when_concurrency_exceeded(mock_resolve):
     assert "Concurrency limit" in response.json()["detail"]
 
 
-# ─── #18 — NDJSON Streaming ─────────────────────────────────────────
+# ─── NDJSON Streaming ─────────────────────────────────────────
 
 @patch("main._resolve_fmu_path")
 @patch("main._executor")
@@ -1305,7 +1325,7 @@ def test_stream_preserves_safe_structured_error_details(mock_exec, mock_md, mock
     }
 
 
-# --- #29 - Simulation History ---
+# --- Simulation History ---
 def test_upload_endpoint_removed():
     """FMU upload is intentionally not exposed from Marketplace/Gateway."""
     response = client.post("/api/v1/fmu/upload")
@@ -1721,7 +1741,7 @@ def test_run_persists_to_history(mock_md, mock_exec, mock_resolve, tmp_path, mon
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-# ─── #31 — Model Exchange ───────────────────────────────────────────
+# ─── Model Exchange ───────────────────────────────────────────
 
 class MockModelExchangeDescription:
     """Fake FMPy model description for a ModelExchange-only FMU."""
