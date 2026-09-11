@@ -1695,7 +1695,7 @@ test('renders the complete station status card with truthful empty and configure
   assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:/);
   assert.match(row.rawInnerHTML, /WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials"[^>]*>[\s\S]*<span class="host-status-text good">configured<\/span>/);
   assert.doesNotMatch(row.rawInnerHTML, /class="mini-btn" data-action="set-winrm-credentials"/);
-  assert.match(row.rawInnerHTML, /WinRM TLS trust: <span class="host-status-text good">ready<\/span>/);
+  assert.match(row.rawInnerHTML, /WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust"[^>]*>[\s\S]*<span class="host-status-text good">ready<\/span>/);
   assert.match(row.rawInnerHTML, /Forced logoff: not available/);
   assert.match(row.rawInnerHTML, /Power action: not available/);
   assert.match(row.rawInnerHTML, /Ready: n\/a/);
@@ -1703,7 +1703,7 @@ test('renders the complete station status card with truthful empty and configure
   assert.match(row.rawInnerHTML, /Local mode: n\/a/);
 });
 
-test('does not open heartbeat streams for hosts without WinRM credentials', async () => {
+test('does not open heartbeat streams for hosts without WinRM prerequisites', async () => {
   class FakeEventSource {
     static instances = [];
     static CLOSED = 2;
@@ -1725,12 +1725,21 @@ test('does not open heartbeat streams for hosts without WinRM credentials', asyn
       ok: true,
       status: 200,
       json: async () => ({
-        hosts: [{
-          name: '10.192.38.82',
-          address: '10.192.38.82',
-          winrmConfigured: false,
-          editable: true,
-        }],
+        hosts: [
+          {
+            name: '10.192.38.82',
+            address: '10.192.38.82',
+            winrmConfigured: false,
+            editable: true,
+          },
+          {
+            name: 'PC-Siemens',
+            address: '192.168.1.52',
+            winrmConfigured: true,
+            winrmTrustConfigured: false,
+            winrmTrustStatus: 'missing',
+          },
+        ],
         guacamoleUnmatched: [],
       }),
     }),
@@ -1768,8 +1777,8 @@ test('renders classified heartbeat stream errors without exposing the JSON paylo
           name: 'PC-Siemens',
           address: '192.168.1.52',
           winrmConfigured: true,
-          winrmTrustConfigured: false,
-          winrmTrustStatus: 'missing',
+          winrmTrustConfigured: true,
+          winrmTrustStatus: 'ready',
         }],
         guacamoleUnmatched: [],
       }),
