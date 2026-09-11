@@ -1,3 +1,5 @@
+import io
+import json
 import os
 import ssl
 import sys
@@ -280,6 +282,18 @@ def test_winrm_trust_store_reports_expired_certificate(tmp_path, monkeypatch):
     assert result["PC-Siemens"]["errorCode"] == "WINRM_CERTIFICATE_EXPIRED"
 
 
+def test_winrm_trust_store_reports_certificate_host_mismatch(tmp_path, monkeypatch):
+    certificate_dir = tmp_path / "pc-siemens"
+    certificate_dir.mkdir()
+    (certificate_dir / "server.cer").write_bytes(make_winrm_certificate("192.168.1.51"))
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+
+    result = worker.refresh_winrm_trust_store([_winrm_test_host()])
+
+    assert result["PC-Siemens"]["status"] == "invalid"
+    assert result["PC-Siemens"]["errorCode"] == "WINRM_CERTIFICATE_HOST_MISMATCH"
+
+
 def test_api_heartbeat_reports_missing_winrm_trust(client, tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
     monkeypatch.setattr(worker, "_winrm_credentials", lambda *args: ("user", "password"))
@@ -299,3 +313,173 @@ def test_api_heartbeat_reports_missing_winrm_trust(client, tmp_path, monkeypatch
     assert response.status_code == 409
     assert response.json["code"] == "WINRM_TRUST_REQUIRED"
     assert response.json["host"] == "PC-Siemens"
+
+
+def _winrm_test_host():
+    return {
+        "name": "PC-Siemens",
+        "address": "192.168.1.50",
+        "winrm_trust_ref": "pc-siemens",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }
+
+
+def _install_winrm_test_host(host):
+    original_hosts = worker.HOSTS
+    worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    return original_hosts
+
+
+def _certificate_fingerprint(certificate_bytes):
+    certificate = x509.load_der_x509_certificate(certificate_bytes)
+    return certificate.fingerprint(hashes.SHA256()).hex().upper()
+
+
+def _certificate_upload(certificate_bytes, fingerprint=None):
+    data = {
+        "certificate": (io.BytesIO(certificate_bytes), "winrm-server.cer"),
+    }
+    if fingerprint is not None:
+        data["fingerprintSha256"] = fingerprint
+    return data
+
+
+def test_api_winrm_trust_preview_returns_metadata_without_persisting(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    original_hosts = _install_winrm_test_host(_winrm_test_host())
+    certificate = make_winrm_certificate()
+    try:
+        response = client.post(
+            "/api/hosts/PC-Siemens/winrm-trust/preview",
+            data=_certificate_upload(certificate),
+            content_type="multipart/form-data",
+        )
+    finally:
+        worker.HOSTS = original_hosts
+
+    assert response.status_code == 200
+    preview = response.json["preview"]
+    assert preview["status"] == "ready"
+    assert preview["sanIpAddresses"] == ["192.168.1.50"]
+    assert preview["fingerprintSha256"] == _certificate_fingerprint(certificate)
+    assert not (tmp_path / "pc-siemens" / "server.cer").exists()
+
+
+def test_api_winrm_trust_preview_rejects_host_mismatch(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    original_hosts = _install_winrm_test_host(_winrm_test_host())
+    try:
+        response = client.post(
+            "/api/hosts/PC-Siemens/winrm-trust/preview",
+            data=_certificate_upload(make_winrm_certificate("192.168.1.51")),
+            content_type="multipart/form-data",
+        )
+    finally:
+        worker.HOSTS = original_hosts
+
+    assert response.status_code == 422
+    assert response.json["code"] == "WINRM_CERTIFICATE_HOST_MISMATCH"
+    assert response.json["preview"]["sanIpAddresses"] == ["192.168.1.51"]
+
+
+def test_api_winrm_trust_save_requires_fingerprint_confirmation(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    original_hosts = _install_winrm_test_host(_winrm_test_host())
+    try:
+        response = client.put(
+            "/api/hosts/PC-Siemens/winrm-trust",
+            data=_certificate_upload(make_winrm_certificate()),
+            content_type="multipart/form-data",
+        )
+    finally:
+        worker.HOSTS = original_hosts
+
+    assert response.status_code == 400
+    assert response.json["code"] == "WINRM_FINGERPRINT_CONFIRMATION_REQUIRED"
+    assert not (tmp_path / "pc-siemens" / "server.cer").exists()
+
+
+def test_api_winrm_trust_save_get_and_replace_are_host_scoped(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    original_hosts = _install_winrm_test_host(_winrm_test_host())
+    first_certificate = make_winrm_certificate()
+    second_certificate = make_winrm_certificate()
+    first_fingerprint = _certificate_fingerprint(first_certificate)
+    second_fingerprint = _certificate_fingerprint(second_certificate)
+    try:
+        response = client.put(
+            "/api/hosts/PC-Siemens/winrm-trust",
+            data=_certificate_upload(first_certificate, first_fingerprint),
+            content_type="multipart/form-data",
+        )
+        assert response.status_code == 200
+        assert response.json["trust"]["fingerprintSha256"] == first_fingerprint
+        assert response.json["trust"]["source"] == "lab-manager"
+
+        certificate_path = tmp_path / "pc-siemens" / "server.cer"
+        metadata_path = tmp_path / "pc-siemens" / "metadata.json"
+        assert certificate_path.read_bytes() == x509.load_der_x509_certificate(first_certificate).public_bytes(
+            serialization.Encoding.DER
+        )
+        assert json.loads(metadata_path.read_text(encoding="utf-8"))["fingerprintSha256"] == first_fingerprint
+
+        response = client.get("/api/hosts/PC-Siemens/winrm-trust")
+        assert response.status_code == 200
+        assert response.json["trust"]["fingerprintSha256"] == first_fingerprint
+        assert "certificate" not in response.json["trust"]
+
+        response = client.put(
+            "/api/hosts/PC-Siemens/winrm-trust",
+            data=_certificate_upload(second_certificate, first_fingerprint),
+            content_type="multipart/form-data",
+        )
+        assert response.status_code == 422
+        assert response.json["code"] == "WINRM_FINGERPRINT_MISMATCH"
+        assert _certificate_fingerprint(certificate_path.read_bytes()) == first_fingerprint
+
+        response = client.put(
+            "/api/hosts/PC-Siemens/winrm-trust",
+            data=_certificate_upload(second_certificate, second_fingerprint),
+            content_type="multipart/form-data",
+        )
+        assert response.status_code == 200
+        assert response.json["trust"]["fingerprintSha256"] == second_fingerprint
+    finally:
+        worker.HOSTS = original_hosts
+
+
+def test_api_winrm_trust_delete_is_idempotent_and_does_not_affect_another_host(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "OPS_WINRM_TRUST_PATH", str(tmp_path))
+    first_host = _winrm_test_host()
+    second_host = {
+        **_winrm_test_host(),
+        "name": "PC-Otra",
+        "address": "192.168.1.51",
+        "winrm_trust_ref": "pc-otra",
+    }
+    original_hosts = _install_winrm_test_host(first_host)
+    certificate = make_winrm_certificate()
+    fingerprint = _certificate_fingerprint(certificate)
+    try:
+        worker.HOSTS = worker.HostRegistry({"hosts": [first_host, second_host]})
+        first_path = tmp_path / "pc-siemens"
+        second_path = tmp_path / "pc-otra"
+        first_path.mkdir()
+        second_path.mkdir()
+        (first_path / "server.cer").write_bytes(certificate)
+        (second_path / "server.cer").write_bytes(make_winrm_certificate("192.168.1.51"))
+
+        response = client.delete("/api/hosts/PC-Siemens/winrm-trust")
+        assert response.status_code == 200
+        assert response.json["deleted"] is True
+        assert not (first_path / "server.cer").exists()
+        assert (second_path / "server.cer").exists()
+        assert response.json["trust"]["status"] == "missing"
+
+        response = client.delete("/api/hosts/PC-Siemens/winrm-trust")
+        assert response.status_code == 200
+        assert response.json["trust"]["status"] == "missing"
+    finally:
+        worker.HOSTS = original_hosts

@@ -16,7 +16,7 @@ import socket
 import time
 from datetime import datetime, timezone, timedelta
 from threading import RLock
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -33,6 +33,7 @@ import requests
 import winrm
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from apscheduler.schedulers.background import BackgroundScheduler
 from waitress import serve
 import aas_generator
@@ -468,18 +469,29 @@ WINRM_CERTIFICATE_INVALID_MESSAGE = "WinRM certificate trust is invalid"
 WINRM_CERTIFICATE_EXPIRED_MESSAGE = "WinRM certificate is expired"
 WINRM_CERTIFICATE_NOT_YET_VALID_MESSAGE = "WinRM certificate is not yet valid"
 WINRM_TLS_FAILED_MESSAGE = "WinRM TLS validation failed"
+WINRM_CERTIFICATE_REQUIRED_MESSAGE = "WinRM certificate file is required"
+WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE = "WinRM certificate fingerprint confirmation is required"
+WINRM_FINGERPRINT_MISMATCH_MESSAGE = "WinRM certificate fingerprint confirmation does not match"
+WINRM_TRUST_REF_MISMATCH_MESSAGE = "WinRM trust reference does not match the host"
 WINRM_TRUST_ERROR_MESSAGES = {
     WINRM_TRUST_REQUIRED_CODE: WINRM_TRUST_REQUIRED_MESSAGE,
     "WINRM_TRUST_INVALID": WINRM_CERTIFICATE_INVALID_MESSAGE,
     "WINRM_CERTIFICATE_INVALID": WINRM_CERTIFICATE_INVALID_MESSAGE,
+    "WINRM_CERTIFICATE_REQUIRED": WINRM_CERTIFICATE_REQUIRED_MESSAGE,
     "WINRM_CERTIFICATE_EXPIRED": WINRM_CERTIFICATE_EXPIRED_MESSAGE,
     "WINRM_CERTIFICATE_NOT_YET_VALID": WINRM_CERTIFICATE_NOT_YET_VALID_MESSAGE,
+    "WINRM_CERTIFICATE_HOST_MISMATCH": "WinRM certificate does not match the host address",
     "WINRM_TLS_FAILED": WINRM_TLS_FAILED_MESSAGE,
+    "WINRM_FINGERPRINT_CONFIRMATION_REQUIRED": WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE,
+    "WINRM_FINGERPRINT_MISMATCH": WINRM_FINGERPRINT_MISMATCH_MESSAGE,
+    "WINRM_TRUST_REF_MISMATCH": WINRM_TRUST_REF_MISMATCH_MESSAGE,
     "WINRM_TRUST_STORAGE_UNAVAILABLE": "WinRM certificate trust storage is unavailable",
 }
 WINRM_TRUST_CERTIFICATE_NAME = "server.cer"
 WINRM_TRUST_PEM_NAME = "server.pem"
+WINRM_TRUST_METADATA_NAME = "metadata.json"
 WINRM_CERTIFICATE_MAX_BYTES = 64 * 1024
+WINRM_CERTIFICATE_EXTENSIONS = {".cer", ".crt", ".der", ".pem"}
 
 
 def normalize_winrm_trust_ref(value: Any) -> str:
@@ -554,6 +566,13 @@ def _parse_winrm_certificate(path: str) -> x509.Certificate:
     if len(raw) > WINRM_CERTIFICATE_MAX_BYTES:
         raise WinRMTrustError("WINRM_TRUST_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE)
 
+    return _parse_winrm_certificate_bytes(raw)
+
+
+def _parse_winrm_certificate_bytes(raw: bytes) -> x509.Certificate:
+    """Parse a bounded DER or PEM certificate supplied by an operator."""
+    if not raw or len(raw) > WINRM_CERTIFICATE_MAX_BYTES:
+        raise WinRMTrustError("WINRM_TRUST_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE)
     try:
         try:
             certificate = x509.load_der_x509_certificate(raw)
@@ -563,6 +582,222 @@ def _parse_winrm_certificate(path: str) -> x509.Certificate:
         return certificate
     except (ValueError, TypeError) as exc:
         raise WinRMTrustError("WINRM_TRUST_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE) from exc
+
+
+def _winrm_trust_metadata_path(host: Dict[str, Any]) -> str:
+    return _winrm_trust_file_path(host, WINRM_TRUST_METADATA_NAME)
+
+
+def _write_winrm_trust_bytes(path: str, content: bytes) -> None:
+    """Write trust material through a same-directory atomic replacement."""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{path}.tmp-{uuid4().hex}"
+    try:
+        with open(tmp_path, "wb") as handle:
+            handle.write(content)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        # Bind mounts and Windows filesystems may not support chmod.
+        pass
+
+
+def _read_winrm_trust_metadata(host: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    path = _winrm_trust_metadata_path(host)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_winrm_trust_metadata(host: Dict[str, Any], metadata: Dict[str, Any]) -> None:
+    content = (json.dumps(metadata, indent=2) + "\n").encode("utf-8")
+    _write_winrm_trust_bytes(_winrm_trust_metadata_path(host), content)
+
+
+def _dns_name_matches(pattern: Union[str, bytes], hostname: str) -> bool:
+    if isinstance(pattern, bytes):
+        try:
+            pattern = pattern.decode("idna")
+        except UnicodeError:
+            return False
+    normalized_pattern = str(pattern or "").strip().rstrip(".").lower()
+    normalized_hostname = str(hostname or "").strip().rstrip(".").lower()
+    if not normalized_pattern or not normalized_hostname:
+        return False
+    if normalized_pattern == normalized_hostname:
+        return True
+    if not normalized_pattern.startswith("*."):
+        return False
+    suffix = normalized_pattern[1:]
+    return (
+        normalized_hostname.endswith(suffix)
+        and normalized_hostname.count(".") == normalized_pattern.count(".")
+    )
+
+
+def _is_valid_ip_address(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _certificate_matches_host(certificate: x509.Certificate, host: Dict[str, Any]) -> bool:
+    """Check the inventory address against SAN, falling back to the subject CN."""
+    address = str(host.get("address") or "").strip().rstrip(".")
+    if not address:
+        return True
+
+    san_dns_names: List[str] = []
+    san_ip_addresses: List[str] = []
+    san_has_values = False
+    try:
+        san = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        san_dns_names = [str(value) for value in san.get_values_for_type(x509.DNSName)]
+        san_ip_addresses = [str(value) for value in san.get_values_for_type(x509.IPAddress)]
+        san_has_values = bool(san_dns_names or san_ip_addresses)
+    except x509.ExtensionNotFound:
+        pass
+
+    try:
+        address_ip = ipaddress.ip_address(address)
+    except ValueError:
+        address_ip = None
+
+    if san_has_values:
+        if address_ip is not None:
+            normalized_address = str(address_ip)
+            return any(
+                str(ipaddress.ip_address(value)) == normalized_address
+                for value in san_ip_addresses
+                if _is_valid_ip_address(value)
+            ) or any(
+                _dns_name_matches(value, address) for value in san_dns_names
+            )
+        return any(_dns_name_matches(value, address) for value in san_dns_names)
+
+    common_names = certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    return any(_dns_name_matches(attribute.value, address) for attribute in common_names)
+
+
+def _validate_winrm_certificate(certificate: x509.Certificate, host: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate the certificate as server trust for exactly one inventory host."""
+    try:
+        eku = certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+        if ExtendedKeyUsageOID.SERVER_AUTH not in eku:
+            raise WinRMTrustError("WINRM_CERTIFICATE_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE)
+    except x509.ExtensionNotFound:
+        # Windows-generated self-signed WinRM certificates may omit EKU.
+        pass
+
+    if not _certificate_matches_host(certificate, host):
+        raise WinRMTrustError(
+            "WINRM_CERTIFICATE_HOST_MISMATCH",
+            WINRM_TRUST_ERROR_MESSAGES["WINRM_CERTIFICATE_HOST_MISMATCH"],
+        )
+
+    metadata = _winrm_certificate_metadata(certificate, winrm_trust_ref_for_host(host))
+    if metadata["status"] != "ready":
+        raise WinRMTrustError(
+            metadata["errorCode"],
+            WINRM_TRUST_ERROR_MESSAGES.get(metadata["errorCode"], WINRM_CERTIFICATE_INVALID_MESSAGE),
+        )
+    return metadata
+
+
+def _read_winrm_certificate_upload() -> bytes:
+    """Read an operator upload without accepting paths or unbounded request data."""
+    uploaded = request.files.get("certificate") or request.files.get("file")
+    if uploaded is not None:
+        filename = str(uploaded.filename or "").strip()
+        if filename:
+            extension = os.path.splitext(secure_filename(filename))[1].lower()
+            if extension not in WINRM_CERTIFICATE_EXTENSIONS:
+                raise WinRMTrustError("WINRM_CERTIFICATE_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE)
+        raw = uploaded.stream.read(WINRM_CERTIFICATE_MAX_BYTES + 1)
+    else:
+        if request.content_length and request.content_length > WINRM_CERTIFICATE_MAX_BYTES:
+            raise WinRMTrustError("WINRM_TRUST_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE)
+        raw = request.get_data(cache=False, as_text=False)
+    if not raw:
+        raise WinRMTrustError("WINRM_CERTIFICATE_REQUIRED", WINRM_CERTIFICATE_REQUIRED_MESSAGE)
+    if len(raw) > WINRM_CERTIFICATE_MAX_BYTES:
+        raise WinRMTrustError("WINRM_TRUST_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE)
+    return raw
+
+
+def _winrm_trust_request_value(name: str) -> str:
+    value = request.form.get(name)
+    if value is not None:
+        return str(value).strip()
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        return str(payload.get(name) or "").strip()
+    return ""
+
+
+def _winrm_certificate_response_metadata(
+    certificate: x509.Certificate,
+    host: Dict[str, Any],
+    input_format: str,
+) -> Dict[str, Any]:
+    metadata = _winrm_certificate_metadata(certificate, winrm_trust_ref_for_host(host))
+    metadata["host"] = host.get("name")
+    metadata["address"] = host.get("address")
+    metadata["format"] = input_format
+    return metadata
+
+
+def _store_winrm_trust_certificate(
+    host: Dict[str, Any],
+    certificate: x509.Certificate,
+) -> Dict[str, Any]:
+    trust_ref = winrm_trust_ref_for_host(host)
+    metadata = _winrm_certificate_response_metadata(certificate, host, "DER")
+    metadata.update({
+        "uploadedAt": _format_certificate_datetime(datetime.now(timezone.utc)),
+        "uploadedBy": "lab-manager",
+        "source": "lab-manager",
+    })
+    _write_winrm_trust_bytes(
+        winrm_trust_certificate_path(host),
+        certificate.public_bytes(serialization.Encoding.DER),
+    )
+    _write_winrm_trust_metadata(host, metadata)
+    _materialize_winrm_pem(host, certificate)
+    return inspect_winrm_trust(host)
+
+
+def _delete_winrm_trust_certificate(host: Dict[str, Any]) -> None:
+    for filename in (
+        WINRM_TRUST_CERTIFICATE_NAME,
+        WINRM_TRUST_PEM_NAME,
+        WINRM_TRUST_METADATA_NAME,
+    ):
+        path = _winrm_trust_file_path(host, filename)
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise WinRMTrustError(
+                "WINRM_TRUST_STORAGE_UNAVAILABLE",
+                WINRM_TRUST_ERROR_MESSAGES["WINRM_TRUST_STORAGE_UNAVAILABLE"],
+            ) from exc
 
 
 def _materialize_winrm_pem(host: Dict[str, Any], certificate: x509.Certificate) -> str:
@@ -666,7 +901,31 @@ def inspect_winrm_trust(host: Dict[str, Any]) -> Dict[str, Any]:
             "errorCode": exc.code,
             "trustRef": trust_ref,
         }
-    return _winrm_certificate_metadata(certificate, trust_ref)
+    metadata = _winrm_certificate_metadata(certificate, trust_ref)
+    persisted = _read_winrm_trust_metadata(host)
+    if persisted is not None:
+        if persisted.get("fingerprintSha256") != metadata.get("fingerprintSha256"):
+            return {
+                "configured": True,
+                "status": "invalid",
+                "errorCode": "WINRM_TRUST_INVALID",
+                "trustRef": trust_ref,
+            }
+        for key in ("uploadedAt", "uploadedBy", "source", "format"):
+            if persisted.get(key) is not None:
+                metadata[key] = persisted[key]
+    try:
+        _validate_winrm_certificate(certificate, host)
+    except WinRMTrustError as exc:
+        metadata["status"] = {
+            "WINRM_CERTIFICATE_EXPIRED": "expired",
+            "WINRM_CERTIFICATE_NOT_YET_VALID": "not-yet-valid",
+        }.get(exc.code, "invalid")
+        metadata["errorCode"] = exc.code
+    metadata["host"] = host.get("name")
+    metadata["address"] = host.get("address")
+    metadata["lastValidatedAt"] = _format_certificate_datetime(datetime.now(timezone.utc))
+    return metadata
 
 
 def load_winrm_trust(host: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -680,7 +939,8 @@ def load_winrm_trust(host: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     if status == "not-yet-valid":
         raise WinRMTrustError("WINRM_CERTIFICATE_NOT_YET_VALID", WINRM_CERTIFICATE_NOT_YET_VALID_MESSAGE)
     if status != "ready":
-        raise WinRMTrustError("WINRM_TRUST_INVALID", WINRM_CERTIFICATE_INVALID_MESSAGE)
+        code = str(metadata.get("errorCode") or "WINRM_TRUST_INVALID")
+        raise WinRMTrustError(code, WINRM_TRUST_ERROR_MESSAGES.get(code, WINRM_CERTIFICATE_INVALID_MESSAGE))
     return winrm_trust_pem_path(host), metadata
 
 
@@ -3470,6 +3730,10 @@ def safe_host_inventory_entry(host: Dict[str, Any], *, editable: bool = False) -
         "winrmTrustNotBefore": trust.get("notBefore"),
         "winrmTrustNotAfter": trust.get("notAfter"),
         "winrmTrustSelfSigned": trust.get("selfSigned"),
+        "winrmTrustUploadedAt": trust.get("uploadedAt"),
+        "winrmTrustUploadedBy": trust.get("uploadedBy"),
+        "winrmTrustSource": trust.get("source"),
+        "winrmTrustLastValidatedAt": trust.get("lastValidatedAt"),
         "mac": host.get("mac"),
         "heartbeatPath": host.get("heartbeat_path", r"C:\LabStation\labstation\data\telemetry\heartbeat.json"),
         "mode": host.get("mode"),
@@ -3988,6 +4252,166 @@ def api_hosts_update(host_name: str):
         "hosts": count,
         "host": safe_host_inventory_entry(host_config, editable=True),
     })
+
+
+def _winrm_trust_http_status(code: str) -> int:
+    if code == "WINRM_TRUST_STORAGE_UNAVAILABLE":
+        return 503
+    if code in {
+        "WINRM_CERTIFICATE_HOST_MISMATCH",
+        "WINRM_CERTIFICATE_EXPIRED",
+        "WINRM_CERTIFICATE_NOT_YET_VALID",
+        "WINRM_FINGERPRINT_MISMATCH",
+        "WINRM_TRUST_REF_MISMATCH",
+    }:
+        return 422
+    return 400
+
+
+def _winrm_trust_host_or_404(host_name: str):
+    host = HOSTS.get(host_name)
+    if not host:
+        return None, (jsonify({"error": f"host '{host_name}' not found in config"}), 404)
+    return host, None
+
+
+@APP.route("/api/hosts/<host_name>/winrm-trust/preview", methods=["POST"])
+def api_preview_winrm_trust(host_name: str):
+    host, error_response = _winrm_trust_host_or_404(host_name)
+    if error_response:
+        return error_response
+    if host is None:
+        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
+    try:
+        raw = _read_winrm_certificate_upload()
+        certificate = _parse_winrm_certificate_bytes(raw)
+        input_format = "PEM" if b"-----BEGIN CERTIFICATE-----" in raw[:256] else "DER"
+        preview = _winrm_certificate_response_metadata(certificate, host, input_format)
+        try:
+            _validate_winrm_certificate(certificate, host)
+        except WinRMTrustError as exc:
+            payload = _winrm_trust_error_payload(host_name, exc.code)
+            payload["preview"] = preview
+            return jsonify(payload), _winrm_trust_http_status(exc.code)
+        preview["valid"] = True
+        return jsonify({
+            "requestId": _request_id(),
+            "host": host.get("name"),
+            "address": host.get("address"),
+            "preview": preview,
+        })
+    except WinRMTrustError as exc:
+        return jsonify(_winrm_trust_error_payload(host_name, exc.code)), _winrm_trust_http_status(exc.code)
+    except Exception as exc:
+        return internal_error_response("WinRM trust preview failed", exc)
+
+
+@APP.route("/api/hosts/<host_name>/winrm-trust", methods=["GET"])
+def api_get_winrm_trust(host_name: str):
+    host, error_response = _winrm_trust_host_or_404(host_name)
+    if error_response:
+        return error_response
+    if host is None:
+        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
+    try:
+        trust = inspect_winrm_trust(host)
+        return jsonify({
+            "requestId": _request_id(),
+            "host": host.get("name"),
+            "address": host.get("address"),
+            "trust": trust,
+        })
+    except (ValueError, WinRMTrustError) as exc:
+        code = getattr(exc, "code", "WINRM_TRUST_INVALID")
+        return jsonify(_winrm_trust_error_payload(host_name, code)), _winrm_trust_http_status(code)
+    except Exception as exc:
+        return internal_error_response("WinRM trust status failed", exc)
+
+
+@APP.route("/api/hosts/<host_name>/winrm-trust", methods=["PUT"])
+def api_save_winrm_trust(host_name: str):
+    host, error_response = _winrm_trust_host_or_404(host_name)
+    if error_response:
+        return error_response
+    if host is None:
+        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
+    try:
+        submitted_fingerprint = (
+            _winrm_trust_request_value("fingerprintSha256")
+            or str(request.headers.get("X-WinRM-Fingerprint-SHA256") or "").strip()
+        )
+        submitted_fingerprint = re.sub(r"[\s:]", "", submitted_fingerprint).upper()
+        if not submitted_fingerprint:
+            raise WinRMTrustError(
+                "WINRM_FINGERPRINT_CONFIRMATION_REQUIRED",
+                WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE,
+            )
+        if not re.fullmatch(r"[0-9A-F]{64}", submitted_fingerprint):
+            raise WinRMTrustError("WINRM_FINGERPRINT_MISMATCH", WINRM_FINGERPRINT_MISMATCH_MESSAGE)
+
+        supplied_trust_ref = (
+            _winrm_trust_request_value("trustRef")
+            or str(request.headers.get("X-WinRM-Trust-Ref") or "").strip()
+        )
+        if supplied_trust_ref:
+            try:
+                if normalize_winrm_trust_ref(supplied_trust_ref) != winrm_trust_ref_for_host(host):
+                    raise WinRMTrustError("WINRM_TRUST_REF_MISMATCH", WINRM_TRUST_REF_MISMATCH_MESSAGE)
+            except ValueError as exc:
+                raise WinRMTrustError("WINRM_TRUST_REF_MISMATCH", WINRM_TRUST_REF_MISMATCH_MESSAGE) from exc
+
+        raw = _read_winrm_certificate_upload()
+        certificate = _parse_winrm_certificate_bytes(raw)
+        metadata = _validate_winrm_certificate(certificate, host)
+        if metadata["fingerprintSha256"] != submitted_fingerprint:
+            raise WinRMTrustError("WINRM_FINGERPRINT_MISMATCH", WINRM_FINGERPRINT_MISMATCH_MESSAGE)
+
+        trust = _store_winrm_trust_certificate(host, certificate)
+        logging.info(
+            "WinRM trust saved host=%s fingerprintSha256=%s",
+            _sanitize_log_value(host_name),
+            _sanitize_log_value(metadata["fingerprintSha256"]),
+        )
+        return jsonify({
+            "requestId": _request_id(),
+            "saved": True,
+            "host": host.get("name"),
+            "address": host.get("address"),
+            "trust": trust,
+        })
+    except WinRMTrustError as exc:
+        return jsonify(_winrm_trust_error_payload(host_name, exc.code)), _winrm_trust_http_status(exc.code)
+    except OSError as exc:
+        logging.warning("Unable to save WinRM trust for %s: %s", _sanitize_log_value(host_name), type(exc).__name__)
+        return jsonify(_winrm_trust_error_payload(
+            host_name,
+            "WINRM_TRUST_STORAGE_UNAVAILABLE",
+        )), 503
+    except Exception as exc:
+        return internal_error_response("WinRM trust save failed", exc)
+
+
+@APP.route("/api/hosts/<host_name>/winrm-trust", methods=["DELETE"])
+def api_delete_winrm_trust(host_name: str):
+    host, error_response = _winrm_trust_host_or_404(host_name)
+    if error_response:
+        return error_response
+    if host is None:
+        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
+    try:
+        _delete_winrm_trust_certificate(host)
+        logging.info("WinRM trust removed host=%s", _sanitize_log_value(host_name))
+        return jsonify({
+            "requestId": _request_id(),
+            "deleted": True,
+            "host": host.get("name"),
+            "address": host.get("address"),
+            "trust": inspect_winrm_trust(host),
+        })
+    except WinRMTrustError as exc:
+        return jsonify(_winrm_trust_error_payload(host_name, exc.code)), _winrm_trust_http_status(exc.code)
+    except Exception as exc:
+        return internal_error_response("WinRM trust delete failed", exc)
 
 
 @APP.route("/api/hosts/winrm-credentials", methods=["POST"])

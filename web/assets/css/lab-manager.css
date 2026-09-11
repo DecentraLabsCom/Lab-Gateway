@@ -1141,6 +1141,55 @@ body {
     outline-offset: 3px;
     border-radius: 4px;
 }
+.winrm-trust-current {
+    margin: 12px 0 16px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #0d1220;
+    color: var(--muted);
+}
+.winrm-trust-current.good {
+    border-color: rgba(94, 234, 212, 0.5);
+}
+.winrm-trust-current.warn {
+    border-color: rgba(250, 204, 21, 0.55);
+}
+.winrm-trust-current.bad {
+    border-color: rgba(255, 107, 107, 0.6);
+}
+.certificate-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0 0 14px;
+}
+.certificate-detail {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #0d1220;
+}
+.certificate-detail dt {
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-bottom: 4px;
+}
+.certificate-detail dd {
+    margin: 0;
+    color: var(--text);
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.82rem;
+}
+.winrm-trust-confirmation {
+    align-items: flex-start;
+    margin-bottom: 4px;
+}
+.winrm-trust-preview[hidden] {
+    display: none;
+}
 .guacamole-match-trigger {
     display: inline-block;
     outline: none;
@@ -1469,6 +1518,21 @@ body {
 .modal-body { padding: 0 16px 16px; overflow-y: auto; }
 .icon-btn { width: 36px; height: 36px; border-radius: 50%; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; }
 .footer-actions { display: flex; gap: 10px; align-items: center; }
+
+@media (max-width: 700px) {
+    .certificate-detail-grid {
+        grid-template-columns: 1fr;
+    }
+    .winrm-trust-modal .modal-footer,
+    #winrmTrustModal .modal-footer {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    #winrmTrustModal .footer-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+}
 
 @media (max-width: 768px) {
     .lm-header { flex-direction: column; align-items: flex-start; }

@@ -110,7 +110,8 @@ In `Operations` → `Lab Station Ops`, the interface shows:
 - Guacamole connections that are not yet associated with an Ops host.
 
 Click `Refresh` after changing the inventory. The UI starts a heartbeat stream
-for each host with WinRM credentials when the browser and endpoint support it.
+for each host with WinRM credentials and ready TLS trust when the browser and
+endpoint support it.
 Hosts created through the Lab Manager are editable with the pencil action next
 to their name; the address remains read-only.
 
@@ -145,7 +146,8 @@ open `Set WinRM Credentials`, and save the user and password for its
 `credential_ref`. The password is stored in the encrypted
 Ops Worker credential store, not in `hosts.json`.
 
-Until credentials are saved, heartbeat streaming is not started for that host.
+Until both credentials and certificate trust are ready, heartbeat streaming is
+not started for that host.
 
 The host card reports credentials and certificate trust separately:
 
@@ -161,6 +163,25 @@ The host card reports credentials and certificate trust separately:
 needed to prove network reachability, authentication, and that the certificate
 served by the Station matches the trusted certificate.
 
+### Manage WinRM TLS trust
+
+Click the `WinRM TLS trust` status in the host card to open its certificate
+panel. The panel is the single entry point for this host's trust lifecycle:
+
+1. Select the public certificate exported by Lab Station, normally
+   `C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer`.
+2. Click `Preview certificate` and check the displayed host, validity dates,
+   SAN/CN and SHA-256 fingerprint.
+3. Check the explicit fingerprint confirmation and click `Save certificate`.
+   Saving replaces the existing certificate only after the server validates it
+   against the selected host.
+4. Use `Verify connection` to run an immediate heartbeat, or `Remove trust` to
+   delete the host-specific trust material.
+
+The panel reports `missing`, `ready`, `expired`, `not yet valid`, or `invalid`
+independently from the credential status. Error responses include a stable
+code and request ID; internal exceptions and certificate contents are not shown.
+
 These two prerequisites are independent. Until WinRM credentials are saved,
 the Lab Manager does not open a heartbeat stream for the host. If credentials
 exist but certificate trust is missing or invalid, the host remains unable to
@@ -169,9 +190,8 @@ produce a heartbeat until the certificate is installed or corrected. Use the
 which step is missing; do not treat an incomplete host as a Station or Gateway
 failure.
 
-To bootstrap certificate trust before the Lab Manager upload control is
-available, copy the public certificate exported by Lab Station to the Gateway
-host:
+For technical bootstrap or recovery, the public certificate exported by Lab
+Station can also be copied directly to the Gateway host:
 
 ```text
 ops-data/winrm-certificates/<lower-case-host-name>/server.cer
@@ -204,8 +224,8 @@ For each host, operators can:
 - inspect preparation state, the last operation, power state, and WoL NIC data.
 
 Heartbeat streaming starts automatically only for hosts with configured WinRM
-credentials. A missing or invalid certificate prevents the authenticated
-heartbeat even when the Station is powered on. If a stream error includes a
+credentials and ready TLS trust. A missing or invalid certificate prevents the
+authenticated heartbeat even when the Station is powered on. If a stream error includes a
 `requestId`, keep it for the Ops Worker logs; the browser message is not a
 substitute for the host-card credential and TLS trust statuses.
 

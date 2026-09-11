@@ -73,6 +73,9 @@ and when `POST /api/hosts/reload` runs. It validates the CER as DER or PEM,
 generates a local `server.pem` for Requests/OpenSSL when necessary, and uses
 that PEM only for the corresponding host's WinRM sessions. The host's
 `winrm_trust_ref` controls the directory; if omitted, the host name is used.
+Uploaded certificates are stored canonically as `server.cer` plus
+`metadata.json`; the metadata records the fingerprint and operational dates,
+never private key material.
 
 After copying a certificate, restart the worker or call the protected reload
 endpoint. `GET /api/hosts` exposes `winrmTrustStatus`, fingerprints, SANs and
@@ -166,6 +169,14 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
 - `POST /api/hosts/winrm-credentials`
   - Body: `{ credentialRef, user, password }`
   - Encrypts and stores WinRM credentials for the configured host. Credentials are never accepted through `/api/winrm` or stored in the host catalog.
+- `POST /api/hosts/{hostName}/winrm-trust/preview`
+  - Multipart field `certificate` containing a public `.cer`, `.crt`, `.der` or `.pem` file. Returns parsed metadata without persisting the upload.
+- `GET /api/hosts/{hostName}/winrm-trust`
+  - Returns only per-host certificate metadata and status; the certificate bytes are never returned.
+- `PUT /api/hosts/{hostName}/winrm-trust`
+  - Multipart fields `certificate`, `fingerprintSha256` and optional `trustRef`. The worker recalculates SHA-256, validates the certificate identity against the host SAN/CN, rejects expired certificates, and stores it atomically.
+- `DELETE /api/hosts/{hostName}/winrm-trust`
+  - Removes the public certificate, generated PEM and metadata. The operation is idempotent.
 - `POST /api/reservations/start`
   - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
 - `POST /api/reservations/end`

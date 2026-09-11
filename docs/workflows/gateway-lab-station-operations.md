@@ -48,7 +48,8 @@ per-host `ca_trust_path` while keeping TLS validation enabled. A certificate
 is never installed as a global trust override and is never trusted for another
 host.
 
-The manual bootstrap procedure is:
+The manual bootstrap procedure, which remains useful for recovery and local
+deployments, is:
 
 1. Run `LabStation.exe winrm configure` on the Windows station.
 2. Copy `C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer` to the
@@ -60,8 +61,10 @@ The manual bootstrap procedure is:
 
 The certificate file must be the public CER/DER or PEM export only. Do not
 copy a private key, use `verify=false`, or use `TrustedHosts` as a substitute
-for certificate validation. The future Lab Manager upload flow will manage
-the same per-host trust store; it does not change this trust boundary.
+for certificate validation. Lab Manager now manages the same per-host trust
+store from the `WinRM TLS trust` indicator on each host card. It previews the
+certificate, validates SAN/CN identity and validity dates, requires an explicit
+SHA-256 confirmation, and never returns the certificate contents after saving.
 
 ## Host inventory and telemetry
 
@@ -96,6 +99,10 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `POST /ops/api/hosts/provision` | Create or update a dynamic host after successful discovery. |
 | `PATCH /ops/api/hosts/{hostName}` | Update the name, MAC, or heartbeat path of a dynamic host. |
 | `POST /ops/api/hosts/winrm-credentials` | Store encrypted credentials for a host reference. |
+| `POST /ops/api/hosts/{hostName}/winrm-trust/preview` | Validate and preview a public CER/DER/PEM certificate without persisting it. |
+| `GET /ops/api/hosts/{hostName}/winrm-trust` | Read per-host trust metadata and classified status. |
+| `PUT /ops/api/hosts/{hostName}/winrm-trust` | Save or replace trust after server-side validation and SHA-256 confirmation. |
+| `DELETE /ops/api/hosts/{hostName}/winrm-trust` | Remove the host trust material and return `WINRM_TRUST_REQUIRED` state. |
 | `POST /ops/api/hosts/reload` | Reload the static/dynamic host catalog. |
 | `POST /ops/api/hosts/local-mode` | Set the station local-mode operational flag. |
 | `POST /ops/api/reservations/start` | Start the operational preparation for one reservation. |

@@ -70,6 +70,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeWinrmCredentialsModalBtn = $('#closeWinrmCredentialsModal');
     const cancelWinrmCredentialsBtn = $('#cancelWinrmCredentials');
     const saveWinrmCredentialsBtn = $('#saveWinrmCredentials');
+    const winrmTrustModal = $('#winrmTrustModal');
+    const closeWinrmTrustModalBtn = $('#closeWinrmTrustModal');
+    const cancelWinrmTrustBtn = $('#cancelWinrmTrust');
+    const previewWinrmTrustBtn = $('#previewWinrmTrust');
+    const saveWinrmTrustBtn = $('#saveWinrmTrust');
+    const verifyWinrmTrustBtn = $('#verifyWinrmTrust');
+    const deleteWinrmTrustBtn = $('#deleteWinrmTrust');
+    const winrmTrustModalHostEl = $('#winrmTrustModalHost');
+    const winrmTrustCurrentEl = $('#winrmTrustCurrent');
+    const winrmTrustCertificateEl = $('#winrmTrustCertificate');
+    const winrmTrustCertificateNameEl = $('#winrmTrustCertificateName');
+    const winrmTrustPreviewEl = $('#winrmTrustPreview');
+    const winrmTrustPreviewDetailsEl = $('#winrmTrustPreviewDetails');
+    const winrmTrustFingerprintConfirmedEl = $('#winrmTrustFingerprintConfirmed');
     const editHostModal = $('#editHostModal');
     const closeEditHostModalBtn = $('#closeEditHostModal');
     const cancelEditHostBtn = $('#cancelEditHost');
@@ -119,6 +133,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeWinrmCredentialsModalBtn) closeWinrmCredentialsModalBtn.addEventListener('click', closeWinrmCredentialsModal);
     if (cancelWinrmCredentialsBtn) cancelWinrmCredentialsBtn.addEventListener('click', closeWinrmCredentialsModal);
     if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.addEventListener('click', saveWinrmCredentials);
+    if (closeWinrmTrustModalBtn) closeWinrmTrustModalBtn.addEventListener('click', closeWinrmTrustModal);
+    if (cancelWinrmTrustBtn) cancelWinrmTrustBtn.addEventListener('click', closeWinrmTrustModal);
+    if (previewWinrmTrustBtn) previewWinrmTrustBtn.addEventListener('click', previewWinrmTrust);
+    if (saveWinrmTrustBtn) saveWinrmTrustBtn.addEventListener('click', saveWinrmTrust);
+    if (verifyWinrmTrustBtn) verifyWinrmTrustBtn.addEventListener('click', verifyWinrmTrust);
+    if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.addEventListener('click', deleteWinrmTrust);
+    if (winrmTrustCertificateEl) winrmTrustCertificateEl.addEventListener('change', handleWinrmTrustCertificateSelected);
+    if (winrmTrustFingerprintConfirmedEl) {
+        winrmTrustFingerprintConfirmedEl.addEventListener('change', updateWinrmTrustSaveState);
+    }
     if (closeEditHostModalBtn) closeEditHostModalBtn.addEventListener('click', closeEditHostModal);
     if (cancelEditHostBtn) cancelEditHostBtn.addEventListener('click', closeEditHostModal);
     if (saveEditHostBtn) saveEditHostBtn.addEventListener('click', saveEditedHost);
@@ -201,6 +225,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const powerPolicyEditorHintEl = $('#powerPolicyEditorHint');
     const hostState = {};
     const hostMetadata = {};
+    let activeWinrmTrustHost = '';
+    let activeWinrmTrustFile = null;
+    let activeWinrmTrustPreview = null;
     const guacamoleCandidateState = {};
     const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
@@ -210,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
         WINRM_TRUST_REQUIRED: 'WinRM certificate trust is required',
         WINRM_TRUST_INVALID: 'WinRM certificate trust is invalid',
         WINRM_CERTIFICATE_INVALID: 'WinRM certificate trust is invalid',
+        WINRM_CERTIFICATE_HOST_MISMATCH: 'WinRM certificate does not match the host address',
         WINRM_CERTIFICATE_EXPIRED: 'WinRM certificate is expired',
         WINRM_CERTIFICATE_NOT_YET_VALID: 'WinRM certificate is not yet valid',
         WINRM_TLS_FAILED: 'WinRM TLS validation failed',
@@ -221,6 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'WINRM_TRUST_REQUIRED',
         'WINRM_TRUST_INVALID',
         'WINRM_CERTIFICATE_INVALID',
+        'WINRM_CERTIFICATE_HOST_MISMATCH',
         'WINRM_CERTIFICATE_EXPIRED',
         'WINRM_CERTIFICATE_NOT_YET_VALID',
         'WINRM_TLS_FAILED',
@@ -1029,6 +1058,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 .filter(name => !nextSet.has(name))
                 .forEach(stopHeartbeatStream);
             hostNames = nextHostNames;
+            hostNames
+                .filter(name => {
+                    const meta = hostMetadata[name] || {};
+                    return meta.winrmConfigured !== true || meta.winrmTrustStatus !== 'ready';
+                })
+                .forEach(stopHeartbeatStream);
             renderHosts();
             guacamoleCandidates = Array.isArray(data.guacamoleUnmatched) ? data.guacamoleUnmatched : [];
             guacamoleCandidates.forEach(rememberGuacamoleCandidate);
@@ -2457,7 +2492,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function startHeartbeatStream(host) {
         const meta = hostMetadata[host] || {};
         const EventSourceCtor = window.EventSource;
-        if (!host || !EventSourceCtor || heartbeatSources[host] || meta.winrmConfigured !== true) return;
+        if (
+            !host ||
+            !EventSourceCtor ||
+            heartbeatSources[host] ||
+            meta.winrmConfigured !== true ||
+            meta.winrmTrustStatus !== 'ready'
+        ) return;
         const url = new URL('/ops/api/heartbeat/stream', window.location.origin);
         url.searchParams.set('host', host);
         url.searchParams.set('include_events', 'false');
@@ -2680,7 +2721,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="host-meta">Last heartbeat: ${safeUpdated}</div>
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
                 <div class="host-meta">WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update WinRM credentials" aria-label="Set or update WinRM credentials"><span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></button></div>
-                <div class="host-meta">WinRM TLS trust: <span class="host-status-text ${winrmTrust.className}">${winrmTrust.label}</span></div>
+                <div class="host-meta">WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage WinRM TLS trust" aria-label="Manage WinRM TLS trust"><span class="host-status-text ${winrmTrust.className}">${winrmTrust.label}</span></button></div>
             </div>
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">
@@ -3151,6 +3192,239 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function winrmTrustStatusLabel(status) {
+        const labels = {
+            missing: 'missing',
+            ready: 'ready',
+            expired: 'expired',
+            'not-yet-valid': 'not yet valid',
+            invalid: 'invalid',
+            unavailable: 'unavailable',
+        };
+        return labels[String(status || '').trim().toLowerCase()] || 'unavailable';
+    }
+
+    function winrmTrustStatusClass(status) {
+        const normalized = String(status || '').trim().toLowerCase();
+        if (normalized === 'ready') return 'good';
+        if (normalized === 'missing' || normalized === 'unavailable') return 'warn';
+        return 'bad';
+    }
+
+    function appendTrustDetail(container, label, value) {
+        const item = document.createElement('div');
+        item.className = 'certificate-detail';
+        const labelEl = document.createElement('dt');
+        labelEl.textContent = label;
+        const valueEl = document.createElement('dd');
+        valueEl.textContent = value === null || value === undefined || value === '' ? 'n/a' : String(value);
+        item.append(labelEl, valueEl);
+        container.appendChild(item);
+    }
+
+    function renderWinrmTrustState(trust) {
+        if (!winrmTrustCurrentEl) return;
+        const status = String(trust?.status || (trust?.configured ? 'ready' : 'missing')).toLowerCase();
+        winrmTrustCurrentEl.className = `winrm-trust-current ${winrmTrustStatusClass(status)}`;
+        winrmTrustCurrentEl.replaceChildren();
+
+        const title = document.createElement('strong');
+        title.textContent = `Current trust: ${winrmTrustStatusLabel(status)}`;
+        winrmTrustCurrentEl.appendChild(title);
+
+        const details = document.createElement('dl');
+        details.className = 'certificate-detail-grid';
+        appendTrustDetail(details, 'SHA-256', trust?.fingerprintSha256);
+        appendTrustDetail(details, 'SHA-1', trust?.fingerprintSha1);
+        appendTrustDetail(details, 'Subject', trust?.subject);
+        appendTrustDetail(details, 'SAN DNS', Array.isArray(trust?.sanDnsNames) ? trust.sanDnsNames.join(', ') : '');
+        appendTrustDetail(details, 'SAN IP', Array.isArray(trust?.sanIpAddresses) ? trust.sanIpAddresses.join(', ') : '');
+        appendTrustDetail(details, 'Valid until', trust?.notAfter ? formatDate(trust.notAfter) : '');
+        appendTrustDetail(details, 'Last validated', trust?.lastValidatedAt ? formatDate(trust.lastValidatedAt) : '');
+        appendTrustDetail(details, 'Error code', trust?.errorCode);
+        winrmTrustCurrentEl.appendChild(details);
+    }
+
+    function renderWinrmTrustPreview(preview) {
+        if (!winrmTrustPreviewEl || !winrmTrustPreviewDetailsEl) return;
+        winrmTrustPreviewEl.hidden = !preview;
+        winrmTrustPreviewDetailsEl.replaceChildren();
+        if (!preview) {
+            updateWinrmTrustSaveState();
+            return;
+        }
+
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Status', winrmTrustStatusLabel(preview.status));
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SHA-256', preview.fingerprintSha256);
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SHA-1', preview.fingerprintSha1);
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Subject', preview.subject);
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Issuer', preview.issuer);
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SAN DNS', Array.isArray(preview.sanDnsNames) ? preview.sanDnsNames.join(', ') : '');
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SAN IP', Array.isArray(preview.sanIpAddresses) ? preview.sanIpAddresses.join(', ') : '');
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Valid from', preview.notBefore ? formatDate(preview.notBefore) : '');
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Valid until', preview.notAfter ? formatDate(preview.notAfter) : '');
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Format', preview.format);
+        if (winrmTrustFingerprintConfirmedEl) winrmTrustFingerprintConfirmedEl.checked = false;
+        updateWinrmTrustSaveState();
+    }
+
+    function updateWinrmTrustSaveState() {
+        if (previewWinrmTrustBtn) previewWinrmTrustBtn.disabled = !activeWinrmTrustFile;
+        if (saveWinrmTrustBtn) {
+            saveWinrmTrustBtn.disabled = !(
+                activeWinrmTrustFile &&
+                activeWinrmTrustPreview?.valid === true &&
+                winrmTrustFingerprintConfirmedEl?.checked === true
+            );
+        }
+    }
+
+    function handleWinrmTrustCertificateSelected() {
+        activeWinrmTrustFile = winrmTrustCertificateEl?.files?.[0] || null;
+        activeWinrmTrustPreview = null;
+        if (winrmTrustCertificateNameEl) {
+            winrmTrustCertificateNameEl.textContent = activeWinrmTrustFile?.name || 'No file selected';
+        }
+        renderWinrmTrustPreview(null);
+        updateWinrmTrustSaveState();
+    }
+
+    function winrmTrustErrorMessage(body, status) {
+        const code = String(body?.code || '').trim();
+        const requestSuffix = body?.requestId ? ` (request ID ${body.requestId})` : '';
+        return `${body?.error || `HTTP ${status}`}${code ? ` [${code}]` : ''}${requestSuffix}`;
+    }
+
+    async function openWinrmTrustModal(host) {
+        if (!winrmTrustModal || !winrmTrustCertificateEl) {
+            showToast('WinRM TLS trust modal is unavailable', 'error');
+            return;
+        }
+        activeWinrmTrustHost = host;
+        activeWinrmTrustFile = null;
+        activeWinrmTrustPreview = null;
+        winrmTrustCertificateEl.value = '';
+        if (winrmTrustCertificateNameEl) winrmTrustCertificateNameEl.textContent = 'No file selected';
+        if (winrmTrustModalHostEl) {
+            const meta = hostMetadata[host] || {};
+            winrmTrustModalHostEl.textContent = `Host: ${host} · Address: ${meta.address || 'n/a'}`;
+        }
+        if (winrmTrustFingerprintConfirmedEl) winrmTrustFingerprintConfirmedEl.checked = false;
+        renderWinrmTrustPreview(null);
+        if (winrmTrustCurrentEl) winrmTrustCurrentEl.textContent = 'Loading certificate trust state...';
+        updateWinrmTrustSaveState();
+        winrmTrustModal.classList.add('show');
+        await loadWinrmTrustState(host);
+    }
+
+    async function loadWinrmTrustState(host) {
+        try {
+            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(host)}/winrm-trust`);
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
+            if (activeWinrmTrustHost !== host) return;
+            renderWinrmTrustState(body.trust || body);
+        } catch (err) {
+            if (activeWinrmTrustHost === host) {
+                if (winrmTrustCurrentEl) winrmTrustCurrentEl.textContent = `Unable to load trust: ${err.message}`;
+                showToast(`WinRM trust status failed: ${err.message}`, 'error');
+            }
+        }
+    }
+
+    function closeWinrmTrustModal() {
+        if (winrmTrustModal) winrmTrustModal.classList.remove('show');
+        activeWinrmTrustHost = '';
+        activeWinrmTrustFile = null;
+        activeWinrmTrustPreview = null;
+    }
+
+    async function previewWinrmTrust() {
+        if (!activeWinrmTrustHost || !activeWinrmTrustFile) {
+            showToast('Choose a station certificate first', 'error');
+            return;
+        }
+        if (previewWinrmTrustBtn) previewWinrmTrustBtn.disabled = true;
+        try {
+            const form = new FormData();
+            form.append('certificate', activeWinrmTrustFile, activeWinrmTrustFile.name);
+            const res = await fetch(
+                `/ops/api/hosts/${encodeURIComponent(activeWinrmTrustHost)}/winrm-trust/preview`,
+                { method: 'POST', body: form },
+            );
+            const body = await res.json().catch(() => ({}));
+            if (body.preview) {
+                activeWinrmTrustPreview = body.preview;
+                renderWinrmTrustPreview(activeWinrmTrustPreview);
+            }
+            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
+            activeWinrmTrustPreview = { ...body.preview, valid: true };
+            renderWinrmTrustPreview(activeWinrmTrustPreview);
+            showToast('Certificate preview ready; verify the SHA-256 fingerprint', 'success');
+        } catch (err) {
+            showToast(`Certificate preview failed: ${err.message}`, 'error');
+        } finally {
+            updateWinrmTrustSaveState();
+        }
+    }
+
+    async function saveWinrmTrust() {
+        if (!activeWinrmTrustHost || !activeWinrmTrustFile || activeWinrmTrustPreview?.valid !== true) {
+            showToast('Preview a valid certificate first', 'error');
+            return;
+        }
+        if (!winrmTrustFingerprintConfirmedEl?.checked) {
+            showToast('Verify the SHA-256 fingerprint before saving', 'error');
+            return;
+        }
+        if (saveWinrmTrustBtn) saveWinrmTrustBtn.disabled = true;
+        try {
+            const form = new FormData();
+            form.append('certificate', activeWinrmTrustFile, activeWinrmTrustFile.name);
+            form.append('fingerprintSha256', activeWinrmTrustPreview.fingerprintSha256);
+            form.append('trustRef', activeWinrmTrustPreview.trustRef || '');
+            const res = await fetch(
+                `/ops/api/hosts/${encodeURIComponent(activeWinrmTrustHost)}/winrm-trust`,
+                { method: 'PUT', body: form },
+            );
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
+            const savedHost = activeWinrmTrustHost;
+            closeWinrmTrustModal();
+            showToast(`WinRM TLS trust saved for ${savedHost}`, 'success');
+            await loadHostInventory({ skipAuthPrompt: true });
+            await pollHeartbeat(savedHost);
+        } catch (err) {
+            showToast(`WinRM trust save failed: ${err.message}`, 'error');
+        } finally {
+            updateWinrmTrustSaveState();
+        }
+    }
+
+    async function verifyWinrmTrust() {
+        if (!activeWinrmTrustHost) return;
+        await pollHeartbeat(activeWinrmTrustHost);
+    }
+
+    async function deleteWinrmTrust() {
+        if (!activeWinrmTrustHost) return;
+        if (!window.confirm(`Remove WinRM TLS trust for ${activeWinrmTrustHost}?`)) return;
+        if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.disabled = true;
+        try {
+            const host = activeWinrmTrustHost;
+            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(host)}/winrm-trust`, { method: 'DELETE' });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
+            closeWinrmTrustModal();
+            showToast(`WinRM TLS trust removed for ${host}`, 'success');
+            await loadHostInventory({ skipAuthPrompt: true });
+        } catch (err) {
+            showToast(`WinRM trust removal failed: ${err.message}`, 'error');
+        } finally {
+            if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.disabled = false;
+        }
+    }
+
     async function saveProvisionedHost() {
         if (
             !provisionConnectionIdEl ||
@@ -3293,6 +3567,10 @@ document.addEventListener('DOMContentLoaded', () => {
             openWinrmCredentialsModal(host);
             return;
         }
+        if (action === 'manage-winrm-trust') {
+            openWinrmTrustModal(host);
+            return;
+        }
         if (action === 'sync-aas') {
             syncAasHost(host);
         }
@@ -3301,12 +3579,15 @@ document.addEventListener('DOMContentLoaded', () => {
     async function refreshAllHosts() {
         await loadHostInventory();
         if (window.EventSource) {
-            const streamableHosts = hostNames.filter(host => hostMetadata[host]?.winrmConfigured === true);
+            const streamableHosts = hostNames.filter(host =>
+                hostMetadata[host]?.winrmConfigured === true
+                && hostMetadata[host]?.winrmTrustStatus === 'ready'
+            );
             streamableHosts.forEach(startHeartbeatStream);
-            showToast(
-                streamableHosts.length
-                    ? 'Heartbeat streaming started for configured hosts'
-                    : 'Heartbeat streaming unavailable: configure WinRM credentials',
+                showToast(
+                    streamableHosts.length
+                        ? 'Heartbeat streaming started for configured hosts'
+                        : 'Heartbeat streaming unavailable: configure WinRM credentials and TLS trust',
                 streamableHosts.length ? 'success' : 'error',
             );
             return;

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v17">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=winrm-trust-v1">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -1074,6 +1074,50 @@
         </div>
     </div>
 
+    <div class="modal" id="winrmTrustModal">
+        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="winrmTrustModalTitle">
+            <div class="modal-header">
+                <h3 id="winrmTrustModalTitle"><i class="fas fa-shield-halved"></i> WinRM TLS trust</h3>
+                <button class="ghost-btn icon-btn" id="closeWinrmTrustModal" type="button" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="hint" id="winrmTrustModalHost"></div>
+                <div class="winrm-trust-current" id="winrmTrustCurrent" role="status" aria-live="polite">
+                    Loading certificate trust state...
+                </div>
+                <div class="form-grid">
+                    <label class="field full">
+                        <span>Station certificate (.cer, .crt, .der or .pem)</span>
+                        <div class="file-picker">
+                            <label class="file-picker-button" for="winrmTrustCertificate">Choose certificate</label>
+                            <input class="file-picker-input" type="file" id="winrmTrustCertificate"
+                                accept=".cer,.crt,.der,.pem,application/x-x509-ca-cert,application/pkix-cert,text/plain">
+                            <span class="file-picker-name" id="winrmTrustCertificateName" aria-live="polite">No file selected</span>
+                        </div>
+                        <span class="hint">Select the public certificate exported by Lab Station. Private keys are never accepted or stored.</span>
+                    </label>
+                </div>
+                <div class="winrm-trust-preview" id="winrmTrustPreview" hidden>
+                    <div class="form-section-title">Certificate preview</div>
+                    <dl class="certificate-detail-grid" id="winrmTrustPreviewDetails"></dl>
+                    <label class="check-field winrm-trust-confirmation">
+                        <input type="checkbox" id="winrmTrustFingerprintConfirmed">
+                        <span>I verified this SHA-256 fingerprint against the Lab Station.</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="danger-btn" id="deleteWinrmTrust" type="button">Remove trust</button>
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="cancelWinrmTrust" type="button">Close</button>
+                    <button class="ghost-btn" id="verifyWinrmTrust" type="button">Verify connection</button>
+                    <button class="ghost-btn" id="previewWinrmTrust" type="button" disabled>Preview certificate</button>
+                    <button class="primary-btn" id="saveWinrmTrust" type="button" disabled>Save certificate</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal" id="editHostModal">
         <div class="modal-content">
             <div class="modal-header">
@@ -1114,7 +1158,7 @@
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v2"></script>
     <script src="../assets/js/lab-manager-tabs.js?v=workflow-tabs-v1"></script>
-        <script src="../assets/js/lab-manager.js?v=workflow-tabs-v17"></script>
+        <script src="../assets/js/lab-manager.js?v=winrm-trust-v1"></script>
     <script src="../assets/js/lab-publisher.js?v=workflow-tabs-v2"></script>
 </body>
 </html>
