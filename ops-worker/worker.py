@@ -110,6 +110,8 @@ from heartbeat_values import suggest_mac_from_heartbeat as _suggest_mac_from_hea
 from heartbeat_service import poll_heartbeat as _poll_heartbeat_impl
 from heartbeat_stream import generate_heartbeat_stream as _generate_heartbeat_stream_impl
 from heartbeat_poller import poll_all_hosts as _poll_all_hosts_impl
+from heartbeat_route import handle_heartbeat_poll as _handle_heartbeat_poll_impl
+from heartbeat_stream_route import handle_heartbeat_stream as _handle_heartbeat_stream_route_impl
 from winrm_credentials_resolution import (
     resolve_winrm_credentials as _resolve_winrm_credentials_impl,
 )
@@ -151,6 +153,11 @@ from guacamole_connection_values import (
     parse_guacamole_selector as _parse_guacamole_selector_impl,
     safe_connection_response as _safe_connection_response_impl,
 )
+from guacamole_connection_route import (
+    handle_guacamole_connections as _handle_guacamole_connections_impl,
+)
+from guacamole_cleanup_route import handle_guacamole_cleanup as _handle_guacamole_cleanup_impl
+from guacamole_provision_route import handle_guacamole_provision as _handle_guacamole_provision_impl
 from guacamole_catalog_service import (
     load_guacamole_connections as _load_guacamole_connections_impl,
 )
@@ -167,7 +174,15 @@ from demo_values import (
     canonical_demo_lab_id as _canonical_demo_lab_id_impl,
     get_mandatory_field as _get_mandatory_field_impl,
 )
+from health_values import build_health_response as _build_health_response_impl
 from operation_values import rows_to_operations as _rows_to_operations_impl
+from operations_route import handle_operations_recent as _handle_operations_recent_impl
+from hosts_route import handle_hosts_inventory as _handle_hosts_inventory_impl
+from hosts_reload_route import handle_hosts_reload as _handle_hosts_reload_impl
+from hosts_discover_route import handle_hosts_discover as _handle_hosts_discover_impl
+from timeline_route import handle_reservation_timeline as _handle_reservation_timeline_impl
+from aas_sync_route import handle_aas_sync as _handle_aas_sync_impl
+from winrm_trust_route import handle_winrm_trust_get as _handle_winrm_trust_get_impl
 from host_provisioning_values import (
     build_provisioned_host as _build_provisioned_host_impl,
     normalize_labs as _normalize_labs_impl,
@@ -2029,23 +2044,17 @@ def health():
                 )).scalar_one())
         except Exception as exc:  # pylint: disable=broad-except
             logging.warning("Health durable queue check failed: %s", exc)
-    revocation_queue_ok = failed_revocations == 0
-    observation_outbox_ok = failed_observations == 0
     demo = demo_readiness()
-    demo_ok = demo["status"] in ("disabled", "ready")
-    healthy = db_ok and fernet_ok and guacamole_schema_ok and revocation_queue_ok and observation_outbox_ok and demo_ok
-    return jsonify({
-        "status": "ok" if healthy else "degraded",
-        "hosts_loaded": len(HOSTS.all_hosts()),
-        "db": db_ok,
-        "ops_secrets_key": fernet_ok,
-        "guacamole_schema": guacamole_schema_ok,
-        "guacamole_failed_revocations": failed_revocations,
-        "guacamole_revocation_queue": revocation_queue_ok,
-        "session_observation_failed": failed_observations,
-        "session_observation_outbox": observation_outbox_ok,
-        "demo": demo,
-    }), 200 if healthy else 503
+    payload, status = _build_health_response_impl(
+        hosts_loaded=len(HOSTS.all_hosts()),
+        db_ok=db_ok,
+        fernet_ok=fernet_ok,
+        guacamole_schema_ok=guacamole_schema_ok,
+        failed_revocations=failed_revocations,
+        failed_observations=failed_observations,
+        demo=demo,
+    )
+    return jsonify(payload), status
 
 
 @APP.route("/api/wol", methods=["POST"])
@@ -2121,32 +2130,18 @@ def api_winrm():
 
 @APP.route("/api/heartbeat/poll", methods=["POST"])
 def api_poll_heartbeat():
-    payload = request.get_json(force=True, silent=True) or {}
-    host_name = payload.get("host")
-    include_events = bool(payload.get("include_events", True))
-    if not host_name:
-        return jsonify({"error": "host is required"}), 400
-    host = HOSTS.get(host_name)
-    if not host:
-        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
-    start = time.time()
-    try:
-        data = poll_heartbeat(host, include_events=include_events)
-        data["duration_ms"] = int((time.time() - start) * 1000)
-        data["host"] = host_name
-        return jsonify(data)
-    except WinRMTrustError as exc:
-        return jsonify(_winrm_trust_error_payload(host_name, exc.code)), 409
-    except ValueError as exc:
-        if is_missing_winrm_credentials_error(exc):
-            return jsonify({
-                "error": WINRM_CREDENTIALS_REQUIRED_MESSAGE,
-                "code": "WINRM_CREDENTIALS_REQUIRED",
-                "host": host_name,
-            }), 409
-        return internal_error_response("Heartbeat poll failed", exc)
-    except Exception as exc:
-        return internal_error_response("Heartbeat poll failed", exc)
+    return _handle_heartbeat_poll_impl(
+        request.get_json(force=True, silent=True) or {},
+        find_host=lambda host_name: HOSTS.get(host_name) if host_name else None,
+        poll_heartbeat=poll_heartbeat,
+        now=time.time,
+        jsonify=jsonify,
+        trust_error_type=WinRMTrustError,
+        trust_error_payload=_winrm_trust_error_payload,
+        missing_credentials_predicate=is_missing_winrm_credentials_error,
+        credentials_required_message=WINRM_CREDENTIALS_REQUIRED_MESSAGE,
+        internal_error_response=internal_error_response,
+    )
 
 
 def _format_sse_event(event: str, data: str) -> str:
@@ -2173,19 +2168,14 @@ def generate_heartbeat_stream(host: Dict[str, Any], include_events: bool):
 
 @APP.route("/api/heartbeat/stream", methods=["GET"])
 def api_stream_heartbeat():
-    host_name = request.args.get("host")
-    include_events = request.args.get("include_events", "true").strip().lower() not in ("0", "false", "no", "off")
-    if not host_name:
-        return jsonify({"error": "host is required"}), 400
-    host = HOSTS.get(host_name)
-    if not host:
-        return jsonify({"error": f"host '{host_name}' not found"}), 404
-    response = Response(
-        stream_with_context(generate_heartbeat_stream(host, include_events)),
-        content_type="text/event-stream",
+    return _handle_heartbeat_stream_route_impl(
+        request.args,
+        find_host=lambda host_name: HOSTS.get(host_name) if host_name else None,
+        generate_stream=generate_heartbeat_stream,
+        response_factory=Response,
+        stream_with_context=stream_with_context,
+        jsonify=jsonify,
     )
-    response.headers["Cache-Control"] = "no-cache"
-    return response
 
 
 def _get_mandatory_field(payload: Dict[str, Any], *keys: str) -> Optional[str]:
@@ -2817,20 +2807,15 @@ def _summarize_phases(operations: Sequence[Mapping[str, Any]]) -> Dict[str, Any]
 
 @APP.route("/api/reservations/timeline", methods=["GET"])
 def api_reservation_timeline():
-    if not DB_ENGINE:
-        return jsonify({"error": "Database not configured"}), 500
-    reservation_id = request.args.get("reservationId") or request.args.get("reservation_id")
-    if not reservation_id:
-        return jsonify({"error": "reservationId is required"}), 400
-    limit = _sanitize_limit(request.args.get("limit"))
-    offset = _sanitize_offset(request.args.get("offset"))
-    try:
-        data = build_reservation_timeline(reservation_id, limit, offset)
-    except LookupError:
-        return jsonify({"error": "Reservation not found"}), 404
-    except RuntimeError as exc:
-        return internal_error_response("Timeline error", exc)
-    return jsonify(data)
+    return _handle_reservation_timeline_impl(
+        request.args,
+        db_engine=DB_ENGINE,
+        sanitize_limit=_sanitize_limit,
+        sanitize_offset=_sanitize_offset,
+        build_timeline=build_reservation_timeline,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 def normalize_match_key(value: Optional[Any]) -> str:
@@ -3247,77 +3232,52 @@ def build_host_inventory() -> Dict[str, Any]:
 
 @APP.route("/api/hosts", methods=["GET"])
 def api_hosts_inventory():
-    return jsonify(build_host_inventory())
+    return _handle_hosts_inventory_impl(
+        build_inventory=build_host_inventory,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/internal/guacamole/connections", methods=["GET"])
 def api_internal_guacamole_connections():
-    auth_response = require_guacamole_provisioner_auth()
-    if auth_response:
-        return auth_response
-    connections, error = load_guacamole_connections()
-    if error:
-        return jsonify({"success": False, "error": error}), 503
-    return jsonify({
-        "success": True,
-        "connections": [safe_connection_response(connection) for connection in connections],
-    })
+    return _handle_guacamole_connections_impl(
+        authorize=require_guacamole_provisioner_auth,
+        load_connections=load_guacamole_connections,
+        safe_connection_response=safe_connection_response,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/internal/guacamole/provision", methods=["POST"])
 def api_internal_guacamole_provision():
-    auth_response = require_guacamole_provisioner_auth()
-    if auth_response:
-        return auth_response
-    payload = request.get_json(silent=True) or {}
-    try:
-        activate = payload.get("activate", True)
-        if not isinstance(activate, bool):
-            raise ValueError("activate must be a boolean")
-        result = provision_guacamole_temporary_user(
-            str(payload.get("selector") or "").strip(),
-            str(payload.get("sessionId") or "").strip(),
-            payload.get("validUntilEpochSeconds"),
-            activate,
-        )
-        return jsonify(result)
-    except ValueError as exc:
-        error = (
-            "activate must be a boolean"
-            if str(exc) == "activate must be a boolean"
-            else "Invalid Guacamole provisioning request"
-        )
-        return jsonify({"success": False, "error": error}), 400
-    except Exception as exc:  # pylint: disable=broad-except
-        return internal_error_response("Guacamole provisioning failed", exc, success=False)
+    return _handle_guacamole_provision_impl(
+        request.get_json(silent=True) or {},
+        authorize=require_guacamole_provisioner_auth,
+        provision_temporary_user=provision_guacamole_temporary_user,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/internal/guacamole/provision/<session_id>", methods=["DELETE"])
 def api_internal_guacamole_delete(session_id: str):
-    auth_response = require_guacamole_provisioner_auth()
-    if auth_response:
-        return auth_response
-    try:
-        deleted = delete_guacamole_temporary_user(session_id)
-        return jsonify({"success": True, "deleted": deleted, "sessionId": session_id})
-    except ValueError as exc:
-        return jsonify({"success": False, "error": "Invalid Guacamole cleanup request"}), 400
-    except Exception as exc:  # pylint: disable=broad-except
-        return internal_error_response("Guacamole temporary-user cleanup failed", exc, success=False)
+    return _handle_guacamole_cleanup_impl(
+        session_id,
+        authorize=require_guacamole_provisioner_auth,
+        delete_temporary_user=delete_guacamole_temporary_user,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/hosts/discover", methods=["POST"])
 def api_hosts_discover():
-    payload = request.get_json(force=True, silent=True) or {}
-    connection_id = payload.get("connectionId") or payload.get("connection_id")
-    if connection_id in (None, ""):
-        return jsonify({"error": "connectionId is required"}), 400
-
-    connection = resolve_guacamole_connection(connection_id)
-    if not connection:
-        return jsonify({"error": f"Guacamole connection {connection_id} not found"}), 404
-
-    return jsonify(discover_labstation_candidate(connection))
+    return _handle_hosts_discover_impl(
+        request.get_json(force=True, silent=True) or {},
+        resolve_connection=resolve_guacamole_connection,
+        discover_candidate=discover_labstation_candidate,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/api/hosts/provision", methods=["POST"])
@@ -3477,24 +3437,17 @@ def api_preview_winrm_trust(host_name: str):
 
 @APP.route("/api/hosts/<host_name>/winrm-trust", methods=["GET"])
 def api_get_winrm_trust(host_name: str):
-    host, error_response = _winrm_trust_host_or_404(host_name)
-    if error_response:
-        return error_response
-    if host is None:
-        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
-    try:
-        trust = inspect_winrm_trust(host)
-        return jsonify({
-            "requestId": _request_id(),
-            "host": host.get("name"),
-            "address": host.get("address"),
-            "trust": trust,
-        })
-    except (ValueError, WinRMTrustError) as exc:
-        code = getattr(exc, "code", "WINRM_TRUST_INVALID")
-        return jsonify(_winrm_trust_error_payload(host_name, code)), _winrm_trust_http_status(code)
-    except Exception as exc:
-        return internal_error_response("WinRM trust status failed", exc)
+    return _handle_winrm_trust_get_impl(
+        host_name,
+        find_host=HOSTS.get,
+        inspect_trust=inspect_winrm_trust,
+        request_id=_request_id,
+        trust_error_type=WinRMTrustError,
+        trust_error_payload=_winrm_trust_error_payload,
+        trust_http_status=_winrm_trust_http_status,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/hosts/<host_name>/winrm-trust", methods=["PUT"])
@@ -3607,10 +3560,10 @@ def api_save_winrm_credentials():
 
 @APP.route("/api/hosts/reload", methods=["POST"])
 def api_hosts_reload():
-    count, error = reload_hosts()
-    if error:
-        return jsonify({"error": "Hosts configuration reload failed"}), 500
-    return jsonify({"reloaded": True, "hosts": count})
+    return _handle_hosts_reload_impl(
+        reload_hosts=reload_hosts,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/api/aas-sync", methods=["POST"])
@@ -3625,25 +3578,13 @@ def api_aas_sync():
     Request body: { "host": "<host-name>" }
     Response: { "host": "...", "labs": [{ "labId": "1", "synced": true, ... }] }
     """
-    payload = request.get_json(force=True, silent=True) or {}
-    host_name = payload.get("host")
-    if not host_name:
-        return jsonify({"error": "host is required"}), 400
-    host = HOSTS.get(host_name)
-    if not host:
-        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
-    labs = host.get("labs", [])
-    if not labs:
-        return jsonify({"host": host_name, "labs": [], "message": "No labs mapped to this host"}), 200
-    results = []
-    for lab_id in labs:
-        try:
-            result = aas_generator.sync_lab_to_basyx(str(lab_id), host)
-            results.append({"labId": str(lab_id), **result})
-        except Exception as exc:  # pylint: disable=broad-except
-            logging.exception("AAS sync failed for lab %s", lab_id)
-            results.append({"labId": str(lab_id), "error": "AAS synchronization failed"})
-    return jsonify({"host": host_name, "labs": results}), 200
+    return _handle_aas_sync_impl(
+        request.get_json(force=True, silent=True) or {},
+        find_host=HOSTS.get,
+        sync_lab=aas_generator.sync_lab_to_basyx,
+        log_failure=logging.exception,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/api/hosts/local-mode", methods=["POST"])
@@ -3675,56 +3616,17 @@ def api_hosts_local_mode():
 
 @APP.route("/api/operations/recent", methods=["GET"])
 def api_operations_recent():
-    if not DB_ENGINE:
-        return jsonify({"error": "Database not configured"}), 500
-    limit = _sanitize_limit(request.args.get("limit"))
-    offset = _sanitize_offset(request.args.get("offset"))
-    host_name = request.args.get("host")
-    reservation_id = request.args.get("reservationId") or request.args.get("reservation_id")
-
-    query_base = "FROM reservation_operations"
-    params: Dict[str, Any] = {}
-    where_clauses: List[str] = []
-    if host_name:
-        host = HOSTS.get(host_name)
-        if not host:
-            return jsonify({"error": f"host '{host_name}' not found"}), 404
-        where_clauses.append("host = :host")
-        params["host"] = host_name
-    if reservation_id:
-        where_clauses.append("reservation_id = :reservation_id")
-        params["reservation_id"] = reservation_id
-
-    if where_clauses:
-        query_base += " WHERE " + " AND ".join(where_clauses)
-
-    params["limit_value"] = limit
-    params["offset_value"] = offset
-    try:
-        with DB_ENGINE.begin() as conn:
-            total = conn.execute(text("SELECT COUNT(*) as total " + query_base), params).scalar() or 0
-            rows = conn.execute(
-                text(
-                    "SELECT reservation_id, lab_id, host, action, status, success, message, payload, response_code, duration_ms, created_at "
-                    + query_base
-                    + " ORDER BY created_at DESC, id DESC LIMIT :limit_value OFFSET :offset_value"
-                ),
-                params,
-            ).mappings().all()
-        returned = len(rows)
-        pagination = {
-            "limit": limit,
-            "offset": offset,
-            "returned": returned,
-            "total": total,
-            "nextOffset": offset + returned,
-            "hasMore": total > offset + returned,
-            "page": (offset // limit) + 1 if limit else 1,
-            "pageSize": limit,
-        }
-        return jsonify({"operations": _rows_to_operations([dict(row) for row in rows]), "pagination": pagination})
-    except Exception as exc:
-        return internal_error_response("Failed to load recent operations", exc)
+    return _handle_operations_recent_impl(
+        request.args,
+        db_engine=DB_ENGINE,
+        find_host=lambda host_name: HOSTS.get(host_name) if host_name else None,
+        sanitize_limit=_sanitize_limit,
+        sanitize_offset=_sanitize_offset,
+        sql_text=text,
+        rows_to_operations=_rows_to_operations,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/aas-admin/lab/<lab_id>/sync", methods=["POST"])
