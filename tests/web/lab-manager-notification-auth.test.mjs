@@ -5,6 +5,19 @@ import vm from 'node:vm';
 
 const repoRoot = new URL('../../', import.meta.url);
 const scriptPath = new URL('web/assets/js/lab-manager.js', repoRoot);
+const stateScriptPath = new URL('web/assets/js/core/state.js', repoRoot);
+const apiClientScriptPath = new URL('web/assets/js/core/api-client.js', repoRoot);
+const activityScriptPath = new URL('web/assets/js/lab-manager-activity.js', repoRoot);
+const accessPolicyScriptPath = new URL('web/assets/js/lab-manager-access-policy.js', repoRoot);
+const heartbeatErrorsScriptPath = new URL('web/assets/js/lab-manager-heartbeat-errors.js', repoRoot);
+const toastScriptPath = new URL('web/assets/js/core/toast.js', repoRoot);
+const notificationsAccessScriptPath = new URL('web/assets/js/lab-manager-notifications-access.js', repoRoot);
+const paginationScriptPath = new URL('web/assets/js/core/pagination.js', repoRoot);
+const formattersScriptPath = new URL('web/assets/js/core/formatters.js', repoRoot);
+const notificationsConfigScriptPath = new URL('web/assets/js/lab-manager-notifications-config.js', repoRoot);
+const fmuSyncScriptPath = new URL('web/assets/js/lab-manager-fmu-sync.js', repoRoot);
+const aasLinkScriptPath = new URL('web/assets/js/lab-manager-aas-link.js', repoRoot);
+const powerCredentialsScriptPath = new URL('web/assets/js/lab-manager-power-credentials.js', repoRoot);
 const indexPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement(id) {
@@ -297,6 +310,45 @@ function loadLabManager({
     },
   });
 
+  vm.runInContext(fs.readFileSync(stateScriptPath, 'utf8'), context, {
+    filename: 'state.js',
+  });
+  vm.runInContext(fs.readFileSync(apiClientScriptPath, 'utf8'), context, {
+    filename: 'api-client.js',
+  });
+  vm.runInContext(fs.readFileSync(activityScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-activity.js',
+  });
+  vm.runInContext(fs.readFileSync(accessPolicyScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-access-policy.js',
+  });
+  vm.runInContext(fs.readFileSync(heartbeatErrorsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-heartbeat-errors.js',
+  });
+  vm.runInContext(fs.readFileSync(toastScriptPath, 'utf8'), context, {
+    filename: 'toast.js',
+  });
+  vm.runInContext(fs.readFileSync(notificationsAccessScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-notifications-access.js',
+  });
+  vm.runInContext(fs.readFileSync(paginationScriptPath, 'utf8'), context, {
+    filename: 'pagination.js',
+  });
+  vm.runInContext(fs.readFileSync(formattersScriptPath, 'utf8'), context, {
+    filename: 'formatters.js',
+  });
+  vm.runInContext(fs.readFileSync(notificationsConfigScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-notifications-config.js',
+  });
+  vm.runInContext(fs.readFileSync(fmuSyncScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-fmu-sync.js',
+  });
+  vm.runInContext(fs.readFileSync(aasLinkScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-aas-link.js',
+  });
+  vm.runInContext(fs.readFileSync(powerCredentialsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-power-credentials.js',
+  });
   vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {
     filename: 'lab-manager.js',
   });
@@ -374,6 +426,14 @@ test('reuses the existing Lab Manager session without prompting on Operations en
   assert.ok(actionableCall, 'Actionable Reservations should be loaded when Operations is activated');
   assert.equal(actionableCall.options.credentials, 'include');
   assert.equal(actionableCall.options.skipAuthPrompt, true);
+});
+
+test('loads the activity controller before the Lab Manager bootstrap', () => {
+  const html = fs.readFileSync(indexPath, 'utf8');
+  assert.match(
+    html,
+    /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v1[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v1[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
+  );
 });
 
 test('places Lab Station Ops before Actionable Reservations', () => {
@@ -1171,6 +1231,7 @@ test('loads an existing power credential and submits a replacement with overwrit
   });
 
   await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(elements.get('powerCredentialsStatus').textContent, '1 credential');
   elements.get('powerCredentialSelect').value = 'netio-lab-01-http';
   elements.get('powerCredentialSelect').dispatchEvent({ type: 'change' });
   assert.equal(elements.get('powerCredentialRef').value, 'netio-lab-01-http');
@@ -1685,9 +1746,11 @@ test('adds spacing below operations and reservation timeline hints', () => {
 
 test('keeps energy credential metadata separated from its rotate action', () => {
   const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const credentialsScript = fs.readFileSync(new URL('web/assets/js/lab-manager-power-credentials.js', repoRoot), 'utf8');
   const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
 
-  assert.match(script, /<div class="power-controller-row power-credential-row">/);
+  assert.doesNotMatch(script, /<div class="power-controller-row power-credential-row">/);
+  assert.match(credentialsScript, /<div class="power-controller-row power-credential-row">/);
   assert.match(styles, /\.power-credential-row\s*\{[\s\S]*display:\s*flex;[\s\S]*gap:\s*12px;/);
 });
 

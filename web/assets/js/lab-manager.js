@@ -7,14 +7,103 @@ function escapeHtml(str) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    let billingAccessReady = false;
-    let billingAccessPromise = null;
-    let billingTokenRequired = false;
-
-    function hasBillingAccess() {
-        return billingAccessReady;
+    const stateModule = window.LabManagerState;
+    if (!stateModule) {
+        throw new Error('LabManagerState must load before lab-manager.js');
     }
-
+    const managerState = stateModule.createTabActivationState();
+    const apiClientModule = window.LabManagerApiClient;
+    if (!apiClientModule) {
+        throw new Error('LabManagerApiClient must load before lab-manager.js');
+    }
+    const apiClient = apiClientModule.createClient({
+        fetchImpl: (...args) => fetch(...args),
+    });
+    const requestJson = apiClient.requestJson;
+    const activityModule = window.LabManagerActivity;
+    if (!activityModule) {
+        throw new Error('LabManagerActivity must load before lab-manager.js');
+    }
+    const accessPolicyModule = window.LabManagerAccessPolicy;
+    if (!accessPolicyModule) {
+        throw new Error('LabManagerAccessPolicy must load before lab-manager.js');
+    }
+    const accessPolicyController = accessPolicyModule.createController({
+        document,
+        fetchImpl: (...args) => fetch(...args),
+    });
+    const loadAccessPolicy = accessPolicyController.loadAccessPolicy;
+    const heartbeatErrors = window.LabManagerHeartbeatErrors;
+    if (!heartbeatErrors) {
+        throw new Error('LabManagerHeartbeatErrors must load before lab-manager.js');
+    }
+    const formatHeartbeatStreamError = heartbeatErrors.formatStreamError;
+    const isHeartbeatConfigurationError = heartbeatErrors.isConfigurationError;
+    const toastModule = window.LabManagerToast;
+    if (!toastModule) {
+        throw new Error('LabManagerToast must load before lab-manager.js');
+    }
+    const toastController = toastModule.createController({
+        document,
+        setTimeoutImpl: setTimeout,
+    });
+    const showToast = toastController.showToast;
+    const notificationsAccessModule = window.LabManagerNotificationsAccess;
+    if (!notificationsAccessModule) {
+        throw new Error('LabManagerNotificationsAccess must load before lab-manager.js');
+    }
+    const notificationsAccessController = notificationsAccessModule.createController({
+        fetchImpl: (...args) => fetch(...args),
+        applyNotificationConfig: (...args) => notificationsConfigController.applyConfig(...args),
+        setNotificationsLocked,
+        setStatus,
+        updateBillingStatusAction,
+        showToast,
+        getAuthTokenHandler: () => window.AuthTokenHandler,
+        logger: console,
+    });
+    const hasBillingAccess = notificationsAccessController.hasBillingAccess;
+    const loadConfig = notificationsAccessController.loadConfig;
+    const promptBillingToken = notificationsAccessController.promptBillingToken;
+    const requestNotificationsAccess = notificationsAccessController.requestAccess;
+    const requireBillingAccess = notificationsAccessController.requireAccess;
+    const paginationModule = window.LabManagerPagination;
+    if (!paginationModule) {
+        throw new Error('LabManagerPagination must load before lab-manager.js');
+    }
+    const normalizePagination = paginationModule.normalizePagination;
+    const formattersModule = window.LabManagerFormatters;
+    if (!formattersModule) {
+        throw new Error('LabManagerFormatters must load before lab-manager.js');
+    }
+    const formatDate = formattersModule.formatDate;
+    const formatBool = formattersModule.formatBool;
+    const htmlEscape = formattersModule.htmlEscape;
+    const notificationsConfigModule = window.LabManagerNotificationsConfig;
+    if (!notificationsConfigModule) {
+        throw new Error('LabManagerNotificationsConfig must load before lab-manager.js');
+    }
+    const fmuSyncModule = window.LabManagerFmuSync;
+    if (!fmuSyncModule) {
+        throw new Error('LabManagerFmuSync must load before lab-manager.js');
+    }
+    const aasLinkModule = window.LabManagerAasLink;
+    if (!aasLinkModule) {
+        throw new Error('LabManagerAasLink must load before lab-manager.js');
+    }
+    const powerCredentialsModule = window.LabManagerPowerCredentials;
+    if (!powerCredentialsModule) {
+        throw new Error('LabManagerPowerCredentials must load before lab-manager.js');
+    }
+    const activityFeedController = activityModule.createController({
+        document,
+        fetchImpl: (...args) => fetch(...args),
+        requestJson,
+        escapeHtml,
+        normalizePagination,
+        logger: console,
+    });
+    const loadActivityFeed = activityFeedController.loadActivityFeed;
     const driverEl = $('#driver');
     const enabledEl = $('#enabled');
     const fromEl = $('#from');
@@ -32,23 +121,18 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-    const activityFeedState = {
-        limit: 8,
-        offset: 0,
-        operations: [],
-        pagination: null,
-        loading: false
-    };
     const smtpHostEl = $('#smtpHost');
     const smtpPortEl = $('#smtpPort');
     const smtpUserEl = $('#smtpUser');
     const smtpPassEl = $('#smtpPass');
     const smtpStartTlsEl = $('#smtpStartTls');
+    const smtpSectionEl = $('#smtpSection');
 
     const graphTenantEl = $('#graphTenant');
     const graphClientIdEl = $('#graphClientId');
     const graphClientSecretEl = $('#graphClientSecret');
     const graphFromEl = $('#graphFrom');
+    const graphSectionEl = $('#graphSection');
     const driverSummary = $('#driverSummary');
     const configStatusEl = $('#configStatus');
     const notificationsAccessGateEl = $('#notificationsAccessGate');
@@ -56,6 +140,38 @@ document.addEventListener('DOMContentLoaded', () => {
     const unlockNotificationsBtn = $('#unlockNotificationsBtn');
     const smtpPasswordHintEl = $('#smtpPasswordHint');
     const graphClientSecretHintEl = $('#graphClientSecretHint');
+
+    const notificationsConfigController = notificationsConfigModule.createController({
+        fields: {
+            enabled: enabledEl,
+            driver: driverEl,
+            from: fromEl,
+            fromName: fromNameEl,
+            defaultTo: defaultToEl,
+            timezone: timezoneEl,
+            smtpHost: smtpHostEl,
+            smtpPort: smtpPortEl,
+            smtpUser: smtpUserEl,
+            smtpPass: smtpPassEl,
+            smtpStartTls: smtpStartTlsEl,
+            graphTenant: graphTenantEl,
+            graphClientId: graphClientIdEl,
+            graphClientSecret: graphClientSecretEl,
+            graphFrom: graphFromEl,
+            smtpSection: smtpSectionEl,
+            graphSection: graphSectionEl,
+            driverSummary,
+            smtpPasswordHint: smtpPasswordHintEl,
+            graphClientSecretHint: graphClientSecretHintEl,
+        },
+        commonTimezones: COMMON_TIMEZONES,
+        browserTimezone,
+    });
+    const applyNotificationConfig = notificationsConfigController.applyConfig;
+    const buildNotificationPayload = notificationsConfigController.buildPayload;
+    const populateTimezones = notificationsConfigController.populateTimezones;
+    const toggleSections = notificationsConfigController.toggleSections;
+    const updateDriverSummary = notificationsConfigController.updateDriverSummary;
 
     // Modal controls
     const modal = $('#configModal');
@@ -233,29 +349,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
     const heartbeatStreamErrorShown = {};
-    const heartbeatStreamErrorMessages = {
-        WINRM_CREDENTIALS_REQUIRED: 'WinRM credentials are required',
-        WINRM_TRUST_REQUIRED: 'WinRM certificate trust is required',
-        WINRM_TRUST_INVALID: 'WinRM certificate trust is invalid',
-        WINRM_CERTIFICATE_INVALID: 'WinRM certificate trust is invalid',
-        WINRM_CERTIFICATE_HOST_MISMATCH: 'WinRM certificate does not match the host address',
-        WINRM_CERTIFICATE_EXPIRED: 'WinRM certificate is expired',
-        WINRM_CERTIFICATE_NOT_YET_VALID: 'WinRM certificate is not yet valid',
-        WINRM_TLS_FAILED: 'WinRM TLS validation failed',
-        WINRM_TRUST_STORAGE_UNAVAILABLE: 'WinRM certificate trust storage is unavailable',
-        INTERNAL_ERROR: 'temporary Ops Worker error',
-    };
-    const heartbeatConfigurationErrorCodes = new Set([
-        'WINRM_CREDENTIALS_REQUIRED',
-        'WINRM_TRUST_REQUIRED',
-        'WINRM_TRUST_INVALID',
-        'WINRM_CERTIFICATE_INVALID',
-        'WINRM_CERTIFICATE_HOST_MISMATCH',
-        'WINRM_CERTIFICATE_EXPIRED',
-        'WINRM_CERTIFICATE_NOT_YET_VALID',
-        'WINRM_TLS_FAILED',
-        'WINRM_TRUST_STORAGE_UNAVAILABLE',
-    ]);
     let powerControllers = [];
     let powerControllerStatusLoading = false;
     let powerControllerStatusError = false;
@@ -275,6 +368,47 @@ document.addEventListener('DOMContentLoaded', () => {
     let provisionStationKey = '';
     let provisionLabsLoading = false;
 
+    const powerCredentialsController = powerCredentialsModule.createController({
+        fields: {
+            select: powerCredentialSelectEl,
+            ref: powerCredentialRefEl,
+            type: powerCredentialTypeEl,
+            username: powerCredentialUsernameEl,
+            password: powerCredentialPasswordEl,
+            community: powerCredentialCommunityEl,
+            authProtocol: powerCredentialAuthProtocolEl,
+            authPassword: powerCredentialAuthPasswordEl,
+            privProtocol: powerCredentialPrivProtocolEl,
+            privPassword: powerCredentialPrivPasswordEl,
+            contextName: powerCredentialContextNameEl,
+            usernameField: powerCredentialUsernameFieldEl,
+            passwordField: powerCredentialPasswordFieldEl,
+            communityField: powerCredentialCommunityFieldEl,
+            authProtocolField: powerCredentialAuthProtocolFieldEl,
+            authPasswordField: powerCredentialAuthPasswordFieldEl,
+            privProtocolField: powerCredentialPrivProtocolFieldEl,
+            privPasswordField: powerCredentialPrivPasswordFieldEl,
+            contextNameField: powerCredentialContextNameFieldEl,
+            saveButton: powerCredentialSaveBtn,
+            list: powerCredentialsListEl,
+            status: powerCredentialsStatusEl,
+            hint: powerCredentialsHintEl,
+            editorHint: powerCredentialEditorHintEl,
+        },
+        fetchImpl: (...args) => fetch(...args),
+        showToast,
+        showOpsWarning,
+        refreshPowerControllerStatuses: (...args) => loadPowerControllerStatuses(...args),
+        renderControllerCredentialOptions: credentials => {
+            powerCredentials = credentials;
+            renderPowerControllerCredentialOptions();
+        },
+        escapeHtml,
+        documentImpl: document,
+    });
+    const loadPowerCredentials = powerCredentialsController.load;
+    powerCredentialsController.initialize();
+
     // FMU AAS sync elements
     const fmuSyncBtn = $('#fmuSyncBtn');
     const fmuSyncKeyEl = $('#fmuSyncKey');
@@ -289,98 +423,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const fmuSyncDescriptionHintEl = $('#fmuSyncDescriptionHint');
     const fmuSyncLicenseHintEl = $('#fmuSyncLicenseHint');
 
-    // Track which fields were auto-filled from the FMU so we don't clobber
-    // manual edits and can restore editability when the key changes.
-    const fmuAutoFilled = { description: false, license: false };
+    const fmuSyncController = fmuSyncModule.createController({
+        fields: {
+            syncButton: fmuSyncBtn,
+            keyInput: fmuSyncKeyEl,
+            labSelect: fmuSyncLabSelectEl,
+            fileInput: fmuSyncFileEl,
+            fileName: fmuSyncFileNameEl,
+            result: fmuSyncResultEl,
+            description: fmuSyncDescriptionEl,
+            license: fmuSyncLicenseEl,
+            docsUrl: fmuSyncDocsUrlEl,
+            contactEmail: fmuSyncContactEmailEl,
+            descriptionHint: fmuSyncDescriptionHintEl,
+            licenseHint: fmuSyncLicenseHintEl,
+        },
+        fetchImpl: (...args) => fetch(...args),
+        showToast,
+        formDataCtor: FormData,
+        urlSearchParamsCtor: URLSearchParams,
+        logger: console,
+    });
+    fmuSyncController.initialize();
 
-    function _setFmuFieldFromHint(inputEl, hintEl, value) {
-        if (!inputEl) return;
-        inputEl.value = value;
-        inputEl.readOnly = true;
-        inputEl.style.opacity = '0.7';
-        inputEl.style.cursor = 'default';
-        if (hintEl) { hintEl.textContent = '\u2139\ufe0f From FMU'; hintEl.hidden = false; }
-    }
-
-    function _clearFmuFieldHint(inputEl, hintEl) {
-        if (!inputEl) return;
-        inputEl.readOnly = false;
-        inputEl.style.opacity = '';
-        inputEl.style.cursor = '';
-        if (hintEl) { hintEl.textContent = ''; hintEl.hidden = true; }
-    }
-
-    function _clearAllFmuHints() {
-        if (fmuAutoFilled.description) {
-            _clearFmuFieldHint(fmuSyncDescriptionEl, fmuSyncDescriptionHintEl);
-            if (fmuSyncDescriptionEl) fmuSyncDescriptionEl.value = '';
-            fmuAutoFilled.description = false;
-        }
-        if (fmuAutoFilled.license) {
-            _clearFmuFieldHint(fmuSyncLicenseEl, fmuSyncLicenseHintEl);
-            if (fmuSyncLicenseEl) fmuSyncLicenseEl.value = '';
-            fmuAutoFilled.license = false;
-        }
-    }
-
-    async function _fetchFmuHints(accessKey) {
-        if (!accessKey) { _clearAllFmuHints(); return; }
-        try {
-            const res = await fetch(`/aas-admin/fmu/${encodeURIComponent(accessKey)}/hints`);
-            if (!res.ok) { _clearAllFmuHints(); return; }
-            const hints = await res.json();
-            // description
-            if (hints.description && fmuSyncDescriptionEl && !fmuSyncDescriptionEl.value.trim()) {
-                _setFmuFieldFromHint(fmuSyncDescriptionEl, fmuSyncDescriptionHintEl, hints.description);
-                fmuAutoFilled.description = true;
-            }
-            // license
-            if (hints.license && fmuSyncLicenseEl && !fmuSyncLicenseEl.value.trim()) {
-                _setFmuFieldFromHint(fmuSyncLicenseEl, fmuSyncLicenseHintEl, hints.license);
-                fmuAutoFilled.license = true;
-            }
-        } catch (_) {
-            // hints are best-effort, ignore errors
-        }
-    }
-
-    if (fmuSyncKeyEl) {
-        fmuSyncKeyEl.addEventListener('input', () => {
-            // User is editing the key — clear any previous auto-filled locks
-            _clearAllFmuHints();
-        });
-    }
-
-    if (fmuSyncKeyEl) {
-        fmuSyncKeyEl.addEventListener('change', () => {
-            const key = fmuSyncKeyEl.value.trim();
-            if (!key) { _clearAllFmuHints(); return; }
-            _fetchFmuHints(key);
-        });
-    }
-
-    if (fmuSyncFileEl) {
-        fmuSyncFileEl.addEventListener('change', () => {
-            const file = fmuSyncFileEl.files && fmuSyncFileEl.files[0];
-            if (fmuSyncFileNameEl) {
-                fmuSyncFileNameEl.textContent = file ? file.name : 'No file chosen';
-            }
-        });
-    }
-
-    if (fmuSyncBtn) {
-        fmuSyncBtn.addEventListener('click', () => {
-            const accessKey = (fmuSyncKeyEl && fmuSyncKeyEl.value || '').trim();
-            const labId = (fmuSyncLabSelectEl && fmuSyncLabSelectEl.value || '').trim();
-            const file = fmuSyncFileEl && fmuSyncFileEl.files && fmuSyncFileEl.files[0];
-            const description = (fmuSyncDescriptionEl && fmuSyncDescriptionEl.value || '').trim();
-            const license = (fmuSyncLicenseEl && fmuSyncLicenseEl.value || '').trim();
-            const docsUrl = (fmuSyncDocsUrlEl && fmuSyncDocsUrlEl.value || '').trim();
-            const contactEmail = (fmuSyncContactEmailEl && fmuSyncContactEmailEl.value || '').trim();
-            syncAasFmu(accessKey, labId, file || null, { description, license, docsUrl, contactEmail });
-        });
-    }
-    
     // AAS Link elements
     const aasLinkKeyEl = $('#aasLinkKey');
     const aasLinkLabSelectEl = $('#aasLinkLabSelect');
@@ -389,97 +454,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const aasLinkCheckBtn = $('#aasLinkCheckBtn');
     const aasLinkDeleteBtn = $('#aasLinkDeleteBtn');
     const aasLinkResultEl = $('#aasLinkResult');
-
-    function _aasLinkShowResult(msg, isError) {
-        if (!aasLinkResultEl) return;
-        aasLinkResultEl.textContent = msg;
-        aasLinkResultEl.style.color = isError
-            ? 'var(--color-error, #c0392b)'
-            : 'var(--color-success, #1a7f4b)';
-    }
-
-    if (aasLinkSaveBtn) {
-        aasLinkSaveBtn.addEventListener('click', async () => {
-            const accessKey = (aasLinkKeyEl && aasLinkKeyEl.value || '').trim();
-            const labId = (aasLinkLabSelectEl && aasLinkLabSelectEl.value || '').trim();
-            const aasId = (aasLinkAasIdEl && aasLinkAasIdEl.value || '').trim();
-            if (!accessKey) { showToast('Enter an access key', 'error'); return; }
-            if (!aasId) { showToast('Enter an external AAS ID', 'error'); return; }
-            aasLinkSaveBtn.disabled = true;
-            try {
-                const body = { aasId };
-                if (labId) body.labId = labId;
-                const res = await fetch(`/aas-admin/fmu/${encodeURIComponent(accessKey)}/aas-link`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                });
-                if (!res.ok) {
-                    const body = await res.json().catch(() => ({}));
-                    throw new Error(body.detail || `HTTP ${res.status}`);
-                }
-                const data = await res.json();
-                _aasLinkShowResult(`Linked: ${data.aasId}`, false);
-                showToast(`AAS link saved for ${accessKey}`, 'success');
-            } catch (err) {
-                _aasLinkShowResult(err.message, true);
-                showToast(`AAS link failed: ${err.message}`, 'error');
-            } finally {
-                aasLinkSaveBtn.disabled = false;
-            }
-        });
-    }
-
-    if (aasLinkCheckBtn) {
-        aasLinkCheckBtn.addEventListener('click', async () => {
-            const accessKey = (aasLinkKeyEl && aasLinkKeyEl.value || '').trim();
-            if (!accessKey) { showToast('Enter an access key', 'error'); return; }
-            aasLinkCheckBtn.disabled = true;
-            try {
-                const res = await fetch(`/aas-admin/fmu/${encodeURIComponent(accessKey)}/aas-link`);
-                if (res.status === 404) {
-                    _aasLinkShowResult('No link configured for this access key.', false);
-                    if (aasLinkAasIdEl) aasLinkAasIdEl.value = '';
-                    return;
-                }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                _aasLinkShowResult(`Current link: ${data.aasId}`, false);
-                if (aasLinkAasIdEl) aasLinkAasIdEl.value = data.aasId || '';
-                if (aasLinkLabSelectEl) aasLinkLabSelectEl.value = data.labId || '';
-            } catch (err) {
-                _aasLinkShowResult(err.message, true);
-            } finally {
-                aasLinkCheckBtn.disabled = false;
-            }
-        });
-    }
-
-    if (aasLinkDeleteBtn) {
-        aasLinkDeleteBtn.addEventListener('click', async () => {
-            const accessKey = (aasLinkKeyEl && aasLinkKeyEl.value || '').trim();
-            if (!accessKey) { showToast('Enter an access key', 'error'); return; }
-            aasLinkDeleteBtn.disabled = true;
-            try {
-                const res = await fetch(`/aas-admin/fmu/${encodeURIComponent(accessKey)}/aas-link`, {
-                    method: 'DELETE',
-                });
-                if (res.status === 404) {
-                    _aasLinkShowResult('No link configured for this access key.', false);
-                    return;
-                }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                _aasLinkShowResult('Link removed.', false);
-                if (aasLinkAasIdEl) aasLinkAasIdEl.value = '';
-                showToast(`AAS link removed for ${accessKey}`, 'success');
-            } catch (err) {
-                _aasLinkShowResult(err.message, true);
-                showToast(`Remove link failed: ${err.message}`, 'error');
-            } finally {
-                aasLinkDeleteBtn.disabled = false;
-            }
-        });
-    }
+    const aasLinkController = aasLinkModule.createController({
+        fields: {
+            keyInput: aasLinkKeyEl,
+            labSelect: aasLinkLabSelectEl,
+            aasIdInput: aasLinkAasIdEl,
+            saveButton: aasLinkSaveBtn,
+            checkButton: aasLinkCheckBtn,
+            deleteButton: aasLinkDeleteBtn,
+            result: aasLinkResultEl,
+        },
+        fetchImpl: (...args) => fetch(...args),
+        showToast,
+    });
+    aasLinkController.initialize();
 
     // Reservation timeline elements
     const timelineInput = $('#timelineReservationId');
@@ -551,13 +539,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (savePowerControllerBtn) savePowerControllerBtn.addEventListener('click', savePowerController);
     if (refreshPowerCredentialsBtn) refreshPowerCredentialsBtn.addEventListener('click', loadPowerCredentials);
-    if (powerCredentialSelectEl) powerCredentialSelectEl.addEventListener('change', loadSelectedPowerCredential);
-    if (powerCredentialTypeEl) powerCredentialTypeEl.addEventListener('change', updatePowerCredentialFields);
-    if (powerCredentialAuthProtocolEl) powerCredentialAuthProtocolEl.addEventListener('change', updatePowerCredentialFields);
-    if (powerCredentialPrivProtocolEl) powerCredentialPrivProtocolEl.addEventListener('change', updatePowerCredentialFields);
-    if (powerCredentialSaveBtn) powerCredentialSaveBtn.addEventListener('click', savePowerCredential);
-    if (powerCredentialsListEl) powerCredentialsListEl.addEventListener('click', handlePowerCredentialActions);
-    updatePowerCredentialFields();
     if (powerPolicySelectEl) powerPolicySelectEl.addEventListener('change', loadSelectedPowerPolicy);
     if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.addEventListener('change', handlePowerPolicyLabChange);
     if (addPowerPolicyStepBtn) addPowerPolicyStepBtn.addEventListener('click', addPowerPolicyStep);
@@ -572,95 +553,6 @@ document.addEventListener('DOMContentLoaded', () => {
         guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
     }
 
-    function loadConfig(onSuccess) {
-        setStatus('Loading...');
-        updateBillingStatusAction();
-        if (billingAccessPromise) {
-            return billingAccessPromise.then(accessReady => {
-                if (accessReady && typeof onSuccess === 'function') onSuccess();
-                return accessReady;
-            });
-        }
-
-        const request = fetch('/billing/admin/notifications', {
-            credentials: 'include',
-            // Billing is requested only when its configuration is used, not
-            // as a second authentication prompt during page loading.
-            skipAuthPrompt: true
-        })
-            .then(res => {
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                return res.json();
-            })
-            .then(data => {
-                billingAccessReady = true;
-                billingTokenRequired = false;
-                const cfg = data.config || {};
-                applyNotificationConfig(cfg);
-                setNotificationsLocked(false);
-                setStatus('Loaded');
-                updateBillingStatusAction();
-                showToast('Configuration loaded', 'success');
-                if (typeof onSuccess === 'function') {
-                    onSuccess();
-                }
-                return true;
-            })
-            .catch(err => {
-                billingAccessReady = false;
-                const needsToken = err.message === 'HTTP 401';
-                if (!needsToken) console.error(err);
-                billingTokenRequired = needsToken;
-                setNotificationsLocked(true);
-                setStatus(needsToken ? 'Gateway administrator token required' : 'Error');
-                updateBillingStatusAction();
-                showToast(needsToken ? 'Enter the Gateway administrator token to load notifications' : 'Cannot load config (check administrator access)', 'error');
-                return false;
-            });
-
-        let pending;
-        pending = request.finally(() => {
-            if (billingAccessPromise === pending) billingAccessPromise = null;
-        });
-        billingAccessPromise = pending;
-        return pending.then(accessReady => {
-            if (accessReady && typeof onSuccess === 'function') onSuccess();
-            return accessReady;
-        });
-    }
-
-    function applyNotificationConfig(cfg) {
-        enabledEl.checked = !!cfg.enabled;
-        driverEl.value = cfg.driver || 'NOOP';
-        fromEl.value = cfg.from || '';
-        fromNameEl.value = cfg.fromName || '';
-        defaultToEl.value = (cfg.defaultTo || []).join(', ');
-        setTimezone(cfg.timezone || browserTimezone);
-        const smtp = cfg.smtp || {};
-        smtpHostEl.value = smtp.host || '';
-        smtpPortEl.value = smtp.port || '';
-        smtpUserEl.value = smtp.username || '';
-        smtpPassEl.value = '';
-        smtpStartTlsEl.checked = smtp.startTls ?? true;
-        if (smtpPasswordHintEl) {
-            smtpPasswordHintEl.textContent = smtp.passwordConfigured
-                ? 'A password is stored. Leave blank to keep it.'
-                : 'No password is currently stored.';
-        }
-        const graph = cfg.graph || {};
-        graphTenantEl.value = graph.tenantId || '';
-        graphClientIdEl.value = graph.clientId || '';
-        graphClientSecretEl.value = '';
-        graphFromEl.value = graph.from || '';
-        if (graphClientSecretHintEl) {
-            graphClientSecretHintEl.textContent = graph.clientSecretConfigured
-                ? 'A client secret is stored. Leave blank to keep it.'
-                : 'No client secret is currently stored.';
-        }
-        toggleSections();
-        updateDriverSummary();
-    }
-
     function setNotificationsLocked(locked) {
         if (notificationsAccessGateEl) notificationsAccessGateEl.hidden = !locked;
         if (notificationsConfigContentEl) notificationsConfigContentEl.hidden = locked;
@@ -669,20 +561,11 @@ document.addEventListener('DOMContentLoaded', () => {
             .forEach(button => { button.disabled = locked; });
     }
 
-    function requestNotificationsAccess() {
-        loadConfig().then(accessReady => {
-            if (!accessReady && billingTokenRequired) {
-                promptBillingToken(() => loadConfig());
-            }
-        });
-    }
-
     if (upcomingReservationsListEl) {
         upcomingReservationsListEl.addEventListener('click', handleUpcomingReservationActions);
         upcomingReservationsListEl.addEventListener('change', handleUpcomingReservationReasonChange);
     }
 
-    const initializedManagerTabs = new Set();
     document.addEventListener('lab-manager:tab-activated', event => {
         initializeManagerTab(event.detail && event.detail.tab);
     });
@@ -707,8 +590,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function initializeManagerTab(tabName) {
-        if (!tabName || initializedManagerTabs.has(tabName)) return;
-        initializedManagerTabs.add(tabName);
+        if (!managerState.claimTab(tabName)) return;
 
         if (tabName === 'operations') {
             void (async () => {
@@ -751,52 +633,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return managedLabsPromise;
     }
 
-    function requireBillingAccess(onAuthenticated, onTokenAuthenticated) {
-        if (hasBillingAccess()) {
-            if (typeof onAuthenticated === 'function') onAuthenticated();
-            return;
-        }
-
-        loadConfig().then(accessReady => {
-            if (accessReady) {
-                if (typeof onAuthenticated === 'function') onAuthenticated();
-                return;
-            }
-            if (billingTokenRequired) {
-                promptBillingToken(onTokenAuthenticated || onAuthenticated);
-            }
-        });
-    }
-
     function saveConfig() {
         if (!hasBillingAccess()) {
             requireBillingAccess(() => saveConfig());
             return;
         }
 
-        const smtpPassword = smtpPassEl.value.trim();
-        const graphClientSecret = graphClientSecretEl.value.trim();
-        const payload = {
-            enabled: enabledEl.checked,
-            driver: driverEl.value,
-            from: fromEl.value.trim(),
-            fromName: fromNameEl.value.trim(),
-            defaultTo: defaultToEl.value.split(',').map(x => x.trim()).filter(Boolean),
-            timezone: timezoneEl.value,
-            smtp: {
-                host: smtpHostEl.value.trim(),
-                port: smtpPortEl.value ? parseInt(smtpPortEl.value, 10) : null,
-                username: smtpUserEl.value.trim(),
-                startTls: smtpStartTlsEl.checked
-            },
-            graph: {
-                tenantId: graphTenantEl.value.trim(),
-                clientId: graphClientIdEl.value.trim(),
-                from: graphFromEl.value.trim()
-            }
-        };
-        if (smtpPassword) payload.smtp.password = smtpPassword;
-        if (graphClientSecret) payload.graph.clientSecret = graphClientSecret;
+        const payload = buildNotificationPayload();
 
         fetch('/billing/admin/notifications', {
             method: 'POST',
@@ -824,15 +667,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
 
-    function toggleSections() {
-        const driver = driverEl.value;
-        $('#smtpSection').style.display = driver === 'SMTP' ? 'block' : 'none';
-        $('#graphSection').style.display = driver === 'GRAPH' ? 'block' : 'none';
-        if (driver === 'NOOP') {
-            enabledEl.checked = false;
-        }
-    }
-
     function openModal() {
         modal.classList.add('show');
     }
@@ -842,78 +676,10 @@ document.addEventListener('DOMContentLoaded', () => {
         updateDriverSummary();
     }
 
-    function updateDriverSummary() {
-        const driver = driverEl.value || 'NOOP';
-        driverSummary.textContent = driver;
-    }
-
-    function populateTimezones() {
-        timezoneEl.innerHTML = '';
-        const primary = new Option(`Auto (browser: ${browserTimezone})`, browserTimezone);
-        timezoneEl.appendChild(primary);
-        const unique = Array.from(new Set([browserTimezone, ...COMMON_TIMEZONES])).sort();
-        unique.forEach(tz => {
-            if (tz === browserTimezone) {
-                return;
-            }
-            const opt = new Option(tz, tz);
-            timezoneEl.appendChild(opt);
-        });
-    }
-
-    function setTimezone(tz) {
-        if (!tz) {
-            timezoneEl.value = browserTimezone;
-            return;
-        }
-        let found = false;
-        for (const opt of timezoneEl.options) {
-            if (opt.value === tz) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            timezoneEl.appendChild(new Option(`${tz} (config)`, tz));
-        }
-        timezoneEl.value = tz;
-    }
-
     function setStatus(text) {
         if (configStatusEl) {
             configStatusEl.textContent = text;
         }
-    }
-
-    function promptBillingToken(onSuccess) {
-        const handler = window.AuthTokenHandler;
-        if (!handler || typeof handler.showTokenModal !== 'function') {
-            showToast('Token prompt unavailable on this page', 'error');
-            return;
-        }
-
-        let config = null;
-        if (typeof handler.getTokenConfigForPath === 'function') {
-            config = handler.getTokenConfigForPath('/billing/admin/notifications');
-        }
-        if (!config) {
-            config = {
-                key: 'billing',
-                login: '/admin/login',
-                header: 'X-Access-Token',
-                cookie: 'access_token',
-                title: 'Gateway administrator token required',
-                description: 'Enter the Gateway administrator token for Wallet & Billing.',
-                invalidMessage: 'Invalid Gateway administrator token.'
-            };
-        }
-
-        handler.showTokenModal(config, () => {
-            billingAccessReady = true;
-            if (typeof onSuccess === 'function') {
-                onSuccess();
-            }
-        });
     }
 
     function updateBillingStatusAction() {
@@ -966,68 +732,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
 
-    function showToast(msg, type = 'info') {
-        const toast = $('#toast');
-        toast.textContent = msg;
-        toast.className = `toast show ${type === 'error' ? 'error' : type === 'success' ? 'success' : ''}`;
-        setTimeout(() => toast.className = 'toast', 2500);
-    }
-
     function $(sel) { return document.querySelector(sel); }
-
-    async function loadAccessPolicy() {
-        const badge = $('#labManagerAccessBadge');
-        if (!badge) return;
-        try {
-            const res = await fetch('/lab-manager/access-policy', {
-                credentials: 'include',
-                skipAuthPrompt: true
-            });
-            if (res.status === 401) {
-                badge.textContent = 'Lab Manager session required';
-                badge.classList.remove('local', 'private', 'external', 'token-required-action');
-                return;
-            }
-            if (res.status === 403) {
-                badge.textContent = 'Access Policy Blocked';
-                badge.classList.remove('local', 'private', 'external', 'token-required-action');
-                return;
-            }
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const status = await res.json();
-            updateAccessPolicyBadge(status);
-        } catch (err) {
-            badge.textContent = 'Access Policy Unavailable';
-            badge.classList.remove('local', 'private', 'external', 'token-required-action');
-        }
-    }
-
-    function updateAccessPolicyBadge(status) {
-        const badge = $('#labManagerAccessBadge');
-        if (!badge || !status) return;
-
-        const localOnly = status.dashboardLocalOnly !== false;
-        const privateEnabled = status.allowPrivateNetworks === true && status.dashboardAllowPrivate === true;
-        const cidrs = typeof status.dashboardAllowedCidrs === 'string'
-            ? status.dashboardAllowedCidrs.split(',').map(item => item.trim()).filter(Boolean)
-            : [];
-
-        badge.classList.remove('local', 'private', 'external', 'token-required-action');
-        if (!localOnly) {
-            badge.textContent = 'External Access Allowed';
-            badge.classList.add('external');
-        } else if (privateEnabled && cidrs.length > 0) {
-            badge.textContent = 'Private CIDR Allowlist';
-            badge.title = cidrs.join(', ');
-            badge.classList.add('private');
-        } else if (privateEnabled) {
-            badge.textContent = 'Any Private Network';
-            badge.classList.add('private');
-        } else {
-            badge.textContent = 'Localhost Only';
-            badge.classList.add('local');
-        }
-    }
 
     // ---- Lab Station ops helpers ----
     async function loadHostInventory(options = {}) {
@@ -1211,243 +916,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 powerControllerStatusLoading = false;
                 renderPowerControllers();
             }
-        }
-    }
-
-    function updatePowerCredentialFields() {
-        const type = powerCredentialTypeEl?.value || 'netio-http-basic';
-        const isNetio = type === 'netio-http-basic';
-        const isSnmpV1V2 = type === 'snmpv1' || type === 'snmpv2c';
-        const isSnmpV3 = type === 'snmpv3';
-        const authProtocol = powerCredentialAuthProtocolEl?.value || 'NONE';
-        const privProtocol = powerCredentialPrivProtocolEl?.value || 'NONE';
-        if (powerCredentialUsernameFieldEl) powerCredentialUsernameFieldEl.hidden = isSnmpV1V2;
-        if (powerCredentialPasswordFieldEl) powerCredentialPasswordFieldEl.hidden = !isNetio;
-        if (powerCredentialCommunityFieldEl) powerCredentialCommunityFieldEl.hidden = !isSnmpV1V2;
-        if (powerCredentialAuthProtocolFieldEl) powerCredentialAuthProtocolFieldEl.hidden = !isSnmpV3;
-        if (powerCredentialAuthPasswordFieldEl) powerCredentialAuthPasswordFieldEl.hidden = !isSnmpV3 || authProtocol === 'NONE';
-        if (powerCredentialPrivProtocolFieldEl) powerCredentialPrivProtocolFieldEl.hidden = !isSnmpV3;
-        if (powerCredentialPrivPasswordFieldEl) powerCredentialPrivPasswordFieldEl.hidden = !isSnmpV3 || privProtocol === 'NONE';
-        if (powerCredentialContextNameFieldEl) powerCredentialContextNameFieldEl.hidden = !isSnmpV3;
-    }
-
-    function resetPowerCredentialEditor() {
-        if (powerCredentialSelectEl) powerCredentialSelectEl.value = '';
-        if (powerCredentialRefEl) {
-            powerCredentialRefEl.value = '';
-            powerCredentialRefEl.disabled = false;
-        }
-        if (powerCredentialTypeEl) {
-            powerCredentialTypeEl.value = 'netio-http-basic';
-            powerCredentialTypeEl.disabled = false;
-        }
-        [
-            powerCredentialUsernameEl,
-            powerCredentialPasswordEl,
-            powerCredentialCommunityEl,
-            powerCredentialAuthPasswordEl,
-            powerCredentialPrivPasswordEl,
-            powerCredentialContextNameEl,
-        ].forEach(element => {
-            if (element) element.value = '';
-        });
-        if (powerCredentialAuthProtocolEl) powerCredentialAuthProtocolEl.value = 'NONE';
-        if (powerCredentialPrivProtocolEl) powerCredentialPrivProtocolEl.value = 'NONE';
-        updatePowerCredentialFields();
-        if (powerCredentialEditorHintEl) powerCredentialEditorHintEl.textContent = 'Configure a new provider-local credential.';
-    }
-
-    function populatePowerCredentialForm(credential) {
-        if (powerCredentialRefEl) {
-            powerCredentialRefEl.value = credential.credentialRef || '';
-            powerCredentialRefEl.disabled = true;
-        }
-        if (powerCredentialTypeEl) {
-            powerCredentialTypeEl.value = credential.type || 'netio-http-basic';
-            powerCredentialTypeEl.disabled = true;
-        }
-        [
-            powerCredentialUsernameEl,
-            powerCredentialPasswordEl,
-            powerCredentialCommunityEl,
-            powerCredentialAuthPasswordEl,
-            powerCredentialPrivPasswordEl,
-            powerCredentialContextNameEl,
-        ].forEach(element => {
-            if (element) element.value = '';
-        });
-        if (powerCredentialAuthProtocolEl) powerCredentialAuthProtocolEl.value = 'NONE';
-        if (powerCredentialPrivProtocolEl) powerCredentialPrivProtocolEl.value = 'NONE';
-        updatePowerCredentialFields();
-        if (powerCredentialEditorHintEl) powerCredentialEditorHintEl.textContent = 'Enter replacement secret values to rotate this credential. The current values are never loaded.';
-    }
-
-    function renderPowerCredentialOptions() {
-        if (!powerCredentialSelectEl) return;
-        const current = powerCredentialSelectEl.value;
-        powerCredentialSelectEl.innerHTML = '<option value="">New credential</option>';
-        powerCredentials.forEach(credential => {
-            const option = document.createElement('option');
-            option.value = credential.credentialRef || '';
-            option.textContent = `${credential.credentialRef || 'unknown'} · ${credential.type || 'unknown'}`;
-            powerCredentialSelectEl.appendChild(option);
-        });
-        const selected = powerCredentials.some(item => String(item.credentialRef) === String(current)) ? current : '';
-        powerCredentialSelectEl.value = selected;
-        if (selected) loadSelectedPowerCredential();
-        else resetPowerCredentialEditor();
-    }
-
-    function loadSelectedPowerCredential() {
-        const reference = powerCredentialSelectEl?.value || '';
-        const credential = powerCredentials.find(item => String(item.credentialRef || '') === String(reference));
-        if (credential) populatePowerCredentialForm(credential);
-        else resetPowerCredentialEditor();
-    }
-
-    function renderPowerCredentials() {
-        if (!powerCredentialsListEl) return;
-        if (!powerCredentials.length) {
-            powerCredentialsListEl.innerHTML = '<div class="empty">No energy credentials are configured.</div>';
-            return;
-        }
-        powerCredentialsListEl.innerHTML = powerCredentials.map(credential => `
-            <div class="power-controller-row power-credential-row">
-                <div>
-                    <strong>${escapeHtml(credential.credentialRef || 'unknown')}</strong>
-                    <div class="host-meta">Type: ${escapeHtml(credential.type || 'unknown')} · Secret values hidden</div>
-                </div>
-                <button class="mini-btn" type="button" data-power-credential-ref="${escapeHtml(credential.credentialRef || '')}">Rotate</button>
-            </div>
-        `).join('');
-    }
-
-    function handlePowerCredentialActions(event) {
-        const button = event.target?.closest?.('[data-power-credential-ref]');
-        const reference = button?.dataset?.powerCredentialRef;
-        if (!reference || !powerCredentialSelectEl) return;
-        powerCredentialSelectEl.value = reference;
-        loadSelectedPowerCredential();
-    }
-
-    function readPowerCredentialForm() {
-        const credentialRef = (powerCredentialRefEl?.value || '').trim().toLowerCase();
-        const type = (powerCredentialTypeEl?.value || '').trim().toLowerCase();
-        if (!credentialRef) throw new Error('Credential reference is required');
-        if (!/^[a-z0-9][a-z0-9._:-]{0,127}$/.test(credentialRef)) throw new Error('Credential reference contains invalid characters');
-        if (!['netio-http-basic', 'snmpv1', 'snmpv2c', 'snmpv3'].includes(type)) throw new Error('Select a supported credential type');
-
-        let credentials;
-        if (type === 'netio-http-basic') {
-            const username = (powerCredentialUsernameEl?.value || '').trim();
-            const password = powerCredentialPasswordEl?.value || '';
-            if (!username || !password) throw new Error('NETIO username and password are required');
-            credentials = { username, password };
-        } else if (type === 'snmpv1' || type === 'snmpv2c') {
-            const community = powerCredentialCommunityEl?.value || '';
-            if (!community) throw new Error('SNMP community is required');
-            credentials = { version: type.slice(4), community };
-        } else {
-            const username = (powerCredentialUsernameEl?.value || '').trim();
-            const authProtocol = powerCredentialAuthProtocolEl?.value || 'NONE';
-            const privProtocol = powerCredentialPrivProtocolEl?.value || 'NONE';
-            if (!username) throw new Error('SNMPv3 username is required');
-            if (privProtocol !== 'NONE' && authProtocol === 'NONE') throw new Error('SNMPv3 privacy requires authentication');
-            credentials = { version: 'v3', username, authProtocol, privProtocol };
-            if (authProtocol !== 'NONE') {
-                const authPassword = powerCredentialAuthPasswordEl?.value || '';
-                if (!authPassword) throw new Error('SNMPv3 authentication password is required');
-                credentials.authPassword = authPassword;
-            }
-            if (privProtocol !== 'NONE') {
-                const privPassword = powerCredentialPrivPasswordEl?.value || '';
-                if (!privPassword) throw new Error('SNMPv3 privacy password is required');
-                credentials.privPassword = privPassword;
-            }
-            const contextName = (powerCredentialContextNameEl?.value || '').trim();
-            if (contextName) credentials.contextName = contextName;
-        }
-        return {
-            credentialRef,
-            type,
-            credentials,
-            overwrite: Boolean(powerCredentialSelectEl?.value),
-        };
-    }
-
-    async function loadPowerCredentials(options = {}) {
-        if (powerCredentialsStatusEl) {
-            powerCredentialsStatusEl.textContent = 'Loading...';
-            powerCredentialsStatusEl.className = 'pill soft';
-        }
-        try {
-            const res = await fetch('/ops/api/power/credentials', options);
-            if (res.status === 403) {
-                showOpsWarning();
-                return;
-            }
-            if (res.status === 401) {
-                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load energy credentials', 'error');
-                return;
-            }
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            powerCredentials = Array.isArray(body.credentials) ? body.credentials : [];
-            renderPowerCredentials();
-            renderPowerCredentialOptions();
-            renderPowerControllerCredentialOptions();
-            if (powerCredentialsStatusEl) {
-                powerCredentialsStatusEl.textContent = `${powerCredentials.length} credential${powerCredentials.length === 1 ? '' : 's'}`;
-                powerCredentialsStatusEl.className = 'pill good';
-            }
-            if (powerCredentialsHintEl) powerCredentialsHintEl.textContent = powerCredentials.length
-                ? 'Secret values are write-only. Select a reference to rotate it.'
-                : 'No energy credentials are configured.';
-        } catch (err) {
-            console.warn('Unable to load power credentials', err);
-            powerCredentials = [];
-            renderPowerCredentials();
-            renderPowerCredentialOptions();
-            renderPowerControllerCredentialOptions();
-            if (powerCredentialsStatusEl) {
-                powerCredentialsStatusEl.textContent = 'Unavailable';
-                powerCredentialsStatusEl.className = 'pill bad';
-            }
-            if (powerCredentialsHintEl) powerCredentialsHintEl.textContent = 'Energy credentials could not be loaded.';
-        }
-    }
-
-    async function savePowerCredential() {
-        let credential;
-        try {
-            credential = readPowerCredentialForm();
-        } catch (err) {
-            showToast(`Energy credential is invalid: ${err.message}`, 'error');
-            return;
-        }
-        if (powerCredentialSaveBtn) powerCredentialSaveBtn.disabled = true;
-        try {
-            const res = await fetch('/ops/api/power/credentials', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(credential),
-            });
-            const body = await res.json().catch(() => ({}));
-            if (res.status === 403) {
-                showOpsWarning();
-                return;
-            }
-            if (res.status === 401) throw new Error('Lab Manager session required');
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            showToast(`${credential.overwrite ? 'Energy credential rotated' : 'Energy credential saved'}: ${credential.credentialRef}`, 'success');
-            await loadPowerCredentials({ skipAuthPrompt: true });
-            void loadPowerControllerStatuses({ forceRefresh: true, skipAuthPrompt: true });
-            if (powerCredentialSelectEl) powerCredentialSelectEl.value = credential.credentialRef;
-            loadSelectedPowerCredential();
-        } catch (err) {
-            showToast(`Energy credential save failed: ${err.message}`, 'error');
-        } finally {
-            if (powerCredentialSaveBtn) powerCredentialSaveBtn.disabled = false;
         }
     }
 
@@ -2478,17 +1946,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return `lab-manager:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     }
 
-    function formatHeartbeatStreamError(host, payload) {
-        const code = String(payload?.code || '').trim().toUpperCase();
-        const message = heartbeatStreamErrorMessages[code] || 'connection error';
-        const requestId = String(payload?.requestId || '').trim();
-        const safeRequestId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? requestId : '';
-        const requestSuffix = code === 'INTERNAL_ERROR' && safeRequestId
-            ? ` (request ID ${safeRequestId})`
-            : '';
-        return `Heartbeat unavailable for ${host}: ${message}${requestSuffix}`;
-    }
-
     function startHeartbeatStream(host) {
         const meta = hostMetadata[host] || {};
         const EventSourceCtor = window.EventSource;
@@ -2525,7 +1982,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (_) {
                 // Browser connection errors do not always include a payload.
             }
-            if (heartbeatConfigurationErrorCodes.has(String(errorPayload?.code || '').trim().toUpperCase())) {
+            if (isHeartbeatConfigurationError(errorPayload?.code)) {
                 stopHeartbeatStream(host);
                 showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
                 return;
@@ -3666,116 +3123,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function loadActivityFeed(append = false, options = {}) {
-        const activityFeed = $('#activityFeedList');
-        if (!activityFeed) return;
-        if (!append) {
-            activityFeedState.offset = 0;
-            activityFeedState.operations = [];
-            activityFeedState.pagination = null;
-        }
-        activityFeedState.loading = true;
-        activityFeed.innerHTML = '<div class="empty">Loading recent operations...</div>';
-        try {
-            const params = new URLSearchParams({
-                limit: String(activityFeedState.limit),
-                offset: String(activityFeedState.offset)
-            });
-            const res = await fetch(`/ops/api/operations/recent?${params.toString()}`, {
-                credentials: 'include',
-                ...options,
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const body = await res.json();
-            const entries = Array.isArray(body.operations) ? body.operations : [];
-            activityFeedState.operations = append
-                ? activityFeedState.operations.concat(entries)
-                : entries;
-            activityFeedState.pagination = normalizePagination(
-                body.pagination,
-                activityFeedState.offset,
-                entries.length,
-                activityFeedState.limit
-            );
-            activityFeedState.offset = activityFeedState.pagination.nextOffset;
-            renderActivityFeed();
-        } catch (err) {
-            console.error(err);
-            activityFeed.innerHTML = `<div class="empty">Unable to load activity: ${escapeHtml(err.message)}</div>`;
-        } finally {
-            activityFeedState.loading = false;
-        }
-    }
-
-    function renderActivityFeed() {
-        const activityFeed = $('#activityFeedList');
-        if (!activityFeed) return;
-        if (!activityFeedState.operations.length) {
-            activityFeed.innerHTML = '<div class="empty">No recent activity available yet.</div>';
-            return;
-        }
-        activityFeed.innerHTML = '';
-        activityFeedState.operations.forEach(entry => {
-            activityFeed.appendChild(renderActivityFeedItem(entry));
-        });
-        const paginationEl = renderActivityFeedPagination(activityFeedState.pagination);
-        if (paginationEl) {
-            activityFeed.appendChild(paginationEl);
-        }
-    }
-
-    function renderActivityFeedPagination(pagination) {
-        if (!pagination) return null;
-        const footer = document.createElement('div');
-        footer.className = 'activity-pagination';
-        const summary = document.createElement('div');
-        summary.className = 'activity-meta';
-        const start = pagination.returned ? pagination.offset + 1 : pagination.offset;
-        const end = pagination.offset + pagination.returned;
-        summary.textContent = pagination.total
-            ? `Showing ${start}-${end} of ${pagination.total}`
-            : `Showing ${pagination.returned} entr${pagination.returned === 1 ? 'y' : 'ies'}`;
-        footer.appendChild(summary);
-        if (pagination.hasMore) {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'mini-btn primary';
-            btn.textContent = 'Load more';
-            btn.disabled = activityFeedState.loading;
-            btn.addEventListener('click', () => {
-                if (!activityFeedState.loading) {
-                    loadActivityFeed(true);
-                }
-            });
-            footer.appendChild(btn);
-        }
-        return footer;
-    }
-
-    function renderActivityFeedItem(item) {
-        const payloadText = item.payload && typeof item.payload === 'object'
-            ? JSON.stringify(item.payload)
-            : String(item.payload || '');
-        const row = document.createElement('div');
-        row.className = 'item';
-        row.innerHTML = `
-            <div class="item-title">${escapeHtml(item.action)} (${escapeHtml(item.status)})</div>
-            <div class="item-meta">${escapeHtml(item.host || 'unknown host')} · ${escapeHtml(formatDateTime(item.createdAt) || 'n/a')}</div>
-            <div class="item-description">${escapeHtml(item.message || payloadText)}</div>
-        `;
-        return row;
-    }
-
-    function formatDateTime(value) {
-        if (!value) return null;
-        try {
-            const dt = new Date(value);
-            return dt.toLocaleString();
-        } catch (_e) {
-            return value;
-        }
-    }
-
     async function triggerWol(host) {
         try {
             const res = await fetch('/ops/api/wol', {
@@ -3822,68 +3169,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.error(err);
             showToast(`${command} failed on ${host}: ${err.message}`, 'error');
-        }
-    }
-
-    async function syncAasFmu(accessKey, labId, aasxFile, extraInfo = {}) {
-        if (!accessKey) {
-            showToast('Enter a FMU access key', 'error');
-            return;
-        }
-        if (fmuSyncBtn) fmuSyncBtn.disabled = true;
-        if (fmuSyncResultEl) fmuSyncResultEl.textContent = '';
-        try {
-            let res;
-            const url = `/aas-admin/fmu/${encodeURIComponent(accessKey)}/sync`;
-            if (aasxFile) {
-                const form = new FormData();
-                form.append('file', aasxFile);
-                if (labId) form.append('labId', labId);
-                if (extraInfo.description) form.append('description', extraInfo.description);
-                if (extraInfo.license) form.append('license', extraInfo.license);
-                if (extraInfo.docsUrl) form.append('documentationUrl', extraInfo.docsUrl);
-                if (extraInfo.contactEmail) form.append('contactEmail', extraInfo.contactEmail);
-                res = await fetch(url, { method: 'POST', body: form });
-            } else {
-                const params = new URLSearchParams();
-                if (labId) params.set('labId', labId);
-                if (extraInfo.description) params.set('description', extraInfo.description);
-                if (extraInfo.license) params.set('license', extraInfo.license);
-                if (extraInfo.docsUrl) params.set('documentationUrl', extraInfo.docsUrl);
-                if (extraInfo.contactEmail) params.set('contactEmail', extraInfo.contactEmail);
-                const qs = params.toString() ? `?${params.toString()}` : '';
-                res = await fetch(url + qs, { method: 'POST' });
-            }
-            if (res.status === 403) {
-                showToast('AAS admin unavailable in Lite mode or blocked by gateway policy', 'error');
-                return;
-            }
-            if (res.status === 401) {
-                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
-                return;
-            }
-            if (!res.ok) {
-                const body = await res.json().catch(() => ({}));
-                throw new Error(body.detail || `HTTP ${res.status}`);
-            }
-            const data = await res.json();
-            if (fmuSyncResultEl) {
-                const msg = data.aasxUpload
-                    ? `Synced ${(data.uploadedAasIds || []).length} shell(s) + ${(data.uploadedSubmodelIds || []).length} submodel(s) from AASX`
-                    : `AAS shell synced — ${data.created ? 'created' : 'updated'}`;
-                fmuSyncResultEl.textContent = msg;
-                fmuSyncResultEl.style.color = 'var(--color-success, #1a7f4b)';
-            }
-            showToast(`FMU AAS sync: ${accessKey} ok`, 'success');
-        } catch (err) {
-            console.error(err);
-            if (fmuSyncResultEl) {
-                fmuSyncResultEl.textContent = err.message;
-                fmuSyncResultEl.style.color = 'var(--color-error, #c0392b)';
-            }
-            showToast(`FMU AAS sync failed: ${err.message}`, 'error');
-        } finally {
-            if (fmuSyncBtn) fmuSyncBtn.disabled = false;
         }
     }
 
@@ -4296,25 +3581,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function normalizePagination(pagination, offset, returned, limitFallback) {
-        const limit = Math.max(1, Number(pagination?.limit) || limitFallback || TIMELINE_DEFAULT_LIMIT);
-        const total = Number.isFinite(Number(pagination?.total)) ? Number(pagination.total) : offset + returned;
-        const nextOffset = Number.isFinite(Number(pagination?.nextOffset)) ? Number(pagination.nextOffset) : offset + returned;
-        const hasMore = typeof pagination?.hasMore === 'boolean' ? pagination.hasMore : total > nextOffset;
-        const page = Number.isFinite(Number(pagination?.page)) ? Number(pagination.page) : Math.floor(offset / limit) + 1;
-        const pageSize = Number.isFinite(Number(pagination?.pageSize)) ? Number(pagination.pageSize) : limit;
-        return {
-            limit,
-            offset,
-            returned,
-            total,
-            nextOffset,
-            hasMore,
-            page,
-            pageSize
-        };
-    }
-
     async function loadMoreTimeline(buttonEl) {
         if (!timelineState.pagination?.hasMore || timelineState.loading) {
             return;
@@ -4528,33 +3794,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return `${formatDate(start)} → ${formatDate(end)}`;
         }
     
-        function formatDate(value) {
-            if (!value) return 'n/a';
-            const date = new Date(value);
-            if (Number.isNaN(date.getTime())) {
-                return value;
-            }
-            return date.toLocaleString();
-        }
-    
-        function formatBool(value) {
-            if (value === true) return 'yes';
-            if (value === false) return 'no';
-            return 'n/a';
-        }
-    
-    function htmlEscape(value) {
-        const str = (value ?? '').toString();
-        return str.replace(/[&<>"'`]/g, ch => ({
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;',
-            '`': '&#96;'
-        })[ch] || ch);
-    }
-
     async function checkOpsAvailability() {
         try {
             const res = await fetch('/ops/health', { method: 'HEAD' });
