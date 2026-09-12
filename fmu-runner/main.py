@@ -14,10 +14,6 @@ import json
 import logging
 import tempfile
 import asyncio
-import io
-import zipfile
-import hashlib
-import hmac
 import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
@@ -38,6 +34,7 @@ import jwt
 from fmpy import read_model_description, simulate_fmu
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
 from fastapi.responses import StreamingResponse, Response
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import UploadFile
 from xml.etree import ElementTree as ET
@@ -63,6 +60,16 @@ from execution_lifecycle import (
 from execution_slots import ConcurrencySlots
 from execution_tracking import SimulationRegistry
 from timeout_policy import effective_timeout_seconds as _effective_timeout_seconds_policy
+from simulation_options import (
+    SimulationOptions,
+    SimulationOptionsError,
+    parse_simulation_options as _parse_simulation_options_impl,
+)
+from simulation_model import resolve_fmi_type as _resolve_fmi_type_impl
+from simulation_stream_payloads import (
+    build_completed_event as _build_simulation_completed_event,
+    iter_result_chunks as _iter_simulation_result_chunks,
+)
 from local_fmu_catalog import (
     _list_local_fmus_payload as _catalog_list_local_fmus_payload,
     _load_local_model_metadata as _catalog_load_local_model_metadata,
@@ -83,8 +90,13 @@ from metadata import (
 from proxy_fmu import (
     _build_proxy_model_description_xml,
     _collect_runtime_files as _collect_proxy_runtime_files,
-    _proxy_model_identifier,
+    _proxy_model_identifier as _proxy_model_identifier_impl,
     _validate_proxy_generation_supported,
+)
+from proxy_artifact import build_proxy_artifact, build_proxy_artifact_headers
+from proxy_session_config import (
+    build_proxy_session_config as _build_proxy_session_config_impl,
+    derive_gateway_ws_url as _derive_gateway_ws_url_impl,
 )
 from simulation_history import (
     get_history_result as _get_history_result,
@@ -127,6 +139,7 @@ from history_router import create_history_router
 from aas_link_router import create_aas_link_router
 from aas_hints_router import create_aas_hints_router
 from aas_sync_router import create_aas_sync_router
+from proxy_router import create_proxy_router
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -595,6 +608,27 @@ def _effective_timeout_seconds(requested_timeout: int, claims: dict) -> int:
     )
 
 
+def _parse_simulation_options(options: dict, claims: dict) -> SimulationOptions:
+    try:
+        return _parse_simulation_options_impl(
+            options,
+            max_timeout=MAX_SIMULATION_TIMEOUT,
+            max_stop_time=MAX_STOP_TIME,
+            min_step_size=MIN_STEP_SIZE,
+            effective_timeout_seconds=lambda requested: _effective_timeout_seconds(requested, claims),
+        )
+    except SimulationOptionsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _resolve_fmi_type(requested_type: Any, fmu_path: Path) -> Any:
+    return _resolve_fmi_type_impl(
+        requested_type,
+        str(fmu_path),
+        read_model_description,
+    )
+
+
 def _resolve_fmu_path(fmu_filename: str) -> Path:
     """Search *FMU_DATA_PATH* for a .fmu file matching *fmu_filename*."""
     fmu_filename = _validate_storage_key(fmu_filename, "FMU filename")
@@ -645,16 +679,34 @@ def _extract_authorization_header(request: Request) -> Optional[str]:
 
 
 def _derive_gateway_ws_url(claims: dict) -> str:
-    if FMU_PROXY_GATEWAY_WS_URL:
-        return FMU_PROXY_GATEWAY_WS_URL
-    aud = str(claims.get("aud") or "").strip()
-    if not aud:
-        raise HTTPException(status_code=500, detail="Missing aud claim required to derive gateway WS URL")
-    parsed = urlparse(aud)
-    if not parsed.scheme or not parsed.netloc:
-        raise HTTPException(status_code=500, detail="Invalid aud claim required to derive gateway WS URL")
-    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
-    return urlunparse((ws_scheme, parsed.netloc, "/fmu/api/v1/fmu/sessions", "", "", ""))
+    try:
+        return _derive_gateway_ws_url_impl(
+            claims,
+            configured_url=FMU_PROXY_GATEWAY_WS_URL,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _build_proxy_session_config(
+    *,
+    fmi_version: str,
+    gateway_ws_url: str,
+    lab_id: str,
+    reservation_key: str,
+    session_ticket: str,
+    ticket_expires_at: int,
+    time_mode: str = "simtime",
+) -> dict[str, Any]:
+    return _build_proxy_session_config_impl(
+        fmi_version=fmi_version,
+        gateway_ws_url=gateway_ws_url,
+        lab_id=lab_id,
+        reservation_key=reservation_key,
+        session_ticket=session_ticket,
+        ticket_expires_at=ticket_expires_at,
+        time_mode=time_mode,
+    )
 
 
 def _local_backend_health_payload() -> dict:
@@ -1115,143 +1167,6 @@ def _aas_link_path(access_key: str) -> Path:
     return candidate
 
 
-@app.post("/aas-admin/fmu/{access_key}/aas-link")
-async def create_aas_link(access_key: str, request: Request):
-    """
-    Link an FMU access key to an externally-managed AAS shell.
-
-    Body JSON: ``{"aasId": "<shell-id>", "labId": "<optional>", "submodelIds": ["<optional>"]}``
-
-    ``labId`` should match the numeric on-chain lab ID used in the
-    ``urn:decentralabs:lab:{labId}`` shell ID that the Marketplace queries.
-    When provided the link is indexed by labId so OpenResty can resolve
-    the conventional ID even though the ``accessKey`` is a different string
-    (e.g. ``motor.fmu`` vs ``42``).
-
-    The Gateway's ``/aas/`` proxy resolves requests for
-    ``urn:decentralabs:lab:{labId}`` to the linked AAS ID transparently —
-    Marketplace consumers need no changes.
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    aas_id = (body.get("aasId") or "").strip()
-    if not aas_id:
-        raise HTTPException(status_code=400, detail="aasId is required")
-    lab_id = str(body.get("labId") or "").strip() or None
-    link: dict = {"aasId": aas_id}
-    if lab_id:
-        link["labId"] = lab_id
-    submodel_ids = body.get("submodelIds")
-    if submodel_ids and isinstance(submodel_ids, list):
-        link["submodelIds"] = [s.strip() for s in submodel_ids if isinstance(s, str) and s.strip()]
-    fp = _aas_link_path(access_key)
-    # codeql[py/path-injection]
-    fp.parent.mkdir(parents=True, exist_ok=True)  # /app/data/aas-links/ (writable volume)
-    # codeql[py/path-injection]
-    fp.write_text(json.dumps(link, indent=2), encoding="utf-8")
-    # When labId is provided, also write a labId-indexed file so the resolver
-    # can find the override for the conventional urn:decentralabs:lab:{labId}.
-    if lab_id and lab_id != access_key:
-        fp_lab = _aas_link_path(lab_id)
-        # codeql[py/path-injection]
-        fp_lab.write_text(json.dumps(link, indent=2), encoding="utf-8")
-    return {"linked": True, "accessKey": access_key, **link}
-
-
-@app.get("/aas-admin/fmu/{access_key}/aas-link")
-async def get_aas_link(access_key: str):
-    """Return the current AAS link for a given access key, or 404."""
-    fp = _aas_link_path(access_key)
-    # codeql[py/path-injection]
-    if not fp.is_file():
-        raise HTTPException(status_code=404, detail="No AAS link configured for this access key")
-    try:
-        # codeql[py/path-injection]
-        link = json.loads(fp.read_text(encoding="utf-8"))
-    except Exception:
-        raise HTTPException(status_code=500, detail="Corrupt AAS link file")
-    return {"accessKey": access_key, **link}
-
-
-@app.delete("/aas-admin/fmu/{access_key}/aas-link")
-async def delete_aas_link(access_key: str):
-    """Remove the AAS link for a given access key."""
-    fp = _aas_link_path(access_key)
-    # codeql[py/path-injection]
-    if not fp.is_file():
-        raise HTTPException(status_code=404, detail="No AAS link configured for this access key")
-    # Read labId from the stored file so we can clean up the labId-indexed file too
-    try:
-        # codeql[py/path-injection]
-        stored = json.loads(fp.read_text(encoding="utf-8"))
-        lab_id = stored.get("labId", "")
-    except Exception:
-        lab_id = ""
-    # codeql[py/path-injection]
-    fp.unlink()
-    if lab_id and lab_id != access_key:
-        fp_lab = _aas_link_path(lab_id)
-        # codeql[py/path-injection]
-        if fp_lab.is_file():
-            # codeql[py/path-injection]
-            fp_lab.unlink()
-    return {"unlinked": True, "accessKey": access_key}
-
-
-@app.get("/aas-admin/resolve-aas-id")
-async def resolve_aas_id(shellId: str = Query(...)):
-    """
-    Resolve a conventional AAS shell ID to the actual target ID.
-
-    Called by OpenResty (Lua subrequest) before proxying ``/aas/`` to BaSyx.
-    If an AAS link override exists for the lab ID embedded in the shell ID,
-    the response contains the overridden ``targetId``; otherwise returns the
-    original ``shellId`` unchanged.
-
-    Query param ``shellId`` is the base64url-decoded shell ID string,
-    e.g. ``urn:decentralabs:lab:42``.
-    """
-    # Extract the lab/access key portion from the conventional URN
-    prefix = "urn:decentralabs:lab:"
-    if shellId.startswith(prefix):
-        lab_key = shellId[len(prefix):]
-    else:
-        # Not a conventional ID — pass through unchanged
-        return {"targetId": shellId, "override": False}
-
-    # Check if there's a link file for this lab key (which may be an access key)
-    fp = _aas_link_path(lab_key)
-    # codeql[py/path-injection]
-    if fp.is_file():
-        try:
-            # codeql[py/path-injection]
-            link = json.loads(fp.read_text(encoding="utf-8"))
-            target = link.get("aasId", "").strip()
-            if target:
-                return {"targetId": target, "override": True}
-        except Exception:
-            # Missing or corrupt link files are treated as no override.
-            pass
-
-    # Also check with .fmu extension (access keys are typically "file.fmu")
-    fp_fmu = _aas_link_path(f"{lab_key}.fmu")
-    # codeql[py/path-injection]
-    if fp_fmu.is_file():
-        try:
-            # codeql[py/path-injection]
-            link = json.loads(fp_fmu.read_text(encoding="utf-8"))
-            target = link.get("aasId", "").strip()
-            if target:
-                return {"targetId": target, "override": True}
-        except Exception:
-            # Missing or corrupt extension link files are treated as no override.
-            pass
-
-    return {"targetId": shellId, "override": False}
-
-
 @app.websocket("/api/v1/fmu/sessions")
 async def fmu_realtime_sessions(websocket: WebSocket):
     await _realtime_manager.handle_websocket(websocket, internal=False)
@@ -1262,106 +1177,100 @@ async def fmu_realtime_sessions_internal(websocket: WebSocket):
     await _realtime_manager.handle_websocket(websocket, internal=True)
 
 
-@app.get("/api/v1/fmu/proxy/{lab_id}")
-async def download_proxy_fmu(
-    lab_id: str,
-    request: Request,
-    reservationKey: Optional[str] = Query(None),
-    claims: dict = Depends(verify_jwt),
-):
-    """Generate and download a reservation-scoped FMU proxy artifact."""
-    _enforce_fmu_claim(claims)
+def _proxy_enforce_fmu_claim(claims: dict):
+    return _enforce_fmu_claim(claims)
 
-    claim_lab_id = _get_claim_lab_id(claims)
-    if claim_lab_id and str(claim_lab_id) != str(lab_id):
-        raise HTTPException(status_code=403, detail="Token is not authorised for requested labId")
 
-    claim_reservation_key = str(claims.get("reservationKey") or "").strip()
-    _enforce_requested_reservation(claims, reservationKey)
-    effective_reservation_key = reservationKey or claim_reservation_key
-    if not effective_reservation_key:
-        raise HTTPException(status_code=400, detail="Missing reservationKey")
+def _proxy_get_claim_lab_id(claims: dict):
+    return _get_claim_lab_id(claims)
 
-    claim_sub = str(claims.get("sub") or "anonymous")
-    rate_key = f"{claim_sub}:{lab_id}"
-    if not _allow_proxy_download(rate_key):
-        raise HTTPException(status_code=429, detail="Proxy download rate limit exceeded. Retry shortly.")
 
-    authorization = _extract_authorization_header(request)
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing bearer token required to issue session ticket")
+def _proxy_enforce_requested_reservation(claims: dict, requested: Optional[str]):
+    return _enforce_requested_reservation(claims, requested)
 
-    fmu_filename = claims.get("accessKey") or claims.get("fmuFileName")
-    if not fmu_filename:
-        raise HTTPException(status_code=400, detail="Cannot determine FMU file name from token")
 
-    session_ticket, ticket_expiry = await _issue_session_ticket(
-        authorization,
-        lab_id=str(lab_id),
-        reservation_key=effective_reservation_key,
-        request_id=f"proxy_{uuid4().hex[:8]}",
-    )
-    gateway_ws_url = _derive_gateway_ws_url(claims)
-    model_metadata = await _fmu_backend.get_authorized_model_metadata(
-        claims=claims,
-        requested_fmu_filename=str(fmu_filename),
-    )
-    model_xml = _build_proxy_model_description_xml(model_metadata)
-    proxy_fmi_version = "3.0" if _parse_fmi_major_version(model_metadata.get("fmiVersion")) >= 3 else "2.0.3"
-    proxy_model_identifier = _proxy_model_identifier(model_metadata)
-    runtime_files = _collect_runtime_files(
-        fmi_version=proxy_fmi_version,
-        model_identifier=proxy_model_identifier,
-    )
+def _proxy_allow_download(key: str):
+    return _allow_proxy_download(key)
 
-    config_payload = {
-        "protocolVersion": "1.0",
-        "fmiVersion": proxy_fmi_version,
-        "gatewayWsUrl": gateway_ws_url,
-        "labId": str(lab_id),
-        "reservationKey": effective_reservation_key,
-        "sessionTicket": session_ticket,
-        "ticketExpiresAt": ticket_expiry,
-        "timeMode": "simtime",
-    }
 
-    archive_buffer = io.BytesIO()
-    with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("modelDescription.xml", model_xml)
-        # Also place modelDescription.xml inside resources/ — the proxy DLL receives
-        # fmuResourceLocation pointing to the resources/ directory and looks for
-        # modelDescription.xml there first (FMI spec §2.1.6).
-        archive.writestr("resources/modelDescription.xml", model_xml)
-        archive.writestr("resources/config.json", json.dumps(config_payload, separators=(",", ":")))
-        for file_path, archive_name in runtime_files:
-            archive.write(file_path, archive_name)
+def _proxy_extract_authorization_header(request: Request):
+    return _extract_authorization_header(request)
 
-    archive_bytes = archive_buffer.getvalue()
-    artifact_sha256 = hashlib.sha256(archive_bytes).hexdigest()
 
-    proxy_name = f"fmu-proxy-lab-{lab_id}.fmu"
-    headers = {
-        "Content-Disposition": f'attachment; filename="{proxy_name}"',
-        "X-Proxy-Artifact-Sha256": artifact_sha256,
-    }
-    if FMU_PROXY_SIGNING_KEY:
-        signature = hmac.new(
-            FMU_PROXY_SIGNING_KEY.encode("utf-8"),
-            archive_bytes,
-            hashlib.sha256,
-        ).hexdigest()
-        headers["X-Proxy-Artifact-Signature"] = f"hmac-sha256={signature}"
+async def _proxy_issue_session_ticket(*args, **kwargs):
+    return await _issue_session_ticket(*args, **kwargs)
 
-    logger.info(
-        "Generated proxy FMU lab_id=%s reservation_key=%s ticket_id=%s bytes=%s sha256=%s signed=%s",
-        str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
-        str(effective_reservation_key).replace("\r", "\\r").replace("\n", "\\n"),
-        str(_normalize_ticket_id(session_ticket) or "-").replace("\r", "\\r").replace("\n", "\\n"),
-        len(archive_bytes),
-        artifact_sha256,
-        "yes" if FMU_PROXY_SIGNING_KEY else "no",
-    )
-    return Response(content=archive_bytes, media_type="application/octet-stream", headers=headers)
+
+async def _proxy_get_authorized_model_metadata(**kwargs):
+    return await _fmu_backend.get_authorized_model_metadata(**kwargs)
+
+
+def _proxy_build_model_description_xml(metadata: dict):
+    return _build_proxy_model_description_xml(metadata)
+
+
+def _proxy_parse_fmi_major_version(value: Any):
+    return _parse_fmi_major_version(value)
+
+
+def _proxy_derive_gateway_ws_url(claims: dict):
+    return _derive_gateway_ws_url(claims)
+
+
+def _proxy_model_identifier(metadata: dict):
+    return _proxy_model_identifier_impl(metadata)
+
+
+def _proxy_model_identifier_for_route(metadata: dict):
+    return _proxy_model_identifier(metadata)
+
+
+def _proxy_collect_runtime_files(**kwargs):
+    return _collect_runtime_files(**kwargs)
+
+
+def _proxy_build_session_config(**kwargs):
+    return _build_proxy_session_config(**kwargs)
+
+
+def _proxy_normalize_ticket_id(session_ticket: Optional[str]):
+    return _normalize_ticket_id(session_ticket)
+
+
+def _proxy_build_artifact(**kwargs):
+    return build_proxy_artifact(**kwargs)
+
+
+def _proxy_build_artifact_headers(**kwargs):
+    return build_proxy_artifact_headers(**kwargs)
+
+
+_proxy_router = create_proxy_router(
+    verify_jwt=verify_jwt,
+    enforce_fmu_claim=_proxy_enforce_fmu_claim,
+    get_claim_lab_id=_proxy_get_claim_lab_id,
+    enforce_requested_reservation=_proxy_enforce_requested_reservation,
+    allow_proxy_download=_proxy_allow_download,
+    extract_authorization_header=_proxy_extract_authorization_header,
+    new_request_id=lambda: f"proxy_{uuid4().hex[:8]}",
+    issue_session_ticket=_proxy_issue_session_ticket,
+    derive_gateway_ws_url=_proxy_derive_gateway_ws_url,
+    get_authorized_model_metadata=_proxy_get_authorized_model_metadata,
+    build_proxy_model_description_xml=_proxy_build_model_description_xml,
+    parse_fmi_major_version=_proxy_parse_fmi_major_version,
+    proxy_model_identifier=_proxy_model_identifier_for_route,
+    collect_runtime_files=_proxy_collect_runtime_files,
+    build_proxy_session_config=_proxy_build_session_config,
+    build_proxy_artifact=_proxy_build_artifact,
+    build_proxy_artifact_headers=_proxy_build_artifact_headers,
+    normalize_ticket_id=_proxy_normalize_ticket_id,
+    get_signing_key=lambda: FMU_PROXY_SIGNING_KEY,
+    logger=logger,
+)
+# Keep the historical private symbol available to callers and tests while the
+# registered endpoint lives in the dedicated router.
+download_proxy_fmu = cast(APIRoute, _proxy_router.routes[0]).endpoint
+app.include_router(_proxy_router)
 
 
 @app.post("/api/v1/simulations/run")
@@ -1416,34 +1325,15 @@ async def run_simulation(
 
     fmu_path = _resolve_fmu_path(fmu_filename)
 
-    # Options
-    start_time = float(req.options.get("startTime", 0))
-    stop_time = float(req.options.get("stopTime", 10))
-    step_size = float(req.options.get("stepSize", 0.01))
-    requested_timeout = int(req.options.get("timeout", MAX_SIMULATION_TIMEOUT))
-
-    if stop_time <= start_time:
-        raise HTTPException(status_code=400, detail="stopTime must be greater than startTime")
-    if step_size <= 0:
-        raise HTTPException(status_code=400, detail="stepSize must be positive")
-    if requested_timeout <= 0:
-        raise HTTPException(status_code=400, detail="timeout must be positive")
-    timeout = _effective_timeout_seconds(requested_timeout, claims)
-    # Upper/lower safety bounds
-    if stop_time > MAX_STOP_TIME:
-        raise HTTPException(status_code=400, detail=f"stopTime exceeds maximum ({MAX_STOP_TIME}s)")
-    if step_size < MIN_STEP_SIZE:
-        raise HTTPException(status_code=400, detail=f"stepSize below minimum ({MIN_STEP_SIZE}s)")
+    execution_options = _parse_simulation_options(req.options, claims)
+    start_time = execution_options.start_time
+    stop_time = execution_options.stop_time
+    step_size = execution_options.step_size
+    timeout = execution_options.timeout
 
     # --- FMI type auto-detection ---
-    fmi_type = req.options.get("fmiType", None)
-    solver_name = req.options.get("solver", "Euler")
-    if not fmi_type:
-        try:
-            md = read_model_description(str(fmu_path))
-            fmi_type = "CoSimulation" if md.coSimulation else ("ModelExchange" if md.modelExchange else "CoSimulation")
-        except Exception:
-            fmi_type = "CoSimulation"
+    fmi_type = _resolve_fmi_type(execution_options.fmi_type, fmu_path)
+    solver_name = execution_options.solver_name
 
     # Concurrency check
     _acquire_slot(lab_id)
@@ -1588,31 +1478,13 @@ async def stream_simulation(
 
     fmu_path = _resolve_fmu_path(fmu_filename)
 
-    start_time = float(req.options.get("startTime", 0))
-    stop_time = float(req.options.get("stopTime", 10))
-    step_size = float(req.options.get("stepSize", 0.01))
-    requested_timeout = int(req.options.get("timeout", MAX_SIMULATION_TIMEOUT))
-
-    if stop_time <= start_time:
-        raise HTTPException(status_code=400, detail="stopTime must be greater than startTime")
-    if step_size <= 0:
-        raise HTTPException(status_code=400, detail="stepSize must be positive")
-    if requested_timeout <= 0:
-        raise HTTPException(status_code=400, detail="timeout must be positive")
-    timeout = _effective_timeout_seconds(requested_timeout, claims)
-    if stop_time > MAX_STOP_TIME:
-        raise HTTPException(status_code=400, detail=f"stopTime exceeds maximum ({MAX_STOP_TIME}s)")
-    if step_size < MIN_STEP_SIZE:
-        raise HTTPException(status_code=400, detail=f"stepSize below minimum ({MIN_STEP_SIZE}s)")
-
-    fmi_type = req.options.get("fmiType", None)
-    solver_name = req.options.get("solver", "Euler")
-    if not fmi_type:
-        try:
-            md = read_model_description(str(fmu_path))
-            fmi_type = "CoSimulation" if md.coSimulation else ("ModelExchange" if md.modelExchange else "CoSimulation")
-        except Exception:
-            fmi_type = "CoSimulation"
+    execution_options = _parse_simulation_options(req.options, claims)
+    start_time = execution_options.start_time
+    stop_time = execution_options.stop_time
+    step_size = execution_options.step_size
+    timeout = execution_options.timeout
+    fmi_type = _resolve_fmi_type(execution_options.fmi_type, fmu_path)
+    solver_name = execution_options.solver_name
 
     sim_id = uuid4().hex
 
@@ -1648,27 +1520,16 @@ async def stream_simulation(
             sim_result = future.result()
 
             # Stream results in chunks (~10 chunks)
-            time_data = sim_result.get("time", [])
-            chunk_size = max(1, len(time_data) // 10)
-            total_chunks = max(1, -(-len(time_data) // chunk_size))  # ceil division
-            for idx in range(0, len(time_data), chunk_size):
-                chunk = {
-                    "type": "data",
-                    "chunkIndex": idx // chunk_size,
-                    "totalChunks": total_chunks,
-                    "time": time_data[idx:idx + chunk_size],
-                    "outputs": {k: v[idx:idx + chunk_size] for k, v in sim_result.get("outputs", {}).items()},
-                }
+            for chunk in _iter_simulation_result_chunks(sim_result):
                 yield json.dumps(chunk) + "\n"
 
             elapsed = round(time.monotonic() - t0, 3)
-            yield json.dumps({
-                "type": "completed",
-                "simId": sim_id,
-                "simulationTime": elapsed,
-                "fmiType": fmi_type,
-                "outputVariables": sim_result.get("outputVariables", []),
-            }) + "\n"
+            yield json.dumps(_build_simulation_completed_event(
+                sim_id=sim_id,
+                simulation_time=elapsed,
+                fmi_type=fmi_type,
+                simulation_result=sim_result,
+            )) + "\n"
 
             await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
                                 req.parameters, req.options, sim_result, elapsed)
