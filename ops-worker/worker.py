@@ -78,6 +78,7 @@ from winrm_trust_service import (
     refresh_winrm_trust_store as _refresh_winrm_trust_store_impl,
 )
 from winrm_session_policy import (
+    build_winrm_endpoint as _build_winrm_endpoint_impl,
     resolve_winrm_connection_policy as _resolve_winrm_connection_policy_impl,
 )
 from winrm_session_factory import (
@@ -108,18 +109,65 @@ from heartbeat_values import (
 from heartbeat_values import suggest_mac_from_heartbeat as _suggest_mac_from_heartbeat_impl
 from heartbeat_service import poll_heartbeat as _poll_heartbeat_impl
 from heartbeat_stream import generate_heartbeat_stream as _generate_heartbeat_stream_impl
+from heartbeat_poller import poll_all_hosts as _poll_all_hosts_impl
 from winrm_credentials_resolution import (
     resolve_winrm_credentials as _resolve_winrm_credentials_impl,
 )
 from host_catalog import validate_winrm_catalog as _validate_winrm_catalog_impl
 from host_registry import HostRegistry
+from host_config_service import (
+    load_dynamic_config as _load_dynamic_config_impl,
+    load_host_config as _load_host_config_impl,
+    update_dynamic_host as _update_dynamic_host_impl,
+    upsert_dynamic_host as _upsert_dynamic_host_impl,
+    write_dynamic_config as _write_dynamic_config_impl,
+)
+from host_reload_service import reload_hosts as _reload_hosts_impl
 from host_inventory_values import (
     safe_host_inventory_entry as _safe_host_inventory_entry_impl,
+)
+from host_inventory_service import (
+    build_host_inventory as _build_host_inventory_impl,
 )
 from host_discovery_values import (
     probe_labstation_http as _probe_labstation_http_impl,
     response_looks_like_labstation as _response_looks_like_labstation_impl,
 )
+from host_discovery_service import (
+    discover_labstation_candidate as _discover_labstation_candidate_impl,
+)
+from host_heartbeat_discovery import (
+    discover_heartbeat_hint as _discover_heartbeat_hint_impl,
+)
+from host_heartbeat_paths import (
+    build_heartbeat_path_candidates as _build_heartbeat_path_candidates_impl,
+    query_labstation_task_heartbeat_path as _query_labstation_task_heartbeat_path_impl,
+)
+from guacamole_connection_lookup import (
+    guacamole_name_candidates as _guacamole_name_candidates_impl,
+    resolve_guacamole_connection as _resolve_guacamole_connection_impl,
+)
+from guacamole_connection_values import (
+    parse_guacamole_selector as _parse_guacamole_selector_impl,
+    safe_connection_response as _safe_connection_response_impl,
+)
+from guacamole_catalog_service import (
+    load_guacamole_connections as _load_guacamole_connections_impl,
+)
+from guacamole_dsn import build_guacamole_dsn as _build_guacamole_dsn_impl
+from ops_dsn import build_ops_dsn as _build_ops_dsn_impl
+from datetime_values import to_utc as _to_utc_impl
+from input_values import (
+    normalize_args as _normalize_args_impl,
+    parse_bool as _parse_bool_impl,
+    parse_recipients as _parse_recipients_impl,
+)
+from database_health import database_is_usable as _database_is_usable_impl
+from demo_values import (
+    canonical_demo_lab_id as _canonical_demo_lab_id_impl,
+    get_mandatory_field as _get_mandatory_field_impl,
+)
+from operation_values import rows_to_operations as _rows_to_operations_impl
 from host_provisioning_values import (
     build_provisioned_host as _build_provisioned_host_impl,
     normalize_labs as _normalize_labs_impl,
@@ -827,29 +875,29 @@ def validate_winrm_catalog(config: Dict[str, Any]) -> None:
     )
 
 def load_config() -> Dict[str, Any]:
-    base = read_hosts_config(CONFIG_PATH, missing_ok=False)
-    dynamic = read_hosts_config(DYNAMIC_CONFIG_PATH, missing_ok=True)
-    merged = merge_host_configs(base, dynamic)
-    validate_winrm_catalog(merged)
-    return resolve_host_secret_refs(merged)
+    return _load_host_config_impl(
+        CONFIG_PATH,
+        DYNAMIC_CONFIG_PATH,
+        read_config=read_hosts_config,
+        merge_configs=merge_host_configs,
+        validate_config=validate_winrm_catalog,
+        resolve_secret_refs=resolve_host_secret_refs,
+    )
 
 
 HOSTS = HostRegistry(load_config())
 
 
 def build_ops_dsn() -> Optional[str]:
-    if MYSQL_DSN:
-        return MYSQL_DSN
-    if OPS_MYSQL_USER and OPS_MYSQL_PASSWORD and OPS_MYSQL_DATABASE:
-        return URL.create(
-            "mysql+pymysql",
-            username=OPS_MYSQL_USER,
-            password=OPS_MYSQL_PASSWORD,
-            host=MYSQL_HOSTNAME,
-            port=MYSQL_PORT,
-            database=OPS_MYSQL_DATABASE,
-        ).render_as_string(hide_password=False)
-    return None
+    return _build_ops_dsn_impl(
+        MYSQL_DSN,
+        OPS_MYSQL_USER,
+        OPS_MYSQL_PASSWORD,
+        OPS_MYSQL_DATABASE,
+        MYSQL_HOSTNAME,
+        MYSQL_PORT,
+        create_url=URL.create,
+    )
 
 
 OPS_DSN = build_ops_dsn()
@@ -857,24 +905,18 @@ DB_ENGINE: Optional[Engine] = create_engine(OPS_DSN, pool_pre_ping=True) if OPS_
 
 
 def build_guacamole_dsn() -> Optional[str]:
-    if GUACAMOLE_MYSQL_DSN:
-        return GUACAMOLE_MYSQL_DSN
-    if GUACAMOLE_MYSQL_USER and GUACAMOLE_MYSQL_PASSWORD and GUACAMOLE_MYSQL_DATABASE:
-        return URL.create(
-            "mysql+pymysql",
-            username=GUACAMOLE_MYSQL_USER,
-            password=GUACAMOLE_MYSQL_PASSWORD,
-            host=MYSQL_HOSTNAME,
-            port=MYSQL_PORT,
-            database=GUACAMOLE_MYSQL_DATABASE,
-        ).render_as_string(hide_password=False)
-    if not MYSQL_DSN or not GUACAMOLE_MYSQL_DATABASE:
-        return None
-    try:
-        return str(make_url(MYSQL_DSN).set(database=GUACAMOLE_MYSQL_DATABASE))
-    except Exception as exc:
-        logging.warning("Unable to derive Guacamole DSN from MYSQL_DSN: %s", exc)
-        return None
+    return _build_guacamole_dsn_impl(
+        GUACAMOLE_MYSQL_DSN,
+        GUACAMOLE_MYSQL_USER,
+        GUACAMOLE_MYSQL_PASSWORD,
+        GUACAMOLE_MYSQL_DATABASE,
+        MYSQL_DSN,
+        MYSQL_HOSTNAME,
+        MYSQL_PORT,
+        create_url=URL.create,
+        parse_url=make_url,
+        logger=logging,
+    )
 
 
 GUACAMOLE_DSN = build_guacamole_dsn()
@@ -884,20 +926,11 @@ GUACAMOLE_DB_ENGINE: Optional[Engine] = (
 
 
 def to_utc(ts: Any) -> Optional[datetime]:
-    if not ts:
-        return None
-    try:
-        # Handle trailing Z
-        value = str(ts).replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(value)
-        # MySQL/SQLite rows are stored as UTC but are commonly returned as
-        # naive datetimes.  Treating them as local time shifts expiry windows
-        # on hosts outside UTC and can drop evidence near token expiration.
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-    except Exception:
-        return None
+    return _to_utc_impl(
+        ts,
+        parse_datetime=datetime.fromisoformat,
+        utc_timezone=timezone.utc,
+    )
 
 
 def wol_and_wait(mac: str, broadcast: Optional[str], port: int, ping_target: str,
@@ -1027,8 +1060,12 @@ def run_winrm_method(session: Any, method_name: str, *args: Any):
 
 
 def winrm_endpoint(host: Dict[str, Any], use_ssl: Optional[bool], port: Optional[int]) -> str:
-    _, effective_port, _ = _winrm_connection_policy(host, use_ssl, port, None)
-    return f"https://{host.get('address')}:{effective_port}/wsman"
+    return _build_winrm_endpoint_impl(
+        host,
+        use_ssl,
+        port,
+        resolve_policy=_winrm_connection_policy,
+    )
 
 
 def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[list],
@@ -1234,37 +1271,15 @@ def persist_heartbeat(engine: Engine, host: Dict[str, Any], heartbeat: Dict[str,
 
 
 def parse_bool(value: Any, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() not in ("false", "0", "no", "off")
-    return bool(value)
+    return _parse_bool_impl(value, default)
 
 
 def normalize_args(args: Any, default: Optional[List[str]] = None) -> List[str]:
-    if args is None:
-        return list(default or [])
-    if isinstance(args, list):
-        return [str(item) for item in args]
-    return [str(args)]
+    return _normalize_args_impl(args, default)
 
 
 def parse_recipients(value: Any, default: Optional[List[str]] = None) -> List[str]:
-    if value is None:
-        return list(default or [])
-    if isinstance(value, list):
-        items = [str(item) for item in value]
-    else:
-        items = [str(value)]
-    recipients: List[str] = []
-    for item in items:
-        for part in item.split(","):
-            normalized = part.strip()
-            if normalized:
-                recipients.append(normalized)
-    return recipients
+    return _parse_recipients_impl(value, default)
 
 
 NOTIFICATION_SERVICE_RECIPIENTS = parse_recipients(os.getenv("NOTIFICATION_SERVICE_RECIPIENTS"))
@@ -1847,15 +1862,12 @@ def poll_heartbeat(host: Dict[str, Any], include_events: bool = False) -> Dict[s
     )
 
 def database_is_usable(engine: Optional[Engine], statement: str) -> bool:
-    if not engine:
-        return False
-    try:
-        with engine.connect() as conn:
-            conn.execute(text(statement)).first()
-        return True
-    except Exception as exc:  # pylint: disable=broad-except
-        logging.warning("Health database check failed: %s", exc)
-        return False
+    return _database_is_usable_impl(
+        engine,
+        statement,
+        sql_text=text,
+        logger=logging,
+    )
 
 
 def fernet_key_is_usable() -> bool:
@@ -2177,18 +2189,11 @@ def api_stream_heartbeat():
 
 
 def _get_mandatory_field(payload: Dict[str, Any], *keys: str) -> Optional[str]:
-    for key in keys:
-        value = payload.get(key)
-        if value not in (None, ""):
-            return value
-    return None
+    return _get_mandatory_field_impl(payload, *keys)
 
 
 def _canonical_demo_lab_id(value: Any) -> Optional[str]:
-    raw = str(value or "").strip()
-    if not raw.isdigit():
-        return None
-    return str(int(raw))
+    return _canonical_demo_lab_id_impl(value)
 
 
 def _demo_context(payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -2628,28 +2633,7 @@ def _sanitize_offset(value: Optional[str]) -> int:
 
 
 def _rows_to_operations(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    op_entries: List[Dict[str, Any]] = []
-    for op in rows:
-        payload = op.get("payload")
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except json.JSONDecodeError:
-                # Optional operation payloads may contain opaque non-JSON values.
-                pass
-        op_entries.append(
-            {
-                "action": op.get("action"),
-                "status": op.get("status"),
-                "success": bool(op.get("success")),
-                "message": op.get("message"),
-                "payload": payload,
-                "responseCode": op.get("response_code"),
-                "durationMs": op.get("duration_ms"),
-                "createdAt": _to_iso(op.get("created_at")),
-            }
-        )
-    return op_entries
+    return _rows_to_operations_impl(rows, to_iso=_to_iso)
 
 
 def build_reservation_timeline(reservation_id: str, limit: int, offset: int) -> Dict[str, Any]:
@@ -2905,191 +2889,65 @@ def probe_labstation_http(host: str) -> Dict[str, Any]:
     )
 
 def query_labstation_task_heartbeat_path(host: Dict[str, Any]) -> Optional[str]:
-    script = r"""
-$task = Get-ScheduledTask -TaskPath '\LabStation\' -TaskName 'BackgroundService' -ErrorAction Stop
-$action = @($task.Actions)[0]
-$execute = [string]$action.Execute
-$arguments = [string]$action.Arguments
-$heartbeatPath = ''
-if ($arguments -match '"([^"]*\\LabStation\.ahk)"') {
-    $root = Split-Path -Parent $Matches[1]
-    $heartbeatPath = Join-Path $root 'data\telemetry\heartbeat.json'
-} elseif ($execute -match '(?i)LabStation\.exe$') {
-    $root = Split-Path -Parent $execute.Trim('"')
-    $heartbeatPath = Join-Path $root 'data\telemetry\heartbeat.json'
-}
-[pscustomobject]@{
-    execute = $execute
-    arguments = $arguments
-    heartbeatPath = $heartbeatPath
-} | ConvertTo-Json -Compress
-"""
-    try:
-        raw = run_remote_powershell(host, script, None, None, None, None, None)
-        parsed = json.loads(raw)
-    except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("Unable to derive Lab Station heartbeat path from scheduled task: %s", exc)
-        return None
-    path = str(parsed.get("heartbeatPath") or "").strip() if isinstance(parsed, dict) else ""
-    return path or None
+    return _query_labstation_task_heartbeat_path_impl(
+        host,
+        run_remote_powershell=run_remote_powershell,
+        parse_json=json.loads,
+        logger=logging,
+    )
 
 
 def build_heartbeat_path_candidates(host: Dict[str, Any]) -> List[str]:
-    candidates = []
-    task_path = query_labstation_task_heartbeat_path(host)
-    if task_path:
-        candidates.append(task_path)
-    for path in DISCOVERY_HEARTBEAT_PATHS:
-        if path and path not in candidates:
-            candidates.append(path)
-    return candidates
+    return _build_heartbeat_path_candidates_impl(
+        host,
+        query_task_path=query_labstation_task_heartbeat_path,
+        configured_paths=DISCOVERY_HEARTBEAT_PATHS,
+    )
 
 
 def discover_heartbeat_hint(hostname: str) -> Dict[str, Any]:
-    if not hostname:
-        return {"checked": False, "detected": False, "status": "missing-hostname"}
-    temp_host = {
-        "name": hostname,
-        "address": hostname,
-        "credential_ref": hostname,
-        "winrm_transport": "ntlm",
-        "winrm_use_ssl": True,
-        "winrm_port": WINRM_PORT,
-    }
-    if not winrm_credentials_configured(hostname):
-        return {"checked": False, "detected": False, "status": "missing-winrm-credentials"}
-    errors = []
-    heartbeat = None
-    detected_path = None
-    for path in build_heartbeat_path_candidates(temp_host):
-        try:
-            raw = read_remote_file(
-                temp_host,
-                path,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            heartbeat = json.loads(raw)
-            detected_path = path
-            break
-        except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("Unable to read heartbeat candidate %s: %s", path, exc)
-            errors.append({"path": path, "error": "Remote heartbeat read failed"})
-
-    if heartbeat is None:
-        return {"checked": True, "detected": False, "status": "read-failed", "errors": errors}
-
-    mac_hint = suggest_mac_from_heartbeat(heartbeat)
-    result = {"checked": True, "detected": True, "path": detected_path}
-    if mac_hint:
-        result["suggestedMac"] = mac_hint
-    return result
+    return _discover_heartbeat_hint_impl(
+        hostname,
+        credentials_configured=winrm_credentials_configured,
+        path_candidates=build_heartbeat_path_candidates,
+        read_remote_file=read_remote_file,
+        parse_json=json.loads,
+        suggest_mac=suggest_mac_from_heartbeat,
+        winrm_port=WINRM_PORT,
+        logger=logging,
+    )
 
 
 def guacamole_name_candidates(connection: Dict[str, Any]) -> List[str]:
-    host_key = normalize_match_key(connection.get("hostname"))
-    candidates = []
-    connections, _ = load_guacamole_connections()
-    for item in connections:
-        if normalize_match_key(item.get("hostname")) != host_key:
-            continue
-        text = str(item.get("name") or "").strip()
-        if text and text not in candidates:
-            candidates.append(text)
-    for item in connections:
-        if normalize_match_key(item.get("hostname")) != host_key:
-            continue
-        text = str(item.get("hostname") or "").strip()
-        if text and text not in candidates:
-            candidates.append(text)
-    fallback = str(connection.get("hostname") or connection.get("name") or "").strip()
-    if fallback and fallback not in candidates:
-        candidates.append(fallback)
-    return candidates
+    return _guacamole_name_candidates_impl(
+        connection,
+        load_connections=load_guacamole_connections,
+        normalize_key=normalize_match_key,
+    )
 
 
 def resolve_guacamole_connection(connection_id: Any) -> Optional[Dict[str, Any]]:
-    try:
-        wanted = int(connection_id)
-    except (TypeError, ValueError):
-        return None
-    connections, _ = load_guacamole_connections()
-    for connection in connections:
-        if connection.get("id") == wanted:
-            return connection
-    return None
+    return _resolve_guacamole_connection_impl(
+        connection_id,
+        load_connections=load_guacamole_connections,
+    )
 
 
 def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
-    host = normalize_match_key(connection.get("hostname"))
-    if not host:
-        return {
-            "connection": connection,
-            "status": "missing-hostname",
-            "checks": {
-                "dns": False,
-                "winrm": {},
-                "labStationHttp": {"checked": False, "detected": False, "status": "missing-hostname"},
-            },
-        }
-
-    try:
-        socket.getaddrinfo(host, None)
-        dns_ok = True
-    except OSError:
-        dns_ok = False
-
-    winrm_checks = {
-        str(WINRM_PORT): tcp_port_open(host, WINRM_PORT, DISCOVERY_TIMEOUT_SECONDS)
-    }
-    secure_winrm_reachable = winrm_checks[str(WINRM_PORT)]
-    labstation_http = probe_labstation_http(host)
-    heartbeat_hint = discover_heartbeat_hint(host) if any(winrm_checks.values()) else {
-        "checked": False,
-        "detected": False,
-        "status": "winrm-unreachable",
-    }
-    mac_hint = labstation_http.get("suggestedMac") or heartbeat_hint.get("suggestedMac")
-
-    if labstation_http.get("detected") is True and secure_winrm_reachable:
-        status = "labstation-detected"
-    elif secure_winrm_reachable:
-        status = "winrm-reachable"
-    elif labstation_http.get("detected") is True:
-        status = "labstation-detected-without-winrm"
-    elif dns_ok:
-        status = "host-resolves"
-    else:
-        status = "no-response"
-
-    ops_host_draft = {
-        "name": connection.get("hostname"),
-        "address": connection.get("hostname"),
-        "winrm_transport": "ntlm",
-        "winrm_use_ssl": True,
-        "winrm_port": 5986,
-        "heartbeat_path": heartbeat_hint.get("path") or DISCOVERY_HEARTBEAT_PATHS[0],
-        "events_path": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
-        "labs": [],
-        "nameCandidates": guacamole_name_candidates(connection),
-    }
-    if mac_hint:
-        ops_host_draft["mac"] = mac_hint["mac"]
-
-    return {
-        "connection": connection,
-        "status": status,
-        "checks": {
-            "dns": dns_ok,
-            "winrm": winrm_checks,
-            "labStationHttp": labstation_http,
-            "heartbeat": heartbeat_hint,
-        },
-        "opsHostDraft": ops_host_draft,
-    }
+    return _discover_labstation_candidate_impl(
+        connection,
+        normalize_host=normalize_match_key,
+        resolve_dns=socket.getaddrinfo,
+        tcp_probe=tcp_port_open,
+        http_probe=probe_labstation_http,
+        heartbeat_hint=discover_heartbeat_hint,
+        name_candidates=guacamole_name_candidates,
+        winrm_port=WINRM_PORT,
+        discovery_timeout=DISCOVERY_TIMEOUT_SECONDS,
+        heartbeat_paths=DISCOVERY_HEARTBEAT_PATHS,
+        draft_winrm_port=5986,
+        events_path=r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+    )
 
 
 def sanitize_host_name(value: Any, fallback: Optional[Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -3102,33 +2960,30 @@ def validate_labs_against_candidates(labs: List[str], candidates: Any) -> Option
     return _validate_labs_against_candidates_impl(labs, candidates)
 
 def load_dynamic_config() -> Dict[str, Any]:
-    return read_hosts_config(DYNAMIC_CONFIG_PATH, missing_ok=True)
+    return _load_dynamic_config_impl(
+        DYNAMIC_CONFIG_PATH,
+        read_config=read_hosts_config,
+    )
 
 
 def write_dynamic_config(config: Dict[str, Any]) -> None:
-    directory = os.path.dirname(DYNAMIC_CONFIG_PATH) or "."
-    os.makedirs(directory, exist_ok=True)
-    tmp_path = f"{DYNAMIC_CONFIG_PATH}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        json.dump(config, handle, indent=2)
-        handle.write("\n")
-    os.replace(tmp_path, DYNAMIC_CONFIG_PATH)
+    return _write_dynamic_config_impl(
+        config,
+        DYNAMIC_CONFIG_PATH,
+        path_dirname=os.path.dirname,
+        make_dirs=os.makedirs,
+        open_file=open,
+        dump_json=json.dump,
+        replace_file=os.replace,
+    )
 
 
 def upsert_dynamic_host(host_config: Dict[str, Any]) -> None:
-    config = load_dynamic_config()
-    hosts = [host for host in config.get("hosts", []) if isinstance(host, dict)]
-    key = str(host_config.get("name") or "").strip().lower()
-    replaced = False
-    for index, host in enumerate(hosts):
-        if str(host.get("name") or "").strip().lower() == key:
-            hosts[index] = host_config
-            replaced = True
-            break
-    if not replaced:
-        hosts.append(host_config)
-    config["hosts"] = hosts
-    write_dynamic_config(config)
+    return _upsert_dynamic_host_impl(
+        host_config,
+        load_config=load_dynamic_config,
+        write_config=write_dynamic_config,
+    )
 
 
 def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -3145,53 +3000,16 @@ def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) 
     )
 
 def update_dynamic_host(host_name: str, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    config = load_dynamic_config()
-    hosts = [host for host in config.get("hosts", []) if isinstance(host, dict)]
-    original_key = normalize_match_key(host_name)
-    host_index = next(
-        (
-            index for index, host in enumerate(hosts)
-            if normalize_match_key(host.get("name")) == original_key
-        ),
-        None,
+    return _update_dynamic_host_impl(
+        host_name,
+        payload,
+        load_config=load_dynamic_config,
+        write_config=write_dynamic_config,
+        normalize_key=normalize_match_key,
+        sanitize_name=sanitize_host_name,
+        normalize_mac=normalize_mac,
+        host_get=HOSTS.get,
     )
-    if host_index is None:
-        return None, "host is defined in the static catalog; edit ops-worker/hosts.json manually"
-
-    current = dict(hosts[host_index])
-    name, error = sanitize_host_name(payload.get("name"), current.get("name"))
-    if error or name is None:
-        return None, error or "host name is required"
-    if normalize_match_key(name) != original_key:
-        existing = HOSTS.get(name)
-        if existing and normalize_match_key(existing.get("name")) != original_key:
-            return None, f"host {name} already exists"
-
-    updated = dict(current)
-    updated["name"] = name
-
-    if "mac" in payload:
-        raw_mac = str(payload.get("mac") or "").strip()
-        if raw_mac:
-            mac = normalize_mac(raw_mac)
-            if not mac:
-                return None, "mac must use format 00:11:22:33:44:55 or 00-11-22-33-44-55"
-            updated["mac"] = mac
-        else:
-            updated.pop("mac", None)
-
-    if "heartbeatPath" in payload:
-        heartbeat_path = str(payload.get("heartbeatPath") or "").strip()
-        if not heartbeat_path:
-            return None, "heartbeatPath is required"
-        if len(heartbeat_path) > 1024 or any(ord(char) < 32 for char in heartbeat_path):
-            return None, "heartbeatPath must be a valid Windows path"
-        updated["heartbeat_path"] = heartbeat_path
-
-    hosts[host_index] = updated
-    config["hosts"] = hosts
-    write_dynamic_config(config)
-    return updated, None
 
 
 def safe_host_inventory_entry(host: Dict[str, Any], *, editable: bool = False) -> Dict[str, Any]:
@@ -3205,72 +3023,11 @@ def safe_host_inventory_entry(host: Dict[str, Any], *, editable: bool = False) -
     )
 
 def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    if not GUACAMOLE_DB_ENGINE:
-        return [], "Guacamole database not configured"
-
-    try:
-        with GUACAMOLE_DB_ENGINE.begin() as conn:
-            rows = conn.execute(
-                text(
-                    """
-                    SELECT
-                        c.connection_id,
-                        c.connection_name,
-                        c.protocol,
-                        MAX(CASE WHEN p.parameter_name = 'hostname' THEN p.parameter_value END) AS hostname,
-                        MAX(CASE WHEN p.parameter_name = 'port' THEN p.parameter_value END) AS port
-                    FROM guacamole_connection c
-                    LEFT JOIN guacamole_connection_parameter p
-                        ON p.connection_id = c.connection_id
-                        AND p.parameter_name IN ('hostname', 'port')
-                    GROUP BY c.connection_id, c.connection_name, c.protocol
-                    ORDER BY c.connection_id ASC
-                    """
-                )
-            ).mappings().all()
-            try:
-                user_rows = conn.execute(
-                    text(
-                        """
-                        SELECT
-                            cp.connection_id,
-                            e.name AS username
-                        FROM guacamole_connection_permission cp
-                        JOIN guacamole_entity e
-                            ON e.entity_id = cp.entity_id
-                        WHERE cp.permission = 'READ'
-                            AND e.type = 'USER'
-                            AND e.name NOT LIKE 'dlabs-res-%'
-                        ORDER BY cp.connection_id ASC, e.entity_id ASC
-                        """
-                    )
-                ).mappings().all()
-            except Exception as exc:
-                logging.warning("Unable to load Guacamole connection users: %s", exc)
-                user_rows = []
-    except Exception as exc:
-        logging.warning("Unable to load Guacamole connections: %s", exc)
-        return [], "Guacamole connection inventory unavailable"
-
-    users_by_connection: Dict[Any, List[str]] = {}
-    for row in user_rows:
-        connection_id = row.get("connection_id")
-        username = str(row.get("username") or "").strip()
-        if connection_id is not None and username:
-            users_by_connection.setdefault(connection_id, []).append(username)
-
-    return [
-        {
-            "id": row.get("connection_id"),
-            "selector": f"guac:id:{row.get('connection_id')}",
-            "name": row.get("connection_name"),
-            "protocol": row.get("protocol"),
-            "hostname": row.get("hostname"),
-            "port": row.get("port"),
-            "users": users_by_connection.get(row.get("connection_id"), []),
-        }
-        for row in rows
-    ], None
+    return _load_guacamole_connections_impl(
+        GUACAMOLE_DB_ENGINE,
+        sql_text=text,
+        logger=logging,
+    )
 
 
 def require_guacamole_provisioner_auth():
@@ -3286,23 +3043,14 @@ def require_guacamole_provisioner_auth():
 
 
 def parse_guacamole_selector(selector: Any) -> int:
-    match = GUAC_SELECTOR_RE.match(str(selector or "").strip())
-    if not match:
-        raise ValueError("selector must use guac:id:<connection_id>")
-    return int(match.group(1))
+    return _parse_guacamole_selector_impl(
+        selector,
+        selector_pattern=GUAC_SELECTOR_RE,
+    )
 
 
 def safe_connection_response(connection: Dict[str, Any]) -> Dict[str, Any]:
-    connection_id = connection.get("id")
-    return {
-        "id": connection_id,
-        "selector": connection.get("selector") or f"guac:id:{connection_id}",
-        "name": connection.get("name"),
-        "protocol": connection.get("protocol"),
-        "hostname": connection.get("hostname"),
-        "port": connection.get("port"),
-        "warnings": [],
-    }
+    return _safe_connection_response_impl(connection)
 
 
 def provision_guacamole_temporary_user(
@@ -3485,56 +3233,16 @@ def cleanup_expired_guacamole_temp_users() -> int:
 def build_host_inventory() -> Dict[str, Any]:
     with HOSTS_LOCK:
         hosts = HOSTS.all_hosts()
-    dynamic_host_names = {
-        normalize_match_key(host.get("name"))
-        for host in load_dynamic_config().get("hosts", [])
-        if isinstance(host, dict) and normalize_match_key(host.get("name"))
-    }
+    dynamic_config = load_dynamic_config()
     guacamole_connections, guacamole_error = load_guacamole_connections()
-    claimed_ids = set()
-    host_entries = []
-
-    for host in hosts:
-        match_keys = {
-            normalize_match_key(host.get("name")),
-            normalize_match_key(host.get("address")),
-        }
-        match_keys.discard("")
-        matches = [
-            conn for conn in guacamole_connections
-            if normalize_match_key(conn.get("hostname")) in match_keys
-        ]
-        for conn in matches:
-            claimed_ids.add(conn.get("id"))
-
-        if len(matches) == 1:
-            status = "single"
-        elif len(matches) > 1:
-            status = "multiple"
-        else:
-            status = "none"
-
-        entry = safe_host_inventory_entry(
-            host,
-            editable=normalize_match_key(host.get("name")) in dynamic_host_names,
-        )
-        entry["guacamole"] = {
-            "status": status,
-            "connections": matches,
-        }
-        host_entries.append(entry)
-
-    unmatched = [
-        conn for conn in guacamole_connections
-        if conn.get("id") not in claimed_ids
-    ]
-
-    return {
-        "hosts": host_entries,
-        "guacamoleAvailable": guacamole_error is None,
-        "guacamoleError": guacamole_error,
-        "guacamoleUnmatched": unmatched,
-    }
+    return _build_host_inventory_impl(
+        hosts,
+        dynamic_config,
+        guacamole_connections,
+        guacamole_error,
+        normalize_key=normalize_match_key,
+        safe_entry=safe_host_inventory_entry,
+    )
 
 
 @APP.route("/api/hosts", methods=["GET"])
@@ -4077,12 +3785,7 @@ def api_aas_sync_lab(lab_id: str):
 
 
 def poll_all_hosts():
-    for host in HOSTS.all_hosts():
-        try:
-            poll_heartbeat(host, include_events=True)
-            logging.info("Polled heartbeat for %s", host.get("name"))
-        except Exception as exc:
-            logging.error("Heartbeat poll failed for %s: %s", host.get("name"), exc)
+    return _poll_all_hosts_impl(HOSTS, poll_heartbeat, logging)
 
 
 class ReservationOrchestrator:
@@ -5035,21 +4738,22 @@ def deliver_session_observation_outbox() -> int:
     return delivered
 
 
+def _replace_host_registry(registry: HostRegistry) -> None:
+    global HOSTS
+    with HOSTS_LOCK:
+        HOSTS = registry
+        RESERVATION_AUTOMATOR.registry = registry
+
+
 def reload_hosts() -> Tuple[int, Optional[str]]:
     """Reload host catalog from CONFIG_PATH."""
-    global HOSTS
-    try:
-        cfg = load_config()
-        registry = HostRegistry(cfg)
-        refresh_winrm_trust_store(registry.all_hosts())
-        with HOSTS_LOCK:
-            HOSTS = registry
-            RESERVATION_AUTOMATOR.registry = registry
-        logging.info("Reloaded hosts catalog (%s hosts)", registry.count())
-        return registry.count(), None
-    except Exception as exc:
-        logging.error("Failed to reload hosts: %s", exc)
-        return 0, "Host catalog reload failed"
+    return _reload_hosts_impl(
+        load_config=load_config,
+        registry_factory=HostRegistry,
+        refresh_trust_store=refresh_winrm_trust_store,
+        replace_registry=_replace_host_registry,
+        logger=logging,
+    )
 
 
 def start_scheduler():

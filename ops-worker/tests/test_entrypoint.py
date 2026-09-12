@@ -37,6 +37,36 @@ def test_ops_worker_image_copies_the_winrm_session_policy():
     assert "COPY winrm_session_policy.py /app/winrm_session_policy.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_datetime_values_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY datetime_values.py /app/datetime_values.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_input_values_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY input_values.py /app/input_values.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_database_health_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY database_health.py /app/database_health.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_demo_values_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY demo_values.py /app/demo_values.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_operation_values_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY operation_values.py /app/operation_values.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_winrm_session_factory():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
@@ -79,6 +109,54 @@ def test_ops_worker_image_copies_the_heartbeat_stream():
     assert "COPY heartbeat_stream.py /app/heartbeat_stream.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_heartbeat_poller():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY heartbeat_poller.py /app/heartbeat_poller.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_host_heartbeat_discovery():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_heartbeat_discovery.py /app/host_heartbeat_discovery.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_host_heartbeat_paths():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_heartbeat_paths.py /app/host_heartbeat_paths.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_guacamole_connection_lookup():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY guacamole_connection_lookup.py /app/guacamole_connection_lookup.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_guacamole_connection_values():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY guacamole_connection_values.py /app/guacamole_connection_values.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_guacamole_catalog_service():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY guacamole_catalog_service.py /app/guacamole_catalog_service.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_guacamole_dsn_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY guacamole_dsn.py /app/guacamole_dsn.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_ops_dsn_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY ops_dsn.py /app/ops_dsn.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_host_catalog_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
@@ -91,16 +169,40 @@ def test_ops_worker_image_copies_the_host_registry_module():
     assert "COPY host_registry.py /app/host_registry.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_host_config_service():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_config_service.py /app/host_config_service.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_host_reload_service():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_reload_service.py /app/host_reload_service.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_host_inventory_values():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY host_inventory_values.py /app/host_inventory_values.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_host_inventory_service():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_inventory_service.py /app/host_inventory_service.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_host_discovery_values():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY host_discovery_values.py /app/host_discovery_values.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_host_discovery_service():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_discovery_service.py /app/host_discovery_service.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_host_provisioning_values():
