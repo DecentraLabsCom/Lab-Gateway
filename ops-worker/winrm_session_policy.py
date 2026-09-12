@@ -9,6 +9,18 @@ from collections.abc import Callable, Collection, Mapping
 from typing import Any, Optional, Tuple
 
 
+def build_winrm_endpoint(
+    host: Mapping[str, Any],
+    use_ssl: Optional[bool],
+    port: Optional[int],
+    *,
+    resolve_policy: Callable[..., Tuple[bool, int, str]],
+) -> str:
+    """Build the HTTPS WinRM endpoint after resolving connection policy."""
+    _, effective_port, _ = resolve_policy(host, use_ssl, port, None)
+    return f"https://{host.get('address')}:{effective_port}/wsman"
+
+
 def resolve_winrm_connection_policy(
     host: Mapping[str, Any],
     use_ssl: Optional[bool],
