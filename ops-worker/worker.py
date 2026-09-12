@@ -77,6 +77,48 @@ from winrm_trust_service import (
     load_winrm_trust as _load_winrm_trust_impl,
     refresh_winrm_trust_store as _refresh_winrm_trust_store_impl,
 )
+from winrm_session_policy import (
+    resolve_winrm_connection_policy as _resolve_winrm_connection_policy_impl,
+)
+from winrm_session_factory import (
+    create_winrm_session as _create_winrm_session_impl,
+)
+from winrm_command_execution import (
+    run_winrm_method as _run_winrm_method_impl,
+)
+from winrm_command_builders import (
+    build_labstation_command as _build_labstation_command_impl,
+    build_read_remote_file_command as _build_read_remote_file_command_impl,
+    build_remove_remote_file_command as _build_remove_remote_file_command_impl,
+    build_write_remote_file_command as _build_write_remote_file_command_impl,
+)
+from heartbeat_values import (
+    choose_wol_mac as _choose_wol_mac_impl,
+    extract_nic_candidates_from_heartbeat as _extract_nic_candidates_from_heartbeat_impl,
+    normalize_mac as _normalize_mac_impl,
+    parse_boolish as _parse_boolish_impl,
+)
+from heartbeat_values import suggest_mac_from_heartbeat as _suggest_mac_from_heartbeat_impl
+from heartbeat_service import poll_heartbeat as _poll_heartbeat_impl
+from heartbeat_stream import generate_heartbeat_stream as _generate_heartbeat_stream_impl
+from winrm_credentials_resolution import (
+    resolve_winrm_credentials as _resolve_winrm_credentials_impl,
+)
+from host_catalog import validate_winrm_catalog as _validate_winrm_catalog_impl
+from host_registry import HostRegistry
+from host_inventory_values import (
+    safe_host_inventory_entry as _safe_host_inventory_entry_impl,
+)
+from host_discovery_values import (
+    probe_labstation_http as _probe_labstation_http_impl,
+    response_looks_like_labstation as _response_looks_like_labstation_impl,
+)
+from host_provisioning_values import (
+    build_provisioned_host as _build_provisioned_host_impl,
+    normalize_labs as _normalize_labs_impl,
+    sanitize_host_name as _sanitize_host_name_impl,
+    validate_labs_against_candidates as _validate_labs_against_candidates_impl,
+)
 from power.api import power_bp
 from power.models import ValidationError as PowerValidationError
 from power.credentials import PowerCredentialStore
@@ -768,45 +810,14 @@ def _resolved_addresses(address: str) -> List[Any]:
 
 
 def validate_winrm_catalog(config: Dict[str, Any]) -> None:
-    """Reject an invalid Station catalog before it becomes operational."""
-    hosts = config.get("hosts", [])
-    if not hosts:
-        return
-    if not WINRM_MANAGEMENT_CIDRS:
-        raise ValueError("WINRM_MANAGEMENT_CIDRS is required when hosts are configured")
-    try:
-        management_networks = [ipaddress.ip_network(value, strict=False) for value in WINRM_MANAGEMENT_CIDRS]
-    except ValueError as exc:
-        raise ValueError("WINRM_MANAGEMENT_CIDRS contains an invalid network") from exc
-
-    for host in hosts:
-        if not isinstance(host, dict):
-            raise ValueError("every catalog host must be an object")
-        name = str(host.get("name") or "").strip()
-        address = str(host.get("address") or "").strip()
-        if not name or not address:
-            raise ValueError("every catalog host requires name and address")
-        trust_ref = str(host.get("winrm_trust_ref") or "").strip().lower()
-        if trust_ref and not WINRM_TRUST_REF_RE.fullmatch(trust_ref):
-            raise ValueError(
-                f"host '{name}' has an invalid winrm_trust_ref"
-            )
-        if "winrm_use_ssl" not in host or "winrm_port" not in host:
-            raise ValueError(f"host '{name}' must declare winrm_use_ssl and winrm_port")
-        if not _catalog_bool(host.get("winrm_use_ssl")):
-            raise ValueError(f"host '{name}' must use WinRM HTTPS")
-        configured_port = host.get("winrm_port")
-        if configured_port not in (None, ""):
-            try:
-                configured_port = int(configured_port)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"host '{name}' has an invalid winrm_port") from exc
-            if configured_port != WINRM_PORT:
-                raise ValueError(f"host '{name}' must use WinRM port {WINRM_PORT}")
-        addresses = _resolved_addresses(address)
-        if not any(any(candidate in network for network in management_networks) for candidate in addresses):
-            raise ValueError(f"host '{name}' is outside WINRM_MANAGEMENT_CIDRS")
-
+    return _validate_winrm_catalog_impl(
+        config,
+        management_cidrs=WINRM_MANAGEMENT_CIDRS,
+        winrm_port=WINRM_PORT,
+        catalog_bool=_catalog_bool,
+        resolve_addresses=_resolved_addresses,
+        trust_ref_pattern=WINRM_TRUST_REF_RE,
+    )
 
 def load_config() -> Dict[str, Any]:
     base = read_hosts_config(CONFIG_PATH, missing_ok=False)
@@ -814,40 +825,6 @@ def load_config() -> Dict[str, Any]:
     merged = merge_host_configs(base, dynamic)
     validate_winrm_catalog(merged)
     return resolve_host_secret_refs(merged)
-
-
-class HostRegistry:
-    def __init__(self, cfg: Dict[str, Any]):
-        self.hosts: Dict[str, Dict[str, Any]] = {}
-        self.lab_index: Dict[str, Dict[str, Any]] = {}
-        for host in cfg.get("hosts", []):
-            if "name" not in host or "address" not in host:
-                continue
-            host = dict(host)
-            host.pop("winrm_user", None)
-            host.pop("winrm_pass", None)
-            key = host["name"].lower()
-            self.hosts[key] = host
-            for lab_id in host.get("labs", []):
-                lab_key = str(lab_id).strip().lower()
-                if not lab_key:
-                    continue
-                # Only first mapping wins; if multiple hosts share a lab_id, this will pick the first one.
-                self.lab_index.setdefault(lab_key, host)
-
-    def get(self, name: str) -> Optional[Dict[str, Any]]:
-        return self.hosts.get(name.lower()) if name else None
-
-    def get_by_lab(self, lab_id: Optional[Any]) -> Optional[Dict[str, Any]]:
-        if lab_id is None:
-            return None
-        return self.lab_index.get(str(lab_id).strip().lower())
-
-    def all_hosts(self):
-        return list(self.hosts.values())
-
-    def count(self) -> int:
-        return len(self.hosts)
 
 
 HOSTS = HostRegistry(load_config())
@@ -973,56 +950,26 @@ def _winrm_connection_policy(
     port: Optional[int],
     transport: Optional[str],
 ) -> Tuple[bool, int, str]:
-    if "winrm_use_ssl" not in host or "winrm_port" not in host:
-        raise ValueError("host must declare winrm_use_ssl and winrm_port")
-    configured_ssl = _coerce_bool(host.get("winrm_use_ssl"))
-    if configured_ssl is False:
-        raise ValueError("WinRM HTTPS is required by gateway policy")
-    effective_ssl = True
-
-    requested_ssl = _coerce_bool(use_ssl)
-    if requested_ssl is not None and requested_ssl != effective_ssl:
-        raise ValueError("request use_ssl does not match the host WinRM policy")
-
-    configured_port_value = host.get("winrm_port")
-    configured_port: Optional[int] = None
-    if configured_port_value not in (None, ""):
-        try:
-            configured_port = int(configured_port_value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("host winrm_port is invalid") from exc
-
-    requested_port = None
-    if port not in (None, ""):
-        try:
-            requested_port = int(port)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("request port is invalid") from exc
-    if configured_port is not None and configured_port != WINRM_PORT:
-        raise ValueError(f"WinRM port must be {WINRM_PORT}")
-    if configured_port is not None and requested_port is not None and requested_port != configured_port:
-        raise ValueError("request port does not match the host WinRM policy")
-
-    effective_port = requested_port or configured_port
-    if effective_port != WINRM_PORT:
-        raise ValueError(f"WinRM port must be {WINRM_PORT}")
-
-    configured_transport = str(host.get("winrm_transport") or "ntlm").strip().lower()
-    effective_transport = str(transport or configured_transport).strip().lower()
-    if transport not in (None, "") and effective_transport != configured_transport:
-        raise ValueError("request transport does not match the host WinRM policy")
-    if effective_transport not in WINRM_ALLOWED_TRANSPORTS:
-        raise ValueError("WinRM transport is not allowed by gateway policy")
-    return effective_ssl, effective_port, effective_transport
+    return _resolve_winrm_connection_policy_impl(
+        host,
+        use_ssl,
+        port,
+        transport,
+        winrm_port=WINRM_PORT,
+        allowed_transports=WINRM_ALLOWED_TRANSPORTS,
+        coerce_bool=_coerce_bool,
+    )
 
 
 def _winrm_credentials(host: Dict[str, Any], user: Optional[str], password: Optional[str]) -> Tuple[str, str]:
-    if user or password:
-        raise ValueError("WinRM credentials must be stored through the credentials endpoint")
-    credentials = load_winrm_credentials(credential_ref_for_host(host))
-    if not credentials:
-        raise ValueError(WINRM_CREDENTIALS_REQUIRED_MESSAGE)
-    return credentials["user"], credentials["password"]
+    return _resolve_winrm_credentials_impl(
+        host,
+        user,
+        password,
+        credential_ref_for_host=credential_ref_for_host,
+        load_credentials=load_winrm_credentials,
+        required_message=WINRM_CREDENTIALS_REQUIRED_MESSAGE,
+    )
 
 
 def _winrm_trust_error_payload(host_name: Any, code: str) -> Dict[str, Any]:
@@ -1046,27 +993,30 @@ def create_winrm_session(
     operation_timeout_sec: Optional[int] = None,
 ):
     """Create a validated HTTPS WinRM session using trust for this host only."""
-    certificate_path, _ = load_winrm_trust(host)
-    endpoint = f"https://{host.get('address')}:{effective_port}/wsman"
-    kwargs: Dict[str, Any] = {
-        "auth": (user, password),
-        "transport": transport,
-        "ca_trust_path": certificate_path,
-        "server_cert_validation": "validate",
-    }
-    if read_timeout_sec is not None:
-        kwargs["read_timeout_sec"] = read_timeout_sec
-    if operation_timeout_sec is not None:
-        kwargs["operation_timeout_sec"] = operation_timeout_sec
-    return winrm.Session(endpoint, **kwargs)
+    return _create_winrm_session_impl(
+        host,
+        user,
+        password,
+        transport,
+        effective_port,
+        read_timeout_sec=read_timeout_sec,
+        operation_timeout_sec=operation_timeout_sec,
+        load_trust=load_winrm_trust,
+        session_factory=winrm.Session,
+    )
 
 
 def run_winrm_method(session: Any, method_name: str, *args: Any):
     """Run a WinRM operation while keeping TLS failures actionable and stable."""
-    try:
-        return getattr(session, method_name)(*args)
-    except requests.exceptions.SSLError as exc:
-        raise WinRMTrustError("WINRM_TLS_FAILED", WINRM_TLS_FAILED_MESSAGE) from exc
+    return _run_winrm_method_impl(
+        session,
+        method_name,
+        *args,
+        ssl_error_type=requests.exceptions.SSLError,
+        trust_error_factory=WinRMTrustError,
+        tls_error_code="WINRM_TLS_FAILED",
+        tls_error_message=WINRM_TLS_FAILED_MESSAGE,
+    )
 
 
 def winrm_endpoint(host: Dict[str, Any], use_ssl: Optional[bool], port: Optional[int]) -> str:
@@ -1102,7 +1052,8 @@ def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[li
         read_timeout_sec=WINRM_READ_TIMEOUT,
         operation_timeout_sec=WINRM_OPERATION_TIMEOUT,
     )
-    result = run_winrm_method(session, "run_cmd", exe, [command] + args)
+    executable, command_args = _build_labstation_command_impl(exe, command, args)
+    result = run_winrm_method(session, "run_cmd", executable, command_args)
     duration_ms = int((time.time() - start) * 1000)
 
     return {
@@ -1138,8 +1089,7 @@ def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], passw
     user, password = _winrm_credentials(host, user, password)
 
     _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    escaped_path = str(path or "").replace("'", "''")
-    ps = f"Get-Content -LiteralPath '{escaped_path}' -Raw -Encoding UTF8"
+    ps = _build_read_remote_file_command_impl(path)
 
     session = create_winrm_session(
         host,
@@ -1162,9 +1112,7 @@ def write_remote_file(host: Dict[str, Any], path: str, contents: str,
     user, password = _winrm_credentials(host, user, password)
 
     _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    escaped_path = path.replace("'", "''")
-    escaped_contents = contents.replace("'", "''")
-    ps = f"Set-Content -LiteralPath '{escaped_path}' -Value '{escaped_contents}' -Encoding UTF8"
+    ps = _build_write_remote_file_command_impl(path, contents)
 
     session = create_winrm_session(
         host,
@@ -1186,10 +1134,7 @@ def remove_remote_file(host: Dict[str, Any], path: str,
     user, password = _winrm_credentials(host, user, password)
 
     _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    escaped_path = path.replace("'", "''")
-    ps = (
-        f"if (Test-Path -LiteralPath '{escaped_path}') {{ Remove-Item -LiteralPath '{escaped_path}' -Force }}"
-    )
+    ps = _build_remove_remote_file_command_impl(path)
 
     session = create_winrm_session(
         host,
@@ -1900,37 +1845,17 @@ def perform_command_step(
 
 
 def poll_heartbeat(host: Dict[str, Any], include_events: bool = False) -> Dict[str, Any]:
-    hb_path = host.get("heartbeat_path", r"C:\LabStation\labstation\data\telemetry\heartbeat.json")
-    events_path = host.get("events_path", r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl")
-    content = read_remote_file(host, hb_path, None, None, None, None, None)
-    heartbeat = json.loads(content)
-    last_event = None
-    if include_events:
-        try:
-            tail = read_remote_file(host, events_path, None, None, None, None, None)
-            if tail.strip():
-                last_event = json.loads(tail.strip().splitlines()[-1])
-        except Exception as exc:
-            logging.warning("Could not read events for %s: %s", host.get("name"), exc)
-    if DB_ENGINE:
-        try:
-            persist_heartbeat(DB_ENGINE, host, heartbeat, last_event)
-        except Exception as exc:
-            logging.error("DB persistence failed for %s: %s", host.get("name"), exc)
-    # Auto-sync AAS TechnicalData on heartbeat (best-effort, never blocks the poll)
-    for lab_id in host.get("labs", []):
-        try:
-            sync_result = aas_generator.sync_lab_to_basyx(str(lab_id), host, heartbeat)
-            if sync_result.get("disabled"):
-                break  # AAS not configured on this gateway — skip remaining labs silently
-            if sync_result.get("error"):
-                logging.warning("AAS auto-sync failed for lab %s: %s", lab_id, sync_result["error"])
-            else:
-                logging.debug("AAS auto-synced for lab %s", lab_id)
-        except Exception as exc:
-            logging.warning("AAS auto-sync exception for lab %s: %s", lab_id, exc)
-    return {"heartbeat": heartbeat, "last_event": last_event}
-
+    return _poll_heartbeat_impl(
+        host,
+        include_events,
+        read_remote_file=read_remote_file,
+        persist_heartbeat=persist_heartbeat,
+        db_engine=DB_ENGINE,
+        sync_lab_to_basyx=aas_generator.sync_lab_to_basyx,
+        logger=logging,
+        default_heartbeat_path=r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
+        default_events_path=r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+    )
 
 def database_is_usable(engine: Optional[Engine], statement: str) -> bool:
     if not engine:
@@ -2228,67 +2153,21 @@ def _format_sse_event(event: str, data: str) -> str:
 
 
 def generate_heartbeat_stream(host: Dict[str, Any], include_events: bool):
-    while True:
-        try:
-            data = poll_heartbeat(host, include_events=include_events)
-            data["host"] = host.get("name")
-            yield _format_sse_event("heartbeat", json.dumps(data))
-        except WinRMTrustError as exc:
-            logging.info(
-                "Heartbeat stream paused for %s: %s",
-                _sanitize_log_value(host.get("name")),
-                exc.code,
-            )
-            yield _format_sse_event(
-                "error",
-                json.dumps(_winrm_trust_error_payload(host.get("name"), exc.code)),
-            )
-            return
-        except ValueError as exc:
-            if is_missing_winrm_credentials_error(exc):
-                logging.info(
-                    "Heartbeat stream paused for %s: WinRM credentials are required",
-                    _sanitize_log_value(host.get("name")),
-                )
-                yield _format_sse_event(
-                    "error",
-                    json.dumps({
-                        "error": WINRM_CREDENTIALS_REQUIRED_MESSAGE,
-                        "code": "WINRM_CREDENTIALS_REQUIRED",
-                        "host": host.get("name"),
-                    }),
-                )
-                return
-            request_id = _request_id()
-            logging.exception(
-                "Heartbeat stream failed request_id=%s",
-                str(request_id).replace("\r", "\\r").replace("\n", "\\n"),
-            )
-            yield _format_sse_event(
-                "error",
-                json.dumps({
-                    "error": "Internal server error",
-                    "code": "INTERNAL_ERROR",
-                    "requestId": request_id,
-                    "host": host.get("name"),
-                }),
-            )
-        except Exception as exc:
-            request_id = _request_id()
-            logging.exception(
-                "Heartbeat stream failed request_id=%s",
-                str(request_id).replace("\r", "\\r").replace("\n", "\\n"),
-            )
-            yield _format_sse_event(
-                "error",
-                json.dumps({
-                    "error": "Internal server error",
-                    "code": "INTERNAL_ERROR",
-                    "requestId": request_id,
-                    "host": host.get("name"),
-                }),
-            )
-        time.sleep(HEARTBEAT_SSE_INTERVAL_SECONDS)
+    return _generate_heartbeat_stream_impl(
+        host,
+        include_events,
+        poll_heartbeat=poll_heartbeat,
+        format_sse_event=_format_sse_event,
+        trust_error_type=WinRMTrustError,
+        missing_credentials_predicate=is_missing_winrm_credentials_error,
+        trust_error_payload=_winrm_trust_error_payload,
+        request_id=_request_id,
+        logger=logging,
+        sanitize_log_value=_sanitize_log_value,
+        credentials_required_message=WINRM_CREDENTIALS_REQUIRED_MESSAGE,
+        heartbeat_interval_seconds=HEARTBEAT_SSE_INTERVAL_SECONDS,
+        sleep=time.sleep,
+    )
 
 
 @APP.route("/api/heartbeat/stream", methods=["GET"])
@@ -2994,111 +2873,47 @@ def tcp_port_open(host: str, port: int, timeout: Optional[float] = None) -> bool
 
 
 def response_looks_like_labstation(response: requests.Response) -> Tuple[bool, Optional[str]]:
-    service = None
-    try:
-        body = response.json()
-        if isinstance(body, dict):
-            service = body.get("service") or body.get("name") or body.get("app")
-            text_blob = json.dumps(body).lower()
-        else:
-            text_blob = str(body).lower()
-    except ValueError:
-        text_blob = response.text.lower()
-
-    detected = "labstation" in text_blob or str(service or "").lower() == "labstation"
-    return detected, service
-
+    return _response_looks_like_labstation_impl(response)
 
 def normalize_mac(value: Any) -> str:
-    candidate = str(value or "").strip()
-    if not MAC_RE.fullmatch(candidate):
-        return ""
-    return candidate.replace("-", ":").upper()
+    return _normalize_mac_impl(value, mac_pattern=MAC_RE)
 
 
 def parse_boolish(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled", "up"}
+    return _parse_boolish_impl(value)
 
 
 def extract_nic_candidates_from_heartbeat(heartbeat: Dict[str, Any]) -> List[Dict[str, Any]]:
-    raw_status = heartbeat.get("status")
-    status = raw_status if isinstance(raw_status, dict) else heartbeat
-    raw_wake = status.get("wake")
-    wake = raw_wake if isinstance(raw_wake, dict) else {}
-    raw_adapters = wake.get("nicPower")
-    adapters = raw_adapters if isinstance(raw_adapters, list) else []
-    candidates = []
-    for adapter in adapters:
-        if not isinstance(adapter, dict):
-            continue
-        mac = normalize_mac(adapter.get("macAddress") or adapter.get("mac") or adapter.get("physicalAddress"))
-        if not mac:
-            continue
-        candidates.append({
-            "mac": mac,
-            "name": adapter.get("name") or adapter.get("interfaceAlias") or "",
-            "status": adapter.get("status") or "",
-            "wolReady": parse_boolish(adapter.get("wolReady")),
-            "wakeArmed": parse_boolish(adapter.get("wakeArmed")),
-        })
-    return candidates
+    return _extract_nic_candidates_from_heartbeat_impl(
+        heartbeat,
+        normalize_mac_fn=normalize_mac,
+        parse_boolish_fn=parse_boolish,
+    )
 
 
 def choose_wol_mac(candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not candidates:
-        return None
-
-    def score(candidate: Dict[str, Any]) -> Tuple[int, int, int]:
-        status = str(candidate.get("status") or "").strip().lower()
-        return (
-            1 if candidate.get("wolReady") else 0,
-            1 if status == "up" else 0,
-            1 if candidate.get("wakeArmed") else 0,
-        )
-
-    best = sorted(candidates, key=score, reverse=True)[0]
-    return {"mac": best["mac"], "source": "status.wake.nicPower", "adapter": best}
+    return _choose_wol_mac_impl(candidates)
 
 
 def suggest_mac_from_heartbeat(heartbeat: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    return choose_wol_mac(extract_nic_candidates_from_heartbeat(heartbeat))
+    return _suggest_mac_from_heartbeat_impl(
+        heartbeat,
+        normalize_mac_fn=normalize_mac,
+        parse_boolish_fn=parse_boolish,
+    )
 
 
 def probe_labstation_http(host: str) -> Dict[str, Any]:
-    if not host:
-        return {"checked": False, "detected": False, "status": "missing-hostname"}
-
-    for port in DISCOVERY_LABSTATION_PORTS:
-        for path in DISCOVERY_LABSTATION_PATHS:
-            url = f"http://{host}:{port}{path}"
-            try:
-                response = requests.get(url, timeout=DISCOVERY_TIMEOUT_SECONDS)
-            except requests.RequestException:
-                continue
-            detected, service = response_looks_like_labstation(response)
-            if detected:
-                result = {
-                    "checked": True,
-                    "detected": True,
-                    "url": url,
-                    "statusCode": response.status_code,
-                    "service": service,
-                }
-                try:
-                    body = response.json()
-                    if isinstance(body, dict):
-                        mac_hint = suggest_mac_from_heartbeat(body)
-                        if mac_hint:
-                            result["suggestedMac"] = mac_hint
-                except ValueError:
-                    # A malformed heartbeat body simply has no MAC hint.
-                    pass
-                return result
-
-    return {"checked": True, "detected": False, "status": "no-response"}
-
+    return _probe_labstation_http_impl(
+        host,
+        ports=DISCOVERY_LABSTATION_PORTS,
+        paths=DISCOVERY_LABSTATION_PATHS,
+        timeout=DISCOVERY_TIMEOUT_SECONDS,
+        http_get=requests.get,
+        request_exception_type=requests.RequestException,
+        response_classifier=response_looks_like_labstation,
+        suggest_mac=suggest_mac_from_heartbeat,
+    )
 
 def query_labstation_task_heartbeat_path(host: Dict[str, Any]) -> Optional[str]:
     script = r"""
@@ -3289,35 +3104,13 @@ def discover_labstation_candidate(connection: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def sanitize_host_name(value: Any, fallback: Optional[Any]) -> Tuple[Optional[str], Optional[str]]:
-    name = str(value or fallback or "").strip()
-    if not HOST_NAME_RE.fullmatch(name):
-        return None, "name must contain only letters, numbers, dots, underscores, and hyphens"
-    return name, None
-
+    return _sanitize_host_name_impl(value, fallback, name_pattern=HOST_NAME_RE)
 
 def normalize_labs(value: Any) -> List[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        parts = value.split(",")
-    elif isinstance(value, list):
-        parts = value
-    else:
-        parts = []
-    return [str(part).strip() for part in parts if str(part).strip()]
-
+    return _normalize_labs_impl(value)
 
 def validate_labs_against_candidates(labs: List[str], candidates: Any) -> Optional[str]:
-    if candidates is None:
-        return None
-    valid = set(normalize_labs(candidates))
-    if not valid:
-        return "validLabIds must contain at least one lab candidate when provided"
-    invalid = [lab for lab in labs if lab not in valid]
-    if invalid:
-        return f"labs contain values that are not valid candidates: {', '.join(invalid)}"
-    return None
-
+    return _validate_labs_against_candidates_impl(labs, candidates)
 
 def load_dynamic_config() -> Dict[str, Any]:
     return read_hosts_config(DYNAMIC_CONFIG_PATH, missing_ok=True)
@@ -3350,46 +3143,17 @@ def upsert_dynamic_host(host_config: Dict[str, Any]) -> None:
 
 
 def build_provisioned_host(payload: Dict[str, Any], connection: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    fallback_name = connection.get("hostname") or connection.get("name")
-    name, error = sanitize_host_name(payload.get("name"), fallback_name)
-    if error or name is None:
-        return None, error or "host name is required"
-    address = str(payload.get("address") or connection.get("hostname") or "").strip()
-    if not address:
-        return None, "address is required"
-
-    labs = normalize_labs(payload.get("labs"))
-    labs_error = validate_labs_against_candidates(labs, payload.get("validLabIds"))
-    if labs_error:
-        return None, labs_error
-    credential_ref = str(payload.get("credentialRef") or address).strip()
-    raw_mac = str(payload.get("mac") or "").strip()
-    mac = normalize_mac(raw_mac) if raw_mac else ""
-    if raw_mac and not mac:
-        return None, "mac must use format 00:11:22:33:44:55 or 00-11-22-33-44-55"
-
-    host_config = {
-        "name": name,
-        "address": address,
-        "credential_ref": credential_ref,
-        "winrm_trust_ref": normalize_winrm_trust_ref(name),
-        "winrm_transport": str(payload.get("winrmTransport") or "ntlm").strip() or "ntlm",
-        "winrm_use_ssl": True,
-        "winrm_port": 5986,
-        "heartbeat_path": str(
-            payload.get("heartbeatPath")
-            or r"C:\LabStation\labstation\data\telemetry\heartbeat.json"
-        ),
-        "events_path": str(
-            payload.get("eventsPath")
-            or r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl"
-        ),
-        "labs": labs,
-    }
-    if mac:
-        host_config["mac"] = mac
-    return host_config, None
-
+    return _build_provisioned_host_impl(
+        payload,
+        connection,
+        sanitize_host_name_fn=sanitize_host_name,
+        normalize_labs_fn=normalize_labs,
+        validate_labs_fn=validate_labs_against_candidates,
+        normalize_mac_fn=normalize_mac,
+        normalize_trust_ref_fn=normalize_winrm_trust_ref,
+        default_heartbeat_path=r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
+        default_events_path=r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+    )
 
 def update_dynamic_host(host_name: str, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     config = load_dynamic_config()
@@ -3442,36 +3206,14 @@ def update_dynamic_host(host_name: str, payload: Dict[str, Any]) -> Tuple[Option
 
 
 def safe_host_inventory_entry(host: Dict[str, Any], *, editable: bool = False) -> Dict[str, Any]:
-    credential_ref = credential_ref_for_host(host)
-    trust = inspect_winrm_trust(host)
-    return {
-        "name": host.get("name"),
-        "address": host.get("address"),
-        "credentialRef": credential_ref,
-        "winrmTrustRef": trust.get("trustRef"),
-        "winrmTrustConfigured": trust.get("configured", False),
-        "winrmTrustStatus": trust.get("status"),
-        "winrmTrustErrorCode": trust.get("errorCode"),
-        "winrmTrustFingerprintSha256": trust.get("fingerprintSha256"),
-        "winrmTrustFingerprintSha1": trust.get("fingerprintSha1"),
-        "winrmTrustSubject": trust.get("subject"),
-        "winrmTrustSanDnsNames": trust.get("sanDnsNames", []),
-        "winrmTrustSanIpAddresses": trust.get("sanIpAddresses", []),
-        "winrmTrustNotBefore": trust.get("notBefore"),
-        "winrmTrustNotAfter": trust.get("notAfter"),
-        "winrmTrustSelfSigned": trust.get("selfSigned"),
-        "winrmTrustUploadedAt": trust.get("uploadedAt"),
-        "winrmTrustUploadedBy": trust.get("uploadedBy"),
-        "winrmTrustSource": trust.get("source"),
-        "winrmTrustLastValidatedAt": trust.get("lastValidatedAt"),
-        "mac": host.get("mac"),
-        "heartbeatPath": host.get("heartbeat_path", r"C:\LabStation\labstation\data\telemetry\heartbeat.json"),
-        "mode": host.get("mode"),
-        "labs": [str(lab) for lab in host.get("labs", [])],
-        "editable": editable,
-        "winrmConfigured": bool(host.get("winrm_user") and host.get("winrm_pass")) or winrm_credentials_configured(credential_ref),
-    }
-
+    return _safe_host_inventory_entry_impl(
+        host,
+        editable=editable,
+        credential_ref_for_host=credential_ref_for_host,
+        inspect_winrm_trust=inspect_winrm_trust,
+        winrm_credentials_configured=winrm_credentials_configured,
+        default_heartbeat_path=r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
+    )
 
 def load_guacamole_connections() -> Tuple[List[Dict[str, Any]], Optional[str]]:
     if not GUACAMOLE_DB_ENGINE:
