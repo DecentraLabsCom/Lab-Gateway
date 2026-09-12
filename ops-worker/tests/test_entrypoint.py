@@ -55,6 +55,12 @@ def test_ops_worker_image_copies_the_winrm_command_builders():
     assert "COPY winrm_command_builders.py /app/winrm_command_builders.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_winrm_command_service():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY winrm_command_service.py /app/winrm_command_service.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_heartbeat_values_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
