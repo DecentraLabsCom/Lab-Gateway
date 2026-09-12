@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -10,6 +9,21 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
 
     @router.post("/aas-admin/fmu/{access_key}/aas-link")
     async def create_aas_link(access_key: str, request: Request):
+        """
+        Link an FMU access key to an externally-managed AAS shell.
+
+        Body JSON: ``{"aasId": "<shell-id>", "labId": "<optional>", "submodelIds": ["<optional>"]}``
+
+        ``labId`` should match the numeric on-chain lab ID used in the
+        ``urn:decentralabs:lab:{labId}`` shell ID that the Marketplace queries.
+        When provided the link is indexed by labId so OpenResty can resolve
+        the conventional ID even though the ``accessKey`` is a different string
+        (e.g. ``motor.fmu`` vs ``42``).
+
+        The Gateway's ``/aas/`` proxy resolves requests for
+        ``urn:decentralabs:lab:{labId}`` to the linked AAS ID transparently —
+        Marketplace consumers need no changes.
+        """
         try:
             body = await request.json()
         except Exception:
@@ -34,6 +48,7 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
 
     @router.get("/aas-admin/fmu/{access_key}/aas-link")
     async def get_aas_link(access_key: str):
+        """Return the current AAS link for a given access key, or 404."""
         fp = get_link_path(access_key)
         if not fp.is_file():
             raise HTTPException(status_code=404, detail="No AAS link configured for this access key")
@@ -45,6 +60,7 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
 
     @router.delete("/aas-admin/fmu/{access_key}/aas-link")
     async def delete_aas_link(access_key: str):
+        """Remove the AAS link for a given access key."""
         fp = get_link_path(access_key)
         if not fp.is_file():
             raise HTTPException(status_code=404, detail="No AAS link configured for this access key")
@@ -62,6 +78,17 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
 
     @router.get("/aas-admin/resolve-aas-id")
     async def resolve_aas_id(shellId: str = Query(...)):
+        """
+        Resolve a conventional AAS shell ID to the actual target ID.
+
+        Called by OpenResty (Lua subrequest) before proxying ``/aas/`` to BaSyx.
+        If an AAS link override exists for the lab ID embedded in the shell ID,
+        the response contains the overridden ``targetId``; otherwise returns the
+        original ``shellId`` unchanged.
+
+        Query param ``shellId`` is the base64url-decoded shell ID string,
+        e.g. ``urn:decentralabs:lab:42``.
+        """
         prefix = "urn:decentralabs:lab:"
         if not shellId.startswith(prefix):
             return {"targetId": shellId, "override": False}

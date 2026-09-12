@@ -12,7 +12,8 @@ import zipfile
 import io
 import hashlib
 import hmac
-from collections import defaultdict, deque
+import warnings
+from collections import Counter, defaultdict, deque
 from xml.etree import ElementTree as ET
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -37,6 +38,7 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _record_browser_session_started,
         _preload_jwks_if_enabled,
         _validate_proxy_generation_supported,
+        _derive_gateway_ws_url,
         _shutdown_simulation_executor,
         _resolve_fmu_path,
         _enforce_fmu_claim,
@@ -97,6 +99,16 @@ def test_provider_describe_claims_are_allowed_only_for_metadata():
     }
 
     _enforce_fmu_claim(claims, allow_provider_describe=True)
+
+
+def test_proxy_gateway_ws_url_facade_preserves_http_error_contract(monkeypatch):
+    monkeypatch.setattr("main.FMU_PROXY_GATEWAY_WS_URL", "")
+
+    with pytest.raises(HTTPException) as error:
+        _derive_gateway_ws_url({})
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Missing aud claim required to derive gateway WS URL"
 
 
 def test_provider_describe_claims_cannot_be_used_for_execution():
@@ -1691,6 +1703,35 @@ def test_history_empty_initially(tmp_path, monkeypatch):
     response = client.get("/api/v1/simulations/history")
     assert response.status_code == 200
     assert response.json()["simulations"] == []
+
+
+def test_aas_routes_are_registered_once_and_openapi_is_warning_free():
+    aas_routes = [
+        route
+        for route in app.routes
+        if getattr(route, "path", "").startswith("/aas-admin/")
+        and getattr(route, "methods", None)
+    ]
+    registrations = Counter(
+        (route.path, method)
+        for route in aas_routes
+        for method in route.methods
+    )
+
+    assert registrations
+    assert all(count == 1 for count in registrations.values())
+
+    app.openapi_schema = None
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        app.openapi()
+
+    duplicate_warnings = [
+        warning
+        for warning in caught
+        if "Duplicate Operation ID" in str(warning.message)
+    ]
+    assert duplicate_warnings == []
 
 
 @patch("main._resolve_fmu_path")
