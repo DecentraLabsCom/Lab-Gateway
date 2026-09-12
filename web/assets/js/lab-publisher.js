@@ -1,4 +1,25 @@
 (function () {
+    const publisherValues = window.LabPublisherValues;
+    if (!publisherValues) {
+        throw new Error('LabPublisherValues must load before lab-publisher.js');
+    }
+    const publisherRenderers = window.LabPublisherRenderers;
+    if (!publisherRenderers) {
+        throw new Error('LabPublisherRenderers must load before lab-publisher.js');
+    }
+    const publisherResources = window.LabPublisherResources;
+    if (!publisherResources) {
+        throw new Error('LabPublisherResources must load before lab-publisher.js');
+    }
+    const publisherAssets = window.LabPublisherAssets;
+    if (!publisherAssets) {
+        throw new Error('LabPublisherAssets must load before lab-publisher.js');
+    }
+    const publisherMetadata = window.LabPublisherMetadata;
+    if (!publisherMetadata) {
+        throw new Error('LabPublisherMetadata must load before lab-publisher.js');
+    }
+
     const state = {
         status: null,
         hosts: [],
@@ -24,172 +45,61 @@
         originalPriceUnit: null,
     };
 
-    const CREDIT_DECIMALS = 7;
-    const RAW_PER_CREDIT = 10n ** BigInt(CREDIT_DECIMALS);
-    const SECONDS_PER_UNIT = {
-        minute: 60n,
-        hour: 3600n,
-        day: 86400n,
-        week: 604800n,
-        month: 2592000n,
-    };
-    const DISPLAY_PRICE_DECIMALS = 3;
+    const parseHourlyCreditsToRaw = publisherValues.parseHourlyCreditsToRaw;
+    const normalizePricingUnit = publisherValues.normalizePricingUnit;
+    const convertDisplayCreditsToRawPerSecond = publisherValues.convertDisplayCreditsToRawPerSecond;
+    const formatRawPriceForUnit = publisherValues.formatRawPriceForUnit;
+    const resolveLabPriceUnit = publisherValues.resolveLabPriceUnit;
+    const fetchJson = (url, options) => publisherValues.fetchJson(url, options, fetch);
+    const assertLabMutationSuccess = publisherValues.assertLabMutationSuccess;
+    const CLASSIFICATION_SCHEMES = publisherValues.CLASSIFICATION_SCHEMES;
+    const CLASSIFICATION_SCHEME_VERSIONS = publisherValues.CLASSIFICATION_SCHEME_VERSIONS;
+    const FORD_FIELDS_GROUPED = publisherValues.FORD_FIELDS_GROUPED;
+    const FORD_FIELDS = publisherValues.FORD_FIELDS;
+    const ISCED_F_FIELDS = publisherValues.ISCED_F_FIELDS;
+    const getFordField = publisherValues.getFordField;
+    const getIscedField = publisherValues.getIscedField;
+    const normalizeClassificationEntries = publisherValues.normalizeClassificationEntries;
+    const buildClassificationEntries = publisherValues.buildClassificationEntries;
+    const getSuggestedIscedCodes = publisherValues.getSuggestedIscedCodes;
+    const normalizeMaxConcurrentUsers = publisherValues.normalizeMaxConcurrentUsers;
+    const sanitizeAvailableHours = publisherValues.sanitizeAvailableHours;
+    const sanitizeUnavailableWindows = publisherValues.sanitizeUnavailableWindows;
+    const sanitizeTermsOfUse = publisherValues.sanitizeTermsOfUse;
+    const normalizePeriodUnit = publisherValues.normalizePeriodUnit;
+    const expandAllowedDurations = publisherValues.expandAllowedDurations;
+    const buildPeriodRules = publisherValues.buildPeriodRules;
+    const deriveAllowedPeriodRange = publisherValues.deriveAllowedPeriodRange;
+    const resolveLabDisplayName = publisherValues.resolveLabDisplayName;
+    const WEEKDAY_OPTIONS = publisherValues.WEEKDAY_OPTIONS;
+    const resolveSupportedTimezones = publisherValues.resolveSupportedTimezones;
+    const resolveBrowserTimezone = publisherValues.resolveBrowserTimezone;
+    const metadataAttributes = publisherValues.metadataAttributes;
+    const normalizeTraitType = publisherValues.normalizeTraitType;
+    const normalizeArray = publisherValues.normalizeArray;
+    const splitCsv = publisherValues.splitCsv;
+    const mergeMediaUrls = publisherValues.mergeMediaUrls;
+    const dateInputToUnix = publisherValues.dateInputToUnix;
+    const unixToDateInput = publisherValues.unixToDateInput;
+    const guessVersionFromUrl = publisherValues.guessVersionFromUrl;
     const RESOURCE_TYPES = { LAB: 'lab', FMU: 'fmu' };
-    const WEEKDAY_OPTIONS = [
-        { value: 'MONDAY', label: 'Mon' },
-        { value: 'TUESDAY', label: 'Tue' },
-        { value: 'WEDNESDAY', label: 'Wed' },
-        { value: 'THURSDAY', label: 'Thu' },
-        { value: 'FRIDAY', label: 'Fri' },
-        { value: 'SATURDAY', label: 'Sat' },
-        { value: 'SUNDAY', label: 'Sun' },
-    ];
-    const DEFAULT_TIMEZONES = [
-        'UTC',
-        'Europe/Madrid',
-        'Europe/London',
-        'Europe/Paris',
-        'Europe/Berlin',
-        'Europe/Rome',
-        'Europe/Amsterdam',
-        'America/New_York',
-        'America/Chicago',
-        'America/Denver',
-        'America/Los_Angeles',
-        'America/Mexico_City',
-        'America/Bogota',
-        'America/Sao_Paulo',
-        'America/Argentina/Buenos_Aires',
-        'Africa/Johannesburg',
-        'Asia/Tokyo',
-        'Asia/Seoul',
-        'Asia/Shanghai',
-        'Asia/Singapore',
-        'Asia/Kolkata',
-        'Australia/Sydney',
-        'Pacific/Auckland',
-    ];
+    const escapeHtml = publisherValues.escapeHtml;
+    const escapeAttr = publisherValues.escapeAttr;
 
-    function normalizeConnectionUsers(connection) {
-        const rawUsers = Array.isArray(connection?.users) ? connection.users : [];
-        return rawUsers
-            .map(user => {
-                if (typeof user === 'string') return user.trim();
-                if (user && typeof user === 'object') return String(user.username || user.name || '').trim();
-                return '';
-            })
-            .filter(Boolean);
-    }
+    const normalizeConnectionUsers = publisherValues.normalizeConnectionUsers;
 
-    function resolveConnectionAccessKey(connection) {
-        return connection?.selector || (connection?.id ? `guac:id:${connection.id}` : '');
-    }
+    const resolveConnectionAccessKey = publisherValues.resolveConnectionAccessKey;
 
-    function formatConnectionUsers(connection) {
-        const users = normalizeConnectionUsers(connection);
-        return users.length ? ` - ${users.join(', ')}` : '';
-    }
-    const CLASSIFICATION_SCHEMES = {
-        FORD: 'OECD-FORD',
-        ISCED_F: 'ISCED-F',
-    };
-    const CLASSIFICATION_SCHEME_VERSIONS = {
-        'OECD-FORD': 'Frascati Manual 2015',
-        'ISCED-F': 'ISCED-F 2013',
-    };
-    const FORD_FIELDS_GROUPED = {
-        '1 Natural Sciences': [
-            { code: '1.1', label: 'Mathematics' },
-            { code: '1.2', label: 'Computer and information sciences' },
-            { code: '1.3', label: 'Physical sciences' },
-            { code: '1.4', label: 'Chemical sciences' },
-            { code: '1.5', label: 'Earth and related environmental sciences' },
-            { code: '1.6', label: 'Biological sciences' },
-            { code: '1.7', label: 'Other natural sciences' },
-        ],
-        '2 Engineering and Technology': [
-            { code: '2.1', label: 'Civil engineering' },
-            { code: '2.2', label: 'Electrical engineering, electronic engineering, information engineering' },
-            { code: '2.3', label: 'Mechanical engineering' },
-            { code: '2.4', label: 'Chemical engineering' },
-            { code: '2.5', label: 'Materials engineering' },
-            { code: '2.6', label: 'Medical engineering' },
-            { code: '2.7', label: 'Environmental engineering' },
-            { code: '2.8', label: 'Environmental biotechnology' },
-            { code: '2.9', label: 'Industrial biotechnology' },
-            { code: '2.10', label: 'Nano-technology' },
-            { code: '2.11', label: 'Other engineering and technologies' },
-        ],
-        '3 Medical and Health Sciences': [
-            { code: '3.1', label: 'Basic medicine' },
-            { code: '3.2', label: 'Clinical medicine' },
-            { code: '3.3', label: 'Health sciences' },
-            { code: '3.4', label: 'Medical biotechnology' },
-            { code: '3.5', label: 'Other medical sciences' },
-        ],
-        '4 Agricultural and Veterinary Sciences': [
-            { code: '4.1', label: 'Agriculture, forestry, and fisheries' },
-            { code: '4.2', label: 'Animal and dairy science' },
-            { code: '4.3', label: 'Veterinary science' },
-            { code: '4.4', label: 'Agricultural biotechnology' },
-            { code: '4.5', label: 'Other agricultural sciences' },
-        ],
-        '5 Social Sciences': [
-            { code: '5.1', label: 'Psychology' },
-            { code: '5.2', label: 'Economics and business' },
-            { code: '5.3', label: 'Educational sciences' },
-            { code: '5.4', label: 'Sociology' },
-            { code: '5.5', label: 'Law' },
-            { code: '5.6', label: 'Political science' },
-            { code: '5.7', label: 'Social and economic geography' },
-            { code: '5.8', label: 'Media and communications' },
-            { code: '5.9', label: 'Other social sciences' },
-        ],
-        '6 Humanities and the Arts': [
-            { code: '6.1', label: 'History and archaeology' },
-            { code: '6.2', label: 'Languages and literature' },
-            { code: '6.3', label: 'Philosophy, ethics and religion' },
-            { code: '6.4', label: 'Arts' },
-            { code: '6.5', label: 'Other humanities' },
-        ],
-    };
-    const FORD_FIELDS = Object.values(FORD_FIELDS_GROUPED).flat();
-    const ISCED_F_FIELDS = [
-        { code: '05', label: 'Natural sciences, mathematics and statistics' },
-        { code: '051', label: 'Biological and related sciences' },
-        { code: '052', label: 'Environment' },
-        { code: '053', label: 'Physical sciences' },
-        { code: '054', label: 'Mathematics and statistics' },
-        { code: '061', label: 'Information and Communication Technologies (ICTs)' },
-        { code: '071', label: 'Engineering and engineering trades' },
-        { code: '072', label: 'Manufacturing and processing' },
-        { code: '073', label: 'Architecture and construction' },
-        { code: '081', label: 'Agriculture' },
-        { code: '082', label: 'Forestry' },
-        { code: '083', label: 'Fisheries' },
-        { code: '084', label: 'Veterinary' },
-        { code: '091', label: 'Health' },
-        { code: '092', label: 'Welfare' },
-        { code: '031', label: 'Social and behavioural sciences' },
-        { code: '032', label: 'Journalism and information' },
-        { code: '041', label: 'Business and administration' },
-        { code: '042', label: 'Law' },
-        { code: '011', label: 'Education' },
-        { code: '021', label: 'Arts' },
-        { code: '022', label: 'Humanities except languages' },
-        { code: '023', label: 'Languages' },
-    ];
-    const FORD_TO_ISCED_F_SUGGESTIONS = {
-        '1.1': ['054'], '1.2': ['061'], '1.3': ['053'], '1.4': ['053', '071'], '1.5': ['052', '053'], '1.6': ['051'], '1.7': ['05'],
-        '2.1': ['073', '071'], '2.2': ['071', '061'], '2.3': ['071'], '2.4': ['071', '072'], '2.5': ['071', '072'], '2.6': ['091', '071'], '2.7': ['071', '052'], '2.8': ['051', '071'], '2.9': ['072', '071'], '2.10': ['071', '053'], '2.11': ['071'],
-        '3.1': ['091'], '3.2': ['091'], '3.3': ['091', '092'], '3.4': ['091', '051'], '3.5': ['091'],
-        '4.1': ['081', '082', '083'], '4.2': ['081'], '4.3': ['084'], '4.4': ['081', '051'], '4.5': ['081'],
-        '5.1': ['031'], '5.2': ['041', '031'], '5.3': ['011'], '5.4': ['031'], '5.5': ['042'], '5.6': ['031'], '5.7': ['031', '052'], '5.8': ['032'], '5.9': ['031'],
-        '6.1': ['022'], '6.2': ['023'], '6.3': ['022'], '6.4': ['021'], '6.5': ['022'],
-    };
-    const FORD_BY_CODE = new Map(FORD_FIELDS.map(field => [field.code, field]));
-    const ISCED_BY_CODE = new Map(ISCED_F_FIELDS.map(field => [field.code, field]));
-
+    const formatConnectionUsers = publisherValues.formatConnectionUsers;
+    const renderLabActionIcon = publisherRenderers.renderLabActionIcon;
+    const renderModelVariablesTable = publisherRenderers.renderModelVariables;
+    const collectDetectedResources = publisherResources.collectDetectedResources;
+    const uniqueGuacamole = publisherResources.uniqueGuacamole;
+    const fetchFmuMetadata = publisherResources.fetchFmuMetadata;
+    const buildAssetUploadRequest = publisherAssets.buildAssetUploadRequest;
+    const buildAssetDeleteRequest = publisherAssets.buildAssetDeleteRequest;
+    const renderAssetList = publisherAssets.renderAssetList;
+    const buildMetadataPayload = publisherMetadata.buildMetadata;
     const $ = (id) => document.getElementById(id);
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -385,30 +295,6 @@
         select.value = options.includes(browserTimezone) ? browserTimezone : 'Europe/Madrid';
     }
 
-    function resolveSupportedTimezones() {
-        if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
-            try {
-                const values = Intl.supportedValuesOf('timeZone');
-                if (Array.isArray(values) && values.length > 0) return values;
-            } catch {
-                // Fall through to defaults.
-            }
-        }
-        return DEFAULT_TIMEZONES;
-    }
-
-    function resolveBrowserTimezone() {
-        if (typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function') {
-            try {
-                const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                if (timezone && typeof timezone === 'string') return timezone;
-            } catch {
-                // Fall through to UTC.
-            }
-        }
-        return 'UTC';
-    }
-
     async function loadPublisherData(options = {}) {
         setStatus('Loading provider status...', false);
         try {
@@ -419,11 +305,12 @@
             ]);
             state.status = status;
             state.hosts = hosts?.hosts || [];
-            state.guacamole = [
-                ...(hosts?.guacamoleUnmatched || []),
-                ...state.hosts.flatMap(host => host?.guacamole?.connections || []),
-            ];
-            state.fmus = status?.fmuInventory || [];
+            const detectedResources = collectDetectedResources({
+                hosts: hosts || {},
+                fmuInventory: status?.fmuInventory,
+            });
+            state.guacamole = detectedResources.guacamole;
+            state.fmus = detectedResources.fmus;
             renderResourceOptions();
             state.labs = labs?.labs || [];
             renderLabs(state.labs);
@@ -450,16 +337,6 @@
             select.appendChild(option);
         });
         void applySelectedResource();
-    }
-
-    function uniqueGuacamole() {
-        const seen = new Set();
-        return state.guacamole.filter(conn => {
-            const key = String(conn.id);
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
     }
 
     function renderCategoryMenu() {
@@ -739,12 +616,6 @@
         }
     }
 
-    function normalizeMaxConcurrentUsers(value, isFmu) {
-        const parsed = Math.trunc(Number(value));
-        const minimum = isFmu ? 2 : 1;
-        return Number.isFinite(parsed) && parsed >= minimum ? parsed : minimum;
-    }
-
     function syncResourceTypeFields() {
         const isFmu = $('labResourceType').value === '1';
         const accessKeyInput = $('labAccessKey');
@@ -796,11 +667,8 @@
         const contentId = ensureContentId();
         try {
             for (const file of list) {
-                const form = new FormData();
-                form.append('contentId', contentId);
-                form.append('kind', kind);
-                form.append('file', file);
-                const result = await fetchJson('/lab-admin/assets', { method: 'POST', body: form });
+                const request = buildAssetUploadRequest({ contentId, kind, file });
+                const result = await fetchJson(request.url, request.options);
                 if (kind === 'images') state.uploadedImages.push(result.url);
                 else state.uploadedDocs.push(result.url);
             }
@@ -912,44 +780,39 @@
             effectiveDate: $('labTermsEffectiveDate').value.trim(),
             sha256: $('labTermsSha256').value.trim(),
         });
-        const attributes = [
-            { trait_type: 'classification', value: classification },
-            { trait_type: 'classificationPrimaryScheme', value: CLASSIFICATION_SCHEMES.FORD },
-            ...(state.educationalProgramLinked ? [{ trait_type: 'educationalProgramLinked', value: true }] : []),
-            { trait_type: 'keywords', value: keywords },
-            ...(bookingMode === 'slot' ? [{ trait_type: 'timeSlots', value: timeSlots }] : []),
-            { trait_type: 'pricing', value: pricing },
-            { trait_type: 'bookingMode', value: bookingMode },
-            ...(allowedDurationRange ? [{ trait_type: 'allowedDurationRange', value: allowedDurationRange }] : []),
-            { trait_type: 'allowedDurations', value: allowedDurations },
-            ...(periodRules ? [{ trait_type: 'periodRules', value: periodRules }] : []),
-            { trait_type: 'opens', value: dateInputToUnix($('labOpens').value) },
-            { trait_type: 'closes', value: dateInputToUnix($('labCloses').value) },
-            { trait_type: 'additionalImages', value: imageUrls.slice(1) },
-            { trait_type: 'docs', value: docs },
-            { trait_type: 'availableDays', value: [...state.availableDays] },
-            { trait_type: 'availableHours', value: sanitizeAvailableHours($('labAvailableHoursStart').value, $('labAvailableHoursEnd').value) },
-            { trait_type: 'maxConcurrentUsers', value: normalizeMaxConcurrentUsers($('labMaxConcurrentUsers').value, resourceType === RESOURCE_TYPES.FMU) },
-            { trait_type: 'unavailableWindows', value: unavailableWindows },
-            { trait_type: 'termsOfUse', value: termsOfUse },
-            { trait_type: 'timezone', value: $('labTimezone').value.trim() || '' },
-            { trait_type: 'resourceType', value: resourceType },
-            ...(resourceType === RESOURCE_TYPES.FMU && fmuFileName ? [{ trait_type: 'fmuFileName', value: fmuFileName }] : []),
-            ...optionalAttribute('fmiVersion', $('labFmiVersion').value.trim()),
-            ...optionalAttribute('simulationType', $('labSimulationType').value.trim()),
-            ...optionalAttribute('modelVariables', state.modelVariables.length ? state.modelVariables : null),
-            ...optionalNumberAttribute('defaultStartTime', $('labDefaultStartTime').value),
-            ...optionalNumberAttribute('defaultStopTime', $('labDefaultStopTime').value),
-            ...optionalNumberAttribute('defaultStepSize', $('labDefaultStepSize').value),
-        ];
-        return {
+        return buildMetadataPayload({
             contentId: ensureContentId(),
             name: $('labName').value.trim(),
             description: $('labDescription').value.trim(),
-            image: imageUrls[0] || '',
+            imageUrls,
+            docs,
             demoEnabled: $('labDemoEnabled').checked === true,
-            attributes,
-        };
+            classification,
+            educationalProgramLinked: state.educationalProgramLinked,
+            keywords,
+            resourceType,
+            fmuFileName,
+            unavailableWindows,
+            bookingMode,
+            timeSlots,
+            allowedDurationRange,
+            allowedDurations,
+            periodRules,
+            pricing,
+            termsOfUse,
+            opens: dateInputToUnix($('labOpens').value),
+            closes: dateInputToUnix($('labCloses').value),
+            availableDays: state.availableDays,
+            availableHours: sanitizeAvailableHours($('labAvailableHoursStart').value, $('labAvailableHoursEnd').value),
+            maxConcurrentUsers: normalizeMaxConcurrentUsers($('labMaxConcurrentUsers').value, resourceType === RESOURCE_TYPES.FMU),
+            timezone: $('labTimezone').value.trim() || '',
+            fmiVersion: $('labFmiVersion').value.trim(),
+            simulationType: $('labSimulationType').value.trim(),
+            modelVariables: state.modelVariables,
+            defaultStartTime: $('labDefaultStartTime').value,
+            defaultStopTime: $('labDefaultStopTime').value,
+            defaultStepSize: $('labDefaultStepSize').value,
+        });
     }
 
     function validateMarketplaceFields() {
@@ -994,78 +857,6 @@
         }
     }
 
-    function optionalAttribute(traitType, value) {
-        return value === null || value === undefined || value === ''
-            ? []
-            : [{ trait_type: traitType, value }];
-    }
-
-    function optionalNumberAttribute(traitType, value) {
-        if (value === null || value === undefined || value === '') return [];
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? [{ trait_type: traitType, value: parsed }] : [];
-    }
-
-    function dateInputToUnix(value) {
-        if (!value) return null;
-        const parsed = new Date(`${value}T00:00:00`);
-        return Number.isFinite(parsed.getTime()) ? Math.floor(parsed.getTime() / 1000) : null;
-    }
-
-    function sanitizeAvailableHours(start, end) {
-        const safeStart = sanitizeTime(start);
-        const safeEnd = sanitizeTime(end);
-        return safeStart && safeEnd ? { start: safeStart, end: safeEnd } : {};
-    }
-
-    function sanitizeTime(value) {
-        const text = String(value || '').trim();
-        if (!/^\d{1,2}:\d{2}$/.test(text)) return '';
-        const [hours, minutes] = text.split(':').map(Number);
-        if (hours > 23 || minutes > 59) return '';
-        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-    }
-
-    function sanitizeUnavailableWindows(windows) {
-        return (Array.isArray(windows) ? windows : [])
-            .map(window => {
-                const startUnix = Number(window?.startUnix || 0);
-                const endUnix = Number(window?.endUnix || 0);
-                const reason = String(window?.reason || '').trim();
-                if (!Number.isFinite(startUnix) || !Number.isFinite(endUnix) || startUnix <= 0 || endUnix <= 0) return null;
-                if (!reason || startUnix >= endUnix) return null;
-                return {
-                    startUnix: Math.floor(startUnix),
-                    endUnix: Math.floor(endUnix),
-                    reason,
-                };
-            })
-            .filter(Boolean);
-    }
-
-    function sanitizeTermsOfUse(terms) {
-        const result = {};
-        if (terms.url) result.url = terms.url;
-        if (terms.version) result.version = terms.version;
-        const effectiveDate = normalizeTermsEffectiveDate(terms.effectiveDate);
-        if (effectiveDate !== null) result.effectiveDate = effectiveDate;
-        if (terms.sha256) result.sha256 = terms.sha256.toLowerCase();
-        return result;
-    }
-
-    function normalizeTermsEffectiveDate(value) {
-        const text = String(value || '').trim();
-        if (!text) return null;
-        if (/^\d+$/.test(text)) {
-            const epoch = Number(text);
-            return Number.isSafeInteger(epoch) && epoch > 0 ? epoch : null;
-        }
-        const parsed = /^\d{4}-\d{2}-\d{2}$/.test(text)
-            ? new Date(`${text}T00:00:00Z`)
-            : new Date(text);
-        return Number.isFinite(parsed.getTime()) ? Math.floor(parsed.getTime() / 1000) : null;
-    }
-
     function ensureContentId() {
         const el = $('labContentId');
         if (!el.value.trim()) {
@@ -1084,21 +875,12 @@
 
     function renderAssets() {
         const target = $('labAssetList');
-        const entries = [
-            ...state.uploadedImages.map(url => ({ kind: 'images', label: 'Image', url })),
-            ...state.uploadedDocs.map(url => ({ kind: 'docs', label: 'Doc', url })),
-        ];
-        target.innerHTML = entries.length
-            ? entries.map(entry => `
-                <div class="asset-row">
-                    <span>${escapeHtml(entry.label)}</span>
-                    <a href="${escapeAttr(entry.url)}" target="_blank" rel="noopener">${escapeHtml(entry.url)}</a>
-                    <button class="mini-btn danger asset-delete-btn" type="button" data-kind="${escapeAttr(entry.kind)}" data-url="${escapeAttr(entry.url)}" title="Delete ${escapeAttr(entry.label)}" aria-label="Delete ${escapeAttr(entry.label)}">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            `).join('')
-            : '';
+        target.innerHTML = renderAssetList({
+            uploadedImages: state.uploadedImages,
+            uploadedDocs: state.uploadedDocs,
+            escapeHtml,
+            escapeAttr,
+        });
     }
 
     async function handleAssetListClick(event) {
@@ -1108,11 +890,8 @@
         const kind = button.dataset.kind || '';
         button.disabled = true;
         try {
-            await fetchJson('/lab-admin/assets', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: url }),
-            });
+            const request = buildAssetDeleteRequest(url);
+            await fetchJson(request.url, request.options);
             const stateKey = kind === 'images' ? 'uploadedImages' : 'uploadedDocs';
             state[stateKey] = state[stateKey].filter(item => item !== url);
             setStatus('Asset deleted.', false);
@@ -1180,26 +959,12 @@
         resetFmuDescribeFields(true);
         status.textContent = 'Loading FMU metadata...';
         try {
-            const tokenResponse = await fetch('/lab-admin/fmu/provider-describe-token', {
-                method: 'POST',
-                credentials: 'include',
+            const metadata = await fetchFmuMetadata({
+                fmuFileName,
+                gatewayUrl,
                 signal: controller.signal,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fmuFileName }),
+                fetchImpl: fetch,
             });
-            const tokenBody = await tokenResponse.json().catch(() => ({}));
-            if (!tokenResponse.ok || !tokenBody.token) {
-                throw new Error(tokenBody.error || `Describe token request returned HTTP ${tokenResponse.status}`);
-            }
-            const describeUrl = `${gatewayUrl.replace(/\/+$/, '')}/api/v1/simulations/describe?fmuFileName=${encodeURIComponent(fmuFileName)}`;
-            const describeResponse = await fetch(describeUrl, {
-                signal: controller.signal,
-                headers: { Authorization: `Bearer ${tokenBody.token}` },
-            });
-            const metadata = await describeResponse.json().catch(() => ({}));
-            if (!describeResponse.ok) {
-                throw new Error(metadata.error || `Gateway returned HTTP ${describeResponse.status}`);
-            }
             if (state.fmuDescribeController !== controller) return;
             applyFmuMetadata(metadata);
             status.textContent = 'FMU metadata loaded successfully.';
@@ -1238,42 +1003,12 @@
     function renderModelVariables() {
         const wrap = $('labModelVariablesWrap');
         const body = $('labModelVariables');
-        wrap.hidden = state.modelVariables.length === 0;
-        body.innerHTML = state.modelVariables.map(variable => `
-            <tr>
-                <td>${escapeHtml(variable.name || '')}</td>
-                <td>${escapeHtml(variable.causality || '')}</td>
-                <td>${escapeHtml(variable.type || '')}</td>
-                <td>${escapeHtml(variable.unit || '')}</td>
-                <td>${escapeHtml(variable.start ?? '')}</td>
-            </tr>
-        `).join('');
-    }
-
-    function renderLabActionIcon(action) {
-        const attributes = 'class="lab-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false"';
-        if (action === 'edit') {
-            return `<svg ${attributes}><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
-        }
-        if (action === 'list') {
-            return `<svg ${attributes}><path d="M2.1 12s3.6-6 9.9-6 9.9 6 9.9 6-3.6 6-9.9 6-9.9-6-9.9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>`;
-        }
-        if (action === 'unlist') {
-            return `<svg ${attributes}><path d="M2.1 12s3.6-6 9.9-6 9.9 6 9.9 6-3.6 6-9.9 6-9.9-6-9.9-6Z"/><circle cx="12" cy="12" r="2.5"/><path d="m3 3 18 18"/></svg>`;
-        }
-        return `<svg ${attributes}><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>`;
-    }
-
-    function resolveLabDisplayName(lab) {
-        const candidates = [
-            lab?.name,
-            lab?.labName,
-            lab?.metadataName,
-            lab?.metadata?.name,
-            lab?.metadata?.labName,
-        ];
-        const name = candidates.find(candidate => typeof candidate === 'string' && candidate.trim());
-        return name || `Lab #${String(lab?.labId ?? '').trim()}`;
+        const rendered = renderModelVariablesTable({
+            modelVariables: state.modelVariables,
+            escapeHtml,
+        });
+        wrap.hidden = rendered.hidden;
+        body.innerHTML = rendered.html;
     }
 
     function resolveStateLabDisplayName(labId) {
@@ -1650,10 +1385,6 @@
         if (cancel) cancel.hidden = !editing;
     }
 
-    function metadataAttributes(value) {
-        return Array.isArray(value) ? value.filter(item => item && typeof item === 'object') : [];
-    }
-
     function setAttributeValue(attributes, traitType, setter) {
         const attribute = attributes.find(item => normalizeTraitType(item.trait_type) === normalizeTraitType(traitType));
         if (attribute) setter(attribute.value);
@@ -1661,90 +1392,6 @@
 
     function getAttributeValue(attributes, traitType) {
         return attributes.find(item => normalizeTraitType(item.trait_type) === normalizeTraitType(traitType))?.value;
-    }
-
-    function normalizeTraitType(value) {
-        return String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
-    }
-
-    function mergeMediaUrls(...values) {
-        const urls = [];
-        values.forEach(value => {
-            normalizeArray(value).forEach(url => {
-                if (!urls.includes(url)) urls.push(url);
-            });
-        });
-        return urls;
-    }
-
-    function getFordField(code) {
-        return FORD_BY_CODE.get(String(code || '').trim()) || null;
-    }
-
-    function getIscedField(code) {
-        return ISCED_BY_CODE.get(String(code || '').trim()) || null;
-    }
-
-    function normalizeClassificationEntries(value) {
-        return (Array.isArray(value) ? value : [])
-            .map(entry => {
-                const scheme = String(entry?.scheme || '').trim();
-                const code = String(entry?.code || '').trim();
-                const field = scheme === CLASSIFICATION_SCHEMES.FORD
-                    ? getFordField(code)
-                    : scheme === CLASSIFICATION_SCHEMES.ISCED_F
-                        ? getIscedField(code)
-                        : null;
-                if (!field) return null;
-                return {
-                    scheme,
-                    schemeVersion: CLASSIFICATION_SCHEME_VERSIONS[scheme],
-                    code: field.code,
-                    label: field.label,
-                };
-            })
-            .filter(Boolean);
-    }
-
-    function buildClassificationEntries({ fordCodes, iscedCodes = [], educationalProgramLinked = false }) {
-        const seen = new Set();
-        const add = (scheme, code) => {
-            const field = scheme === CLASSIFICATION_SCHEMES.FORD ? getFordField(code) : getIscedField(code);
-            if (!field) return null;
-            const key = `${scheme}:${field.code}`;
-            if (seen.has(key)) return null;
-            seen.add(key);
-            return {
-                scheme,
-                schemeVersion: CLASSIFICATION_SCHEME_VERSIONS[scheme],
-                code: field.code,
-                label: field.label,
-            };
-        };
-        return [
-            ...(Array.isArray(fordCodes) ? fordCodes : [fordCodes]).map(code => add(CLASSIFICATION_SCHEMES.FORD, code)),
-            ...(educationalProgramLinked ? (Array.isArray(iscedCodes) ? iscedCodes : [iscedCodes]).map(code => add(CLASSIFICATION_SCHEMES.ISCED_F, code)) : []),
-        ].filter(Boolean);
-    }
-
-    function getSuggestedIscedCodes(fordCodes) {
-        const seen = new Set();
-        (Array.isArray(fordCodes) ? fordCodes : [fordCodes]).forEach(code => {
-            (FORD_TO_ISCED_F_SUGGESTIONS[String(code || '').trim()] || []).forEach(iscedCode => seen.add(iscedCode));
-        });
-        return [...seen];
-    }
-
-    function normalizeArray(value) {
-        if (Array.isArray(value)) return value.map(item => String(item ?? '').trim()).filter(Boolean);
-        const text = String(value ?? '').trim();
-        return text ? [text] : [];
-    }
-
-    function unixToDateInput(value) {
-        const timestamp = Number(value);
-        if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
-        return new Date(timestamp * 1000).toISOString().slice(0, 10);
     }
 
     function extractContentIdFromMetadataUri(value) {
@@ -1757,52 +1404,11 @@
         }
     }
 
-    async function fetchJson(url, options) {
-        const res = await fetch(url, { credentials: 'include', ...(options || {}) });
-        const rawBody = await res.text().catch(() => '');
-        let body = {};
-        if (rawBody) {
-            try {
-                body = JSON.parse(rawBody);
-            } catch {
-                body = { error: rawBody.trim() };
-            }
-        }
-        if (!res.ok) {
-            throw new Error(body.error || body.detail || `HTTP ${res.status}`);
-        }
-        return body;
-    }
-
-    function assertLabMutationSuccess(result, action) {
-        if (result?.success !== true) {
-            throw new Error(result?.error || `${action} failed`);
-        }
-
-        // Metadata-only updates and duplicate publications are successful
-        // idempotent outcomes without a new transaction receipt.
-        if (result.action === 'metadataOnly' || result.status === 'offchain_updated'
-            || result.action === 'existingLab' || result.status === 'already_exists') {
-            return result;
-        }
-
-        const status = String(result.status || '').trim().toLowerCase();
-        const receiptSucceeded = ['0x1', '1', 'ok', 'success', 'succeeded', 'confirmed'].includes(status);
-        if (!result.transactionHash || !receiptSucceeded) {
-            throw new Error(`${action} transaction did not confirm on-chain`);
-        }
-        return result;
-    }
-
     function setStatus(message, isError) {
         const el = $('labPublisherStatus');
         if (!el) return;
         el.textContent = message;
         el.classList.toggle('error', !!isError);
-    }
-
-    function splitCsv(value) {
-        return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
     }
 
     function cryptoRandomId() {
@@ -1822,52 +1428,11 @@
         return `${year}-${month}-${day}T${hours}:${minutes}`;
     }
 
-    function guessVersionFromUrl(url) {
-        const filename = String(url || '').split('/').pop() || '';
-        const match = filename.match(/v(?:ersion)?[-_]?(\d+(?:\.\d+)*)/i);
-        return match ? match[1] : '';
-    }
-
     async function sha256Hex(buffer) {
         const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer);
         return Array.from(new Uint8Array(hashBuffer))
             .map(byte => byte.toString(16).padStart(2, '0'))
             .join('');
-    }
-
-    function parseHourlyCreditsToRaw(hourlyCredits) {
-        const text = String(hourlyCredits ?? '').trim();
-        if (!text) {
-            throw new Error('Price is required');
-        }
-
-        const normalizedText = text.endsWith('.') ? text.slice(0, -1) : text;
-        if (!/^(?:\d+|\d*\.\d+)$/.test(normalizedText)) {
-            throw new Error('Price must be a non-negative number');
-        }
-
-        const [wholeRaw, fractionRaw = ''] = normalizedText.split('.');
-        if (fractionRaw.length > CREDIT_DECIMALS) {
-            throw new Error(`Price supports up to ${CREDIT_DECIMALS} decimal places`);
-        }
-
-        const whole = wholeRaw || '0';
-        const fraction = fractionRaw.padEnd(CREDIT_DECIMALS, '0') || '0';
-        return BigInt(whole) * RAW_PER_CREDIT + BigInt(fraction);
-    }
-
-    function normalizePricingUnit(unit) {
-        const normalized = String(unit || 'hour').trim().toLowerCase();
-        return Object.prototype.hasOwnProperty.call(SECONDS_PER_UNIT, normalized) ? normalized : 'hour';
-    }
-
-    function convertDisplayCreditsToRawPerSecond(displayCredits, unit = 'hour') {
-        const rawPerUnit = parseHourlyCreditsToRaw(displayCredits);
-        const seconds = SECONDS_PER_UNIT[normalizePricingUnit(unit)];
-        if (rawPerUnit === 0n) return 0n;
-        const base = rawPerUnit / seconds;
-        const remainder = rawPerUnit % seconds;
-        return remainder * 2n >= seconds ? base + 1n : base;
     }
 
     function getSelectedAllowedPeriodRange() {
@@ -1880,32 +1445,6 @@
             : null;
     }
 
-    function expandAllowedDurations(range) {
-        if (!range || !Number.isFinite(Number(range.min)) || !Number.isFinite(Number(range.max))) return [];
-        const unit = normalizePeriodUnit(range.unit);
-        const min = Math.trunc(Number(range.min));
-        const max = Math.trunc(Number(range.max));
-        if (min <= 0 || max < min) return [];
-        return Array.from({ length: max - min + 1 }, (_, index) => ({ unit, value: min + index }));
-    }
-
-    function buildPeriodRules(range) {
-        if (!range) return null;
-        const daysPerUnit = { day: 1, week: 7, month: 30 };
-        const unit = normalizePeriodUnit(range.unit);
-        return {
-            startGranularity: 'day',
-            allowCustomDateRange: true,
-            minDurationDays: Number(range.min) * daysPerUnit[unit],
-            maxDurationDays: Number(range.max) * daysPerUnit[unit],
-        };
-    }
-
-    function normalizePeriodUnit(unit) {
-        const normalized = String(unit || 'day').trim().toLowerCase().replace(/s$/, '');
-        return ['day', 'week', 'month'].includes(normalized) ? normalized : 'day';
-    }
-
     function setAllowedPeriodRangeControls(range) {
         const minInput = $('labAllowedPeriodMin');
         const maxInput = $('labAllowedPeriodMax');
@@ -1916,111 +1455,4 @@
         normalizeAllowedPeriodRange({ min: range.min, max: range.max });
     }
 
-    function deriveAllowedPeriodRange(value) {
-        const durations = (Array.isArray(value) ? value : [])
-            .map(item => ({
-                unit: normalizePeriodUnit(item?.unit),
-                value: Number(item?.value),
-            }))
-            .filter(item => Number.isFinite(item.value) && item.value > 0);
-        if (!durations.length) return null;
-        const unit = durations[0].unit;
-        const matching = durations.filter(item => item.unit === unit);
-        const values = matching.map(item => item.value);
-        return {
-            unit,
-            min: Math.min(...values),
-            max: Math.max(...values),
-        };
-    }
-
-    function formatRawPriceForUnit(rawPricePerSecond, unit = 'hour') {
-        try {
-            const rawPerSecond = typeof rawPricePerSecond === 'bigint'
-                ? rawPricePerSecond
-                : BigInt(rawPricePerSecond ?? 0);
-            const seconds = SECONDS_PER_UNIT[normalizePricingUnit(unit)];
-            return roundDecimalString(formatRawCredits(rawPerSecond * seconds), DISPLAY_PRICE_DECIMALS);
-        } catch {
-            return '0';
-        }
-    }
-
-    function resolveLabPriceUnit(lab) {
-        return normalizePricingUnit(
-            lab?.pricing?.displayUnit
-            || lab?.metadata?.pricing?.displayUnit
-            || lab?.priceUnit
-            || 'hour'
-        );
-    }
-
-    function formatRawCredits(rawAmount) {
-        const normalized = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount ?? 0);
-        const negative = normalized < 0n;
-        const value = negative ? -normalized : normalized;
-        const whole = value / RAW_PER_CREDIT;
-        const fraction = (value % RAW_PER_CREDIT).toString().padStart(CREDIT_DECIMALS, '0');
-        const formatted = trimTrailingZeros(`${whole.toString()}.${fraction}`);
-        return negative && formatted !== '0' ? `-${formatted}` : formatted;
-    }
-
-    function roundDecimalString(value, maxFractionDigits = DISPLAY_PRICE_DECIMALS) {
-        if (value === null || value === undefined) return '0';
-
-        const text = String(value).trim();
-        if (!text) return '0';
-
-        const negative = text.startsWith('-');
-        const unsigned = negative ? text.slice(1) : text;
-        if (!/^\d+(?:\.\d+)?$/.test(unsigned)) {
-            return '0';
-        }
-
-        const safeDigits = Math.max(0, Number(maxFractionDigits) || 0);
-        const [integerPartRaw, fractionPartRaw = ''] = unsigned.split('.');
-        const integerPart = integerPartRaw || '0';
-
-        if (safeDigits === 0) {
-            let roundedInteger = BigInt(integerPart);
-            if ((fractionPartRaw[0] || '0') >= '5') {
-                roundedInteger += 1n;
-            }
-            const normalized = roundedInteger.toString();
-            return negative && normalized !== '0' ? `-${normalized}` : normalized;
-        }
-
-        const paddedFraction = fractionPartRaw.padEnd(safeDigits + 1, '0');
-        const keptFraction = paddedFraction.slice(0, safeDigits);
-        const roundingDigit = paddedFraction[safeDigits] || '0';
-        const scale = 10n ** BigInt(safeDigits);
-
-        let scaledValue = BigInt(integerPart) * scale + BigInt(keptFraction || '0');
-        if (roundingDigit >= '5') {
-            scaledValue += 1n;
-        }
-
-        const roundedInteger = scaledValue / scale;
-        const roundedFraction = (scaledValue % scale).toString().padStart(safeDigits, '0');
-        const normalized = trimTrailingZeros(`${roundedInteger.toString()}.${roundedFraction}`);
-        return negative && normalized !== '0' ? `-${normalized}` : normalized;
-    }
-
-    function trimTrailingZeros(value) {
-        if (value === null || value === undefined) return '0';
-        const text = String(value).trim();
-        if (!text) return '0';
-        if (!text.includes('.')) return text;
-        return text.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '').replace(/\.$/, '');
-    }
-
-    function escapeHtml(value) {
-        return String(value ?? '').replace(/[&<>"'`]/g, ch => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;'
-        })[ch]);
-    }
-
-    function escapeAttr(value) {
-        return escapeHtml(value).replace(/"/g, '&quot;');
-    }
 })();

@@ -4,6 +4,11 @@ import vm from 'node:vm';
 
 const repoRoot = new URL('../../', import.meta.url);
 const scriptPath = new URL('web/assets/js/lab-publisher.js', repoRoot);
+const valuesScriptPath = new URL('web/assets/js/lab-publisher-values.js', repoRoot);
+const renderersScriptPath = new URL('web/assets/js/lab-publisher-renderers.js', repoRoot);
+const resourcesScriptPath = new URL('web/assets/js/lab-publisher-resources.js', repoRoot);
+const assetsScriptPath = new URL('web/assets/js/lab-publisher-assets.js', repoRoot);
+const metadataScriptPath = new URL('web/assets/js/lab-publisher-metadata.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -115,6 +120,11 @@ function createDocument() {
 
 function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected fetch call'); } } = {}) {
   const source = fs.readFileSync(scriptPath, 'utf8');
+  const valuesSource = fs.readFileSync(valuesScriptPath, 'utf8');
+  const renderersSource = fs.readFileSync(renderersScriptPath, 'utf8');
+  const resourcesSource = fs.readFileSync(resourcesScriptPath, 'utf8');
+  const assetsSource = fs.readFileSync(assetsScriptPath, 'utf8');
+  const metadataSource = fs.readFileSync(metadataScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
@@ -130,6 +140,11 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const document = createDocument();
   const window = { location: { origin: 'https://gateway.example' } };
   const context = vm.createContext({ AbortController, URL, document, fetch, window, console });
+  vm.runInContext(valuesSource, context, { filename: 'lab-publisher-values.js' });
+  vm.runInContext(renderersSource, context, { filename: 'lab-publisher-renderers.js' });
+  vm.runInContext(resourcesSource, context, { filename: 'lab-publisher-resources.js' });
+  vm.runInContext(assetsSource, context, { filename: 'lab-publisher-assets.js' });
+  vm.runInContext(metadataSource, context, { filename: 'lab-publisher-metadata.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   return { document, hooks: context.window.__labPublisherTestHooks };
 }
