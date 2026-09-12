@@ -27,6 +27,7 @@ COPY winrm_session_policy.py /app/winrm_session_policy.py
 COPY winrm_session_factory.py /app/winrm_session_factory.py
 COPY winrm_command_execution.py /app/winrm_command_execution.py
 COPY winrm_command_builders.py /app/winrm_command_builders.py
+COPY winrm_command_service.py /app/winrm_command_service.py
 COPY heartbeat_values.py /app/heartbeat_values.py
 COPY heartbeat_service.py /app/heartbeat_service.py
 COPY heartbeat_stream.py /app/heartbeat_stream.py

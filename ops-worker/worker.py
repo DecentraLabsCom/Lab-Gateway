@@ -86,6 +86,13 @@ from winrm_session_factory import (
 from winrm_command_execution import (
     run_winrm_method as _run_winrm_method_impl,
 )
+from winrm_command_service import (
+    read_remote_file as _read_remote_file_impl,
+    remove_remote_file as _remove_remote_file_impl,
+    run_remote_powershell as _run_remote_powershell_impl,
+    run_labstation_command as _run_labstation_command_impl,
+    write_remote_file as _write_remote_file_impl,
+)
 from winrm_command_builders import (
     build_labstation_command as _build_labstation_command_impl,
     build_read_remote_file_command as _build_read_remote_file_command_impl,
@@ -1028,126 +1035,108 @@ def run_labstation_command(host: Dict[str, Any], command: str, args: Optional[li
                            user: Optional[str], password: Optional[str],
                            transport: Optional[str], use_ssl: Optional[bool],
                            port: Optional[int]) -> Dict[str, Any]:
-    user, password = _winrm_credentials(host, user, password)
-
-    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    endpoint = f"https://{host.get('address')}:{effective_port}/wsman"
-    exe = host.get("labstation_exe", DEFAULT_LABSTATION_EXE)
-    args = args or []
-
-    logging.info(
-        "Executing %s %s on %s via %s",
-        str(exe).replace("\r", "\\r").replace("\n", "\\n"),
-        str(command).replace("\r", "\\r").replace("\n", "\\n"),
-        str(host.get("name")).replace("\r", "\\r").replace("\n", "\\n"),
-        str(endpoint).replace("\r", "\\r").replace("\n", "\\n"),
-    )
-    start = time.time()
-    session = create_winrm_session(
+    return _run_labstation_command_impl(
         host,
+        command,
+        args,
         user,
         password,
         transport,
-        effective_port,
+        use_ssl,
+        port,
+        resolve_credentials=_winrm_credentials,
+        resolve_policy=_winrm_connection_policy,
+        create_session=create_winrm_session,
+        run_method=run_winrm_method,
+        build_command=_build_labstation_command_impl,
+        default_executable=DEFAULT_LABSTATION_EXE,
         read_timeout_sec=WINRM_READ_TIMEOUT,
         operation_timeout_sec=WINRM_OPERATION_TIMEOUT,
+        logger=logging,
+        clock=time.time,
     )
-    executable, command_args = _build_labstation_command_impl(exe, command, args)
-    result = run_winrm_method(session, "run_cmd", executable, command_args)
-    duration_ms = int((time.time() - start) * 1000)
-
-    return {
-        "exit_code": result.status_code,
-        "stdout": (result.std_out or b"").decode("utf-8", errors="ignore"),
-        "stderr": (result.std_err or b"").decode("utf-8", errors="ignore"),
-        "duration_ms": duration_ms,
-    }
 
 
 def run_remote_powershell(host: Dict[str, Any], script: str, user: Optional[str], password: Optional[str],
                           transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> str:
-    user, password = _winrm_credentials(host, user, password)
-
-    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    session = create_winrm_session(
+    return _run_remote_powershell_impl(
         host,
+        script,
         user,
         password,
         transport,
-        effective_port,
+        use_ssl,
+        port,
+        resolve_credentials=_winrm_credentials,
+        resolve_policy=_winrm_connection_policy,
+        create_session=create_winrm_session,
+        run_method=run_winrm_method,
         read_timeout_sec=WINRM_READ_TIMEOUT,
         operation_timeout_sec=WINRM_OPERATION_TIMEOUT,
     )
-    result = run_winrm_method(session, "run_ps", script)
-    if result.status_code != 0:
-        raise RuntimeError(f"WinRM PowerShell failed ({result.status_code}): {(result.std_err or b'').decode('utf-8', errors='ignore')}")
-    return (result.std_out or b"").decode("utf-8", errors="ignore")
 
 
 def read_remote_file(host: Dict[str, Any], path: str, user: Optional[str], password: Optional[str],
                      transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> str:
-    user, password = _winrm_credentials(host, user, password)
-
-    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    ps = _build_read_remote_file_command_impl(path)
-
-    session = create_winrm_session(
+    return _read_remote_file_impl(
         host,
+        path,
         user,
         password,
         transport,
-        effective_port,
+        use_ssl,
+        port,
+        resolve_credentials=_winrm_credentials,
+        resolve_policy=_winrm_connection_policy,
+        create_session=create_winrm_session,
+        run_method=run_winrm_method,
+        build_command=_build_read_remote_file_command_impl,
         read_timeout_sec=WINRM_READ_TIMEOUT,
         operation_timeout_sec=WINRM_OPERATION_TIMEOUT,
     )
-    result = run_winrm_method(session, "run_ps", ps)
-    if result.status_code != 0:
-        raise RuntimeError(f"WinRM read failed ({result.status_code}): {(result.std_err or b'').decode('utf-8', errors='ignore')}")
-    return (result.std_out or b"").decode("utf-8", errors="ignore")
 
 
 def write_remote_file(host: Dict[str, Any], path: str, contents: str,
                       user: Optional[str], password: Optional[str],
                       transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> None:
-    user, password = _winrm_credentials(host, user, password)
-
-    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    ps = _build_write_remote_file_command_impl(path, contents)
-
-    session = create_winrm_session(
+    return _write_remote_file_impl(
         host,
+        path,
+        contents,
         user,
         password,
         transport,
-        effective_port,
+        use_ssl,
+        port,
+        resolve_credentials=_winrm_credentials,
+        resolve_policy=_winrm_connection_policy,
+        create_session=create_winrm_session,
+        run_method=run_winrm_method,
+        build_command=_build_write_remote_file_command_impl,
         read_timeout_sec=WINRM_READ_TIMEOUT,
         operation_timeout_sec=WINRM_OPERATION_TIMEOUT,
     )
-    result = run_winrm_method(session, "run_ps", ps)
-    if result.status_code != 0:
-        raise RuntimeError(f"WinRM write failed ({result.status_code}): {(result.std_err or b'').decode('utf-8', errors='ignore')}")
 
 
 def remove_remote_file(host: Dict[str, Any], path: str,
                        user: Optional[str], password: Optional[str],
                        transport: Optional[str], use_ssl: Optional[bool], port: Optional[int]) -> None:
-    user, password = _winrm_credentials(host, user, password)
-
-    _, effective_port, transport = _winrm_connection_policy(host, use_ssl, port, transport)
-    ps = _build_remove_remote_file_command_impl(path)
-
-    session = create_winrm_session(
+    return _remove_remote_file_impl(
         host,
+        path,
         user,
         password,
         transport,
-        effective_port,
+        use_ssl,
+        port,
+        resolve_credentials=_winrm_credentials,
+        resolve_policy=_winrm_connection_policy,
+        create_session=create_winrm_session,
+        run_method=run_winrm_method,
+        build_command=_build_remove_remote_file_command_impl,
         read_timeout_sec=WINRM_READ_TIMEOUT,
         operation_timeout_sec=WINRM_OPERATION_TIMEOUT,
     )
-    result = run_winrm_method(session, "run_ps", ps)
-    if result.status_code != 0:
-        raise RuntimeError(f"WinRM remove failed ({result.status_code}): {(result.std_err or b'').decode('utf-8', errors='ignore')}")
 
 
 def get_local_mode_flag_path(host: Dict[str, Any]) -> str:

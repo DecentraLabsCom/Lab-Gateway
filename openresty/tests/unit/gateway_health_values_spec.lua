@@ -19,6 +19,9 @@ runner.describe("gateway_health value helpers", function()
 
     runner.it("parses issuer URLs and omits default ports from their origin", function()
         local parsed = values.parse_issuer_url(" https://issuer.example/auth ")
+        if not parsed then
+            error("expected a parsed HTTPS issuer URL")
+        end
         runner.assert.equals("https", parsed.scheme)
         runner.assert.equals("issuer.example", parsed.host)
         runner.assert.equals(443, parsed.port)
