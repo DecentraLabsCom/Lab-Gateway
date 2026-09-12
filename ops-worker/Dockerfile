@@ -19,6 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY worker.py /app/worker.py
+COPY errors.py /app/errors.py
+COPY winrm_trust.py /app/winrm_trust.py
+COPY winrm_trust_store.py /app/winrm_trust_store.py
+COPY winrm_trust_service.py /app/winrm_trust_service.py
 COPY aas_generator.py /app/aas_generator.py
 COPY rotate_secrets.py /app/rotate_secrets.py
 COPY power_credentials.py /app/power_credentials.py
