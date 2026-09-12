@@ -2,43 +2,15 @@ local cjson = require "cjson.safe"
 local resolver = require "resty.dns.resolver"
 local ok_http, resty_http = pcall(require, "resty.http")
 local demo_readiness = require "demo_readiness"
+local health_values = require "gateway_health_values"
 
 local PUBLIC_KEY_PATH = "/etc/ssl/private/public_key.pem"
 local FULLCHAIN_PATH = "/etc/ssl/private/fullchain.pem"
 local PRIVKEY_PATH = "/etc/ssl/private/privkey.pem"
 local STATIC_ROOT_INDEX_PATH = "/var/www/html/index.html"
 
-local function response_is_reachable(status, body)
-    if not status then
-        return false
-    end
-    if status < 500 then
-        return true
-    end
-    if type(body) ~= "table" then
-        return false
-    end
-    local payload_status = tostring(body.status or ""):upper()
-    return payload_status == "DEGRADED"
-        or payload_status == "PARTIAL"
-        or body.db ~= nil
-        or body.guacamole_schema ~= nil
-end
-
-local function trim(value)
-    if not value then
-        return ""
-    end
-    return (tostring(value):gsub("^%s*(.-)%s*$", "%1"))
-end
-
-local function normalize_issuer(value)
-    local normalized = trim(value)
-    if normalized == "" then
-        return ""
-    end
-    return normalized:gsub("/+$", "")
-end
+local trim = health_values.trim
+local normalize_issuer = health_values.normalize_issuer
 
 local function file_exists(path)
     local f = io.open(path, "r")
@@ -59,96 +31,35 @@ local function read_file(path)
     return body
 end
 
-local function looks_like_public_key_pem(value)
-    if type(value) ~= "string" then
-        return false
-    end
-    return value:find("BEGIN PUBLIC KEY", 1, true) ~= nil
-        and value:find("END PUBLIC KEY", 1, true) ~= nil
-end
-
-local function canonical_public_key(value)
-    if not looks_like_public_key_pem(value) then
-        return nil
-    end
-    local body = value:match("%-%-%-%-%-BEGIN PUBLIC KEY%-%-%-%-%-(.-)%-%-%-%-%-END PUBLIC KEY%-%-%-%-%-")
-    if not body then
-        return nil
-    end
-    return body:gsub("%s+", "")
-end
-
-local function parse_issuer_url(value)
-    local raw = trim(value)
-    if raw == "" then
-        return nil
-    end
-    local scheme, host, port = raw:match("^(https?)://([^/:]+):?(%d*)")
-    if not scheme or not host then
-        return nil
-    end
-    local port_num = tonumber(port)
-    if not port_num then
-        port_num = (scheme == "https") and 443 or 80
-    end
-    return {
-        scheme = scheme,
-        host = host,
-        port = port_num
-    }
-end
-
-local function issuer_origin(parsed)
-    if not parsed then
-        return nil
-    end
-    local default_port = parsed.scheme == "https" and 443 or 80
-    local suffix = ""
-    if parsed.port ~= default_port then
-        suffix = ":" .. tostring(parsed.port)
-    end
-    return string.format("%s://%s%s", parsed.scheme, parsed.host, suffix)
-end
+local looks_like_public_key_pem = health_values.looks_like_public_key_pem
+local canonical_public_key = health_values.canonical_public_key
+local parse_issuer_url = health_values.parse_issuer_url
+local issuer_origin = health_values.issuer_origin
 
 local function is_lite_mode()
     local config = ngx.shared and ngx.shared.config
     local value = config and config:get("lite_mode")
-    return value == 1 or value == true or value == "1"
+    return health_values.lite_mode_enabled(value)
 end
 
 local function build_local_issuer()
     local config = ngx.shared and ngx.shared.config
-    local server_name = trim((config and config:get("server_name")) or os.getenv("SERVER_NAME") or "localhost")
-    local https_port = trim((config and config:get("https_port")) or os.getenv("HTTPS_PORT") or "443")
-    local port_segment = ""
-    if https_port ~= "" and https_port ~= "443" then
-        port_segment = ":" .. https_port
-    end
-    return string.format("https://%s%s/auth", server_name, port_segment)
+    local server_name = (config and config:get("server_name")) or os.getenv("SERVER_NAME") or "localhost"
+    local https_port = (config and config:get("https_port")) or os.getenv("HTTPS_PORT") or "443"
+    return health_values.build_local_issuer(server_name, https_port)
 end
 
 local function capture(path)
     local res = ngx.location.capture(path)
     if not res then
-        return { ok = false, error = "no response" }
+        return health_values.capture_result(nil)
     end
     local body = res.body or ""
     local parsed = cjson.decode(body) or {}
-    return {
-        status = res.status,
-        ok = res.status and res.status < 400,
-        reachable = response_is_reachable(res.status, parsed),
-        body = parsed,
-        raw = body
-    }
+    return health_values.capture_result(res, parsed, body)
 end
 
-local function blockchain_ready(check)
-    if not check or not check.status then
-        return false
-    end
-    return check.status >= 200 and check.status < 400
-end
+local blockchain_ready = health_values.blockchain_ready
 
 local function check_dns(host)
     local r, err = resolver:new{ nameservers = { "127.0.0.11" }, retrans = 1, timeout = 100 }
@@ -188,57 +99,10 @@ local function cert_days_remaining(path)
     f:close()
     local notAfter = out:match("notAfter=([^\r\n]+)")
     if not notAfter then return nil end
-    notAfter = notAfter:match("^%s*(.-)%s*$")
-    local ts = ngx.parse_http_time(notAfter)
-    if not ts then
-        local months = {
-            Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,
-            Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12
-        }
-        local mon, day, hour, min, sec, year = notAfter:match("^(%a+)%s+(%d+)%s+(%d+):(%d+):(%d+)%s+(%d+)%s+GMT$")
-        local month_num = mon and months[mon] or nil
-        local year_num = year and tonumber(year) or nil
-        local day_num = day and tonumber(day) or nil
-        local hour_num = hour and tonumber(hour) or nil
-        local min_num = min and tonumber(min) or nil
-        local sec_num = sec and tonumber(sec) or nil
-
-        if month_num and year_num and day_num and hour_num and min_num and sec_num then
-            local local_ts = os.time({
-                year = year_num,
-                month = month_num,
-                day = day_num,
-                hour = hour_num,
-                min = min_num,
-                sec = sec_num
-            })
-            if local_ts then
-                local local_date = os.date("*t", local_ts)
-                local utc_date = os.date("!*t", local_ts)
-                local offset = os.difftime(
-                    type(local_date) == "table" and os.time(local_date) or local_ts,
-                    type(utc_date) == "table" and os.time(utc_date) or local_ts
-                )
-                ts = local_ts - offset
-            end
-        end
-    end
-    if not ts then return nil end
-    local now = ngx.time()
-    return math.floor((ts - now) / 86400)
+    return health_values.certificate_days_remaining(notAfter, ngx.time(), ngx.parse_http_time)
 end
 
-local function overall_status(services)
-    local ok_count = 0
-    local reachable_count = 0
-    for _, svc in ipairs(services) do
-        if svc.ok then ok_count = ok_count + 1 end
-        if svc.reachable then reachable_count = reachable_count + 1 end
-    end
-    if ok_count == #services then return "UP" end
-    if ok_count > 0 or reachable_count > 0 then return "PARTIAL" end
-    return "DOWN"
-end
+local overall_status = health_values.overall_status
 
 local function check_lite_issuer_trust(issuer)
     -- init.lua stores the exact mode-selected key in shared memory. Use that
@@ -397,26 +261,27 @@ end
 -- Ops worker details (optional)
 local guacamole_schema_ok = ops_body.guacamole_schema == true
 
-local status_checks = {
-    { ok = guac.ok, reachable = guac_reachable },
-    { ok = guac_api_ok, reachable = guac_api_reachable },
-    { ok = guacd_ok, reachable = guacd_ok },
-    { ok = ops.ok, reachable = ops_reachable },
-    { ok = guacamole_schema_ok, reachable = ops_reachable },
-    { ok = mysql_ok, reachable = mysql_ok or ops_reachable }
-}
-
-if not lite_mode then
-    table.insert(status_checks, 1, { ok = blockchain_ok, reachable = blockchain_reachable })
-elseif lite_auth then
-    table.insert(status_checks, { ok = lite_auth.ok, reachable = lite_auth.issuer_host_dns_ok })
-end
-if fmu_runner_enabled then
-    table.insert(status_checks, { ok = fmu_runner_ok, reachable = fmu_runner.reachable == true })
-end
-if aas_enabled then
-    table.insert(status_checks, { ok = aas.ok, reachable = aas.reachable == true })
-end
+local status_checks = health_values.build_status_checks({
+    lite_mode = lite_mode,
+    lite_auth = lite_auth,
+    blockchain_ok = blockchain_ok,
+    blockchain_reachable = blockchain_reachable,
+    guac_ok = guac.ok,
+    guac_reachable = guac_reachable,
+    guac_api_ok = guac_api_ok,
+    guac_api_reachable = guac_api_reachable,
+    guacd_ok = guacd_ok,
+    ops_ok = ops.ok,
+    ops_reachable = ops_reachable,
+    guacamole_schema_ok = guacamole_schema_ok,
+    mysql_ok = mysql_ok,
+    fmu_runner_enabled = fmu_runner_enabled,
+    fmu_runner_ok = fmu_runner_ok,
+    fmu_runner_reachable = fmu_runner.reachable == true,
+    aas_enabled = aas_enabled,
+    aas_ok = aas.ok,
+    aas_reachable = aas.reachable == true
+})
 
 local gateway_status = overall_status(status_checks)
 local demo = demo_readiness.evaluate({
@@ -428,85 +293,40 @@ local demo = demo_readiness.evaluate({
 })
 
 -- Build structured response
-local result = {
-    mode = lite_mode and "lite" or "full",
-    lite = lite_mode,
-    status = gateway_status,
+local result = health_values.build_result({
+    lite_mode = lite_mode,
+    gateway_status = gateway_status,
     demo = demo,
-    services = {
-        blockchain = {
-            ok = blockchain_ok,
-            reachable = blockchain_reachable,
-            status = blockchain.status,
-            required = not lite_mode,
-            details = block_body
-        },
-        guacamole = {
-            ok = guac.ok,
-            status = guac.status
-        },
-        guacamole_api = {
-            ok = guac_api_ok,
-            status = guac_api.status
-        },
-        guacd = {
-            ok = guacd_ok or false,
-            status = guacd_ok and "OK" or guacd_err
-        },
-        ops = {
-            ok = ops.ok,
-            status = ops.status,
-            hosts = ops_body.hosts or ops_body.host_count,
-            poll_enabled = ops_body.polling_enabled or ops_body.polling,
-            demo = ops_body.demo
-        },
-        demo = demo,
-        guacamole_schema = {
-            ok = guacamole_schema_ok,
-            checked_by = "ops-worker"
-        },
-        mysql = {
-            ok = mysql_ok or false
-        },
-        lite_auth = {
-            ok = lite_auth and lite_auth.ok or (not lite_mode),
-            issuer = lite_auth and lite_auth.issuer or configured_issuer,
-            local_issuer = lite_auth and lite_auth.local_issuer or local_issuer,
-            external_issuer = lite_auth and lite_auth.external_issuer or false,
-            issuer_url_valid = lite_auth and lite_auth.issuer_url_valid or false,
-            issuer_host_dns_ok = lite_auth and lite_auth.issuer_host_dns_ok or false,
-            active_public_key_source = lite_auth and lite_auth.active_public_key_source or nil,
-            local_public_key_present = lite_auth and lite_auth.local_public_key_present or file_exists(PUBLIC_KEY_PATH),
-            local_public_key_valid = lite_auth and lite_auth.local_public_key_valid or false,
-            remote_public_key_ok = lite_auth and lite_auth.remote_public_key_ok or false,
-            public_key_matches = lite_auth and lite_auth.public_key_matches or false,
-            remote_public_key_status = lite_auth and lite_auth.remote_public_key_status or "not_applicable"
-        },
-        fmu_runner = {
-            ok = fmu_runner_ok,
-            enabled = fmu_runner_enabled,
-            status = fmu_runner_status,
-            details = fmu_runner_body
-        },
-        aas = {
-            ok = aas.ok,
-            enabled = aas_enabled,
-            status = aas.status
-        }
-    },
-    infra = {
-        dns = dns,
-        mysql_up = mysql_ok or false,
-        cert = {
-            days_remaining = cert_days,
-            fullchain_present = file_exists(FULLCHAIN_PATH),
-            privkey_present = file_exists(PRIVKEY_PATH)
-        },
-        static_root_ok = file_exists(STATIC_ROOT_INDEX_PATH),
-        env = env_ok
-    },
-    version = block_body.version
-}
+    blockchain = blockchain,
+    blockchain_ok = blockchain_ok,
+    blockchain_reachable = blockchain_reachable,
+    block_body = block_body,
+    guac = guac,
+    guac_api = guac_api,
+    guac_api_ok = guac_api_ok,
+    guacd_ok = guacd_ok,
+    guacd_err = guacd_err,
+    ops = ops,
+    ops_body = ops_body,
+    guacamole_schema_ok = guacamole_schema_ok,
+    mysql_ok = mysql_ok,
+    lite_auth = lite_auth,
+    configured_issuer = configured_issuer,
+    local_issuer = local_issuer,
+    public_key_file_present = file_exists(PUBLIC_KEY_PATH),
+    fmu_runner_ok = fmu_runner_ok,
+    fmu_runner_enabled = fmu_runner_enabled,
+    fmu_runner_status = fmu_runner_status,
+    fmu_runner_body = fmu_runner_body,
+    aas = aas,
+    aas_enabled = aas_enabled,
+    dns = dns,
+    cert_days = cert_days,
+    fullchain_present = file_exists(FULLCHAIN_PATH),
+    privkey_present = file_exists(PRIVKEY_PATH),
+    static_root_ok = file_exists(STATIC_ROOT_INDEX_PATH),
+    env_ok = env_ok
+})
 
 ngx.header["Content-Type"] = "application/json"
 ngx.status = result.status == "UP" and 200 or 503

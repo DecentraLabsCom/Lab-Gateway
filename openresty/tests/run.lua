@@ -25,6 +25,7 @@ local specs = {
     "tests.unit.init_spec",
     "tests.unit.public_health_spec",
     "tests.unit.gateway_health_spec",
+    "tests.unit.gateway_health_values_spec",
     "tests.unit.demo_readiness_spec",
     "tests.unit.demo_station_spec",
     "tests.unit.treasury_access_spec",
