@@ -67,6 +67,54 @@ def test_ops_worker_image_copies_the_operation_values_module():
     assert "COPY operation_values.py /app/operation_values.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_health_values_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY health_values.py /app/health_values.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_operations_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY operations_route.py /app/operations_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_hosts_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY hosts_route.py /app/hosts_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_hosts_reload_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY hosts_reload_route.py /app/hosts_reload_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_hosts_discover_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY hosts_discover_route.py /app/hosts_discover_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_aas_sync_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY aas_sync_route.py /app/aas_sync_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_timeline_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY timeline_route.py /app/timeline_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_winrm_trust_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY winrm_trust_route.py /app/winrm_trust_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_winrm_session_factory():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
@@ -115,6 +163,18 @@ def test_ops_worker_image_copies_the_heartbeat_poller():
     assert "COPY heartbeat_poller.py /app/heartbeat_poller.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_heartbeat_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY heartbeat_route.py /app/heartbeat_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_heartbeat_stream_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY heartbeat_stream_route.py /app/heartbeat_stream_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_host_heartbeat_discovery():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
@@ -137,6 +197,24 @@ def test_ops_worker_image_copies_the_guacamole_connection_values():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY guacamole_connection_values.py /app/guacamole_connection_values.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_guacamole_connection_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY guacamole_connection_route.py /app/guacamole_connection_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_guacamole_cleanup_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY guacamole_cleanup_route.py /app/guacamole_cleanup_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_guacamole_provision_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY guacamole_provision_route.py /app/guacamole_provision_route.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_guacamole_catalog_service():
