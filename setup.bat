@@ -576,11 +576,11 @@ if "!issuer_value!"=="" (
     if "!session_observer_credentials_json!"=="{}" set "session_observer_credentials_json={^"!session_observer_gateway_id!^":^"!session_observer_signing_secret!^"}"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_GATEWAY_ID" "!session_observer_gateway_id!"
     call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_SIGNING_SECRET" "!session_observer_signing_secret!"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" "!session_observer_credentials_json!"
+    call :UpdateEnvFromVariable "%ROOT_ENV_FILE%" "SESSION_OBSERVER_CREDENTIALS_JSON" session_observer_credentials_json
     call :ReadEnvValue "%ROOT_ENV_FILE%" "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" access_code_redeemer_credentials_json
     if not defined access_code_redeemer_credentials_json set "access_code_redeemer_credentials_json={}"
     if "!access_code_redeemer_credentials_json!"=="{}" set "access_code_redeemer_credentials_json={^"!session_observer_gateway_id!^":^"!access_code_redeemer_token!^"}"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" "!access_code_redeemer_credentials_json!"
+    call :UpdateEnvFromVariable "%ROOT_ENV_FILE%" "ACCESS_CODE_REDEEMER_CREDENTIALS_JSON" access_code_redeemer_credentials_json
     call :UpdateEnv "%ROOT_ENV_FILE%" "ACCESS_AUDIT_URL" ""
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_ISSUE_URL" "http://blockchain-services:8080/auth/fmu/session-ticket/issue"
     call :UpdateEnv "%ROOT_ENV_FILE%" "AUTH_SESSION_TICKET_REDEEM_URL" "http://blockchain-services:8080/auth/fmu/session-ticket/redeem"
@@ -1280,8 +1280,22 @@ exit /b
 
 :GenerateObserverSecret
 setlocal
-for /f %%H in ('powershell -NoLogo -NoProfile -Command "$bytes = New-Object byte[](32); [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes); [Convert]::ToBase64String($bytes).TrimEnd('=^').Replace('+','-').Replace('/','_')"') do set "_secret=%%H"
+for /f %%H in ('powershell -NoLogo -NoProfile -Command "$bytes = New-Object byte[](32); [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes); [Convert]::ToBase64String($bytes).TrimEnd('=^').Replace('+','-').Replace('/','_')"') do set "_secret=%%H"
 endlocal & set "%~1=%_secret%"
+exit /b
+
+:UpdateEnvFromVariable
+set "env_file=%~1"
+set "env_key=%~2"
+set "env_variable=%~3"
+set "DL_ENV_FILE=!env_file!"
+set "DL_ENV_KEY=!env_key!"
+set "DL_ENV_VALUE="
+for /f "tokens=1,* delims==" %%A in ('set !env_variable! 2^>nul') do set "DL_ENV_VALUE=%%B"
+powershell -NoLogo -NoProfile -Command "& { $file=$env:DL_ENV_FILE; $key=$env:DL_ENV_KEY; $value=$env:DL_ENV_VALUE; if (-not (Test-Path -LiteralPath $file)) { New-Item -Path $file -ItemType File -Force | Out-Null }; $content = @(); if (Test-Path -LiteralPath $file) { $content = @(Get-Content -LiteralPath $file) }; $pattern = '^' + [regex]::Escape($key) + '=.*$'; $replacement = $key + '=' + $value; $updated = $false; for ($i = 0; $i -lt $content.Count; $i++) { if ($content[$i] -match $pattern) { $content[$i] = $replacement; $updated = $true } }; if (-not $updated) { $content += $replacement }; Set-Content -LiteralPath $file -Value $content -Encoding Ascii }"
+set "DL_ENV_FILE="
+set "DL_ENV_KEY="
+set "DL_ENV_VALUE="
 exit /b
 
 :IsValidFernetKey
