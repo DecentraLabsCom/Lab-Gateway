@@ -10,6 +10,12 @@ const apiClientScriptPath = new URL('web/assets/js/core/api-client.js', repoRoot
 const activityScriptPath = new URL('web/assets/js/lab-manager-activity.js', repoRoot);
 const accessPolicyScriptPath = new URL('web/assets/js/lab-manager-access-policy.js', repoRoot);
 const heartbeatErrorsScriptPath = new URL('web/assets/js/lab-manager-heartbeat-errors.js', repoRoot);
+const hostsScriptPath = new URL('web/assets/js/lab-manager-hosts.js', repoRoot);
+const hostDiscoveryScriptPath = new URL('web/assets/js/lab-manager-host-discovery.js', repoRoot);
+const winrmCredentialsScriptPath = new URL('web/assets/js/lab-manager-winrm-credentials.js', repoRoot);
+const winrmTrustScriptPath = new URL('web/assets/js/lab-manager-winrm-trust.js', repoRoot);
+const hostProvisioningScriptPath = new URL('web/assets/js/lab-manager-host-provisioning.js', repoRoot);
+const hostActionsScriptPath = new URL('web/assets/js/lab-manager-host-actions.js', repoRoot);
 const toastScriptPath = new URL('web/assets/js/core/toast.js', repoRoot);
 const notificationsAccessScriptPath = new URL('web/assets/js/lab-manager-notifications-access.js', repoRoot);
 const paginationScriptPath = new URL('web/assets/js/core/pagination.js', repoRoot);
@@ -325,6 +331,24 @@ function loadLabManager({
   vm.runInContext(fs.readFileSync(heartbeatErrorsScriptPath, 'utf8'), context, {
     filename: 'lab-manager-heartbeat-errors.js',
   });
+  vm.runInContext(fs.readFileSync(hostsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-hosts.js',
+  });
+  vm.runInContext(fs.readFileSync(hostDiscoveryScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-host-discovery.js',
+  });
+  vm.runInContext(fs.readFileSync(winrmCredentialsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-winrm-credentials.js',
+  });
+  vm.runInContext(fs.readFileSync(winrmTrustScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-winrm-trust.js',
+  });
+  vm.runInContext(fs.readFileSync(hostProvisioningScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-host-provisioning.js',
+  });
+  vm.runInContext(fs.readFileSync(hostActionsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-host-actions.js',
+  });
   vm.runInContext(fs.readFileSync(toastScriptPath, 'utf8'), context, {
     filename: 'toast.js',
   });
@@ -432,7 +456,7 @@ test('loads the activity controller before the Lab Manager bootstrap', () => {
   const html = fs.readFileSync(indexPath, 'utf8');
   assert.match(
     html,
-    /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v1[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v1[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
+    /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*lab-manager-hosts\.js\?v=lab-manager-hosts-v1[\s\S]*lab-manager-host-discovery\.js\?v=lab-manager-host-discovery-v1[\s\S]*lab-manager-winrm-credentials\.js\?v=lab-manager-winrm-credentials-v1[\s\S]*lab-manager-winrm-trust\.js\?v=lab-manager-winrm-trust-v1[\s\S]*lab-manager-host-provisioning\.js\?v=lab-manager-host-provisioning-v1[\s\S]*lab-manager-host-actions\.js\?v=lab-manager-host-actions-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v1[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v1[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
   );
 });
 
