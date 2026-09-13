@@ -39,6 +39,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const formatHeartbeatStreamError = heartbeatErrors.formatStreamError;
     const isHeartbeatConfigurationError = heartbeatErrors.isConfigurationError;
+    const hostsModule = window.LabManagerHosts;
+    if (!hostsModule) {
+        throw new Error('LabManagerHosts must load before lab-manager.js');
+    }
+    const hostDiscoveryModule = window.LabManagerHostDiscovery;
+    if (!hostDiscoveryModule) {
+        throw new Error('LabManagerHostDiscovery must load before lab-manager.js');
+    }
+    const winrmCredentialsModule = window.LabManagerWinrmCredentials;
+    if (!winrmCredentialsModule) {
+        throw new Error('LabManagerWinrmCredentials must load before lab-manager.js');
+    }
+    const winrmTrustModule = window.LabManagerWinrmTrust;
+    if (!winrmTrustModule) {
+        throw new Error('LabManagerWinrmTrust must load before lab-manager.js');
+    }
+    const hostProvisioningModule = window.LabManagerHostProvisioning;
+    if (!hostProvisioningModule) {
+        throw new Error('LabManagerHostProvisioning must load before lab-manager.js');
+    }
+    const hostActionsModule = window.LabManagerHostActions;
+    if (!hostActionsModule) {
+        throw new Error('LabManagerHostActions must load before lab-manager.js');
+    }
     const toastModule = window.LabManagerToast;
     if (!toastModule) {
         throw new Error('LabManagerToast must load before lab-manager.js');
@@ -367,6 +391,126 @@ document.addEventListener('DOMContentLoaded', () => {
     let guacamoleStationCandidates = [];
     let provisionStationKey = '';
     let provisionLabsLoading = false;
+
+    const hostsController = hostsModule.createController({
+        fetchImpl: (...args) => fetch(...args),
+        getEventSource: () => window.EventSource,
+        getOrigin: () => window.location.origin,
+        state: {
+            hostState,
+            hostMetadata,
+            heartbeatSources,
+            heartbeatStreamErrorShown,
+            getHostNames: () => hostNames,
+            setHostNames: nextHostNames => { hostNames = nextHostNames; },
+        },
+        callbacks: {
+            renderHosts,
+            loadActivityFeed,
+            setGuacamoleCandidates: candidates => { guacamoleCandidates = candidates; },
+            renderGuacamoleCandidates: candidates => {
+                guacamoleStationCandidates = candidates;
+                renderGuacamoleCandidates(candidates);
+            },
+            rememberGuacamoleCandidate,
+            groupGuacamoleCandidates,
+            updateOpsHint,
+            showOpsWarning,
+            showToast,
+            formatHeartbeatStreamError,
+            isHeartbeatConfigurationError,
+        },
+        logger: console,
+    });
+    const loadHostInventory = hostsController.loadInventory;
+    const startHeartbeatStream = hostsController.startHeartbeatStream;
+    const stopHeartbeatStream = hostsController.stopHeartbeatStream;
+    const refreshAllHosts = hostsController.refreshAllHosts;
+    const pollHeartbeat = hostsController.pollHeartbeat;
+    const hostActionsController = hostActionsModule.createController({
+        fetchImpl: (...args) => fetch(...args),
+        callbacks: {
+            pollHeartbeat,
+            showToast,
+        },
+        logger: console,
+    });
+    const hostDiscoveryController = hostDiscoveryModule.createController({
+        fetchImpl: (...args) => fetch(...args),
+        candidateState: guacamoleCandidateState,
+        callbacks: {
+            renderCandidates: () => renderGuacamoleCandidates(guacamoleStationCandidates),
+            loadHostInventory,
+            showToast,
+        },
+        logger: console,
+    });
+    const winrmCredentialsController = winrmCredentialsModule.createController({
+        fetchImpl: (...args) => fetch(...args),
+        callbacks: {
+            closeModal: closeWinrmCredentialsModal,
+            loadHostInventory,
+            showToast,
+        },
+        logger: console,
+    });
+    const winrmTrustController = winrmTrustModule.createController({
+        fetchImpl: (...args) => fetch(...args),
+        formDataCtor: FormData,
+        formatErrorMessage: winrmTrustErrorMessage,
+        callbacks: {
+            onLoaded: (host, trust) => {
+                if (activeWinrmTrustHost === host) renderWinrmTrustState(trust);
+            },
+            onLoadError: (host, err) => {
+                if (activeWinrmTrustHost !== host) return;
+                savedWinrmTrustStatus = 'unavailable';
+                updateWinrmTrustVerifyState();
+                if (winrmTrustCurrentEl) {
+                    winrmTrustCurrentEl.textContent = `Unable to load trust: ${err.message}`;
+                }
+                showToast(`WinRM trust status failed: ${err.message}`, 'error');
+            },
+            onPreview: preview => {
+                activeWinrmTrustPreview = preview;
+                renderWinrmTrustPreview(preview);
+            },
+            onReady: preview => {
+                activeWinrmTrustPreview = preview;
+                renderWinrmTrustPreview(preview);
+                showToast('Certificate preview ready; verify the SHA-256 fingerprint', 'success');
+            },
+            onPreviewError: err => showToast(`Certificate preview failed: ${err.message}`, 'error'),
+            onPreviewFinished: updateWinrmTrustSaveState,
+            onSaved: async host => {
+                const savedHost = host;
+                closeWinrmTrustModal();
+                showToast(`WinRM TLS trust saved for ${savedHost}`, 'success');
+                await loadHostInventory({ skipAuthPrompt: true });
+                await pollHeartbeat(savedHost);
+            },
+            onSaveError: err => showToast(`WinRM trust save failed: ${err.message}`, 'error'),
+            onSaveFinished: updateWinrmTrustSaveState,
+            onRemoved: async host => {
+                closeWinrmTrustModal();
+                showToast(`WinRM TLS trust removed for ${host}`, 'success');
+                await loadHostInventory({ skipAuthPrompt: true });
+            },
+            onRemoveError: (host, err) => showToast(`WinRM trust removal failed: ${err.message}`, 'error'),
+            onRemoveFinished: () => {
+                if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.disabled = false;
+            },
+        },
+    });
+    const hostProvisioningController = hostProvisioningModule.createController({
+        fetchImpl: (...args) => fetch(...args),
+        callbacks: {
+            closeModal: closeProvisionHostModal,
+            loadHostInventory,
+            showToast,
+        },
+        logger: console,
+    });
 
     const powerCredentialsController = powerCredentialsModule.createController({
         fields: {
@@ -735,54 +879,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function $(sel) { return document.querySelector(sel); }
 
     // ---- Lab Station ops helpers ----
-    async function loadHostInventory(options = {}) {
-        try {
-            const res = await fetch('/ops/api/hosts', options);
-            if (res.status === 403) {
-                showOpsWarning();
-                return;
-            }
-            if (res.status === 401) {
-                if (!options.skipAuthPrompt) {
-                    showToast('Lab Manager session required to load Lab Station hosts', 'error');
-                }
-                return;
-            }
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            const hosts = Array.isArray(data.hosts) ? data.hosts : [];
-            Object.keys(hostMetadata).forEach(key => delete hostMetadata[key]);
-            hosts.forEach(host => {
-                if (host && host.name) {
-                    hostMetadata[host.name] = host;
-                }
-            });
-
-            const nextHostNames = hosts.map(host => host.name).filter(Boolean);
-            const nextSet = new Set(nextHostNames);
-            hostNames
-                .filter(name => !nextSet.has(name))
-                .forEach(stopHeartbeatStream);
-            hostNames = nextHostNames;
-            hostNames
-                .filter(name => {
-                    const meta = hostMetadata[name] || {};
-                    return meta.winrmConfigured !== true || meta.winrmTrustStatus !== 'ready';
-                })
-                .forEach(stopHeartbeatStream);
-            renderHosts();
-            guacamoleCandidates = Array.isArray(data.guacamoleUnmatched) ? data.guacamoleUnmatched : [];
-            guacamoleCandidates.forEach(rememberGuacamoleCandidate);
-            guacamoleStationCandidates = groupGuacamoleCandidates(guacamoleCandidates);
-            renderGuacamoleCandidates(guacamoleStationCandidates);
-            hostNames.forEach(startHeartbeatStream);
-            updateOpsHint(data);
-        } catch (err) {
-            console.warn('Unable to load ops host inventory', err);
-            updateOpsHint(null);
-        }
-    }
-
     function updateOpsHint(data) {
         const opsHint = $('#opsHint');
         if (!opsHint) return;
@@ -1946,69 +2042,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return `lab-manager:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     }
 
-    function startHeartbeatStream(host) {
-        const meta = hostMetadata[host] || {};
-        const EventSourceCtor = window.EventSource;
-        if (
-            !host ||
-            !EventSourceCtor ||
-            heartbeatSources[host] ||
-            meta.winrmConfigured !== true ||
-            meta.winrmTrustStatus !== 'ready'
-        ) return;
-        const url = new URL('/ops/api/heartbeat/stream', window.location.origin);
-        url.searchParams.set('host', host);
-        url.searchParams.set('include_events', 'false');
-
-        const source = new EventSourceCtor(url.toString());
-        heartbeatSources[host] = source;
-
-        source.addEventListener('heartbeat', evt => {
-            try {
-                const data = JSON.parse(evt.data || '{}');
-                hostState[host] = data;
-                delete heartbeatStreamErrorShown[host];
-                renderHosts();
-                loadActivityFeed();
-            } catch (err) {
-                console.warn('Heartbeat SSE parse failed', err);
-            }
-        });
-
-        source.addEventListener('error', evt => {
-            let errorPayload = null;
-            try {
-                errorPayload = JSON.parse(evt?.data || '');
-            } catch (_) {
-                // Browser connection errors do not always include a payload.
-            }
-            if (isHeartbeatConfigurationError(errorPayload?.code)) {
-                stopHeartbeatStream(host);
-                showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
-                return;
-            }
-            if (source.readyState === EventSourceCtor.CLOSED) {
-                stopHeartbeatStream(host);
-            }
-            if (!heartbeatStreamErrorShown[host]) {
-                heartbeatStreamErrorShown[host] = true;
-                showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
-            }
-        });
-    }
-
-    function stopHeartbeatStream(host) {
-        const source = heartbeatSources[host];
-        if (!source) return;
-        try {
-            source.close();
-        } catch (_) {
-            // ignore
-        }
-        delete heartbeatSources[host];
-        delete heartbeatStreamErrorShown[host];
-    }
-
     function closeAllGuacamoleMatchPopovers() {
         Array.from(guacamolePopoverClosers).forEach(closePopover => closePopover());
     }
@@ -2288,56 +2321,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btn.dataset.action !== 'probe-candidate') return;
         const station = findGuacamoleStationCandidate(stationKey);
         if (!station) return;
-        const representative = station.connections[0];
-        guacamoleCandidateState[stationKey] = {
-            ...(guacamoleCandidateState[stationKey] || {}),
-            candidate: representative,
-            connectionId: representative?.id,
-            status: 'checking'
-        };
-        btn.disabled = true;
-        renderGuacamoleCandidates(guacamoleStationCandidates);
-        try {
-            const res = await fetch('/ops/api/hosts/discover', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ connectionId: representative?.id })
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                throw new Error(body.error || `HTTP ${res.status}`);
-            }
-            const winrmOpen = Object.entries(body.checks?.winrm || {})
-                .filter(([, open]) => open)
-                .map(([port]) => port);
-            const suggestedMac = body.opsHostDraft?.mac;
-            const detail = body.status === 'labstation-detected'
-                ? `HTTP health matched at ${body.checks?.labStationHttp?.url || 'configured discovery endpoint'}`
-                : winrmOpen.length
-                    ? `Open WinRM port${winrmOpen.length === 1 ? '' : 's'}: ${winrmOpen.join(', ')}`
-                    : 'No Lab Station health endpoint or WinRM port detected.';
-            guacamoleCandidateState[stationKey] = {
-                ...(guacamoleCandidateState[stationKey] || {}),
-                candidate: body.connection || representative,
-                connectionId: body.connection?.id || representative?.id,
-                status: body.status,
-                detail: suggestedMac ? `${detail} Suggested MAC: ${suggestedMac}` : detail,
-                opsHostDraft: body.opsHostDraft || {}
-            };
-            showToast(`Discovery finished for ${body.connection?.hostname || station.address || representative?.id}`, 'success');
-        } catch (err) {
-            console.error(err);
-            guacamoleCandidateState[stationKey] = {
-                ...(guacamoleCandidateState[stationKey] || {}),
-                candidate: representative,
-                connectionId: representative?.id,
-                status: 'error',
-                detail: err.message
-            };
-            showToast(`Lab Station check failed: ${err.message}`, 'error');
-        } finally {
-            loadHostInventory();
-        }
+        await hostDiscoveryController.probe(stationKey, station, btn);
     }
 
     function stationCandidateKey(candidate) {
@@ -2622,31 +2606,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const payload = {
             credentialRef: winrmCredentialRefEl.value.trim(),
             user: winrmCredentialUserEl.value.trim(),
-            password: winrmCredentialPasswordEl.value
+            password: winrmCredentialPasswordEl.value,
         };
-        if (!payload.credentialRef || !payload.user || !payload.password) {
-            showToast('WinRM credential reference, user, and password are required', 'error');
-            return;
-        }
-        if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.disabled = true;
-        try {
-            const res = await fetch('/ops/api/hosts/winrm-credentials', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                throw new Error(body.error || `HTTP ${res.status}`);
-            }
-            closeWinrmCredentialsModal();
-            showToast('WinRM credentials saved', 'success');
-            loadHostInventory();
-        } catch (err) {
-            showToast(`WinRM credential save failed: ${err.message}`, 'error');
-        } finally {
-            if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.disabled = false;
-        }
+        await winrmCredentialsController.save(payload, saveWinrmCredentialsBtn);
     }
 
     function winrmTrustStatusLabel(status) {
@@ -2790,20 +2752,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadWinrmTrustState(host) {
-        try {
-            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(host)}/winrm-trust`);
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
-            if (activeWinrmTrustHost !== host) return;
-            renderWinrmTrustState(body.trust || body);
-        } catch (err) {
-            if (activeWinrmTrustHost === host) {
-                savedWinrmTrustStatus = 'unavailable';
-                updateWinrmTrustVerifyState();
-                if (winrmTrustCurrentEl) winrmTrustCurrentEl.textContent = `Unable to load trust: ${err.message}`;
-                showToast(`WinRM trust status failed: ${err.message}`, 'error');
-            }
-        }
+        return winrmTrustController.load(host);
     }
 
     function closeWinrmTrustModal() {
@@ -2821,27 +2770,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (previewWinrmTrustBtn) previewWinrmTrustBtn.disabled = true;
-        try {
-            const form = new FormData();
-            form.append('certificate', activeWinrmTrustFile, activeWinrmTrustFile.name);
-            const res = await fetch(
-                `/ops/api/hosts/${encodeURIComponent(activeWinrmTrustHost)}/winrm-trust/preview`,
-                { method: 'POST', body: form },
-            );
-            const body = await res.json().catch(() => ({}));
-            if (body.preview) {
-                activeWinrmTrustPreview = body.preview;
-                renderWinrmTrustPreview(activeWinrmTrustPreview);
-            }
-            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
-            activeWinrmTrustPreview = { ...body.preview, valid: true };
-            renderWinrmTrustPreview(activeWinrmTrustPreview);
-            showToast('Certificate preview ready; verify the SHA-256 fingerprint', 'success');
-        } catch (err) {
-            showToast(`Certificate preview failed: ${err.message}`, 'error');
-        } finally {
-            updateWinrmTrustSaveState();
-        }
+        await winrmTrustController.preview(activeWinrmTrustHost, activeWinrmTrustFile);
     }
 
     async function saveWinrmTrust() {
@@ -2854,27 +2783,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (saveWinrmTrustBtn) saveWinrmTrustBtn.disabled = true;
-        try {
-            const form = new FormData();
-            form.append('certificate', activeWinrmTrustFile, activeWinrmTrustFile.name);
-            form.append('fingerprintSha256', activeWinrmTrustPreview.fingerprintSha256);
-            form.append('trustRef', activeWinrmTrustPreview.trustRef || '');
-            const res = await fetch(
-                `/ops/api/hosts/${encodeURIComponent(activeWinrmTrustHost)}/winrm-trust`,
-                { method: 'PUT', body: form },
-            );
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
-            const savedHost = activeWinrmTrustHost;
-            closeWinrmTrustModal();
-            showToast(`WinRM TLS trust saved for ${savedHost}`, 'success');
-            await loadHostInventory({ skipAuthPrompt: true });
-            await pollHeartbeat(savedHost);
-        } catch (err) {
-            showToast(`WinRM trust save failed: ${err.message}`, 'error');
-        } finally {
-            updateWinrmTrustSaveState();
-        }
+        await winrmTrustController.save(
+            activeWinrmTrustHost,
+            activeWinrmTrustFile,
+            activeWinrmTrustPreview,
+        );
     }
 
     async function verifyWinrmTrust() {
@@ -2886,19 +2799,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!activeWinrmTrustHost) return;
         if (!window.confirm(`Remove WinRM TLS trust for ${activeWinrmTrustHost}?`)) return;
         if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.disabled = true;
-        try {
-            const host = activeWinrmTrustHost;
-            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(host)}/winrm-trust`, { method: 'DELETE' });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
-            closeWinrmTrustModal();
-            showToast(`WinRM TLS trust removed for ${host}`, 'success');
-            await loadHostInventory({ skipAuthPrompt: true });
-        } catch (err) {
-            showToast(`WinRM trust removal failed: ${err.message}`, 'error');
-        } finally {
-            if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.disabled = false;
-        }
+        await winrmTrustController.remove(activeWinrmTrustHost);
     }
 
     async function saveProvisionedHost() {
@@ -2925,34 +2826,10 @@ document.addEventListener('DOMContentLoaded', () => {
             mac: provisionHostMacEl.value.trim(),
             labs,
             credentialRef: provisionHostAddressEl.value.trim(),
-            heartbeatPath: provisionHeartbeatPathEl.value.trim()
+            heartbeatPath: provisionHeartbeatPathEl.value.trim(),
         };
         if (labs.length) payload.validLabIds = labs;
-        if (!payload.connectionId || !payload.name || !payload.address) {
-            showToast('Name and address are required', 'error');
-            return;
-        }
-        if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = true;
-        try {
-            const res = await fetch('/ops/api/hosts/provision', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                const requestSuffix = body.requestId ? ` (request ID ${body.requestId})` : '';
-                throw new Error(`${body.error || `HTTP ${res.status}`}${requestSuffix}`);
-            }
-            closeProvisionHostModal();
-            showToast(`Ops host ${body.host?.name || payload.name} configured`, 'success');
-            loadHostInventory();
-        } catch (err) {
-            console.error(err);
-            showToast(`Configure host failed: ${err.message}`, 'error');
-        } finally {
-            if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = false;
-        }
+        await hostProvisioningController.save(payload, saveProvisionHostBtn);
     }
 
     function formatConnectionsStatus(connections) {
@@ -3052,163 +2929,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function refreshAllHosts() {
-        await loadHostInventory();
-        if (window.EventSource) {
-            const streamableHosts = hostNames.filter(host =>
-                hostMetadata[host]?.winrmConfigured === true
-                && hostMetadata[host]?.winrmTrustStatus === 'ready'
-            );
-            streamableHosts.forEach(startHeartbeatStream);
-                showToast(
-                    streamableHosts.length
-                        ? 'Heartbeat streaming started for configured hosts'
-                        : 'Heartbeat streaming unavailable: configure WinRM credentials and TLS trust',
-                streamableHosts.length ? 'success' : 'error',
-            );
-            return;
-        }
-        hostNames.forEach(pollHeartbeat);
-    }
-
-    async function pollHeartbeat(host) {
-        try {
-            const res = await fetch('/ops/api/heartbeat/poll', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host })
-            });
-            if (res.status === 403) {
-                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
-                return;
-            }
-            if (res.status === 401) {
-                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
-                return;
-            }
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-            hostState[host] = data;
-            renderHosts();
-            loadActivityFeed();
-            showToast(`Heartbeat ${host} ok`, 'success');
-        } catch (err) {
-            console.error(err);
-            showToast(`Heartbeat failed for ${host}: ${err.message}`, 'error');
-        }
-    }
-
     async function toggleLocalMode(host, enabled) {
-        try {
-            const res = await fetch('/ops/api/hosts/local-mode', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host, enabled })
-            });
-            if (res.status === 403) {
-                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
-                return;
-            }
-            if (res.status === 401) {
-                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
-                return;
-            }
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            await pollHeartbeat(host);
-            showToast(`Local mode ${data.localModeEnabled ? 'enabled' : 'disabled'} for ${host}`, 'success');
-        } catch (err) {
-            console.error(err);
-            showToast(`Local mode toggle failed for ${host}: ${err.message}`, 'error');
-        }
+        return hostActionsController.toggleLocalMode(host, enabled);
     }
 
     async function triggerWol(host) {
-        try {
-            const res = await fetch('/ops/api/wol', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host })
-            });
-            if (res.status === 403) {
-                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
-                return;
-            }
-            if (res.status === 401) {
-                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
-                return;
-            }
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            showToast(`WoL ${host}: ${data.success ? 'sent' : 'failed'}`, data.success ? 'success' : 'error');
-        } catch (err) {
-            console.error(err);
-            showToast(`WoL failed for ${host}: ${err.message}`, 'error');
-        }
+        return hostActionsController.triggerWol(host);
     }
 
     async function triggerWinrm(host, command, args = []) {
-        try {
-            const res = await fetch('/ops/api/winrm', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host, command, args })
-            });
-            if (res.status === 403) {
-                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
-                return;
-            }
-            if (res.status === 401) {
-                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
-                return;
-            }
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            const ok = data.exit_code === 0;
-            showToast(`${command} on ${host}: ${ok ? 'ok' : 'err'}`, ok ? 'success' : 'error');
-        } catch (err) {
-            console.error(err);
-            showToast(`${command} failed on ${host}: ${err.message}`, 'error');
-        }
+        return hostActionsController.triggerWinrm(host, command, args);
     }
 
     async function syncAasHost(host) {
-        try {
-            const res = await fetch('/ops/api/aas-sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host })
-            });
-            if (res.status === 403) {
-                showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
-                return;
-            }
-            if (res.status === 401) {
-                showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
-                return;
-            }
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            const labs = data.labs || [];
-            if (!labs.length) {
-                showToast(`AAS sync ${host}: no labs mapped`, 'error');
-                return;
-            }
-            const disabled = labs.every(l => l.disabled);
-            if (disabled) {
-                showToast(`AAS sync ${host}: AAS not configured on this gateway`, 'error');
-                return;
-            }
-            const errors = labs.filter(l => l.error);
-            if (errors.length) {
-                showToast(`AAS sync ${host}: ${errors.length}/${labs.length} failed`, 'error');
-            } else {
-                showToast(`AAS sync ${host}: ${labs.length} lab(s) synced`, 'success');
-            }
-        } catch (err) {
-            console.error(err);
-            showToast(`AAS sync failed for ${host}: ${err.message}`, 'error');
-        }
+        return hostActionsController.syncAasHost(host);
     }
 
     async function fetchTimeline() {
