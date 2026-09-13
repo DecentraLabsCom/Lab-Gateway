@@ -115,6 +115,72 @@ def test_ops_worker_image_copies_the_winrm_trust_route():
     assert "COPY winrm_trust_route.py /app/winrm_trust_route.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_winrm_trust_preview_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY winrm_trust_preview_route.py /app/winrm_trust_preview_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_winrm_credentials_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY winrm_credentials_route.py /app/winrm_credentials_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_local_mode_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY local_mode_route.py /app/local_mode_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_winrm_trust_mutation_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY winrm_trust_mutation_route.py /app/winrm_trust_mutation_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_host_update_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_update_route.py /app/host_update_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_host_provision_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_provision_route.py /app/host_provision_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_aas_lab_sync_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY aas_lab_sync_route.py /app/aas_lab_sync_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_internal_ingest_routes():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY internal_ingest_routes.py /app/internal_ingest_routes.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_lifecycle_routes():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY lifecycle_routes.py /app/lifecycle_routes.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_wol_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY wol_route.py /app/wol_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_winrm_route():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY winrm_route.py /app/winrm_route.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_winrm_session_factory():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
