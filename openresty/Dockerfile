@@ -37,9 +37,13 @@ COPY init-ssl-jwt-watchers.sh /usr/local/bin/init-ssl-jwt-watchers.sh
 COPY lab_access_health_internal.conf /etc/openresty/lab_access_health_internal.conf
 COPY lab_access_auth_handoff.conf /etc/openresty/lab_access_auth_handoff.conf
 COPY lab_access_guacamole_auth.conf /etc/openresty/lab_access_guacamole_auth.conf
+COPY lab_access_guacamole_proxy.conf /etc/openresty/lab_access_guacamole_proxy.conf
 COPY lab_access_guacamole_provisioner.conf /etc/openresty/lab_access_guacamole_provisioner.conf
 COPY lab_access_aas_public.conf /etc/openresty/lab_access_aas_public.conf
+COPY lab_access_aas_admin.conf /etc/openresty/lab_access_aas_admin.conf
 COPY lab_access_aas_resolve.conf /etc/openresty/lab_access_aas_resolve.conf
+COPY lab_access_gateway_mode.conf /etc/openresty/lab_access_gateway_mode.conf
+COPY lab_access_fmu.conf /etc/openresty/lab_access_fmu.conf
 RUN chmod +x /usr/local/bin/init-ssl.sh /usr/local/bin/init-ssl-secrets.sh /usr/local/bin/init-ssl-tls.sh /usr/local/bin/init-ssl-jwt-sync.sh /usr/local/bin/init-ssl-jwt-watchers.sh
 
 EXPOSE 80 443

@@ -50,9 +50,13 @@ def test_full_lite_fixture_does_not_expose_exception_text_or_vary_response_tuple
 def test_guacamole_proxy_normalizes_connection_upgrade_header():
     nginx = (ROOT / "openresty" / "nginx.conf").read_text(encoding="utf-8")
     conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    guacamole_proxy = (
+        ROOT / "openresty" / "lab_access_guacamole_proxy.conf"
+    ).read_text(encoding="utf-8")
+    effective_conf = conf + "\n" + guacamole_proxy
 
     assert "map $http_upgrade $connection_upgrade" in nginx
     assert "default upgrade;" in nginx
     assert "close;" in nginx
-    assert "proxy_set_header Connection $connection_upgrade;" in conf
-    assert "proxy_set_header Connection $http_connection;" not in conf
+    assert "proxy_set_header Connection $connection_upgrade;" in effective_conf
+    assert "proxy_set_header Connection $http_connection;" not in effective_conf
