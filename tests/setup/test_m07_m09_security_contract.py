@@ -36,12 +36,18 @@ def test_aas_profile_isolated_and_authenticated():
 
 def test_external_aas_policy_is_applied_to_proxy_and_workers():
     conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    aas_public = (
+        ROOT / "openresty" / "lab_access_aas_public.conf"
+    ).read_text(encoding="utf-8")
+    internal_health = (
+        ROOT / "openresty" / "lab_access_health_internal.conf"
+    ).read_text(encoding="utf-8")
     ops = (ROOT / "ops-worker" / "aas_generator.py").read_text(encoding="utf-8")
     fmu = (ROOT / "fmu-runner" / "aas_generator.py").read_text(encoding="utf-8")
 
-    assert "location /aas/" in conf
-    assert "access_by_lua_file /etc/openresty/lua/aas_access.lua;" in conf
-    assert "location = /__health_aas" in conf
+    assert "location /aas/" in aas_public
+    assert "access_by_lua_file /etc/openresty/lua/aas_access.lua;" in aas_public
+    assert "location = /__health_aas" in internal_health
     assert "headers=_aas_request_headers()" in fmu
     assert "session.headers.update({\"Content-Type\": \"application/json\", **_aas_request_headers()})" in ops
     assert "external AAS endpoint must use HTTPS" in ops
@@ -107,12 +113,20 @@ def test_demo_guacamole_principal_is_managed_and_reconciled_fail_closed():
 
 def test_cors_denied_preflight_is_not_reflected():
     conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    aas_public = (
+        ROOT / "openresty" / "lab_access_aas_public.conf"
+    ).read_text(encoding="utf-8")
+    conf_with_aas_public = conf + "\n" + aas_public
 
-    assert "set $cors_preflight_origin $http_origin;" not in conf
+    assert "set $cors_preflight_origin $http_origin;" not in conf_with_aas_public
     for location in ("location /auth", "location /aas/", "location /fmu/"):
-        start = conf.index(location)
-        end = conf.find("\n    location ", start + len(location))
-        block = conf[start:] if end == -1 else conf[start:end]
+        start = conf_with_aas_public.index(location)
+        end = conf_with_aas_public.find("\n    location ", start + len(location))
+        block = (
+            conf_with_aas_public[start:]
+            if end == -1
+            else conf_with_aas_public[start:end]
+        )
         assert 'if ($cors_allow_origin = "DENY")' in block
         assert "return 403;" in block
         assert "if ($request_method = 'OPTIONS')" in block

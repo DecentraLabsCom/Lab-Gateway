@@ -20,27 +20,7 @@ if [ "$TLS_RELOAD_INTERVAL_SECONDS" -eq 0 ]; then
     TLS_RELOAD_INTERVAL_SECONDS=60
 fi
 
-load_secret_env() {
-    variable="$1"
-    path="$2"
-    if [ -r "$path" ]; then
-        value=$(cat "$path")
-        export "$variable=$value"
-    fi
-}
-
-# Keep browser/admin and internal service credentials out of the OpenResty
-# container environment as shown by Compose inspection. Lua still receives
-# them through the inherited process environment after this one-time load.
-load_secret_env ADMIN_ACCESS_TOKEN /run/secrets/admin_access_token
-load_secret_env LAB_MANAGER_TOKEN /run/secrets/lab_manager_token
-load_secret_env OPS_INTERNAL_AUTH_TOKEN /run/secrets/ops_internal_auth_token
-load_secret_env GUAC_ADMIN_PASS /run/secrets/guac_admin_pass
-load_secret_env AUTH_ACCESS_CODE_REDEEMER_TOKEN /run/secrets/auth_access_code_redeemer_token
-load_secret_env SESSION_OBSERVATION_INGEST_TOKEN /run/secrets/session_observation_ingest_token
-load_secret_env GUACAMOLE_PROVISIONER_TOKEN /run/secrets/guacamole_provisioner_token
-load_secret_env AAS_SERVICE_TOKEN /run/secrets/aas_service_token
-load_secret_env LAB_ADMIN_BACKEND_TOKEN /run/secrets/lab_admin_backend_token
+. /usr/local/bin/init-ssl-secrets.sh
 
 echo "=== OpenResty SSL Certificate Check ==="
 echo "Certificate: $CERT_FILE"
@@ -65,6 +45,8 @@ set_ssl_permissions() {
     fi
 }
 
+. /usr/local/bin/init-ssl-tls.sh
+
 build_local_issuer() {
     local_name="$(trim "${SERVER_NAME:-localhost}")"
     local_port="$(trim "${HTTPS_PORT:-443}")"
@@ -76,61 +58,6 @@ build_local_issuer() {
     else
         echo "https://${local_name}/auth"
     fi
-}
-
-build_key_url_from_issuer() {
-    issuer_raw="$(trim "$1")"
-    issuer_no_slash="$(echo "$issuer_raw" | sed 's:/*$::')"
-    origin="$(echo "$issuer_no_slash" | sed -n 's#^\(https\?://[^/]*\).*$#\1#p')"
-    if [ -z "$origin" ]; then
-        return 1
-    fi
-    echo "${origin}/.well-known/public-key.pem"
-}
-
-sync_jwt_public_key_from_issuer() {
-    target_issuer="$1"
-    key_url="$(build_key_url_from_issuer "$target_issuer" 2>/dev/null || true)"
-    if [ -z "$key_url" ]; then
-        echo "Invalid issuer URL for key sync: '$target_issuer'"
-        return 1
-    fi
-
-    tmp_key="${JWT_PUBLIC_KEY}.download"
-    echo "Syncing JWT public key from: $key_url"
-    if ! curl -fsSL --connect-timeout 10 --max-time 20 "$key_url" -o "$tmp_key"; then
-        echo "Failed to download JWT public key from $key_url"
-        rm -f "$tmp_key"
-        return 1
-    fi
-
-    if ! grep -q "BEGIN PUBLIC KEY" "$tmp_key"; then
-        echo "Downloaded file is not a PEM public key"
-        rm -f "$tmp_key"
-        return 1
-    fi
-
-    if ! openssl pkey -pubin -in "$tmp_key" -noout >/dev/null 2>&1; then
-        echo "Downloaded PEM public key is invalid"
-        rm -f "$tmp_key"
-        return 1
-    fi
-
-    if [ -f "$JWT_PUBLIC_KEY" ] && cmp -s "$tmp_key" "$JWT_PUBLIC_KEY"; then
-        rm -f "$tmp_key"
-        echo "JWT public key already up-to-date"
-        return 0
-    fi
-
-    if [ -f "$JWT_PUBLIC_KEY" ]; then
-        atomic_copy "$JWT_PUBLIC_KEY" "$JWT_PREVIOUS_PUBLIC_KEY"
-        date +%s > "$JWT_PREVIOUS_ISSUED_MARKER" 2>/dev/null || true
-    fi
-    mv "$tmp_key" "$JWT_PUBLIC_KEY"
-    chmod 644 "$JWT_PUBLIC_KEY"
-    atomic_copy "$JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"
-    echo "JWT public key updated from issuer"
-    return 10
 }
 
 atomic_copy() {
@@ -145,58 +72,7 @@ atomic_copy() {
     mv -f "$target_tmp" "$target_path"
 }
 
-atomic_tls_copy() {
-    source_path="$1"
-    target_path="$2"
-    mode="$3"
-    target_tmp="${target_path}.tmp.$$"
-    if ! cp "$source_path" "$target_tmp"; then
-        rm -f "$target_tmp"
-        return 1
-    fi
-    chmod "$mode" "$target_tmp" 2>/dev/null || true
-    mv -f "$target_tmp" "$target_path"
-}
-
-cert_pair_is_usable() {
-    cert_path="$1"
-    key_path="$2"
-
-    [ -s "$cert_path" ] && [ -s "$key_path" ] || return 1
-    openssl x509 -in "$cert_path" -noout >/dev/null 2>&1 || return 1
-    openssl x509 -in "$cert_path" -checkend 0 -noout >/dev/null 2>&1 || return 1
-    openssl pkey -in "$key_path" -noout >/dev/null 2>&1 || return 1
-
-    if [ -n "${SERVER_NAME:-}" ] && [ "$SERVER_NAME" != "localhost" ]; then
-        case "$SERVER_NAME" in
-            *:*)
-                openssl x509 -in "$cert_path" -checkip "$SERVER_NAME" -noout >/dev/null 2>&1 || return 1
-                ;;
-            *)
-                openssl x509 -in "$cert_path" -checkhost "$SERVER_NAME" -noout >/dev/null 2>&1 || return 1
-                ;;
-        esac
-    fi
-
-    mkdir -p "$TEMP_SSL_DIR"
-    cert_public_tmp="$TEMP_SSL_DIR/cert-public.$$"
-    key_public_tmp="$TEMP_SSL_DIR/key-public.$$"
-
-    if ! openssl x509 -in "$cert_path" -pubkey -noout |
-        openssl pkey -pubin -outform DER > "$cert_public_tmp"; then
-        rm -f "$cert_public_tmp" "$key_public_tmp"
-        return 1
-    fi
-    if ! openssl pkey -in "$key_path" -pubout -outform DER > "$key_public_tmp"; then
-        rm -f "$cert_public_tmp" "$key_public_tmp"
-        return 1
-    fi
-
-    cmp -s "$cert_public_tmp" "$key_public_tmp"
-    result=$?
-    rm -f "$cert_public_tmp" "$key_public_tmp"
-    return "$result"
-}
+. /usr/local/bin/init-ssl-jwt-sync.sh
 
 primary_certbot_domain() {
     certbot_domains="${CERTBOT_DOMAINS:-${SERVER_NAME:-}}"
@@ -221,19 +97,6 @@ resolve_certbot_live_pair() {
         return 0
     fi
     return 1
-}
-
-install_tls_pair() {
-    source_cert="$1"
-    source_key="$2"
-    if ! atomic_tls_copy "$source_cert" "$CERT_FILE" 0644; then
-        return 1
-    fi
-    if ! atomic_tls_copy "$source_key" "$KEY_FILE" 0640; then
-        return 1
-    fi
-    set_ssl_permissions
-    return 0
 }
 
 is_valid_public_key() {
@@ -457,6 +320,8 @@ if [ "$jwt_key_sync_mode" = "local" ] && is_valid_public_key "$FULL_JWT_PUBLIC_K
     fi
 fi
 
+. /usr/local/bin/init-ssl-jwt-watchers.sh
+
 echo "=== Starting OpenResty ==="
 
 # Export environment variables that nginx needs to access
@@ -485,58 +350,6 @@ watch_certs() {
 
 watch_certs &
 
-retire_previous_jwt_key() {
-    issued_ts="$(cat "$JWT_PREVIOUS_ISSUED_MARKER" 2>/dev/null || echo 0)"
-    now_ts="$(date +%s)"
-    case "$issued_ts" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    if [ "$issued_ts" -gt 0 ] && [ $((now_ts - issued_ts)) -ge "$JWT_KEY_OVERLAP_SECONDS" ]; then
-        rm -f "$JWT_PREVIOUS_PUBLIC_KEY" "$JWT_PREVIOUS_ISSUED_MARKER"
-        echo "Expired previous JWT public key overlap"
-        return 0
-    fi
-    return 1
-}
-
-# blockchain-services rotates the Full-mode key in-place.  Keep the last
-# complete key in the writable cert volume and reload only after the new PEM
-# validates, giving OpenResty a bounded current/previous overlap window.
-watch_full_jwt_public_key() {
-    if [ "$jwt_key_sync_mode" != "local" ]; then
-        return
-    fi
-    while true; do
-        sleep 60
-        if retire_previous_jwt_key; then
-            /usr/local/openresty/bin/openresty -s reload || true
-        fi
-        if ! is_valid_public_key "$FULL_JWT_PUBLIC_KEY"; then
-            echo "WARNING: Full-mode JWT public key is missing or invalid; retaining current key"
-            continue
-        fi
-        if [ ! -f "$JWT_ACTIVE_SNAPSHOT" ]; then
-            atomic_copy "$FULL_JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"
-            echo "Full-mode JWT public key became available; reloading OpenResty"
-            /usr/local/openresty/bin/openresty -s reload || true
-            continue
-        fi
-        if ! cmp -s "$FULL_JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"; then
-            if ! atomic_copy "$JWT_ACTIVE_SNAPSHOT" "$JWT_PREVIOUS_PUBLIC_KEY"; then
-                echo "WARNING: Could not preserve previous JWT key; deferring rotation"
-                continue
-            fi
-            date +%s > "$JWT_PREVIOUS_ISSUED_MARKER" 2>/dev/null || true
-            if ! atomic_copy "$FULL_JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"; then
-                echo "WARNING: Could not snapshot new JWT key; deferring rotation"
-                continue
-            fi
-            echo "Full-mode JWT public key changed; reloading OpenResty with overlap key"
-            /usr/local/openresty/bin/openresty -s reload || true
-        fi
-    done
-}
-
 watch_full_jwt_public_key &
 
 auto_rotate_self_signed() {
@@ -557,43 +370,6 @@ auto_rotate_self_signed() {
 }
 
 auto_rotate_self_signed &
-
-auto_refresh_jwt_public_key() {
-    if [ "$jwt_key_sync_mode" != "remote" ]; then
-        return
-    fi
-    while true; do
-        sleep "$JWT_KEY_REFRESH_INTERVAL_SECONDS"
-        if retire_previous_jwt_key; then
-            /usr/local/openresty/bin/openresty -s reload || true
-        fi
-        sync_jwt_public_key_from_issuer "$EFFECTIVE_ISSUER"
-        sync_result=$?
-        if [ $sync_result -eq 10 ]; then
-            echo "JWT public key changed - reloading OpenResty"
-            /usr/local/openresty/bin/openresty -s reload || true
-        elif [ $sync_result -ne 0 ]; then
-            echo "WARNING: JWT public key refresh failed; will retry every hour until it succeeds"
-            # Retry loop: attempt once per hour until the remote is reachable again
-            retry_interval=3600
-            while true; do
-                sleep $retry_interval
-                sync_jwt_public_key_from_issuer "$EFFECTIVE_ISSUER"
-                retry_result=$?
-                if [ $retry_result -eq 0 ] || [ $retry_result -eq 10 ]; then
-                    if [ $retry_result -eq 10 ]; then
-                        echo "JWT public key updated on retry - reloading OpenResty"
-                        /usr/local/openresty/bin/openresty -s reload || true
-                    else
-                        echo "JWT public key confirmed up-to-date after retry"
-                    fi
-                    break  # success – return to 24h cycle
-                fi
-                echo "WARNING: JWT public key refresh retry failed; will try again in ${retry_interval}s"
-            done
-        fi
-    done
-}
 
 auto_refresh_jwt_public_key &
 
