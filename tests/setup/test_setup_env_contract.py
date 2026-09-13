@@ -218,6 +218,22 @@ class SetupEnvContractTest(unittest.TestCase):
         ):
             self.assertIn(key, self.validate_gateway_env_ps1)
 
+    def test_windows_setup_preserves_json_credential_maps_when_updating_env(self):
+        self.assertIn(":UpdateEnvFromVariable", self.setup_bat)
+        for key, variable in (
+            ("SESSION_OBSERVER_CREDENTIALS_JSON", "session_observer_credentials_json"),
+            ("ACCESS_CODE_REDEEMER_CREDENTIALS_JSON", "access_code_redeemer_credentials_json"),
+        ):
+            with self.subTest(key=key):
+                self.assertIn(
+                    f'call :UpdateEnvFromVariable "%ROOT_ENV_FILE%" "{key}" {variable}',
+                    self.setup_bat,
+                )
+                self.assertNotIn(
+                    f'call :UpdateEnv "%ROOT_ENV_FILE%" "{key}" "!{variable}!"',
+                    self.setup_bat,
+                )
+
     def test_gateway_setup_no_longer_writes_shared_admin_keys_to_blockchain_env(self):
         forbidden_tokens = [
             "update_env_in_all",
@@ -269,6 +285,16 @@ class SetupEnvContractTest(unittest.TestCase):
         for snippet in expected_bat:
             with self.subTest(script="setup.bat", snippet=snippet):
                 self.assertIn(snippet, self.setup_bat)
+
+    def test_windows_secret_generation_works_with_windows_powershell(self):
+        self.assertIn(
+            "[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)",
+            self.setup_bat,
+        )
+        self.assertNotIn(
+            "[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)",
+            self.setup_bat,
+        )
 
     def test_secret_synchronizers_reject_invalid_fernet_keys(self):
         expected_shell = [
