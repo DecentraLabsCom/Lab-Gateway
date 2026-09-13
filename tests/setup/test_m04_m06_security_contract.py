@@ -7,6 +7,9 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_guacamole_manual_login_has_ip_and_user_rate_limits():
     nginx = (ROOT / "openresty" / "nginx.conf").read_text(encoding="utf-8")
     conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    guacamole_auth = (
+        ROOT / "openresty" / "lab_access_guacamole_auth.conf"
+    ).read_text(encoding="utf-8")
     guard = (ROOT / "openresty" / "lua" / "modules" / "guacamole_login_guard.lua").read_text(encoding="utf-8")
     dockerfile = (ROOT / "guacamole" / "Dockerfile").read_text(encoding="utf-8")
     entrypoint = (ROOT / "guacamole" / "docker-entrypoint.sh").read_text(encoding="utf-8")
@@ -14,8 +17,8 @@ def test_guacamole_manual_login_has_ip_and_user_rate_limits():
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
     assert "zone=guac_token_login_ip" in nginx
-    assert "location = /guacamole/api/tokens" in conf
-    assert "limit_req zone=guac_token_login_ip" in conf
+    assert "location = /guacamole/api/tokens" in guacamole_auth
+    assert "limit_req zone=guac_token_login_ip" in guacamole_auth
     assert "lua_shared_dict guac_login_rate" in nginx
     assert "get_post_args" in guard
     assert "HTTP_TOO_MANY_REQUESTS" in guard

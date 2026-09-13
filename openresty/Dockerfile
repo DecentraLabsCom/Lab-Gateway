@@ -30,7 +30,17 @@ RUN mkdir -p /etc/openresty/lua /etc/openresty/jwt-keys /etc/ssl/private /var/li
 
 # Copy SSL initialization script
 COPY init-ssl.sh /usr/local/bin/init-ssl.sh
-RUN chmod +x /usr/local/bin/init-ssl.sh
+COPY init-ssl-secrets.sh /usr/local/bin/init-ssl-secrets.sh
+COPY init-ssl-tls.sh /usr/local/bin/init-ssl-tls.sh
+COPY init-ssl-jwt-sync.sh /usr/local/bin/init-ssl-jwt-sync.sh
+COPY init-ssl-jwt-watchers.sh /usr/local/bin/init-ssl-jwt-watchers.sh
+COPY lab_access_health_internal.conf /etc/openresty/lab_access_health_internal.conf
+COPY lab_access_auth_handoff.conf /etc/openresty/lab_access_auth_handoff.conf
+COPY lab_access_guacamole_auth.conf /etc/openresty/lab_access_guacamole_auth.conf
+COPY lab_access_guacamole_provisioner.conf /etc/openresty/lab_access_guacamole_provisioner.conf
+COPY lab_access_aas_public.conf /etc/openresty/lab_access_aas_public.conf
+COPY lab_access_aas_resolve.conf /etc/openresty/lab_access_aas_resolve.conf
+RUN chmod +x /usr/local/bin/init-ssl.sh /usr/local/bin/init-ssl-secrets.sh /usr/local/bin/init-ssl-tls.sh /usr/local/bin/init-ssl-jwt-sync.sh /usr/local/bin/init-ssl-jwt-watchers.sh
 
 EXPOSE 80 443
 
