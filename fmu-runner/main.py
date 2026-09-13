@@ -17,7 +17,6 @@ import asyncio
 import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
-from contextlib import asynccontextmanager
 try:
     import resource as posix_resource
 except ImportError:
@@ -35,8 +34,8 @@ from fmpy import read_model_description, simulate_fmu
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
 from fastapi.responses import StreamingResponse, Response
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import UploadFile
+from starlette.routing import WebSocketRoute
 from xml.etree import ElementTree as ET
 
 from auth import _fetch_jwks, verify_jwt, verify_jwt_token, jwks_health
@@ -47,6 +46,7 @@ from claim_values import (
     normalize_lab_id as _normalize_lab_id_value,
 )
 from fmu_backend import LocalFmuBackend, StationFmuBackend
+from backend_factory import build_fmu_backend as _build_fmu_backend_impl
 from execution_adapters import (
     ensure_local_execution_backend as _ensure_local_execution_backend_adapter,
     simulation_request_payload as _simulation_request_payload_adapter,
@@ -59,6 +59,7 @@ from execution_lifecycle import (
 )
 from execution_slots import ConcurrencySlots
 from execution_tracking import SimulationRegistry
+from execution_state import create_execution_state
 from timeout_policy import effective_timeout_seconds as _effective_timeout_seconds_policy
 from simulation_options import (
     SimulationOptions,
@@ -107,6 +108,8 @@ from simulation_history import (
 from stream_errors import build_stream_error_payload as _build_stream_error_payload
 from realtime_ws import RealtimeWsManager
 from station_ws_proxy import StationRealtimeWsProxyManager
+from realtime_factory import build_realtime_manager as _build_realtime_manager_impl
+from proxy_rate_limiter import allow_download as _allow_proxy_download_impl
 from temp_cleanup import cleanup_fmu_temp_files
 from session_ticket_responses import (
     extract_error_payload as _extract_error_payload,
@@ -133,9 +136,53 @@ from session_observation_service import (
     confirm_session_started_with_retries as _confirm_session_started_with_retries,
     record_browser_session_started as _record_browser_session_started_service,
 )
+from session_observation_state import create_observation_state
+from simulation_request import SimulationRequest
+from config import (
+    _default_access_audit_url as _default_access_audit_url_value,
+    _env_or_secret_file,
+    _AAS_LINK_DATA_PATH,
+    ACCESS_AUDIT_URL,
+    AUTH_SESSION_TICKET_INTERNAL_TOKEN,
+    AUTH_SESSION_TICKET_ISSUE_URL,
+    AUTH_SESSION_TICKET_REDEEM_URL,
+    FMU_BACKEND_MODE,
+    FMU_DATA_PATH,
+    FMU_LOCAL_DEV_MODE,
+    FMU_LOCAL_REALTIME_ENABLED,
+    FMU_PROXY_GATEWAY_WS_URL,
+    FMU_PROXY_RUNTIME_PATH,
+    FMU_PROXY_SIGNING_KEY,
+    FMU_SESSION_OBSERVATION_MAX_ATTEMPTS,
+    FMU_STATION_BASE_URL,
+    FMU_STATION_INTERNAL_TOKEN,
+    FMU_STATION_REQUEST_TIMEOUT,
+    FMU_WORKER_ADDRESS_SPACE_LIMIT,
+    HISTORY_DB_PATH,
+    INTERNAL_WS_TOKEN,
+    MAX_CONCURRENT_PER_MODEL,
+    MAX_SIMULATION_TIMEOUT,
+    MAX_STOP_TIME,
+    MIN_STEP_SIZE,
+    PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE,
+    SESSION_OBSERVER_GATEWAY_ID,
+    SESSION_OBSERVER_SIGNING_SECRET,
+    WS_ATTACH_GRACE_SECONDS,
+    WS_CLEANUP_SECONDS,
+    WS_CREATE_RATE_LIMIT_PER_MINUTE,
+    WS_EXPIRING_NOTICE_SECONDS,
+    WS_HEARTBEAT_SECONDS,
+    WS_SESSION_QUEUE_SIZE,
+)
+from app_factory import create_app
+from lifecycle import create_lifespan
 from health_router import create_health_router
 from catalog_router import create_catalog_router
 from history_router import create_history_router
+from cancel_router import create_cancel_router
+from run_router import create_run_router
+from stream_router import create_stream_router
+from realtime_router import create_realtime_router
 from aas_link_router import create_aas_link_router
 from aas_hints_router import create_aas_hints_router
 from aas_sync_router import create_aas_sync_router
@@ -145,87 +192,10 @@ from proxy_router import create_proxy_router
 # Configuration
 # ---------------------------------------------------------------------------
 
-def _env_or_secret_file(name: str, default: str = "") -> str:
-    """Read a value from the environment, falling back to a mounted secret."""
-    value = os.getenv(name)
-    if value:
-        return value
-    path = os.getenv(f"{name}_FILE")
-    if not path:
-        return default
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return handle.read().strip()
-    except OSError:
-        logging.warning("Unable to read secret file for %s", name)
-        return default
-
-
-FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
-# Writable store for AAS link override files (separate from read-only fmu-data).
-_AAS_LINK_DATA_PATH = Path(os.getenv("AAS_LINK_DATA_PATH", "/app/data/aas-links"))
-MAX_SIMULATION_TIMEOUT = int(os.getenv("MAX_SIMULATION_TIMEOUT", "300"))
-MAX_CONCURRENT_PER_MODEL = int(os.getenv("MAX_CONCURRENT_PER_MODEL", "10"))
-# Keep the virtual address-space ceiling above the container memory ceiling.
-# FMPy/Numpy can reserve substantial virtual address space before dlopen() maps
-# the FMU binary; the Docker cgroup remains the effective resident-memory cap.
-FMU_WORKER_ADDRESS_SPACE_LIMIT = int(os.getenv(
-    "FMU_WORKER_ADDRESS_SPACE_LIMIT",
-    str(2 * 1024 ** 3),
-))
-MAX_STOP_TIME = float(os.getenv("MAX_STOP_TIME", "86400"))  # 24h upper bound
-MIN_STEP_SIZE = float(os.getenv("MIN_STEP_SIZE", "1e-6"))    # 1 µs lower bound
-HISTORY_DB_PATH = os.getenv("HISTORY_DB_PATH", "/app/data/history.db")
-WS_SESSION_QUEUE_SIZE = int(os.getenv("WS_SESSION_QUEUE_SIZE", "64"))
-WS_HEARTBEAT_SECONDS = float(os.getenv("WS_HEARTBEAT_SECONDS", "15"))
-WS_EXPIRING_NOTICE_SECONDS = int(os.getenv("WS_EXPIRING_NOTICE_SECONDS", "60"))
-WS_ATTACH_GRACE_SECONDS = int(os.getenv("WS_ATTACH_GRACE_SECONDS", "120"))
-WS_CLEANUP_SECONDS = float(os.getenv("WS_CLEANUP_SECONDS", "15"))
-INTERNAL_WS_TOKEN = _env_or_secret_file("FMU_INTERNAL_WS_TOKEN")
-AUTH_SESSION_TICKET_ISSUE_URL = os.getenv(
-    "AUTH_SESSION_TICKET_ISSUE_URL",
-    "http://blockchain-services:8080/auth/fmu/session-ticket/issue",
-)
-AUTH_SESSION_TICKET_REDEEM_URL = os.getenv(
-    "AUTH_SESSION_TICKET_REDEEM_URL",
-    "http://blockchain-services:8080/auth/fmu/session-ticket/redeem",
-)
-AUTH_SESSION_TICKET_INTERNAL_TOKEN = _env_or_secret_file("AUTH_SESSION_TICKET_INTERNAL_TOKEN")
-SESSION_OBSERVER_GATEWAY_ID = os.getenv("SESSION_OBSERVER_GATEWAY_ID", "").strip().lower()
-SESSION_OBSERVER_SIGNING_SECRET = _env_or_secret_file("SESSION_OBSERVER_SIGNING_SECRET").strip()
-
-
 def _default_access_audit_url() -> str:
-    redeem_url = urlparse(AUTH_SESSION_TICKET_REDEEM_URL)
-    if not redeem_url.scheme or not redeem_url.netloc:
-        return ""
-    return urlunparse(redeem_url._replace(
-        path="/access-audit/internal/session-observed",
-        params="",
-        query="",
-        fragment="",
-    ))
+    """Return the default observer URL derived from the redeem endpoint."""
+    return _default_access_audit_url_value(AUTH_SESSION_TICKET_REDEEM_URL)
 
-
-ACCESS_AUDIT_URL = os.getenv("ACCESS_AUDIT_URL", "").strip() or _default_access_audit_url()
-FMU_PROXY_RUNTIME_PATH = os.getenv("FMU_PROXY_RUNTIME_PATH", "/app/fmu-proxy-runtime")
-FMU_PROXY_GATEWAY_WS_URL = os.getenv("FMU_PROXY_GATEWAY_WS_URL", "")
-FMU_PROXY_SIGNING_KEY = _env_or_secret_file("FMU_PROXY_SIGNING_KEY")
-FMU_BACKEND_MODE = os.getenv("FMU_BACKEND_MODE", "station").strip().lower()
-FMU_LOCAL_DEV_MODE = os.getenv("FMU_LOCAL_DEV_MODE", "false").strip().lower() in (
-    "1", "true", "yes", "on",
-)
-FMU_LOCAL_REALTIME_ENABLED = os.getenv("FMU_LOCAL_REALTIME_ENABLED", "false").strip().lower() in (
-    "1", "true", "yes", "on",
-)
-FMU_STATION_BASE_URL = os.getenv("FMU_STATION_BASE_URL", "").strip()
-FMU_STATION_INTERNAL_TOKEN = _env_or_secret_file("FMU_STATION_INTERNAL_TOKEN").strip()
-FMU_STATION_REQUEST_TIMEOUT = float(os.getenv("FMU_STATION_REQUEST_TIMEOUT", "10"))
-FMU_SESSION_OBSERVATION_MAX_ATTEMPTS = max(
-    1, int(os.getenv("FMU_SESSION_OBSERVATION_MAX_ATTEMPTS", "3"))
-)
-PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE = int(os.getenv("PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE", "20"))
-WS_CREATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("WS_CREATE_RATE_LIMIT_PER_MINUTE", "30"))
 
 # ---- Structured JSON logging ----
 
@@ -252,14 +222,14 @@ logger.setLevel(logging.INFO)
 # Concurrency tracking
 # ---------------------------------------------------------------------------
 
-_active_slots = ConcurrencySlots()
-_active_counts = _active_slots.counts
-_active_lock = _active_slots.lock
-
 _proxy_download_hits: dict[str, deque[float]] = defaultdict(deque)
 _proxy_download_lock = Lock()
-_browser_observed_credentials: set[str] = set()
-_browser_observation_lock = Lock()
+_observation_state = create_observation_state(
+    set_factory=set,
+    lock_factory=Lock,
+)
+_browser_observed_credentials = _observation_state.observed_credentials
+_browser_observation_lock = _observation_state.lock
 
 
 def _normalize_ticket_id(session_ticket: Optional[str]) -> Optional[str]:
@@ -267,17 +237,13 @@ def _normalize_ticket_id(session_ticket: Optional[str]) -> Optional[str]:
 
 
 def _allow_proxy_download(key: str) -> bool:
-    if PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE <= 0:
-        return False
-    now = time.time()
-    with _proxy_download_lock:
-        bucket = _proxy_download_hits[key]
-        while bucket and now - bucket[0] >= 60:
-            bucket.popleft()
-        if len(bucket) >= PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE:
-            return False
-        bucket.append(now)
-        return True
+    return _allow_proxy_download_impl(
+        key,
+        limit_per_minute=PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE,
+        hits=_proxy_download_hits,
+        lock=_proxy_download_lock,
+        clock=time.time,
+    )
 
 
 def _acquire_slot(lab_id: str):
@@ -296,13 +262,21 @@ def _create_executor():
     return _create_simulation_executor_impl(logger=logger)
 
 
-_executor = _create_executor()
+_execution_state = create_execution_state(
+    create_executor=_create_executor,
+    slots_factory=ConcurrencySlots,
+    registry_factory=SimulationRegistry,
+)
+_active_slots = _execution_state.slots
+_active_counts = _active_slots.counts
+_active_lock = _active_slots.lock
+_executor = _execution_state.executor
 
 # ---------------------------------------------------------------------------
 # Running-simulation registry (for cancellation)
 # ---------------------------------------------------------------------------
 
-_running_registry = SimulationRegistry()
+_running_registry = _execution_state.registry
 _running_futures = _running_registry.entries
 _running_lock = _running_registry.lock
 
@@ -315,6 +289,11 @@ def _track_running_future(
     executor: Optional[ProcessPoolExecutor] = None,
 ):
     _running_registry.register(sim_id, future, lab_id, claims, executor)
+
+
+def _get_running_entry(sim_id: str):
+    with _running_lock:
+        return _running_futures.get(sim_id)
 
 
 def _shutdown_simulation_executor(executor: Any, *, force: bool = False) -> None:
@@ -356,21 +335,6 @@ def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = 
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-
-@asynccontextmanager
-async def _lifespan(_app: FastAPI):
-    await _init_db()
-    await _preload_jwks_if_enabled()
-    if _realtime_manager is not None:
-        await _realtime_manager.start()
-    try:
-        yield
-    finally:
-        if _realtime_manager is not None:
-            await _realtime_manager.stop()
-        _shutdown_simulation_executor(_executor)
-        await _cleanup_temp_files()
-
 
 async def _health_backend_payload():
     return await _fmu_backend.health()
@@ -457,20 +421,19 @@ async def _aas_sync_to_basyx(**kwargs):
     return await sync_fmu_to_basyx(**kwargs)
 
 
-app = FastAPI(title="FMU Runner", version="0.2.0", lifespan=_lifespan)
-app.include_router(create_health_router(
+_health_router = create_health_router(
     backend_health=_health_backend_payload,
     refresh_jwks=_refresh_health_jwks,
     auth_health=_health_auth_status,
-))
-app.include_router(create_catalog_router(
+)
+_catalog_router = create_catalog_router(
     verify_jwt=verify_jwt,
     enforce_fmu_claim=_catalog_enforce_fmu_claim,
     get_authorized_model_metadata=_catalog_get_authorized_model_metadata,
     public_model_metadata=_catalog_public_model_metadata,
     list_authorized_fmu=_catalog_list_authorized_fmu,
-))
-app.include_router(create_history_router(
+)
+_history_router = create_history_router(
     verify_jwt=verify_jwt,
     enforce_fmu_claim=_history_enforce_fmu_claim,
     ensure_local_execution_backend=_history_ensure_local_execution_backend,
@@ -480,21 +443,21 @@ app.include_router(create_history_router(
     get_history_db_path=_history_db_path,
     list_history=_list_history,
     get_history_result=_get_history_result,
-))
-app.include_router(create_aas_link_router(get_link_path=_aas_link_path_for_router))
-app.include_router(create_aas_hints_router(
+)
+_aas_link_router = create_aas_link_router(get_link_path=_aas_link_path_for_router)
+_aas_hints_router = create_aas_hints_router(
     resolve_fmu_path=_aas_hints_resolve_fmu_path,
     read_model_description=_aas_hints_read_model_description,
     normalize_xml_value=_normalize_xml_value,
     logger=logger,
-))
-app.include_router(create_aas_sync_router(
+)
+_aas_sync_router = create_aas_sync_router(
     resolve_fmu_path=_aas_sync_resolve_fmu_path,
     read_model_description=_aas_sync_read_model_description,
     metadata_builder=_aas_sync_metadata_builder,
     sync_fmu_to_basyx=_aas_sync_to_basyx,
     logger=logger,
-))
+)
 
 
 # ---------------------------------------------------------------------------
@@ -520,22 +483,6 @@ async def _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type, params, 
         elapsed=elapsed,
         logger=logger,
     )
-
-
-# ----- models -----
-
-class SimulationRequest(BaseModel):
-    reservationKey: Optional[str] = None
-    labId: Optional[str] = None
-    parameters: dict = Field(default_factory=dict)
-    options: dict = Field(default_factory=dict)
-
-    @field_validator("labId", mode="before")
-    @classmethod
-    def _normalize_lab_id(cls, value):
-        if isinstance(value, (str, int)) and not isinstance(value, bool):
-            return str(value)
-        return value
 
 
 # ----- helpers -----
@@ -736,32 +683,18 @@ def _list_local_fmus_payload(claimed_file: str) -> dict:
 
 
 def _build_fmu_backend():
-    if FMU_BACKEND_MODE == "station":
-        logger.info("FMU backend mode selected: station")
-        return StationFmuBackend(
-            base_url=FMU_STATION_BASE_URL,
-            internal_token=FMU_STATION_INTERNAL_TOKEN,
-            request_timeout=FMU_STATION_REQUEST_TIMEOUT,
-        )
-
-    if FMU_BACKEND_MODE != "local":
-        logger.error(
-            "Unknown FMU_BACKEND_MODE=%s; local execution remains disabled",
-            FMU_BACKEND_MODE,
-        )
-
-    if FMU_BACKEND_MODE == "local" and not FMU_LOCAL_DEV_MODE:
-        logger.error(
-            "FMU_BACKEND_MODE=local requires FMU_LOCAL_DEV_MODE=true; "
-            "native FMU execution is disabled",
-        )
-
-    logger.info("FMU backend mode selected: local")
-    return LocalFmuBackend(
+    return _build_fmu_backend_impl(
+        mode=FMU_BACKEND_MODE,
+        local_dev_mode=FMU_LOCAL_DEV_MODE,
+        station_base_url=FMU_STATION_BASE_URL,
+        station_internal_token=FMU_STATION_INTERNAL_TOKEN,
+        station_request_timeout=FMU_STATION_REQUEST_TIMEOUT,
         health_loader=_local_backend_health_payload,
         model_metadata_loader=_load_local_model_metadata,
         list_loader=_list_local_fmus_payload,
-        allow_execution=FMU_BACKEND_MODE == "local" and FMU_LOCAL_DEV_MODE,
+        logger=logger,
+        station_backend_factory=StationFmuBackend,
+        local_backend_factory=LocalFmuBackend,
     )
 
 
@@ -1025,55 +958,32 @@ class _UnsupportedRealtimeManager:
         await websocket.close(code=1013)
 
 
-if _fmu_backend.supports_local_execution and FMU_LOCAL_REALTIME_ENABLED:
-    _realtime_manager = RealtimeWsManager(
-        logger=logger,
-        verify_jwt_token=verify_jwt_token,
-        enforce_fmu_claim=_enforce_fmu_claim,
-        resolve_fmu_path=_resolve_fmu_path,
-        get_claim_lab_id=_get_claim_lab_id,
-        normalize_lab_id=_normalize_lab_id,
-        coerce_epoch_seconds=_coerce_epoch_seconds,
-        acquire_slot=_acquire_slot,
-        release_slot=_release_slot,
-        redeem_session_ticket=_redeem_session_ticket,
-        issue_session_ticket=_issue_session_ticket,
-        confirm_session_started=_confirm_fmu_session_started,
-        ws_session_queue_size=WS_SESSION_QUEUE_SIZE,
-        ws_heartbeat_seconds=WS_HEARTBEAT_SECONDS,
-        ws_expiring_notice_seconds=WS_EXPIRING_NOTICE_SECONDS,
-        ws_attach_grace_seconds=WS_ATTACH_GRACE_SECONDS,
-        ws_cleanup_seconds=WS_CLEANUP_SECONDS,
-        internal_ws_token=INTERNAL_WS_TOKEN,
-        ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
-    )
-elif _fmu_backend.mode == "station":
-    _realtime_manager = StationRealtimeWsProxyManager(
-        logger=logger,
-        station_backend=_fmu_backend,
-        verify_jwt_token=verify_jwt_token,
-        enforce_fmu_claim=_enforce_fmu_claim,
-        get_claim_lab_id=_get_claim_lab_id,
-        normalize_lab_id=_normalize_lab_id,
-        coerce_epoch_seconds=_coerce_epoch_seconds,
-        redeem_session_ticket=_redeem_session_ticket,
-        issue_session_ticket=_issue_session_ticket,
-        confirm_session_started=_confirm_fmu_session_started,
-        ws_cleanup_seconds=WS_CLEANUP_SECONDS,
-        internal_ws_token=INTERNAL_WS_TOKEN,
-        ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
-    )
-else:
-    _realtime_manager = _UnsupportedRealtimeManager(
-        reason=(
-            "Local realtime FMU execution is disabled by default because native "
-            "doStep calls cannot be force-terminated inside the ASGI process. "
-            "Use FMU_BACKEND_MODE=station in production, or explicitly set "
-            "FMU_LOCAL_REALTIME_ENABLED=true only for isolated development."
-        )
-        if _fmu_backend.supports_local_execution
-        else None
-    )
+_realtime_manager = _build_realtime_manager_impl(
+    backend=_fmu_backend,
+    local_realtime_enabled=FMU_LOCAL_REALTIME_ENABLED,
+    logger=logger,
+    verify_jwt_token=verify_jwt_token,
+    enforce_fmu_claim=_enforce_fmu_claim,
+    resolve_fmu_path=_resolve_fmu_path,
+    get_claim_lab_id=_get_claim_lab_id,
+    normalize_lab_id=_normalize_lab_id,
+    coerce_epoch_seconds=_coerce_epoch_seconds,
+    acquire_slot=_acquire_slot,
+    release_slot=_release_slot,
+    redeem_session_ticket=_redeem_session_ticket,
+    issue_session_ticket=_issue_session_ticket,
+    confirm_session_started=_confirm_fmu_session_started,
+    ws_session_queue_size=WS_SESSION_QUEUE_SIZE,
+    ws_heartbeat_seconds=WS_HEARTBEAT_SECONDS,
+    ws_expiring_notice_seconds=WS_EXPIRING_NOTICE_SECONDS,
+    ws_attach_grace_seconds=WS_ATTACH_GRACE_SECONDS,
+    ws_cleanup_seconds=WS_CLEANUP_SECONDS,
+    internal_ws_token=INTERNAL_WS_TOKEN,
+    ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
+    local_manager_factory=RealtimeWsManager,
+    station_manager_factory=StationRealtimeWsProxyManager,
+    unsupported_manager_factory=_UnsupportedRealtimeManager,
+)
 
 
 def _run_simulation(fmu_path: str, start_time: float, stop_time: float, step_size: float,
@@ -1167,14 +1077,121 @@ def _aas_link_path(access_key: str) -> Path:
     return candidate
 
 
-@app.websocket("/api/v1/fmu/sessions")
-async def fmu_realtime_sessions(websocket: WebSocket):
-    await _realtime_manager.handle_websocket(websocket, internal=False)
+def _get_realtime_manager_for_route():
+    return _realtime_manager
 
 
-@app.websocket("/internal/fmu/sessions")
-async def fmu_realtime_sessions_internal(websocket: WebSocket):
-    await _realtime_manager.handle_websocket(websocket, internal=True)
+_realtime_router = create_realtime_router(
+    get_realtime_manager=_get_realtime_manager_for_route,
+)
+# Keep the historical private symbols available to callers and tests while
+# the registered endpoints live in the dedicated router.
+fmu_realtime_sessions = cast(WebSocketRoute, _realtime_router.routes[0]).endpoint
+fmu_realtime_sessions_internal = cast(WebSocketRoute, _realtime_router.routes[1]).endpoint
+
+
+def _run_enforce_fmu_claim(claims: dict):
+    return _enforce_fmu_claim(claims)
+
+
+def _run_backend_mode() -> str:
+    return _fmu_backend.mode
+
+
+def _run_get_station_backend():
+    return _get_station_backend()
+
+
+def _run_simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = None):
+    return _simulation_request_payload(req, sim_id)
+
+
+def _run_extract_authorization_header(request: Request):
+    return _extract_authorization_header(request)
+
+
+async def _run_record_browser_session_started(*args, **kwargs):
+    return await _record_browser_session_started(*args, **kwargs)
+
+
+def _run_ensure_local_execution_backend(message: str):
+    return _ensure_local_execution_backend(message)
+
+
+def _run_get_claim_lab_id(claims: dict):
+    return _get_claim_lab_id(claims)
+
+
+def _run_normalize_lab_id(value):
+    return _normalize_lab_id(value)
+
+
+def _run_enforce_requested_reservation(claims: dict, requested: Optional[str]):
+    return _enforce_requested_reservation(claims, requested)
+
+
+def _run_resolve_fmu_path(fmu_filename: str):
+    return _resolve_fmu_path(fmu_filename)
+
+
+def _run_parse_simulation_options(options: dict, claims: dict):
+    return _parse_simulation_options(options, claims)
+
+
+def _run_resolve_fmi_type(fmi_type, fmu_path):
+    return _resolve_fmi_type(fmi_type, fmu_path)
+
+
+def _run_acquire_slot(lab_id: str):
+    return _acquire_slot(lab_id)
+
+
+def _run_new_simulation_id() -> str:
+    return uuid4().hex
+
+
+def _run_monotonic() -> float:
+    return time.monotonic()
+
+
+def _run_submit_simulation(*args):
+    return _submit_simulation(*args)
+
+
+def _run_track_running_future(*args, **kwargs):
+    return _track_running_future(*args, **kwargs)
+
+
+def _run_shutdown_executor(executor: Any, *, force: bool = False):
+    return _shutdown_simulation_executor(executor, force=force)
+
+
+def _run_finalize_tracking(*args, **kwargs):
+    return _finalize_simulation_tracking(*args, **kwargs)
+
+
+async def _run_save_history(*args, **kwargs):
+    return await _save_history(*args, **kwargs)
+
+
+async def _stream_station_simulation_for_route(*args, **kwargs):
+    return await _stream_station_simulation(*args, **kwargs)
+
+
+def _stream_iter_result_chunks(simulation_result):
+    return _iter_simulation_result_chunks(simulation_result)
+
+
+def _stream_build_completed_event(**kwargs):
+    return _build_simulation_completed_event(**kwargs)
+
+
+def _stream_error_payload_for_route(exc: Exception, *, sim_id: Optional[str] = None):
+    return _stream_error_payload(exc, sim_id=sim_id)
+
+
+async def _stream_sleep(seconds: float):
+    await asyncio.sleep(seconds)
 
 
 def _proxy_enforce_fmu_claim(claims: dict):
@@ -1270,163 +1287,88 @@ _proxy_router = create_proxy_router(
 # Keep the historical private symbol available to callers and tests while the
 # registered endpoint lives in the dedicated router.
 download_proxy_fmu = cast(APIRoute, _proxy_router.routes[0]).endpoint
-app.include_router(_proxy_router)
 
 
-@app.post("/api/v1/simulations/run")
-async def run_simulation(
-    req: SimulationRequest,
-    request: Request,
-    claims: dict = Depends(verify_jwt),
-):
-    """Execute an FMU simulation and return results.
-
-    Supports CoSimulation and ModelExchange. Auto-detects FMI type from
-    model description when ``options.fmiType`` is absent.
-    """
-    _enforce_fmu_claim(claims)
-    if _fmu_backend.mode == "station":
-        station_backend = _get_station_backend()
-        station_backend.build_authorized_context(
-            claims=claims,
-            requested_lab_id=req.labId,
-            requested_reservation_key=req.reservationKey,
-        )
-        sim_id = uuid4().hex
-        await _record_browser_session_started(request, claims, sim_id)
-        result = await station_backend.run_authorized_simulation(
-            claims=claims,
-            request_payload=_simulation_request_payload(req, sim_id),
-            authorization=_extract_authorization_header(request),
-        )
-        if isinstance(result, dict):
-            result = dict(result)
-            # The gateway id is the durable observation key. Ignore any
-            # executor identifier returned by Station so evidence stays tied
-            # to the gateway request.
-            result["simId"] = sim_id
-        return result
-    _ensure_local_execution_backend("Simulation run endpoint")
-
-    # Determine FMU filename from JWT claims or request
-    fmu_filename = claims.get("accessKey") or claims.get("fmuFileName")
-    claims_lab_id = _get_claim_lab_id(claims)
-    request_lab_id = _normalize_lab_id(req.labId)
-    if claims_lab_id and request_lab_id and claims_lab_id != request_lab_id:
-        raise HTTPException(status_code=403, detail="JWT not authorised for requested labId")
-    lab_id = request_lab_id or claims_lab_id or "unknown"
-    _enforce_requested_reservation(claims, req.reservationKey)
-
-    if req.labId is None and claims_lab_id:
-        req.labId = claims_lab_id
-
-    if not fmu_filename:
-        raise HTTPException(status_code=400, detail="Cannot determine FMU file name from JWT or request")
-
-    fmu_path = _resolve_fmu_path(fmu_filename)
-
-    execution_options = _parse_simulation_options(req.options, claims)
-    start_time = execution_options.start_time
-    stop_time = execution_options.stop_time
-    step_size = execution_options.step_size
-    timeout = execution_options.timeout
-
-    # --- FMI type auto-detection ---
-    fmi_type = _resolve_fmi_type(execution_options.fmi_type, fmu_path)
-    solver_name = execution_options.solver_name
-
-    # Concurrency check
-    _acquire_slot(lab_id)
-
-    sim_id = uuid4().hex
-    t0 = time.monotonic()
-    future: Optional[Future] = None
-    job_executor: Any = None
-    try:
-        # Durable observation is the acceptance gate. The executor is not
-        # released until it succeeds, so a failed observation cannot race with
-        # work that has already started.
-        await _record_browser_session_started(request, claims, sim_id)
-        job_executor, future = _submit_simulation(
-            str(fmu_path),
-            start_time,
-            stop_time,
-            step_size,
-            req.parameters,
-            timeout,
-            fmi_type,
-            solver_name,
-        )
-        if future is None:
-            raise RuntimeError("simulation executor returned no future")
-        _track_running_future(sim_id, future, lab_id, claims, job_executor)
-        try:
-            sim_result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
-        except asyncio.TimeoutError as exc:
-            if not future.done():
-                future.cancel()
-            # Future.cancel() cannot stop a process that already entered FMPy.
-            # Kill this simulation's private worker and release its slot now.
-            _shutdown_simulation_executor(job_executor, force=True)
-            raise HTTPException(status_code=504, detail="Simulation timed out") from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        if future is None and job_executor is not None:
-            _shutdown_simulation_executor(job_executor, force=True)
-        logger.error(
-            "Simulation failed for lab %s: %s",
-            str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
-            type(exc).__name__,
-        )
-        raise HTTPException(status_code=500, detail="Simulation failed") from exc
-    finally:
-        _finalize_simulation_tracking(sim_id, lab_id)
-
-    elapsed = round(time.monotonic() - t0, 3)
-    logger.info(
-        "Simulation completed for lab %s in %.3fs",
-        str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
-        elapsed,
-    )
-
-    # Persist to history DB
-    await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
-                        req.parameters, req.options, sim_result, elapsed)
-
-    return {
-        "status": "completed",
-        "simId": sim_id,
-        "simulationTime": elapsed,
-        "fmiType": fmi_type,
-        **sim_result,
-    }
+_run_router = create_run_router(
+    verify_jwt=verify_jwt,
+    enforce_fmu_claim=_run_enforce_fmu_claim,
+    get_backend_mode=_run_backend_mode,
+    get_station_backend=_run_get_station_backend,
+    simulation_request_payload=_run_simulation_request_payload,
+    extract_authorization_header=_run_extract_authorization_header,
+    record_browser_session_started=_run_record_browser_session_started,
+    ensure_local_execution_backend=_run_ensure_local_execution_backend,
+    get_claim_lab_id=_run_get_claim_lab_id,
+    normalize_lab_id=_run_normalize_lab_id,
+    enforce_requested_reservation=_run_enforce_requested_reservation,
+    resolve_fmu_path=_run_resolve_fmu_path,
+    parse_simulation_options=_run_parse_simulation_options,
+    resolve_fmi_type=_run_resolve_fmi_type,
+    acquire_slot=_run_acquire_slot,
+    new_simulation_id=_run_new_simulation_id,
+    monotonic=_run_monotonic,
+    submit_simulation=_run_submit_simulation,
+    track_running_future=_run_track_running_future,
+    shutdown_executor=_run_shutdown_executor,
+    finalize_tracking=_run_finalize_tracking,
+    save_history=_run_save_history,
+    logger=logger,
+)
+# Keep the historical private symbol available to callers and tests while the
+# registered endpoint lives in the dedicated router.
+run_simulation = cast(APIRoute, _run_router.routes[0]).endpoint
 
 
 # ---------------------------------------------------------------------------
 # Cancel a running simulation
 # ---------------------------------------------------------------------------
 
-@app.post("/api/v1/simulations/{sim_id}/cancel")
-async def cancel_simulation(sim_id: str, claims: dict = Depends(verify_jwt)):
-    """Attempt to cancel a running simulation by its ID."""
-    _enforce_fmu_claim(claims)
-    _ensure_local_execution_backend("Simulation cancel endpoint")
-    with _running_lock:
-        entry = _running_futures.get(sim_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Simulation not found or already finished")
-    future, lab_id, reservation_key, puc_hash, job_executor = entry
-    if _get_claim_lab_id(claims) != _normalize_lab_id(lab_id):
-        raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
-    if _claim_reservation_key(claims) != reservation_key:
-        raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
-    if str(claims.get("pucHash") or "").strip().lower() != puc_hash:
-        raise HTTPException(status_code=403, detail="Token is not authorised for requested simulation")
-    future.cancel()
-    _shutdown_simulation_executor(job_executor, force=True)
-    _finalize_simulation_tracking(sim_id)
-    return {"status": "cancelled"}
+_cancel_router = create_cancel_router(
+    verify_jwt=verify_jwt,
+    enforce_fmu_claim=_enforce_fmu_claim,
+    ensure_local_execution_backend=_ensure_local_execution_backend,
+    get_running_entry=_get_running_entry,
+    get_claim_lab_id=_get_claim_lab_id,
+    normalize_lab_id=_normalize_lab_id,
+    claim_reservation_key=_claim_reservation_key,
+    shutdown_executor=_shutdown_simulation_executor,
+    finalize_tracking=_finalize_simulation_tracking,
+)
+# Keep the historical private symbol available to callers and tests while the
+# registered endpoint lives in the dedicated router.
+cancel_simulation = cast(APIRoute, _cancel_router.routes[0]).endpoint
+
+
+_stream_router = create_stream_router(
+    verify_jwt=verify_jwt,
+    enforce_fmu_claim=_run_enforce_fmu_claim,
+    get_backend_mode=_run_backend_mode,
+    stream_station_simulation=_stream_station_simulation_for_route,
+    ensure_local_execution_backend=_run_ensure_local_execution_backend,
+    get_claim_lab_id=_run_get_claim_lab_id,
+    normalize_lab_id=_run_normalize_lab_id,
+    enforce_requested_reservation=_run_enforce_requested_reservation,
+    resolve_fmu_path=_run_resolve_fmu_path,
+    parse_simulation_options=_run_parse_simulation_options,
+    resolve_fmi_type=_run_resolve_fmi_type,
+    new_simulation_id=_run_new_simulation_id,
+    monotonic=_run_monotonic,
+    acquire_slot=_run_acquire_slot,
+    record_browser_session_started=_run_record_browser_session_started,
+    submit_simulation=_run_submit_simulation,
+    track_running_future=_run_track_running_future,
+    shutdown_executor=_run_shutdown_executor,
+    finalize_tracking=_run_finalize_tracking,
+    iter_result_chunks=_stream_iter_result_chunks,
+    build_completed_event=_stream_build_completed_event,
+    stream_error_payload=_stream_error_payload_for_route,
+    save_history=_run_save_history,
+    sleep=_stream_sleep,
+    logger=logger,
+)
+# Keep the historical private symbol available to callers and tests while the
+# registered endpoint lives in the dedicated router.
+stream_simulation = cast(APIRoute, _stream_router.routes[0]).endpoint
 
 # ---------------------------------------------------------------------------
 # Temp file cleanup (FMPy extracts FMUs to tempdir)
@@ -1439,109 +1381,31 @@ async def _cleanup_temp_files():
         logger.info("Cleaned up %d FMPy temp directories", removed)
 
 
-# ---------------------------------------------------------------------------
-# NDJSON Streaming endpoint
-# ---------------------------------------------------------------------------
+_lifespan = create_lifespan(
+    init_db=_init_db,
+    preload_jwks=_preload_jwks_if_enabled,
+    get_realtime_manager=lambda: _realtime_manager,
+    get_executor=lambda: _executor,
+    shutdown_executor=_shutdown_simulation_executor,
+    cleanup_temp_files=_cleanup_temp_files,
+)
 
-@app.post("/api/v1/simulations/stream")
-async def stream_simulation(
-    req: SimulationRequest,
-    request: Request,
-    claims: dict = Depends(verify_jwt),
-):
-    """Execute a simulation and stream results as newline-delimited JSON.
 
-    Each line is a JSON object with a ``type`` field:
-      - ``started``  — simulation ID assigned
-      - ``progress`` — heartbeat with elapsed seconds
-      - ``data``     — chunk of time + output arrays
-      - ``completed``— final summary
-      - ``error``    — if something went wrong
-    """
-    _enforce_fmu_claim(claims)
-    if _fmu_backend.mode == "station":
-        response = await _stream_station_simulation(request, req, claims)
-        return response
-    _ensure_local_execution_backend("Simulation stream endpoint")
-
-    fmu_filename = claims.get("accessKey") or claims.get("fmuFileName")
-    claims_lab_id = _get_claim_lab_id(claims)
-    request_lab_id = _normalize_lab_id(req.labId)
-    if claims_lab_id and request_lab_id and claims_lab_id != request_lab_id:
-        raise HTTPException(status_code=403, detail="JWT not authorised for requested labId")
-    lab_id = request_lab_id or claims_lab_id or "unknown"
-    _enforce_requested_reservation(claims, req.reservationKey)
-    if req.labId is None and claims_lab_id:
-        req.labId = claims_lab_id
-    if not fmu_filename:
-        raise HTTPException(status_code=400, detail="Cannot determine FMU file name from JWT or request")
-
-    fmu_path = _resolve_fmu_path(fmu_filename)
-
-    execution_options = _parse_simulation_options(req.options, claims)
-    start_time = execution_options.start_time
-    stop_time = execution_options.stop_time
-    step_size = execution_options.step_size
-    timeout = execution_options.timeout
-    fmi_type = _resolve_fmi_type(execution_options.fmi_type, fmu_path)
-    solver_name = execution_options.solver_name
-
-    sim_id = uuid4().hex
-
-    async def _event_stream():
-        t0 = time.monotonic()
-        future: Optional[Future] = None
-        job_executor: Any = None
-        _acquire_slot(lab_id)
-        try:
-            # Observation is the durable acceptance gate; only then is the
-            # worker released and the `started` event exposed.
-            await _record_browser_session_started(request, claims, sim_id)
-            job_executor, future = _submit_simulation(
-                str(fmu_path), start_time, stop_time, step_size,
-                req.parameters, timeout, fmi_type, solver_name,
-            )
-            if future is None:
-                raise RuntimeError("simulation executor returned no future")
-            _track_running_future(sim_id, future, lab_id, claims, job_executor)
-            yield json.dumps({"type": "started", "simId": sim_id}) + "\n"
-
-            # Heartbeat while simulation runs
-            while not future.done():
-                elapsed = round(time.monotonic() - t0, 1)
-                if elapsed >= timeout:
-                    future.cancel()
-                    _shutdown_simulation_executor(job_executor, force=True)
-                    yield json.dumps({"type": "error", "simId": sim_id, "detail": "Simulation timed out"}) + "\n"
-                    return
-                yield json.dumps({"type": "progress", "elapsedSeconds": elapsed}) + "\n"
-                await asyncio.sleep(1)
-
-            sim_result = future.result()
-
-            # Stream results in chunks (~10 chunks)
-            for chunk in _iter_simulation_result_chunks(sim_result):
-                yield json.dumps(chunk) + "\n"
-
-            elapsed = round(time.monotonic() - t0, 3)
-            yield json.dumps(_build_simulation_completed_event(
-                sim_id=sim_id,
-                simulation_time=elapsed,
-                fmi_type=fmi_type,
-                simulation_result=sim_result,
-            )) + "\n"
-
-            await _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type,
-                                req.parameters, req.options, sim_result, elapsed)
-
-        except Exception as exc:
-            logger.exception(
-                "Streaming simulation failed for lab %s sim_id=%s",
-                str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
-                sim_id,
-            )
-            yield json.dumps(_stream_error_payload(exc, sim_id=sim_id)) + "\n"
-        finally:
-            _finalize_simulation_tracking(sim_id, lab_id)
-
-    return StreamingResponse(_event_stream(), media_type="application/x-ndjson")
+# Keep application creation and router registration in one composition seam;
+# the injected callbacks above continue to preserve the historical patch points.
+app = create_app(
+    lifespan=_lifespan,
+    routers=(
+        _health_router,
+        _catalog_router,
+        _history_router,
+        _aas_link_router,
+        _aas_hints_router,
+        _aas_sync_router,
+        _realtime_router,
+        _proxy_router,
+        _run_router,
+        _cancel_router,
+        _stream_router,
+    ),
+)
