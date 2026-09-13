@@ -76,25 +76,18 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeoutImpl: setTimeout,
     });
     const showToast = toastController.showToast;
-    const notificationsAccessModule = window.LabManagerNotificationsAccess;
-    if (!notificationsAccessModule) {
-        throw new Error('LabManagerNotificationsAccess must load before lab-manager.js');
+    const notificationsModule = window.LabManagerNotifications;
+    if (!notificationsModule) {
+        throw new Error('LabManagerNotifications must load before lab-manager.js');
     }
-    const notificationsAccessController = notificationsAccessModule.createController({
+    const notificationsController = notificationsModule.createController({
+        documentImpl: document,
         fetchImpl: (...args) => fetch(...args),
-        applyNotificationConfig: (...args) => notificationsConfigController.applyConfig(...args),
-        setNotificationsLocked,
-        setStatus,
-        updateBillingStatusAction,
         showToast,
         getAuthTokenHandler: () => window.AuthTokenHandler,
         logger: console,
     });
-    const hasBillingAccess = notificationsAccessController.hasBillingAccess;
-    const loadConfig = notificationsAccessController.loadConfig;
-    const promptBillingToken = notificationsAccessController.promptBillingToken;
-    const requestNotificationsAccess = notificationsAccessController.requestAccess;
-    const requireBillingAccess = notificationsAccessController.requireAccess;
+    const requestNotificationsAccess = notificationsController.requestAccess;
     const paginationModule = window.LabManagerPagination;
     if (!paginationModule) {
         throw new Error('LabManagerPagination must load before lab-manager.js');
@@ -123,9 +116,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const normalizeReservationStatus = reservationValuesController.normalizeReservationStatus;
     const cancellationButtonLabel = reservationValuesController.cancellationButtonLabel;
     const shortAddress = reservationValuesController.shortAddress;
-    const notificationsConfigModule = window.LabManagerNotificationsConfig;
-    if (!notificationsConfigModule) {
-        throw new Error('LabManagerNotificationsConfig must load before lab-manager.js');
+    const reservationRenderersModule = window.LabManagerReservationRenderers;
+    if (!reservationRenderersModule) {
+        throw new Error('LabManagerReservationRenderers must load before lab-manager.js');
     }
     const fmuSyncModule = window.LabManagerFmuSync;
     if (!fmuSyncModule) {
@@ -135,9 +128,37 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!aasLinkModule) {
         throw new Error('LabManagerAasLink must load before lab-manager.js');
     }
+    const digitalTwinsModule = window.LabManagerDigitalTwins;
+    if (!digitalTwinsModule) {
+        throw new Error('LabManagerDigitalTwins must load before lab-manager.js');
+    }
     const powerCredentialsModule = window.LabManagerPowerCredentials;
     if (!powerCredentialsModule) {
         throw new Error('LabManagerPowerCredentials must load before lab-manager.js');
+    }
+    const powerRenderersModule = window.LabManagerPowerRenderers;
+    if (!powerRenderersModule) {
+        throw new Error('LabManagerPowerRenderers must load before lab-manager.js');
+    }
+    const powerValuesModule = window.LabManagerPowerValues;
+    if (!powerValuesModule) {
+        throw new Error('LabManagerPowerValues must load before lab-manager.js');
+    }
+    const powerOperationsModule = window.LabManagerPowerOperations;
+    if (!powerOperationsModule) {
+        throw new Error('LabManagerPowerOperations must load before lab-manager.js');
+    }
+    const powerStatusModule = window.LabManagerPowerStatus;
+    if (!powerStatusModule) {
+        throw new Error('LabManagerPowerStatus must load before lab-manager.js');
+    }
+    const powerControllersModule = window.LabManagerPowerControllers;
+    if (!powerControllersModule) {
+        throw new Error('LabManagerPowerControllers must load before lab-manager.js');
+    }
+    const powerPoliciesModule = window.LabManagerPowerPolicies;
+    if (!powerPoliciesModule) {
+        throw new Error('LabManagerPowerPolicies must load before lab-manager.js');
     }
     const activityFeedController = activityModule.createController({
         document,
@@ -148,80 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
         logger: console,
     });
     const loadActivityFeed = activityFeedController.loadActivityFeed;
-    const driverEl = $('#driver');
-    const enabledEl = $('#enabled');
-    const fromEl = $('#from');
-    const fromNameEl = $('#fromName');
-    const defaultToEl = $('#defaultTo');
-    const timezoneEl = $('#timezone');
-    const COMMON_TIMEZONES = [
-        'UTC',
-        'Europe/Madrid', 'Europe/London', 'Europe/Berlin', 'Europe/Paris',
-        'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-        'America/Mexico_City', 'America/Sao_Paulo', 'America/Bogota',
-        'Africa/Johannesburg', 'Africa/Cairo',
-        'Asia/Dubai', 'Asia/Kolkata', 'Asia/Shanghai', 'Asia/Tokyo',
-        'Australia/Sydney'
-    ];
-    const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-
-    const smtpHostEl = $('#smtpHost');
-    const smtpPortEl = $('#smtpPort');
-    const smtpUserEl = $('#smtpUser');
-    const smtpPassEl = $('#smtpPass');
-    const smtpStartTlsEl = $('#smtpStartTls');
-    const smtpSectionEl = $('#smtpSection');
-
-    const graphTenantEl = $('#graphTenant');
-    const graphClientIdEl = $('#graphClientId');
-    const graphClientSecretEl = $('#graphClientSecret');
-    const graphFromEl = $('#graphFrom');
-    const graphSectionEl = $('#graphSection');
-    const driverSummary = $('#driverSummary');
-    const configStatusEl = $('#configStatus');
-    const notificationsAccessGateEl = $('#notificationsAccessGate');
-    const notificationsConfigContentEl = $('#notificationsConfigContent');
-    const unlockNotificationsBtn = $('#unlockNotificationsBtn');
-    const smtpPasswordHintEl = $('#smtpPasswordHint');
-    const graphClientSecretHintEl = $('#graphClientSecretHint');
-
-    const notificationsConfigController = notificationsConfigModule.createController({
-        fields: {
-            enabled: enabledEl,
-            driver: driverEl,
-            from: fromEl,
-            fromName: fromNameEl,
-            defaultTo: defaultToEl,
-            timezone: timezoneEl,
-            smtpHost: smtpHostEl,
-            smtpPort: smtpPortEl,
-            smtpUser: smtpUserEl,
-            smtpPass: smtpPassEl,
-            smtpStartTls: smtpStartTlsEl,
-            graphTenant: graphTenantEl,
-            graphClientId: graphClientIdEl,
-            graphClientSecret: graphClientSecretEl,
-            graphFrom: graphFromEl,
-            smtpSection: smtpSectionEl,
-            graphSection: graphSectionEl,
-            driverSummary,
-            smtpPasswordHint: smtpPasswordHintEl,
-            graphClientSecretHint: graphClientSecretHintEl,
-        },
-        commonTimezones: COMMON_TIMEZONES,
-        browserTimezone,
-    });
-    const applyNotificationConfig = notificationsConfigController.applyConfig;
-    const buildNotificationPayload = notificationsConfigController.buildPayload;
-    const populateTimezones = notificationsConfigController.populateTimezones;
-    const toggleSections = notificationsConfigController.toggleSections;
-    const updateDriverSummary = notificationsConfigController.updateDriverSummary;
-
     // Modal controls
-    const modal = $('#configModal');
-    const configureBtn = $('#configureBtn');
-    const closeModalBtn = $('#closeModal');
-    const cancelModalBtn = $('#cancelModal');
     const provisionHostModal = $('#provisionHostModal');
     const closeProvisionHostModalBtn = $('#closeProvisionHostModal');
     const cancelProvisionHostBtn = $('#cancelProvisionHost');
@@ -264,29 +212,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const editHostMacEl = $('#editHostMac');
     const editHeartbeatPathEl = $('#editHeartbeatPath');
 
-    populateTimezones();
-
-    $('#btnTestLoad').addEventListener('click', () => {
-        if (!hasBillingAccess()) {
-            requireBillingAccess(() => loadConfig(), () => loadConfig());
-            return;
-        }
-        loadConfig();
-    });
-    $('#saveConfigBtn').addEventListener('click', saveConfig);
-    $('#btnTestEmail').addEventListener('click', sendTestEmail);
-    driverEl.addEventListener('change', toggleSections);
-    configureBtn.addEventListener('click', () => {
-        if (!hasBillingAccess()) {
-            requireBillingAccess(() => openModal(), () => loadConfig(() => {
-                openModal();
-            }));
-            return;
-        }
-        openModal();
-    });
-    closeModalBtn.addEventListener('click', closeModal);
-    cancelModalBtn.addEventListener('click', closeModal);
     if (closeProvisionHostModalBtn) closeProvisionHostModalBtn.addEventListener('click', closeProvisionHostModal);
     if (cancelProvisionHostBtn) cancelProvisionHostBtn.addEventListener('click', closeProvisionHostModal);
     if (saveProvisionHostBtn) saveProvisionHostBtn.addEventListener('click', saveProvisionedHost);
@@ -308,9 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (saveEditHostBtn) saveEditHostBtn.addEventListener('click', saveEditedHost);
 
     loadAccessPolicy();
-    updateBillingStatusAction();
-    setNotificationsLocked(true);
-    if (unlockNotificationsBtn) unlockNotificationsBtn.addEventListener('click', requestNotificationsAccess);
+    notificationsController.initialize();
 
     // Lab Station ops state
     const refreshHostsBtn = $('#refreshHostsBtn');
@@ -393,19 +316,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
     const heartbeatStreamErrorShown = {};
-    let powerControllers = [];
-    let powerControllerStatusLoading = false;
-    let powerControllerStatusError = false;
-    let powerControllerStatusRequestId = 0;
-    let powerControllerOutletDrafts = [];
-    let powerControllerIdWasSuggested = false;
-    let lastPowerControllerDriver = 'mock';
-    let powerCredentials = [];
-    let powerPolicies = [];
-    let powerPolicyStepDrafts = [];
-    let managedLabsInitialized = false;
-    let managedLabsPromise = null;
-    let managedLabs = [];
+    let powerControllersController;
+    let powerPoliciesController;
+    let digitalTwinsController;
+    const powerValuesController = powerValuesModule.createController();
+    const createPowerPolicyStepDraft = powerValuesController.createPowerPolicyStepDraft;
+    const createPowerControllerOutletDraft = powerValuesController.createPowerControllerOutletDraft;
+    const parsePowerPolicyInteger = powerValuesController.parsePowerPolicyInteger;
+    const powerOperationsController = powerOperationsModule.createController();
+    const buildPowerCommandPayload = powerOperationsController.buildPowerCommandPayload;
+    const powerStatusController = powerStatusModule.createController();
+    const mergePowerControllerStatuses = powerStatusController.mergePowerControllerStatuses;
+    const powerRenderersController = powerRenderersModule.createController({ escapeHtml });
     let hostNames = [];
     let guacamoleCandidates = [];
     let guacamoleStationCandidates = [];
@@ -539,6 +461,99 @@ document.addEventListener('DOMContentLoaded', () => {
         logger: console,
     });
 
+    powerControllersController = powerControllersModule.createController({
+        fields: {
+            refresh: refreshPowerControllersBtn,
+            list: powerControllerListEl,
+            status: powerControllersStatusEl,
+            hint: powerControllersHintEl,
+            select: powerControllerSelectEl,
+            id: powerControllerIdEl,
+            name: powerControllerNameEl,
+            driver: powerControllerDriverEl,
+            enabled: powerControllerEnabledEl,
+            host: powerControllerHostEl,
+            port: powerControllerPortEl,
+            credentialRef: powerControllerCredentialRefEl,
+            netioPath: powerControllerNetioPathEl,
+            netioHttps: powerControllerNetioHttpsEl,
+            netioVerifyTls: powerControllerNetioVerifyTlsEl,
+            netioPathField: powerControllerNetioPathFieldEl,
+            netioHttpsField: powerControllerNetioHttpsFieldEl,
+            netioVerifyTlsField: powerControllerNetioVerifyTlsFieldEl,
+            profileField: powerControllerProfileFieldEl,
+            profile: powerControllerProfileEl,
+            timeoutSeconds: powerControllerTimeoutSecondsEl,
+            retries: powerControllerRetriesEl,
+            outlets: powerControllerOutletsEl,
+            addOutlet: addPowerControllerOutletBtn,
+            saveButton: savePowerControllerBtn,
+            editorHint: powerControllerEditorHintEl,
+            operationReason: powerOperationReasonEl,
+            cycleSeconds: powerCycleSecondsEl,
+            maintenanceMode: powerMaintenanceModeEl,
+        },
+        fetchImpl: (...args) => fetch(...args),
+        showToast,
+        showOpsWarning,
+        renderPolicySteps: (...args) => powerPoliciesController?.renderSteps(...args),
+        renderControllerRowsMarkup: (...args) => powerRenderersController.renderPowerControllerRowsMarkup(...args),
+        renderControllerCredentialOptionsMarkup: (...args) => powerRenderersController.renderPowerControllerCredentialOptionsMarkup(...args),
+        renderControllerOutletsMarkup: (...args) => powerRenderersController.renderPowerControllerOutletsMarkup(...args),
+        mergePowerControllerStatuses,
+        createPowerControllerOutletDraft,
+        buildPowerCommandPayload,
+        logger: console,
+        documentImpl: document,
+    });
+    powerPoliciesController = powerPoliciesModule.createController({
+        fields: {
+            select: powerPolicySelectEl,
+            labSelect: powerPolicyLabSelectEl,
+            name: powerPolicyNameEl,
+            enabled: powerPolicyEnabledEl,
+            respectLocalMode: powerPolicyRespectLocalModeEl,
+            maintenanceMode: powerPolicyMaintenanceModeEl,
+            startFailureMode: powerPolicyStartFailureModeEl,
+            endFailureMode: powerPolicyEndFailureModeEl,
+            steps: powerPolicyStepsEl,
+            addStep: addPowerPolicyStepBtn,
+            saveButton: savePowerPolicyBtn,
+            status: powerPoliciesStatusEl,
+            editorHint: powerPolicyEditorHintEl,
+        },
+        fetchImpl: (...args) => fetch(...args),
+        showToast,
+        showOpsWarning,
+        getControllers: () => powerControllersController?.getControllers() || [],
+        getManagedLabs: () => digitalTwinsController?.getManagedLabs() || [],
+        resolveLabDisplayName: lab => digitalTwinsController?.resolveLabDisplayName(lab) || '',
+        renderPowerPolicyStepsMarkup: (...args) => powerRenderersController.renderPowerPolicyStepsMarkup(...args),
+        createPowerPolicyStepDraft,
+        parsePowerPolicyInteger,
+        logger: console,
+        documentImpl: document,
+    });
+    const loadPowerControllers = powerControllersController.load;
+    const loadPowerControllerStatuses = powerControllersController.loadStatuses;
+    const loadSelectedPowerController = powerControllersController.loadSelected;
+    const savePowerController = powerControllersController.save;
+    const updatePowerControllerDriverFields = powerControllersController.updateDriverFields;
+    const updatePowerControllerNetioPort = powerControllersController.updateNetioPort;
+    const suggestPowerControllerId = powerControllersController.suggestId;
+    const addPowerControllerOutlet = powerControllersController.addOutlet;
+    const handlePowerControllerOutletChange = powerControllersController.handleOutletChange;
+    const handlePowerControllerOutletActions = powerControllersController.handleOutletActions;
+    const handlePowerActions = powerControllersController.handleActions;
+    const loadPowerPolicies = powerPoliciesController.load;
+    const loadSelectedPowerPolicy = powerPoliciesController.loadSelected;
+    const savePowerPolicy = powerPoliciesController.save;
+    const handlePowerPolicyLabChange = powerPoliciesController.handleLabChange;
+    const addPowerPolicyStep = powerPoliciesController.addStep;
+    const handlePowerPolicyStepChange = powerPoliciesController.handleStepChange;
+    const handlePowerPolicyStepActions = powerPoliciesController.handleStepActions;
+    const resetPowerPolicyEditor = powerPoliciesController.resetEditor;
+
     const powerCredentialsController = powerCredentialsModule.createController({
         fields: {
             select: powerCredentialSelectEl,
@@ -571,16 +586,17 @@ document.addEventListener('DOMContentLoaded', () => {
         showOpsWarning,
         refreshPowerControllerStatuses: (...args) => loadPowerControllerStatuses(...args),
         renderControllerCredentialOptions: credentials => {
-            powerCredentials = credentials;
-            renderPowerControllerCredentialOptions();
+            powerControllersController.setCredentials(credentials);
         },
         escapeHtml,
         documentImpl: document,
     });
     const loadPowerCredentials = powerCredentialsController.load;
     powerCredentialsController.initialize();
+    powerControllersController.initialize();
+    powerPoliciesController.initialize();
 
-    // FMU AAS sync elements
+    // Digital twins: managed labs, FMU sync and AAS links.
     const fmuSyncBtn = $('#fmuSyncBtn');
     const fmuSyncKeyEl = $('#fmuSyncKey');
     const fmuSyncLabSelectEl = $('#fmuSyncLabSelect');
@@ -593,31 +609,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const fmuSyncContactEmailEl = $('#fmuSyncContactEmail');
     const fmuSyncDescriptionHintEl = $('#fmuSyncDescriptionHint');
     const fmuSyncLicenseHintEl = $('#fmuSyncLicenseHint');
-
-    const fmuSyncController = fmuSyncModule.createController({
-        fields: {
-            syncButton: fmuSyncBtn,
-            keyInput: fmuSyncKeyEl,
-            labSelect: fmuSyncLabSelectEl,
-            fileInput: fmuSyncFileEl,
-            fileName: fmuSyncFileNameEl,
-            result: fmuSyncResultEl,
-            description: fmuSyncDescriptionEl,
-            license: fmuSyncLicenseEl,
-            docsUrl: fmuSyncDocsUrlEl,
-            contactEmail: fmuSyncContactEmailEl,
-            descriptionHint: fmuSyncDescriptionHintEl,
-            licenseHint: fmuSyncLicenseHintEl,
-        },
-        fetchImpl: (...args) => fetch(...args),
-        showToast,
-        formDataCtor: FormData,
-        urlSearchParamsCtor: URLSearchParams,
-        logger: console,
-    });
-    fmuSyncController.initialize();
-
-    // AAS Link elements
     const aasLinkKeyEl = $('#aasLinkKey');
     const aasLinkLabSelectEl = $('#aasLinkLabSelect');
     const aasLinkAasIdEl = $('#aasLinkAasId');
@@ -625,20 +616,50 @@ document.addEventListener('DOMContentLoaded', () => {
     const aasLinkCheckBtn = $('#aasLinkCheckBtn');
     const aasLinkDeleteBtn = $('#aasLinkDeleteBtn');
     const aasLinkResultEl = $('#aasLinkResult');
-    const aasLinkController = aasLinkModule.createController({
+    digitalTwinsController = digitalTwinsModule.createController({
         fields: {
-            keyInput: aasLinkKeyEl,
-            labSelect: aasLinkLabSelectEl,
-            aasIdInput: aasLinkAasIdEl,
-            saveButton: aasLinkSaveBtn,
-            checkButton: aasLinkCheckBtn,
-            deleteButton: aasLinkDeleteBtn,
-            result: aasLinkResultEl,
+            powerPolicyLabSelect: powerPolicyLabSelectEl,
+            powerPolicySelect: powerPolicySelectEl,
+            fmuSyncKey: fmuSyncKeyEl,
+            fmuSyncLabSelect: fmuSyncLabSelectEl,
+            aasLinkLabSelect: aasLinkLabSelectEl,
+            fmuSync: {
+                syncButton: fmuSyncBtn,
+                keyInput: fmuSyncKeyEl,
+                labSelect: fmuSyncLabSelectEl,
+                fileInput: fmuSyncFileEl,
+                fileName: fmuSyncFileNameEl,
+                result: fmuSyncResultEl,
+                description: fmuSyncDescriptionEl,
+                license: fmuSyncLicenseEl,
+                docsUrl: fmuSyncDocsUrlEl,
+                contactEmail: fmuSyncContactEmailEl,
+                descriptionHint: fmuSyncDescriptionHintEl,
+                licenseHint: fmuSyncLicenseHintEl,
+            },
+            aasLink: {
+                keyInput: aasLinkKeyEl,
+                labSelect: aasLinkLabSelectEl,
+                aasIdInput: aasLinkAasIdEl,
+                saveButton: aasLinkSaveBtn,
+                checkButton: aasLinkCheckBtn,
+                deleteButton: aasLinkDeleteBtn,
+                result: aasLinkResultEl,
+            },
         },
         fetchImpl: (...args) => fetch(...args),
         showToast,
+        showOpsWarning,
+        fmuSyncModule,
+        aasLinkModule,
+        formDataCtor: FormData,
+        urlSearchParamsCtor: URLSearchParams,
+        documentImpl: document,
+        logger: console,
     });
-    aasLinkController.initialize();
+    const getManagedLabs = digitalTwinsController.getManagedLabs;
+    const loadManagedLabsOnce = digitalTwinsController.loadManagedLabsOnce;
+    digitalTwinsController.initialize();
 
     // Reservation timeline elements
     const timelineInput = $('#timelineReservationId');
@@ -667,6 +688,19 @@ document.addEventListener('DOMContentLoaded', () => {
         hasMore: false,
         loading: false
     };
+    const reservationRenderersController = reservationRenderersModule.createController({
+        escapeHtml,
+        htmlEscape,
+        formatDate,
+        formatBool,
+        formatReservationDate,
+        formatRange,
+        isReservationWindowEnded,
+        normalizeReservationStatus,
+        cancellationButtonLabel,
+        shortAddress,
+        resolveReservationLabDisplayName,
+    });
     
     if (timelineBtn && timelineInput && timelineResult) {
         timelineBtn.addEventListener('click', fetchTimeline);
@@ -685,51 +719,9 @@ document.addEventListener('DOMContentLoaded', () => {
         hostListEl.addEventListener('click', handleHostActions);
         renderHosts();
     }
-    if (powerControllerListEl) powerControllerListEl.addEventListener('click', handlePowerActions);
-    if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', () => {
-        loadPowerControllers({ forceStatusRefresh: true });
-    });
-    if (powerControllerSelectEl) powerControllerSelectEl.addEventListener('change', loadSelectedPowerController);
-    if (powerControllerDriverEl) {
-        powerControllerDriverEl.addEventListener('change', updatePowerControllerDriverFields);
-        powerControllerDriverEl.addEventListener('change', suggestPowerControllerId);
-        powerControllerDriverEl.addEventListener('change', renderPowerControllerCredentialOptions);
-    }
-    if (powerControllerHostEl) powerControllerHostEl.addEventListener('input', suggestPowerControllerId);
-    if (powerControllerIdEl) {
-        powerControllerIdEl.addEventListener('input', () => {
-            powerControllerIdWasSuggested = false;
-        });
-    }
-    if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.addEventListener('change', updatePowerControllerNetioPort);
-    if (addPowerControllerOutletBtn) addPowerControllerOutletBtn.addEventListener('click', addPowerControllerOutlet);
-    if (powerControllerOutletsEl) {
-        powerControllerOutletsEl.addEventListener('change', handlePowerControllerOutletChange);
-        powerControllerOutletsEl.addEventListener('input', handlePowerControllerOutletChange);
-        powerControllerOutletsEl.addEventListener('click', handlePowerControllerOutletActions);
-    }
-    if (savePowerControllerBtn) savePowerControllerBtn.addEventListener('click', savePowerController);
     if (refreshPowerCredentialsBtn) refreshPowerCredentialsBtn.addEventListener('click', loadPowerCredentials);
-    if (powerPolicySelectEl) powerPolicySelectEl.addEventListener('change', loadSelectedPowerPolicy);
-    if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.addEventListener('change', handlePowerPolicyLabChange);
-    if (addPowerPolicyStepBtn) addPowerPolicyStepBtn.addEventListener('click', addPowerPolicyStep);
-    if (powerPolicyStepsEl) {
-        powerPolicyStepsEl.addEventListener('change', handlePowerPolicyStepChange);
-        powerPolicyStepsEl.addEventListener('input', handlePowerPolicyStepChange);
-        powerPolicyStepsEl.addEventListener('click', handlePowerPolicyStepActions);
-    }
-    if (savePowerPolicyBtn) savePowerPolicyBtn.addEventListener('click', savePowerPolicy);
-    if (powerPolicyNameEl && !powerPolicyNameEl.value) resetPowerPolicyEditor();
     if (guacamoleCandidateListEl) {
         guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
-    }
-
-    function setNotificationsLocked(locked) {
-        if (notificationsAccessGateEl) notificationsAccessGateEl.hidden = !locked;
-        if (notificationsConfigContentEl) notificationsConfigContentEl.hidden = locked;
-        [configureBtn, $('#btnTestLoad'), $('#saveConfigBtn'), $('#btnTestEmail')]
-            .filter(Boolean)
-            .forEach(button => { button.disabled = locked; });
     }
 
     if (upcomingReservationsListEl) {
@@ -796,113 +788,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function loadManagedLabsOnce(options = {}) {
-        if (managedLabsPromise) return managedLabsPromise;
-        if (managedLabsInitialized) return Promise.resolve();
-        managedLabsInitialized = true;
-        managedLabsPromise = loadManagedLabs(options);
-        return managedLabsPromise;
-    }
-
-    function saveConfig() {
-        if (!hasBillingAccess()) {
-            requireBillingAccess(() => saveConfig());
-            return;
-        }
-
-        const payload = buildNotificationPayload();
-
-        fetch('/billing/admin/notifications', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify(payload)
-        })
-            .then(res => {
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                return res.json();
-            })
-            .then(data => {
-                applyNotificationConfig(data.config || {
-                    ...payload,
-                    smtp: { ...payload.smtp, passwordConfigured: Boolean(smtpPassword) },
-                    graph: { ...payload.graph, clientSecretConfigured: Boolean(graphClientSecret) }
-                });
-                setStatus('Saved');
-                showToast('Configuration saved', 'success');
-            })
-            .catch(err => {
-                console.error(err);
-                setStatus('Error');
-                showToast('Save failed (check admin access)', 'error');
-            });
-    }
-
-    function openModal() {
-        modal.classList.add('show');
-    }
-
-    function closeModal() {
-        modal.classList.remove('show');
-        updateDriverSummary();
-    }
-
-    function setStatus(text) {
-        if (configStatusEl) {
-            configStatusEl.textContent = text;
-        }
-    }
-
-    function updateBillingStatusAction() {
-        if (!configStatusEl) {
-            return;
-        }
-        const needsToken = !hasBillingAccess();
-        configStatusEl.classList.toggle('token-required-action', needsToken);
-        configStatusEl.title = needsToken ? 'Click to enter the Gateway administrator token' : '';
-        configStatusEl.setAttribute('aria-disabled', needsToken ? 'false' : 'true');
-    }
-
-    if (configStatusEl) {
-        configStatusEl.setAttribute('role', 'button');
-        configStatusEl.tabIndex = 0;
-        configStatusEl.addEventListener('click', () => {
-            if (!hasBillingAccess()) {
-                promptBillingToken(() => loadConfig());
-            }
-        });
-        configStatusEl.addEventListener('keydown', (e) => {
-            if ((e.key === 'Enter' || e.key === ' ') && !hasBillingAccess()) {
-                e.preventDefault();
-                promptBillingToken(() => loadConfig());
-            }
-        });
-    }
-
-    function sendTestEmail() {
-        if (!hasBillingAccess()) {
-            requireBillingAccess(() => sendTestEmail());
-            return;
-        }
-
-        fetch('/billing/admin/notifications/test', {
-            method: 'POST',
-            credentials: 'include'
-        })
-            .then(async res => {
-                const body = await res.json().catch(() => ({}));
-                if (!res.ok || body.success === false) {
-                    const msg = body.error || `Test failed (HTTP ${res.status})`;
-                    throw new Error(msg);
-                }
-                showToast('Test email sent (check recipients)', 'success');
-            })
-            .catch(err => {
-                console.error(err);
-                showToast(err.message || 'Test email failed', 'error');
-            });
-    }
-
     function $(sel) { return document.querySelector(sel); }
 
     // ---- Lab Station ops helpers ----
@@ -920,1153 +805,12 @@ document.addEventListener('DOMContentLoaded', () => {
         opsHint.textContent = `Hosts are loaded from ops-worker/hosts.json and ops-data/hosts.json. ${guacStatus}`;
     }
 
-    async function loadPowerControllers(options = {}) {
-        const { forceStatusRefresh = false, ...fetchOptions } = options;
-        fetchOptions.cache = 'no-store';
-        powerControllerStatusRequestId += 1;
-        if (powerControllersStatusEl) {
-            powerControllersStatusEl.textContent = 'Loading...';
-            powerControllersStatusEl.className = 'pill soft';
-        }
-        try {
-            const res = await fetch('/ops/api/power/controllers', fetchOptions);
-            if (res.status === 403) {
-                showOpsWarning();
-                return false;
-            }
-            if (res.status === 401) {
-                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power controllers', 'error');
-                return false;
-            }
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            powerControllers = Array.isArray(body.controllers) ? body.controllers : [];
-            powerControllerStatusLoading = powerControllers.length > 0;
-            powerControllerStatusError = false;
-            renderPowerControllers();
-            renderPowerControllerOptions();
-            renderPowerPolicySteps();
-            if (powerControllersStatusEl) {
-                powerControllersStatusEl.textContent = `${powerControllers.length} controller${powerControllers.length === 1 ? '' : 's'}`;
-                powerControllersStatusEl.className = 'pill good';
-            }
-            if (powerControllersHintEl) {
-                powerControllersHintEl.textContent = powerControllers.length
-                    ? 'Protected outlets require an explicit maintenance mode toggle. Physical activation remains subject to provider hardware validation.'
-                    : 'No controller is configured. Add one to the provider-local power catalog before using this panel.';
-            }
-            if (powerControllers.length) {
-                void loadPowerControllerStatuses({
-                    forceRefresh: forceStatusRefresh,
-                    skipAuthPrompt: options.skipAuthPrompt,
-                });
-            }
-            return true;
-        } catch (err) {
-            console.warn('Unable to load power controllers', err);
-            powerControllers = [];
-            powerControllerStatusLoading = false;
-            powerControllerStatusError = false;
-            renderPowerControllers();
-            renderPowerControllerOptions();
-            renderPowerPolicySteps();
-            if (powerControllersStatusEl) {
-                powerControllersStatusEl.textContent = 'Unavailable';
-                powerControllersStatusEl.className = 'pill bad';
-            }
-            if (powerControllersHintEl) powerControllersHintEl.textContent = 'Power controllers could not be loaded.';
-            return false;
-        }
-    }
-
-    async function loadPowerControllerStatuses(options = {}) {
-        const { forceRefresh = false, ...fetchOptions } = options;
-        fetchOptions.cache = 'no-store';
-        const requestId = ++powerControllerStatusRequestId;
-        if (!powerControllers.length) {
-            powerControllerStatusLoading = false;
-            powerControllerStatusError = false;
-            renderPowerControllers();
-            return;
-        }
-        powerControllerStatusLoading = true;
-        powerControllerStatusError = false;
-        renderPowerControllers();
-        const query = forceRefresh ? '?refresh=true' : '';
-        try {
-            const res = await fetch(`/ops/api/power/controllers/status${query}`, fetchOptions);
-            if (res.status === 403) {
-                showOpsWarning();
-                throw new Error('Power controller status access denied');
-            }
-            if (res.status === 401) {
-                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power controller status', 'error');
-                throw new Error('Lab Manager session required');
-            }
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            if (!Array.isArray(body.controllers)) throw new Error('Power controller status is invalid');
-            if (requestId !== powerControllerStatusRequestId) return;
-            const statuses = new Map(
-                body.controllers
-                    .filter(controller => controller && controller.id)
-                    .map(controller => [String(controller.id), controller]),
-            );
-            powerControllers = powerControllers.map(controller => {
-                const status = statuses.get(String(controller.id));
-                if (!status) return controller;
-                const statusOutlets = new Map(
-                    (Array.isArray(status.outlets) ? status.outlets : [])
-                        .filter(outlet => outlet && outlet.outlet !== undefined)
-                        .map(outlet => [String(outlet.outlet), outlet]),
-                );
-                return {
-                    ...controller,
-                    discovery: status.discovery || {},
-                    outlets: (Array.isArray(controller.outlets) ? controller.outlets : []).map(outlet => ({
-                        ...outlet,
-                        state: statusOutlets.get(String(outlet.outlet))?.state || 'unknown',
-                    })),
-                };
-            });
-            powerControllerStatusError = false;
-        } catch (err) {
-            if (requestId !== powerControllerStatusRequestId) return;
-            console.warn('Unable to load power controller status', err);
-            powerControllerStatusError = true;
-        } finally {
-            if (requestId === powerControllerStatusRequestId) {
-                powerControllerStatusLoading = false;
-                renderPowerControllers();
-            }
-        }
-    }
-
-    async function loadManagedLabs(options = {}) {
-        if (!powerPolicyLabSelectEl && !fmuSyncKeyEl && !fmuSyncLabSelectEl && !aasLinkLabSelectEl) return;
-        const selectedPowerPolicyLabId = powerPolicyLabSelectEl?.value || '';
-        const selectedFmuAccessKey = fmuSyncKeyEl?.value || '';
-        const selectedFmuLabId = fmuSyncLabSelectEl?.value || '';
-        const selectedAasLinkLabId = aasLinkLabSelectEl?.value || '';
-        try {
-            const res = await fetch('/lab-admin/labs', options);
-            if (res.status === 403) {
-                showOpsWarning();
-                managedLabs = [];
-                renderPowerPolicyLabOptions([]);
-                renderFmuAccessKeyOptions([]);
-                renderFmuLabOptions(fmuSyncLabSelectEl, []);
-                renderFmuLabOptions(aasLinkLabSelectEl, []);
-                return;
-            }
-            if (res.status === 401) {
-                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load laboratories', 'error');
-                managedLabs = [];
-                renderPowerPolicyLabOptions([]);
-                renderFmuAccessKeyOptions([]);
-                renderFmuLabOptions(fmuSyncLabSelectEl, []);
-                renderFmuLabOptions(aasLinkLabSelectEl, []);
-                return;
-            }
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            managedLabs = Array.isArray(body.labs) ? body.labs : [];
-            renderPowerPolicyLabOptions(managedLabs, selectedPowerPolicyLabId);
-            renderFmuAccessKeyOptions(managedLabs, selectedFmuAccessKey);
-            renderFmuLabOptions(fmuSyncLabSelectEl, managedLabs, selectedFmuLabId);
-            renderFmuLabOptions(aasLinkLabSelectEl, managedLabs, selectedAasLinkLabId);
-        } catch (err) {
-            console.warn('Unable to load provider laboratories', err);
-            managedLabs = [];
-            renderPowerPolicyLabOptions([]);
-            renderFmuAccessKeyOptions([]);
-            renderFmuLabOptions(fmuSyncLabSelectEl, []);
-            renderFmuLabOptions(aasLinkLabSelectEl, []);
-        }
-    }
-
-    function renderPowerPolicyLabOptions(labs, preferredLabId = '') {
-        if (!powerPolicyLabSelectEl) return;
-        const current = powerPolicyLabSelectEl.value;
-        const validLabs = (Array.isArray(labs) ? labs : [])
-            .filter(lab => String(lab?.labId || '').trim())
-            .filter((lab, index, items) => items.findIndex(item => String(item.labId) === String(lab.labId)) === index);
-        powerPolicyLabSelectEl.innerHTML = validLabs.length
-            ? '<option value="">Select a laboratory</option>'
-            : '<option value="">No laboratories available</option>';
-        validLabs.forEach(lab => {
-            const labId = String(lab.labId).trim();
-            const option = document.createElement('option');
-            option.value = labId;
-            option.textContent = formatPowerPolicyLabLabel(lab);
-            powerPolicyLabSelectEl.appendChild(option);
-        });
-        const selected = preferredLabId || current || powerPolicySelectEl?.value || '';
-        powerPolicyLabSelectEl.value = validLabs.some(lab => String(lab.labId) === selected)
-            ? selected
-            : '';
-        powerPolicyLabSelectEl.disabled = validLabs.length === 0;
-    }
-
-    function renderFmuLabOptions(selectEl, labs, preferredLabId = '') {
-        if (!selectEl) return;
-        const current = selectEl.value;
-        const fmuLabs = (Array.isArray(labs) ? labs : [])
-            .filter(lab => Number(lab?.resourceType) === 1)
-            .filter(lab => String(lab?.labId || '').trim())
-            .filter((lab, index, items) => items.findIndex(item => String(item.labId) === String(lab.labId)) === index);
-        selectEl.innerHTML = fmuLabs.length
-            ? '<option value="">No lab ID override</option>'
-            : '<option value="">No FMU laboratories available</option>';
-        fmuLabs.forEach(lab => {
-            const labId = String(lab.labId).trim();
-            const option = document.createElement('option');
-            option.value = labId;
-            option.textContent = formatPowerPolicyLabLabel(lab);
-            selectEl.appendChild(option);
-        });
-        const selected = preferredLabId || current || '';
-        selectEl.value = fmuLabs.some(lab => String(lab.labId) === selected)
-            ? selected
-            : '';
-        selectEl.disabled = fmuLabs.length === 0;
-    }
-
-    function renderFmuAccessKeyOptions(labs, preferredAccessKey = '') {
-        if (!fmuSyncKeyEl) return;
-        const current = fmuSyncKeyEl.value;
-        const accessKeys = (Array.isArray(labs) ? labs : [])
-            .filter(lab => Number(lab?.resourceType) === 1)
-            .filter(lab => String(lab?.accessKey || '').trim())
-            .filter((lab, index, items) => items.findIndex(item => String(item.accessKey) === String(lab.accessKey)) === index);
-        fmuSyncKeyEl.innerHTML = accessKeys.length
-            ? '<option value="">Select an FMU access key</option>'
-            : '<option value="">No FMU access keys available</option>';
-        accessKeys.forEach(lab => {
-            const accessKey = String(lab.accessKey).trim();
-            const option = document.createElement('option');
-            option.value = accessKey;
-            option.textContent = `${resolveLabDisplayName(lab)} · ${accessKey}`;
-            fmuSyncKeyEl.appendChild(option);
-        });
-        const selected = preferredAccessKey || current || '';
-        fmuSyncKeyEl.value = accessKeys.some(lab => String(lab.accessKey) === selected)
-            ? selected
-            : '';
-        fmuSyncKeyEl.disabled = accessKeys.length === 0;
-    }
-
-    function formatPowerPolicyLabLabel(lab) {
-        const resourceType = Number(lab?.resourceType) === 1 ? 'FMU' : 'Remote';
-        const status = lab?.listed ? 'Listed' : 'Draft';
-        return `${resolveLabDisplayName(lab)} · ${resourceType} · ${status}`;
-    }
-
-    function resolveLabDisplayName(lab) {
-        const candidates = [
-            lab?.name,
-            lab?.labName,
-            lab?.metadataName,
-            lab?.metadata?.name,
-            lab?.metadata?.labName,
-        ];
-        const name = candidates.find(candidate => typeof candidate === 'string' && candidate.trim());
-        const labId = String(lab?.labId ?? '').trim();
-        return name ? name.trim() : `Lab #${labId}`;
-    }
-
     function resolveReservationLabDisplayName(reservation) {
         const directName = [reservation?.labName, reservation?.name]
             .find(candidate => typeof candidate === 'string' && candidate.trim());
         if (directName) return directName.trim();
-        const managedLab = managedLabs.find(lab => String(lab?.labId ?? '') === String(reservation?.labId ?? ''));
-        return resolveLabDisplayName(managedLab || reservation);
-    }
-
-    function handlePowerPolicyLabChange() {
-        const labId = powerPolicyLabSelectEl?.value || '';
-        if (powerPolicySelectEl) {
-            powerPolicySelectEl.value = powerPolicies.some(policy => String(policy.labId || '') === labId)
-                ? labId
-                : '';
-        }
-        loadSelectedPowerPolicy();
-    }
-
-    async function loadPowerPolicies(options = {}) {
-        if (powerPoliciesStatusEl) {
-            powerPoliciesStatusEl.textContent = 'Loading...';
-            powerPoliciesStatusEl.className = 'pill soft';
-        }
-        try {
-            const selectedLabId = powerPolicyLabSelectEl?.value || powerPolicySelectEl?.value || '';
-            const res = await fetch('/ops/api/power/policies', options);
-            if (res.status === 403) {
-                showOpsWarning();
-                return;
-            }
-            if (res.status === 401) {
-                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power policies', 'error');
-                return;
-            }
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            powerPolicies = Array.isArray(body.policies) ? body.policies : [];
-            renderPowerPolicyOptions(selectedLabId);
-            if (powerPoliciesStatusEl) {
-                powerPoliciesStatusEl.textContent = `${powerPolicies.length} polic${powerPolicies.length === 1 ? 'y' : 'ies'}`;
-                powerPoliciesStatusEl.className = 'pill good';
-            }
-        } catch (err) {
-            console.warn('Unable to load power policies', err);
-            powerPolicies = [];
-            renderPowerPolicyOptions('');
-            if (powerPoliciesStatusEl) {
-                powerPoliciesStatusEl.textContent = 'Unavailable';
-                powerPoliciesStatusEl.className = 'pill bad';
-            }
-            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Power policies could not be loaded.';
-        }
-    }
-
-    function renderPowerPolicyOptions(preferredLabId) {
-        if (!powerPolicySelectEl) return;
-        const current = powerPolicySelectEl.value;
-        powerPolicySelectEl.innerHTML = '<option value="">New policy</option>';
-        powerPolicies.forEach(policy => {
-            const option = document.createElement('option');
-            option.value = policy.labId || '';
-            const lab = managedLabs.find(item => String(item?.labId || '') === String(policy.labId || ''))
-                || { labId: policy.labId };
-            option.textContent = `${resolveLabDisplayName(lab)} · ${policy.policyName || 'Unnamed policy'}`;
-            powerPolicySelectEl.appendChild(option);
-        });
-        const selected = preferredLabId || current;
-        if (selected && powerPolicies.some(policy => String(policy.labId) === selected)) {
-            powerPolicySelectEl.value = selected;
-        } else {
-            powerPolicySelectEl.value = '';
-        }
-        loadSelectedPowerPolicy();
-    }
-
-    function loadSelectedPowerPolicy() {
-        const labId = powerPolicySelectEl?.value || '';
-        const policy = powerPolicies.find(item => String(item.labId || '') === labId);
-        if (policy) {
-            if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.value = policy.labId || '';
-            populatePowerPolicyForm(policy);
-            return;
-        }
-        resetPowerPolicyEditor(false);
-    }
-
-    function resetPowerPolicyEditor(clearLabId = true) {
-        if (clearLabId && powerPolicyLabSelectEl) powerPolicyLabSelectEl.value = '';
-        if (powerPolicyNameEl) powerPolicyNameEl.value = 'New lab policy';
-        if (powerPolicyEnabledEl) powerPolicyEnabledEl.checked = true;
-        if (powerPolicyRespectLocalModeEl) powerPolicyRespectLocalModeEl.checked = true;
-        if (powerPolicyMaintenanceModeEl) powerPolicyMaintenanceModeEl.checked = false;
-        if (powerPolicyStartFailureModeEl) powerPolicyStartFailureModeEl.value = 'fail_reservation_start';
-        if (powerPolicyEndFailureModeEl) powerPolicyEndFailureModeEl.value = 'warn_and_continue';
-        powerPolicyStepDrafts = [];
-        renderPowerPolicySteps();
-        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = '';
-    }
-
-    function createPowerPolicyStepDraft(step = {}) {
-        const action = String(step.action || 'on').trim().toLowerCase();
-        const conditions = step.conditions && typeof step.conditions === 'object' && !Array.isArray(step.conditions)
-            ? step.conditions
-            : {};
-        const parsedSequence = Number.parseInt(step.sequence, 10);
-        const readInteger = (value, fallback) => {
-            const parsed = Number.parseInt(value, 10);
-            return Number.isInteger(parsed) ? parsed : fallback;
-        };
-        return {
-            id: String(step.id || step.stepId || '').trim(),
-            phase: String(step.phase || 'pre_start').trim().toLowerCase(),
-            sequence: Number.isInteger(parsedSequence) && parsedSequence >= 0 ? parsedSequence : 10,
-            controllerId: String(step.controllerId || step.controller_id || '').trim(),
-            outlet: String(step.outlet || step.outletKey || step.outlet_key || '').trim(),
-            logicalName: String(step.logicalName || step.logical_name || '').trim(),
-            action: ['on', 'off', 'cycle'].includes(action) ? action : 'on',
-            desiredState: step.desiredState || step.desired_state || (action === 'on' || action === 'off' ? action : ''),
-            required: step.required !== false,
-            readBackRequired: step.readBackRequired !== false && step.read_back_required !== false,
-            offSeconds: readInteger(step.offSeconds ?? step.off_seconds, 10),
-            delayBeforeSeconds: readInteger(step.delayBeforeSeconds ?? step.delay_before_seconds, 0),
-            delayAfterSeconds: readInteger(step.delayAfterSeconds ?? step.delay_after_seconds, 0),
-            timeoutSeconds: readInteger(step.timeoutSeconds ?? step.timeout_seconds, 20),
-            retryCount: readInteger(step.retryCount ?? step.retry_count, 0),
-            allowProtected: step.allowProtected === true || step.allow_protected === true,
-            conditionsText: JSON.stringify(conditions, null, 2),
-        };
-    }
-
-    function populatePowerPolicyForm(policy) {
-        if (powerPolicyNameEl) powerPolicyNameEl.value = policy.policyName || '';
-        if (powerPolicyEnabledEl) powerPolicyEnabledEl.checked = policy.enabled !== false;
-        if (powerPolicyRespectLocalModeEl) powerPolicyRespectLocalModeEl.checked = policy.respectLocalMode !== false;
-        if (powerPolicyMaintenanceModeEl) powerPolicyMaintenanceModeEl.checked = policy.maintenanceMode === true;
-        if (powerPolicyStartFailureModeEl) powerPolicyStartFailureModeEl.value = policy.startFailureMode || 'fail_reservation_start';
-        if (powerPolicyEndFailureModeEl) powerPolicyEndFailureModeEl.value = policy.endFailureMode || 'warn_and_continue';
-        powerPolicyStepDrafts = Array.isArray(policy.steps)
-            ? policy.steps.map(createPowerPolicyStepDraft)
-            : [];
-        renderPowerPolicySteps();
-    }
-
-    function powerPolicyControllerOptions(selectedId) {
-        const options = powerControllers.map(controller => {
-            const controllerId = String(controller.id || '').trim();
-            const label = controller.name || controllerId;
-            return `<option value="${escapeHtml(controllerId)}"${controllerId === selectedId ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-        }).join('');
-        return `<option value="">Select controller</option>${options}`;
-    }
-
-    function getPowerControllerOutlets(controllerId) {
-        const controller = powerControllers.find(item => String(item.id || '') === String(controllerId || ''));
-        return Array.isArray(controller?.outlets) ? controller.outlets : [];
-    }
-
-    function powerPolicyOutletOptions(step) {
-        const outlets = getPowerControllerOutlets(step.controllerId);
-        const options = outlets.map(outlet => {
-            const outletId = String(outlet.outlet || '').trim();
-            const label = outlet.displayName || outlet.logicalName || outletId;
-            return `<option value="${escapeHtml(outletId)}"${outletId === step.outlet ? ' selected' : ''}>${escapeHtml(label)} (${escapeHtml(outletId)})</option>`;
-        }).join('');
-        return `<option value="">${outlets.length ? 'Select outlet' : 'No outlets available'}</option>${options}`;
-    }
-
-    function powerPolicySelectOptions(values, selected, labels = {}) {
-        return values.map(value => `<option value="${value}"${value === selected ? ' selected' : ''}>${labels[value] || value}</option>`).join('');
-    }
-
-    function renderPowerPolicySteps() {
-        if (!powerPolicyStepsEl) return;
-        if (!powerPolicyStepDrafts.length) {
-            powerPolicyStepsEl.innerHTML = '<div class="empty">No steps configured. Add a step to control an outlet during a reservation phase.</div>';
-            return;
-        }
-        const phases = ['pre_start', 'start', 'post_start', 'pre_end', 'end', 'post_end', 'manual', 'maintenance', 'emergency_stop'];
-        const phaseLabels = {
-            pre_start: 'Before start',
-            start: 'Start',
-            post_start: 'After start',
-            pre_end: 'Before end',
-            end: 'End',
-            post_end: 'After end',
-            manual: 'Manual',
-            maintenance: 'Maintenance',
-            emergency_stop: 'Emergency stop',
-        };
-        powerPolicyStepsEl.innerHTML = powerPolicyStepDrafts.map((step, index) => `
-            <div class="power-policy-step" data-step-index="${index}">
-                <div class="power-policy-step-header">
-                    <strong>Step ${index + 1}</strong>
-                    <button class="mini-btn danger" type="button" data-step-action="remove">Remove</button>
-                </div>
-                <div class="form-grid power-policy-step-fields">
-                    <label class="field">
-                        <span>Phase</span>
-                        <select data-step-field="phase">${powerPolicySelectOptions(phases, step.phase, phaseLabels)}</select>
-                    </label>
-                    <label class="field">
-                        <span>Sequence</span>
-                        <input type="number" min="0" max="1000000" data-step-field="sequence" value="${step.sequence}" inputmode="numeric">
-                    </label>
-                    <label class="field">
-                        <span>Controller</span>
-                        <select data-step-field="controllerId">${powerPolicyControllerOptions(step.controllerId)}</select>
-                    </label>
-                    <label class="field">
-                        <span>Outlet</span>
-                        <select data-step-field="outlet">${powerPolicyOutletOptions(step)}</select>
-                    </label>
-                    <label class="field">
-                        <span>Action</span>
-                        <select data-step-field="action">${powerPolicySelectOptions(['on', 'off', 'cycle'], step.action)}</select>
-                    </label>
-                    <label class="field">
-                        <span>Desired state</span>
-                        <select data-step-field="desiredState">${powerPolicySelectOptions(['', 'on', 'off', 'unknown'], step.desiredState, { '': 'Use action default' })}</select>
-                    </label>
-                    <label class="field">
-                        <span>Logical name</span>
-                        <input type="text" maxlength="160" data-step-field="logicalName" value="${escapeHtml(step.logicalName)}" placeholder="Optional label">
-                    </label>
-                    <label class="field">
-                        <span>Cycle off time (seconds)</span>
-                        <input type="number" min="0" max="3600" data-step-field="offSeconds" value="${step.offSeconds}" inputmode="numeric">
-                    </label>
-                    <label class="field">
-                        <span>Delay before (seconds)</span>
-                        <input type="number" min="0" max="3600" data-step-field="delayBeforeSeconds" value="${step.delayBeforeSeconds}" inputmode="numeric">
-                    </label>
-                    <label class="field">
-                        <span>Delay after (seconds)</span>
-                        <input type="number" min="0" max="3600" data-step-field="delayAfterSeconds" value="${step.delayAfterSeconds}" inputmode="numeric">
-                    </label>
-                    <label class="field">
-                        <span>Timeout (seconds)</span>
-                        <input type="number" min="0" max="300" data-step-field="timeoutSeconds" value="${step.timeoutSeconds}" inputmode="numeric">
-                    </label>
-                    <label class="field">
-                        <span>Retries</span>
-                        <input type="number" min="0" max="5" data-step-field="retryCount" value="${step.retryCount}" inputmode="numeric">
-                    </label>
-                </div>
-                <div class="power-policy-step-options">
-                    <label class="check-field"><input type="checkbox" data-step-field="required"${step.required ? ' checked' : ''}> Required</label>
-                    <label class="check-field"><input type="checkbox" data-step-field="readBackRequired"${step.readBackRequired ? ' checked' : ''}> Read back state</label>
-                    <label class="check-field"><input type="checkbox" data-step-field="allowProtected"${step.allowProtected ? ' checked' : ''}> Allow protected outlet</label>
-                </div>
-                <label class="field power-policy-conditions">
-                    <span>Conditions (advanced JSON, optional)</span>
-                    <textarea rows="3" data-step-field="conditions" spellcheck="false">${escapeHtml(step.conditionsText)}</textarea>
-                </label>
-            </div>
-        `).join('');
-    }
-
-    function getPowerPolicyStepIndex(target) {
-        const row = target?.closest?.('[data-step-index]');
-        const index = Number.parseInt(row?.dataset?.stepIndex, 10);
-        return Number.isInteger(index) && index >= 0 && index < powerPolicyStepDrafts.length ? index : -1;
-    }
-
-    function handlePowerPolicyStepChange(event) {
-        const field = event.target?.dataset?.stepField;
-        if (!field) return;
-        const index = getPowerPolicyStepIndex(event.target);
-        if (index < 0) return;
-        const step = powerPolicyStepDrafts[index];
-        step[field] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
-        if (field === 'controllerId') {
-            step.outlet = '';
-            renderPowerPolicySteps();
-        } else if (field === 'action') {
-            if (event.target.value === 'on' || event.target.value === 'off') step.desiredState = event.target.value;
-            renderPowerPolicySteps();
-        }
-    }
-
-    function handlePowerPolicyStepActions(event) {
-        const button = event.target?.closest?.('[data-step-action]');
-        if (!button || button.dataset.stepAction !== 'remove') return;
-        const index = getPowerPolicyStepIndex(button);
-        if (index < 0) return;
-        powerPolicyStepDrafts.splice(index, 1);
-        renderPowerPolicySteps();
-    }
-
-    function addPowerPolicyStep() {
-        const phase = 'pre_start';
-        const phaseSequences = powerPolicyStepDrafts
-            .filter(step => step.phase === phase)
-            .map(step => Number(step.sequence) || 0);
-        const firstController = powerControllers[0];
-        const firstOutlet = Array.isArray(firstController?.outlets) ? firstController.outlets[0] : null;
-        powerPolicyStepDrafts.push(createPowerPolicyStepDraft({
-            phase,
-            sequence: (phaseSequences.length ? Math.max(...phaseSequences) : 0) + 10,
-            controllerId: firstController?.id || '',
-            outlet: firstOutlet?.outlet || '',
-        }));
-        renderPowerPolicySteps();
-    }
-
-    function parsePowerPolicyInteger(value, fieldName, maximum) {
-        const parsed = Number.parseInt(value, 10);
-        if (!Number.isInteger(parsed) || parsed < 0 || parsed > maximum) {
-            throw new Error(`${fieldName} must be between 0 and ${maximum}`);
-        }
-        return parsed;
-    }
-
-    function readPowerPolicyForm() {
-        const policyName = (powerPolicyNameEl?.value || '').trim();
-        if (!policyName) throw new Error('Policy name is required');
-        const steps = powerPolicyStepDrafts.map((step, index) => {
-            if (!step.phase) throw new Error(`Step ${index + 1}: phase is required`);
-            if (!step.controllerId) throw new Error(`Step ${index + 1}: select a controller`);
-            if (!step.outlet) throw new Error(`Step ${index + 1}: select an outlet`);
-            if (!['pre_start', 'start', 'post_start', 'pre_end', 'end', 'post_end', 'manual', 'maintenance', 'emergency_stop'].includes(step.phase)) {
-                throw new Error(`Step ${index + 1}: unsupported phase`);
-            }
-            if (!['on', 'off', 'cycle'].includes(step.action)) {
-                throw new Error(`Step ${index + 1}: unsupported action`);
-            }
-            if (step.desiredState && !['on', 'off', 'unknown'].includes(step.desiredState)) {
-                throw new Error(`Step ${index + 1}: unsupported desired state`);
-            }
-            let conditions = {};
-            if (step.conditionsText?.trim()) {
-                try {
-                    conditions = JSON.parse(step.conditionsText);
-                } catch (err) {
-                    throw new Error(`Step ${index + 1}: conditions JSON is invalid`);
-                }
-                if (!conditions || typeof conditions !== 'object' || Array.isArray(conditions)) {
-                    throw new Error(`Step ${index + 1}: conditions must be an object`);
-                }
-            }
-            const offSeconds = parsePowerPolicyInteger(step.offSeconds, 'Cycle off time', 3600);
-            if (step.action === 'cycle' && offSeconds === 0) {
-                throw new Error(`Step ${index + 1}: cycle off time must be greater than zero`);
-            }
-            const normalized = {
-                phase: step.phase,
-                sequence: parsePowerPolicyInteger(step.sequence, 'Sequence', 1000000),
-                controllerId: step.controllerId,
-                outlet: step.outlet,
-                action: step.action,
-                required: step.required === true,
-                readBackRequired: step.readBackRequired === true,
-                offSeconds,
-                delayBeforeSeconds: parsePowerPolicyInteger(step.delayBeforeSeconds, 'Delay before', 3600),
-                delayAfterSeconds: parsePowerPolicyInteger(step.delayAfterSeconds, 'Delay after', 3600),
-                timeoutSeconds: parsePowerPolicyInteger(step.timeoutSeconds, 'Timeout', 300),
-                retryCount: parsePowerPolicyInteger(step.retryCount, 'Retries', 5),
-                allowProtected: step.allowProtected === true,
-                conditions,
-            };
-            if (step.id) normalized.id = step.id;
-            if (step.logicalName) normalized.logicalName = step.logicalName;
-            if (step.desiredState) normalized.desiredState = step.desiredState;
-            return normalized;
-        });
-        return {
-            policyName,
-            enabled: powerPolicyEnabledEl?.checked !== false,
-            respectLocalMode: powerPolicyRespectLocalModeEl?.checked !== false,
-            maintenanceMode: powerPolicyMaintenanceModeEl?.checked === true,
-            startFailureMode: powerPolicyStartFailureModeEl?.value || 'fail_reservation_start',
-            endFailureMode: powerPolicyEndFailureModeEl?.value || 'warn_and_continue',
-            steps,
-        };
-    }
-
-    async function savePowerPolicy() {
-        const labId = powerPolicyLabSelectEl?.value || '';
-        if (!labId) {
-            showToast('Select a laboratory before saving the policy', 'error');
-            return;
-        }
-        let policy;
-        try {
-            policy = readPowerPolicyForm();
-        } catch (err) {
-            showToast(`Power policy is invalid: ${err.message}`, 'error');
-            return;
-        }
-        policy.labId = labId;
-        delete policy.lab_id;
-        if (savePowerPolicyBtn) savePowerPolicyBtn.disabled = true;
-        try {
-            const res = await fetch(`/ops/api/power/policies/${encodeURIComponent(labId)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(policy)
-            });
-            const body = await res.json().catch(() => ({}));
-            if (res.status === 403) {
-                showOpsWarning();
-                return;
-            }
-            if (res.status === 401) throw new Error('Lab Manager session required');
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            showToast(`Power policy for ${labId} saved`, 'success');
-            await loadPowerPolicies({ skipAuthPrompt: true });
-            if (powerPolicySelectEl) powerPolicySelectEl.value = labId;
-            loadSelectedPowerPolicy();
-        } catch (err) {
-            showToast(`Power policy save failed: ${err.message}`, 'error');
-        } finally {
-            if (savePowerPolicyBtn) savePowerPolicyBtn.disabled = false;
-        }
-    }
-
-    function createPowerControllerOutletDraft(outlet = {}) {
-        return {
-            outlet: String(outlet.outlet || outlet.outletKey || '').trim(),
-            displayName: String(outlet.displayName || '').trim(),
-            logicalName: String(outlet.logicalName || '').trim(),
-            protected: outlet.protected === true,
-            critical: outlet.critical === true,
-            defaultState: outlet.defaultState === 'on' ? 'on' : 'off',
-        };
-    }
-
-    function updatePowerControllerDriverFields() {
-        const driver = powerControllerDriverEl?.value || 'mock';
-        const isNetio = driver === 'netio-json';
-        const isApc = driver === 'apc-powernet-snmp';
-        const currentPort = String(powerControllerPortEl?.value || '');
-        if (powerControllerPortEl && driver === 'netio-json' && lastPowerControllerDriver !== 'netio-json' && currentPort === '161') {
-            powerControllerPortEl.value = powerControllerNetioHttpsEl?.checked === true ? '443' : '80';
-        } else if (powerControllerPortEl && driver !== 'netio-json' && lastPowerControllerDriver === 'netio-json' && ['80', '443'].includes(currentPort)) {
-            powerControllerPortEl.value = '161';
-        }
-        lastPowerControllerDriver = driver;
-        if (powerControllerNetioPathFieldEl) powerControllerNetioPathFieldEl.hidden = !isNetio;
-        if (powerControllerNetioHttpsFieldEl) powerControllerNetioHttpsFieldEl.hidden = !isNetio;
-        if (powerControllerNetioVerifyTlsFieldEl) powerControllerNetioVerifyTlsFieldEl.hidden = !isNetio;
-        if (powerControllerProfileFieldEl) powerControllerProfileFieldEl.hidden = !isApc;
-    }
-
-    function updatePowerControllerNetioPort() {
-        if (powerControllerDriverEl?.value !== 'netio-json' || !powerControllerPortEl) return;
-        if (['80', '443'].includes(String(powerControllerPortEl.value || ''))) {
-            powerControllerPortEl.value = powerControllerNetioHttpsEl?.checked === true ? '443' : '80';
-        }
-    }
-
-    function suggestPowerControllerId() {
-        if (!powerControllerIdEl || powerControllerSelectEl?.value) return;
-        const host = String(powerControllerHostEl?.value || '').trim().toLowerCase();
-        if (!host) {
-            if (powerControllerIdWasSuggested) {
-                powerControllerIdEl.value = '';
-                powerControllerIdWasSuggested = false;
-            }
-            return;
-        }
-        const driver = powerControllerDriverEl?.value || 'mock';
-        const prefix = driver === 'apc-powernet-snmp'
-            ? 'apc'
-            : driver === 'netio-json'
-                ? 'netio'
-                : 'power';
-        const hostSlug = host.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 110);
-        if (!hostSlug) return;
-        const suggestion = `${prefix}-${hostSlug}`;
-        const current = String(powerControllerIdEl.value || '').trim();
-        if (!current || powerControllerIdWasSuggested) {
-            powerControllerIdEl.value = suggestion;
-            powerControllerIdWasSuggested = true;
-        }
-    }
-
-    function resetPowerControllerEditor() {
-        if (powerControllerSelectEl) powerControllerSelectEl.value = '';
-        powerControllerIdWasSuggested = false;
-        if (powerControllerIdEl) {
-            powerControllerIdEl.value = '';
-            powerControllerIdEl.disabled = false;
-        }
-        if (powerControllerNameEl) powerControllerNameEl.value = '';
-        if (powerControllerDriverEl) powerControllerDriverEl.value = 'mock';
-        if (powerControllerEnabledEl) powerControllerEnabledEl.checked = true;
-        if (powerControllerHostEl) powerControllerHostEl.value = '';
-        if (powerControllerPortEl) powerControllerPortEl.value = '161';
-        if (powerControllerCredentialRefEl) powerControllerCredentialRefEl.value = '';
-        if (powerControllerNetioPathEl) powerControllerNetioPathEl.value = '/netio.json';
-        if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.checked = false;
-        if (powerControllerNetioVerifyTlsEl) powerControllerNetioVerifyTlsEl.checked = true;
-        if (powerControllerProfileEl) powerControllerProfileEl.value = 'auto';
-        if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = '2';
-        if (powerControllerRetriesEl) powerControllerRetriesEl.value = '1';
-        updatePowerControllerDriverFields();
-        renderPowerControllerCredentialOptions();
-        powerControllerOutletDrafts = [createPowerControllerOutletDraft({ outlet: '1' })];
-        renderPowerControllerOutlets();
-        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = '';
-    }
-
-    function populatePowerControllerForm(controller) {
-        powerControllerIdWasSuggested = false;
-        if (powerControllerIdEl) {
-            powerControllerIdEl.value = controller.id || '';
-            powerControllerIdEl.disabled = true;
-        }
-        if (powerControllerNameEl) powerControllerNameEl.value = controller.name || '';
-        if (powerControllerDriverEl) powerControllerDriverEl.value = controller.driver || 'mock';
-        if (powerControllerEnabledEl) powerControllerEnabledEl.checked = controller.enabled !== false;
-        if (powerControllerHostEl) powerControllerHostEl.value = controller.host || '';
-        if (powerControllerCredentialRefEl) powerControllerCredentialRefEl.value = controller.credentialRef || '';
-        const config = controller.config || {};
-        const defaultPort = controller.driver === 'netio-json'
-            ? (config.useHttps === true ? '443' : '80')
-            : '161';
-        if (powerControllerPortEl) powerControllerPortEl.value = controller.port || defaultPort;
-        if (powerControllerNetioPathEl) powerControllerNetioPathEl.value = config.path || '/netio.json';
-        if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.checked = config.useHttps === true;
-        if (powerControllerNetioVerifyTlsEl) powerControllerNetioVerifyTlsEl.checked = config.verifyTls !== false;
-        if (powerControllerProfileEl) powerControllerProfileEl.value = config.profile || 'auto';
-        if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = config.timeoutSeconds || '2';
-        if (powerControllerRetriesEl) powerControllerRetriesEl.value = config.retries ?? '1';
-        updatePowerControllerDriverFields();
-        renderPowerControllerCredentialOptions();
-        powerControllerOutletDrafts = Array.isArray(controller.outlets)
-            ? controller.outlets.map(createPowerControllerOutletDraft)
-            : [];
-        renderPowerControllerOutlets();
-    }
-
-    function renderPowerControllerOptions() {
-        if (!powerControllerSelectEl) return;
-        const current = powerControllerSelectEl.value;
-        powerControllerSelectEl.innerHTML = '<option value="">New controller</option>';
-        powerControllers.forEach(controller => {
-            const option = document.createElement('option');
-            option.value = controller.id || '';
-            option.textContent = controller.name || controller.id || 'Unnamed controller';
-            powerControllerSelectEl.appendChild(option);
-        });
-        const selected = powerControllers.some(controller => String(controller.id) === String(current)) ? current : '';
-        powerControllerSelectEl.value = selected;
-        if (selected) {
-            loadSelectedPowerController();
-        } else {
-            resetPowerControllerEditor();
-        }
-    }
-
-    function loadSelectedPowerController() {
-        const controllerId = powerControllerSelectEl?.value || '';
-        const controller = powerControllers.find(item => String(item.id || '') === String(controllerId));
-        if (controller) {
-            populatePowerControllerForm(controller);
-            return;
-        }
-        resetPowerControllerEditor();
-    }
-
-    function renderPowerControllerCredentialOptions() {
-        if (!powerControllerCredentialRefEl) return;
-        const driver = powerControllerDriverEl?.value || 'mock';
-        const current = String(powerControllerCredentialRefEl.value || '').trim();
-        const compatibleTypes = driver === 'apc-powernet-snmp'
-            ? new Set(['snmpv1', 'snmpv2c', 'snmpv3'])
-            : driver === 'netio-json'
-                ? new Set(['netio-http-basic'])
-                : null;
-        const credentials = powerCredentials.filter(credential => {
-            const reference = String(credential?.credentialRef || '').trim();
-            if (!reference) return false;
-            return !compatibleTypes || compatibleTypes.has(String(credential.type || '').trim().toLowerCase());
-        });
-        const currentIsCompatible = credentials.some(credential =>
-            String(credential.credentialRef || '').trim() === current);
-        const emptyLabel = driver === 'apc-powernet-snmp'
-            ? 'Select SNMP credential'
-            : driver === 'netio-json'
-                ? 'No credential (optional)'
-                : 'No credential required';
-        const options = [`<option value="">${emptyLabel}</option>`];
-        if (current && !currentIsCompatible) {
-            options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)} — unavailable for this driver</option>`);
-        }
-        credentials.forEach(credential => {
-            const reference = String(credential.credentialRef || '').trim();
-            const type = String(credential.type || 'unknown').trim();
-            options.push(`<option value="${escapeHtml(reference)}">${escapeHtml(reference)} · ${escapeHtml(type)}</option>`);
-        });
-        powerControllerCredentialRefEl.innerHTML = options.join('');
-        powerControllerCredentialRefEl.value = current;
-    }
-
-    function renderPowerControllerOutlets() {
-        if (!powerControllerOutletsEl) return;
-        if (!powerControllerOutletDrafts.length) {
-            powerControllerOutletsEl.innerHTML = '<div class="empty">No outlets configured. Add at least one outlet before saving.</div>';
-            return;
-        }
-        powerControllerOutletsEl.innerHTML = powerControllerOutletDrafts.map((outlet, index) => `
-            <div class="power-controller-outlet-config" data-controller-outlet-index="${index}">
-                <div class="power-controller-outlet-config-header">
-                    <strong>Outlet ${index + 1}</strong>
-                    <button class="mini-btn danger" type="button" data-controller-outlet-action="remove">Remove</button>
-                </div>
-                <div class="form-grid power-controller-outlet-fields">
-                    <label class="field">
-                        <span>Outlet ID</span>
-                        <input type="text" maxlength="64" data-controller-outlet-field="outlet" value="${escapeHtml(outlet.outlet)}" placeholder="1">
-                    </label>
-                    <label class="field">
-                        <span>Display name</span>
-                        <input type="text" maxlength="160" data-controller-outlet-field="displayName" value="${escapeHtml(outlet.displayName)}" placeholder="PLC power">
-                    </label>
-                    <label class="field">
-                        <span>Logical name</span>
-                        <input type="text" maxlength="160" data-controller-outlet-field="logicalName" value="${escapeHtml(outlet.logicalName)}" placeholder="plc">
-                    </label>
-                    <label class="field">
-                        <span>Default state</span>
-                        <select data-controller-outlet-field="defaultState">
-                            <option value="off"${outlet.defaultState === 'off' ? ' selected' : ''}>Off</option>
-                            <option value="on"${outlet.defaultState === 'on' ? ' selected' : ''}>On</option>
-                        </select>
-                    </label>
-                </div>
-                <div class="power-controller-outlet-options">
-                    <label class="check-field"><input type="checkbox" data-controller-outlet-field="protected"${outlet.protected ? ' checked' : ''}> Protected</label>
-                    <label class="check-field"><input type="checkbox" data-controller-outlet-field="critical"${outlet.critical ? ' checked' : ''}> Critical</label>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    function getPowerControllerOutletIndex(target) {
-        const row = target?.closest?.('[data-controller-outlet-index]');
-        const index = Number.parseInt(row?.dataset?.controllerOutletIndex, 10);
-        return Number.isInteger(index) && index >= 0 && index < powerControllerOutletDrafts.length ? index : -1;
-    }
-
-    function handlePowerControllerOutletChange(event) {
-        const field = event.target?.dataset?.controllerOutletField;
-        if (!field) return;
-        const index = getPowerControllerOutletIndex(event.target);
-        if (index < 0) return;
-        powerControllerOutletDrafts[index][field] = event.target.type === 'checkbox'
-            ? event.target.checked
-            : event.target.value;
-    }
-
-    function handlePowerControllerOutletActions(event) {
-        const button = event.target?.closest?.('[data-controller-outlet-action]');
-        if (!button || button.dataset.controllerOutletAction !== 'remove') return;
-        const index = getPowerControllerOutletIndex(button);
-        if (index < 0) return;
-        powerControllerOutletDrafts.splice(index, 1);
-        renderPowerControllerOutlets();
-    }
-
-    function addPowerControllerOutlet() {
-        const usedIds = new Set(powerControllerOutletDrafts.map(outlet => outlet.outlet));
-        let nextId = 1;
-        while (usedIds.has(String(nextId))) nextId += 1;
-        powerControllerOutletDrafts.push(createPowerControllerOutletDraft({ outlet: String(nextId) }));
-        renderPowerControllerOutlets();
-    }
-
-    function readPowerControllerForm() {
-        const id = (powerControllerIdEl?.value || '').trim();
-        const name = (powerControllerNameEl?.value || '').trim();
-        const driver = (powerControllerDriverEl?.value || '').trim();
-        if (!id) throw new Error('Controller ID is required');
-        if (!/^[A-Za-z0-9._:-]+$/.test(id)) throw new Error('Controller ID contains invalid characters');
-        if (!name) throw new Error('Controller name is required');
-        if (!['mock', 'apc-powernet-snmp', 'netio-json'].includes(driver)) throw new Error('Select a supported driver');
-        const useHttps = powerControllerNetioHttpsEl?.checked === true;
-        const defaultPort = driver === 'netio-json' ? (useHttps ? 443 : 80) : 161;
-        const port = Number.parseInt(powerControllerPortEl?.value || String(defaultPort), 10);
-        if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port must be between 1 and 65535');
-        const timeoutSeconds = Number.parseInt(powerControllerTimeoutSecondsEl?.value || '2', 10);
-        if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 60) throw new Error('Timeout must be between 1 and 60 seconds');
-        const retries = Number.parseInt(powerControllerRetriesEl?.value || '1', 10);
-        if (!Number.isInteger(retries) || retries < 1 || retries > 10) throw new Error('Retries must be between 1 and 10');
-        const host = (powerControllerHostEl?.value || '').trim();
-        const credentialRef = (powerControllerCredentialRefEl?.value || '').trim();
-        if (driver !== 'mock' && !host) throw new Error('Host is required for this driver');
-        if (driver === 'apc-powernet-snmp' && !credentialRef) throw new Error('Credential reference is required for APC SNMP');
-
-        const outlets = powerControllerOutletDrafts.map((outlet, index) => {
-            const outletId = String(outlet.outlet || '').trim();
-            if (!outletId) throw new Error(`Outlet ${index + 1}: ID is required`);
-            return {
-                outlet: outletId,
-                displayName: outlet.displayName || '',
-                logicalName: outlet.logicalName || '',
-                protected: outlet.protected === true,
-                critical: outlet.critical === true,
-                defaultState: outlet.defaultState === 'on' ? 'on' : 'off',
-            };
-        });
-        if (!outlets.length) throw new Error('At least one outlet is required');
-        if (new Set(outlets.map(outlet => outlet.outlet)).size !== outlets.length) throw new Error('Outlet IDs must be unique');
-
-        const config = driver === 'netio-json'
-            ? {
-                path: (powerControllerNetioPathEl?.value || '/netio.json').trim(),
-                useHttps,
-                verifyTls: powerControllerNetioVerifyTlsEl?.checked !== false,
-                timeoutSeconds,
-                retries,
-            }
-            : {
-                profile: powerControllerProfileEl?.value || 'auto',
-                timeoutSeconds,
-                retries,
-            };
-        if (driver === 'netio-json' && (!config.path || !config.path.startsWith('/') || config.path.includes('\n') || config.path.includes('\r'))) {
-            throw new Error('NETIO API path must start with /');
-        }
-        return {
-            id,
-            name,
-            driver,
-            enabled: powerControllerEnabledEl?.checked !== false,
-            host,
-            port,
-            credentialRef,
-            config,
-            outlets,
-        };
-    }
-
-    async function savePowerController() {
-        let controller;
-        try {
-            controller = readPowerControllerForm();
-        } catch (err) {
-            showToast(`Power controller is invalid: ${err.message}`, 'error');
-            return;
-        }
-        const existingId = powerControllerSelectEl?.value || '';
-        const method = existingId ? 'PUT' : 'POST';
-        const url = existingId
-            ? `/ops/api/power/controllers/${encodeURIComponent(existingId)}`
-            : '/ops/api/power/controllers';
-        if (savePowerControllerBtn) savePowerControllerBtn.disabled = true;
-        try {
-            const res = await fetch(url, {
-                method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(controller),
-            });
-            const body = await res.json().catch(() => ({}));
-            if (res.status === 403) {
-                showOpsWarning();
-                return;
-            }
-            if (res.status === 401) throw new Error('Lab Manager session required');
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            showToast(`Power controller ${controller.id} saved`, 'success');
-            await loadPowerControllers({ skipAuthPrompt: true, forceStatusRefresh: true });
-            if (powerControllerSelectEl) powerControllerSelectEl.value = controller.id;
-            loadSelectedPowerController();
-        } catch (err) {
-            showToast(`Power controller save failed: ${err.message}`, 'error');
-        } finally {
-            if (savePowerControllerBtn) savePowerControllerBtn.disabled = false;
-        }
-    }
-
-    function renderPowerControllers() {
-        if (!powerControllerListEl) return;
-        powerControllerListEl.innerHTML = '';
-        if (!powerControllers.length) {
-            powerControllerListEl.innerHTML = '<div class="empty">No power controllers are configured.</div>';
-            return;
-        }
-        powerControllers.forEach(controller => {
-            const row = document.createElement('div');
-            row.className = 'power-controller-row';
-            const discovery = controller.discovery || {};
-            const reachable = discovery.reachable === true;
-            const discoveryText = powerControllerStatusLoading
-                ? 'checking'
-                : powerControllerStatusError
-                    ? 'status unavailable'
-                    : reachable
-                        ? 'reachable'
-                        : discovery.errorCode ? `unreachable (${discovery.errorCode})` : 'unknown reachability';
-            const discoveryClass = powerControllerStatusLoading
-                ? 'soft'
-                : powerControllerStatusError
-                    ? 'warn'
-                    : reachable ? 'good' : 'warn';
-            const safeControllerId = escapeHtml(controller.id);
-            const safeName = escapeHtml(controller.name || controller.id);
-            const safeDriver = escapeHtml(controller.driver);
-            const safeHost = escapeHtml(controller.host || 'local/mock');
-            const safeDiscovery = escapeHtml(discoveryText);
-            const outlets = Array.isArray(controller.outlets) ? controller.outlets : [];
-            row.innerHTML = `
-                <div class="power-controller-heading">
-                    <div>
-                        <div class="host-title">${safeName}</div>
-                        <div class="host-meta mono">${safeControllerId} · ${safeDriver} · ${safeHost}</div>
-                    </div>
-                    <span class="pill ${discoveryClass}">${safeDiscovery}</span>
-                </div>
-                <div class="power-outlet-list">
-                    ${outlets.length ? outlets.map(outlet => renderPowerOutlet(controller, outlet)).join('') : '<div class="empty">No outlets configured.</div>'}
-                </div>
-            `;
-            powerControllerListEl.appendChild(row);
-        });
-    }
-
-    function renderPowerOutlet(controller, outlet) {
-        const protectedOutlet = outlet.protected === true;
-        const state = String(outlet.state || 'unknown').toLowerCase();
-        const stateClass = state === 'on' ? 'good' : state === 'off' ? 'soft' : 'warn';
-        const label = outlet.displayName || outlet.logicalName || outlet.outlet;
-        return `
-            <div class="power-outlet-row">
-                <div>
-                    <div class="item-title">${escapeHtml(label)}</div>
-                    <div class="host-meta">Outlet ${escapeHtml(outlet.outlet)}${protectedOutlet ? ' · protected' : ''}${outlet.critical ? ' · critical' : ''}</div>
-                </div>
-                <div class="power-outlet-actions">
-                    <span class="pill ${stateClass}">${escapeHtml(state)}</span>
-                    <button class="mini-btn" data-power-action="on" data-controller-id="${escapeHtml(controller.id)}" data-outlet-id="${escapeHtml(outlet.outlet)}" data-protected="${protectedOutlet}">On</button>
-                    <button class="mini-btn" data-power-action="off" data-controller-id="${escapeHtml(controller.id)}" data-outlet-id="${escapeHtml(outlet.outlet)}" data-protected="${protectedOutlet}">Off</button>
-                    <button class="mini-btn primary" data-power-action="cycle" data-controller-id="${escapeHtml(controller.id)}" data-outlet-id="${escapeHtml(outlet.outlet)}" data-protected="${protectedOutlet}">Cycle</button>
-                </div>
-            </div>
-        `;
-    }
-
-    async function handlePowerActions(event) {
-        const button = event.target.closest('[data-power-action]');
-        if (!button) return;
-        const action = button.dataset.powerAction;
-        const controllerId = button.dataset.controllerId;
-        const outletId = button.dataset.outletId;
-        const protectedOutlet = button.dataset.protected === 'true';
-        if (protectedOutlet && !powerMaintenanceModeEl?.checked) {
-            showToast('Enable maintenance mode before operating a protected outlet', 'error');
-            return;
-        }
-        const offSeconds = Number.parseInt(powerCycleSecondsEl?.value || '10', 10);
-        if (action === 'cycle' && (!Number.isInteger(offSeconds) || offSeconds < 1 || offSeconds > 3600)) {
-            showToast('Cycle off time must be between 1 and 3600 seconds', 'error');
-            return;
-        }
-        button.disabled = true;
-        try {
-            const payload = {
-                command: action === 'cycle' ? 'cycle' : 'set_state',
-                state: action === 'cycle' ? undefined : action,
-                actor: 'lab-manager',
-                reason: powerOperationReasonEl?.value.trim() || 'Lab Manager manual power test',
-                idempotencyKey: createPowerIdempotencyKey(),
-                offSeconds: action === 'cycle' ? offSeconds : undefined,
-                allowProtected: protectedOutlet,
-                maintenance: protectedOutlet && Boolean(powerMaintenanceModeEl?.checked)
-            };
-            Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
-            const res = await fetch(
-                `/ops/api/power/controllers/${encodeURIComponent(controllerId)}/outlets/${encodeURIComponent(outletId)}/commands`,
-                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
-            );
-            const body = await res.json().catch(() => ({}));
-            if (res.status === 403) {
-                showOpsWarning();
-                return;
-            }
-            if (res.status === 401) throw new Error('Lab Manager session required');
-            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-            showToast(`Power ${action} completed for outlet ${outletId}`, 'success');
-            void loadPowerControllerStatuses({ forceRefresh: true, skipAuthPrompt: true });
-        } catch (err) {
-            showToast(`Power ${action} failed: ${err.message}`, 'error');
-        } finally {
-            button.disabled = false;
-        }
-    }
-
-    function createPowerIdempotencyKey() {
-        if (window.crypto?.randomUUID) return `lab-manager:${window.crypto.randomUUID()}`;
-        return `lab-manager:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        const managedLab = getManagedLabs().find(lab => String(lab?.labId ?? '') === String(reservation?.labId ?? ''));
+        return digitalTwinsController.resolveLabDisplayName(managedLab || reservation);
     }
 
     function closeAllGuacamoleMatchPopovers() {
@@ -2904,71 +1648,10 @@ document.addEventListener('DOMContentLoaded', () => {
             renderUpcomingReservationsMessage('No actionable reservations for your labs.');
             return;
         }
-
-        const items = reservations.map(reservation => {
-            const key = String(reservation.reservationKey || '');
-            const status = String(reservation.statusLabel || 'UNKNOWN');
-            const numericStatus = normalizeReservationStatus(reservation.status);
-            const accessWindowEnded = isReservationWindowEnded(reservation);
-            const displayedStatus = accessWindowEnded && !/access window ended/i.test(status)
-                ? `${status} · ACCESS WINDOW ENDED`
-                : status;
-            const statusClass = accessWindowEnded
-                ? 'warn'
-                : numericStatus === 1 ? 'good' : numericStatus === 0 ? 'warn' : 'soft';
-            const reasonOptions = Array.isArray(reservation.cancellationOptions)
-                ? reservation.cancellationOptions
-                    .map(option => ({
-                        code: Number(option.reasonCode),
-                        label: String(option.label || `Reason ${option.reasonCode}`),
-                        deadline: Number(option.deadline),
-                        penalty: Number(option.reputationPenalty)
-                    }))
-                    .filter(option => Number.isInteger(option.code))
-                : [];
-            const defaultReasonCode = reasonOptions[0]?.code;
-            const actions = reservation.cancellable && reasonOptions.length
-                ? `<div class="reservation-item-actions">
-                    <button type="button" class="mini-btn danger" data-action="cancel-reservation" data-reservation-key="${escapeHtml(key)}">
-                        ${cancellationButtonLabel(numericStatus, defaultReasonCode)}
-                    </button>
-                    <select class="reservation-reason" aria-label="Cancellation reason" data-reservation-reason>
-                        ${reasonOptions.map(option => {
-                            const deadline = Number.isFinite(option.deadline)
-                                ? `until ${formatReservationDate(option.deadline)}`
-                                : 'deadline unavailable';
-                            const penalty = Number.isFinite(option.penalty)
-                                ? `${option.penalty} reputation`
-                                : 'penalty unavailable';
-                            return `<option value="${option.code}">Reason ${option.code}: ${escapeHtml(option.label)} · ${escapeHtml(penalty)} · ${escapeHtml(deadline)}</option>`;
-                        }).join('')}
-                    </select>
-                </div>`
-                : `<div class="reservation-cancel-note">Cancellation unavailable for this status.</div>`;
-            const renter = shortAddress(reservation.renter);
-            const labLabel = resolveReservationLabDisplayName(reservation);
-            const institution = reservation.institutionName || shortAddress(reservation.institutionAddress);
-            return `<article class="reservation-item" data-reservation-key="${escapeHtml(key)}" data-reservation-status="${numericStatus ?? ''}">
-                <div class="reservation-item-heading">
-                    <span class="item-title">${escapeHtml(labLabel)}</span>
-                    <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
-                    <span class="pill ${statusClass}">${escapeHtml(displayedStatus)}</span>
-                </div>
-                <div class="reservation-item-schedule">
-                    <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
-                    ${actions}
-                </div>
-                <div class="reservation-item-meta">
-                    <span>Price: ${escapeHtml(reservation.priceCredits || '0')} service credits</span>
-                    <span>Provider share: ${escapeHtml(reservation.providerShareCredits || '0')} credits</span>
-                    <span>Renter: (${escapeHtml(institution || 'Unknown')}) ${escapeHtml(renter)}</span>
-                </div>
-            </article>`;
-        }).join('');
-        const loadMore = actionableReservationsState.hasMore
-            ? '<div class="reservation-pagination"><button type="button" class="mini-btn primary" data-action="load-more-actionable">Load more</button></div>'
-            : '';
-        upcomingReservationsListEl.innerHTML = `${items}${loadMore}`;
+        upcomingReservationsListEl.innerHTML = reservationRenderersController.renderUpcomingReservationsMarkup(
+            reservations,
+            actionableReservationsState.hasMore,
+        );
     }
 
     function renderUpcomingReservationsMessage(message) {
@@ -3158,185 +1841,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
         function renderTimeline(data) {
             if (!timelineResult) return;
-            const summary = buildTimelineSummary(data);
-            const phases = buildTimelinePhases(data.phases || {});
-            const operations = buildTimelineOperations(data.operations || [], data.pagination);
-            const heartbeat = buildTimelineHeartbeat(data.heartbeat, data.host);
             timelineResult.classList.remove('empty');
-            timelineResult.innerHTML = summary + phases + operations + heartbeat;
+            timelineResult.innerHTML = reservationRenderersController.renderTimelineMarkup(data);
             const loadMoreBtn = timelineResult.querySelector('#timelineLoadMoreBtn');
             if (loadMoreBtn) {
                 loadMoreBtn.addEventListener('click', () => loadMoreTimeline(loadMoreBtn));
             }
         }
-    
-        function buildTimelineSummary(data) {
-            const reservation = data.reservation || {};
-            const host = data.host || {};
-            const labId = host.labId || reservation.labId;
-            const labName = host.labName || reservation.labName;
-            const rows = [
-                { label: 'Reservation', value: reservation.reservationId || 'n/a', mono: true },
-                { label: 'Lab', value: resolveReservationLabDisplayName({ labId, labName }) || 'n/a' },
-                { label: 'Host', value: host.name || 'n/a' },
-                { label: 'Status', value: reservation.status || 'unknown' },
-                { label: 'Schedule', value: formatRange(reservation.start, reservation.end) },
-            ];
-            return `
-                <div class="timeline-summary">
-                    ${rows.map(row => `
-                        <div>
-                            <div class="label">${row.label}</div>
-                            <div class="value ${row.mono ? 'mono' : ''}">${htmlEscape(row.value)}</div>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-    
-        function buildTimelinePhases(phases) {
-            const config = [
-                { key: 'wake', label: 'Wake' },
-                { key: 'prepare', label: 'Prepare' },
-                { key: 'schedulerEnd', label: 'Scheduler End' },
-                { key: 'release', label: 'Release' },
-                { key: 'power', label: 'Power' },
-            ];
-            const pills = config.map(item => {
-                const phase = phases[item.key];
-                if (!phase) {
-                    return `<span class="pill soft">${item.label}: pending</span>`;
-                }
-                const cls = phase.success ? 'good' : 'bad';
-                const title = buildPhaseTitle(phase);
-                const status = phase.status || (phase.success ? 'ok' : 'error');
-                return `<span class="pill ${cls}" title="${htmlEscape(title)}">${item.label}: ${htmlEscape(status)}</span>`;
-            }).join('');
-            return `
-                <div class="timeline-phases">
-                    <h3>Phases</h3>
-                    <div class="pill-group">${pills}</div>
-                </div>
-            `;
-        }
-    
-        function buildTimelineOperations(operations, pagination) {
-            const steps = operations.length
-                ? operations.map((op, idx) => renderTimelineStep(op, idx)).join('')
-                : '<div class="timeline-step">No orchestration events captured yet.</div>';
-            const paginationControls = buildTimelinePagination(pagination);
-            return `
-                <div class="timeline-steps">
-                    <h3>Operation Log</h3>
-                    ${steps}
-                    ${paginationControls}
-                </div>
-            `;
-        }
 
-        function buildTimelinePagination(pagination) {
-            if (!pagination) {
-                return '';
-            }
-            const returned = pagination.returned || 0;
-            const total = typeof pagination.total === 'number' ? pagination.total : returned;
-            const start = returned ? pagination.offset + 1 : pagination.offset;
-            const end = pagination.offset + returned;
-            const summary = total
-                ? `Showing ${start || 0}-${end} of ${total}`
-                : `Showing ${returned} entr${returned === 1 ? 'y' : 'ies'}`;
-            const button = pagination.hasMore
-                ? '<button id="timelineLoadMoreBtn" class="mini-btn primary">Load more</button>'
-                : '';
-            return `
-                <div class="timeline-pagination">
-                    <div class="meta">${htmlEscape(summary)}</div>
-                    ${button}
-                </div>
-            `;
-        }
-    
-        function renderTimelineStep(op, idx) {
-            const success = !!op.success;
-            const status = op.status || (success ? 'success' : 'error');
-            const metaParts = [formatDate(op.createdAt)];
-            if (op.durationMs !== null && op.durationMs !== undefined) {
-                metaParts.push(`${op.durationMs} ms`);
-            }
-            if (op.responseCode) {
-                metaParts.push(`code ${op.responseCode}`);
-            }
-            const meta = metaParts.filter(Boolean).join(' · ');
-            return `
-                <div class="timeline-step ${success ? 'success' : 'error'}">
-                    <div class="timeline-step-header">
-                        <span>${htmlEscape(op.action || `Step ${idx + 1}`)}</span>
-                        <span class="pill ${success ? 'good' : 'bad'}">${htmlEscape(status)}</span>
-                    </div>
-                    <div class="meta">${htmlEscape(meta)}</div>
-                    ${op.message ? `<div class="message">${htmlEscape(op.message)}</div>` : ''}
-                </div>
-            `;
-        }
-    
-        function buildTimelineHeartbeat(heartbeat, host) {
-            if (!heartbeat) {
-                const name = host?.name;
-                const message = name ? `No heartbeat data for ${name} yet.` : 'No heartbeat data.';
-                return `
-                    <div class="timeline-heartbeat">
-                        <h3>Heartbeat</h3>
-                        <div class="muted-text">${htmlEscape(message)}</div>
-                    </div>
-                `;
-            }
-            return `
-                <div class="timeline-heartbeat">
-                    <h3>Heartbeat (${htmlEscape(formatDate(heartbeat.timestamp))})</h3>
-                    <div class="pill-group">
-                        ${renderHeartbeatPill('Ready', heartbeat.ready)}
-                        ${renderHeartbeatPill('Local mode', heartbeat.localMode)}
-                        ${renderHeartbeatPill('Local session', heartbeat.localSession)}
-                    </div>
-                    <div class="meta">Power: ${htmlEscape(renderPowerInfo(heartbeat.lastPower))}</div>
-                    <div class="meta">Forced logoff: ${htmlEscape(renderLogoffInfo(heartbeat.lastForcedLogoff))}</div>
-                </div>
-            `;
-        }
-    
-        function renderHeartbeatPill(label, value) {
-            const state = formatBool(value);
-            const cls = value === true ? 'good' : value === false ? 'soft' : 'soft';
-            return `<span class="pill ${cls}">${label}: ${state}</span>`;
-        }
-    
-        function renderPowerInfo(info) {
-            if (!info || (!info.timestamp && !info.mode)) {
-                return 'n/a';
-            }
-            const parts = [];
-            if (info.mode) parts.push(info.mode);
-            if (info.timestamp) parts.push(formatDate(info.timestamp));
-            return parts.join(' @ ');
-        }
-    
-        function renderLogoffInfo(info) {
-            if (!info || (!info.timestamp && !info.user)) {
-                return 'n/a';
-            }
-            const parts = [];
-            if (info.user) parts.push(info.user);
-            if (info.timestamp) parts.push(formatDate(info.timestamp));
-            return parts.join(' · ');
-        }
-    
-        function buildPhaseTitle(phase) {
-            const parts = [];
-            if (phase.createdAt) parts.push(formatDate(phase.createdAt));
-            if (phase.message) parts.push(phase.message);
-            return parts.join(' · ');
-        }
-    
     async function checkOpsAvailability() {
         try {
             const res = await fetch('/ops/health', { method: 'HEAD' });
