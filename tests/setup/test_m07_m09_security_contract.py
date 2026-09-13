@@ -116,7 +116,10 @@ def test_cors_denied_preflight_is_not_reflected():
     aas_public = (
         ROOT / "openresty" / "lab_access_aas_public.conf"
     ).read_text(encoding="utf-8")
-    conf_with_aas_public = conf + "\n" + aas_public
+    fmu = (ROOT / "openresty" / "lab_access_fmu.conf").read_text(
+        encoding="utf-8"
+    )
+    conf_with_aas_public = conf + "\n" + aas_public + "\n" + fmu
 
     assert "set $cors_preflight_origin $http_origin;" not in conf_with_aas_public
     for location in ("location /auth", "location /aas/", "location /fmu/"):
