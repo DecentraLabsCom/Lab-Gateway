@@ -21,6 +21,7 @@ const toastScriptPath = new URL('web/assets/js/core/toast.js', repoRoot);
 const notificationsAccessScriptPath = new URL('web/assets/js/lab-manager-notifications-access.js', repoRoot);
 const paginationScriptPath = new URL('web/assets/js/core/pagination.js', repoRoot);
 const formattersScriptPath = new URL('web/assets/js/core/formatters.js', repoRoot);
+const reservationValuesScriptPath = new URL('web/assets/js/lab-manager-reservation-values.js', repoRoot);
 const notificationsConfigScriptPath = new URL('web/assets/js/lab-manager-notifications-config.js', repoRoot);
 const fmuSyncScriptPath = new URL('web/assets/js/lab-manager-fmu-sync.js', repoRoot);
 const aasLinkScriptPath = new URL('web/assets/js/lab-manager-aas-link.js', repoRoot);
@@ -365,6 +366,9 @@ function loadLabManager({
   vm.runInContext(fs.readFileSync(formattersScriptPath, 'utf8'), context, {
     filename: 'formatters.js',
   });
+  vm.runInContext(fs.readFileSync(reservationValuesScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-reservation-values.js',
+  });
   vm.runInContext(fs.readFileSync(notificationsConfigScriptPath, 'utf8'), context, {
     filename: 'lab-manager-notifications-config.js',
   });
@@ -460,7 +464,7 @@ test('loads the activity controller before the Lab Manager bootstrap', () => {
   const html = fs.readFileSync(indexPath, 'utf8');
   assert.match(
     html,
-    /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*lab-manager-hosts\.js\?v=lab-manager-hosts-v1[\s\S]*lab-manager-host-discovery\.js\?v=lab-manager-host-discovery-v1[\s\S]*lab-manager-winrm-credentials\.js\?v=lab-manager-winrm-credentials-v1[\s\S]*lab-manager-winrm-trust\.js\?v=lab-manager-winrm-trust-v1[\s\S]*lab-manager-host-provisioning\.js\?v=lab-manager-host-provisioning-v1[\s\S]*lab-manager-host-actions\.js\?v=lab-manager-host-actions-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v1[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v1[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
+    /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*lab-manager-hosts\.js\?v=lab-manager-hosts-v1[\s\S]*lab-manager-host-discovery\.js\?v=lab-manager-host-discovery-v1[\s\S]*lab-manager-winrm-credentials\.js\?v=lab-manager-winrm-credentials-v1[\s\S]*lab-manager-winrm-trust\.js\?v=lab-manager-winrm-trust-v1[\s\S]*lab-manager-host-provisioning\.js\?v=lab-manager-host-provisioning-v1[\s\S]*lab-manager-host-actions\.js\?v=lab-manager-host-actions-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-reservation-values\.js\?v=lab-manager-reservation-values-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v1[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v1[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
   );
 });
 
