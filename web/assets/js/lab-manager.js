@@ -107,6 +107,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const formatDate = formattersModule.formatDate;
     const formatBool = formattersModule.formatBool;
     const htmlEscape = formattersModule.htmlEscape;
+    const reservationValuesModule = window.LabManagerReservationValues;
+    if (!reservationValuesModule) {
+        throw new Error('LabManagerReservationValues must load before lab-manager.js');
+    }
+    const reservationValuesController = reservationValuesModule.createController({
+        dateTimeFormatCtor: Intl.DateTimeFormat,
+        dateCtor: Date,
+        formatDate,
+        now: () => Date.now(),
+    });
+    const formatReservationDate = reservationValuesController.formatReservationDate;
+    const formatRange = reservationValuesController.formatRange;
+    const isReservationWindowEnded = reservationValuesController.isReservationWindowEnded;
+    const normalizeReservationStatus = reservationValuesController.normalizeReservationStatus;
+    const cancellationButtonLabel = reservationValuesController.cancellationButtonLabel;
+    const shortAddress = reservationValuesController.shortAddress;
     const notificationsConfigModule = window.LabManagerNotificationsConfig;
     if (!notificationsConfigModule) {
         throw new Error('LabManagerNotificationsConfig must load before lab-manager.js');
@@ -2967,35 +2983,6 @@ document.addEventListener('DOMContentLoaded', () => {
         upcomingReservationsStatusEl.className = `pill ${type || 'soft'}`;
     }
 
-    function formatReservationDate(epochSeconds) {
-        const timestamp = Number(epochSeconds);
-        if (!Number.isFinite(timestamp)) return 'Unknown time';
-        return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-            .format(new Date(timestamp * 1000));
-    }
-
-    function isReservationWindowEnded(reservation) {
-        const end = Number(reservation?.end);
-        return Number.isFinite(end) && end > 0 && end <= Math.floor(Date.now() / 1000);
-    }
-
-    function normalizeReservationStatus(status) {
-        const numericStatus = Number(status);
-        return Number.isInteger(numericStatus) ? numericStatus : null;
-    }
-
-    function cancellationButtonLabel(status, reasonCode) {
-        if (status === 0) return 'Decline request';
-        if (status === 2 || reasonCode === 8) return 'Report service failure';
-        return 'Cancel reservation';
-    }
-
-    function shortAddress(value, prefixLength = 6, suffixLength = 4) {
-        const text = String(value || '');
-        if (text.length <= prefixLength + suffixLength + 3) return text;
-        return `${text.slice(0, prefixLength)}…${text.slice(-suffixLength)}`;
-    }
-
     function handleUpcomingReservationReasonChange(event) {
         const reasonEl = event.target.closest('[data-reservation-reason]');
         if (!reasonEl || !upcomingReservationsListEl.contains(reasonEl)) return;
@@ -3348,11 +3335,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (phase.createdAt) parts.push(formatDate(phase.createdAt));
             if (phase.message) parts.push(phase.message);
             return parts.join(' · ');
-        }
-    
-        function formatRange(start, end) {
-            if (!start && !end) return 'n/a';
-            return `${formatDate(start)} → ${formatDate(end)}`;
         }
     
     async function checkOpsAvailability() {
