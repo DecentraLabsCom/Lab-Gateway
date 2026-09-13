@@ -22,10 +22,19 @@ const notificationsAccessScriptPath = new URL('web/assets/js/lab-manager-notific
 const paginationScriptPath = new URL('web/assets/js/core/pagination.js', repoRoot);
 const formattersScriptPath = new URL('web/assets/js/core/formatters.js', repoRoot);
 const reservationValuesScriptPath = new URL('web/assets/js/lab-manager-reservation-values.js', repoRoot);
+const reservationRenderersScriptPath = new URL('web/assets/js/lab-manager-reservation-renderers.js', repoRoot);
 const notificationsConfigScriptPath = new URL('web/assets/js/lab-manager-notifications-config.js', repoRoot);
+const notificationsScriptPath = new URL('web/assets/js/lab-manager-notifications.js', repoRoot);
 const fmuSyncScriptPath = new URL('web/assets/js/lab-manager-fmu-sync.js', repoRoot);
 const aasLinkScriptPath = new URL('web/assets/js/lab-manager-aas-link.js', repoRoot);
+const digitalTwinsScriptPath = new URL('web/assets/js/lab-manager-digital-twins.js', repoRoot);
 const powerCredentialsScriptPath = new URL('web/assets/js/lab-manager-power-credentials.js', repoRoot);
+const powerRenderersScriptPath = new URL('web/assets/js/lab-manager-power-renderers.js', repoRoot);
+const powerValuesScriptPath = new URL('web/assets/js/lab-manager-power-values.js', repoRoot);
+const powerOperationsScriptPath = new URL('web/assets/js/lab-manager-power-operations.js', repoRoot);
+const powerStatusScriptPath = new URL('web/assets/js/lab-manager-power-status.js', repoRoot);
+const powerControllersScriptPath = new URL('web/assets/js/lab-manager-power-controllers.js', repoRoot);
+const powerPoliciesScriptPath = new URL('web/assets/js/lab-manager-power-policies.js', repoRoot);
 const indexPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement(id) {
@@ -369,8 +378,14 @@ function loadLabManager({
   vm.runInContext(fs.readFileSync(reservationValuesScriptPath, 'utf8'), context, {
     filename: 'lab-manager-reservation-values.js',
   });
+  vm.runInContext(fs.readFileSync(reservationRenderersScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-reservation-renderers.js',
+  });
   vm.runInContext(fs.readFileSync(notificationsConfigScriptPath, 'utf8'), context, {
     filename: 'lab-manager-notifications-config.js',
+  });
+  vm.runInContext(fs.readFileSync(notificationsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-notifications.js',
   });
   vm.runInContext(fs.readFileSync(fmuSyncScriptPath, 'utf8'), context, {
     filename: 'lab-manager-fmu-sync.js',
@@ -378,8 +393,29 @@ function loadLabManager({
   vm.runInContext(fs.readFileSync(aasLinkScriptPath, 'utf8'), context, {
     filename: 'lab-manager-aas-link.js',
   });
+  vm.runInContext(fs.readFileSync(digitalTwinsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-digital-twins.js',
+  });
   vm.runInContext(fs.readFileSync(powerCredentialsScriptPath, 'utf8'), context, {
     filename: 'lab-manager-power-credentials.js',
+  });
+  vm.runInContext(fs.readFileSync(powerRenderersScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-power-renderers.js',
+  });
+  vm.runInContext(fs.readFileSync(powerValuesScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-power-values.js',
+  });
+  vm.runInContext(fs.readFileSync(powerOperationsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-power-operations.js',
+  });
+  vm.runInContext(fs.readFileSync(powerStatusScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-power-status.js',
+  });
+  vm.runInContext(fs.readFileSync(powerControllersScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-power-controllers.js',
+  });
+  vm.runInContext(fs.readFileSync(powerPoliciesScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-power-policies.js',
   });
   vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {
     filename: 'lab-manager.js',
@@ -464,7 +500,7 @@ test('loads the activity controller before the Lab Manager bootstrap', () => {
   const html = fs.readFileSync(indexPath, 'utf8');
   assert.match(
     html,
-    /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*lab-manager-hosts\.js\?v=lab-manager-hosts-v1[\s\S]*lab-manager-host-discovery\.js\?v=lab-manager-host-discovery-v1[\s\S]*lab-manager-winrm-credentials\.js\?v=lab-manager-winrm-credentials-v1[\s\S]*lab-manager-winrm-trust\.js\?v=lab-manager-winrm-trust-v1[\s\S]*lab-manager-host-provisioning\.js\?v=lab-manager-host-provisioning-v1[\s\S]*lab-manager-host-actions\.js\?v=lab-manager-host-actions-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-reservation-values\.js\?v=lab-manager-reservation-values-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v1[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v1[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
+    /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*lab-manager-hosts\.js\?v=lab-manager-hosts-v1[\s\S]*lab-manager-host-discovery\.js\?v=lab-manager-host-discovery-v1[\s\S]*lab-manager-winrm-credentials\.js\?v=lab-manager-winrm-credentials-v1[\s\S]*lab-manager-winrm-trust\.js\?v=lab-manager-winrm-trust-v1[\s\S]*lab-manager-host-provisioning\.js\?v=lab-manager-host-provisioning-v1[\s\S]*lab-manager-host-actions\.js\?v=lab-manager-host-actions-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-reservation-values\.js\?v=lab-manager-reservation-values-v1[\s\S]*lab-manager-reservation-renderers\.js\?v=lab-manager-reservation-renderers-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-notifications\.js\?v=lab-manager-notifications-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v1[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v1[\s\S]*lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v1[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager-power-renderers\.js\?v=lab-manager-power-renderers-v1[\s\S]*lab-manager-power-values\.js\?v=lab-manager-power-values-v1[\s\S]*lab-manager-power-operations\.js\?v=lab-manager-power-operations-v1[\s\S]*lab-manager-power-status\.js\?v=lab-manager-power-status-v1[\s\S]*lab-manager-power-controllers\.js\?v=lab-manager-power-controllers-v1[\s\S]*lab-manager-power-policies\.js\?v=lab-manager-power-policies-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
   );
 });
 
@@ -497,7 +533,7 @@ test('reserves a tall, explicit scroll area for actionable reservation details',
 
 test('places the cancellation reason selector below the cancellation button', () => {
   const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
-  const script = fs.readFileSync(scriptPath, 'utf8');
+  const script = fs.readFileSync(reservationRenderersScriptPath, 'utf8');
 
   assert.match(
     stylesheet,
