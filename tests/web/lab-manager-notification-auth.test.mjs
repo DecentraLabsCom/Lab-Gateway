@@ -11,6 +11,7 @@ const activityScriptPath = new URL('web/assets/js/lab-manager-activity.js', repo
 const accessPolicyScriptPath = new URL('web/assets/js/lab-manager-access-policy.js', repoRoot);
 const heartbeatErrorsScriptPath = new URL('web/assets/js/lab-manager-heartbeat-errors.js', repoRoot);
 const hostsScriptPath = new URL('web/assets/js/lab-manager-hosts.js', repoRoot);
+const hostRenderersScriptPath = new URL('web/assets/js/lab-manager-host-renderers.js', repoRoot);
 const hostDiscoveryScriptPath = new URL('web/assets/js/lab-manager-host-discovery.js', repoRoot);
 const winrmCredentialsScriptPath = new URL('web/assets/js/lab-manager-winrm-credentials.js', repoRoot);
 const winrmTrustScriptPath = new URL('web/assets/js/lab-manager-winrm-trust.js', repoRoot);
@@ -333,6 +334,9 @@ function loadLabManager({
   });
   vm.runInContext(fs.readFileSync(hostsScriptPath, 'utf8'), context, {
     filename: 'lab-manager-hosts.js',
+  });
+  vm.runInContext(fs.readFileSync(hostRenderersScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-host-renderers.js',
   });
   vm.runInContext(fs.readFileSync(hostDiscoveryScriptPath, 'utf8'), context, {
     filename: 'lab-manager-host-discovery.js',
@@ -1713,7 +1717,7 @@ test('edits a dynamic ops host from the pencil action', async () => {
 });
 
 test('uses a self-contained visible pencil icon for editable ops hosts', () => {
-  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const script = fs.readFileSync(hostRenderersScriptPath, 'utf8');
   const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
 
   assert.match(
@@ -1724,7 +1728,8 @@ test('uses a self-contained visible pencil icon for editable ops hosts', () => {
 });
 
 test('renders station identity, connection counts, operation history and WinRM trust states', () => {
-  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const script = fs.readFileSync(hostRenderersScriptPath, 'utf8');
+  const bootstrap = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
   const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
 
   assert.match(script, /host-status-text/);
@@ -1751,9 +1756,9 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(styles, /\.host-status-action[\s\S]*display: inline/);
   assert.match(styles, /\.host-state-column[\s\S]*display: flex/);
   assert.match(styles, /\.host-history[\s\S]*display: flex/);
-  assert.match(script, /setupGuacamoleMatchPopover/);
-  assert.match(script, /addEventListener\('mouseenter'/);
-  assert.match(script, /addEventListener\('focusin'/);
+  assert.match(bootstrap, /setupGuacamoleMatchPopover/);
+  assert.match(bootstrap, /addEventListener\('mouseenter'/);
+  assert.match(bootstrap, /addEventListener\('focusin'/);
   assert.match(styles, /\.guacamole-match-popover[\s\S]*position: fixed/);
   assert.match(styles, /\.guacamole-match-popover\.is-visible[\s\S]*opacity: 1/);
 });
