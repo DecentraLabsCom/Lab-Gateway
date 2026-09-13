@@ -110,6 +110,35 @@ wait_for_url "$CONTROL_URL/health" || { echo "Control plane did not become ready
 wait_for_url "$FULL_URL/" || { echo "Full gateway did not become ready" >&2; exit 1; }
 wait_for_url "$LITE_URL/" || { echo "Lite gateway did not become ready" >&2; exit 1; }
 
+echo "Checking TLS negotiation and public/protected health surfaces..."
+for gateway in full lite; do
+  gateway_host="$gateway.local"
+  gateway_service="$gateway-gateway"
+  tls_output="$(compose exec -T "$gateway_service" sh -c "printf '' | openssl s_client -connect 127.0.0.1:443 -servername $gateway_host -brief 2>&1" || true)"
+  if grep -Eq 'Protocol version: TLSv1\.[23]' <<<"$tls_output" \
+    && grep -q 'Ciphersuite:' <<<"$tls_output"; then
+    pass "$gateway gateway negotiates TLS 1.2/1.3"
+  else
+    fail "$gateway gateway did not negotiate an approved TLS protocol"
+  fi
+done
+
+assert_status 200 "Full public /health" "$FULL_URL/health" -H 'Host: full.local'
+assert_status 200 "Full public /gateway/health" "$FULL_URL/gateway/health" -H 'Host: full.local'
+assert_status 200 "Full public /ops/health" "$FULL_URL/ops/health" -H 'Host: full.local'
+assert_status 401 "Full protected /health/details rejects missing token" \
+  "$FULL_URL/health/details" -H 'Host: full.local'
+assert_status 200 "Full protected /health/details accepts operator token" \
+  "$FULL_URL/health/details" -H 'Host: full.local' -H 'X-Lab-Manager-Token: full-lab-manager'
+
+assert_status 200 "Lite public /health" "$LITE_URL/health" -H 'Host: lite.local'
+assert_status 200 "Lite public /gateway/health" "$LITE_URL/gateway/health" -H 'Host: lite.local'
+assert_status 200 "Lite public /ops/health" "$LITE_URL/ops/health" -H 'Host: lite.local'
+assert_status 401 "Lite protected /gateway/health/details rejects missing token" \
+  "$LITE_URL/gateway/health/details" -H 'Host: lite.local'
+assert_status 200 "Lite protected /gateway/health/details accepts operator token" \
+  "$LITE_URL/gateway/health/details" -H 'Host: lite.local' -H 'X-Lab-Manager-Token: lite-lab-manager'
+
 echo "Checking mode-specific key trust and auth surfaces..."
 full_key_hash="$(curl -fsSk "$FULL_URL/.well-known/public-key.pem" -H 'Host: full.local' | sha256sum | awk '{print $1}')"
 lite_key_hash="$(curl -fsSk "$LITE_URL/.well-known/public-key.pem" -H 'Host: lite.local' | sha256sum | awk '{print $1}')"

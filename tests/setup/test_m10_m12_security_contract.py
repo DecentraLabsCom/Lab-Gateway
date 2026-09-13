@@ -6,21 +6,24 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_public_health_is_aggregate_only_and_details_are_guarded():
     conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    ops_include = (ROOT / "openresty" / "lab_access_ops.conf").read_text(encoding="utf-8")
+    effective_conf = conf + "\n" + ops_include
     public_health = (ROOT / "openresty" / "lua" / "public_health.lua").read_text(encoding="utf-8")
     details_guard = (ROOT / "openresty" / "lua" / "health_details_access.lua").read_text(encoding="utf-8")
 
-    assert "location = /health" in conf
-    assert "location = /ops/health" in conf
-    assert "location = /gateway/health" in conf
-    assert conf.count("content_by_lua_file /etc/openresty/lua/public_health.lua;") == 3
-    assert "location = /health/details" in conf
-    assert "location = /ops/health/details" in conf
-    assert "location = /gateway/health/details" in conf
-    assert "health_details_access.lua" in conf
+    assert "location = /health" in effective_conf
+    assert "location = /ops/health" in effective_conf
+    assert "location = /gateway/health" in effective_conf
+    assert effective_conf.count("content_by_lua_file /etc/openresty/lua/public_health.lua;") == 3
+    assert "location = /health/details" in effective_conf
+    assert "location = /ops/health/details" in effective_conf
+    assert "location = /gateway/health/details" in effective_conf
+    assert "health_details_access.lua" in effective_conf
     assert "public = true" in public_health
     assert "remote_public_key" not in public_health
     assert "private_key" not in public_health
-    assert "dofile(\"/etc/openresty/lua/lab_manager_access.lua\")" in details_guard
+    assert 'loadfile("/etc/openresty/lua/lab_manager_access.lua")' in details_guard
+    assert "return guard()" in details_guard
 
 
 def test_ops_worker_container_and_winrm_policy_are_hardened():

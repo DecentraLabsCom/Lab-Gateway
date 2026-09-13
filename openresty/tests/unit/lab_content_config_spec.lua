@@ -1,5 +1,15 @@
 local runner = require "tests.helpers.runner"
 
+local function read_file(path)
+    local file = io.open(path, "r")
+    if not file then
+        return nil
+    end
+    local content = file:read("*all")
+    file:close()
+    return content
+end
+
 local function resolve_conf_path()
     local source = debug.getinfo(1, "S").source
     if source:sub(1, 1) == "@" then
@@ -16,10 +26,34 @@ local function resolve_conf_path()
     }
 
     for _, path in ipairs(candidates) do
-        local file = io.open(path, "r")
-        if file then
-            local content = file:read("*all")
-            file:close()
+        local content = read_file(path)
+        if content then
+            local include_candidates = {
+                dir .. "/../../lab_access_lab_admin.conf",
+                dir .. "/../lab_access_lab_admin.conf",
+                "openresty/lab_access_lab_admin.conf",
+                "lab_access_lab_admin.conf"
+            }
+            for _, include_path in ipairs(include_candidates) do
+                local fragment = read_file(include_path)
+                if fragment then
+                    content = content .. "\n" .. fragment
+                    break
+                end
+            end
+            include_candidates = {
+                dir .. "/../../lab_access_lab_content.conf",
+                dir .. "/../lab_access_lab_content.conf",
+                "openresty/lab_access_lab_content.conf",
+                "lab_access_lab_content.conf"
+            }
+            for _, include_path in ipairs(include_candidates) do
+                local fragment = read_file(include_path)
+                if fragment then
+                    content = content .. "\n" .. fragment
+                    break
+                end
+            end
             return content
         end
     end
