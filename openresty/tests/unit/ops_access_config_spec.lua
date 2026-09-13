@@ -1,5 +1,15 @@
 local runner = require "tests.helpers.runner"
 
+local function read_file(path)
+    local file = io.open(path, "r")
+    if not file then
+        return nil
+    end
+    local content = file:read("*all")
+    file:close()
+    return content
+end
+
 local function resolve_conf_path()
     local source = debug.getinfo(1, "S").source
     if source:sub(1, 1) == "@" then
@@ -16,10 +26,26 @@ local function resolve_conf_path()
     }
 
     for _, path in ipairs(candidates) do
-        local file = io.open(path, "r")
-        if file then
-            local content = file:read("*all")
-            file:close()
+        local content = read_file(path)
+        if content then
+            for _, include_name in ipairs({
+                "lab_access_lab_manager.conf",
+                "lab_access_ops.conf"
+            }) do
+                local include_candidates = {
+                    dir .. "/../../" .. include_name,
+                    dir .. "/../" .. include_name,
+                    "openresty/" .. include_name,
+                    include_name
+                }
+                for _, include_path in ipairs(include_candidates) do
+                    local fragment = read_file(include_path)
+                    if fragment then
+                        content = content .. "\n" .. fragment
+                        break
+                    end
+                end
+            end
             return content
         end
     end
@@ -53,7 +79,7 @@ local function extract_location_block(conf, location)
     error("Unterminated location " .. location)
 end
 
-runner.describe("Ops access configuration", function()
+runner.describe("Ops and Lab Manager access configuration", function()
     runner.it("leaves ops health public for readiness checks", function()
         local conf = resolve_conf_path()
         local block = extract_location_block(conf, "= /ops/health")

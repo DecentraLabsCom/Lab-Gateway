@@ -319,9 +319,10 @@ class SetupEnvContractTest(unittest.TestCase):
 
     def test_openresty_does_not_use_an_unrendered_server_name_placeholder(self):
         lab_access = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+        ops_include = (ROOT / "openresty" / "lab_access_ops.conf").read_text(encoding="utf-8")
         self.assertNotIn("${SERVER_NAME}", lab_access)
         self.assertIn("server_name _;", lab_access)
-        self.assertIn("set_by_lua_block $ops_origin", lab_access)
+        self.assertIn("set_by_lua_block $ops_origin", ops_include)
 
     def test_backend_entrypoints_persist_generated_intent_payload_key(self):
         entrypoint = CANONICAL_BACKEND_ENTRYPOINT.read_text(encoding="utf-8")

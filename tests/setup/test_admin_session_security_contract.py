@@ -5,7 +5,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_admin_bootstrap_is_post_only_and_cookies_are_path_scoped():
-    conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    openresty_root = ROOT / "openresty"
+    conf = "\n".join(
+        (openresty_root / name).read_text(encoding="utf-8")
+        for name in ("lab_access.conf", "lab_access_admin_session.conf")
+    )
     login = (ROOT / "openresty" / "lua" / "admin_login.lua").read_text(encoding="utf-8")
     lab_access = (ROOT / "openresty" / "lua" / "lab_manager_access.lua").read_text(encoding="utf-8")
     assert "?token=" not in conf
@@ -33,7 +37,17 @@ def test_gateway_admin_web_does_not_persist_or_forward_tokens():
 
 
 def test_gateway_static_locations_send_strict_csp():
-    conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    openresty_root = ROOT / "openresty"
+    conf = "\n".join(
+        (openresty_root / name).read_text(encoding="utf-8")
+        for name in (
+            "lab_access.conf",
+            "lab_access_lab_manager.conf",
+            "lab_access_wallet_dashboard.conf",
+            "lab_access_institution_config.conf",
+            "lab_access_admin_session.conf",
+        )
+    )
     assert conf.count("Content-Security-Policy") >= 3
     assert "script-src 'self'" in conf
     assert "style-src 'self'" in conf
