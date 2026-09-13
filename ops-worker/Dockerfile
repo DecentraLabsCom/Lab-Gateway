@@ -37,6 +37,17 @@ COPY hosts_discover_route.py /app/hosts_discover_route.py
 COPY timeline_route.py /app/timeline_route.py
 COPY aas_sync_route.py /app/aas_sync_route.py
 COPY winrm_trust_route.py /app/winrm_trust_route.py
+COPY winrm_trust_preview_route.py /app/winrm_trust_preview_route.py
+COPY winrm_credentials_route.py /app/winrm_credentials_route.py
+COPY local_mode_route.py /app/local_mode_route.py
+COPY winrm_trust_mutation_route.py /app/winrm_trust_mutation_route.py
+COPY host_update_route.py /app/host_update_route.py
+COPY host_provision_route.py /app/host_provision_route.py
+COPY aas_lab_sync_route.py /app/aas_lab_sync_route.py
+COPY internal_ingest_routes.py /app/internal_ingest_routes.py
+COPY lifecycle_routes.py /app/lifecycle_routes.py
+COPY wol_route.py /app/wol_route.py
+COPY winrm_route.py /app/winrm_route.py
 COPY winrm_session_factory.py /app/winrm_session_factory.py
 COPY winrm_command_execution.py /app/winrm_command_execution.py
 COPY winrm_command_builders.py /app/winrm_command_builders.py

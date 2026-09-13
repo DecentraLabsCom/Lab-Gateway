@@ -183,6 +183,20 @@ from hosts_discover_route import handle_hosts_discover as _handle_hosts_discover
 from timeline_route import handle_reservation_timeline as _handle_reservation_timeline_impl
 from aas_sync_route import handle_aas_sync as _handle_aas_sync_impl
 from winrm_trust_route import handle_winrm_trust_get as _handle_winrm_trust_get_impl
+from winrm_trust_preview_route import handle_winrm_trust_preview as _handle_winrm_trust_preview_impl
+from winrm_credentials_route import handle_winrm_credentials as _handle_winrm_credentials_impl
+from local_mode_route import handle_local_mode as _handle_local_mode_impl
+from winrm_trust_mutation_route import (
+    handle_winrm_trust_delete as _handle_winrm_trust_delete_impl,
+    handle_winrm_trust_put as _handle_winrm_trust_put_impl,
+)
+from host_update_route import handle_host_update as _handle_host_update_impl
+from host_provision_route import handle_host_provision as _handle_host_provision_impl
+from aas_lab_sync_route import handle_aas_lab_sync as _handle_aas_lab_sync_impl
+from internal_ingest_routes import handle_internal_ingest as _handle_internal_ingest_impl
+from lifecycle_routes import handle_lifecycle_request as _handle_lifecycle_request_impl
+from wol_route import handle_wol as _handle_wol_impl
+from winrm_route import handle_winrm as _handle_winrm_impl
 from host_provisioning_values import (
     build_provisioned_host as _build_provisioned_host_impl,
     normalize_labs as _normalize_labs_impl,
@@ -2059,73 +2073,29 @@ def health():
 
 @APP.route("/api/wol", methods=["POST"])
 def api_wol():
-    payload = request.get_json(force=True, silent=True) or {}
-    host_name = payload.get("host")
-    host = HOSTS.get(host_name) if host_name else None
-    mac = payload.get("mac") or (host or {}).get("mac")
-    if not mac:
-        return jsonify({"error": "mac is required"}), 400
-
-    ping_target = str(payload.get("ping_target") or (host or {}).get("ping_target") or (host or {}).get("address") or "").strip()
-    if not ping_target:
-        return jsonify({"error": "ping_target or host address is required"}), 400
-    if not _is_valid_ping_target(ping_target):
-        return jsonify({"error": "ping_target is invalid"}), 400
-    attempts = int(payload.get("attempts", 3))
-    wait_seconds = float(payload.get("ping_timeout", 10))
-    broadcast = payload.get("broadcast")
-    port = int(payload.get("port", 9))
-    configured_probe_port = (host or {}).get("winrm_port")
-    try:
-        probe_port = int(configured_probe_port) if configured_probe_port not in (None, "") else None
-    except (TypeError, ValueError):
-        probe_port = None
-
-    start = time.time()
-    try:
-        up, used_attempts = wol_and_wait(
-            mac, broadcast, port, ping_target, attempts, wait_seconds, probe_port=probe_port
-        )
-    except Exception as exc:
-        return internal_error_response("WOL failed", exc)
-
-    return jsonify({
-        "success": up,
-        "attempts_used": used_attempts,
-        "duration_ms": int((time.time() - start) * 1000),
-        "ping_target": ping_target,
-    })
+    return _handle_wol_impl(
+        request.get_json(force=True, silent=True) or {},
+        find_host=lambda host_name: HOSTS.get(host_name) if host_name else None,
+        is_valid_ping_target=_is_valid_ping_target,
+        wol_and_wait=wol_and_wait,
+        now=time.time,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/winrm", methods=["POST"])
 def api_winrm():
-    payload = request.get_json(force=True, silent=True) or {}
-    host_name = payload.get("host")
-    command = payload.get("command")
-    args = payload.get("args") or []
-    if not host_name or not command:
-        return jsonify({"error": "host and command are required"}), 400
-    if command not in ALLOWED_WINRM_COMMANDS:
-        return jsonify({"error": f"command '{command}' not allowed"}), 400
-    host = HOSTS.get(host_name)
-    if not host:
-        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
-    try:
-        result = run_labstation_command(
-            host=host,
-            command=command,
-            args=args,
-            user=None,
-            password=None,
-            transport=payload.get("transport"),
-            use_ssl=payload.get("use_ssl"),
-            port=payload.get("port"),
-        )
-        return jsonify(result)
-    except Exception as exc:
-        if isinstance(exc, WinRMTrustError):
-            return jsonify(_winrm_trust_error_payload(host_name, exc.code)), 409
-        return internal_error_response("WinRM exec failed", exc)
+    return _handle_winrm_impl(
+        request.get_json(force=True, silent=True) or {},
+        allowed_commands=ALLOWED_WINRM_COMMANDS,
+        find_host=lambda host_name: HOSTS.get(host_name),
+        run_command=run_labstation_command,
+        trust_error_type=WinRMTrustError,
+        trust_error_payload=_winrm_trust_error_payload,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/heartbeat/poll", methods=["POST"])
@@ -2553,37 +2523,47 @@ def handle_reservation_end(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int
 
 @APP.route("/api/reservations/start", methods=["POST"])
 def api_reservation_start():
-    payload = request.get_json(force=True, silent=True) or {}
-    response, status = handle_reservation_start(payload)
-    return jsonify(response), status
+    return _handle_lifecycle_request_impl(
+        request.get_json(force=True, silent=True) or {},
+        operation=handle_reservation_start,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/api/reservations/end", methods=["POST"])
 def api_reservation_end():
-    payload = request.get_json(force=True, silent=True) or {}
-    response, status = handle_reservation_end(payload)
-    return jsonify(response), status
+    return _handle_lifecycle_request_impl(
+        request.get_json(force=True, silent=True) or {},
+        operation=handle_reservation_end,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/api/demo/start", methods=["POST"])
 def api_demo_start():
-    payload = request.get_json(force=True, silent=True) or {}
-    response, status = handle_demo_start(payload)
-    return jsonify(response), status
+    return _handle_lifecycle_request_impl(
+        request.get_json(force=True, silent=True) or {},
+        operation=handle_demo_start,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/api/demo/event", methods=["POST"])
 def api_demo_event():
-    payload = request.get_json(force=True, silent=True) or {}
-    response, status = handle_demo_event(payload)
-    return jsonify(response), status
+    return _handle_lifecycle_request_impl(
+        request.get_json(force=True, silent=True) or {},
+        operation=handle_demo_event,
+        jsonify=jsonify,
+    )
 
 
 @APP.route("/api/demo/end", methods=["POST"])
 def api_demo_end():
-    payload = request.get_json(force=True, silent=True) or {}
-    response, status = handle_demo_end(payload)
-    return jsonify(response), status
+    return _handle_lifecycle_request_impl(
+        request.get_json(force=True, silent=True) or {},
+        operation=handle_demo_end,
+        jsonify=jsonify,
+    )
 
 
 def _to_iso(dt: Any) -> Optional[str]:
@@ -3282,105 +3262,32 @@ def api_hosts_discover():
 
 @APP.route("/api/hosts/provision", methods=["POST"])
 def api_hosts_provision():
-    payload = request.get_json(force=True, silent=True) or {}
-    connection_id = payload.get("connectionId") or payload.get("connection_id")
-    if connection_id in (None, ""):
-        return jsonify({"error": "connectionId is required"}), 400
-
-    connection = resolve_guacamole_connection(connection_id)
-    if not connection:
-        return jsonify({"error": f"Guacamole connection {connection_id} not found"}), 404
-
-    discovery = discover_labstation_candidate(connection)
-    if discovery.get("status") not in ENOUGH_DISCOVERY_SIGNALS:
-        return jsonify({
-            "error": "insufficient discovery signal for ops host provisioning",
-            "discovery": discovery,
-        }), 409
-
-    provision_payload = dict(payload)
-    if not str(provision_payload.get("mac") or "").strip():
-        ops_host_draft = discovery.get("opsHostDraft")
-        suggested_mac = ops_host_draft.get("mac") if isinstance(ops_host_draft, dict) else None
-        if suggested_mac:
-            provision_payload["mac"] = suggested_mac
-
-    host_config, error = build_provisioned_host(provision_payload, connection)
-    if error:
-        return jsonify({"error": error}), 400
-    if host_config is None:
-        return jsonify({"error": "host configuration could not be built"}), 400
-
-    existing = HOSTS.get(host_config["name"])
-    if existing:
-        return jsonify({"error": f"host {host_config['name']} already exists"}), 409
-
-    try:
-        upsert_dynamic_host(host_config)
-        count, reload_error = reload_hosts()
-    except PermissionError:
-        return jsonify({
-            "error": "Ops host catalog is not writable; check the ops-data mount permissions",
-            "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
-        }), 503
-    except OSError as exc:
-        if exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
-            return jsonify({
-                "error": "Ops host catalog is not writable; check the ops-data mount permissions",
-                "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
-            }), 503
-        return internal_error_response("Failed to provision ops host", exc)
-    except Exception as exc:
-        return internal_error_response("Failed to provision ops host", exc)
-
-    if reload_error:
-        return jsonify({"error": "Hosts configuration reload failed"}), 500
-
-    return jsonify({
-        "provisioned": True,
-        "hosts": count,
-        "host": safe_host_inventory_entry(host_config, editable=True),
-        "discoveryStatus": discovery.get("status"),
-    })
+    return _handle_host_provision_impl(
+        request.get_json(force=True, silent=True) or {},
+        resolve_connection=resolve_guacamole_connection,
+        discover_candidate=discover_labstation_candidate,
+        enough_discovery_signals=ENOUGH_DISCOVERY_SIGNALS,
+        build_host=build_provisioned_host,
+        find_host=HOSTS.get,
+        upsert_host=upsert_dynamic_host,
+        reload_hosts=reload_hosts,
+        safe_host_inventory_entry=safe_host_inventory_entry,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/hosts/<host_name>", methods=["PATCH"])
 def api_hosts_update(host_name: str):
-    payload = request.get_json(force=True, silent=True) or {}
-    if not isinstance(payload, dict):
-        return jsonify({"error": "host update payload must be an object"}), 400
-
-    try:
-        host_config, error = update_dynamic_host(host_name, payload)
-        if error:
-            status = 409 if "static catalog" in error or "already exists" in error else 400
-            return jsonify({"error": error}), status
-        if host_config is None:
-            return jsonify({"error": "host configuration could not be updated"}), 400
-        count, reload_error = reload_hosts()
-    except PermissionError:
-        return jsonify({
-            "error": "Ops host catalog is not writable; check the ops-data mount permissions",
-            "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
-        }), 503
-    except OSError as exc:
-        if exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
-            return jsonify({
-                "error": "Ops host catalog is not writable; check the ops-data mount permissions",
-                "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
-            }), 503
-        return internal_error_response("Failed to update ops host", exc)
-    except Exception as exc:
-        return internal_error_response("Failed to update ops host", exc)
-
-    if reload_error:
-        return jsonify({"error": "Hosts configuration reload failed"}), 500
-
-    return jsonify({
-        "updated": True,
-        "hosts": count,
-        "host": safe_host_inventory_entry(host_config, editable=True),
-    })
+    return _handle_host_update_impl(
+        host_name,
+        request.get_json(force=True, silent=True) or {},
+        update_host=update_dynamic_host,
+        reload_hosts=reload_hosts,
+        safe_host_inventory_entry=safe_host_inventory_entry,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 def _winrm_trust_http_status(code: str) -> int:
@@ -3406,33 +3313,20 @@ def _winrm_trust_host_or_404(host_name: str):
 
 @APP.route("/api/hosts/<host_name>/winrm-trust/preview", methods=["POST"])
 def api_preview_winrm_trust(host_name: str):
-    host, error_response = _winrm_trust_host_or_404(host_name)
-    if error_response:
-        return error_response
-    if host is None:
-        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
-    try:
-        raw = _read_winrm_certificate_upload()
-        certificate = _parse_winrm_certificate_bytes(raw)
-        input_format = "PEM" if b"-----BEGIN CERTIFICATE-----" in raw[:256] else "DER"
-        preview = _winrm_certificate_response_metadata(certificate, host, input_format)
-        try:
-            _validate_winrm_certificate(certificate, host)
-        except WinRMTrustError as exc:
-            payload = _winrm_trust_error_payload(host_name, exc.code)
-            payload["preview"] = preview
-            return jsonify(payload), _winrm_trust_http_status(exc.code)
-        preview["valid"] = True
-        return jsonify({
-            "requestId": _request_id(),
-            "host": host.get("name"),
-            "address": host.get("address"),
-            "preview": preview,
-        })
-    except WinRMTrustError as exc:
-        return jsonify(_winrm_trust_error_payload(host_name, exc.code)), _winrm_trust_http_status(exc.code)
-    except Exception as exc:
-        return internal_error_response("WinRM trust preview failed", exc)
+    return _handle_winrm_trust_preview_impl(
+        host_name,
+        find_host=HOSTS.get,
+        read_certificate_upload=_read_winrm_certificate_upload,
+        parse_certificate=_parse_winrm_certificate_bytes,
+        response_metadata=_winrm_certificate_response_metadata,
+        validate_certificate=_validate_winrm_certificate,
+        request_id=_request_id,
+        trust_error_type=WinRMTrustError,
+        trust_error_payload=_winrm_trust_error_payload,
+        trust_http_status=_winrm_trust_http_status,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/hosts/<host_name>/winrm-trust", methods=["GET"])
@@ -3452,110 +3346,60 @@ def api_get_winrm_trust(host_name: str):
 
 @APP.route("/api/hosts/<host_name>/winrm-trust", methods=["PUT"])
 def api_save_winrm_trust(host_name: str):
-    host, error_response = _winrm_trust_host_or_404(host_name)
-    if error_response:
-        return error_response
-    if host is None:
-        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
-    try:
-        submitted_fingerprint = (
-            _winrm_trust_request_value("fingerprintSha256")
-            or str(request.headers.get("X-WinRM-Fingerprint-SHA256") or "").strip()
-        )
-        submitted_fingerprint = re.sub(r"[\s:]", "", submitted_fingerprint).upper()
-        if not submitted_fingerprint:
-            raise WinRMTrustError(
-                "WINRM_FINGERPRINT_CONFIRMATION_REQUIRED",
-                WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE,
-            )
-        if not re.fullmatch(r"[0-9A-F]{64}", submitted_fingerprint):
-            raise WinRMTrustError("WINRM_FINGERPRINT_MISMATCH", WINRM_FINGERPRINT_MISMATCH_MESSAGE)
-
-        supplied_trust_ref = (
-            _winrm_trust_request_value("trustRef")
-            or str(request.headers.get("X-WinRM-Trust-Ref") or "").strip()
-        )
-        if supplied_trust_ref:
-            try:
-                if normalize_winrm_trust_ref(supplied_trust_ref) != winrm_trust_ref_for_host(host):
-                    raise WinRMTrustError("WINRM_TRUST_REF_MISMATCH", WINRM_TRUST_REF_MISMATCH_MESSAGE)
-            except ValueError as exc:
-                raise WinRMTrustError("WINRM_TRUST_REF_MISMATCH", WINRM_TRUST_REF_MISMATCH_MESSAGE) from exc
-
-        raw = _read_winrm_certificate_upload()
-        certificate = _parse_winrm_certificate_bytes(raw)
-        metadata = _validate_winrm_certificate(certificate, host)
-        if metadata["fingerprintSha256"] != submitted_fingerprint:
-            raise WinRMTrustError("WINRM_FINGERPRINT_MISMATCH", WINRM_FINGERPRINT_MISMATCH_MESSAGE)
-
-        trust = _store_winrm_trust_certificate(host, certificate)
-        logging.info(
-            "WinRM trust saved host=%s fingerprintSha256=%s",
-            _sanitize_log_value(host_name),
-            _sanitize_log_value(metadata["fingerprintSha256"]),
-        )
-        return jsonify({
-            "requestId": _request_id(),
-            "saved": True,
-            "host": host.get("name"),
-            "address": host.get("address"),
-            "trust": trust,
-        })
-    except WinRMTrustError as exc:
-        return jsonify(_winrm_trust_error_payload(host_name, exc.code)), _winrm_trust_http_status(exc.code)
-    except OSError as exc:
-        logging.warning("Unable to save WinRM trust for %s: %s", _sanitize_log_value(host_name), type(exc).__name__)
-        return jsonify(_winrm_trust_error_payload(
-            host_name,
-            "WINRM_TRUST_STORAGE_UNAVAILABLE",
-        )), 503
-    except Exception as exc:
-        return internal_error_response("WinRM trust save failed", exc)
+    return _handle_winrm_trust_put_impl(
+        host_name,
+        headers=request.headers,
+        find_host=HOSTS.get,
+        request_value=_winrm_trust_request_value,
+        normalize_trust_ref=normalize_winrm_trust_ref,
+        trust_ref_for_host=winrm_trust_ref_for_host,
+        read_certificate_upload=_read_winrm_certificate_upload,
+        parse_certificate=_parse_winrm_certificate_bytes,
+        validate_certificate=_validate_winrm_certificate,
+        store_trust=_store_winrm_trust_certificate,
+        request_id=_request_id,
+        sanitize_log_value=_sanitize_log_value,
+        log_info=logging.info,
+        log_warning=logging.warning,
+        trust_error_type=WinRMTrustError,
+        trust_error_payload=_winrm_trust_error_payload,
+        trust_http_status=_winrm_trust_http_status,
+        fingerprint_confirmation_required_message=WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE,
+        fingerprint_mismatch_message=WINRM_FINGERPRINT_MISMATCH_MESSAGE,
+        trust_ref_mismatch_message=WINRM_TRUST_REF_MISMATCH_MESSAGE,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/hosts/<host_name>/winrm-trust", methods=["DELETE"])
 def api_delete_winrm_trust(host_name: str):
-    host, error_response = _winrm_trust_host_or_404(host_name)
-    if error_response:
-        return error_response
-    if host is None:
-        return jsonify({"error": f"host '{host_name}' not found in config"}), 404
-    try:
-        _delete_winrm_trust_certificate(host)
-        logging.info("WinRM trust removed host=%s", _sanitize_log_value(host_name))
-        return jsonify({
-            "requestId": _request_id(),
-            "deleted": True,
-            "host": host.get("name"),
-            "address": host.get("address"),
-            "trust": inspect_winrm_trust(host),
-        })
-    except WinRMTrustError as exc:
-        return jsonify(_winrm_trust_error_payload(host_name, exc.code)), _winrm_trust_http_status(exc.code)
-    except Exception as exc:
-        return internal_error_response("WinRM trust delete failed", exc)
+    return _handle_winrm_trust_delete_impl(
+        host_name,
+        find_host=HOSTS.get,
+        delete_trust=_delete_winrm_trust_certificate,
+        inspect_trust=inspect_winrm_trust,
+        request_id=_request_id,
+        sanitize_log_value=_sanitize_log_value,
+        log_info=logging.info,
+        trust_error_type=WinRMTrustError,
+        trust_error_payload=_winrm_trust_error_payload,
+        trust_http_status=_winrm_trust_http_status,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/hosts/winrm-credentials", methods=["POST"])
 def api_save_winrm_credentials():
-    payload = request.get_json(force=True, silent=True) or {}
-    credential_ref = payload.get("credentialRef") or payload.get("credential_ref")
-    user = payload.get("user") or payload.get("username")
-    password = payload.get("password")
-    try:
-        save_winrm_credentials(str(credential_ref or ""), str(user or ""), str(password or ""))
-        count, reload_error = reload_hosts()
-    except ValueError as exc:
-        return jsonify({"error": "Invalid WinRM credentials request"}), 400
-    except Exception as exc:  # pylint: disable=broad-except
-        return internal_error_response("Failed to save WinRM credentials", exc)
-    if reload_error:
-        return jsonify({"error": "Hosts configuration reload failed"}), 500
-    return jsonify({
-        "saved": True,
-        "credentialRef": normalize_credential_ref(credential_ref),
-        "hosts": count,
-    })
+    return _handle_winrm_credentials_impl(
+        request.get_json(force=True, silent=True) or {},
+        save_credentials=save_winrm_credentials,
+        reload_hosts=reload_hosts,
+        normalize_credential_ref=normalize_credential_ref,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/hosts/reload", methods=["POST"])
@@ -3589,29 +3433,16 @@ def api_aas_sync():
 
 @APP.route("/api/hosts/local-mode", methods=["POST"])
 def api_hosts_local_mode():
-    payload = request.get_json(force=True, silent=True) or {}
-    host_name = payload.get("host")
-    if host_name is None:
-        return jsonify({"error": "host is required"}), 400
-    enabled = payload.get("enabled")
-    if enabled is None:
-        return jsonify({"error": "enabled is required"}), 400
-    enabled = parse_bool(enabled, False)
-
-    host = HOSTS.get(host_name)
-    if not host:
-        return jsonify({"error": f"host '{host_name}' not found"}), 404
-
-    flag_path = get_local_mode_flag_path(host)
-    try:
-        if enabled:
-            write_remote_file(host, flag_path, "1", None, None, None, None, None)
-        else:
-            remove_remote_file(host, flag_path, None, None, None, None, None)
-    except Exception as exc:
-        return internal_error_response(f"Local mode toggle failed for {host_name}", exc)
-
-    return jsonify({"host": host_name, "localModeEnabled": enabled}), 200
+    return _handle_local_mode_impl(
+        request.get_json(force=True, silent=True) or {},
+        parse_bool=parse_bool,
+        find_host=HOSTS.get,
+        get_flag_path=get_local_mode_flag_path,
+        write_remote_file=write_remote_file,
+        remove_remote_file=remove_remote_file,
+        jsonify=jsonify,
+        internal_error_response=internal_error_response,
+    )
 
 
 @APP.route("/api/operations/recent", methods=["GET"])
@@ -3629,6 +3460,17 @@ def api_operations_recent():
     )
 
 
+def _load_aas_persisted_heartbeat(lab_id: str, host: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Load the latest persisted heartbeat for the AAS sync route."""
+    if not DB_ENGINE:
+        return None
+    with DB_ENGINE.begin() as conn:
+        heartbeat_data_row = _fetch_latest_heartbeat(conn, host.get("name", ""))
+        if heartbeat_data_row and heartbeat_data_row.get("raw"):
+            return heartbeat_data_row["raw"]
+    return None
+
+
 @APP.route("/aas-admin/lab/<lab_id>/sync", methods=["POST"])
 def api_aas_sync_lab(lab_id: str):
     """
@@ -3643,47 +3485,17 @@ def api_aas_sync_lab(lab_id: str):
     The host is resolved from the lab_id via the HOSTS registry.
     If the lab_id is not mapped, returns 404.
     """
-    host = HOSTS.get_by_lab(lab_id)
-    if not host:
-        return jsonify({"error": f"No host mapping found for labId '{lab_id}'"}), 404
-
-    payload = request.get_json(silent=True) or {}
-    include_heartbeat = parse_bool(payload.get("includeHeartbeat", False), False)
-
-    heartbeat_data: Optional[Dict[str, Any]] = None
-    if include_heartbeat:
-        try:
-            poll_result = poll_heartbeat(host, include_events=False)
-            heartbeat_data = poll_result.get("heartbeat")
-        except Exception as exc:
-            logging.warning(
-                "AAS sync: could not poll heartbeat for lab %s: %s",
-                str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
-                type(exc).__name__,
-            )
-    elif DB_ENGINE:
-        # Use latest persisted heartbeat from DB if available
-        try:
-            with DB_ENGINE.begin() as conn:
-                heartbeat_data_row = _fetch_latest_heartbeat(conn, host.get("name", ""))
-                if heartbeat_data_row and heartbeat_data_row.get("raw"):
-                    heartbeat_data = heartbeat_data_row["raw"]
-        except Exception as exc:
-            logging.warning(
-                "AAS sync: could not load heartbeat from DB for lab %s: %s",
-                str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
-                type(exc).__name__,
-            )
-
-    result = aas_generator.sync_lab_to_basyx(str(lab_id), host, heartbeat_data)
-
-    if result.get("disabled"):
-        return jsonify(result), 200
-
-    if result.get("error"):
-        return jsonify({"detail": result["error"], **result}), 502
-
-    return jsonify(result), 200
+    return _handle_aas_lab_sync_impl(
+        lab_id,
+        request.get_json(silent=True) or {},
+        find_host_by_lab=HOSTS.get_by_lab,
+        parse_bool=parse_bool,
+        poll_heartbeat=poll_heartbeat,
+        load_persisted_heartbeat=_load_aas_persisted_heartbeat if DB_ENGINE else None,
+        sync_lab=aas_generator.sync_lab_to_basyx,
+        log_warning=logging.warning,
+        jsonify=jsonify,
+    )
 
 
 def poll_all_hosts():
@@ -4154,15 +3966,16 @@ def enqueue_guacamole_token_revocation(payload: Mapping[str, Any]) -> bool:
 
 @APP.route("/internal/guacamole-token-revocations", methods=["POST"])
 def ingest_guacamole_token_revocation():
-    if not SESSION_OBSERVATION_INGEST_TOKEN:
-        return jsonify({"accepted": False, "error": "Guacamole revocation ingestion is disabled"}), 503
-    provided = request.headers.get("X-Gateway-Observation-Token", "")
-    if not hmac.compare_digest(provided, SESSION_OBSERVATION_INGEST_TOKEN):
-        return jsonify({"accepted": False, "error": "unauthorized"}), 401
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not enqueue_guacamole_token_revocation(payload):
-        return jsonify({"accepted": False, "error": "invalid or unavailable revocation"}), 400
-    return jsonify({"accepted": True}), 202
+    return _handle_internal_ingest_impl(
+        request.get_json(silent=True),
+        headers=request.headers,
+        ingest_token=SESSION_OBSERVATION_INGEST_TOKEN,
+        compare_digest=hmac.compare_digest,
+        enqueue=enqueue_guacamole_token_revocation,
+        disabled_error="Guacamole revocation ingestion is disabled",
+        invalid_error="invalid or unavailable revocation",
+        jsonify=jsonify,
+    )
 
 
 def _guacamole_admin_session() -> Optional[Tuple[str, str]]:
@@ -4440,15 +4253,16 @@ def enqueue_session_observation(payload: Mapping[str, Any]) -> bool:
 @APP.route("/internal/session-observations", methods=["POST"])
 def ingest_session_observation():
     """Accept observations only from the co-located OpenResty gateway."""
-    if not SESSION_OBSERVATION_INGEST_TOKEN:
-        return jsonify({"accepted": False, "error": "session observation ingestion is disabled"}), 503
-    provided = request.headers.get("X-Gateway-Observation-Token", "")
-    if not hmac.compare_digest(provided, SESSION_OBSERVATION_INGEST_TOKEN):
-        return jsonify({"accepted": False, "error": "unauthorized"}), 401
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not enqueue_session_observation(payload):
-        return jsonify({"accepted": False, "error": "invalid or unavailable observation"}), 400
-    return jsonify({"accepted": True}), 202
+    return _handle_internal_ingest_impl(
+        request.get_json(silent=True),
+        headers=request.headers,
+        ingest_token=SESSION_OBSERVATION_INGEST_TOKEN,
+        compare_digest=hmac.compare_digest,
+        enqueue=enqueue_session_observation,
+        disabled_error="session observation ingestion is disabled",
+        invalid_error="invalid or unavailable observation",
+        jsonify=jsonify,
+    )
 
 
 def _claim_session_observation_outbox_rows() -> List[Dict[str, Any]]:
