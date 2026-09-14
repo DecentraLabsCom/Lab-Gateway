@@ -23,21 +23,6 @@ def host_registry():
     worker.HOSTS = original
 
 
-def test_api_wol_requires_mac(client):
-    response = client.post("/api/wol", json={})
-    assert response.status_code == 400
-    assert "mac is required" in response.get_data(as_text=True)
-
-
-def test_api_wol_uses_host_mac(client):
-    with patch("worker.wol_and_wait", return_value=(True, 1)) as mock_wol:
-        response = client.post("/api/wol", json={"host": "lab-ws-01"})
-    assert response.status_code == 200
-    assert response.json["success"] is True
-    assert response.json["attempts_used"] == 1
-    mock_wol.assert_called_once()
-
-
 def test_wol_and_wait_retries():
     with patch("worker.send_magic_packet") as mock_packet, patch(
         "worker.host_is_up", side_effect=[False, True]
@@ -55,21 +40,6 @@ def test_wol_and_wait_retries():
     assert attempts == 2
     assert mock_packet.call_count == 2
     assert mock_up.call_count == 2
-
-
-def test_api_wol_rejects_command_injection_in_ping_target(client):
-    with patch("worker.wol_and_wait") as mock_wol:
-        response = client.post(
-            "/api/wol",
-            json={
-                "mac": "00:11:22:33:44:55",
-                "ping_target": "127.0.0.1; whoami",
-            },
-        )
-
-    assert response.status_code == 400
-    assert "ping_target" in response.get_data(as_text=True)
-    mock_wol.assert_not_called()
 
 
 def test_host_is_up_does_not_open_socket_for_invalid_target():

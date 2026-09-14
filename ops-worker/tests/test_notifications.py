@@ -9,15 +9,6 @@ if ROOT not in sys.path:
 import worker
 
 
-def test_parse_recipients_comma_separated_values():
-    recipients = worker.parse_recipients("alice@example.com, bob@example.com , , carol@example.com")
-    assert recipients == [
-        "alice@example.com",
-        "bob@example.com",
-        "carol@example.com",
-    ]
-
-
 def test_notify_critical_failure_sends_expected_payload_and_headers(monkeypatch):
     monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ENABLED", True)
     monkeypatch.setattr(

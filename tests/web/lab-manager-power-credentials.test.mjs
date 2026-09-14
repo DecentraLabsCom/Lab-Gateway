@@ -134,12 +134,16 @@ test('saves a NETIO credential without leaking unrelated fields', async () => {
 });
 
 test('loads an existing credential and rotates it with overwrite', async () => {
+  const calls = [];
   const { controller, fields, controllerStatuses } = loadController({
-    fetchImpl: async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ credentials: [{ credentialRef: 'existing', type: 'netio-http-basic' }] }),
-    }),
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ credentials: [{ credentialRef: 'existing', type: 'netio-http-basic' }] }),
+      };
+    },
   });
 
   await controller.load();
@@ -152,6 +156,10 @@ test('loads an existing credential and rotates it with overwrite', async () => {
   fields.password.value = 'replacement-secret';
   await controller.save();
 
+  const saveCall = calls.find(({ url, options }) =>
+    url === '/ops/api/power/credentials' && options.method === 'POST');
+  assert.ok(saveCall);
+  assert.equal(JSON.parse(saveCall.options.body).overwrite, true);
   assert.equal(controllerStatuses.length, 1);
   assert.equal(controllerStatuses[0].forceRefresh, true);
 });

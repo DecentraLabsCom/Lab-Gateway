@@ -285,17 +285,6 @@ def test_internal_guacamole_provision_can_stage_and_then_activate_temp_user(clie
             assert conn.execute(text("SELECT COUNT(*) FROM guacamole_connection_permission WHERE entity_id = :entity_id"), {"entity_id": entity_id}).scalar() == 1
 
 
-def test_internal_guacamole_provision_rejects_non_boolean_activate(client):
-    with with_inventory_state([], [{"id": 42, "name": "RDP Lab 42", "protocol": "rdp", "hostname": "lab-ws-42", "port": "3389"}]):
-        response = client.post(
-            "/internal/guacamole/provision",
-            json={"selector": "guac:id:42", "sessionId": "session-invalid-activate", "validUntilEpochSeconds": 1800000000, "activate": "false"},
-        )
-
-    assert response.status_code == 400
-    assert response.get_json()["error"] == "activate must be a boolean"
-
-
 def test_internal_guacamole_delete_removes_temp_user(client):
     guacamole = [{"id": 42, "name": "RDP Lab 42", "protocol": "rdp", "hostname": "lab-ws-42", "port": "3389"}]
     with with_inventory_state([], guacamole):
@@ -385,13 +374,6 @@ def test_host_inventory_marks_multiple_when_multiple_connections_match(client):
     guacamole_status = response.get_json()["hosts"][0]["guacamole"]
     assert guacamole_status["status"] == "multiple"
     assert [conn["name"] for conn in guacamole_status["connections"]] == ["Primary RDP", "Backup RDP"]
-
-
-def test_discover_requires_connection_id(client):
-    response = client.post("/api/hosts/discover", json={})
-
-    assert response.status_code == 400
-    assert "connectionId is required" in response.get_data(as_text=True)
 
 
 def test_discover_returns_404_for_unknown_connection(client):

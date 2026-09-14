@@ -54,6 +54,12 @@ def test_gateway_workflow_runs_all_setup_contract_tests():
     assert "python -m pytest tests/setup -q" in workflow
 
 
+def test_gateway_workflow_runs_compose_profile_smoke():
+    workflow = (ROOT / ".github" / "workflows" / "gateway-tests.yml").read_text(encoding="utf-8")
+
+    assert "run: ./tests/integration/verify-compose-profiles.ps1" in workflow
+
+
 def test_ops_worker_summary_requires_a_completed_checkout():
     workflow = (ROOT / ".github" / "workflows" / "gateway-tests.yml").read_text(encoding="utf-8")
     guard = "if: always() && hashFiles('.github/scripts/test_summary.py') != ''"

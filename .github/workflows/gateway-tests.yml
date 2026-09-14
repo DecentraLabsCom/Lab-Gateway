@@ -432,6 +432,26 @@ jobs:
         if: steps.run_full_lite_access_integration.outcome != 'success'
         run: exit 1
 
+  compose-profile-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+
+      - name: Prepare Compose environment fixtures
+        shell: bash
+        run: |
+          cp .env.example .env
+          cp blockchain-services/.env.example blockchain-services/.env
+
+      - name: Run Compose profile configuration smoke
+        shell: pwsh
+        run: ./tests/integration/verify-compose-profiles.ps1
+
   real-compose-resilience:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -606,6 +626,7 @@ jobs:
       - ops-worker-tests
       - integration-tests
       - full-lite-access-integration
+      - compose-profile-smoke
       - real-compose-resilience
       - fmu-integration-tests
       - smoke-tests
