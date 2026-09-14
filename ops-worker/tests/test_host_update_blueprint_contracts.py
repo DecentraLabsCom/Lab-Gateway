@@ -103,7 +103,6 @@ def test_worker_host_update_route_is_owned_by_the_blueprint(monkeypatch):
     rules = [rule for rule in worker.APP.url_map.iter_rules() if rule.rule == "/api/hosts/<host_name>"]
     assert len(rules) == 1
     assert rules[0].endpoint == "host_update.api_hosts_update"
-    assert callable(worker.api_hosts_update)
 
     response = worker.APP.test_client().patch(
         "/api/hosts/lab-ws-01", json={"mac": "00-11-22-33-44-55"}

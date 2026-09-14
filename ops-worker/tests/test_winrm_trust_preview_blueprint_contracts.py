@@ -68,7 +68,6 @@ def test_worker_winrm_trust_preview_route_is_owned_by_the_blueprint_without_dupl
 
     assert len(rules) == 1
     assert rules[0].endpoint == "winrm_trust_preview.api_preview_winrm_trust"
-    assert callable(worker.api_preview_winrm_trust)
 
 
 def test_worker_winrm_trust_preview_blueprint_resolves_runtime_dependencies(monkeypatch):

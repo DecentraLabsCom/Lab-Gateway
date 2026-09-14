@@ -113,7 +113,6 @@ def test_worker_aas_lab_sync_route_is_owned_by_the_blueprint(monkeypatch):
     ]
     assert len(rules) == 1
     assert rules[0].endpoint == "aas_lab_sync.api_aas_sync_lab"
-    assert callable(worker.api_aas_sync_lab)
 
     response = worker.APP.test_client().post("/aas-admin/lab/lab-1/sync")
 

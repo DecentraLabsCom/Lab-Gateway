@@ -105,7 +105,6 @@ def test_worker_winrm_credentials_route_is_owned_by_the_blueprint(monkeypatch):
     ]
     assert len(rules) == 1
     assert rules[0].endpoint == "winrm_credentials.api_save_winrm_credentials"
-    assert callable(worker.api_save_winrm_credentials)
 
     response = worker.APP.test_client().post(
         "/api/hosts/winrm-credentials",

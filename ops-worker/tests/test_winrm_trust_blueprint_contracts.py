@@ -52,7 +52,6 @@ def test_worker_winrm_trust_get_route_is_owned_by_the_blueprint_without_duplicat
 
     assert len(rules) == 1
     assert rules[0].endpoint == "winrm_trust.api_get_winrm_trust"
-    assert callable(worker.api_get_winrm_trust)
 
 
 def test_worker_winrm_trust_get_blueprint_resolves_runtime_dependencies(monkeypatch):

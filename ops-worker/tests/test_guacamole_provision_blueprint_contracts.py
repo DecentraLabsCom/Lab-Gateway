@@ -147,8 +147,6 @@ def test_worker_guacamole_provision_routes_are_owned_by_the_blueprint(monkeypatc
         "guacamole_provision.api_internal_guacamole_provision",
         "guacamole_provision.api_internal_guacamole_delete",
     }
-    assert callable(worker.api_internal_guacamole_provision)
-    assert callable(worker.api_internal_guacamole_delete)
 
     client = worker.APP.test_client()
     post_response = client.post(

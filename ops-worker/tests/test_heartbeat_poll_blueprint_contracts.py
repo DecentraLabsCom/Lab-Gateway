@@ -55,7 +55,6 @@ def test_worker_heartbeat_poll_route_is_owned_by_the_blueprint_without_duplicate
 
     assert len(rules) == 1
     assert rules[0].endpoint == "heartbeat_poll.api_poll_heartbeat"
-    assert callable(worker.api_poll_heartbeat)
 
 
 def test_worker_heartbeat_poll_blueprint_resolves_runtime_dependencies(monkeypatch):

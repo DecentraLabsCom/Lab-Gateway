@@ -91,4 +91,3 @@ def test_worker_operations_route_is_owned_by_the_blueprint_without_duplicates():
 
     assert len(rules) == 1
     assert rules[0].endpoint == "operations.api_operations_recent"
-    assert callable(worker.api_operations_recent)

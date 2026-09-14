@@ -74,7 +74,6 @@ def test_worker_hosts_discover_route_is_owned_by_the_blueprint_and_resolves_runt
     ]
     assert len(rules) == 1
     assert rules[0].endpoint == "hosts_discover.api_hosts_discover"
-    assert callable(worker.api_hosts_discover)
 
     response = worker.APP.test_client().post(
         "/api/hosts/discover",

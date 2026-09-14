@@ -47,7 +47,6 @@ def test_worker_heartbeat_stream_route_is_owned_by_the_blueprint_without_duplica
 
     assert len(rules) == 1
     assert rules[0].endpoint == "heartbeat_stream.api_stream_heartbeat"
-    assert callable(worker.api_stream_heartbeat)
 
 
 def test_worker_heartbeat_stream_blueprint_resolves_runtime_dependencies(monkeypatch):

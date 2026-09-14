@@ -21,7 +21,7 @@ def test_app_factory_preserves_import_name_and_registers_cross_cutting_hooks():
     assert len(app.before_request_funcs[None]) == 1
 
 
-def test_worker_constructs_app_through_the_factory_and_keeps_legacy_app_surface():
+def test_worker_constructs_app_through_the_factory_and_keeps_flask_app_surface():
     source = open(worker.__file__, encoding="utf-8").read()
 
     assert "APP = create_app(" in source
