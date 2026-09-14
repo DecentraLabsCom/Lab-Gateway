@@ -237,6 +237,38 @@ JWT_KEY_OVERLAP_SECONDS="${JWT_KEY_OVERLAP_SECONDS:-14400}"
 JWT_KEY_REFRESH_INTERVAL_SECONDS="${JWT_KEY_REFRESH_INTERVAL_SECONDS:-300}"
 JWT_KEY_CONTEXT="$SSL_DIR/.jwt-key-context"
 FULL_JWT_PUBLIC_KEY="/etc/openresty/jwt-keys/public_key.pem"
+
+# The certs bind mount is normally owned by HOST_UID/HOST_GID. Some
+# Docker Desktop/CI mounts expose it as root-owned and read-only to the
+# OpenResty user, however. Keep the canonical TLS and public-key paths
+# unchanged when they are writable, and move only JWT rotation state to the
+# durable writable state mount when they are not. This preserves the
+# Full/Lite trust contract without broadening certs/ permissions.
+JWT_ROTATION_STATE_DIR="${JWT_ROTATION_STATE_PATH:-${FMU_ACCESS_STATE_PATH:-/var/lib/openresty/fmu-access}/jwt-rotation}"
+JWT_STATE_WRITE_TEST="$SSL_DIR/.jwt-state-write-test.$$"
+if touch "$JWT_STATE_WRITE_TEST" 2>/dev/null; then
+    rm -f "$JWT_STATE_WRITE_TEST"
+else
+    rm -f "$JWT_STATE_WRITE_TEST"
+    JWT_STATE_WRITE_TEST="$JWT_ROTATION_STATE_DIR/.jwt-state-write-test.$$"
+    if mkdir -p "$JWT_ROTATION_STATE_DIR" 2>/dev/null \
+        && touch "$JWT_STATE_WRITE_TEST" 2>/dev/null; then
+        rm -f "$JWT_STATE_WRITE_TEST"
+        REMOTE_JWT_PUBLIC_KEY="$JWT_ROTATION_STATE_DIR/public_key.pem"
+        JWT_PREVIOUS_PUBLIC_KEY="$JWT_ROTATION_STATE_DIR/previous_public_key.pem"
+        JWT_PREVIOUS_ISSUED_MARKER="$JWT_ROTATION_STATE_DIR/.previous_public_key_issued"
+        JWT_ACTIVE_SNAPSHOT="$JWT_ROTATION_STATE_DIR/.active_public_key.pem"
+        JWT_KEY_CONTEXT="$JWT_ROTATION_STATE_DIR/.jwt-key-context"
+        echo "INFO: certs/ is not writable; using writable JWT rotation state at $JWT_ROTATION_STATE_DIR"
+    else
+        echo "WARNING: neither certs/ nor $JWT_ROTATION_STATE_DIR is writable; JWT rotation state may not persist"
+    fi
+fi
+
+# init.lua and the public-key endpoint consume these values through Nginx's
+# inherited environment. Defaults remain the historical certs/ paths.
+export JWT_REMOTE_PUBLIC_KEY_PATH="$REMOTE_JWT_PUBLIC_KEY"
+export JWT_PREVIOUS_PUBLIC_KEY_PATH="$JWT_PREVIOUS_PUBLIC_KEY"
 JWT_PUBLIC_KEY="$REMOTE_JWT_PUBLIC_KEY"
 LOCAL_ISSUER="$(build_local_issuer)"
 ISSUER_OVERRIDE="$(trim "${ISSUER:-}" | sed 's:/*$::')"

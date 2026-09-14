@@ -198,17 +198,24 @@ end
 -- these paths is unsafe: a stale local Full key must never be accepted by a
 -- Lite gateway, and a downloaded remote key must never override Full mode.
 local active_key_path
+local remote_public_key_path = os.getenv("JWT_REMOTE_PUBLIC_KEY_PATH")
+if not remote_public_key_path or remote_public_key_path == "" then
+    remote_public_key_path = "/etc/ssl/private/public_key.pem"
+end
 if lite_mode then
     active_key_path = "/etc/ssl/private/public_key.pem"
+    if remote_public_key_path ~= active_key_path then
+        active_key_path = remote_public_key_path
+    end
 else
     active_key_path = "/etc/openresty/jwt-keys/public_key.pem"
 end
 local previous_key_path
-if lite_mode then
-    previous_key_path = "/etc/ssl/private/previous_public_key.pem"
-else
+previous_key_path = os.getenv("JWT_PREVIOUS_PUBLIC_KEY_PATH")
+if not previous_key_path or previous_key_path == "" then
     -- The backend key mount is read-only; the overlap copy is maintained by
-    -- init-ssl.sh in the writable cert volume for both deployment modes.
+    -- init-ssl.sh in the writable cert volume (or durable JWT state fallback)
+    -- for both deployment modes.
     previous_key_path = "/etc/ssl/private/previous_public_key.pem"
 end
 local key_paths = { active_key_path, previous_key_path }

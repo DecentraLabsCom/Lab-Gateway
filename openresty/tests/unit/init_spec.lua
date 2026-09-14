@@ -169,6 +169,32 @@ runner.describe("OpenResty init.lua", function()
         runner.assert.equals("http://guac.internal/guacamole/api", ngx.shared.config:get("guac_api_url"))
     end)
 
+    runner.it("uses durable JWT paths exported by the SSL bootstrap", function()
+        local remote_path = "/var/lib/openresty/fmu-access/jwt-rotation/public_key.pem"
+        local previous_path = "/var/lib/openresty/fmu-access/jwt-rotation/previous_public_key.pem"
+        local public_key = "-----BEGIN PUBLIC KEY-----\nfallback\n-----END PUBLIC KEY-----"
+        local ngx = run_init({
+            env = {
+                GUAC_ADMIN_USER = "admin",
+                GUAC_ADMIN_PASS = "really-strong-secret",
+                SERVER_NAME = "gateway.example",
+                HTTPS_PORT = "443",
+                ISSUER = "https://issuer.example/auth",
+                JWT_REMOTE_PUBLIC_KEY_PATH = remote_path,
+                JWT_PREVIOUS_PUBLIC_KEY_PATH = previous_path
+            },
+            files = {
+                [remote_path] = public_key,
+                [previous_path] = "previous-fallback-key"
+            }
+        })
+
+        runner.assert.equals(remote_path, ngx.shared.config:get("jwt_public_key_path"))
+        runner.assert.equals(previous_path, ngx.shared.config:get("jwt_previous_public_key_path"))
+        runner.assert.equals(public_key, ngx.shared.cache:get("public_key"))
+        runner.assert.equals("previous-fallback-key", ngx.shared.cache:get("public_key_previous"))
+    end)
+
     runner.it("defaults FMU runner to disabled even in lite mode when FMU_RUNNER_ENABLED is empty", function()
         local ngx = run_init({
             env = {
