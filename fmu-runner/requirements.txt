@@ -1,6 +1,6 @@
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
-fmpy==0.3.31
+fmpy==0.3.32
 pyjwt[crypto]==2.13.0
 httpx==0.28.1
 websockets==17.1
