@@ -374,6 +374,11 @@ _RUNTIME_PATHS = load_runtime_paths(
     secret_loader=_env_or_secret_file,
     default_config_path=os.path.join(os.path.dirname(__file__), "hosts.json"),
 )
+# These names are populated from the immutable runtime snapshot below. Keep
+# their public types visible to static analyzers that cannot evaluate the
+# dynamic namespace publication performed by ``publish_runtime_paths``.
+CONFIG_PATH: str
+DYNAMIC_CONFIG_PATH: str
 publish_runtime_paths(_RUNTIME_PATHS, globals())
 
 
@@ -393,6 +398,12 @@ _RUNTIME_POLICY = load_runtime_policy(
     log_error=logging.error,
 )
 publish_runtime_policy(_RUNTIME_POLICY, globals())
+# ``publish_runtime_policy`` preserves the worker's historical module-level
+# names, so declare the values used by callers and tests for type checkers.
+GUACAMOLE_PROVISIONER_TOKEN: str
+WINRM_MANAGEMENT_CIDRS: List[str]
+NOTIFICATION_SERVICE_URL: str
+NOTIFICATION_SERVICE_RECIPIENTS: List[str]
 # The Ops Worker is intentionally not a public API. OpenResty authenticates
 # the operator at the edge and injects this separate, gateway-local credential.
 OPS_INTERNAL_AUTH_TOKEN = _RUNTIME_POLICY.ops_internal_auth_token

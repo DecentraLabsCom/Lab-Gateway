@@ -54,6 +54,7 @@ def test_heartbeat_poll_route_contract_maps_trust_errors_to_conflict(client, mon
     response = client.post("/api/heartbeat/poll", json={"host": "lab-ws-01"})
 
     assert response.status_code == 409
+    assert response.json["error"] == worker.WINRM_TLS_FAILED_MESSAGE
     assert response.json["code"] == "WINRM_TLS_FAILED"
     assert response.json["host"] == "lab-ws-01"
     assert "secret details" not in response.get_data(as_text=True)

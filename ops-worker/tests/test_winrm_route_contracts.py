@@ -128,6 +128,7 @@ def test_winrm_route_contract_maps_trust_errors_without_details(client, monkeypa
     )
 
     assert response.status_code == 409
+    assert response.json["error"] == worker.WINRM_CERTIFICATE_INVALID_MESSAGE
     assert response.json["code"] == "WINRM_TRUST_INVALID"
     assert response.json["requestId"] == "winrm-route-1"
     assert "secret details" not in response.get_data(as_text=True)
