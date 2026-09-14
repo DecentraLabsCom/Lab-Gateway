@@ -61,6 +61,14 @@ class TlsAutomationContractTest(unittest.TestCase):
         self.assertIn("RENEWED_LINEAGE=", block)
         self.assertIn("/etc/letsencrypt/live/$$primary_domain", block)
 
+    def test_certbot_init_uses_explicit_shell_argv(self):
+        block = service_block("certbot-init", self.compose)
+        self.assertRegex(
+            block,
+            r"entrypoint:\s*\n\s*- /bin/sh\s*\n\s*- -c\s*\n",
+        )
+        self.assertNotIn("entrypoint: >", block)
+
     def test_manual_certbot_service_uses_certbot_as_entrypoint(self):
         block = service_block("certbot", self.compose)
         self.assertIn('entrypoint: ["certbot"]', block)

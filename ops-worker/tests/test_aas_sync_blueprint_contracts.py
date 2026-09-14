@@ -97,7 +97,6 @@ def test_worker_aas_sync_route_is_owned_by_the_blueprint(monkeypatch):
     rules = [rule for rule in worker.APP.url_map.iter_rules() if rule.rule == "/api/aas-sync"]
     assert len(rules) == 1
     assert rules[0].endpoint == "aas_sync.api_aas_sync"
-    assert callable(worker.api_aas_sync)
 
     response = worker.APP.test_client().post("/api/aas-sync", json={"host": "lab-ws-01"})
 

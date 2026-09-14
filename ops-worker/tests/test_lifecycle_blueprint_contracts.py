@@ -104,11 +104,6 @@ def test_worker_lifecycle_routes_are_owned_by_the_blueprint_and_resolve_handlers
         "lifecycle.api_demo_event",
         "lifecycle.api_demo_end",
     }
-    assert callable(worker.api_reservation_start)
-    assert callable(worker.api_reservation_end)
-    assert callable(worker.api_demo_start)
-    assert callable(worker.api_demo_event)
-    assert callable(worker.api_demo_end)
 
     client = worker.APP.test_client()
     for name, config in handlers.items():

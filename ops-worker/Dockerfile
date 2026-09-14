@@ -24,7 +24,6 @@ COPY entrypoint.py /app/entrypoint.py
 COPY entrypoint_runtime.py /app/entrypoint_runtime.py
 COPY app_hooks.py /app/app_hooks.py
 COPY app_hooks_runtime.py /app/app_hooks_runtime.py
-COPY legacy_api.py /app/legacy_api.py
 COPY runtime_context.py /app/runtime_context.py
 COPY runtime_composition.py /app/runtime_composition.py
 COPY runtime_values.py /app/runtime_values.py
@@ -54,6 +53,7 @@ COPY reservation_runtime.py /app/reservation_runtime.py
 COPY winrm_runtime.py /app/winrm_runtime.py
 COPY session_observations.py /app/session_observations.py
 COPY session_observation_runtime.py /app/session_observation_runtime.py
+COPY session_observation_maintenance.py /app/session_observation_maintenance.py
 COPY reservation_operations.py /app/reservation_operations.py
 COPY reservation_lifecycle_runtime.py /app/reservation_lifecycle_runtime.py
 COPY reservation_execution_runtime.py /app/reservation_execution_runtime.py

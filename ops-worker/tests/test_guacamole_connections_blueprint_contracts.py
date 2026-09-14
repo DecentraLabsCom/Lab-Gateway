@@ -44,4 +44,3 @@ def test_worker_guacamole_connections_route_is_owned_by_the_blueprint_without_du
 
     assert len(rules) == 1
     assert rules[0].endpoint == "guacamole_connections.api_internal_guacamole_connections"
-    assert callable(worker.api_internal_guacamole_connections)

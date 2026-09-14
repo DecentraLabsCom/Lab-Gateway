@@ -140,8 +140,10 @@ compose exec -T ops-worker python -c \
 history_hash="$(printf '%s' "$history_token" | sha256sum | cut -d' ' -f1)"
 mysql_query "$blockchain_database" "UPDATE guacamole_token_revocation_queue SET status = 'REVOKED', expires_at = UTC_TIMESTAMP() + INTERVAL 5 MINUTE WHERE token_hash = '$history_hash';"
 mysql_query "$guacamole_database" "INSERT INTO guacamole_connection_history (username, connection_name, start_date, end_date) VALUES ('$history_user', 'resilience-history-connection', UTC_TIMESTAMP(), UTC_TIMESTAMP());"
-compose exec -T ops-worker python -c \
-  'import worker; worker.requests.get = lambda *args, **kwargs: type("Response", (), {"status_code": 200, "json": lambda self: {}})(); worker._reconcile_guacamole_observations("unused-admin-token", "mysql")'
+compose exec -T ops-worker python -m session_observation_maintenance \
+  --admin-token unused-admin-token \
+  --data-source mysql \
+  --active-connections-json '{}'
 observation_count="$(mysql_query "$blockchain_database" "SELECT COUNT(*) FROM gateway_session_observation_outbox WHERE dedup_key = '$history_hash' AND access_type = 'guacamole';")"
 if [[ "$observation_count" != "1" ]]; then
   echo "Guacamole history did not produce a durable session observation (count=$observation_count)." >&2

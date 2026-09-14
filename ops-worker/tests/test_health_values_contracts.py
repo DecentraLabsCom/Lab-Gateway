@@ -54,10 +54,9 @@ def test_health_route_contract_preserves_healthy_payload_shape(monkeypatch):
     monkeypatch.setattr(worker, "demo_readiness", lambda: demo)
     monkeypatch.setattr(worker, "HOSTS", _Hosts())
 
-    with worker.APP.test_request_context("/health"):
-        response, status = worker.health()
+    response = worker.APP.test_client().get("/health")
 
-    assert status == 200
+    assert response.status_code == 200
     assert response.get_json() == {
         "status": "ok",
         "hosts_loaded": 2,
@@ -81,10 +80,9 @@ def test_health_route_contract_marks_failed_revocation_queue_degraded(monkeypatc
     monkeypatch.setattr(worker, "demo_readiness", lambda: {"status": "disabled", "checks": {}})
     monkeypatch.setattr(worker, "HOSTS", _Hosts())
 
-    with worker.APP.test_request_context("/health"):
-        response, status = worker.health()
+    response = worker.APP.test_client().get("/health")
 
-    assert status == 503
+    assert response.status_code == 503
     payload = response.get_json()
     assert payload["status"] == "degraded"
     assert payload["guacamole_failed_revocations"] == 2

@@ -435,28 +435,29 @@ services:
     depends_on:
       openresty:
         condition: service_started
-    entrypoint: >
-      sh -c '
-      if [ -z "$$CERTBOT_DOMAINS" ] || [ -z "$$CERTBOT_EMAIL" ]; then
-        echo "CERTBOT_DOMAINS or CERTBOT_EMAIL not set; skipping initial cert issuance";
-        exit 0;
-      fi;
-      primary_domain=$$(printf '%s' "$$CERTBOT_DOMAINS" | cut -d',' -f1 | tr -d ' ');
-      live_cert="/etc/letsencrypt/live/$$primary_domain/fullchain.pem";
-      live_key="/etc/letsencrypt/live/$$primary_domain/privkey.pem";
-      if [ -s "$$live_cert" ] && [ -s "$$live_key" ] &&
-         openssl x509 -in "$$live_cert" -checkend 0 -noout >/dev/null 2>&1 &&
-         openssl pkey -in "$$live_key" -noout >/dev/null 2>&1; then
-        echo "Valid certificate already present for $$primary_domain; promoting it to the canonical TLS paths";
-        RENEWED_LINEAGE="/etc/letsencrypt/live/$$primary_domain" sh /usr/local/bin/deploy-hook.sh;
-        exit 0;
-      fi;
-      domains="";
-      for d in $$(printf '%s' "$$CERTBOT_DOMAINS" | tr ',' ' '); do domains="$$domains -d $$d"; done;
-      staging="";
-      if [ "$$CERTBOT_STAGING" = "1" ]; then staging="--staging"; fi;
-      certbot certonly --non-interactive --agree-tos $$staging --webroot -w /var/www/certbot $$domains -m "$$CERTBOT_EMAIL" --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
-      '
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$$CERTBOT_DOMAINS" ] || [ -z "$$CERTBOT_EMAIL" ]; then
+          echo "CERTBOT_DOMAINS or CERTBOT_EMAIL not set; skipping initial cert issuance";
+          exit 0;
+        fi
+        primary_domain=$$(printf '%s' "$$CERTBOT_DOMAINS" | cut -d',' -f1 | tr -d ' ')
+        live_cert="/etc/letsencrypt/live/$$primary_domain/fullchain.pem"
+        live_key="/etc/letsencrypt/live/$$primary_domain/privkey.pem"
+        if [ -s "$$live_cert" ] && [ -s "$$live_key" ] &&
+           openssl x509 -in "$$live_cert" -checkend 0 -noout >/dev/null 2>&1 &&
+           openssl pkey -in "$$live_key" -noout >/dev/null 2>&1; then
+          echo "Valid certificate already present for $$primary_domain; promoting it to the canonical TLS paths"
+          RENEWED_LINEAGE="/etc/letsencrypt/live/$$primary_domain" sh /usr/local/bin/deploy-hook.sh
+          exit 0
+        fi
+        domains=""
+        for d in $$(printf '%s' "$$CERTBOT_DOMAINS" | tr ',' ' '); do domains="$$domains -d $$d"; done
+        staging=""
+        if [ "$$CERTBOT_STAGING" = "1" ]; then staging="--staging"; fi
+        certbot certonly --non-interactive --agree-tos $$staging --webroot -w /var/www/certbot $$domains -m "$$CERTBOT_EMAIL" --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
     environment:
       - CERTBOT_DOMAINS=${CERTBOT_DOMAINS}
       - CERTBOT_EMAIL=${CERTBOT_EMAIL}

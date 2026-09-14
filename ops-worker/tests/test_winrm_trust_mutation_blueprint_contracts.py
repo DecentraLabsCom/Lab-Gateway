@@ -152,8 +152,6 @@ def test_worker_winrm_trust_mutations_are_owned_by_the_blueprint(monkeypatch):
         "winrm_trust_mutation.api_save_winrm_trust",
         "winrm_trust_mutation.api_delete_winrm_trust",
     }
-    assert callable(worker.api_save_winrm_trust)
-    assert callable(worker.api_delete_winrm_trust)
 
     client = worker.APP.test_client()
     put_response = client.put(

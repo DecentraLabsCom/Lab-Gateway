@@ -43,10 +43,10 @@ def test_ops_worker_image_copies_the_runtime_config_module():
     assert "COPY runtime_config.py /app/runtime_config.py" in dockerfile.read_text(encoding="utf-8")
 
 
-def test_ops_worker_image_copies_the_legacy_api_compatibility_module():
+def test_ops_worker_image_does_not_copy_the_removed_legacy_api_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
-    assert "COPY legacy_api.py /app/legacy_api.py" in dockerfile.read_text(encoding="utf-8")
+    assert "legacy_api.py" not in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_runtime_context_module():
@@ -281,6 +281,12 @@ def test_ops_worker_image_copies_the_session_observation_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY session_observation_runtime.py /app/session_observation_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_session_observation_maintenance_command():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY session_observation_maintenance.py /app/session_observation_maintenance.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_reservation_operations_module():

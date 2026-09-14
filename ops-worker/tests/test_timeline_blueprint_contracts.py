@@ -46,4 +46,3 @@ def test_worker_timeline_route_is_owned_by_the_blueprint_without_duplicates():
 
     assert len(rules) == 1
     assert rules[0].endpoint == "timeline.api_reservation_timeline"
-    assert callable(worker.api_reservation_timeline)

@@ -118,7 +118,6 @@ def test_worker_local_mode_route_is_owned_by_the_blueprint(monkeypatch):
     rules = [rule for rule in worker.APP.url_map.iter_rules() if rule.rule == "/api/hosts/local-mode"]
     assert len(rules) == 1
     assert rules[0].endpoint == "local_mode.api_hosts_local_mode"
-    assert callable(worker.api_hosts_local_mode)
 
     response = worker.APP.test_client().post(
         "/api/hosts/local-mode", json={"host": "lab-ws-01", "enabled": "yes"}

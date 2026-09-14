@@ -86,4 +86,3 @@ def test_worker_health_route_is_owned_by_the_blueprint_without_duplicates():
 
     assert len(rules) == 1
     assert rules[0].endpoint == "health.api_health"
-    assert callable(worker.health)

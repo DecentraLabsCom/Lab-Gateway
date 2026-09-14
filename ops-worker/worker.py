@@ -39,7 +39,6 @@ from app_hooks import (
     sanitize_log_value as _sanitize_log_value_impl,
 )
 from app_hooks_runtime import create_app_hooks_runtime
-from legacy_api import create_legacy_api
 from runtime_context import RuntimeContext
 from runtime_composition import compose_worker_app
 from cryptography import x509
@@ -709,11 +708,10 @@ _HOST_RELOAD_RUNTIME = create_host_reload_runtime(globals())
 reload_hosts = _HOST_RELOAD_RUNTIME.reload_hosts
 
 
-_RUNTIME_CONTEXT, _LEGACY_API = compose_worker_app(
+_RUNTIME_CONTEXT = compose_worker_app(
     APP,
     globals(),
     context_factory=RuntimeContext,
-    legacy_factory=create_legacy_api,
     register_blueprints=register_blueprints,
 )
 

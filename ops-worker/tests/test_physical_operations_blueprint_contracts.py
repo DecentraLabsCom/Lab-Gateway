@@ -134,8 +134,6 @@ def test_worker_physical_operations_routes_are_owned_by_the_blueprint(monkeypatc
         "physical_operations.api_wol",
         "physical_operations.api_winrm",
     }
-    assert callable(worker.api_wol)
-    assert callable(worker.api_winrm)
 
     client = worker.APP.test_client()
     wol_response = client.post("/api/wol", json={"host": "lab-ws-01"})
