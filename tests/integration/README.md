@@ -29,6 +29,21 @@ resilience timeout. CI uses
 backend env, and Compose secret override; it never needs the developer's
 production `.env` or `secrets/` directory.
 
+## Compose profile smoke (PowerShell)
+
+Use the profile smoke when Docker Desktop is available on Windows:
+
+```powershell
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass `
+  -File .\tests\integration\verify-compose-profiles.ps1
+```
+
+It validates the base Compose file and every optional profile, exercises the
+Certbot no-op path, and checks both Cloudflare images without starting a
+public tunnel. Add `-Runtime` to verify `/health` and `/gateway/mode` on the
+already running root stack. The script never calls `docker compose down`, so
+it can be run while a developer stack is in use.
+
 ## What is covered
 
 - `/health` and `/gateway/health`
@@ -203,6 +218,7 @@ tests/integration/
 |- run-integration.sh
 |- run-compose-stack-integration.sh
 |- prepare-real-compose-ci.sh
+|- verify-compose-profiles.ps1
 |- docker-compose.integration.yml
 |- certs/generate-certs.sh
 `- mocks/

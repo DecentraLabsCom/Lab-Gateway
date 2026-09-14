@@ -313,7 +313,9 @@ local result = health_values.build_result({
     lite_auth = lite_auth,
     configured_issuer = configured_issuer,
     local_issuer = local_issuer,
-    public_key_file_present = file_exists(PUBLIC_KEY_PATH),
+    public_key_file_present = file_exists(
+        (config and config:get("jwt_public_key_path")) or PUBLIC_KEY_PATH
+    ),
     fmu_runner_ok = fmu_runner_ok,
     fmu_runner_enabled = fmu_runner_enabled,
     fmu_runner_status = fmu_runner_status,
