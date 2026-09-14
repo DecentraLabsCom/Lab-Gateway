@@ -4,6 +4,11 @@ from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def normalize_match_key(value: Optional[Any]) -> str:
+    """Normalize a catalog value for case-insensitive host matching."""
+    return str(value or "").strip().lower()
+
+
 def guacamole_name_candidates(
     connection: Dict[str, Any],
     *,

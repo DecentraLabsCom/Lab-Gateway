@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from typing import Any, Dict
+
 
 class WinRMTrustError(ValueError):
     """Operational error raised when a Station certificate cannot be trusted."""
@@ -42,3 +45,20 @@ WINRM_CREDENTIALS_REQUIRED_MESSAGE = "WinRM credentials are required"
 def is_missing_winrm_credentials_error(exc: BaseException) -> bool:
     """Return whether an exception carries the stable missing-credentials contract."""
     return isinstance(exc, ValueError) and str(exc) == WINRM_CREDENTIALS_REQUIRED_MESSAGE
+
+
+def build_winrm_trust_error_payload(
+    host_name: Any,
+    code: str,
+    *,
+    request_id: Callable[[], str],
+    trust_error_messages: Mapping[str, str] = WINRM_TRUST_ERROR_MESSAGES,
+) -> Dict[str, Any]:
+    """Build the stable public payload for a WinRM trust failure."""
+    normalized_code = code if code in trust_error_messages else "WINRM_TRUST_INVALID"
+    return {
+        "error": trust_error_messages[normalized_code],
+        "code": normalized_code,
+        "host": host_name,
+        "requestId": request_id(),
+    }

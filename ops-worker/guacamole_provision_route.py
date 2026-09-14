@@ -1,6 +1,26 @@
 """Composition for the internal Guacamole temporary-user provision route."""
 
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any, Callable, Dict, Optional, Tuple
+
+
+def check_guacamole_provisioner_auth(
+    headers: Mapping[str, Any],
+    *,
+    expected_token: str,
+    token_header: str,
+    jsonify: Callable[[Any], Any],
+) -> Any:
+    """Validate the gateway-local Guacamole provisioner credential."""
+    expected = str(expected_token or "").strip()
+    if not expected:
+        return None
+    provided = headers.get(token_header)
+    if not provided and token_header.lower() != "x-lab-manager-token":
+        provided = headers.get("X-Lab-Manager-Token")
+    if provided != expected:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    return None
 
 
 def handle_guacamole_provision(

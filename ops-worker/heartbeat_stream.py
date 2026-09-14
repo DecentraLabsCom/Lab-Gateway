@@ -5,6 +5,11 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Dict, Type
 
 
+def format_sse_event(event: str, data: str) -> str:
+    """Serialize one event using the gateway's stable SSE framing."""
+    return f"event: {event}\ndata: {data}\n\n"
+
+
 def generate_heartbeat_stream(
     host: Mapping[str, Any],
     include_events: bool,

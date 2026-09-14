@@ -48,3 +48,61 @@ def test_host_catalog_rejects_hosts_outside_management_network():
             {"hosts": [_host()]},
             cidrs=("10.0.0.0/8",),
         )
+
+
+def test_catalog_bool_contract_accepts_supported_values_and_rejects_unknown_text():
+    assert host_catalog.catalog_bool(None) is True
+    assert host_catalog.catalog_bool("") is True
+    assert host_catalog.catalog_bool("true") is True
+    assert host_catalog.catalog_bool("1") is True
+    assert host_catalog.catalog_bool("off") is False
+    assert host_catalog.catalog_bool(False) is False
+
+    with pytest.raises(ValueError, match="winrm_use_ssl must be a boolean"):
+        host_catalog.catalog_bool("maybe")
+
+
+def test_resolve_addresses_contract_preserves_literal_and_dns_resolution():
+    assert host_catalog.resolve_addresses(
+        "192.168.1.50",
+        ip_address=ipaddress.ip_address,
+        getaddrinfo=__import__("socket").getaddrinfo,
+    ) == [ipaddress.ip_address("192.168.1.50")]
+
+    ip_calls = []
+
+    def fake_ip_address(value):
+        if not ip_calls:
+            ip_calls.append(value)
+            raise ValueError("dns")
+        return ipaddress.ip_address(value)
+
+    result = host_catalog.resolve_addresses(
+        "station.local",
+        ip_address=fake_ip_address,
+        getaddrinfo=lambda *_args, **_kwargs: [
+            (2, 1, 6, "", ("192.168.1.50", 0)),
+            (2, 1, 6, "", ("192.168.1.51", 0)),
+        ],
+    )
+
+    assert set(result) == {
+        ipaddress.ip_address("192.168.1.50"),
+        ipaddress.ip_address("192.168.1.51"),
+    }
+
+
+def test_resolve_addresses_contract_fails_closed_for_unresolvable_names():
+    with pytest.raises(ValueError, match="cannot be resolved"):
+        host_catalog.resolve_addresses(
+            "station.local",
+            ip_address=lambda _value: (_ for _ in ()).throw(ValueError("dns")),
+            getaddrinfo=lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("offline")),
+        )
+
+    with pytest.raises(ValueError, match="cannot be resolved"):
+        host_catalog.resolve_addresses(
+            "station.local",
+            ip_address=lambda _value: (_ for _ in ()).throw(ValueError("dns")),
+            getaddrinfo=lambda *_args, **_kwargs: [],
+        )

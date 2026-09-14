@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_gateway_error_contract_does_not_return_exception_text():
     ops = (ROOT / "ops-worker" / "worker.py").read_text(encoding="utf-8")
+    app_hooks = (ROOT / "ops-worker" / "app_hooks.py").read_text(encoding="utf-8")
     aas = (ROOT / "ops-worker" / "aas_generator.py").read_text(encoding="utf-8")
     auth = (ROOT / "fmu-runner" / "auth.py").read_text(encoding="utf-8")
     backend = (ROOT / "fmu-runner" / "fmu_backend.py").read_text(encoding="utf-8")
@@ -14,10 +15,10 @@ def test_gateway_error_contract_does_not_return_exception_text():
     realtime = (ROOT / "fmu-runner" / "realtime_ws.py").read_text(encoding="utf-8")
     station = (ROOT / "fmu-runner" / "station_ws_proxy.py").read_text(encoding="utf-8")
 
-    assert "def internal_error_response" in ops
-    assert "def handle_unexpected_exception" in ops
-    assert 'jsonify({"error": str(exc)}), 500' not in ops
-    assert 'jsonify({"success": False, "error": str(exc)}), 500' not in ops
+    assert "def internal_error_response" in app_hooks
+    assert "def handle_unexpected_exception" in app_hooks
+    assert 'jsonify({"error": str(exc)}), 500' not in ops + app_hooks
+    assert 'jsonify({"success": False, "error": str(exc)}), 500' not in ops + app_hooks
     assert 'result["error"] = f"BaSyx unreachable: {exc}"' not in aas
     assert 'detail=f"Invalid token: {exc}"' not in auth
     assert 'detail=f"Station backend unavailable: {exc}"' not in backend

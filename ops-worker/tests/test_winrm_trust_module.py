@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import ipaddress
 import os
+import re
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -12,6 +13,7 @@ import errors
 import winrm_trust
 import winrm_trust_store
 import worker
+from werkzeug.utils import secure_filename
 
 
 def _certificate(address: str = "192.168.1.50") -> x509.Certificate:
@@ -56,6 +58,54 @@ def test_certificate_datetime_format_is_utc_and_stable():
     assert winrm_trust._format_certificate_datetime(value) == "2026-09-12T08:11:12.345678Z"
 
 
+def test_trust_reference_normalization_contract_rejects_traversal_and_keeps_case_insensitive_ids():
+    pattern = re.compile(r"^[A-Za-z0-9._-]+$")
+
+    assert winrm_trust.normalize_trust_ref(
+        "PC-Siemens",
+        secure_filename=secure_filename,
+        trust_ref_pattern=pattern,
+    ) == "pc-siemens"
+
+    for value in ("station..\\..\\outside", "station..outside", "bad/ref"):
+        with pytest.raises(ValueError, match="winrm_trust_ref"):
+            winrm_trust.normalize_trust_ref(
+                value,
+                secure_filename=secure_filename,
+                trust_ref_pattern=pattern,
+            )
+
+
+def test_trust_host_reference_and_root_contract_preserve_precedence_and_rejection():
+    assert winrm_trust.trust_ref_for_host(
+        {"winrm_trust_ref": "PC-01", "name": "station", "address": "10.0.0.5"},
+        normalize_ref=lambda value: str(value).strip().lower(),
+    ) == "pc-01"
+    assert winrm_trust.resolve_trust_root(
+        "C:/trust",
+        realpath=lambda value: value,
+        abspath=lambda value: value,
+    ) == "C:/trust"
+
+
+def test_trust_file_path_contract_delegates_managed_reference_and_filename():
+    calls = []
+    result = winrm_trust.resolve_trust_file_path(
+        {"name": "station"},
+        "server.cer",
+        root="C:/trust",
+        trust_ref_for_host=lambda host: calls.append(host) or "station",
+        resolve_path=lambda root, reference, filename: (root, reference, filename),
+    )
+
+    assert result == ("C:/trust", "station", "server.cer")
+    assert calls == [{"name": "station"}]
+
+
+def test_worker_keeps_the_historical_trust_reference_facade():
+    assert worker.normalize_winrm_trust_ref("PC-Siemens") == "pc-siemens"
+
+
 def test_worker_keeps_the_historical_private_helper_aliases():
     assert worker._certificate_datetime is winrm_trust._certificate_datetime
     assert worker._certificate_matches_host is winrm_trust._certificate_matches_host
@@ -90,6 +140,34 @@ def test_trust_file_path_resolves_under_the_configured_root():
     with pytest.raises(errors.WinRMTrustError) as error:
         winrm_trust._resolve_winrm_trust_file_path(root, "pc-siemens", os.path.join("..", "..", "outside"))
     assert error.value.code == "WINRM_TRUST_INVALID"
+
+
+def test_trust_store_certificate_reader_preserves_size_and_missing_file_contract(tmp_path):
+    certificate_path = tmp_path / "server.cer"
+    certificate_path.write_bytes(b"certificate")
+
+    assert winrm_trust_store.read_trust_certificate(
+        str(certificate_path),
+        max_bytes=64,
+        parse_certificate_bytes=lambda raw: raw,
+    ) == b"certificate"
+
+    with pytest.raises(errors.WinRMTrustError) as missing:
+        winrm_trust_store.read_trust_certificate(
+            str(tmp_path / "missing.cer"),
+            max_bytes=64,
+            parse_certificate_bytes=lambda raw: raw,
+        )
+    assert missing.value.code == "WINRM_TRUST_REQUIRED"
+
+    certificate_path.write_bytes(b"x" * 65)
+    with pytest.raises(errors.WinRMTrustError) as oversized:
+        winrm_trust_store.read_trust_certificate(
+            str(certificate_path),
+            max_bytes=64,
+            parse_certificate_bytes=lambda raw: raw,
+        )
+    assert oversized.value.code == "WINRM_TRUST_INVALID"
 
 
 def test_trust_store_persists_bytes_atomically_and_round_trips_metadata(tmp_path):

@@ -1,5 +1,42 @@
 import worker
 
+from host_config_service import resolve_host_secret_refs
+
+
+def test_resolve_host_secret_refs_contract_sets_reference_and_removes_legacy_secrets():
+    warnings = []
+    raw = {
+        "hosts": [
+            {
+                "name": "station-01",
+                "address": "192.168.1.50",
+                "winrm_user": "legacy-user",
+                "winrm_pass": "legacy-pass",
+            },
+            {
+                "name": "station-02",
+                "address": "192.168.1.51",
+                "credential_ref": "Managed-02",
+            },
+        ]
+    }
+
+    result = resolve_host_secret_refs(
+        raw,
+        credential_ref_for_host=lambda host: str(
+            host.get("credential_ref") or host.get("address") or host.get("name")
+        ).lower(),
+        credentials_configured=lambda ref: ref == "managed-02",
+        warn=lambda *args: warnings.append(args),
+    )
+
+    assert result is raw
+    assert raw["hosts"] == [
+        {"name": "station-01", "address": "192.168.1.50", "credential_ref": "192.168.1.50"},
+        {"name": "station-02", "address": "192.168.1.51", "credential_ref": "Managed-02"},
+    ]
+    assert warnings == [("Missing WinRM credentials for host %s", "station-01")]
+
 
 def test_load_config_contract_preserves_read_merge_validate_and_secret_resolution(
     monkeypatch,

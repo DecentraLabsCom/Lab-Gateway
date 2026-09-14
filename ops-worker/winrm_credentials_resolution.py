@@ -4,6 +4,22 @@ from collections.abc import Callable
 from typing import Any, Dict, Optional, Tuple
 
 
+def normalize_credential_ref(value: Any) -> str:
+    """Normalize a stored credential reference for case-insensitive lookup."""
+    return str(value or "").strip().lower()
+
+
+def credential_ref_for_host(
+    host: Dict[str, Any],
+    *,
+    normalize_ref: Callable[[Any], str] = normalize_credential_ref,
+) -> str:
+    """Select the stable credential reference configured for one host."""
+    return normalize_ref(
+        host.get("credential_ref") or host.get("address") or host.get("name")
+    )
+
+
 def resolve_winrm_credentials(
     host: Dict[str, Any],
     user: Optional[str],

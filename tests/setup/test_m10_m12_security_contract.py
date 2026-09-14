@@ -30,6 +30,7 @@ def test_ops_worker_container_and_winrm_policy_are_hardened():
     dockerfile = (ROOT / "ops-worker" / "Dockerfile").read_text(encoding="utf-8")
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     worker = (ROOT / "ops-worker" / "worker.py").read_text(encoding="utf-8")
+    runtime_values = (ROOT / "ops-worker" / "runtime_values.py").read_text(encoding="utf-8")
     winrm_policy = (ROOT / "ops-worker" / "winrm_session_policy.py").read_text(encoding="utf-8")
     sample = (ROOT / "ops-worker" / "hosts.sample.json").read_text(encoding="utf-8")
     env = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -39,7 +40,7 @@ def test_ops_worker_container_and_winrm_policy_are_hardened():
     assert "read_only: true" in compose
     assert "no-new-privileges:true" in compose
     assert "cap_drop:" in compose
-    assert "WINRM_PORT = 5986" in worker
+    assert "WINRM_PORT = 5986" in runtime_values
     assert "WinRM HTTPS is required by gateway policy" in winrm_policy
     assert "request port does not match the host WinRM policy" in winrm_policy
     assert "request transport does not match the host WinRM policy" in winrm_policy

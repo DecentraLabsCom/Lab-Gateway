@@ -1,6 +1,29 @@
 from unittest.mock import Mock
 
 import worker
+from guacamole_provision_route import check_guacamole_provisioner_auth
+
+
+def test_guacamole_provisioner_auth_contract_preserves_header_precedence_and_disabled_mode():
+    unauthorized = check_guacamole_provisioner_auth(
+        {"X-Provisioner": "wrong"},
+        expected_token="secret",
+        token_header="X-Provisioner",
+        jsonify=lambda payload: payload,
+    )
+    assert unauthorized == ({"success": False, "error": "Unauthorized"}, 401)
+    assert check_guacamole_provisioner_auth(
+        {"X-Lab-Manager-Token": "secret"},
+        expected_token="secret",
+        token_header="X-Provisioner",
+        jsonify=lambda payload: payload,
+    ) is None
+    assert check_guacamole_provisioner_auth(
+        {},
+        expected_token="",
+        token_header="X-Provisioner",
+        jsonify=lambda payload: payload,
+    ) is None
 
 
 def test_guacamole_provision_route_contract_short_circuits_authorization(client, monkeypatch):

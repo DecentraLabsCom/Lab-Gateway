@@ -1,4 +1,19 @@
 import worker
+from input_values import coerce_bool
+
+
+def test_coerce_bool_contract_handles_supported_values_and_rejects_ambiguous_text():
+    assert coerce_bool(None) is None
+    assert coerce_bool("") is None
+    assert coerce_bool(True) is True
+    assert coerce_bool(0) is False
+    assert coerce_bool(" YES ") is True
+    assert coerce_bool("off") is False
+
+    import pytest
+
+    with pytest.raises(ValueError, match="WinRM use_ssl must be a boolean"):
+        coerce_bool("maybe")
 
 
 def test_parse_bool_contract_handles_defaults_booleans_and_string_tokens():

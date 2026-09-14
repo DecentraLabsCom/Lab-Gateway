@@ -1,4 +1,10 @@
 import worker
+from guacamole_connection_lookup import normalize_match_key
+
+
+def test_normalize_match_key_contract_is_case_insensitive_and_empty_safe():
+    assert normalize_match_key(" LAB-01 ") == "lab-01"
+    assert normalize_match_key(None) == ""
 
 
 def test_guacamole_name_candidates_contract_preserves_order_and_fallback(monkeypatch):
