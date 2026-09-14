@@ -8,7 +8,7 @@ existing callers continue to use the historical ``worker`` names.
 from datetime import datetime, timezone
 import ipaddress
 import os
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Optional, Pattern, Union
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -21,6 +21,61 @@ from errors import (
 
 
 WINRM_CERTIFICATE_MAX_BYTES = 64 * 1024
+
+
+def trust_ref_for_host(
+    host: Dict[str, Any],
+    *,
+    normalize_ref: Callable[[Any], str],
+) -> str:
+    """Select and normalize the managed trust reference for one host."""
+    return normalize_ref(
+        host.get("winrm_trust_ref") or host.get("name") or host.get("address")
+    )
+
+
+def resolve_trust_root(
+    path: str,
+    *,
+    realpath: Callable[[str], str] = os.path.realpath,
+    abspath: Callable[[str], str] = os.path.abspath,
+    trust_error_type: type[WinRMTrustError] = WinRMTrustError,
+    invalid_message: str = WINRM_CERTIFICATE_INVALID_MESSAGE,
+) -> str:
+    """Resolve the managed trust root without accepting an empty path."""
+    root = realpath(abspath(path))
+    if not root:
+        raise trust_error_type("WINRM_TRUST_INVALID", invalid_message)
+    return root
+
+
+def resolve_trust_file_path(
+    host: Dict[str, Any],
+    filename: str,
+    *,
+    root: str,
+    trust_ref_for_host: Callable[[Dict[str, Any]], str],
+    resolve_path: Optional[Callable[[str, str, str], str]] = None,
+) -> str:
+    """Resolve one managed trust file for a host under the configured root."""
+    resolver = resolve_path or _resolve_winrm_trust_file_path
+    return resolver(root, trust_ref_for_host(host), filename)
+
+
+def normalize_trust_ref(
+    value: Any,
+    *,
+    secure_filename: Callable[[str], str],
+    trust_ref_pattern: Pattern[str],
+) -> str:
+    """Normalize a host trust reference while rejecting traversal and ambiguity."""
+    raw_ref = str(value or "").strip().lower()
+    ref = secure_filename(raw_ref)
+    if ref != raw_ref or ".." in raw_ref or not trust_ref_pattern.fullmatch(ref):
+        raise ValueError(
+            "winrm_trust_ref must contain only letters, numbers, dots, underscores, and hyphens"
+        )
+    return ref
 
 
 def _resolve_winrm_trust_file_path(root: str, trust_ref: str, filename: str) -> str:

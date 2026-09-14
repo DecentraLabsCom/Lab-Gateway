@@ -1,8 +1,43 @@
 """Pure validation of the configured WinRM host catalog."""
 
 import ipaddress
+import socket
 from collections.abc import Callable, Sequence
 from typing import Any, Dict, List, Pattern
+
+
+def catalog_bool(value: Any) -> bool:
+    """Parse the catalog's required HTTPS boolean with its historical default."""
+    if value is None or value == "":
+        return True
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in ("true", "1", "yes", "on"):
+        return True
+    if normalized in ("false", "0", "no", "off"):
+        return False
+    raise ValueError("winrm_use_ssl must be a boolean")
+
+
+def resolve_addresses(
+    address: str,
+    *,
+    ip_address: Callable[[str], Any] = ipaddress.ip_address,
+    getaddrinfo: Callable[..., Sequence[Any]] = socket.getaddrinfo,
+) -> List[Any]:
+    """Resolve a literal or hostname into unique IP address objects."""
+    try:
+        return [ip_address(address)]
+    except ValueError:
+        try:
+            infos = getaddrinfo(address, None, type=socket.SOCK_STREAM)
+        except OSError as exc:
+            raise ValueError(f"address '{address}' cannot be resolved") from exc
+        resolved = {ip_address(info[4][0]) for info in infos}
+        if not resolved:
+            raise ValueError(f"address '{address}' cannot be resolved")
+        return list(resolved)
 
 
 def validate_winrm_catalog(

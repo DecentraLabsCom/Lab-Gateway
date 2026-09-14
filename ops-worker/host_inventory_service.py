@@ -4,6 +4,30 @@ from collections.abc import Callable, Sequence
 from typing import Any, Dict, List, Optional
 
 
+def build_host_inventory_from_sources(
+    registry: Any,
+    *,
+    hosts_lock: Any,
+    load_dynamic_config: Callable[[], Dict[str, Any]],
+    load_guacamole_connections: Callable[[], tuple[Sequence[Dict[str, Any]], Optional[str]]],
+    normalize_key: Callable[[Any], str],
+    safe_entry: Callable[..., Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Collect live inventory sources under the catalog lock and project them."""
+    with hosts_lock:
+        hosts = registry.all_hosts()
+    dynamic_config = load_dynamic_config()
+    guacamole_connections, guacamole_error = load_guacamole_connections()
+    return build_host_inventory(
+        hosts,
+        dynamic_config,
+        guacamole_connections,
+        guacamole_error,
+        normalize_key=normalize_key,
+        safe_entry=safe_entry,
+    )
+
+
 def build_host_inventory(
     hosts: Sequence[Dict[str, Any]],
     dynamic_config: Dict[str, Any],

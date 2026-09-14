@@ -3,6 +3,22 @@
 from typing import Any, List, Optional
 
 
+def coerce_bool(value: Any) -> Optional[bool]:
+    """Coerce a WinRM boolean option or reject an ambiguous value."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in ("true", "1", "yes", "on"):
+        return True
+    if normalized in ("false", "0", "no", "off"):
+        return False
+    raise ValueError("WinRM use_ssl must be a boolean")
+
+
 def parse_bool(value: Any, default: bool) -> bool:
     """Normalize common boolean representations while preserving defaults."""
     if value is None:
@@ -38,3 +54,6 @@ def parse_recipients(value: Any, default: Optional[List[str]] = None) -> List[st
             if normalized:
                 recipients.append(normalized)
     return recipients
+
+
+__all__ = ["coerce_bool", "normalize_args", "parse_bool", "parse_recipients"]

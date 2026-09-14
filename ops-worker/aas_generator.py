@@ -15,23 +15,13 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
 import requests
+from secret_values import env_or_secret_file as _env_or_secret_file_impl
 
 logger = logging.getLogger("ops-worker.aas")
 
 
 def _env_or_secret_file(name: str, default: str = "") -> str:
-    value = os.getenv(name)
-    if value:
-        return value
-    path = os.getenv(f"{name}_FILE")
-    if not path:
-        return default
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return handle.read().strip()
-    except OSError:
-        logger.warning("Unable to read secret file for %s", name)
-        return default
+    return _env_or_secret_file_impl(name, default, logger=logger)
 
 
 # Empty default: if not configured (e.g. Lite mode gateways without --profile aas),

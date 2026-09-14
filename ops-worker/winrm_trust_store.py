@@ -16,6 +16,38 @@ from cryptography.hazmat.primitives import serialization
 from errors import WINRM_TRUST_ERROR_MESSAGES, WinRMTrustError
 
 
+def read_trust_certificate(
+    path: str,
+    *,
+    max_bytes: int,
+    parse_certificate_bytes: Callable[[bytes], x509.Certificate],
+) -> x509.Certificate:
+    """Read one bounded certificate file and delegate DER/PEM parsing."""
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        raise WinRMTrustError("WINRM_TRUST_REQUIRED", "WinRM certificate file is required") from exc
+    if size <= 0 or size > max_bytes:
+        raise WinRMTrustError(
+            "WINRM_TRUST_INVALID",
+            WINRM_TRUST_ERROR_MESSAGES["WINRM_TRUST_INVALID"],
+        )
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(max_bytes + 1)
+    except OSError as exc:
+        raise WinRMTrustError(
+            "WINRM_TRUST_INVALID",
+            WINRM_TRUST_ERROR_MESSAGES["WINRM_TRUST_INVALID"],
+        ) from exc
+    if len(raw) > max_bytes:
+        raise WinRMTrustError(
+            "WINRM_TRUST_INVALID",
+            WINRM_TRUST_ERROR_MESSAGES["WINRM_TRUST_INVALID"],
+        )
+    return parse_certificate_bytes(raw)
+
+
 def write_trust_bytes(path: str, content: bytes) -> None:
     """Write trust material through a same-directory atomic replacement."""
     directory = os.path.dirname(path) or "."

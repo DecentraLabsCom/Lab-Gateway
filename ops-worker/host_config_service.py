@@ -17,10 +17,29 @@ __all__ = [
     "ConfigReader",
     "load_dynamic_config",
     "load_host_config",
+    "resolve_host_secret_refs",
     "update_dynamic_host",
     "upsert_dynamic_host",
     "write_dynamic_config",
 ]
+
+
+def resolve_host_secret_refs(
+    raw: Dict[str, Any],
+    *,
+    credential_ref_for_host: Callable[[Any], str],
+    credentials_configured: Callable[[str], bool],
+    warn: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Normalize host credential references without copying secret material."""
+    for host in raw.get("hosts", []):
+        if not host.get("credential_ref"):
+            host["credential_ref"] = host.get("address") or host.get("name")
+        host.pop("winrm_user", None)
+        host.pop("winrm_pass", None)
+        if not credentials_configured(credential_ref_for_host(host)):
+            warn("Missing WinRM credentials for host %s", host.get("name", "<unknown>"))
+    return raw
 
 
 def load_dynamic_config(

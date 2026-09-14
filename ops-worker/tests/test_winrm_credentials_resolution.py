@@ -3,6 +3,16 @@ import pytest
 import winrm_credentials_resolution
 
 
+def test_credential_reference_helpers_contract_preserves_precedence_and_normalization():
+    assert winrm_credentials_resolution.normalize_credential_ref(" LAB-01 ") == "lab-01"
+    assert winrm_credentials_resolution.credential_ref_for_host(
+        {"credential_ref": " Explicit ", "address": "10.0.0.5", "name": "lab-01"}
+    ) == "explicit"
+    assert winrm_credentials_resolution.credential_ref_for_host(
+        {"address": "10.0.0.5", "name": "lab-01"}
+    ) == "10.0.0.5"
+
+
 def test_credentials_resolution_uses_the_host_reference_and_store_callback():
     calls = []
     host = {"name": "lab-ws-01"}

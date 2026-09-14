@@ -5,6 +5,12 @@ import pytest
 import heartbeat_stream
 
 
+def test_format_sse_event_contract_preserves_wire_framing():
+    assert heartbeat_stream.format_sse_event("heartbeat", '{"ready":true}') == (
+        'event: heartbeat\ndata: {"ready":true}\n\n'
+    )
+
+
 class TrustFailure(ValueError):
     def __init__(self, code):
         super().__init__("trust failed")
