@@ -59,6 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!winrmTrustModule) {
         throw new Error('LabManagerWinrmTrust must load before lab-manager.js');
     }
+    const winrmTrustModalModule = window.LabManagerWinrmTrustModal;
+    if (!winrmTrustModalModule) {
+        throw new Error('LabManagerWinrmTrustModal must load before lab-manager.js');
+    }
     const hostProvisioningModule = window.LabManagerHostProvisioning;
     if (!hostProvisioningModule) {
         throw new Error('LabManagerHostProvisioning must load before lab-manager.js');
@@ -316,10 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const powerPolicyEditorHintEl = $('#powerPolicyEditorHint');
     const hostState = {};
     const hostMetadata = {};
-    let activeWinrmTrustHost = '';
-    let savedWinrmTrustStatus = 'loading';
-    let activeWinrmTrustFile = null;
-    let activeWinrmTrustPreview = null;
+    let winrmTrustModalController;
     const guacamoleCandidateState = {};
     const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
@@ -417,11 +418,11 @@ document.addEventListener('DOMContentLoaded', () => {
         formatErrorMessage: winrmTrustErrorMessage,
         callbacks: {
             onLoaded: (host, trust) => {
-                if (activeWinrmTrustHost === host) renderWinrmTrustState(trust);
+                if (winrmTrustModalController?.getState().activeHost === host) renderWinrmTrustState(trust);
             },
             onLoadError: (host, err) => {
-                if (activeWinrmTrustHost !== host) return;
-                savedWinrmTrustStatus = 'unavailable';
+                if (winrmTrustModalController?.getState().activeHost !== host) return;
+                winrmTrustModalController.markUnavailable();
                 updateWinrmTrustVerifyState();
                 if (winrmTrustCurrentEl) {
                     winrmTrustCurrentEl.textContent = `Unable to load trust: ${err.message}`;
@@ -429,11 +430,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast(`WinRM trust status failed: ${err.message}`, 'error');
             },
             onPreview: preview => {
-                activeWinrmTrustPreview = preview;
                 renderWinrmTrustPreview(preview);
             },
             onReady: preview => {
-                activeWinrmTrustPreview = preview;
                 renderWinrmTrustPreview(preview);
                 showToast('Certificate preview ready; verify the SHA-256 fingerprint', 'success');
             },
@@ -467,6 +466,29 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast,
         },
         logger: console,
+    });
+    winrmTrustModalController = winrmTrustModalModule.createController({
+        fields: {
+            modal: winrmTrustModal,
+            modalHost: winrmTrustModalHostEl,
+            current: winrmTrustCurrentEl,
+            certificate: winrmTrustCertificateEl,
+            certificateName: winrmTrustCertificateNameEl,
+            preview: winrmTrustPreviewEl,
+            previewDetails: winrmTrustPreviewDetailsEl,
+            fingerprintConfirmed: winrmTrustFingerprintConfirmedEl,
+            previewButton: previewWinrmTrustBtn,
+            saveButton: saveWinrmTrustBtn,
+            verifyButton: verifyWinrmTrustBtn,
+            deleteButton: deleteWinrmTrustBtn,
+        },
+        hostMetadata,
+        trustController: winrmTrustController,
+        pollHeartbeat,
+        formatDate,
+        showToast,
+        confirmImpl: message => window.confirm(message),
+        documentImpl: document,
     });
 
     powerControllersController = powerControllersModule.createController({
@@ -1244,197 +1266,59 @@ document.addEventListener('DOMContentLoaded', () => {
         await winrmCredentialsController.save(payload, saveWinrmCredentialsBtn);
     }
 
-    function winrmTrustStatusLabel(status) {
-        const labels = {
-            missing: 'missing',
-            ready: 'ready',
-            expired: 'expired',
-            'not-yet-valid': 'not yet valid',
-            invalid: 'invalid',
-            unavailable: 'unavailable',
-        };
-        return labels[String(status || '').trim().toLowerCase()] || 'unavailable';
-    }
-
-    function winrmTrustStatusClass(status) {
-        const normalized = String(status || '').trim().toLowerCase();
-        if (normalized === 'ready') return 'good';
-        if (normalized === 'missing' || normalized === 'unavailable') return 'warn';
-        return 'bad';
-    }
-
-    function appendTrustDetail(container, label, value) {
-        const item = document.createElement('div');
-        item.className = 'certificate-detail';
-        const labelEl = document.createElement('dt');
-        labelEl.textContent = label;
-        const valueEl = document.createElement('dd');
-        valueEl.textContent = value === null || value === undefined || value === '' ? 'n/a' : String(value);
-        item.append(labelEl, valueEl);
-        container.appendChild(item);
-    }
-
-    function renderWinrmTrustState(trust) {
-        const status = String(trust?.status || (trust?.configured ? 'ready' : 'missing'))
-            .trim()
-            .toLowerCase();
-        savedWinrmTrustStatus = status;
-        updateWinrmTrustVerifyState();
-        if (!winrmTrustCurrentEl) return;
-        winrmTrustCurrentEl.className = `winrm-trust-current ${winrmTrustStatusClass(status)}`;
-        winrmTrustCurrentEl.replaceChildren();
-
-        const title = document.createElement('strong');
-        title.textContent = `Current trust: ${winrmTrustStatusLabel(status)}`;
-        winrmTrustCurrentEl.appendChild(title);
-
-        const details = document.createElement('dl');
-        details.className = 'certificate-detail-grid';
-        appendTrustDetail(details, 'SHA-256', trust?.fingerprintSha256);
-        appendTrustDetail(details, 'SHA-1', trust?.fingerprintSha1);
-        appendTrustDetail(details, 'Subject', trust?.subject);
-        appendTrustDetail(details, 'SAN DNS', Array.isArray(trust?.sanDnsNames) ? trust.sanDnsNames.join(', ') : '');
-        appendTrustDetail(details, 'SAN IP', Array.isArray(trust?.sanIpAddresses) ? trust.sanIpAddresses.join(', ') : '');
-        appendTrustDetail(details, 'Valid until', trust?.notAfter ? formatDate(trust.notAfter) : '');
-        appendTrustDetail(details, 'Last validated', trust?.lastValidatedAt ? formatDate(trust.lastValidatedAt) : '');
-        appendTrustDetail(details, 'Error code', trust?.errorCode);
-        winrmTrustCurrentEl.appendChild(details);
-    }
-
-    function renderWinrmTrustPreview(preview) {
-        if (!winrmTrustPreviewEl || !winrmTrustPreviewDetailsEl) return;
-        winrmTrustPreviewEl.hidden = !preview;
-        winrmTrustPreviewDetailsEl.replaceChildren();
-        if (!preview) {
-            updateWinrmTrustSaveState();
-            return;
-        }
-
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Status', winrmTrustStatusLabel(preview.status));
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SHA-256', preview.fingerprintSha256);
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SHA-1', preview.fingerprintSha1);
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Subject', preview.subject);
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Issuer', preview.issuer);
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SAN DNS', Array.isArray(preview.sanDnsNames) ? preview.sanDnsNames.join(', ') : '');
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SAN IP', Array.isArray(preview.sanIpAddresses) ? preview.sanIpAddresses.join(', ') : '');
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Valid from', preview.notBefore ? formatDate(preview.notBefore) : '');
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Valid until', preview.notAfter ? formatDate(preview.notAfter) : '');
-        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Format', preview.format);
-        if (winrmTrustFingerprintConfirmedEl) winrmTrustFingerprintConfirmedEl.checked = false;
-        updateWinrmTrustSaveState();
-    }
-
-    function updateWinrmTrustVerifyState() {
-        if (!verifyWinrmTrustBtn) return;
-        verifyWinrmTrustBtn.disabled = !(
-            activeWinrmTrustHost &&
-            hostMetadata[activeWinrmTrustHost]?.winrmConfigured === true &&
-            savedWinrmTrustStatus === 'ready'
-        );
-    }
-
-    function updateWinrmTrustSaveState() {
-        if (previewWinrmTrustBtn) previewWinrmTrustBtn.disabled = !activeWinrmTrustFile;
-        if (saveWinrmTrustBtn) {
-            saveWinrmTrustBtn.disabled = !(
-                activeWinrmTrustFile &&
-                activeWinrmTrustPreview?.valid === true &&
-                winrmTrustFingerprintConfirmedEl?.checked === true
-            );
-        }
-        updateWinrmTrustVerifyState();
-    }
-
-    function handleWinrmTrustCertificateSelected() {
-        activeWinrmTrustFile = winrmTrustCertificateEl?.files?.[0] || null;
-        activeWinrmTrustPreview = null;
-        if (winrmTrustCertificateNameEl) {
-            winrmTrustCertificateNameEl.textContent = activeWinrmTrustFile?.name || 'No file selected';
-        }
-        renderWinrmTrustPreview(null);
-        updateWinrmTrustSaveState();
-    }
-
     function winrmTrustErrorMessage(body, status) {
         const code = String(body?.code || '').trim();
         const requestSuffix = body?.requestId ? ` (request ID ${body.requestId})` : '';
         return `${body?.error || `HTTP ${status}`}${code ? ` [${code}]` : ''}${requestSuffix}`;
     }
 
+    function renderWinrmTrustState(trust) {
+        return winrmTrustModalController?.renderState(trust);
+    }
+
+    function renderWinrmTrustPreview(preview) {
+        return winrmTrustModalController?.renderPreview(preview);
+    }
+
+    function updateWinrmTrustVerifyState() {
+        return winrmTrustModalController?.updateVerifyState();
+    }
+
+    function updateWinrmTrustSaveState() {
+        return winrmTrustModalController?.updateSaveState();
+    }
+
+    function handleWinrmTrustCertificateSelected() {
+        return winrmTrustModalController?.handleCertificateSelected();
+    }
+
     async function openWinrmTrustModal(host) {
-        if (!winrmTrustModal || !winrmTrustCertificateEl) {
-            showToast('WinRM TLS trust modal is unavailable', 'error');
-            return;
-        }
-        activeWinrmTrustHost = host;
-        savedWinrmTrustStatus = 'loading';
-        activeWinrmTrustFile = null;
-        activeWinrmTrustPreview = null;
-        winrmTrustCertificateEl.value = '';
-        if (winrmTrustCertificateNameEl) winrmTrustCertificateNameEl.textContent = 'No file selected';
-        if (winrmTrustModalHostEl) {
-            const meta = hostMetadata[host] || {};
-            winrmTrustModalHostEl.textContent = `Host: ${host} · Address: ${meta.address || 'n/a'}`;
-        }
-        if (winrmTrustFingerprintConfirmedEl) winrmTrustFingerprintConfirmedEl.checked = false;
-        renderWinrmTrustPreview(null);
-        if (winrmTrustCurrentEl) winrmTrustCurrentEl.textContent = 'Loading certificate trust state...';
-        updateWinrmTrustSaveState();
-        winrmTrustModal.classList.add('show');
-        await loadWinrmTrustState(host);
+        return winrmTrustModalController?.open(host);
     }
 
     async function loadWinrmTrustState(host) {
-        return winrmTrustController.load(host);
+        return winrmTrustModalController?.load(host);
     }
 
     function closeWinrmTrustModal() {
-        if (winrmTrustModal) winrmTrustModal.classList.remove('show');
-        activeWinrmTrustHost = '';
-        savedWinrmTrustStatus = 'unavailable';
-        activeWinrmTrustFile = null;
-        activeWinrmTrustPreview = null;
-        updateWinrmTrustSaveState();
+        return winrmTrustModalController?.close();
     }
 
     async function previewWinrmTrust() {
-        if (!activeWinrmTrustHost || !activeWinrmTrustFile) {
-            showToast('Choose a station certificate first', 'error');
-            return;
-        }
-        if (previewWinrmTrustBtn) previewWinrmTrustBtn.disabled = true;
-        await winrmTrustController.preview(activeWinrmTrustHost, activeWinrmTrustFile);
+        return winrmTrustModalController?.preview();
     }
 
     async function saveWinrmTrust() {
-        if (!activeWinrmTrustHost || !activeWinrmTrustFile || activeWinrmTrustPreview?.valid !== true) {
-            showToast('Preview a valid certificate first', 'error');
-            return;
-        }
-        if (!winrmTrustFingerprintConfirmedEl?.checked) {
-            showToast('Verify the SHA-256 fingerprint before saving', 'error');
-            return;
-        }
-        if (saveWinrmTrustBtn) saveWinrmTrustBtn.disabled = true;
-        await winrmTrustController.save(
-            activeWinrmTrustHost,
-            activeWinrmTrustFile,
-            activeWinrmTrustPreview,
-        );
+        return winrmTrustModalController?.save();
     }
 
     async function verifyWinrmTrust() {
-        if (!activeWinrmTrustHost || verifyWinrmTrustBtn?.disabled) return;
-        await pollHeartbeat(activeWinrmTrustHost);
+        return winrmTrustModalController?.verify();
     }
 
     async function deleteWinrmTrust() {
-        if (!activeWinrmTrustHost) return;
-        if (!window.confirm(`Remove WinRM TLS trust for ${activeWinrmTrustHost}?`)) return;
-        if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.disabled = true;
-        await winrmTrustController.remove(activeWinrmTrustHost);
+        return winrmTrustModalController?.delete();
     }
-
     async function saveProvisionedHost() {
         if (
             !provisionConnectionIdEl ||
