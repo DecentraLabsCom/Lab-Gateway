@@ -295,22 +295,27 @@ class ApcPowerNetSnmpDriver:
             count = _int(self._get(APC_LEGACY_OIDS["outlet_count"]), "outlet count")
             if count <= 0 or count > 512:
                 raise ApcSnmpError("INVALID_RESPONSE", "APC SNMP returned an invalid outlet count")
+            states = self._table_values(APC_LEGACY_OIDS["state"])
+            configured_names = self._optional_table_values(APC_LEGACY_OIDS["config_name"])
+            names = configured_names or self._optional_table_values(APC_LEGACY_OIDS["name"])
+            power_on_delays = self._optional_table_values(APC_LEGACY_OIDS["power_on_delay"])
+            power_off_delays = self._optional_table_values(APC_LEGACY_OIDS["power_off_delay"])
+            reboot_durations = self._optional_table_values(APC_LEGACY_OIDS["reboot_duration"])
             rows = []
             for number in range(1, count + 1):
                 suffix = str(number)
-                configured_name = self._optional_get(_oid(APC_LEGACY_OIDS["config_name"], suffix))
-                name = configured_name
-                if name is None:
-                    name = self._optional_get(_oid(APC_LEGACY_OIDS["name"], suffix))
-                state = self._state(self._get(_oid(APC_LEGACY_OIDS["state"], suffix)), profile)
+                if suffix not in states:
+                    raise ApcSnmpError("INVALID_RESPONSE", "APC SNMP outlet state is missing")
+                name = names.get(suffix)
                 row = {
                     "outlet": suffix,
                     "name": _text(name) if name is not None else None,
-                    "state": state,
+                    "state": self._state(states[suffix], profile),
                 }
                 self._add_remote_configuration(row, {
-                    key: self._optional_get(_oid(APC_LEGACY_OIDS[key], suffix))
-                    for key in ("power_on_delay", "power_off_delay", "reboot_duration")
+                    "power_on_delay": power_on_delays.get(suffix),
+                    "power_off_delay": power_off_delays.get(suffix),
+                    "reboot_duration": reboot_durations.get(suffix),
                 })
                 rows.append(row)
             return rows
