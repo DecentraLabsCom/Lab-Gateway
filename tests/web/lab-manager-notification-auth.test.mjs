@@ -21,6 +21,7 @@ const hostModalsScriptPath = new URL('web/assets/js/lab-manager-host-modals.js',
 const hostViewScriptPath = new URL('web/assets/js/lab-manager-host-view.js', repoRoot);
 const hostActionBindingsScriptPath = new URL('web/assets/js/lab-manager-host-action-bindings.js', repoRoot);
 const opsAccessScriptPath = new URL('web/assets/js/lab-manager-ops-access.js', repoRoot);
+const operationsLifecycleScriptPath = new URL('web/assets/js/lab-manager-operations-lifecycle.js', repoRoot);
 const hostActionsScriptPath = new URL('web/assets/js/lab-manager-host-actions.js', repoRoot);
 const toastScriptPath = new URL('web/assets/js/core/toast.js', repoRoot);
 const notificationsAccessScriptPath = new URL('web/assets/js/lab-manager-notifications-access.js', repoRoot);
@@ -381,6 +382,9 @@ function loadLabManager({
   });
   vm.runInContext(fs.readFileSync(opsAccessScriptPath, 'utf8'), context, {
     filename: 'lab-manager-ops-access.js',
+  });
+  vm.runInContext(fs.readFileSync(operationsLifecycleScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-operations-lifecycle.js',
   });
   vm.runInContext(fs.readFileSync(hostActionsScriptPath, 'utf8'), context, {
     filename: 'lab-manager-host-actions.js',

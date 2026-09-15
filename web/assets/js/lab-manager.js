@@ -83,6 +83,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!hostActionBindingsModule) {
         throw new Error('LabManagerHostActionBindings must load before lab-manager.js');
     }
+    const operationsLifecycleModule = window.LabManagerOperationsLifecycle;
+    if (!operationsLifecycleModule) {
+        throw new Error('LabManagerOperationsLifecycle must load before lab-manager.js');
+    }
     const hostActionsModule = window.LabManagerHostActions;
     if (!hostActionsModule) {
         throw new Error('LabManagerHostActions must load before lab-manager.js');
@@ -858,6 +862,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     const loadActionableReservations = actionableReservationsController.load;
     actionableReservationsController.bind();
+    const operationsLifecycleController = operationsLifecycleModule.createController({
+        hasHostList: Boolean(hostListEl),
+        hasReservationList: Boolean(upcomingReservationsListEl),
+        refreshSession: () => opsAccessController?.refreshSession(),
+        loadManagedLabs: (...args) => loadManagedLabsOnce(...args),
+        checkAvailability: (...args) => checkOpsAvailability(...args),
+        loadHostInventory: (...args) => loadHostInventory(...args),
+        loadActionableReservations: (...args) => loadActionableReservations(...args),
+        loadActivityFeed: (...args) => loadActivityFeed(...args),
+    });
 
     if (refreshHostsBtn) {
         refreshHostsBtn.addEventListener('click', refreshAllHosts);
@@ -874,26 +888,11 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeManagerTab(window.LabManagerTabs.activeTab);
     }
 
-    async function refreshLabManagerSession() {
-        return opsAccessController ? opsAccessController.refreshSession() : false;
-    }
-
     function initializeManagerTab(tabName) {
         if (!managerState.claimTab(tabName)) return;
 
         if (tabName === 'operations') {
-            void (async () => {
-                await refreshLabManagerSession();
-                await loadManagedLabsOnce({ skipAuthPrompt: true });
-                checkOpsAvailability();
-                if (hostListEl) loadHostInventory({ skipAuthPrompt: true });
-                if (upcomingReservationsListEl) loadActionableReservations({ skipAuthPrompt: true });
-                // Let the shared auth handler recover an expired session and
-                // retry this request. A valid Lab Manager session does not
-                // prompt; suppressing the handler turns an expired session
-                // into a misleading visible HTTP 401.
-                loadActivityFeed(false);
-            })();
+            void operationsLifecycleController.initialize();
             return;
         }
         if (tabName === 'energy') {
