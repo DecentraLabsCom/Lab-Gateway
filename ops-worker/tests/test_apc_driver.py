@@ -177,6 +177,45 @@ def test_apc_legacy_reads_and_writes_outlet_configuration():
     ]
 
 
+def test_apc_legacy_configuration_uses_powernet_table_column_order():
+    config_entry = "1.3.6.1.4.1.318.1.1.4.5.2.1"
+    client = FakeSnmpClient(
+        {
+            APC_LEGACY_OIDS["outlet_count"]: 1,
+            APC_LEGACY_OIDS["state"] + ".1": 2,
+            config_entry + ".2.1": 15,
+            config_entry + ".3.1": "PLC",
+            config_entry + ".4.1": 30,
+            config_entry + ".5.1": 10,
+        }
+    )
+    driver = ApcPowerNetSnmpDriver(
+        "pdu-1",
+        "192.0.2.20",
+        config={"profile": "legacy"},
+        credentials={"version": "v2c", "community": "private"},
+        client=client,
+    )
+
+    assert driver.read_configuration()["outlets"] == [{
+        "outlet": "1",
+        "name": "PLC",
+        "state": "off",
+        "deviceConfig": {
+            "powerOnDelaySeconds": 15,
+            "powerOffDelaySeconds": 30,
+            "rebootDurationSeconds": 10,
+        },
+        "deviceConfigWritable": True,
+        "deviceConfigFields": [
+            "name",
+            "powerOnDelaySeconds",
+            "powerOffDelaySeconds",
+            "rebootDurationSeconds",
+        ],
+    }]
+
+
 def test_apc_rpdu2_discovers_outlets_from_status_table():
     status = APC_RPDU2_OIDS
     client = FakeSnmpClient(

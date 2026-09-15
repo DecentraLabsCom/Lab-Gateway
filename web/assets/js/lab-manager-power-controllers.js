@@ -281,7 +281,7 @@
                 if (!outletId) throw new Error(`Output ${index + 1}: device ID is required`);
                 const item = { outlet: outletId };
                 if (Array.isArray(outlet.deviceConfigFields) && outlet.deviceConfigFields.includes('name')) {
-                    if (String(outlet.deviceName || '').length > 160) throw new Error(`Output ${index + 1}: device name is too long`);
+                    if (String(outlet.deviceName || '').length > 20) throw new Error(`Output ${index + 1}: device name is too long`);
                     item.name = String(outlet.deviceName || '').trim();
                 }
                 const config = {};

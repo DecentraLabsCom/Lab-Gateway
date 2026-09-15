@@ -24,10 +24,10 @@ APC_LEGACY_OIDS = {
     "state": "1.3.6.1.4.1.318.1.1.4.4.2.1.3",
     "name": "1.3.6.1.4.1.318.1.1.4.4.2.1.4",
     "command": "1.3.6.1.4.1.318.1.1.4.4.2.1.3",
-    "config_name": "1.3.6.1.4.1.318.1.1.4.5.2.1.2",
-    "power_on_delay": "1.3.6.1.4.1.318.1.1.4.5.2.1.4",
-    "power_off_delay": "1.3.6.1.4.1.318.1.1.4.5.2.1.5",
-    "reboot_duration": "1.3.6.1.4.1.318.1.1.4.5.2.1.6",
+    "power_on_delay": "1.3.6.1.4.1.318.1.1.4.5.2.1.2",
+    "config_name": "1.3.6.1.4.1.318.1.1.4.5.2.1.3",
+    "power_off_delay": "1.3.6.1.4.1.318.1.1.4.5.2.1.4",
+    "reboot_duration": "1.3.6.1.4.1.318.1.1.4.5.2.1.5",
 }
 
 APC_RPDU2_OIDS = {
@@ -433,7 +433,7 @@ class ApcPowerNetSnmpDriver:
                 raise ApcSnmpError("CONFIGURATION", "APC device outlet config is invalid")
             if "name" in raw_outlet:
                 name = str(raw_outlet.get("name") or "").strip()
-                if len(name) > 160:
+                if len(name) > 20:
                     raise ApcSnmpError("CONFIGURATION", "APC outlet name is too long")
                 if name != str(row.get("name") or ""):
                     name_oid = oids["config_name"] if profile == "legacy" else oids["name"]
