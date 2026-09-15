@@ -75,16 +75,14 @@ def _non_negative_int(value: Any, field_name: str, *, default: int, maximum: int
 
 
 def _step_identity(step: "PowerPolicyStep") -> Dict[str, Any]:
-    return {
+    identity = {
         "phase": step.phase,
         "controllerId": step.controller_id,
         "outlet": step.outlet,
         "action": step.action,
-        "logicalName": step.logical_name,
-        "desiredState": step.desired_state,
+        "stepLabel": step.step_label,
         "required": step.required,
         "readBackRequired": step.read_back_required,
-        "offSeconds": step.off_seconds,
         "delayBeforeSeconds": step.delay_before_seconds,
         "delayAfterSeconds": step.delay_after_seconds,
         "timeoutSeconds": step.timeout_seconds,
@@ -92,6 +90,9 @@ def _step_identity(step: "PowerPolicyStep") -> Dict[str, Any]:
         "allowProtected": step.allow_protected,
         "conditions": step.conditions,
     }
+    if step.action == "cycle":
+        identity["offSeconds"] = step.off_seconds
+    return identity
 
 
 def _generated_step_id(lab_id: str, step: "PowerPolicyStep", occurrence: int) -> str:
@@ -238,8 +239,7 @@ class PowerPolicyStep:
     outlet: str
     action: str
     step_id: Optional[str] = None
-    logical_name: Optional[str] = None
-    desired_state: Optional[str] = None
+    step_label: Optional[str] = None
     required: bool = True
     read_back_required: bool = True
     off_seconds: int = 10
@@ -270,22 +270,16 @@ class PowerPolicyStep:
         if action not in POWER_ACTIONS:
             raise ValidationError(f"unsupported power action: {action}")
 
-        desired_state = value.get("desiredState", value.get("desired_state"))
-        if desired_state is None and action in {"on", "off"}:
-            desired_state = action
-        if desired_state is not None:
-            desired_state = _text(desired_state, "desiredState", max_length=16).lower()
-            if desired_state not in {"on", "off", "unknown"}:
-                raise ValidationError("desiredState must be on, off, or unknown")
-
-        off_seconds = _non_negative_int(
-            value.get("offSeconds", value.get("off_seconds")),
-            "offSeconds",
-            default=10,
-            maximum=3600,
-        )
-        if action == "cycle" and off_seconds == 0:
-            raise ValidationError("offSeconds must be greater than zero for cycle")
+        off_seconds = 10
+        if action == "cycle":
+            off_seconds = _non_negative_int(
+                value.get("offSeconds", value.get("off_seconds")),
+                "offSeconds",
+                default=10,
+                maximum=3600,
+            )
+            if off_seconds == 0:
+                raise ValidationError("offSeconds must be greater than zero for cycle")
 
         return cls(
             phase=phase,
@@ -294,8 +288,16 @@ class PowerPolicyStep:
             outlet=outlet,
             action=action,
             step_id=(str(value.get("id") or value.get("stepId") or "").strip() or None),
-            logical_name=(str(value.get("logicalName") or value.get("logical_name") or "").strip() or None),
-            desired_state=desired_state,
+            step_label=(
+                str(
+                    value.get(
+                        "stepLabel",
+                        value.get("step_label", value.get("logicalName", value.get("logical_name"))),
+                    )
+                    or ""
+                ).strip()
+                or None
+            ),
             required=_bool(value.get("required"), True),
             read_back_required=_bool(value.get("readBackRequired", value.get("read_back_required")), True),
             off_seconds=off_seconds,
@@ -332,17 +334,15 @@ class PowerPolicyStep:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "id": self.step_id,
             "phase": self.phase,
             "controllerId": self.controller_id,
             "outlet": self.outlet,
-            "logicalName": self.logical_name,
+            "stepLabel": self.step_label,
             "action": self.action,
-            "desiredState": self.desired_state,
             "required": self.required,
             "readBackRequired": self.read_back_required,
-            "offSeconds": self.off_seconds,
             "delayBeforeSeconds": self.delay_before_seconds,
             "delayAfterSeconds": self.delay_after_seconds,
             "timeoutSeconds": self.timeout_seconds,
@@ -350,6 +350,9 @@ class PowerPolicyStep:
             "allowProtected": self.allow_protected,
             "conditions": self.conditions,
         }
+        if self.action == "cycle":
+            result["offSeconds"] = self.off_seconds
+        return result
 
 
 @dataclass

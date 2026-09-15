@@ -53,17 +53,14 @@
                         <select data-step-field="action">${powerPolicySelectOptions(['on', 'off', 'cycle'], step.action)}</select>
                     </label>
                     <label class="field">
-                        <span>Desired state</span>
-                        <select data-step-field="desiredState">${powerPolicySelectOptions(['', 'on', 'off', 'unknown'], step.desiredState, { '': 'Use action default' })}</select>
+                        <span>Step label</span>
+                        <input type="text" maxlength="160" data-step-field="stepLabel" value="${escapeHtml(step.stepLabel)}" placeholder="Optional label">
                     </label>
-                    <label class="field">
-                        <span>Logical name</span>
-                        <input type="text" maxlength="160" data-step-field="logicalName" value="${escapeHtml(step.logicalName)}" placeholder="Optional label">
-                    </label>
+                    ${step.action === 'cycle' ? `
                     <label class="field">
                         <span>Cycle off time (seconds)</span>
                         <input type="number" min="0" max="3600" data-step-field="offSeconds" value="${step.offSeconds}" inputmode="numeric">
-                    </label>
+                    </label>` : ''}
                     <label class="field">
                         <span>Delay before (seconds)</span>
                         <input type="number" min="0" max="3600" data-step-field="delayBeforeSeconds" value="${step.delayBeforeSeconds}" inputmode="numeric">

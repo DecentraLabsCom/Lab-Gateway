@@ -178,9 +178,11 @@ Each step contains at least `Phase`, `Controller`, `Outlet`, and `Action`.
 Steps are shown as `Step 1`, `Step 2`, and so on; drag a step to change its
 position in the policy. The position determines the order of steps within the
 same phase, while phases still execute according to their lifecycle order.
-Actions are `on`, `off`, and `cycle`. You can also set `Desired state`, cycle
-timing, delays, timeout, retries, and `Required`, `Read back state`, and
-`Allow protected outlet`. `Conditions` is optional advanced JSON; it must
+Actions are `on`, `off`, and `cycle`; the action itself determines the target
+state. Use the optional `Step label` for operator recognition. `Cycle off
+time` is shown only for `cycle` and controls how long the output stays off.
+You can also set delays, timeout, retries, and `Required`, `Read back state`,
+and `Allow protected outlet`. `Conditions` is optional advanced JSON; it must
 contain a valid JSON object.
 
 Available phases are:

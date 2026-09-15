@@ -263,6 +263,38 @@ def test_policy_steps_follow_ui_order_without_exposing_sequence():
     assert [step.step_id for step in reloaded.steps] == [step["id"] for step in serialized["steps"]]
 
 
+def test_policy_action_is_the_only_state_target_and_step_label_is_explicit():
+    policy = LabPowerPolicy.from_mapping(
+        {
+            "labId": "lab-1",
+            "policyName": "targets",
+            "steps": [
+                {
+                    "phase": "start",
+                    "controllerId": "controller",
+                    "outlet": "1",
+                    "action": "on",
+                    "stepLabel": "PLC boot",
+                },
+                {
+                    "phase": "end",
+                    "controllerId": "controller",
+                    "outlet": "1",
+                    "action": "cycle",
+                    "offSeconds": 15,
+                },
+            ],
+        }
+    )
+
+    assert not hasattr(policy.steps[0], "desired_state")
+    serialized = policy.to_dict()
+    assert serialized["steps"][0]["stepLabel"] == "PLC boot"
+    assert "desiredState" not in serialized["steps"][0]
+    assert "offSeconds" not in serialized["steps"][0]
+    assert serialized["steps"][1]["offSeconds"] == 15
+
+
 def test_executor_runs_phases_in_order_and_is_idempotent():
     operations = []
     runtime = build_runtime(record_operation=operations.append)
