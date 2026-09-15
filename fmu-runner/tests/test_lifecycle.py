@@ -77,5 +77,43 @@ def test_lifecycle_skips_optional_manager_without_skipping_cleanup():
     assert events == ["init", "preload", "ready", ("shutdown", "executor"), "cleanup"]
 
 
+def test_lifecycle_initializes_runtime_before_other_startup_work():
+    events = []
+
+    async def initialize_runtime():
+        events.append("initialize_runtime")
+
+    async def init_db():
+        events.append("init_db")
+
+    async def preload_jwks():
+        events.append("preload_jwks")
+
+    lifespan = create_lifespan(
+        initialize_runtime=initialize_runtime,
+        init_db=init_db,
+        preload_jwks=preload_jwks,
+        get_realtime_manager=lambda: None,
+        get_executor=lambda: "executor",
+        shutdown_executor=lambda _executor: events.append("shutdown_executor"),
+        cleanup_temp_files=lambda: _record(events, "cleanup"),
+    )
+
+    async def exercise():
+        async with lifespan(object()):
+            events.append("ready")
+
+    asyncio.run(exercise())
+
+    assert events == [
+        "initialize_runtime",
+        "init_db",
+        "preload_jwks",
+        "ready",
+        "shutdown_executor",
+        "cleanup",
+    ]
+
+
 async def _record(events, value):
     events.append(value)

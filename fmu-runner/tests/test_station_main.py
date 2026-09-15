@@ -6,9 +6,9 @@ from fastapi.testclient import TestClient
 
 
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu"}):
-    import main
-    from main import app
-    from auth import verify_jwt as _original_verify_jwt
+    import runner_application as application
+    from runner_application import app
+    from runner_application import verify_jwt as _original_verify_jwt
 
 
 def _fake_jwt(**claims):
@@ -35,7 +35,7 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def _stub_browser_session_observation(monkeypatch):
-    monkeypatch.setattr(main, "_record_browser_session_started", AsyncMock(return_value=True))
+    monkeypatch.setattr(application, "_record_browser_session_started", AsyncMock(return_value=True))
 
 
 class _StationBackendStub:
@@ -83,8 +83,8 @@ class _StationBackendStub:
 
 def test_run_station_mode_forwards_request(monkeypatch):
     station_backend = _StationBackendStub()
-    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station"})())
-    monkeypatch.setattr(main, "_get_station_backend", lambda: station_backend)
+    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
 
     response = client.post(
         "/api/v1/simulations/run",
@@ -105,10 +105,10 @@ def test_run_station_mode_forwards_request(monkeypatch):
 
 def test_run_station_mode_does_not_use_local_runner_capacity(monkeypatch):
     station_backend = _StationBackendStub()
-    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station"})())
-    monkeypatch.setattr(main, "_get_station_backend", lambda: station_backend)
+    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
     acquire = Mock(side_effect=AssertionError("local capacity must not be consulted in Station mode"))
-    monkeypatch.setattr(main, "_acquire_slot", acquire)
+    monkeypatch.setattr(application, "_acquire_slot", acquire)
 
     response = client.post(
         "/api/v1/simulations/run",
@@ -131,9 +131,9 @@ def test_run_station_records_observation_before_releasing_job(monkeypatch):
         return {"status": "completed"}
 
     station_backend.run_authorized_simulation = run
-    monkeypatch.setattr(main, "_record_browser_session_started", observe)
-    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station"})())
-    monkeypatch.setattr(main, "_get_station_backend", lambda: station_backend)
+    monkeypatch.setattr(application, "_record_browser_session_started", observe)
+    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
 
     response = client.post("/api/v1/simulations/run", json={"labId": "1"})
 
@@ -153,9 +153,9 @@ def test_station_observation_failure_never_releases_job(monkeypatch):
         return {"status": "completed"}
 
     station_backend.run_authorized_simulation = run
-    monkeypatch.setattr(main, "_record_browser_session_started", observe)
-    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station"})())
-    monkeypatch.setattr(main, "_get_station_backend", lambda: station_backend)
+    monkeypatch.setattr(application, "_record_browser_session_started", observe)
+    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
 
     with pytest.raises(RuntimeError, match="observation unavailable"):
         client.post("/api/v1/simulations/run", json={"labId": "1"})
@@ -164,8 +164,8 @@ def test_station_observation_failure_never_releases_job(monkeypatch):
 
 def test_stream_station_mode_forwards_request(monkeypatch):
     station_backend = _StationBackendStub()
-    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station"})())
-    monkeypatch.setattr(main, "_get_station_backend", lambda: station_backend)
+    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
 
     response = client.post(
         "/api/v1/simulations/stream",
@@ -185,7 +185,7 @@ def test_stream_station_mode_forwards_request(monkeypatch):
 
 
 def test_history_is_blocked_in_station_mode(monkeypatch):
-    monkeypatch.setattr(main, "_fmu_backend", type("StationMode", (), {"mode": "station", "supports_local_execution": False})())
+    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station", "supports_local_execution": False})())
 
     response = client.get("/api/v1/simulations/history")
 

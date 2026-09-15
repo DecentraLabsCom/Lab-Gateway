@@ -488,7 +488,7 @@ from fastapi.testclient import TestClient
 def _get_app():
     """Import app lazily to avoid polluting module-level state for other test files."""
     with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "accessKey": "test.fmu"}):
-        from main import app
+        from runner_application import app
     return app
 
 
@@ -530,8 +530,8 @@ class TestAasSyncEndpoint:
         return md
 
     @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
-    @patch("main.read_model_description")
-    @patch("main._resolve_fmu_path")
+    @patch("runner_application.read_model_description")
+    @patch("runner_application._resolve_fmu_path")
     def test_sync_success(self, mock_resolve, mock_read_md, mock_sync):
         mock_resolve.return_value = "/fake/path/test.fmu"
         mock_read_md.return_value = self._mock_model_description()
@@ -551,8 +551,8 @@ class TestAasSyncEndpoint:
         assert body["aasId"] == "urn:decentralabs:lab:test.fmu"
 
     @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
-    @patch("main.read_model_description")
-    @patch("main._resolve_fmu_path")
+    @patch("runner_application.read_model_description")
+    @patch("runner_application._resolve_fmu_path")
     def test_sync_with_lab_id_param(self, mock_resolve, mock_read_md, mock_sync):
         mock_resolve.return_value = "/fake/path/motor.fmu"
         mock_read_md.return_value = self._mock_model_description()
@@ -571,8 +571,8 @@ class TestAasSyncEndpoint:
         call_kwargs = mock_sync.call_args
         assert call_kwargs.kwargs.get("lab_id") or call_kwargs[1].get("lab_id") or call_kwargs[0][0] == "99"
 
-    @patch("main.read_model_description")
-    @patch("main._resolve_fmu_path")
+    @patch("runner_application.read_model_description")
+    @patch("runner_application._resolve_fmu_path")
     def test_sync_fmu_not_found(self, mock_resolve, mock_read_md):
         from fastapi import HTTPException as _H
         mock_resolve.side_effect = _H(status_code=404, detail="FMU file not found: nonexistent.fmu")
@@ -582,8 +582,8 @@ class TestAasSyncEndpoint:
         assert resp.status_code == 404
 
     @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
-    @patch("main.read_model_description")
-    @patch("main._resolve_fmu_path")
+    @patch("runner_application.read_model_description")
+    @patch("runner_application._resolve_fmu_path")
     def test_sync_basyx_error(self, mock_resolve, mock_read_md, mock_sync):
         mock_resolve.return_value = "/fake/path/test.fmu"
         mock_read_md.return_value = self._mock_model_description()
@@ -595,8 +595,8 @@ class TestAasSyncEndpoint:
         assert "submodel creation failed" in resp.json()["detail"]
 
     @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
-    @patch("main.read_model_description")
-    @patch("main._resolve_fmu_path")
+    @patch("runner_application.read_model_description")
+    @patch("runner_application._resolve_fmu_path")
     def test_sync_extra_info_passed_via_query(self, mock_resolve, mock_read_md, mock_sync):
         mock_resolve.return_value = "/fake/path/test.fmu"
         mock_read_md.return_value = self._mock_model_description()
@@ -894,7 +894,7 @@ class TestAasLinkEndpoints:
 
     def test_create_link_success(self, tmp_path):
         """POST with valid aasId saves a JSON file and returns it."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.post(
                 "/aas-admin/fmu/motor.fmu/aas-link",
@@ -908,7 +908,7 @@ class TestAasLinkEndpoints:
 
     def test_create_link_with_lab_id(self, tmp_path):
         """POST with labId writes both accessKey and labId-indexed files."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.post(
                 "/aas-admin/fmu/motor.fmu/aas-link",
@@ -923,7 +923,7 @@ class TestAasLinkEndpoints:
 
     def test_create_link_persists_file(self, tmp_path):
         """POST writes a .aas-link.json file with the correct content."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             client.post(
                 "/aas-admin/fmu/test.fmu/aas-link",
@@ -938,14 +938,14 @@ class TestAasLinkEndpoints:
 
     def test_create_link_missing_aas_id(self, tmp_path):
         """POST without aasId returns 400."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.post("/aas-admin/fmu/test.fmu/aas-link", json={})
         assert resp.status_code == 400
 
     def test_create_link_invalid_json(self, tmp_path):
         """POST with non-JSON body returns 400."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.post(
                 "/aas-admin/fmu/test.fmu/aas-link",
@@ -956,7 +956,7 @@ class TestAasLinkEndpoints:
 
     def test_create_link_rejects_path_traversal_in_lab_id(self, tmp_path):
         """A lab index must never be able to select a file outside the link store."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.post(
                 "/aas-admin/fmu/test.fmu/aas-link",
@@ -972,7 +972,7 @@ class TestAasLinkEndpoints:
         import json as _json
         link_file = tmp_path / "motor.fmu.aas-link.json"
         link_file.write_text(_json.dumps({"aasId": "urn:example:aas:motor-v2"}))
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.get("/aas-admin/fmu/motor.fmu/aas-link")
         assert resp.status_code == 200
@@ -982,7 +982,7 @@ class TestAasLinkEndpoints:
 
     def test_get_link_not_found(self, tmp_path):
         """GET returns 404 when no link is configured."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.get("/aas-admin/fmu/nonexistent.fmu/aas-link")
         assert resp.status_code == 404
@@ -994,7 +994,7 @@ class TestAasLinkEndpoints:
         import json as _json
         link_file = tmp_path / "test.fmu.aas-link.json"
         link_file.write_text(_json.dumps({"aasId": "urn:example:aas:test"}))
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.delete("/aas-admin/fmu/test.fmu/aas-link")
         assert resp.status_code == 200
@@ -1007,7 +1007,7 @@ class TestAasLinkEndpoints:
         link_content = {"aasId": "urn:example:aas:motor", "labId": "99"}
         (tmp_path / "motor.fmu.aas-link.json").write_text(_json.dumps(link_content))
         (tmp_path / "99.aas-link.json").write_text(_json.dumps(link_content))
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.delete("/aas-admin/fmu/motor.fmu/aas-link")
         assert resp.status_code == 200
@@ -1016,7 +1016,7 @@ class TestAasLinkEndpoints:
 
     def test_delete_link_not_found(self, tmp_path):
         """DELETE returns 404 when no link exists."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.delete("/aas-admin/fmu/ghost.fmu/aas-link")
         assert resp.status_code == 404
@@ -1029,7 +1029,7 @@ class TestAasLinkEndpoints:
         # Simulate what POST writes when labId="42" and accessKey="motor.fmu"
         link_file = tmp_path / "42.aas-link.json"
         link_file.write_text(_json.dumps({"aasId": "urn:external:aas:motor-model", "labId": "42"}))
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.get(
                 "/aas-admin/resolve-aas-id",
@@ -1042,7 +1042,7 @@ class TestAasLinkEndpoints:
 
     def test_resolve_no_override(self, tmp_path):
         """resolve-aas-id returns override:False when no link exists."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.get(
                 "/aas-admin/resolve-aas-id",
@@ -1055,7 +1055,7 @@ class TestAasLinkEndpoints:
 
     def test_resolve_non_conventional_id(self, tmp_path):
         """resolve-aas-id passes through non-conventional IDs unchanged."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             resp = client.get(
                 "/aas-admin/resolve-aas-id",
@@ -1072,7 +1072,7 @@ class TestAasLinkEndpoints:
         # Provider created link without labId — stored only as motor.fmu.aas-link.json
         link_file = tmp_path / "motor.fmu.aas-link.json"
         link_file.write_text(_json.dumps({"aasId": "urn:external:motor"}))
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             # Shell ID was built without labId override: urn:decentralabs:lab:motor.fmu
             resp = client.get(
@@ -1086,7 +1086,7 @@ class TestAasLinkEndpoints:
 
     def test_create_and_resolve_roundtrip(self, tmp_path):
         """Create a link with labId then resolve by the conventional shell ID."""
-        with patch("main._AAS_LINK_DATA_PATH", tmp_path):
+        with patch("runner_application._AAS_LINK_DATA_PATH", tmp_path):
             client = self._client()
             # Provider syncs with labId=7; stores link with labId=7
             client.post(
