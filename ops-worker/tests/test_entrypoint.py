@@ -1,6 +1,13 @@
+from fnmatch import fnmatchcase
 from pathlib import Path
 
+import pytest
+
 import worker
+
+
+OPS_WORKER_ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_MODULES = tuple(sorted(path.name for path in OPS_WORKER_ROOT.glob("*.py")))
 
 
 def test_guacamole_temp_user_cleanup_default_interval_is_900_seconds():
@@ -8,7 +15,7 @@ def test_guacamole_temp_user_cleanup_default_interval_is_900_seconds():
 
 
 def test_ops_worker_image_groups_runtime_files_into_shallow_copy_layers():
-    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+    dockerfile = OPS_WORKER_ROOT / "Dockerfile"
     lines = [
         line.strip()
         for line in dockerfile.read_text(encoding="utf-8").splitlines()
@@ -23,8 +30,24 @@ def test_ops_worker_image_groups_runtime_files_into_shallow_copy_layers():
     assert "legacy_api.py" not in dockerfile.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("module_name", RUNTIME_MODULES)
+def test_ops_worker_image_copies_each_runtime_module_through_the_python_glob(module_name):
+    dockerfile = OPS_WORKER_ROOT / "Dockerfile"
+    dockerfile_text = dockerfile.read_text(encoding="utf-8")
+    dockerignore = OPS_WORKER_ROOT / ".dockerignore"
+    ignored_patterns = {
+        line.strip().rstrip("/")
+        for line in dockerignore.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert (OPS_WORKER_ROOT / module_name).is_file()
+    assert "COPY *.py /app/" in dockerfile_text
+    assert not any(fnmatchcase(module_name, pattern) for pattern in ignored_patterns)
+
+
 def test_ops_worker_docker_context_excludes_development_and_host_configuration():
-    dockerignore = Path(__file__).resolve().parents[1] / ".dockerignore"
+    dockerignore = OPS_WORKER_ROOT / ".dockerignore"
     ignored_paths = {
         line.strip()
         for line in dockerignore.read_text(encoding="utf-8").splitlines()
