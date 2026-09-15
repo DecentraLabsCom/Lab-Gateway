@@ -87,6 +87,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!operationsLifecycleModule) {
         throw new Error('LabManagerOperationsLifecycle must load before lab-manager.js');
     }
+    const modalBindingsModule = window.LabManagerModalBindings;
+    if (!modalBindingsModule) {
+        throw new Error('LabManagerModalBindings must load before lab-manager.js');
+    }
     const hostActionsModule = window.LabManagerHostActions;
     if (!hostActionsModule) {
         throw new Error('LabManagerHostActions must load before lab-manager.js');
@@ -279,26 +283,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function saveWinrmCredentials() {
         return hostModalsController?.saveCredentials();
     }
-    if (closeProvisionHostModalBtn) closeProvisionHostModalBtn.addEventListener('click', closeProvisionHostModal);
-    if (cancelProvisionHostBtn) cancelProvisionHostBtn.addEventListener('click', closeProvisionHostModal);
-    if (saveProvisionHostBtn) saveProvisionHostBtn.addEventListener('click', saveProvisionedHost);
-    if (closeWinrmCredentialsModalBtn) closeWinrmCredentialsModalBtn.addEventListener('click', closeWinrmCredentialsModal);
-    if (cancelWinrmCredentialsBtn) cancelWinrmCredentialsBtn.addEventListener('click', closeWinrmCredentialsModal);
-    if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.addEventListener('click', saveWinrmCredentials);
-    if (closeWinrmTrustModalBtn) closeWinrmTrustModalBtn.addEventListener('click', closeWinrmTrustModal);
-    if (cancelWinrmTrustBtn) cancelWinrmTrustBtn.addEventListener('click', closeWinrmTrustModal);
-    if (previewWinrmTrustBtn) previewWinrmTrustBtn.addEventListener('click', previewWinrmTrust);
-    if (saveWinrmTrustBtn) saveWinrmTrustBtn.addEventListener('click', saveWinrmTrust);
-    if (verifyWinrmTrustBtn) verifyWinrmTrustBtn.addEventListener('click', verifyWinrmTrust);
-    if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.addEventListener('click', deleteWinrmTrust);
-    if (winrmTrustCertificateEl) winrmTrustCertificateEl.addEventListener('change', handleWinrmTrustCertificateSelected);
-    if (winrmTrustFingerprintConfirmedEl) {
-        winrmTrustFingerprintConfirmedEl.addEventListener('change', updateWinrmTrustSaveState);
-    }
-    if (closeEditHostModalBtn) closeEditHostModalBtn.addEventListener('click', closeEditHostModal);
-    if (cancelEditHostBtn) cancelEditHostBtn.addEventListener('click', closeEditHostModal);
-    if (saveEditHostBtn) saveEditHostBtn.addEventListener('click', saveEditedHost);
-
     loadAccessPolicy();
     notificationsController.initialize();
 
@@ -609,6 +593,43 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmImpl: message => window.confirm(message),
         documentImpl: document,
     });
+    const modalBindingsController = modalBindingsModule.createController({
+        fields: {
+            closeProvision: closeProvisionHostModalBtn,
+            cancelProvision: cancelProvisionHostBtn,
+            saveProvision: saveProvisionHostBtn,
+            closeCredentials: closeWinrmCredentialsModalBtn,
+            cancelCredentials: cancelWinrmCredentialsBtn,
+            saveCredentials: saveWinrmCredentialsBtn,
+            closeTrust: closeWinrmTrustModalBtn,
+            cancelTrust: cancelWinrmTrustBtn,
+            previewTrust: previewWinrmTrustBtn,
+            saveTrust: saveWinrmTrustBtn,
+            verifyTrust: verifyWinrmTrustBtn,
+            deleteTrust: deleteWinrmTrustBtn,
+            trustCertificate: winrmTrustCertificateEl,
+            trustFingerprint: winrmTrustFingerprintConfirmedEl,
+            closeEdit: closeEditHostModalBtn,
+            cancelEdit: cancelEditHostBtn,
+            saveEdit: saveEditHostBtn,
+        },
+        callbacks: {
+            closeProvision: closeProvisionHostModal,
+            saveProvision: saveProvisionedHost,
+            closeCredentials: closeWinrmCredentialsModal,
+            saveCredentials: saveWinrmCredentials,
+            closeTrust: closeWinrmTrustModal,
+            previewTrust: previewWinrmTrust,
+            saveTrust: saveWinrmTrust,
+            verifyTrust: verifyWinrmTrust,
+            deleteTrust: deleteWinrmTrust,
+            trustCertificateSelected: handleWinrmTrustCertificateSelected,
+            trustFingerprintChanged: updateWinrmTrustSaveState,
+            closeEdit: closeEditHostModal,
+            saveEdit: saveEditedHost,
+        },
+    });
+    modalBindingsController.bind();
 
     powerControllersController = powerControllersModule.createController({
         fields: {
