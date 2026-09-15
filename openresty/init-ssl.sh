@@ -69,7 +69,10 @@ atomic_copy() {
         return 1
     fi
     chmod 644 "$target_tmp" 2>/dev/null || true
-    mv -f "$target_tmp" "$target_path"
+    if ! mv -f "$target_tmp" "$target_path"; then
+        rm -f "$target_tmp"
+        return 1
+    fi
 }
 
 . /usr/local/bin/init-ssl-jwt-sync.sh

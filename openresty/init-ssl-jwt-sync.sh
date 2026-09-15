@@ -51,7 +51,11 @@ sync_jwt_public_key_from_issuer() {
         atomic_copy "$JWT_PUBLIC_KEY" "$JWT_PREVIOUS_PUBLIC_KEY"
         date +%s > "$JWT_PREVIOUS_ISSUED_MARKER" 2>/dev/null || true
     fi
-    mv "$tmp_key" "$JWT_PUBLIC_KEY"
+    if ! mv "$tmp_key" "$JWT_PUBLIC_KEY"; then
+        echo "Failed to install downloaded JWT public key"
+        rm -f "$tmp_key"
+        return 1
+    fi
     chmod 644 "$JWT_PUBLIC_KEY"
     atomic_copy "$JWT_PUBLIC_KEY" "$JWT_ACTIVE_SNAPSHOT"
     echo "JWT public key updated from issuer"
