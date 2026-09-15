@@ -120,6 +120,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!reservationRenderersModule) {
         throw new Error('LabManagerReservationRenderers must load before lab-manager.js');
     }
+    const timelineModule = window.LabManagerTimeline;
+    if (!timelineModule) {
+        throw new Error('LabManagerTimeline must load before lab-manager.js');
+    }
+    const actionableReservationsModule = window.LabManagerActionableReservations;
+    if (!actionableReservationsModule) {
+        throw new Error('LabManagerActionableReservations must load before lab-manager.js');
+    }
     const fmuSyncModule = window.LabManagerFmuSync;
     if (!fmuSyncModule) {
         throw new Error('LabManagerFmuSync must load before lab-manager.js');
@@ -667,27 +675,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const timelineResult = $('#timelineResult');
     const upcomingReservationsListEl = $('#upcomingReservationsList');
     const upcomingReservationsStatusEl = $('#upcomingReservationsStatus');
-    const TIMELINE_DEFAULT_LIMIT = 100;
-    const ACTIONABLE_RESERVATIONS_PAGE_SIZE = 100;
-    const timelineState = {
-        reservationId: null,
-        limit: TIMELINE_DEFAULT_LIMIT,
-        operations: [],
-        base: null,
-        pagination: null,
-        nextOffset: 0,
-        loading: false
-    };
-    const actionableReservationsState = {
-        reservations: [],
-        offset: 0,
-        nextOffset: 0,
-        cursor: null,
-        total: null,
-        totalKnown: false,
-        hasMore: false,
-        loading: false
-    };
     const reservationRenderersController = reservationRenderersModule.createController({
         escapeHtml,
         htmlEscape,
@@ -701,16 +688,31 @@ document.addEventListener('DOMContentLoaded', () => {
         shortAddress,
         resolveReservationLabDisplayName,
     });
-    
-    if (timelineBtn && timelineInput && timelineResult) {
-        timelineBtn.addEventListener('click', fetchTimeline);
-        timelineInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                fetchTimeline();
-            }
-        });
-    }
+    const timelineController = timelineModule.createController({
+        timelineInput,
+        timelineBtn,
+        timelineResult,
+        fetchImpl: (...args) => fetch(...args),
+        normalizePagination,
+        renderTimelineMarkup: (...args) => reservationRenderersController.renderTimelineMarkup(...args),
+        showToast,
+        logger: console,
+    });
+    timelineController.bind();
+    const actionableReservationsController = actionableReservationsModule.createController({
+        listEl: upcomingReservationsListEl,
+        statusEl: upcomingReservationsStatusEl,
+        fetchImpl: (...args) => fetch(...args),
+        renderMarkup: (...args) => reservationRenderersController.renderUpcomingReservationsMarkup(...args),
+        escapeHtml,
+        normalizeReservationStatus,
+        cancellationButtonLabel,
+        showToast,
+        confirmImpl: message => window.confirm(message),
+        logger: console,
+    });
+    const loadActionableReservations = actionableReservationsController.load;
+    actionableReservationsController.bind();
 
     if (refreshHostsBtn) {
         refreshHostsBtn.addEventListener('click', refreshAllHosts);
@@ -722,11 +724,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (refreshPowerCredentialsBtn) refreshPowerCredentialsBtn.addEventListener('click', loadPowerCredentials);
     if (guacamoleCandidateListEl) {
         guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
-    }
-
-    if (upcomingReservationsListEl) {
-        upcomingReservationsListEl.addEventListener('click', handleUpcomingReservationActions);
-        upcomingReservationsListEl.addEventListener('change', handleUpcomingReservationReasonChange);
     }
 
     document.addEventListener('lab-manager:tab-activated', event => {
@@ -1531,323 +1528,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function syncAasHost(host) {
         return hostActionsController.syncAasHost(host);
     }
-
-    async function fetchTimeline() {
-        if (!timelineResult || !timelineInput) return;
-        const reservationId = (timelineInput.value || '').trim();
-        if (!reservationId) {
-            setTimelineMessage('Provide a reservation id.');
-            timelineInput.focus();
-            return;
-        }
-        resetTimelineState(reservationId);
-        await requestTimelinePage(0, false);
-    }
-
-    async function loadActionableReservations({ append = false, skipAuthPrompt = false } = {}) {
-        if (!upcomingReservationsListEl) return;
-        if (actionableReservationsState.loading) return;
-        if (!append) {
-            actionableReservationsState.reservations = [];
-            actionableReservationsState.offset = 0;
-            actionableReservationsState.nextOffset = 0;
-            actionableReservationsState.cursor = null;
-            actionableReservationsState.total = null;
-            actionableReservationsState.totalKnown = false;
-            actionableReservationsState.hasMore = false;
-        }
-        actionableReservationsState.loading = true;
-        setUpcomingReservationsStatus(append ? 'Loading more...' : 'Loading...', 'soft');
-        try {
-            const params = new URLSearchParams({
-                limit: String(ACTIONABLE_RESERVATIONS_PAGE_SIZE),
-                offset: String(actionableReservationsState.nextOffset)
-            });
-            if (actionableReservationsState.cursor) {
-                params.set('cursor', actionableReservationsState.cursor);
-            }
-            const res = await fetch(`/lab-admin/reservations/actionable?${params.toString()}`, {
-                credentials: 'include',
-                ...(skipAuthPrompt ? { skipAuthPrompt: true } : {}),
-            });
-            if (res.status === 401) {
-                renderUpcomingReservationsMessage('Unauthorized: check LAB_MANAGER_TOKEN.');
-                setUpcomingReservationsStatus('Unauthorized', 'bad');
-                return;
-            }
-            if (res.status === 403) {
-                renderUpcomingReservationsMessage('Access denied: provider reservation administration is not available.');
-                setUpcomingReservationsStatus('Access denied', 'bad');
-                return;
-            }
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                throw new Error(body.error || `Unable to load reservations (HTTP ${res.status}).`);
-            }
-            const page = Array.isArray(body.reservations) ? body.reservations : [];
-            const pagination = body.pagination || {};
-            const returned = Number.isFinite(Number(pagination.returned))
-                ? Number(pagination.returned)
-                : page.length;
-            const nextOffset = Number.isFinite(Number(pagination.nextOffset))
-                ? Number(pagination.nextOffset)
-                : Number.isFinite(Number(body.nextOffset))
-                    ? Number(body.nextOffset)
-                    : actionableReservationsState.nextOffset + returned;
-            actionableReservationsState.reservations = append
-                ? actionableReservationsState.reservations.concat(page)
-                : page;
-            actionableReservationsState.offset = Number.isFinite(Number(pagination.offset))
-                ? Number(pagination.offset)
-                : Number.isFinite(Number(body.offset))
-                    ? Number(body.offset)
-                    : actionableReservationsState.offset;
-            actionableReservationsState.nextOffset = nextOffset;
-            actionableReservationsState.cursor = typeof pagination.nextCursor === 'string'
-                ? pagination.nextCursor
-                : typeof body.nextCursor === 'string'
-                    ? body.nextCursor
-                    : null;
-            const totalKnown = Number.isFinite(Number(pagination.total))
-                || Number.isFinite(Number(body.totalCount));
-            actionableReservationsState.totalKnown = totalKnown;
-            actionableReservationsState.total = totalKnown
-                ? Number.isFinite(Number(pagination.total))
-                    ? Number(pagination.total)
-                    : Number(body.totalCount)
-                : null;
-            actionableReservationsState.hasMore = typeof pagination.hasMore === 'boolean'
-                ? pagination.hasMore
-                : typeof body.hasMore === 'boolean'
-                    ? body.hasMore
-                    : Boolean(body.truncated);
-            renderUpcomingReservations();
-            const loadedCount = actionableReservationsState.reservations.length;
-            const totalCount = actionableReservationsState.totalKnown
-                ? actionableReservationsState.total
-                : loadedCount;
-            const status = actionableReservationsState.hasMore
-                ? actionableReservationsState.totalKnown
-                    ? `${loadedCount} of ${totalCount} actionable`
-                    : `${loadedCount}+ actionable`
-                : `${totalCount} actionable`;
-            setUpcomingReservationsStatus(status, 'soft');
-        } catch (err) {
-            console.error(err);
-            if (!append) renderUpcomingReservationsMessage('Unable to load actionable reservations.');
-            setUpcomingReservationsStatus('Unavailable', 'bad');
-        } finally {
-            actionableReservationsState.loading = false;
-        }
-    }
-
-    function renderUpcomingReservations() {
-        if (!upcomingReservationsListEl) return;
-        const reservations = actionableReservationsState.reservations;
-        if (!reservations.length) {
-            renderUpcomingReservationsMessage('No actionable reservations for your labs.');
-            return;
-        }
-        upcomingReservationsListEl.innerHTML = reservationRenderersController.renderUpcomingReservationsMarkup(
-            reservations,
-            actionableReservationsState.hasMore,
-        );
-    }
-
-    function renderUpcomingReservationsMessage(message) {
-        if (upcomingReservationsListEl) {
-            upcomingReservationsListEl.innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
-        }
-    }
-
-    function setUpcomingReservationsStatus(message, type) {
-        if (!upcomingReservationsStatusEl) return;
-        upcomingReservationsStatusEl.textContent = message;
-        upcomingReservationsStatusEl.className = `pill ${type || 'soft'}`;
-    }
-
-    function handleUpcomingReservationReasonChange(event) {
-        const reasonEl = event.target.closest('[data-reservation-reason]');
-        if (!reasonEl || !upcomingReservationsListEl.contains(reasonEl)) return;
-        const row = reasonEl.closest('.reservation-item');
-        const button = row?.querySelector('[data-action="cancel-reservation"]');
-        if (!button) return;
-        const reservationStatus = normalizeReservationStatus(row.dataset.reservationStatus);
-        button.textContent = cancellationButtonLabel(reservationStatus, Number(reasonEl.value));
-    }
-
-    async function handleUpcomingReservationActions(event) {
-        const loadMoreButton = event.target.closest('[data-action="load-more-actionable"]');
-        if (loadMoreButton && upcomingReservationsListEl.contains(loadMoreButton)) {
-            await loadActionableReservations({ append: true });
-            return;
-        }
-        const button = event.target.closest('[data-action="cancel-reservation"]');
-        if (!button || !upcomingReservationsListEl.contains(button)) return;
-        const row = button.closest('.reservation-item');
-        const key = row?.dataset.reservationKey;
-        const reservationStatus = normalizeReservationStatus(row?.dataset.reservationStatus);
-        const reasonEl = row?.querySelector('[data-reservation-reason]');
-        const reasonCode = Number(reasonEl?.value);
-        if (!key || !Number.isInteger(reasonCode)) return;
-        const confirmationMessage = reservationStatus === 2 || reasonCode === 8
-            ? reservationStatus === 2
-                ? 'Report provider service failure for this access-authorized reservation? The full price returns as service credits.'
-                : 'Report provider service failure for this confirmed reservation? The full price returns as service credits.'
-            : 'Cancel this upcoming reservation? A confirmed reservation returns its full price as service credits.';
-        if (!window.confirm(confirmationMessage)) {
-            return;
-        }
-
-        button.disabled = true;
-        if (reasonEl) reasonEl.disabled = true;
-        try {
-            const res = await fetch(`/lab-admin/reservations/${encodeURIComponent(key)}/cancel`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Idempotency-Key': createReservationIdempotencyKey()
-                },
-                body: JSON.stringify({ reasonCode })
-            });
-            const body = await res.json().catch(() => ({}));
-            if (res.status === 401) throw new Error('Unauthorized: check LAB_MANAGER_TOKEN.');
-            if (res.status === 403) throw new Error('Access denied: provider reservation administration is not available.');
-            if (!res.ok) throw new Error(body.error || `Cancellation failed (HTTP ${res.status}).`);
-            showToast(
-                reasonCode === 8
-                    ? 'Provider service-failure report submitted'
-                    : 'Reservation cancellation submitted',
-                'success'
-            );
-            await loadActionableReservations();
-        } catch (err) {
-            console.error(err);
-            showToast(err.message || 'Reservation cancellation failed', 'error');
-            button.disabled = false;
-            if (reasonEl) reasonEl.disabled = false;
-        }
-    }
-
-    function createReservationIdempotencyKey() {
-        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-            return `lab-manager-${window.crypto.randomUUID()}`;
-        }
-        return `lab-manager-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    }
-
-    function resetTimelineState(reservationId) {
-        timelineState.reservationId = reservationId;
-        timelineState.operations = [];
-        timelineState.base = null;
-        timelineState.pagination = null;
-        timelineState.nextOffset = 0;
-        timelineState.limit = TIMELINE_DEFAULT_LIMIT;
-        timelineState.loading = false;
-    }
-
-    async function requestTimelinePage(offset, append) {
-        if (!timelineState.reservationId || timelineState.loading) return;
-        timelineState.loading = true;
-        if (!append) {
-            setTimelineMessage('Loading timeline...');
-        }
-        try {
-            const params = new URLSearchParams({
-                reservationId: timelineState.reservationId,
-                limit: String(timelineState.limit),
-                offset: String(offset)
-            });
-            const res = await fetch(`/ops/api/reservations/timeline?${params.toString()}`);
-            if (res.status === 403) {
-                const msg = 'Access denied: /ops blocked by Lab Manager access policy';
-                if (!append) setTimelineMessage(msg);
-                showToast(msg, 'error');
-                return;
-            }
-            if (res.status === 401) {
-                const msg = 'Unauthorized: check LAB_MANAGER_TOKEN';
-                if (!append) setTimelineMessage(msg);
-                showToast(msg, 'error');
-                return;
-            }
-            const body = await res.json();
-            if (!res.ok) {
-                const msg = body?.error || `Unable to load timeline (HTTP ${res.status}).`;
-                if (!append) {
-                    setTimelineMessage(msg);
-                }
-                showToast(msg, 'error');
-                return;
-            }
-            const pageOperations = Array.isArray(body.operations) ? body.operations : [];
-            if (!append || !timelineState.base) {
-                timelineState.operations = pageOperations;
-                timelineState.base = body;
-            } else {
-                timelineState.operations = timelineState.operations.concat(pageOperations);
-                timelineState.base = { ...timelineState.base, ...body };
-            }
-            timelineState.pagination = normalizePagination(
-                body.pagination,
-                offset,
-                pageOperations.length,
-                timelineState.limit
-            );
-            timelineState.limit = timelineState.pagination.limit;
-            timelineState.nextOffset = timelineState.pagination.nextOffset;
-            renderTimelineState();
-            if (!append) {
-                showToast('Timeline loaded', 'success');
-            }
-        } catch (err) {
-            console.error(err);
-            if (!append) {
-                setTimelineMessage('Timeline request failed.');
-            }
-            showToast('Timeline request failed', 'error');
-        } finally {
-            timelineState.loading = false;
-        }
-    }
-
-    async function loadMoreTimeline(buttonEl) {
-        if (!timelineState.pagination?.hasMore || timelineState.loading) {
-            return;
-        }
-        if (buttonEl) {
-            buttonEl.disabled = true;
-            buttonEl.textContent = 'Loading...';
-        }
-        await requestTimelinePage(timelineState.nextOffset, true);
-    }
-
-    function renderTimelineState() {
-        if (!timelineResult || !timelineState.base) return;
-        const payload = {
-            ...timelineState.base,
-            operations: [...timelineState.operations],
-            pagination: timelineState.pagination
-        };
-        renderTimeline(payload);
-    }
-    
-        function setTimelineMessage(message) {
-            if (!timelineResult) return;
-            timelineResult.classList.add('empty');
-            timelineResult.textContent = message;
-        }
-    
-        function renderTimeline(data) {
-            if (!timelineResult) return;
-            timelineResult.classList.remove('empty');
-            timelineResult.innerHTML = reservationRenderersController.renderTimelineMarkup(data);
-            const loadMoreBtn = timelineResult.querySelector('#timelineLoadMoreBtn');
-            if (loadMoreBtn) {
-                loadMoreBtn.addEventListener('click', () => loadMoreTimeline(loadMoreBtn));
-            }
-        }
 
     async function checkOpsAvailability() {
         try {
