@@ -1,29 +1,27 @@
 """Compatibility adapters retained by the Ops Worker composition root."""
 
-from collections.abc import Mapping, MutableMapping
 from typing import Any
+
+from worker_compatibility_context import WorkerCompatibilityContext
 
 
 class WorkerCompatibilityRuntime:
-    """Keep historical worker helpers while resolving mutable providers lazily."""
+    """Keep historical worker helpers behind explicit dependency ports."""
 
-    def __init__(self, providers: MutableMapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: WorkerCompatibilityContext):
+        self._context = context
 
     def is_lite_gateway(self) -> bool:
-        return self._get("_is_lite_gateway_config_impl")(self._get("os").environ)
+        return self._context.get_is_lite_gateway_impl()(self._context.get_environ())
 
     def now_utc(self) -> Any:
-        return self._get("datetime").now(self._get("timezone").utc)
+        return self._context.get_datetime().now(self._context.get_timezone().utc)
 
     def winrm_trust_host_or_404(self, host_name: str):
-        host = self._get("HOSTS").get(host_name)
+        host = self._context.get_hosts().get(host_name)
         if not host:
             return None, (
-                self._get("jsonify")(
+                self._context.get_jsonify()(
                     {"error": f"host '{host_name}' not found in config"}
                 ),
                 404,
@@ -31,22 +29,22 @@ class WorkerCompatibilityRuntime:
         return host, None
 
     def set_host_registry(self, registry: Any) -> None:
-        self._providers["HOSTS"] = registry
+        self._context.set_host_registry(registry)
 
     def replace_host_registry(self, registry: Any) -> None:
-        with self._get("HOSTS_LOCK"):
-            self._get("_replace_host_registry_impl")(
+        with self._context.get_hosts_lock():
+            self._context.get_replace_host_registry_impl()(
                 registry,
-                set_registry=self._get("_set_host_registry"),
-                reservation_automator=self._get("RESERVATION_AUTOMATOR"),
+                set_registry=self.set_host_registry,
+                reservation_automator=self._context.get_reservation_automator(),
             )
 
 
 def create_worker_compatibility_runtime(
-    providers: MutableMapping[str, Any],
+    context: WorkerCompatibilityContext,
 ) -> WorkerCompatibilityRuntime:
-    """Create the compatibility adapter bound to the live worker namespace."""
-    return WorkerCompatibilityRuntime(providers)
+    """Create the compatibility adapter bound to explicit ports."""
+    return WorkerCompatibilityRuntime(context)
 
 
 __all__ = ["WorkerCompatibilityRuntime", "create_worker_compatibility_runtime"]

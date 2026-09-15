@@ -1,9 +1,20 @@
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 
+import pytest
+
+from demo_context import DemoContext
 from demo_runtime import DemoRuntime, create_demo_runtime
 
 
-def test_demo_runtime_forwards_readiness_and_context_dependencies():
+def _context(*, calls=None, **overrides):
+    calls = calls if calls is not None else []
+    state = {
+        "hosts": SimpleNamespace(get_by_lab=lambda lab_id: {"name": f"host-{lab_id}"}),
+        "reservation_start": lambda value: calls.append(("start", value)),
+        "reservation_end": lambda value: calls.append(("end", value)),
+        "record_event": lambda *args: calls.append(("event", args)),
+    }
     captured = {}
 
     def build_readiness(**kwargs):
@@ -14,29 +25,57 @@ def test_demo_runtime_forwards_readiness_and_context_dependencies():
         captured["context"] = (args, kwargs)
         return ({"demo_id": "demo:jti", "lab_id": "7"}, None)
 
-    hosts = SimpleNamespace(
-        get_by_lab=lambda lab_id: {"name": f"host-{lab_id}"},
-    )
-    providers = {
-        "_build_demo_readiness_impl": build_readiness,
-        "DEMO_LAB_ID": "7",
-        "DEMO_CONNECTION_ID": "9",
-        "DEMO_USER": "demo-user",
-        "DEMO_HEARTBEAT_MAX_AGE_SECONDS": 30,
-        "GUACAMOLE_DB_ENGINE": "guac-db",
-        "DB_ENGINE": "ops-db",
-        "HOSTS": hosts,
-        "_fetch_latest_heartbeat": "fetch-heartbeat",
-        "to_utc": "to-utc",
-        "text": "sql-text",
-        "datetime": SimpleNamespace(now=lambda timezone: ("now", timezone)),
-        "timezone": SimpleNamespace(utc="UTC"),
-        "logging": "logger",
-        "_build_demo_context_impl": build_context,
-        "DEMO_OPERATION_ID_RE": "demo-pattern",
-        "_canonical_demo_lab_id": "canonical",
+    values = {
+        "get_mandatory_field_impl": lambda payload, *keys: calls.append(
+            ("mandatory", payload, keys)
+        ) or "value",
+        "canonical_demo_lab_id_impl": lambda value: calls.append(
+            ("lab", value)
+        ) or "7",
+        "build_demo_readiness_impl": build_readiness,
+        "get_demo_lab_id": lambda: "7",
+        "get_demo_connection_id": lambda: "9",
+        "get_demo_user": lambda: "demo-user",
+        "get_demo_heartbeat_max_age": lambda: 30,
+        "get_guacamole_db_engine": lambda: "guac-db",
+        "get_db_engine": lambda: "ops-db",
+        "get_find_host_by_lab": lambda: state["hosts"].get_by_lab,
+        "get_fetch_latest_heartbeat": lambda: "fetch-heartbeat",
+        "get_to_utc": lambda: "to-utc",
+        "get_sql_text": lambda: "sql-text",
+        "get_now": lambda: lambda: ("now", "UTC"),
+        "get_logger": lambda: "logger",
+        "build_demo_context_impl": build_context,
+        "get_demo_operation_id_pattern": lambda: "demo-pattern",
+        "get_canonical_demo_lab_id": lambda: "canonical",
+        "operation_completed_impl": lambda *args, **kwargs: False,
+        "record_demo_event_impl": lambda *args, **kwargs: None,
+        "get_demo_event_actions": lambda: {"start": "start"},
+        "get_record_reservation_operation": lambda: lambda *args, **kwargs: None,
+        "demo_host_is_ready_impl": lambda *args, **kwargs: True,
+        "handle_demo_start_impl": lambda payload, **kwargs: (
+            kwargs["reservation_start"]({"source": "start"}),
+            kwargs["reservation_end"]({"source": "end"}),
+            kwargs["record_event"]("context", "start", True),
+            (payload, 200),
+        )[-1],
+        "get_demo_context": lambda: lambda payload: ({}, None),
+        "get_operation_completed": lambda: lambda *args: False,
+        "get_parse_bool": lambda: bool,
+        "get_demo_host_is_ready": lambda: lambda _host: True,
+        "get_reservation_start": lambda: state["reservation_start"],
+        "get_reservation_end": lambda: state["reservation_end"],
+        "get_record_demo_event": lambda: state["record_event"],
+        "handle_demo_event_impl": lambda payload, **kwargs: (payload, 200),
+        "handle_demo_end_impl": lambda payload, **kwargs: (payload, 200),
     }
-    runtime = create_demo_runtime(providers)
+    values.update(overrides)
+    return DemoContext(**values), state, captured, calls
+
+
+def test_demo_runtime_forwards_readiness_and_context_dependencies():
+    context, _state, captured, _calls = _context()
+    runtime = create_demo_runtime(context)
 
     assert isinstance(runtime, DemoRuntime)
     assert runtime.demo_readiness() == {"status": "ready"}
@@ -51,32 +90,25 @@ def test_demo_runtime_forwards_readiness_and_context_dependencies():
         "operation_id_pattern": "demo-pattern",
         "canonical_lab_id": "canonical",
         "configured_lab_id": "7",
-        "find_host_by_lab": hosts.get_by_lab,
+        "find_host_by_lab": captured["readiness"]["find_host_by_lab"],
         "db_engine": "ops-db",
     }
 
 
 def test_demo_runtime_resolves_lifecycle_callbacks_dynamically():
     calls = []
-
-    def handle_start(payload, **kwargs):
-        kwargs["reservation_start"]({"source": "start"})
-        kwargs["reservation_end"]({"source": "end"})
-        kwargs["record_event"]("context", "start", True)
-        return payload, 200
-
-    providers = {
-        "_handle_demo_start_impl": handle_start,
-        "_demo_context": lambda _payload: ({}, None),
-        "_demo_operation_completed": lambda *_args: False,
-        "parse_bool": bool,
-        "_demo_host_is_ready": lambda _host: True,
-        "handle_reservation_start": lambda payload: calls.append(("start", payload)),
-        "handle_reservation_end": lambda payload: calls.append(("end", payload)),
-        "_record_demo_event": lambda *args: calls.append(("event", args)),
-    }
-    runtime = create_demo_runtime(providers)
-    providers["handle_reservation_start"] = lambda payload: calls.append(("start-new", payload))
+    context, state, _captured, _calls = _context(calls=calls)
+    context = replace(
+        context,
+        handle_demo_start_impl=lambda payload, **kwargs: (
+            kwargs["reservation_start"]({"source": "start"}),
+            kwargs["reservation_end"]({"source": "end"}),
+            kwargs["record_event"]("context", "start", True),
+            (payload, 200),
+        )[-1],
+    )
+    runtime = create_demo_runtime(context)
+    state["reservation_start"] = lambda payload: calls.append(("start-new", payload))
 
     runtime.handle_demo_start({"demoId": "demo:jti"})
 
@@ -88,17 +120,19 @@ def test_demo_runtime_resolves_lifecycle_callbacks_dynamically():
 
 
 def test_demo_runtime_forwards_demo_value_helpers():
-    calls = []
-    providers = {
-        "_get_mandatory_field_impl": lambda payload, *keys: calls.append(
-            ("mandatory", payload, keys)
-        ) or "value",
-        "_canonical_demo_lab_id_impl": lambda value: calls.append(
-            ("lab", value)
-        ) or "7",
-    }
-    runtime = create_demo_runtime(providers)
+    context, _state, _captured, calls = _context()
+    runtime = create_demo_runtime(context)
 
     assert runtime.get_mandatory_field({"name": "value"}, "name") == "value"
     assert runtime.canonical_demo_lab_id("007") == "7"
-    assert calls == [("mandatory", {"name": "value"}, ("name",)), ("lab", "007")]
+    assert calls == [
+        ("mandatory", {"name": "value"}, ("name",)),
+        ("lab", "007"),
+    ]
+
+
+def test_demo_context_is_immutable():
+    context, _state, _captured, _calls = _context()
+
+    with pytest.raises(FrozenInstanceError):
+        context.get_logger = lambda: "changed"

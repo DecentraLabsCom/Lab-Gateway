@@ -3,84 +3,49 @@
 from collections.abc import Mapping
 from typing import Any
 
+from session_observation_context import SessionObservationContext
+
 
 class SessionObservationRuntime:
-    """Build observation services from a live worker provider namespace."""
+    """Coordinate observation operations from explicit dependencies."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: SessionObservationContext):
+        self._context = context
 
     def create_service(self) -> Any:
-        get = self._get
-        return get("SessionObservations")(
-            db_engine=get("DB_ENGINE"),
-            guacamole_db_engine=get("GUACAMOLE_DB_ENGINE"),
-            encrypt_secret=lambda value: get("_encrypt_runtime_secret")(value),
-            decrypt_secret=lambda value: get("_decrypt_runtime_secret")(value),
-            http_get=get("requests").get,
-            http_post=get("requests").post,
-            http_delete=get("requests").delete,
-            sql_text=get("text"),
-            integrity_error_type=get("IntegrityError"),
-            enqueue_session_observation=lambda payload: get("enqueue_session_observation")(
+        context = self._context
+        return context.get_session_observations_factory()(
+            db_engine=context.get_db_engine(),
+            guacamole_db_engine=context.get_guacamole_db_engine(),
+            encrypt_secret=context.get_encrypt_secret(),
+            decrypt_secret=context.get_decrypt_secret(),
+            http_get=context.get_http_get(),
+            http_post=context.get_http_post(),
+            http_delete=context.get_http_delete(),
+            sql_text=context.get_sql_text(),
+            integrity_error_type=context.get_integrity_error_type(),
+            enqueue_session_observation=lambda payload: context.get_enqueue_session_observation()(
                 payload
             ),
-            retry_delay=get("session_observation_retry_delay_seconds"),
-            to_utc=get("to_utc"),
-            now=lambda: get("datetime").now(get("timezone").utc),
-            current_epoch=get("time").time,
-            config={
-                "access_audit_url": get("ACCESS_AUDIT_URL"),
-                "session_observer_gateway_id": get("SESSION_OBSERVER_GATEWAY_ID"),
-                "session_observer_signing_secret": get("SESSION_OBSERVER_SIGNING_SECRET"),
-                "session_observation_outbox_enabled": get(
-                    "SESSION_OBSERVATION_OUTBOX_ENABLED"
-                ),
-                "session_observation_outbox_batch_size": get(
-                    "SESSION_OBSERVATION_OUTBOX_BATCH_SIZE"
-                ),
-                "session_observation_outbox_max_attempts": get(
-                    "SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS"
-                ),
-                "session_observation_outbox_request_timeout_seconds": get(
-                    "SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS"
-                ),
-                "guac_admin_user": get("GUAC_ADMIN_USER"),
-                "guac_admin_pass": get("GUAC_ADMIN_PASS"),
-                "guac_api_url": get("GUAC_API_URL"),
-                "guac_token_revocation_max_attempts": get(
-                    "GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS"
-                ),
-                "guacamole_history_lookback_seconds": get(
-                    "GUACAMOLE_HISTORY_LOOKBACK_SECONDS"
-                ),
-                "guacamole_history_reconciliation_retention_seconds": get(
-                    "GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS"
-                ),
-            },
-            logger=get("logging"),
+            retry_delay=context.get_retry_delay(),
+            to_utc=context.get_to_utc(),
+            now=context.get_now(),
+            current_epoch=context.get_current_epoch(),
+            config=context.get_config(),
+            logger=context.get_logger(),
         )
 
     def _service(self) -> Any:
-        return self._get("_session_observations_service")()
+        return self._context.get_service()
 
     def retry_delay_seconds(self, attempts: int) -> int:
-        return self._get("_default_retry_delay_seconds_impl")(attempts)
+        return self._context.get_retry_delay()(attempts)
 
     def encrypt_runtime_secret(self, value: str) -> str:
-        return self._get("_encrypt_secret_impl")(
-            value,
-            load_fernet=self._get("_load_fernet"),
-        )
+        return self._context.get_encrypt_secret()(value)
 
     def decrypt_runtime_secret(self, value: str) -> str:
-        return self._get("_decrypt_secret_impl")(
-            value,
-            load_fernet=self._get("_load_fernet"),
-        )
+        return self._context.get_decrypt_secret()(value)
 
     def enqueue_guacamole_token_revocation(self, payload: Mapping[str, Any]) -> bool:
         return self._service().enqueue_guacamole_token_revocation(payload)
@@ -127,10 +92,10 @@ class SessionObservationRuntime:
 
 
 def create_session_observation_runtime(
-    providers: Mapping[str, Any],
+    context: SessionObservationContext,
 ) -> SessionObservationRuntime:
-    """Create a runtime adapter bound to live worker providers."""
-    return SessionObservationRuntime(providers)
+    """Create an observation runtime bound to explicit dependencies."""
+    return SessionObservationRuntime(context)
 
 
 __all__ = ["SessionObservationRuntime", "create_session_observation_runtime"]

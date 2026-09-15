@@ -1,43 +1,40 @@
-"""Composition adapter for the Ops Worker scheduler."""
+"""Composition adapter for Ops Worker scheduler startup."""
 
-from collections.abc import Mapping
 from typing import Any
+
+from scheduler_context import SchedulerContext
 
 
 class SchedulerRuntime:
-    """Resolve scheduler startup dependencies from a live worker namespace."""
+    """Expose scheduler startup through explicit configuration providers."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: SchedulerContext):
+        self._context = context
 
     def start_scheduler(self) -> None:
-        get = self._get
-        environ = get("os").getenv
-        return get("_start_scheduler_impl")(
-            scheduler_factory=lambda: get("BackgroundScheduler")(daemon=True),
-            poll_enabled=environ("OPS_POLL_ENABLED", "false").lower() == "true",
-            poll_interval_seconds=int(environ("OPS_POLL_INTERVAL", "60")),
-            poll_all_hosts=get("poll_all_hosts"),
-            register_reservation_jobs=get("RESERVATION_AUTOMATOR").register,
-            cleanup_enabled=get("GUACAMOLE_TEMP_USER_CLEANUP_ENABLED"),
-            cleanup_interval_seconds=get("GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS"),
-            cleanup_expired_users=get("cleanup_expired_guacamole_temp_users"),
-            observation_enabled=get("SESSION_OBSERVATION_OUTBOX_ENABLED"),
-            observation_interval_seconds=get("SESSION_OBSERVATION_OUTBOX_INTERVAL_SECONDS"),
-            deliver_observations=get("deliver_session_observation_outbox"),
-            revocation_interval_seconds=get("GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS"),
-            process_revocations=get("process_guacamole_token_revocations"),
-            now=lambda: get("datetime").now(get("timezone").utc),
-            logger=get("logging"),
+        context = self._context
+        return context.get_start_scheduler()(
+            scheduler_factory=context.get_scheduler_factory(),
+            poll_enabled=context.get_poll_enabled(),
+            poll_interval_seconds=context.get_poll_interval_seconds(),
+            poll_all_hosts=context.get_poll_all_hosts(),
+            register_reservation_jobs=context.get_register_reservation_jobs(),
+            cleanup_enabled=context.get_cleanup_enabled(),
+            cleanup_interval_seconds=context.get_cleanup_interval_seconds(),
+            cleanup_expired_users=context.get_cleanup_expired_users(),
+            observation_enabled=context.get_observation_enabled(),
+            observation_interval_seconds=context.get_observation_interval_seconds(),
+            deliver_observations=context.get_deliver_observations(),
+            revocation_interval_seconds=context.get_revocation_interval_seconds(),
+            process_revocations=context.get_process_revocations(),
+            now=context.get_now(),
+            logger=context.get_logger(),
         )
 
 
-def create_scheduler_runtime(providers: Mapping[str, Any]) -> SchedulerRuntime:
-    """Create a scheduler adapter bound to live providers."""
-    return SchedulerRuntime(providers)
+def create_scheduler_runtime(context: SchedulerContext) -> SchedulerRuntime:
+    """Create a scheduler runtime bound to explicit providers."""
+    return SchedulerRuntime(context)
 
 
 __all__ = ["SchedulerRuntime", "create_scheduler_runtime"]

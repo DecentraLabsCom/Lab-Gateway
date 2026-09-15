@@ -1,21 +1,33 @@
+from dataclasses import FrozenInstanceError
+
+import pytest
+
+from input_context import InputContext
 from input_runtime import InputRuntime, create_input_runtime
 
 
-def test_input_runtime_forwards_normalizers_and_defaults_dynamically():
-    calls = []
-    providers = {
-        "_coerce_bool_impl": lambda value: calls.append(("bool", value)) or True,
-        "_parse_bool_impl": lambda value, default: calls.append(
+def _context(**overrides):
+    calls = overrides.pop("calls", [])
+    values = {
+        "coerce_bool": lambda value: calls.append(("bool", value)) or True,
+        "parse_bool": lambda value, default: calls.append(
             ("parse", value, default)
         ) or default,
-        "_normalize_args_impl": lambda value, default=None: calls.append(
+        "normalize_args": lambda value, default=None: calls.append(
             ("args", value, default)
         ) or ["normalized"],
-        "_parse_recipients_impl": lambda value, default=None: calls.append(
+        "parse_recipients": lambda value, default=None: calls.append(
             ("recipients", value, default)
         ) or ["recipient"],
     }
-    runtime = create_input_runtime(providers)
+    values.update(overrides)
+    return InputContext(**values), calls
+
+
+def test_input_runtime_forwards_explicit_normalizers_and_defaults():
+    calls = []
+    context, _ = _context(calls=calls)
+    runtime = create_input_runtime(context)
 
     assert isinstance(runtime, InputRuntime)
     assert runtime.coerce_bool("yes") is True
@@ -28,3 +40,10 @@ def test_input_runtime_forwards_normalizers_and_defaults_dynamically():
         ("args", None, ["default"]),
         ("recipients", None, ["default@example.com"]),
     ]
+
+
+def test_input_context_is_immutable():
+    context, _ = _context()
+
+    with pytest.raises(FrozenInstanceError):
+        context.parse_bool = lambda value, default: default

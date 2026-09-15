@@ -9,12 +9,11 @@ def test_create_runtime_services_preserves_power_then_reservation_order():
     services = create_runtime_services(
         power_factory=lambda **kwargs: calls.append(("power", kwargs)) or power_state,
         power_arguments={"db_engine": "db", "record_operation": "record"},
-        reservation_factory=lambda engine, registry, **kwargs: calls.append(
-            ("reservation", engine, registry, kwargs)
+        reservation_factory=lambda engine, registry: calls.append(
+            ("reservation", engine, registry)
         ) or reservation,
         reservation_engine="db",
         reservation_registry="hosts",
-        reservation_arguments={"parse_bool": "parse", "now": "clock"},
     )
 
     assert isinstance(services, RuntimeServices)
@@ -22,7 +21,7 @@ def test_create_runtime_services_preserves_power_then_reservation_order():
     assert services.reservation_automator is reservation
     assert calls == [
         ("power", {"db_engine": "db", "record_operation": "record"}),
-        ("reservation", "db", "hosts", {"parse_bool": "parse", "now": "clock"}),
+        ("reservation", "db", "hosts"),
     ]
 
 

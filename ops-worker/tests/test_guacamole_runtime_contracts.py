@@ -1,27 +1,53 @@
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
+import pytest
+
+from guacamole_context import GuacamoleContext
 from guacamole_runtime import GuacamoleRuntime, create_guacamole_runtime
 
 
-def test_guacamole_runtime_forwards_catalog_auth_and_selector_dependencies():
-    providers = {
-        "_load_guacamole_connections_impl": lambda engine, **kwargs: ([], "not configured"),
-        "GUACAMOLE_DB_ENGINE": None,
-        "text": "sql-text",
-        "logging": SimpleNamespace(),
-        "request": SimpleNamespace(headers={"X-Token": "secret"}),
-        "_check_guacamole_provisioner_auth_impl": lambda headers, **kwargs: (
-            headers,
-            kwargs,
+def _context(**overrides):
+    values = {
+        "get_load_connections_impl": lambda: lambda engine, **kwargs: (
+            [],
+            "not configured",
         ),
-        "GUACAMOLE_PROVISIONER_TOKEN": "secret",
-        "GUACAMOLE_PROVISIONER_TOKEN_HEADER": "X-Token",
-        "jsonify": "jsonify",
-        "_parse_guacamole_selector_impl": lambda value, **kwargs: (value, kwargs),
-        "GUAC_SELECTOR_RE": "pattern",
-        "_safe_connection_response_impl": lambda value: {"id": value["id"]},
+        "get_db_engine": lambda: None,
+        "get_sql_text": lambda: "sql-text",
+        "get_logger": lambda: SimpleNamespace(),
+        "get_request_headers": lambda: {"X-Token": "secret"},
+        "get_check_auth_impl": lambda: lambda headers, **kwargs: (headers, kwargs),
+        "get_expected_token": lambda: "secret",
+        "get_token_header": lambda: "X-Token",
+        "get_jsonify": lambda: "jsonify",
+        "get_parse_selector_impl": lambda: lambda value, **kwargs: (value, kwargs),
+        "get_selector_pattern": lambda: "pattern",
+        "get_safe_connection_response_impl": lambda: lambda value: {
+            "id": value["id"]
+        },
+        "get_provision_impl": lambda: lambda *args, **kwargs: kwargs[
+            "parse_selector"
+        ]("selector"),
+        "get_parse_selector": lambda: lambda value: "first",
+        "get_resolve_connection": lambda: lambda value: {"id": 1},
+        "get_safe_connection_response": lambda: lambda value: {"id": value["id"]},
+        "get_datetime": lambda: SimpleNamespace(
+            fromtimestamp=lambda *args, **kwargs: SimpleNamespace(
+                date=lambda: "date"
+            )
+        ),
+        "get_timezone": lambda: SimpleNamespace(utc="utc"),
+        "get_delete_impl": lambda: lambda session_id, **kwargs: kwargs["engine"],
+        "get_cleanup_impl": lambda: lambda **kwargs: kwargs["engine"],
     }
-    runtime = create_guacamole_runtime(providers)
+    values.update(overrides)
+    return GuacamoleContext(**values)
+
+
+def test_guacamole_runtime_forwards_catalog_auth_and_selector_dependencies():
+    context = _context()
+    runtime = create_guacamole_runtime(context)
 
     assert isinstance(runtime, GuacamoleRuntime)
     assert runtime.load_guacamole_connections() == ([], "not configured")
@@ -33,30 +59,27 @@ def test_guacamole_runtime_forwards_catalog_auth_and_selector_dependencies():
             "jsonify": "jsonify",
         },
     )
-    assert runtime.parse_guacamole_selector("guac:id:42") == ("guac:id:42", {"selector_pattern": "pattern"})
+    assert runtime.parse_guacamole_selector("guac:id:42") == (
+        "guac:id:42",
+        {"selector_pattern": "pattern"},
+    )
     assert runtime.safe_connection_response({"id": 42}) == {"id": 42}
 
 
 def test_guacamole_runtime_keeps_provisioning_callbacks_dynamic():
-    providers = {
-        "_provision_guacamole_user_impl": lambda *args, **kwargs: kwargs[
-            "parse_selector"
-        ]("selector"),
-        "GUACAMOLE_DB_ENGINE": "engine",
-        "parse_guacamole_selector": lambda value: "first",
-        "resolve_guacamole_connection": lambda value: {"id": 1},
-        "safe_connection_response": lambda value: {"id": value["id"]},
-        "text": "sql-text",
-        "datetime": SimpleNamespace(fromtimestamp=lambda *args, **kwargs: SimpleNamespace(date=lambda: "date")),
-        "timezone": SimpleNamespace(utc="utc"),
-        "logging": SimpleNamespace(info=lambda *args: None),
-        "_delete_guacamole_user_impl": lambda session_id, **kwargs: kwargs["engine"],
-        "_cleanup_guacamole_users_impl": lambda **kwargs: kwargs["engine"],
-    }
-    runtime = create_guacamole_runtime(providers)
+    parse_selector = lambda _value: "first"
+    context = _context(get_parse_selector=lambda: parse_selector)
+    runtime = create_guacamole_runtime(context)
 
     assert runtime.provision_guacamole_temporary_user("selector", "session", None) == "first"
-    providers["parse_guacamole_selector"] = lambda value: "second"
+    parse_selector = lambda _value: "second"
     assert runtime.provision_guacamole_temporary_user("selector", "session", None) == "second"
-    assert runtime.delete_guacamole_temporary_user("session") == "engine"
-    assert runtime.cleanup_expired_guacamole_temp_users() == "engine"
+    assert runtime.delete_guacamole_temporary_user("session") is None
+    assert runtime.cleanup_expired_guacamole_temp_users() is None
+
+
+def test_guacamole_context_is_immutable():
+    context = _context()
+
+    with pytest.raises(FrozenInstanceError):
+        context.get_db_engine = lambda: "changed"

@@ -1,41 +1,34 @@
-"""Compatibility construction for the reservation orchestration runtime."""
+"""Composition adapter for the reservation orchestration runtime."""
 
-from collections.abc import Mapping
 from typing import Any, Optional, Type
 
+from reservation_context import ReservationRuntimeContext
 from reservation_orchestrator import ReservationOrchestrator as BaseReservationOrchestrator
 
 
 def create_reservation_orchestrator_class(
-    providers: Mapping[str, Any],
+    context: ReservationRuntimeContext,
 ) -> Type[BaseReservationOrchestrator]:
-    """Create the legacy two-argument adapter over the explicit orchestrator.
-
-    Provider lookups remain live so tests and runtime reloads can replace the
-    historical worker-level callbacks without importing this module again.
-    """
-    get = providers.__getitem__
+    """Create the two-argument worker constructor over explicit dependencies."""
 
     class WorkerReservationOrchestrator(BaseReservationOrchestrator):
         def __init__(self, engine: Optional[Any], registry: Any):
             super().__init__(
                 engine,
                 registry,
-                parse_bool=get("parse_bool"),
-                get_env=get("os").getenv,
-                env_or_secret_file=lambda name: get("_env_or_secret_file")(name),
-                parse_reservation_datetime=get("_parse_reservation_datetime"),
-                as_utc_datetime=get("_as_utc_datetime"),
-                http_get=lambda *args, **kwargs: get("requests").get(*args, **kwargs),
-                sql_text=get("text"),
-                bindparam=get("bindparam"),
-                dispatch_start=lambda payload: get("handle_reservation_start")(payload),
-                dispatch_end=lambda payload: get("handle_reservation_end")(payload),
-                record_operation=lambda *args, **kwargs: get(
-                    "record_reservation_operation"
-                )(*args, **kwargs),
-                logger=get("logging"),
-                now=lambda: get("datetime").now(get("timezone").utc),
+                parse_bool=context.get_parse_bool(),
+                get_env=context.get_env(),
+                env_or_secret_file=context.get_env_or_secret_file(),
+                parse_reservation_datetime=context.get_parse_reservation_datetime(),
+                as_utc_datetime=context.get_as_utc_datetime(),
+                http_get=context.get_http_get(),
+                sql_text=context.get_sql_text(),
+                bindparam=context.get_bindparam(),
+                dispatch_start=context.get_dispatch_start(),
+                dispatch_end=context.get_dispatch_end(),
+                record_operation=context.get_record_operation(),
+                logger=context.get_logger(),
+                now=context.get_now(),
             )
 
     WorkerReservationOrchestrator.__name__ = "ReservationOrchestrator"

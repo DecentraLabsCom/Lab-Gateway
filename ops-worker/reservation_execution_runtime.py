@@ -1,17 +1,15 @@
 """Composition adapter for reservation execution and operational alerts."""
 
-from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
+
+from reservation_execution_context import ReservationExecutionContext
 
 
 class ReservationExecutionRuntime:
-    """Resolve reservation execution dependencies from a live worker namespace."""
+    """Expose reservation execution through explicit persistence and operation ports."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: ReservationExecutionContext):
+        self._context = context
 
     def record_reservation_operation(
         self,
@@ -26,8 +24,7 @@ class ReservationExecutionRuntime:
         payload: Optional[Dict[str, Any]] = None,
         message: Optional[str] = None,
     ) -> Any:
-        get = self._get
-        return get("_record_reservation_operation_impl")(
+        return self._context.record_reservation_operation_impl(
             reservation_id,
             lab_id,
             host_name,
@@ -38,37 +35,29 @@ class ReservationExecutionRuntime:
             duration_ms,
             payload,
             message,
-            engine=get("DB_ENGINE"),
-            now=get("_now_utc"),
-            sql_text=get("text"),
-            json_dumps=get("json").dumps,
-            check_failure_alert=lambda *args, **kwargs: get("_check_failure_alert")(
-                *args,
-                **kwargs,
-            ),
-            logger=get("logging"),
-            sanitize_log_value=get("_sanitize_log_value"),
+            engine=self._context.get_db_engine(),
+            now=self._context.get_now_utc(),
+            sql_text=self._context.get_sql_text(),
+            json_dumps=self._context.get_json_dumps(),
+            check_failure_alert=self._context.get_check_failure_alert(),
+            logger=self._context.get_logger(),
+            sanitize_log_value=self._context.get_sanitize_log_value(),
         )
 
     def record_power_operation(self, operation: Dict[str, Any]) -> None:
-        get = self._get
-        return get("_project_power_operation_impl")(
+        return self._context.project_power_operation_impl(
             operation,
-            record_operation=lambda *args, **kwargs: get("record_reservation_operation")(
-                *args,
-                **kwargs,
-            ),
-            logger=get("logging"),
+            record_operation=self._context.get_record_reservation_operation(),
+            logger=self._context.get_logger(),
         )
 
     def host_local_mode_enabled(self, host: Dict[str, Any]) -> bool:
-        get = self._get
-        return get("_host_local_mode_enabled_impl")(
+        return self._context.host_local_mode_enabled_impl(
             host,
-            db_engine=get("DB_ENGINE"),
-            fetch_latest_heartbeat=get("_fetch_latest_heartbeat"),
-            parse_bool=get("parse_bool"),
-            logger=get("logging"),
+            db_engine=self._context.get_db_engine(),
+            fetch_latest_heartbeat=self._context.get_fetch_latest_heartbeat(),
+            parse_bool=self._context.get_parse_bool(),
+            logger=self._context.get_logger(),
         )
 
     def execute_reservation_power_phase(
@@ -79,32 +68,30 @@ class ReservationExecutionRuntime:
         phase: str,
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
-        get = self._get
-        return get("_execute_reservation_power_phase_impl")(
+        return self._context.execute_reservation_power_phase_impl(
             reservation_id,
             lab_id,
             host,
             phase,
             payload,
-            parse_bool=get("parse_bool"),
-            power_runtime=get("POWER_RUNTIME"),
-            power_validation_error_type=get("PowerValidationError"),
-            host_local_mode=lambda value: get("_host_local_mode_enabled")(value),
-            logger=get("logging"),
+            parse_bool=self._context.get_parse_bool(),
+            power_runtime=self._context.get_power_runtime(),
+            power_validation_error_type=self._context.get_power_validation_error_type(),
+            host_local_mode=self._context.get_host_local_mode_enabled(),
+            logger=self._context.get_logger(),
         )
 
     def should_send_failure_alert(self, host_name: str) -> bool:
-        get = self._get
-        return get("_should_send_failure_alert_impl")(
+        return self._context.should_send_failure_alert_impl(
             host_name,
-            engine=get("DB_ENGINE"),
-            enabled=get("NOTIFICATION_SERVICE_ENABLED"),
-            url=get("NOTIFICATION_SERVICE_URL"),
-            now=get("_now_utc"),
-            failure_threshold=get("OPS_ALERT_FAILURE_THRESHOLD"),
-            window_seconds=get("OPS_ALERT_WINDOW_SECONDS"),
-            cooldown_seconds=get("OPS_ALERT_COOLDOWN_SECONDS"),
-            sql_text=get("text"),
+            engine=self._context.get_db_engine(),
+            enabled=self._context.get_notification_enabled(),
+            url=self._context.get_notification_url(),
+            now=self._context.get_now_utc(),
+            failure_threshold=self._context.get_failure_threshold(),
+            window_seconds=self._context.get_window_seconds(),
+            cooldown_seconds=self._context.get_cooldown_seconds(),
+            sql_text=self._context.get_sql_text(),
         )
 
     def send_failure_alert(
@@ -115,23 +102,22 @@ class ReservationExecutionRuntime:
         failure_reason: str,
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
-        get = self._get
-        return get("_send_failure_alert_impl")(
+        return self._context.send_failure_alert_impl(
             reservation_id,
             lab_id,
             host_name,
             failure_reason,
             details,
-            recipients=list(get("NOTIFICATION_SERVICE_RECIPIENTS")),
-            url=get("NOTIFICATION_SERVICE_URL"),
-            token_header=get("NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER"),
-            token=get("NOTIFICATION_SERVICE_ACCESS_TOKEN"),
-            retry_attempts=get("NOTIFICATION_SERVICE_RETRY_ATTEMPTS"),
-            retry_backoff_seconds=get("NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS"),
-            http_post=get("requests").post,
-            sleep=get("time").sleep,
-            record_operation=get("record_reservation_operation"),
-            json_dumps=get("json").dumps,
+            recipients=list(self._context.get_recipients()),
+            url=self._context.get_notification_url(),
+            token_header=self._context.get_token_header(),
+            token=self._context.get_token(),
+            retry_attempts=self._context.get_retry_attempts(),
+            retry_backoff_seconds=self._context.get_retry_backoff_seconds(),
+            http_post=self._context.get_http_post(),
+            sleep=self._context.get_sleep(),
+            record_operation=self._context.get_record_reservation_operation(),
+            json_dumps=self._context.get_json_dumps(),
         )
 
     def check_failure_alert(
@@ -143,18 +129,17 @@ class ReservationExecutionRuntime:
         message: Optional[str],
         payload: Optional[Dict[str, Any]],
     ) -> None:
-        get = self._get
-        return get("_check_failure_alert_impl")(
+        return self._context.check_failure_alert_impl(
             host_name,
             reservation_id,
             lab_id,
             action,
             message,
             payload,
-            should_send=get("_should_send_failure_alert"),
-            failure_threshold=get("OPS_ALERT_FAILURE_THRESHOLD"),
-            window_seconds=get("OPS_ALERT_WINDOW_SECONDS"),
-            send_failure_alert=get("_send_failure_alert"),
+            should_send=self._context.get_should_send_failure_alert(),
+            failure_threshold=self._context.get_failure_threshold(),
+            window_seconds=self._context.get_window_seconds(),
+            send_failure_alert=self._context.get_send_failure_alert(),
         )
 
     def notify_critical_failure(
@@ -166,28 +151,27 @@ class ReservationExecutionRuntime:
         failure_reason: str,
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
-        get = self._get
-        return get("_notify_critical_failure_impl")(
+        return self._context.notify_critical_failure_impl(
             reservation_id,
             lab_id,
             host_name,
             action,
             failure_reason,
             details,
-            enabled=get("NOTIFICATION_SERVICE_ENABLED"),
-            url=get("NOTIFICATION_SERVICE_URL"),
-            recipients=list(get("NOTIFICATION_SERVICE_RECIPIENTS")),
-            token_header=get("NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER"),
-            token=get("NOTIFICATION_SERVICE_ACCESS_TOKEN"),
-            retry_attempts=get("NOTIFICATION_SERVICE_RETRY_ATTEMPTS"),
-            retry_backoff_seconds=get("NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS"),
-            http_post=get("requests").post,
-            sleep=get("time").sleep,
-            now_seconds=get("time").time,
-            record_operation=get("record_reservation_operation"),
-            json_dumps=get("json").dumps,
-            logger=get("logging"),
-            sanitize_log_value=get("_sanitize_log_value"),
+            enabled=self._context.get_notification_enabled(),
+            url=self._context.get_notification_url(),
+            recipients=list(self._context.get_recipients()),
+            token_header=self._context.get_token_header(),
+            token=self._context.get_token(),
+            retry_attempts=self._context.get_retry_attempts(),
+            retry_backoff_seconds=self._context.get_retry_backoff_seconds(),
+            http_post=self._context.get_http_post(),
+            sleep=self._context.get_sleep(),
+            now_seconds=self._context.get_current_epoch(),
+            record_operation=self._context.get_record_reservation_operation(),
+            json_dumps=self._context.get_json_dumps(),
+            logger=self._context.get_logger(),
+            sanitize_log_value=self._context.get_sanitize_log_value(),
         )
 
     def perform_wake_step(
@@ -197,23 +181,16 @@ class ReservationExecutionRuntime:
         lab_id: Optional[str],
         options: Dict[str, Any],
     ) -> Tuple[bool, Dict[str, Any]]:
-        get = self._get
-        return get("_perform_wake_step_impl")(
+        return self._context.perform_wake_step_impl(
             host,
             reservation_id,
             lab_id,
             options,
-            wol_and_wait=lambda *args, **kwargs: get("wol_and_wait")(*args, **kwargs),
-            record_operation=lambda *args, **kwargs: get("record_reservation_operation")(
-                *args,
-                **kwargs,
-            ),
-            notify_failure=lambda *args, **kwargs: get("notify_critical_failure")(
-                *args,
-                **kwargs,
-            ),
-            current_epoch=get("time").time,
-            logger=get("logging"),
+            wol_and_wait=self._context.get_wol_and_wait(),
+            record_operation=self._context.get_record_reservation_operation(),
+            notify_failure=self._context.get_notify_critical_failure(),
+            current_epoch=self._context.get_current_epoch(),
+            logger=self._context.get_logger(),
         )
 
     def perform_command_step(
@@ -225,34 +202,26 @@ class ReservationExecutionRuntime:
         command: str,
         args: List[str],
     ) -> Tuple[bool, Dict[str, Any]]:
-        get = self._get
-        return get("_perform_command_step_impl")(
+        return self._context.perform_command_step_impl(
             host,
             reservation_id,
             lab_id,
             action,
             command,
             args,
-            run_labstation_command=lambda *call_args, **call_kwargs: get(
-                "run_labstation_command"
-            )(*call_args, **call_kwargs),
-            record_operation=lambda *call_args, **call_kwargs: get(
-                "record_reservation_operation"
-            )(*call_args, **call_kwargs),
-            notify_failure=lambda *call_args, **call_kwargs: get("notify_critical_failure")(
-                *call_args,
-                **call_kwargs,
-            ),
-            current_epoch=get("time").time,
-            logger=get("logging"),
+            run_labstation_command=self._context.get_run_labstation_command(),
+            record_operation=self._context.get_record_reservation_operation(),
+            notify_failure=self._context.get_notify_critical_failure(),
+            current_epoch=self._context.get_current_epoch(),
+            logger=self._context.get_logger(),
         )
 
 
 def create_reservation_execution_runtime(
-    providers: Mapping[str, Any],
+    context: ReservationExecutionContext,
 ) -> ReservationExecutionRuntime:
-    """Create a reservation execution adapter bound to live providers."""
-    return ReservationExecutionRuntime(providers)
+    """Create a reservation execution adapter bound to explicit ports."""
+    return ReservationExecutionRuntime(context)
 
 
 __all__ = ["ReservationExecutionRuntime", "create_reservation_execution_runtime"]

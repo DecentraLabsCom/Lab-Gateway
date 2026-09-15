@@ -1,34 +1,36 @@
+from dataclasses import FrozenInstanceError, replace
+from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from reservation_context import ReservationRuntimeContext
 from reservation_runtime import create_reservation_orchestrator_class
 
 
-def _providers(calls):
-    import os
-    from datetime import datetime, timezone
-
-    return {
-        "parse_bool": lambda value, default=False: default,
-        "os": os,
-        "_env_or_secret_file": lambda name: calls.append(("secret", name)) or "",
-        "_parse_reservation_datetime": lambda value: value,
-        "_as_utc_datetime": lambda value: value,
-        "requests": SimpleNamespace(get=lambda *args, **kwargs: calls.append(("get", args, kwargs))),
-        "text": lambda value: value,
-        "bindparam": lambda *args, **kwargs: (args, kwargs),
-        "handle_reservation_start": lambda payload: calls.append(("start", payload)),
-        "handle_reservation_end": lambda payload: calls.append(("end", payload)),
-        "record_reservation_operation": lambda *args, **kwargs: calls.append(("record", args, kwargs)),
-        "logging": SimpleNamespace(error=lambda *args: calls.append(("error", args))),
-        "datetime": datetime,
-        "timezone": timezone,
-    }
+def _context(calls):
+    return ReservationRuntimeContext(
+        get_parse_bool=lambda: lambda value, default=False: default,
+        get_env=lambda: lambda name, default=None: default,
+        get_env_or_secret_file=lambda: lambda name: calls.append(("secret", name)) or "",
+        get_parse_reservation_datetime=lambda: lambda value: value,
+        get_as_utc_datetime=lambda: lambda value: value,
+        get_http_get=lambda: lambda *args, **kwargs: calls.append(("get", args, kwargs)),
+        get_sql_text=lambda: lambda value: value,
+        get_bindparam=lambda: lambda *args, **kwargs: (args, kwargs),
+        get_dispatch_start=lambda: lambda payload: calls.append(("start", payload)),
+        get_dispatch_end=lambda: lambda payload: calls.append(("end", payload)),
+        get_record_operation=lambda: lambda *args, **kwargs: calls.append(("record", args, kwargs)),
+        get_logger=lambda: SimpleNamespace(error=lambda *args: calls.append(("error", args))),
+        get_now=lambda: lambda: datetime.now(timezone.utc),
+    )
 
 
-def test_compatibility_class_preserves_two_argument_constructor_and_live_callbacks():
+def test_explicit_context_preserves_two_argument_constructor_and_live_callbacks():
     calls = []
-    providers = _providers(calls)
-    cls = create_reservation_orchestrator_class(providers)
+    context = _context(calls)
+    cls = create_reservation_orchestrator_class(context)
 
     orchestrator = cls(None, "registry")
 
@@ -36,5 +38,20 @@ def test_compatibility_class_preserves_two_argument_constructor_and_live_callbac
     assert orchestrator.registry == "registry"
     assert orchestrator.engine is None
 
-    providers["parse_bool"] = lambda value, default=False: True
-    assert cls(None, "registry-2").enabled is True
+    updated_context = replace(
+        context,
+        get_parse_bool=lambda: lambda value, default=False: True,
+    )
+    assert create_reservation_orchestrator_class(updated_context)(None, "registry-2").enabled is True
+
+
+def test_reservation_context_is_frozen_and_runtime_has_no_provider_namespace():
+    context = _context([])
+
+    with pytest.raises(FrozenInstanceError):
+        context.get_env = lambda: lambda name, default=None: default
+
+    source = Path(__file__).parents[1].joinpath("reservation_runtime.py").read_text(encoding="utf-8")
+    assert "Mapping" not in source
+    assert "globals()" not in source
+    assert "providers" not in source

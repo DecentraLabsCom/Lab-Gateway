@@ -1,63 +1,67 @@
 """Composition adapter for Lab Station host provisioning values."""
 
-from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
+
+from host_provisioning_context import HostProvisioningContext
+from host_provisioning_values import (
+    build_provisioned_host,
+    normalize_labs,
+    sanitize_host_name,
+    validate_labs_against_candidates,
+)
 
 
 class HostProvisioningRuntime:
-    """Resolve host naming and provisioning helpers from live worker providers."""
+    """Expose host provisioning values through explicit dependencies."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: HostProvisioningContext):
+        self._context = context
 
     def sanitize_host_name(
         self,
         value: Any,
         fallback: Optional[Any],
     ) -> Tuple[Optional[str], Optional[str]]:
-        return self._get("_sanitize_host_name_impl")(
+        return sanitize_host_name(
             value,
             fallback,
-            name_pattern=self._get("HOST_NAME_RE"),
+            name_pattern=self._context.get_name_pattern(),
         )
 
     def normalize_labs(self, value: Any) -> List[str]:
-        return self._get("_normalize_labs_impl")(value)
+        return normalize_labs(value)
 
     def validate_labs_against_candidates(
         self,
         labs: List[str],
         candidates: Any,
     ) -> Optional[str]:
-        return self._get("_validate_labs_against_candidates_impl")(labs, candidates)
+        return validate_labs_against_candidates(labs, candidates)
 
     def build_provisioned_host(
         self,
         payload: Dict[str, Any],
         connection: Dict[str, Any],
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-        get = self._get
-        return get("_build_provisioned_host_impl")(
+        context = self._context
+        return build_provisioned_host(
             payload,
             connection,
-            sanitize_host_name_fn=get("sanitize_host_name"),
-            normalize_labs_fn=get("normalize_labs"),
-            validate_labs_fn=get("validate_labs_against_candidates"),
-            normalize_mac_fn=get("normalize_mac"),
-            normalize_trust_ref_fn=get("normalize_winrm_trust_ref"),
-            default_heartbeat_path=r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
-            default_events_path=r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+            sanitize_host_name_fn=context.get_sanitize_host_name,
+            normalize_labs_fn=context.get_normalize_labs,
+            validate_labs_fn=context.get_validate_labs_against_candidates,
+            normalize_mac_fn=context.normalize_mac,
+            normalize_trust_ref_fn=context.normalize_trust_ref,
+            default_heartbeat_path=context.default_heartbeat_path,
+            default_events_path=context.default_events_path,
         )
 
 
 def create_host_provisioning_runtime(
-    providers: Mapping[str, Any],
+    context: HostProvisioningContext,
 ) -> HostProvisioningRuntime:
-    """Create a host provisioning adapter bound to live providers."""
-    return HostProvisioningRuntime(providers)
+    """Create a host provisioning adapter bound to explicit dependencies."""
+    return HostProvisioningRuntime(context)
 
 
 __all__ = ["HostProvisioningRuntime", "create_host_provisioning_runtime"]
