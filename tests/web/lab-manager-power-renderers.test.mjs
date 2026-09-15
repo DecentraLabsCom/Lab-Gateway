@@ -105,6 +105,10 @@ test('renders policy steps with controller and outlet choices', () => {
   assert.match(html, /draggable="true"/);
   assert.match(html, /Step 1/);
   assert.doesNotMatch(html, /data-step-field="sequence"/);
+  assert.ok(
+    html.indexOf('data-step-field="stepLabel"') < html.indexOf('data-step-field="phase"'),
+    'Step label should be the first step field',
+  );
   assert.match(html, /value="pdu-1" selected/);
   assert.match(html, /value="1" selected/);
   assert.match(html, /&lt;PLC&gt;/);
