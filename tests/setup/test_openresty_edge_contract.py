@@ -1944,3 +1944,21 @@ def test_init_ssl_jwt_watchers_keep_mode_guards_and_launch_order():
     )
     assert launch_order == tuple(sorted(launch_order))
     assert "COPY init-ssl-jwt-watchers.sh /usr/local/bin/init-ssl-jwt-watchers.sh" in dockerfile
+
+
+def test_init_ssl_supervises_openresty_and_reaps_background_watchers():
+    script = _read(INIT_SSL)
+
+    for watcher_pid in (
+        "watch_certs_pid",
+        "watch_full_jwt_public_key_pid",
+        "auto_rotate_self_signed_pid",
+        "auto_refresh_jwt_public_key_pid",
+    ):
+        assert f"{watcher_pid}=$!" in script
+
+    assert "openresty_pid=$!" in script
+    assert 'kill "$watcher_pid"' in script
+    assert 'trap cleanup TERM INT EXIT' in script
+    assert 'wait "$openresty_pid"' in script
+    assert 'exec /usr/local/openresty/bin/openresty -g "daemon off;"' not in script

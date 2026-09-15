@@ -381,8 +381,10 @@ watch_certs() {
 }
 
 watch_certs &
+watch_certs_pid=$!
 
 watch_full_jwt_public_key &
+watch_full_jwt_public_key_pid=$!
 
 auto_rotate_self_signed() {
     while true; do
@@ -402,7 +404,44 @@ auto_rotate_self_signed() {
 }
 
 auto_rotate_self_signed &
+auto_rotate_self_signed_pid=$!
 
 auto_refresh_jwt_public_key &
+auto_refresh_jwt_public_key_pid=$!
 
-exec /usr/local/openresty/bin/openresty -g "daemon off;"
+openresty_pid=""
+cleanup() {
+    trap - TERM INT EXIT
+    for watcher_pid in \
+        "$watch_certs_pid" \
+        "$watch_full_jwt_public_key_pid" \
+        "$auto_rotate_self_signed_pid" \
+        "$auto_refresh_jwt_public_key_pid"; do
+        if [ -n "$watcher_pid" ]; then
+            kill "$watcher_pid" 2>/dev/null || true
+        fi
+    done
+    if [ -n "$openresty_pid" ]; then
+        kill "$openresty_pid" 2>/dev/null || true
+    fi
+    for watcher_pid in \
+        "$watch_certs_pid" \
+        "$watch_full_jwt_public_key_pid" \
+        "$auto_rotate_self_signed_pid" \
+        "$auto_refresh_jwt_public_key_pid"; do
+        if [ -n "$watcher_pid" ]; then
+            wait "$watcher_pid" 2>/dev/null || true
+        fi
+    done
+    if [ -n "$openresty_pid" ]; then
+        wait "$openresty_pid" 2>/dev/null || true
+    fi
+}
+
+trap cleanup TERM INT EXIT
+/usr/local/openresty/bin/openresty -g "daemon off;" &
+openresty_pid=$!
+wait "$openresty_pid"
+openresty_status=$?
+cleanup
+exit "$openresty_status"
