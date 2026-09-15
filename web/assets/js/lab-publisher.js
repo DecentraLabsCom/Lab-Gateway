@@ -19,6 +19,10 @@
     if (!publisherMetadata) {
         throw new Error('LabPublisherMetadata must load before lab-publisher.js');
     }
+    const publisherLabActions = window.LabPublisherLabActions;
+    if (!publisherLabActions) {
+        throw new Error('LabPublisherLabActions must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
@@ -125,11 +129,32 @@
 
         if (!refresh || !submit) return;
 
+        const labActionsController = publisherLabActions.createController({
+            listElement: labList,
+            getLabs: () => state.labs,
+            getEditingLabId: () => state.editingLabId,
+            fetchJson,
+            assertLabMutationSuccess,
+            renderLabActionIcon,
+            escapeHtml,
+            escapeAttr,
+            formatRawPriceForUnit,
+            resolveLabPriceUnit,
+            resolveLabDisplayName,
+            confirmImpl: message => window.confirm(message),
+            callbacks: {
+                onEdit: enterEditMode,
+                onClearEdit: () => clearEditMode(false),
+                onReload: loadPublisherData,
+                setStatus,
+            },
+        });
+        labActionsController.bind();
+
         initMarketplaceFields();
         refresh.addEventListener('click', loadPublisherData);
         submit.addEventListener('click', publishLab);
         if (cancelEdit) cancelEdit.addEventListener('click', () => clearEditMode(true));
-        if (labList) labList.addEventListener('click', handleLabListClick);
         resourceType.addEventListener('change', () => {
             renderResourceOptions();
             syncResourceTypeFields();
@@ -313,7 +338,7 @@
             state.fmus = detectedResources.fmus;
             renderResourceOptions();
             state.labs = labs?.labs || [];
-            renderLabs(state.labs);
+            labActionsController.render(state.labs);
             const providerLabel = status?.isProvider
                 ? `Provider wallet: ${status.providerAddress}`
                 : 'This Gateway wallet is not registered as provider yet.';
@@ -1016,62 +1041,6 @@
         return resolveLabDisplayName(lab || { labId });
     }
 
-    function renderLabs(labs) {
-        const target = $('labPublisherList');
-        if (!labs.length) {
-            target.classList.add('empty');
-            target.textContent = 'No labs published by this provider wallet yet.';
-            return;
-        }
-        target.classList.remove('empty');
-        target.innerHTML = labs.map(lab => {
-            const displayName = resolveLabDisplayName(lab);
-            return `
-            <div class="lab-row">
-                <div>
-                    <div class="item-title">${escapeHtml(displayName)} ${Number(lab.resourceType) === 1 ? 'FMU' : 'Remote'} ${lab.listed ? '<span class="pill good">Listed</span>' : '<span class="pill soft">Draft</span>'}</div>
-                    <div class="item-meta">${escapeHtml(lab.accessKey || '')} - ${escapeHtml(lab.uri || '')}</div>
-                </div>
-                <div class="lab-row-side">
-                    <div class="item-meta">${escapeHtml(formatRawPriceForUnit(lab.price || '0', resolveLabPriceUnit(lab)))} credits/${escapeHtml(resolveLabPriceUnit(lab))}</div>
-                    <div class="lab-actions">
-                        <button class="mini-btn primary" type="button" data-lab-action="edit" data-lab-id="${escapeAttr(lab.labId)}" title="Edit ${escapeAttr(displayName)}" aria-label="Edit ${escapeAttr(displayName)}">
-                            ${renderLabActionIcon('edit')}
-                        </button>
-                        <button class="mini-btn" type="button" data-lab-action="${lab.listed ? 'unlist' : 'list'}" data-lab-id="${escapeAttr(lab.labId)}" title="${lab.listed ? 'Unlist' : 'List'} ${escapeAttr(displayName)}" aria-label="${lab.listed ? 'Unlist' : 'List'} ${escapeAttr(displayName)}">
-                            ${renderLabActionIcon(lab.listed ? 'unlist' : 'list')}
-                        </button>
-                        <button class="mini-btn danger" type="button" data-lab-action="delete" data-lab-id="${escapeAttr(lab.labId)}" title="Delete ${escapeAttr(displayName)} on-chain" aria-label="Delete ${escapeAttr(displayName)} on-chain">
-                            ${renderLabActionIcon('delete')}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-        }).join('');
-    }
-
-    async function handleLabListClick(event) {
-        const button = event.target.closest('button[data-lab-action][data-lab-id]');
-        if (!button) return;
-        const labId = button.dataset.labId;
-        const action = button.dataset.labAction;
-        const lab = state.labs.find(item => String(item.labId) === String(labId));
-        if (!lab) return;
-
-        if (action === 'edit') {
-            await enterEditMode(lab);
-            return;
-        }
-        if (action === 'delete') {
-            await deleteLab(lab, button);
-            return;
-        }
-        if (action === 'list' || action === 'unlist') {
-            await toggleLabListing(lab, action === 'list', button);
-        }
-    }
-
     async function enterEditMode(lab) {
         state.editingLabId = String(lab.labId);
         resetFmuDescribeFields(false);
@@ -1230,38 +1199,6 @@
         });
         renderCategoryChips();
         renderIscedSuggestions();
-    }
-
-    async function toggleLabListing(lab, shouldList, button) {
-        button.disabled = true;
-        try {
-            const result = await fetchJson(`/lab-admin/labs/${encodeURIComponent(lab.labId)}/${shouldList ? 'list' : 'unlist'}`, {
-                method: 'POST',
-            });
-            assertLabMutationSuccess(result, shouldList ? 'List' : 'Unlist');
-            setStatus(`${shouldList ? 'Listed' : 'Unlisted'} ${resolveLabDisplayName(lab)}. Tx: ${result.transactionHash || 'pending'}`, false);
-            await loadPublisherData();
-        } catch (err) {
-            setStatus(err.message || `${shouldList ? 'List' : 'Unlist'} failed`, true);
-        } finally {
-            button.disabled = false;
-        }
-    }
-
-    async function deleteLab(lab, button) {
-        if (!window.confirm(`Delete ${resolveLabDisplayName(lab)} on-chain? This burns the lab token and cannot be undone. Use Unlist to stop new bookings while preserving the lab record.`)) return;
-        button.disabled = true;
-        try {
-            const result = await fetchJson(`/lab-admin/labs/${encodeURIComponent(lab.labId)}`, { method: 'DELETE' });
-            assertLabMutationSuccess(result, 'Delete');
-            if (state.editingLabId === String(lab.labId)) clearEditMode(false);
-            setStatus(`Deleted ${resolveLabDisplayName(lab)} on-chain. Gateway content is hidden and retained according to its purge policy. Tx: ${result.transactionHash || 'pending'}`, false);
-            await loadPublisherData();
-        } catch (err) {
-            setStatus(err.message || 'Delete failed', true);
-        } finally {
-            button.disabled = false;
-        }
     }
 
     function clearEditMode(resetStatus = true) {
