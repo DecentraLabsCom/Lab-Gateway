@@ -51,6 +51,10 @@
     if (!publisherMetadataFeature) {
         throw new Error('LabPublisherMetadataFeature must load before lab-publisher.js');
     }
+    const publisherPricingFeature = window.LabPublisherPricingFeature;
+    if (!publisherPricingFeature) {
+        throw new Error('LabPublisherPricingFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
@@ -61,14 +65,9 @@
         docMode: 'link',
         labs: [],
         editingLabId: null,
-        originalRawPrice: null,
-        originalDisplayPrice: null,
-        originalPriceUnit: null,
     };
 
-    const parseHourlyCreditsToRaw = publisherValues.parseHourlyCreditsToRaw;
     const normalizePricingUnit = publisherValues.normalizePricingUnit;
-    const convertDisplayCreditsToRawPerSecond = publisherValues.convertDisplayCreditsToRawPerSecond;
     const formatRawPriceForUnit = publisherValues.formatRawPriceForUnit;
     const resolveLabPriceUnit = publisherValues.resolveLabPriceUnit;
     const fetchJson = (url, options) => publisherValues.fetchJson(url, options, fetch);
@@ -120,6 +119,7 @@
     let termsController;
     let fmuMetadataController;
     let metadataController;
+    let pricingController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
@@ -201,6 +201,12 @@
         metadataController = publisherMetadataFeature.createController({
             documentImpl: document,
             splitCsv,
+        });
+
+        pricingController = publisherPricingFeature.createController({
+            documentImpl: document,
+            normalizePricingUnit,
+            convertDisplayCreditsToRawPerSecond: publisherValues.convertDisplayCreditsToRawPerSecond,
         });
 
         labActionsController = publisherLabActions.createController({
@@ -345,7 +351,7 @@
         const payload = {
             setupMode,
             listImmediately: $('labListImmediately').value === 'true',
-            price: resolvePayloadRawPrice(),
+            price: pricingController.resolvePayloadRawPrice(),
             accessURI: $('labAccessURI').value.trim(),
             accessKey: $('labAccessKey').value.trim(),
             resourceType: Number($('labResourceType').value),
@@ -380,8 +386,7 @@
         const resourceType = $('labResourceType').value === '1' ? RESOURCE_TYPES.FMU : RESOURCE_TYPES.LAB;
         const fmuFileName = $('labFmuFileName').value.trim();
         const unavailableWindows = sanitizeUnavailableWindows(availability.unavailableWindows);
-        const priceUnit = normalizePricingUnit($('labPriceUnit').value || 'hour');
-        const rawPricePerSecond = convertDisplayCreditsToRawPerSecond($('labPrice').value || '0', priceUnit);
+        const pricing = pricingController.getState();
         const bookingMode = schedulingController.getDerivedBookingMode();
         const timeSlots = splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite);
         const allowedDurationRange = bookingMode === 'calendar-period'
@@ -393,13 +398,6 @@
         const periodRules = bookingMode === 'calendar-period'
             ? buildPeriodRules(allowedDurationRange)
             : null;
-        const pricing = {
-            displayAmount: $('labPrice').value.trim(),
-            displayUnit: priceUnit,
-            rawPricePerSecond: rawPricePerSecond.toString(),
-            roundingMode: 'nearest-per-second',
-            billingMode: 'linear-duration',
-        };
         const termsOfUse = sanitizeTermsOfUse(termsController.getState());
         return buildMetadataPayload({
             contentId: ensureContentId(),
@@ -439,10 +437,11 @@
     function validateMarketplaceFields() {
         const isFmu = $('labResourceType').value === '1';
         const content = metadataController.getState();
+        const pricing = pricingController.getState();
         const required = [
             ['Name', content.name],
             ['Description', content.description],
-            ['Price', $('labPrice').value.trim()],
+            ['Price', pricing.displayAmount],
             ['Access URI', $('labAccessURI').value.trim()],
             ['Timezone', $('labTimezone').value.trim()],
         ];
@@ -506,7 +505,7 @@
         fmuMetadataController.reset(false);
         applyLabBaseFields(lab);
         await applyLabMetadata(lab);
-        captureOriginalEditPrice(lab);
+        pricingController.captureOriginalEditPrice(lab);
         resourceFeatureController.syncSetupMode();
         resourceFeatureController.syncTypeFields();
         schedulingController.syncBookingModeFields();
@@ -525,8 +524,10 @@
         $('labAccessKey').value = lab.accessKey || '';
         $('labMaxConcurrentUsers').value = Number(lab.resourceType) === 1 ? '2' : '1';
         const priceUnit = resolveLabPriceUnit(lab);
-        $('labPriceUnit').value = priceUnit;
-        $('labPrice').value = formatRawPriceForUnit(lab.price || '0', priceUnit);
+        pricingController.hydrate({
+            displayUnit: priceUnit,
+            displayAmount: formatRawPriceForUnit(lab.price || '0', priceUnit),
+        });
         $('labMetadataUrl').value = lab.uri || '';
         const contentId = extractContentIdFromMetadataUri(lab.uri);
         setContentId(contentId);
@@ -592,12 +593,7 @@
         setupMediaMode('docs', 'upload');
         assetsController.setUploadedAssets({ images, docs });
 
-        if (metadata?.pricing?.displayUnit) {
-            $('labPriceUnit').value = normalizePricingUnit(metadata.pricing.displayUnit);
-        }
-        if (metadata?.pricing?.displayAmount) {
-            $('labPrice').value = metadata.pricing.displayAmount;
-        }
+        if (metadata?.pricing) pricingController.hydrate(metadata.pricing);
         if (metadata?.allowedDurationRange) {
             schedulingController.setAllowedPeriodRangeControls(metadata.allowedDurationRange);
         }
@@ -606,14 +602,13 @@
         }
         setAttributeValue(attributes, 'timeSlots', value => $('labTimeSlots').value = normalizeArray(value).join(', '));
         setAttributeValue(attributes, 'pricing', value => {
-            if (value?.displayUnit) $('labPriceUnit').value = normalizePricingUnit(value.displayUnit);
-            if (value?.displayAmount) $('labPrice').value = value.displayAmount;
+            pricingController.hydrate(value);
         });
         setAttributeValue(attributes, 'pricingUnit', value => {
-            if (value) $('labPriceUnit').value = normalizePricingUnit(value);
+            if (value) pricingController.hydrate({ displayUnit: value });
         });
         setAttributeValue(attributes, 'pricingDisplayAmount', value => {
-            if (value !== undefined && value !== null && value !== '') $('labPrice').value = String(value);
+            if (value !== undefined && value !== null && value !== '') pricingController.hydrate({ displayAmount: value });
         });
         setAttributeValue(attributes, 'allowedDurations', value => {
             const range = deriveAllowedPeriodRange(value);
@@ -656,9 +651,6 @@
 
     function clearEditMode(resetStatus = true) {
         state.editingLabId = null;
-        state.originalRawPrice = null;
-        state.originalDisplayPrice = null;
-        state.originalPriceUnit = null;
         resetLabPublisherForm();
         updateEditControls();
         if (resetStatus) setStatus('Edit cancelled.', false);
@@ -673,8 +665,7 @@
         setValue('labSetupMode', 'full');
         setValue('labListImmediately', 'true');
         setValue('labAccessKey', '');
-        setValue('labPrice', '0');
-        setValue('labPriceUnit', 'hour');
+        pricingController.reset();
         setValue('labAccessURI', '');
         setValue('labCreatorPucHash', '');
         setValue('labMetadataUrl', '');
@@ -715,27 +706,6 @@
     function setText(id, value) {
         const el = $(id);
         if (el) el.textContent = value;
-    }
-
-    function captureOriginalEditPrice(lab) {
-        state.originalRawPrice = String(lab?.price ?? '0');
-        state.originalDisplayPrice = String($('labPrice')?.value ?? '').trim();
-        state.originalPriceUnit = normalizePricingUnit($('labPriceUnit')?.value || 'hour');
-    }
-
-    function resolvePayloadRawPrice() {
-        const priceInput = String($('labPrice')?.value ?? '0').trim();
-        const priceUnit = normalizePricingUnit($('labPriceUnit')?.value || 'hour');
-        const priceUnchangedDuringEdit = !!state.editingLabId
-            && state.originalRawPrice !== null
-            && priceInput === String(state.originalDisplayPrice ?? '').trim()
-            && priceUnit === state.originalPriceUnit;
-
-        if (priceUnchangedDuringEdit) {
-            return state.originalRawPrice;
-        }
-
-        return convertDisplayCreditsToRawPerSecond(priceInput || '0', priceUnit).toString();
     }
 
     function updateEditControls() {

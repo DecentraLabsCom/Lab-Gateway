@@ -17,6 +17,7 @@ const schedulingFeatureScriptPath = new URL('web/assets/js/lab-publisher-schedul
 const termsFeatureScriptPath = new URL('web/assets/js/lab-publisher-terms-feature.js', repoRoot);
 const fmuMetadataFeatureScriptPath = new URL('web/assets/js/lab-publisher-fmu-metadata-feature.js', repoRoot);
 const metadataFeatureScriptPath = new URL('web/assets/js/lab-publisher-metadata-feature.js', repoRoot);
+const pricingFeatureScriptPath = new URL('web/assets/js/lab-publisher-pricing-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -141,6 +142,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const termsFeatureSource = fs.readFileSync(termsFeatureScriptPath, 'utf8');
   const fmuMetadataFeatureSource = fs.readFileSync(fmuMetadataFeatureScriptPath, 'utf8');
   const metadataFeatureSource = fs.readFileSync(metadataFeatureScriptPath, 'utf8');
+  const pricingFeatureSource = fs.readFileSync(pricingFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
@@ -156,6 +158,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
       setTermsFeatureController: controller => { termsController = controller; },
       setFmuMetadataFeatureController: controller => { fmuMetadataController = controller; },
       setMetadataFeatureController: controller => { metadataController = controller; },
+      setPricingFeatureController: controller => { pricingController = controller; },
     };
 })();`
   );
@@ -175,6 +178,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(termsFeatureSource, context, { filename: 'lab-publisher-terms-feature.js' });
   vm.runInContext(fmuMetadataFeatureSource, context, { filename: 'lab-publisher-fmu-metadata-feature.js' });
   vm.runInContext(metadataFeatureSource, context, { filename: 'lab-publisher-metadata-feature.js' });
+  vm.runInContext(pricingFeatureSource, context, { filename: 'lab-publisher-pricing-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   const hooks = context.window.__labPublisherTestHooks;
   const values = context.window.LabPublisherValues;
@@ -235,6 +239,12 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
     splitCsv: values.splitCsv,
   });
   hooks.setMetadataFeatureController(metadataController);
+  const pricingController = context.window.LabPublisherPricingFeature.createController({
+    documentImpl: document,
+    normalizePricingUnit: values.normalizePricingUnit,
+    convertDisplayCreditsToRawPerSecond: values.convertDisplayCreditsToRawPerSecond,
+  });
+  hooks.setPricingFeatureController(pricingController);
   return {
     document,
     availabilityController,
@@ -242,6 +252,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
     termsController,
     fmuMetadataController,
     metadataController,
+    pricingController,
     hooks: {
       ...hooks,
       syncResourceTypeFields: resourceController.syncTypeFields,
