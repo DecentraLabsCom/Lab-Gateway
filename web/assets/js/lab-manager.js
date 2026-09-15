@@ -67,6 +67,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!hostProvisioningModule) {
         throw new Error('LabManagerHostProvisioning must load before lab-manager.js');
     }
+    const hostModalsModule = window.LabManagerHostModals;
+    if (!hostModalsModule) {
+        throw new Error('LabManagerHostModals must load before lab-manager.js');
+    }
+    const opsAccessModule = window.LabManagerOpsAccess;
+    if (!opsAccessModule) {
+        throw new Error('LabManagerOpsAccess must load before lab-manager.js');
+    }
     const hostActionsModule = window.LabManagerHostActions;
     if (!hostActionsModule) {
         throw new Error('LabManagerHostActions must load before lab-manager.js');
@@ -224,6 +232,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const editHostMacEl = $('#editHostMac');
     const editHeartbeatPathEl = $('#editHeartbeatPath');
 
+    function openProvisionHostModal(stationKey) {
+        return hostModalsController?.openProvision(stationKey);
+    }
+
+    function closeProvisionHostModal() {
+        return hostModalsController?.closeProvision();
+    }
+
+    async function saveProvisionedHost() {
+        return hostModalsController?.saveProvision();
+    }
+
+    function openEditHostModal(host) {
+        return hostModalsController?.openEdit(host);
+    }
+
+    function closeEditHostModal() {
+        return hostModalsController?.closeEdit();
+    }
+
+    async function saveEditedHost() {
+        return hostModalsController?.saveEdit();
+    }
+
+    function openWinrmCredentialsModal(host) {
+        return hostModalsController?.openCredentials(host);
+    }
+
+    function closeWinrmCredentialsModal() {
+        return hostModalsController?.closeCredentials();
+    }
+
+    async function saveWinrmCredentials() {
+        return hostModalsController?.saveCredentials();
+    }
     if (closeProvisionHostModalBtn) closeProvisionHostModalBtn.addEventListener('click', closeProvisionHostModal);
     if (cancelProvisionHostBtn) cancelProvisionHostBtn.addEventListener('click', closeProvisionHostModal);
     if (saveProvisionHostBtn) saveProvisionHostBtn.addEventListener('click', saveProvisionedHost);
@@ -250,6 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Lab Station ops state
     const refreshHostsBtn = $('#refreshHostsBtn');
     const hostListEl = $('#hostList');
+    const opsHintEl = $('#opsHint');
     const guacamoleCandidateListEl = $('#guacamoleCandidateList');
     const refreshPowerControllersBtn = $('#refreshPowerControllersBtn');
     const powerControllerListEl = $('#powerControllerList');
@@ -321,6 +365,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostState = {};
     const hostMetadata = {};
     let winrmTrustModalController;
+    let hostModalsController;
+    let opsAccessController;
     const guacamoleCandidateState = {};
     const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
@@ -340,8 +386,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let hostNames = [];
     let guacamoleCandidates = [];
     let guacamoleStationCandidates = [];
-    let provisionStationKey = '';
-    let provisionLabsLoading = false;
 
     const hostRenderersController = hostRenderersModule.createController({
         documentCtor: document,
@@ -465,6 +509,45 @@ document.addEventListener('DOMContentLoaded', () => {
             loadHostInventory,
             showToast,
         },
+        logger: console,
+    });
+    hostModalsController = hostModalsModule.createController({
+        fields: {
+            provisionModal: provisionHostModal,
+            provisionSaveButton: saveProvisionHostBtn,
+            provisionConnectionId: provisionConnectionIdEl,
+            provisionHostName: provisionHostNameEl,
+            provisionHostNameCandidates: provisionHostNameCandidatesEl,
+            provisionHostAddress: provisionHostAddressEl,
+            provisionHostMac: provisionHostMacEl,
+            provisionHeartbeatPath: provisionHeartbeatPathEl,
+            editModal: editHostModal,
+            editOriginalName: editHostOriginalNameEl,
+            editName: editHostNameEl,
+            editAddress: editHostAddressEl,
+            editMac: editHostMacEl,
+            editHeartbeatPath: editHeartbeatPathEl,
+            editSaveButton: saveEditHostBtn,
+            credentialsModal: winrmCredentialsModal,
+            credentialRef: winrmCredentialRefEl,
+            credentialAddress: winrmCredentialAddressEl,
+            credentialUser: winrmCredentialUserEl,
+            credentialPassword: winrmCredentialPasswordEl,
+            credentialSaveButton: saveWinrmCredentialsBtn,
+        },
+        hostMetadata,
+        hostState,
+        candidateState: guacamoleCandidateState,
+        getStation: findGuacamoleStationCandidate,
+        fetchImpl: (...args) => fetch(...args),
+        provisioningController: hostProvisioningController,
+        credentialsController: winrmCredentialsController,
+        callbacks: {
+            showToast,
+            loadHostInventory,
+            stopHeartbeatStream,
+        },
+        documentImpl: document,
         logger: console,
     });
     winrmTrustModalController = winrmTrustModalModule.createController({
@@ -697,6 +780,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const timelineResult = $('#timelineResult');
     const upcomingReservationsListEl = $('#upcomingReservationsList');
     const upcomingReservationsStatusEl = $('#upcomingReservationsStatus');
+    opsAccessController = opsAccessModule.createController({
+        opsHintEl,
+        refreshHostsBtn,
+        timelineBtn,
+        fetchImpl: (...args) => fetch(...args),
+        groupCandidates: groupGuacamoleCandidates,
+        logger: console,
+    });
     const reservationRenderersController = reservationRenderersModule.createController({
         escapeHtml,
         htmlEscape,
@@ -756,19 +847,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function refreshLabManagerSession() {
-        try {
-            // This protected Lab Manager request also refreshes the same
-            // short-lived session cookie across /lab-admin and /ops.
-            const res = await fetch('/lab-manager/access-policy', {
-                credentials: 'same-origin',
-                cache: 'no-store',
-                skipAuthPrompt: true,
-            });
-            return res.ok;
-        } catch (err) {
-            console.warn('Unable to refresh Lab Manager session', err);
-            return false;
-        }
+        return opsAccessController ? opsAccessController.refreshSession() : false;
     }
 
     function initializeManagerTab(tabName) {
@@ -811,17 +890,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ---- Lab Station ops helpers ----
     function updateOpsHint(data) {
-        const opsHint = $('#opsHint');
-        if (!opsHint) return;
-        if (!data) {
-            opsHint.textContent = 'The ops inventory could not be loaded.';
-            return;
-        }
-        const stationCount = groupGuacamoleCandidates(data.guacamoleUnmatched).length;
-        const guacStatus = data.guacamoleAvailable
-            ? `${stationCount} Lab Station candidate${stationCount === 1 ? '' : 's'} awaiting configuration.`
-            : 'Guacamole inventory unavailable.';
-        opsHint.textContent = `Hosts are loaded from ops-worker/hosts.json and ops-data/hosts.json. ${guacStatus}`;
+        return opsAccessController?.updateHint(data);
     }
 
     function resolveReservationLabDisplayName(reservation) {
@@ -1027,245 +1096,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return (value || '').toString().trim().toLowerCase();
     }
 
-    function urlOrigin(value) {
-        const raw = (value || '').toString().trim();
-        if (!raw) return '';
-        try {
-            return normalizeMatchValue(new URL(raw, window.location.origin).origin);
-        } catch (_) {
-            return '';
-        }
-    }
-
-    function currentGatewayOrigin() {
-        return urlOrigin(window.location.origin);
-    }
-
-    function labMatchesConnection(lab, connection) {
-        if (Number(lab?.resourceType) !== 0) return false;
-
-        const expectedAccessKey = normalizeMatchValue(
-            connection?.selector || (connection?.id ? `guac:id:${connection.id}` : '')
-        );
-        const labAccessKey = normalizeMatchValue(lab?.accessKey);
-        if (!expectedAccessKey || labAccessKey !== expectedAccessKey) return false;
-
-        const gatewayOrigin = currentGatewayOrigin();
-        const labOrigin = urlOrigin(lab?.accessURI);
-        return Boolean(gatewayOrigin && labOrigin && labOrigin === gatewayOrigin);
-    }
-
-    async function loadLabCandidates() {
-        const res = await fetch('/lab-admin/labs');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = await res.json().catch(() => ({}));
-        return Array.isArray(body.labs) ? body.labs : [];
-    }
-
-    function renderProvisionNameCandidates(candidates) {
-        if (!provisionHostNameCandidatesEl) return;
-        provisionHostNameCandidatesEl.innerHTML = '';
-        const seen = new Set();
-        (Array.isArray(candidates) ? candidates : []).forEach(candidate => {
-            const value = (candidate || '').toString().trim();
-            if (!value || seen.has(value)) return;
-            seen.add(value);
-            const option = document.createElement('option');
-            option.value = value;
-            provisionHostNameCandidatesEl.appendChild(option);
-        });
-    }
-
-    async function populateProvisionLabCandidates(stationKey, station) {
-        provisionLabsLoading = true;
-        if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = true;
-        try {
-            const labs = await loadLabCandidates();
-            const candidateLabs = labs.filter(lab => station.connections.some(connection => (
-                labMatchesConnection(lab, connection)
-            )));
-            const labIds = candidateLabs
-                .map(lab => String(lab?.labId || '').trim())
-                .filter(Boolean)
-                .filter((labId, index, values) => values.indexOf(labId) === index);
-            guacamoleCandidateState[stationKey] = {
-                ...(guacamoleCandidateState[stationKey] || {}),
-                labs: labIds,
-                labCandidatesLoaded: true
-            };
-        } catch (err) {
-            console.warn('Unable to load lab candidates', err);
-            guacamoleCandidateState[stationKey] = {
-                ...(guacamoleCandidateState[stationKey] || {}),
-                labs: [],
-                labCandidatesLoaded: true,
-                labCandidatesError: err.message
-            };
-        } finally {
-            provisionLabsLoading = false;
-            if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = false;
-        }
-    }
-
-    function openProvisionHostModal(stationKey) {
-        const station = findGuacamoleStationCandidate(stationKey);
-        if (
-            !station ||
-            !provisionHostModal ||
-            !provisionConnectionIdEl ||
-            !provisionHostNameEl ||
-            !provisionHostAddressEl ||
-            !provisionHostMacEl ||
-            !provisionHeartbeatPathEl
-        ) {
-            showToast('Host provisioning modal is unavailable', 'error');
-            return;
-        }
-        const representative = station.connections[0];
-        const state = guacamoleCandidateState[stationKey] || {};
-        const draft = state.opsHostDraft || {};
-        const host = station.address || station.nameCandidates[0] || '';
-        provisionStationKey = stationKey;
-        provisionConnectionIdEl.value = String(state.connectionId || representative?.id || '');
-        provisionHostNameEl.value = draft.name || host;
-        renderProvisionNameCandidates(draft.nameCandidates || station.nameCandidates);
-        provisionHostAddressEl.value = draft.address || station.address || '';
-        provisionHostMacEl.value = draft.mac || '';
-        populateProvisionLabCandidates(stationKey, station);
-        provisionHeartbeatPathEl.value = draft.heartbeat_path || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
-        provisionHostModal.classList.add('show');
-    }
-
-    function closeProvisionHostModal() {
-        if (provisionHostModal) {
-            provisionHostModal.classList.remove('show');
-        }
-    }
-
-    function openEditHostModal(host) {
-        const meta = hostMetadata[host] || {};
-        if (
-            !meta.editable ||
-            !editHostModal ||
-            !editHostOriginalNameEl ||
-            !editHostNameEl ||
-            !editHostAddressEl ||
-            !editHostMacEl ||
-            !editHeartbeatPathEl
-        ) {
-            showToast('Only dynamically configured hosts can be edited', 'error');
-            return;
-        }
-        editHostOriginalNameEl.value = host;
-        editHostNameEl.value = meta.name || host;
-        editHostAddressEl.value = meta.address || host;
-        editHostMacEl.value = meta.mac || '';
-        editHeartbeatPathEl.value = meta.heartbeatPath || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
-        editHostModal.classList.add('show');
-    }
-
-    function closeEditHostModal() {
-        if (editHostModal) {
-            editHostModal.classList.remove('show');
-        }
-    }
-
-    async function saveEditedHost() {
-        if (
-            !editHostOriginalNameEl ||
-            !editHostNameEl ||
-            !editHostMacEl ||
-            !editHeartbeatPathEl
-        ) {
-            showToast('Host edit modal is unavailable', 'error');
-            return;
-        }
-        const originalName = editHostOriginalNameEl.value.trim();
-        const payload = {
-            name: editHostNameEl.value.trim(),
-            mac: editHostMacEl.value.trim(),
-            heartbeatPath: editHeartbeatPathEl.value.trim(),
-        };
-        if (!originalName || !payload.name) {
-            showToast('Name is required', 'error');
-            return;
-        }
-        if (!/^[A-Za-z0-9._-]+$/.test(payload.name)) {
-            showToast('Name must contain only letters, numbers, dots, underscores, and hyphens', 'error');
-            return;
-        }
-        if (payload.mac && !/^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(payload.mac)) {
-            showToast('MAC must use format 00:11:22:33:44:55 or 00-11-22-33-44-55', 'error');
-            return;
-        }
-        if (!payload.heartbeatPath) {
-            showToast('Heartbeat path is required', 'error');
-            return;
-        }
-        if (saveEditHostBtn) saveEditHostBtn.disabled = true;
-        try {
-            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(originalName)}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                const requestSuffix = body.requestId ? ` (request ID ${body.requestId})` : '';
-                throw new Error(`${body.error || `HTTP ${res.status}`}${requestSuffix}`);
-            }
-            stopHeartbeatStream(originalName);
-            delete hostState[originalName];
-            closeEditHostModal();
-            showToast(`Ops host ${body.host?.name || payload.name} updated`, 'success');
-            await loadHostInventory({ skipAuthPrompt: true });
-        } catch (err) {
-            console.error(err);
-            showToast(`Edit host failed: ${err.message}`, 'error');
-        } finally {
-            if (saveEditHostBtn) saveEditHostBtn.disabled = false;
-        }
-    }
-
-    function openWinrmCredentialsModal(host) {
-        const meta = hostMetadata[host] || {};
-        const credentialRef = meta.credentialRef || meta.address || host;
-        if (
-            !winrmCredentialsModal ||
-            !winrmCredentialRefEl ||
-            !winrmCredentialAddressEl ||
-            !winrmCredentialUserEl ||
-            !winrmCredentialPasswordEl
-        ) {
-            showToast('WinRM credentials modal is unavailable', 'error');
-            return;
-        }
-        winrmCredentialRefEl.value = credentialRef;
-        winrmCredentialAddressEl.value = meta.address || credentialRef;
-        winrmCredentialUserEl.value = '.\\LabGatewaySvc';
-        winrmCredentialPasswordEl.value = '';
-        winrmCredentialsModal.classList.add('show');
-    }
-
-    function closeWinrmCredentialsModal() {
-        if (winrmCredentialsModal) {
-            winrmCredentialsModal.classList.remove('show');
-        }
-    }
-
-    async function saveWinrmCredentials() {
-        if (!winrmCredentialRefEl || !winrmCredentialUserEl || !winrmCredentialPasswordEl) {
-            showToast('WinRM credentials modal is unavailable', 'error');
-            return;
-        }
-        const payload = {
-            credentialRef: winrmCredentialRefEl.value.trim(),
-            user: winrmCredentialUserEl.value.trim(),
-            password: winrmCredentialPasswordEl.value,
-        };
-        await winrmCredentialsController.save(payload, saveWinrmCredentialsBtn);
-    }
-
     function winrmTrustErrorMessage(body, status) {
         const code = String(body?.code || '').trim();
         const requestSuffix = body?.requestId ? ` (request ID ${body.requestId})` : '';
@@ -1319,36 +1149,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function deleteWinrmTrust() {
         return winrmTrustModalController?.delete();
     }
-    async function saveProvisionedHost() {
-        if (
-            !provisionConnectionIdEl ||
-            !provisionHostNameEl ||
-            !provisionHostAddressEl ||
-            !provisionHostMacEl ||
-            !provisionHeartbeatPathEl
-        ) {
-            showToast('Host provisioning modal is unavailable', 'error');
-            return;
-        }
-        if (provisionLabsLoading) {
-            showToast('Lab associations are still loading', 'error');
-            return;
-        }
-        const state = guacamoleCandidateState[provisionStationKey] || {};
-        const labs = Array.isArray(state.labs) ? state.labs : [];
-        const payload = {
-            connectionId: provisionConnectionIdEl.value,
-            name: provisionHostNameEl.value.trim(),
-            address: provisionHostAddressEl.value.trim(),
-            mac: provisionHostMacEl.value.trim(),
-            labs,
-            credentialRef: provisionHostAddressEl.value.trim(),
-            heartbeatPath: provisionHeartbeatPathEl.value.trim(),
-        };
-        if (labs.length) payload.validLabIds = labs;
-        await hostProvisioningController.save(payload, saveProvisionHostBtn);
-    }
-
     function handleHostActions(e) {
         const btn = e.target.closest('button[data-action]');
         if (!btn) return;
@@ -1414,32 +1214,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function checkOpsAvailability() {
-        try {
-            const res = await fetch('/ops/health', { method: 'HEAD' });
-            if (res.status === 403) {
-                showOpsWarning();
-                return false;
-            }
-            return res.ok || res.status === 401; // 401 = token issue, not network
-        } catch {
-            return false;
-        }
+        return opsAccessController ? opsAccessController.checkAvailability() : false;
     }
 
     function showOpsWarning() {
-        const opsHint = $('#opsHint');
-        if (opsHint) {
-            opsHint.innerHTML = `
-                <i class="fas fa-exclamation-triangle warning-icon"></i>
-                <strong>Access policy:</strong> Lab Station operations require an allowed Lab Manager network scope and a valid Lab Manager token.
-                Check ADMIN_DASHBOARD_LOCAL_ONLY, ADMIN_DASHBOARD_ALLOW_PRIVATE, SECURITY_ALLOW_PRIVATE_NETWORKS, and ADMIN_ALLOWED_CIDRS.
-            `;
-            opsHint.style.backgroundColor = '#fff3cd';
-            opsHint.style.color = '#856404';
-            opsHint.style.padding = '12px';
-            opsHint.style.borderRadius = '4px';
-            opsHint.style.border = '1px solid #ffc107';
-        }
-        if (refreshHostsBtn) refreshHostsBtn.disabled = true;
-        if (timelineBtn) timelineBtn.disabled = true;
+        return opsAccessController?.showWarning();
     }});
