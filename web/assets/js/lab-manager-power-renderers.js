@@ -183,7 +183,7 @@
                 if (field === 'name') {
                     return `<label class="field">
                         <span>${labels[field]}${writable ? '' : ' (read-only)'}</span>
-                        <input type="text" maxlength="160" data-controller-outlet-field="deviceName" value="${escapeHtml(outlet.deviceName)}"${writable ? '' : ' readonly'}>
+                        <input type="text" maxlength="20" data-controller-outlet-field="deviceName" value="${escapeHtml(outlet.deviceName)}"${writable ? '' : ' readonly'}>
                     </label>`;
                 }
                 if (!Object.prototype.hasOwnProperty.call(labels, field)) return '';

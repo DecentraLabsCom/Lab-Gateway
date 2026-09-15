@@ -202,4 +202,14 @@ test('sends physical output changes separately from Gateway-local metadata', () 
     critical: false,
     defaultState: 'off',
   }]);
+
+  controller.handleOutletChange({
+    target: {
+      type: 'text',
+      value: 'x'.repeat(21),
+      dataset: { controllerOutletField: 'deviceName' },
+      closest: () => ({ dataset: { controllerOutletIndex: '0' } }),
+    },
+  });
+  assert.throws(() => controller.readForm(), { message: 'Output 1: device name is too long' });
 });
