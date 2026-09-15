@@ -15,6 +15,7 @@ const resourceFeatureScriptPath = new URL('web/assets/js/lab-publisher-resource-
 const availabilityFeatureScriptPath = new URL('web/assets/js/lab-publisher-availability-feature.js', repoRoot);
 const schedulingFeatureScriptPath = new URL('web/assets/js/lab-publisher-scheduling-feature.js', repoRoot);
 const termsFeatureScriptPath = new URL('web/assets/js/lab-publisher-terms-feature.js', repoRoot);
+const fmuMetadataFeatureScriptPath = new URL('web/assets/js/lab-publisher-fmu-metadata-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -137,6 +138,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const availabilityFeatureSource = fs.readFileSync(availabilityFeatureScriptPath, 'utf8');
   const schedulingFeatureSource = fs.readFileSync(schedulingFeatureScriptPath, 'utf8');
   const termsFeatureSource = fs.readFileSync(termsFeatureScriptPath, 'utf8');
+  const fmuMetadataFeatureSource = fs.readFileSync(fmuMetadataFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
@@ -144,12 +146,13 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
       state,
       buildMetadata,
       assertLabMutationSuccess,
-      autoDetectFmuMetadata,
-      resetFmuDescribeFields,
+      autoDetectFmuMetadata: (...args) => fmuMetadataController.autoDetect(...args),
+      resetFmuDescribeFields: (...args) => fmuMetadataController.reset(...args),
       setResourceFeatureController: controller => { resourceFeatureController = controller; },
       setAvailabilityFeatureController: controller => { availabilityController = controller; },
       setSchedulingFeatureController: controller => { schedulingController = controller; },
       setTermsFeatureController: controller => { termsController = controller; },
+      setFmuMetadataFeatureController: controller => { fmuMetadataController = controller; },
     };
 })();`
   );
@@ -167,6 +170,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(availabilityFeatureSource, context, { filename: 'lab-publisher-availability-feature.js' });
   vm.runInContext(schedulingFeatureSource, context, { filename: 'lab-publisher-scheduling-feature.js' });
   vm.runInContext(termsFeatureSource, context, { filename: 'lab-publisher-terms-feature.js' });
+  vm.runInContext(fmuMetadataFeatureSource, context, { filename: 'lab-publisher-fmu-metadata-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   const hooks = context.window.__labPublisherTestHooks;
   const values = context.window.LabPublisherValues;
@@ -214,11 +218,20 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   });
   termsController.bind();
   hooks.setTermsFeatureController(termsController);
+  const fmuMetadataController = context.window.LabPublisherFmuMetadataFeature.createController({
+    documentImpl: document,
+    fetchFmuMetadata: resources.fetchFmuMetadata,
+    fetchImpl: fetch,
+    renderModelVariables: context.window.LabPublisherRenderers.renderModelVariables,
+    escapeHtml: values.escapeHtml,
+  });
+  hooks.setFmuMetadataFeatureController(fmuMetadataController);
   return {
     document,
     availabilityController,
     schedulingController,
     termsController,
+    fmuMetadataController,
     hooks: {
       ...hooks,
       syncResourceTypeFields: resourceController.syncTypeFields,
