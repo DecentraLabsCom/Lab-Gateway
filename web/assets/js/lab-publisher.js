@@ -35,6 +35,10 @@
     if (!publisherAvailabilityFeature) {
         throw new Error('LabPublisherAvailabilityFeature must load before lab-publisher.js');
     }
+    const publisherSchedulingFeature = window.LabPublisherSchedulingFeature;
+    if (!publisherSchedulingFeature) {
+        throw new Error('LabPublisherSchedulingFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
@@ -69,13 +73,10 @@
     const sanitizeAvailableHours = publisherValues.sanitizeAvailableHours;
     const sanitizeUnavailableWindows = publisherValues.sanitizeUnavailableWindows;
     const sanitizeTermsOfUse = publisherValues.sanitizeTermsOfUse;
-    const normalizePeriodUnit = publisherValues.normalizePeriodUnit;
     const expandAllowedDurations = publisherValues.expandAllowedDurations;
     const buildPeriodRules = publisherValues.buildPeriodRules;
     const deriveAllowedPeriodRange = publisherValues.deriveAllowedPeriodRange;
     const resolveLabDisplayName = publisherValues.resolveLabDisplayName;
-    const resolveSupportedTimezones = publisherValues.resolveSupportedTimezones;
-    const resolveBrowserTimezone = publisherValues.resolveBrowserTimezone;
     const metadataAttributes = publisherValues.metadataAttributes;
     const normalizeTraitType = publisherValues.normalizeTraitType;
     const normalizeArray = publisherValues.normalizeArray;
@@ -107,6 +108,7 @@
     let resourceFeatureController;
     let labActionsController;
     let availabilityController;
+    let schedulingController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
@@ -119,8 +121,6 @@
         const docChoose = $('labDocsChooseBtn');
         const assetList = $('labAssetList');
         const termsUrl = $('labTermsUrl');
-        const priceUnit = $('labPriceUnit');
-        const periodUnit = $('labAllowedPeriodUnit');
 
         if (!refresh || !submit) return;
 
@@ -165,6 +165,14 @@
         });
         availabilityController.initialize();
 
+        schedulingController = publisherSchedulingFeature.createController({
+            documentImpl: document,
+            normalizePricingUnit,
+            normalizePeriodUnit: publisherValues.normalizePeriodUnit,
+            resolveSupportedTimezones: publisherValues.resolveSupportedTimezones,
+            resolveBrowserTimezone: publisherValues.resolveBrowserTimezone,
+        });
+
         labActionsController = publisherLabActions.createController({
             listElement: labList,
             getLabs: () => state.labs,
@@ -191,8 +199,6 @@
         refresh.addEventListener('click', loadPublisherData);
         submit.addEventListener('click', publishLab);
         if (cancelEdit) cancelEdit.addEventListener('click', () => clearEditMode(true));
-        if (priceUnit) priceUnit.addEventListener('change', syncBookingModeFields);
-        if (periodUnit) periodUnit.addEventListener('change', () => normalizeAllowedPeriodRange());
         images.addEventListener('change', () => void assetsController.upload(images.files, 'images'));
         docs.addEventListener('change', () => void assetsController.upload(docs.files, 'docs'));
         imageChoose.addEventListener('click', () => images.click());
@@ -201,7 +207,6 @@
 
         resourceFeatureController.syncSetupMode();
         resourceFeatureController.syncTypeFields();
-        syncBookingModeFields();
         let publisherInitialized = false;
         const initializePublisher = () => {
             if (publisherInitialized) return;
@@ -217,94 +222,15 @@
     });
 
     function initMarketplaceFields() {
-        populateTimezoneOptions();
-        normalizeAllowedPeriodRange();
+        schedulingController.initialize();
         setupMediaMode('images', 'link');
         setupMediaMode('docs', 'link');
-        syncBookingModeFields();
         $('labImageMode').querySelectorAll('button').forEach(button => {
             button.addEventListener('click', () => setupMediaMode('images', button.dataset.mode));
         });
         $('labDocMode').querySelectorAll('button').forEach(button => {
             button.addEventListener('click', () => setupMediaMode('docs', button.dataset.mode));
         });
-    }
-
-    function syncBookingModeFields() {
-        const priceUnit = normalizePricingUnit($('labPriceUnit')?.value || 'hour');
-        const mode = getDerivedBookingMode();
-        if ($('labBookingMode')) $('labBookingMode').value = mode;
-        populateAllowedPeriodUnitOptions(priceUnit);
-        normalizeAllowedPeriodRange();
-        document.querySelectorAll('.scheduling-grid').forEach(grid => {
-            grid.classList.toggle('calendar-period-mode', mode === 'calendar-period');
-        });
-        document.querySelectorAll('.booking-slot-field').forEach(field => {
-            field.classList.toggle('is-hidden', mode !== 'slot');
-        });
-        document.querySelectorAll('.booking-period-field').forEach(field => {
-            field.classList.toggle('is-hidden', mode !== 'calendar-period');
-        });
-    }
-
-    function getDerivedBookingMode() {
-        return normalizePricingUnit($('labPriceUnit')?.value || 'hour') === 'hour' ? 'slot' : 'calendar-period';
-    }
-
-    function populateAllowedPeriodUnitOptions(priceUnit = normalizePricingUnit($('labPriceUnit')?.value || 'hour')) {
-        const unitSelect = $('labAllowedPeriodUnit');
-        if (!unitSelect) return;
-
-        const orderedUnits = [
-            { value: 'day', label: 'days' },
-            { value: 'week', label: 'weeks' },
-            { value: 'month', label: '30-day months' },
-        ];
-        const minimumUnit = priceUnit === 'month' ? 'month' : priceUnit === 'week' ? 'week' : 'day';
-        const minimumIndex = orderedUnits.findIndex(unit => unit.value === minimumUnit);
-        const previous = normalizePeriodUnit(unitSelect.value);
-        const options = orderedUnits.slice(Math.max(0, minimumIndex));
-
-        unitSelect.innerHTML = '';
-        options.forEach(unit => unitSelect.add(new Option(unit.label, unit.value)));
-        unitSelect.value = options.some(unit => unit.value === previous) ? previous : options[0].value;
-    }
-
-    function normalizeAllowedPeriodRange(preferredRange = {}) {
-        const minInput = $('labAllowedPeriodMin');
-        const maxInput = $('labAllowedPeriodMax');
-        const unit = normalizePeriodUnit($('labAllowedPeriodUnit')?.value || 'day');
-        if (!minInput || !maxInput) return;
-
-        const maxByUnit = { day: 90, week: 12, month: 3 };
-        const unitMax = maxByUnit[unit] || 90;
-        const rawMin = Math.trunc(Number(preferredRange.min ?? minInput.value ?? 1));
-        const rawMax = Math.trunc(Number(preferredRange.max ?? maxInput.value ?? rawMin));
-        const normalizedMin = Math.min(Math.max(Number.isFinite(rawMin) ? rawMin : 1, 1), unitMax);
-        const normalizedMax = Math.min(Math.max(Number.isFinite(rawMax) ? rawMax : normalizedMin, normalizedMin), unitMax);
-
-        [minInput, maxInput].forEach(input => {
-            input.min = '1';
-            input.max = String(unitMax);
-            input.step = '1';
-        });
-        minInput.value = String(normalizedMin);
-        maxInput.min = String(normalizedMin);
-        maxInput.value = String(normalizedMax);
-    }
-
-    function populateTimezoneOptions() {
-        const select = $('labTimezone');
-        const options = resolveSupportedTimezones();
-        const browserTimezone = resolveBrowserTimezone();
-        select.innerHTML = '<option value="">Select timezone</option>';
-        options.forEach(timezone => {
-            const option = document.createElement('option');
-            option.value = timezone;
-            option.textContent = timezone;
-            select.appendChild(option);
-        });
-        select.value = options.includes(browserTimezone) ? browserTimezone : 'Europe/Madrid';
     }
 
     async function loadPublisherData(options = {}) {
@@ -425,10 +351,10 @@
         const unavailableWindows = sanitizeUnavailableWindows(availability.unavailableWindows);
         const priceUnit = normalizePricingUnit($('labPriceUnit').value || 'hour');
         const rawPricePerSecond = convertDisplayCreditsToRawPerSecond($('labPrice').value || '0', priceUnit);
-        const bookingMode = getDerivedBookingMode();
+        const bookingMode = schedulingController.getDerivedBookingMode();
         const timeSlots = splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite);
         const allowedDurationRange = bookingMode === 'calendar-period'
-            ? getSelectedAllowedPeriodRange()
+            ? schedulingController.getSelectedAllowedPeriodRange()
             : null;
         const allowedDurations = bookingMode === 'calendar-period'
             ? expandAllowedDurations(allowedDurationRange)
@@ -493,7 +419,7 @@
             ['Access URI', $('labAccessURI').value.trim()],
             ['Timezone', $('labTimezone').value.trim()],
         ];
-        const bookingMode = getDerivedBookingMode();
+        const bookingMode = schedulingController.getDerivedBookingMode();
         if (bookingMode === 'slot') {
             required.push(
                 ['Daily Start Time', $('labAvailableHoursStart').value.trim()],
@@ -508,7 +434,7 @@
         if (bookingMode === 'slot' && !splitCsv($('labTimeSlots').value).map(Number).some(Number.isFinite)) {
             throw new Error('Time Slots must include at least one duration in minutes');
         }
-        if (bookingMode === 'calendar-period' && !expandAllowedDurations(getSelectedAllowedPeriodRange()).length) {
+        if (bookingMode === 'calendar-period' && !expandAllowedDurations(schedulingController.getSelectedAllowedPeriodRange()).length) {
             throw new Error('Select a valid minimum and maximum period');
         }
         const opens = dateInputToUnix($('labOpens').value);
@@ -665,7 +591,7 @@
         captureOriginalEditPrice(lab);
         resourceFeatureController.syncSetupMode();
         resourceFeatureController.syncTypeFields();
-        syncBookingModeFields();
+        schedulingController.syncBookingModeFields();
         updateEditControls();
         setStatus(`Editing ${resolveLabDisplayName(lab)}. Use Save Lab to persist changes.`, false);
         $('labName').focus();
@@ -753,10 +679,10 @@
             $('labPrice').value = metadata.pricing.displayAmount;
         }
         if (metadata?.allowedDurationRange) {
-            setAllowedPeriodRangeControls(metadata.allowedDurationRange);
+            schedulingController.setAllowedPeriodRangeControls(metadata.allowedDurationRange);
         }
         if (Array.isArray(metadata?.allowedDurations) && metadata.allowedDurations.length) {
-            setAllowedPeriodRangeControls(deriveAllowedPeriodRange(metadata.allowedDurations));
+            schedulingController.setAllowedPeriodRangeControls(deriveAllowedPeriodRange(metadata.allowedDurations));
         }
         setAttributeValue(attributes, 'timeSlots', value => $('labTimeSlots').value = normalizeArray(value).join(', '));
         setAttributeValue(attributes, 'pricing', value => {
@@ -771,12 +697,12 @@
         });
         setAttributeValue(attributes, 'allowedDurations', value => {
             const range = deriveAllowedPeriodRange(value);
-            if (range) setAllowedPeriodRangeControls(range);
+            if (range) schedulingController.setAllowedPeriodRangeControls(range);
         });
         setAttributeValue(attributes, 'allowedDurationRange', value => {
-            if (value) setAllowedPeriodRangeControls(value);
+            if (value) schedulingController.setAllowedPeriodRangeControls(value);
         });
-        syncBookingModeFields();
+        schedulingController.syncBookingModeFields();
         setAttributeValue(attributes, 'opens', value => $('labOpens').value = unixToDateInput(value));
         setAttributeValue(attributes, 'closes', value => $('labCloses').value = unixToDateInput(value));
         setAttributeValue(attributes, 'availableDays', value => {
@@ -870,14 +796,13 @@
         setChecked('labEducationalProgramLinked', false);
         setChecked('labDemoEnabled', false);
         setContentId('');
-        populateTimezoneOptions();
+        schedulingController.reset();
         resourceFeatureController.renderOptions();
         setupMediaMode('images', 'link');
         setupMediaMode('docs', 'link');
         resetFmuDescribeFields(false);
         resourceFeatureController.syncSetupMode();
         resourceFeatureController.syncTypeFields();
-        syncBookingModeFields();
     }
 
     function setValue(id, value) {
@@ -955,26 +880,6 @@
         return Array.from(new Uint8Array(hashBuffer))
             .map(byte => byte.toString(16).padStart(2, '0'))
             .join('');
-    }
-
-    function getSelectedAllowedPeriodRange() {
-        normalizeAllowedPeriodRange();
-        const min = Number($('labAllowedPeriodMin')?.value || 0);
-        const max = Number($('labAllowedPeriodMax')?.value || 0);
-        const unit = normalizePeriodUnit($('labAllowedPeriodUnit')?.value || 'day');
-        return Number.isFinite(min) && Number.isFinite(max) && min > 0 && max >= min
-            ? { unit, min, max }
-            : null;
-    }
-
-    function setAllowedPeriodRangeControls(range) {
-        const minInput = $('labAllowedPeriodMin');
-        const maxInput = $('labAllowedPeriodMax');
-        const unitSelect = $('labAllowedPeriodUnit');
-        if (!minInput || !maxInput || !unitSelect || !range) return;
-
-        unitSelect.value = normalizePeriodUnit(range.unit);
-        normalizeAllowedPeriodRange({ min: range.min, max: range.max });
     }
 
 })();
