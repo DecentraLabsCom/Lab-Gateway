@@ -11,6 +11,7 @@ const assetsScriptPath = new URL('web/assets/js/lab-publisher-assets.js', repoRo
 const metadataScriptPath = new URL('web/assets/js/lab-publisher-metadata.js', repoRoot);
 const actionsScriptPath = new URL('web/assets/js/lab-publisher-lab-actions.js', repoRoot);
 const assetsFeatureScriptPath = new URL('web/assets/js/lab-publisher-assets-feature.js', repoRoot);
+const resourceFeatureScriptPath = new URL('web/assets/js/lab-publisher-resource-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -129,15 +130,17 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const metadataSource = fs.readFileSync(metadataScriptPath, 'utf8');
   const actionsSource = fs.readFileSync(actionsScriptPath, 'utf8');
   const assetsFeatureSource = fs.readFileSync(assetsFeatureScriptPath, 'utf8');
+  const resourceFeatureSource = fs.readFileSync(resourceFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
     window.__labPublisherTestHooks = {
       state,
-      syncResourceTypeFields,
-      applySelectedResource,
       buildMetadata,
       assertLabMutationSuccess,
+      autoDetectFmuMetadata,
+      resetFmuDescribeFields,
+      setResourceFeatureController: controller => { resourceFeatureController = controller; },
     };
 })();`
   );
@@ -151,8 +154,33 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(metadataSource, context, { filename: 'lab-publisher-metadata.js' });
   vm.runInContext(actionsSource, context, { filename: 'lab-publisher-lab-actions.js' });
   vm.runInContext(assetsFeatureSource, context, { filename: 'lab-publisher-assets-feature.js' });
+  vm.runInContext(resourceFeatureSource, context, { filename: 'lab-publisher-resource-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
-  return { document, hooks: context.window.__labPublisherTestHooks };
+  const hooks = context.window.__labPublisherTestHooks;
+  const values = context.window.LabPublisherValues;
+  const resources = context.window.LabPublisherResources;
+  const resourceController = context.window.LabPublisherResourceFeature.createController({
+    documentImpl: document,
+    windowImpl: window,
+    getStatus: () => hooks.state.status,
+    getFmus: () => hooks.state.fmus,
+    getGuacamole: () => hooks.state.guacamole,
+    uniqueGuacamole: resources.uniqueGuacamole,
+    normalizeMaxConcurrentUsers: values.normalizeMaxConcurrentUsers,
+    formatConnectionUsers: values.formatConnectionUsers,
+    resolveConnectionAccessKey: values.resolveConnectionAccessKey,
+    resetFmuDescribeFields: (...args) => hooks.resetFmuDescribeFields(...args),
+    autoDetectFmuMetadata: (...args) => hooks.autoDetectFmuMetadata(...args),
+  });
+  hooks.setResourceFeatureController(resourceController);
+  return {
+    document,
+    hooks: {
+      ...hooks,
+      syncResourceTypeFields: resourceController.syncTypeFields,
+      applySelectedResource: resourceController.applySelected,
+    },
+  };
 }
 
 const html = fs.readFileSync(htmlPath, 'utf8');

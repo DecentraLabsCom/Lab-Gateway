@@ -27,6 +27,10 @@
     if (!publisherAssetsFeature) {
         throw new Error('LabPublisherAssetsFeature must load before lab-publisher.js');
     }
+    const publisherResourceFeature = window.LabPublisherResourceFeature;
+    if (!publisherResourceFeature) {
+        throw new Error('LabPublisherResourceFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
@@ -107,15 +111,15 @@
     const renderAssetList = publisherAssets.renderAssetList;
     const buildMetadataPayload = publisherMetadata.buildMetadata;
     const $ = (id) => document.getElementById(id);
+    let assetsController;
+    let resourceFeatureController;
+    let labActionsController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
         const submit = $('labPublisherSubmitBtn');
         const cancelEdit = $('labPublisherCancelEditBtn');
         const labList = $('labPublisherList');
-        const resourceType = $('labResourceType');
-        const resourceSelect = $('labDetectedResource');
-        const setupMode = $('labSetupMode');
         const images = $('labImages');
         const docs = $('labDocs');
         const imageChoose = $('labImagesChooseBtn');
@@ -125,13 +129,12 @@
         const termsUrl = $('labTermsUrl');
         const categorySelect = $('labCategorySelect');
         const educationalProgramLinked = $('labEducationalProgramLinked');
-        const fmuFileName = $('labFmuFileName');
         const priceUnit = $('labPriceUnit');
         const periodUnit = $('labAllowedPeriodUnit');
 
         if (!refresh || !submit) return;
 
-        const assetsController = publisherAssetsFeature.createController({
+        assetsController = publisherAssetsFeature.createController({
             assetListElement: assetList,
             inputs: { images, docs },
             ensureContentId,
@@ -145,7 +148,22 @@
         });
         assetsController.bind();
 
-        const labActionsController = publisherLabActions.createController({
+        resourceFeatureController = publisherResourceFeature.createController({
+            documentImpl: document,
+            windowImpl: window,
+            getStatus: () => state.status,
+            getFmus: () => state.fmus,
+            getGuacamole: () => state.guacamole,
+            uniqueGuacamole,
+            formatConnectionUsers,
+            resolveConnectionAccessKey,
+            normalizeMaxConcurrentUsers,
+            resetFmuDescribeFields,
+            autoDetectFmuMetadata,
+        });
+        resourceFeatureController.bind();
+
+        labActionsController = publisherLabActions.createController({
             listElement: labList,
             getLabs: () => state.labs,
             getEditingLabId: () => state.editingLabId,
@@ -171,14 +189,6 @@
         refresh.addEventListener('click', loadPublisherData);
         submit.addEventListener('click', publishLab);
         if (cancelEdit) cancelEdit.addEventListener('click', () => clearEditMode(true));
-        resourceType.addEventListener('change', () => {
-            renderResourceOptions();
-            syncResourceTypeFields();
-        });
-        resourceSelect.addEventListener('change', () => {
-            void applySelectedResource();
-        });
-        setupMode.addEventListener('change', syncSetupMode);
         if (priceUnit) priceUnit.addEventListener('change', syncBookingModeFields);
         if (periodUnit) periodUnit.addEventListener('change', () => normalizeAllowedPeriodRange());
         images.addEventListener('change', () => void assetsController.upload(images.files, 'images'));
@@ -200,10 +210,6 @@
                 renderIscedSuggestions();
             });
         }
-        fmuFileName.addEventListener('input', () => {
-            if ($('labResourceType').value === '1') $('labAccessKey').value = fmuFileName.value.trim();
-            resetFmuDescribeFields(false);
-        });
         categorySelect.addEventListener('click', toggleCategoryMenu);
         categorySelect.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -222,8 +228,8 @@
             event.stopPropagation();
         });
 
-        syncSetupMode();
-        syncResourceTypeFields();
+        resourceFeatureController.syncSetupMode();
+        resourceFeatureController.syncTypeFields();
         syncBookingModeFields();
         let publisherInitialized = false;
         const initializePublisher = () => {
@@ -351,7 +357,7 @@
             });
             state.guacamole = detectedResources.guacamole;
             state.fmus = detectedResources.fmus;
-            renderResourceOptions();
+            resourceFeatureController.renderOptions();
             state.labs = labs?.labs || [];
             labActionsController.render(state.labs);
             const providerLabel = status?.isProvider
@@ -361,22 +367,6 @@
         } catch (err) {
             setStatus(err.message || 'Unable to load Lab Publisher data', true);
         }
-    }
-
-    function renderResourceOptions() {
-        const select = $('labDetectedResource');
-        const type = $('labResourceType').value;
-        select.innerHTML = '<option value="">Manual entry</option>';
-        const resources = type === '1' ? state.fmus : uniqueGuacamole();
-        resources.forEach((resource, index) => {
-            const option = document.createElement('option');
-            option.value = String(index);
-            option.textContent = type === '1'
-                ? `${resource.fileName} (${resource.relativePath || 'fmu-data'})`
-                : `${resource.name || 'Connection'} #${resource.id} ${resource.hostname ? '- ' + resource.hostname : ''}${formatConnectionUsers(resource)}`;
-            select.appendChild(option);
-        });
-        void applySelectedResource();
     }
 
     function renderCategoryMenu() {
@@ -589,118 +579,6 @@
         chooseBtn.hidden = mode !== 'upload';
     }
 
-    async function applySelectedResource() {
-        const type = $('labResourceType').value;
-        const index = $('labDetectedResource').value;
-        const preview = $('labResourcePreview');
-        if (index === '') {
-            preview.textContent = 'No resource selected.';
-            resetFmuDescribeFields(false);
-            return;
-        }
-        if (type === '1') {
-            const fmu = state.fmus[Number(index)];
-            const fmuFileName = fmu?.fileName || '';
-            $('labAccessURI').value = recommendedFmuAccessURI();
-            $('labAccessKey').value = fmuFileName;
-            $('labFmuFileName').value = fmuFileName;
-            $('labName').value = fmuFileName ? fmuFileName.replace(/\.fmu$/i, '') : '';
-            preview.textContent = `FMU: ${fmu?.relativePath || fmuFileName || 'selected'}`;
-            $('labMaxConcurrentUsers').value = Math.max(2, Number($('labMaxConcurrentUsers').value) || 2);
-            syncResourceTypeFields();
-            if (fmuFileName) {
-                await autoDetectFmuMetadata();
-            } else {
-                resetFmuDescribeFields(false);
-            }
-            return;
-        }
-
-        const conn = uniqueGuacamole()[Number(index)];
-        $('labAccessURI').value = recommendedRemoteAccessURI();
-        $('labAccessKey').value = resolveConnectionAccessKey(conn);
-        $('labName').value = conn?.name || '';
-        const selector = resolveConnectionAccessKey(conn);
-        preview.textContent = `Guacamole: ${conn?.name || 'Connection'} (${conn?.hostname || 'no host'}) - connection ${selector || 'n/a'}`;
-        $('labMaxConcurrentUsers').value = 1;
-        resetFmuDescribeFields(false);
-        syncResourceTypeFields();
-    }
-
-    function syncSetupMode() {
-        const quick = $('labSetupMode').value === 'quick';
-        $('fullMetadataPanel').hidden = quick;
-        $('quickMetadataField').hidden = !quick;
-    }
-
-    function recommendedRemoteAccessURI() {
-        return state.status?.recommendedRemoteAccessURI || `${window.location.origin}/guacamole`;
-    }
-
-    function recommendedFmuAccessURI() {
-        return state.status?.recommendedFmuAccessURI || `${window.location.origin}/fmu`;
-    }
-
-    function accessURIHasSegment(value, segment) {
-        const text = String(value || '').trim();
-        if (!text) return false;
-        const normalizedSegment = String(segment || '').trim().toLowerCase();
-        try {
-            const url = new URL(text, window.location.origin);
-            return url.pathname
-                .split('/')
-                .map(part => part.toLowerCase())
-                .includes(normalizedSegment);
-        } catch {
-            return text.toLowerCase().includes(`/${normalizedSegment}`);
-        }
-    }
-
-    function syncResourceTypeFields() {
-        const isFmu = $('labResourceType').value === '1';
-        const accessKeyInput = $('labAccessKey');
-        const accessURIInput = $('labAccessURI');
-        const fmuFileNameInput = $('labFmuFileName');
-        const maxConcurrentUsersInput = $('labMaxConcurrentUsers');
-        syncSetupMode();
-        $('fmuConfigTitle').hidden = !isFmu;
-        $('fmuConfigPanel').hidden = !isFmu;
-        setGroupHidden('.lab-access-key-field', isFmu);
-        setGroupHidden('.lab-fmu-file-field', !isFmu);
-        setGroupHidden('.lab-max-concurrent-users-field', !isFmu);
-        if (isFmu && !fmuFileNameInput.value.trim() && accessKeyInput.value.trim().toLowerCase().endsWith('.fmu')) {
-            fmuFileNameInput.value = accessKeyInput.value.trim();
-        }
-        if (isFmu && fmuFileNameInput.value.trim()) {
-            accessKeyInput.value = fmuFileNameInput.value.trim();
-        }
-        const currentAccessURI = accessURIInput.value.trim();
-        if (isFmu) {
-            if (!currentAccessURI || accessURIHasSegment(currentAccessURI, 'guacamole')) {
-                accessURIInput.value = recommendedFmuAccessURI();
-            }
-            maxConcurrentUsersInput.value = String(normalizeMaxConcurrentUsers(maxConcurrentUsersInput.value, true));
-        } else {
-            if (accessKeyInput.value.trim() && !/^guac:id:[1-9][0-9]*$/.test(accessKeyInput.value.trim())) {
-                accessKeyInput.value = '';
-            }
-            fmuFileNameInput.value = '';
-            maxConcurrentUsersInput.value = '1';
-            resetFmuDescribeFields(false);
-            if (!currentAccessURI || !accessURIHasSegment(currentAccessURI, 'guacamole')) {
-                accessURIInput.value = recommendedRemoteAccessURI();
-            }
-        }
-        accessKeyInput.readOnly = true;
-        accessURIInput.readOnly = true;
-    }
-
-    function setGroupHidden(selector, hidden) {
-        document.querySelectorAll(selector).forEach(element => {
-            element.hidden = hidden;
-        });
-    }
-
     async function publishLab() {
         try {
             const payload = buildLabPayload();
@@ -733,7 +611,7 @@
     }
 
     function buildLabPayload() {
-        syncResourceTypeFields();
+        resourceFeatureController.syncTypeFields();
         const setupMode = $('labSetupMode').value;
         const isFmu = $('labResourceType').value === '1';
         if (isFmu && !$('labFmuFileName').value.trim()) {
@@ -757,7 +635,7 @@
     }
 
     function buildMetadata() {
-        syncResourceTypeFields();
+        resourceFeatureController.syncTypeFields();
         validateMarketplaceFields();
         const imageUrls = state.imageMode === 'link'
             ? splitCsv($('labImageUrls').value)
@@ -1013,8 +891,8 @@
         applyLabBaseFields(lab);
         await applyLabMetadata(lab);
         captureOriginalEditPrice(lab);
-        syncSetupMode();
-        syncResourceTypeFields();
+        resourceFeatureController.syncSetupMode();
+        resourceFeatureController.syncTypeFields();
         syncBookingModeFields();
         updateEditControls();
         setStatus(`Editing ${resolveLabDisplayName(lab)}. Use Save Lab to persist changes.`, false);
@@ -1226,7 +1104,7 @@
         setContentId('');
         closeCategoryMenu();
         populateTimezoneOptions();
-        renderResourceOptions();
+        resourceFeatureController.renderOptions();
         renderCategoryMenu();
         renderCategoryChips();
         renderIscedSuggestions();
@@ -1235,8 +1113,8 @@
         setupMediaMode('images', 'link');
         setupMediaMode('docs', 'link');
         resetFmuDescribeFields(false);
-        syncSetupMode();
-        syncResourceTypeFields();
+        resourceFeatureController.syncSetupMode();
+        resourceFeatureController.syncTypeFields();
         syncBookingModeFields();
     }
 
