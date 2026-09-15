@@ -104,18 +104,18 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeoutImpl: setTimeout,
     });
     const showToast = toastController.showToast;
-    const notificationsModule = window.LabManagerNotifications;
-    if (!notificationsModule) {
-        throw new Error('LabManagerNotifications must load before lab-manager.js');
+    const notificationsFeatureModule = window.LabManagerNotificationsFeature;
+    if (!notificationsFeatureModule) {
+        throw new Error('LabManagerNotificationsFeature must load before lab-manager.js');
     }
-    const notificationsController = notificationsModule.createController({
+    const notificationsFeatureController = notificationsFeatureModule.createController({
         documentImpl: document,
         fetchImpl: (...args) => fetch(...args),
         showToast,
         getAuthTokenHandler: () => window.AuthTokenHandler,
         logger: console,
     });
-    const requestNotificationsAccess = notificationsController.requestAccess;
+    const requestNotificationsAccess = notificationsFeatureController.requestAccess;
     const paginationModule = window.LabManagerPagination;
     if (!paginationModule) {
         throw new Error('LabManagerPagination must load before lab-manager.js');
@@ -224,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return hostModalsController?.saveCredentials();
     }
     loadAccessPolicy();
-    notificationsController.initialize();
+    notificationsFeatureController.initialize();
 
     // Lab Station ops state
     const refreshHostsBtn = $('#refreshHostsBtn');
