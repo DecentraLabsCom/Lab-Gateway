@@ -39,6 +39,10 @@
     if (!publisherSchedulingFeature) {
         throw new Error('LabPublisherSchedulingFeature must load before lab-publisher.js');
     }
+    const publisherTermsFeature = window.LabPublisherTermsFeature;
+    if (!publisherTermsFeature) {
+        throw new Error('LabPublisherTermsFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
@@ -49,7 +53,6 @@
         imageMode: 'link',
         docMode: 'link',
         fmuDescribeController: null,
-        termsController: null,
         labs: [],
         editingLabId: null,
         originalRawPrice: null,
@@ -84,7 +87,6 @@
     const mergeMediaUrls = publisherValues.mergeMediaUrls;
     const dateInputToUnix = publisherValues.dateInputToUnix;
     const unixToDateInput = publisherValues.unixToDateInput;
-    const guessVersionFromUrl = publisherValues.guessVersionFromUrl;
     const RESOURCE_TYPES = { LAB: 'lab', FMU: 'fmu' };
     const escapeHtml = publisherValues.escapeHtml;
     const escapeAttr = publisherValues.escapeAttr;
@@ -109,6 +111,7 @@
     let labActionsController;
     let availabilityController;
     let schedulingController;
+    let termsController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
@@ -120,7 +123,6 @@
         const imageChoose = $('labImagesChooseBtn');
         const docChoose = $('labDocsChooseBtn');
         const assetList = $('labAssetList');
-        const termsUrl = $('labTermsUrl');
 
         if (!refresh || !submit) return;
 
@@ -173,6 +175,13 @@
             resolveBrowserTimezone: publisherValues.resolveBrowserTimezone,
         });
 
+        termsController = publisherTermsFeature.createController({
+            documentImpl: document,
+            fetchImpl: fetch,
+            guessVersionFromUrl: publisherValues.guessVersionFromUrl,
+        });
+        termsController.bind();
+
         labActionsController = publisherLabActions.createController({
             listElement: labList,
             getLabs: () => state.labs,
@@ -203,7 +212,6 @@
         docs.addEventListener('change', () => void assetsController.upload(docs.files, 'docs'));
         imageChoose.addEventListener('click', () => images.click());
         docChoose.addEventListener('click', () => docs.click());
-        termsUrl.addEventListener('blur', autoFetchTermsMetadata);
 
         resourceFeatureController.syncSetupMode();
         resourceFeatureController.syncTypeFields();
@@ -369,12 +377,7 @@
             roundingMode: 'nearest-per-second',
             billingMode: 'linear-duration',
         };
-        const termsOfUse = sanitizeTermsOfUse({
-            url: $('labTermsUrl').value.trim(),
-            version: $('labTermsVersion').value.trim(),
-            effectiveDate: $('labTermsEffectiveDate').value.trim(),
-            sha256: $('labTermsSha256').value.trim(),
-        });
+        const termsOfUse = sanitizeTermsOfUse(termsController.getState());
         return buildMetadataPayload({
             contentId: ensureContentId(),
             name: $('labName').value.trim(),
@@ -467,45 +470,6 @@
         const display = $('labContentIdDisplay');
         if (input) input.value = normalized;
         if (display) display.textContent = normalized || 'auto-generated';
-    }
-
-    async function autoFetchTermsMetadata() {
-        const url = $('labTermsUrl').value.trim();
-        const status = $('labTermsStatus');
-        if (state.termsController) state.termsController.abort();
-        $('labTermsVersion').value = '';
-        $('labTermsEffectiveDate').value = '';
-        $('labTermsSha256').value = '';
-        status.textContent = '';
-        if (!url) return;
-        if (!/^https?:\/\//i.test(url)) {
-            status.textContent = 'Terms link must be an absolute HTTP(S) URL.';
-            return;
-        }
-
-        const controller = new AbortController();
-        state.termsController = controller;
-        status.textContent = 'Fetching metadata...';
-        try {
-            const response = await fetch(url, { signal: controller.signal });
-            if (!response.ok) throw new Error('Unable to download the Terms of Use document.');
-            const buffer = await response.arrayBuffer();
-            let shaValue = '';
-            if (window.crypto?.subtle?.digest) {
-                shaValue = await sha256Hex(buffer);
-            }
-            $('labTermsVersion').value = guessVersionFromUrl(url);
-            $('labTermsEffectiveDate').value = new Date().toISOString().split('T')[0];
-            $('labTermsSha256').value = shaValue;
-            status.textContent = shaValue
-                ? 'Terms metadata auto-filled.'
-                : 'Terms date auto-filled; SHA-256 unavailable in this browser context.';
-        } catch (err) {
-            if (err.name === 'AbortError') return;
-            status.textContent = 'Unable to auto-fill version/date/hash for this link.';
-        } finally {
-            if (state.termsController === controller) state.termsController = null;
-        }
     }
 
     async function autoDetectFmuMetadata() {
@@ -719,12 +683,7 @@
         setAttributeValue(attributes, 'unavailableWindows', value => {
             availabilityController.hydrate({ unavailableWindows: Array.isArray(value) ? value : [] });
         });
-        setAttributeValue(attributes, 'termsOfUse', value => {
-            $('labTermsUrl').value = value?.url || '';
-            $('labTermsVersion').value = value?.version || '';
-            $('labTermsEffectiveDate').value = value?.effectiveDate || '';
-            $('labTermsSha256').value = value?.sha256 || '';
-        });
+        setAttributeValue(attributes, 'termsOfUse', value => termsController.hydrate(value));
         setAttributeValue(attributes, 'timezone', value => {
             if (value) $('labTimezone').value = value;
         });
@@ -783,11 +742,7 @@
         setValue('labAvailableHoursStart', '09:00');
         setValue('labAvailableHoursEnd', '17:00');
         setValue('labMaxConcurrentUsers', '1');
-        setValue('labTermsUrl', '');
-        setValue('labTermsVersion', '');
-        setValue('labTermsEffectiveDate', '');
-        setValue('labTermsSha256', '');
-        setText('labTermsStatus', '');
+        termsController.reset();
         setValue('labFmuFileName', '');
         setValue('labImageUrls', '');
         setValue('labDocUrls', '');
@@ -873,13 +828,6 @@
         if (!el) return;
         el.textContent = message;
         el.classList.toggle('error', !!isError);
-    }
-
-    async function sha256Hex(buffer) {
-        const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer);
-        return Array.from(new Uint8Array(hashBuffer))
-            .map(byte => byte.toString(16).padStart(2, '0'))
-            .join('');
     }
 
 })();
