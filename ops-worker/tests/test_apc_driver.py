@@ -49,6 +49,20 @@ class FakeSnmpClient:
         return list(self.walks[oid])
 
 
+class BatchSnmpClient(FakeSnmpClient):
+    def __init__(self, values=None):
+        super().__init__(values=values)
+        self.get_many_calls = []
+
+    def get_many(self, oids):
+        oids = list(oids)
+        self.get_many_calls.append(oids)
+        return [self.values[oid] for oid in oids]
+
+    def walk(self, oid):
+        raise AssertionError(f"legacy APC should not walk {oid}")
+
+
 class UnreachablePowerDriver:
     capabilities = PowerCapabilities(per_outlet_switching=True, read_back_state=True)
 
@@ -275,6 +289,45 @@ def test_apc_legacy_multioutlet_configuration_uses_table_walks():
     }
     assert client.get_calls == [APC_LEGACY_OIDS["outlet_count"]]
     assert client.walk_calls == [state, config_name, power_on_delay, power_off_delay, reboot_duration]
+
+
+def test_apc_legacy_configuration_uses_batched_gets_when_available():
+    count = 2
+    values = {APC_LEGACY_OIDS["outlet_count"]: count}
+    values.update({
+        f"{APC_LEGACY_OIDS['state']}.{index}": 2
+        for index in range(1, count + 1)
+    })
+    values.update({
+        f"{APC_LEGACY_OIDS['config_name']}.{index}": f"Output {index}"
+        for index in range(1, count + 1)
+    })
+    for key, value in (
+        ("power_on_delay", 15),
+        ("power_off_delay", 30),
+        ("reboot_duration", 10),
+    ):
+        values.update({
+            f"{APC_LEGACY_OIDS[key]}.{index}": value
+            for index in range(1, count + 1)
+        })
+    client = BatchSnmpClient(values)
+    driver = ApcPowerNetSnmpDriver(
+        "pdu-1",
+        "192.0.2.20",
+        config={"profile": "legacy"},
+        credentials={"version": "v2c", "community": "private"},
+        client=client,
+    )
+
+    outlets = driver.read_configuration()["outlets"]
+
+    assert [outlet["name"] for outlet in outlets] == ["Output 1", "Output 2"]
+    assert len(client.get_many_calls) == 5
+    assert client.get_many_calls[0] == [
+        f"{APC_LEGACY_OIDS['state']}.1",
+        f"{APC_LEGACY_OIDS['state']}.2",
+    ]
 
 
 def test_apc_rpdu2_discovers_outlets_from_status_table():
