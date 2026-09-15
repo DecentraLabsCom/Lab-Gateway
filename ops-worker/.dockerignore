@@ -1,0 +1,10 @@
+# Development-only files are not part of the production image.
+tests/
+__pycache__/
+.pytest_cache/
+.pytest-tmp-revocation-spool/
+.coverage
+.coverage.*
+
+# Host configuration is provided through the persistent runtime mount.
+hosts.json
