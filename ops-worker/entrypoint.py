@@ -30,8 +30,12 @@ def run(
     """Run the worker startup sequence and hand the app to Waitress."""
     configure_logging()
     refresh_trust_store(hosts)
-    start_scheduler()
-    return serve(app, host=bind, port=port)
+    scheduler = start_scheduler()
+    try:
+        return serve(app, host=bind, port=port)
+    finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=True)
 
 
 __all__ = ["configure_logging", "run"]

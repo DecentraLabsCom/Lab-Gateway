@@ -11,7 +11,7 @@ class SchedulerRuntime:
     def __init__(self, context: SchedulerContext):
         self._context = context
 
-    def start_scheduler(self) -> None:
+    def start_scheduler(self) -> Any:
         context = self._context
         return context.get_start_scheduler()(
             scheduler_factory=context.get_scheduler_factory(),
