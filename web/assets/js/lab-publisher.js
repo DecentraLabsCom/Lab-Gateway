@@ -55,14 +55,16 @@
     if (!publisherPricingFeature) {
         throw new Error('LabPublisherPricingFeature must load before lab-publisher.js');
     }
+    const publisherMediaFeature = window.LabPublisherMediaFeature;
+    if (!publisherMediaFeature) {
+        throw new Error('LabPublisherMediaFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
         hosts: [],
         guacamole: [],
         fmus: [],
-        imageMode: 'link',
-        docMode: 'link',
         labs: [],
         editingLabId: null,
     };
@@ -120,6 +122,7 @@
     let fmuMetadataController;
     let metadataController;
     let pricingController;
+    let mediaController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
@@ -209,6 +212,8 @@
             convertDisplayCreditsToRawPerSecond: publisherValues.convertDisplayCreditsToRawPerSecond,
         });
 
+        mediaController = publisherMediaFeature.createController({ documentImpl: document });
+
         labActionsController = publisherLabActions.createController({
             listElement: labList,
             getLabs: () => state.labs,
@@ -258,14 +263,7 @@
 
     function initMarketplaceFields() {
         schedulingController.initialize();
-        setupMediaMode('images', 'link');
-        setupMediaMode('docs', 'link');
-        $('labImageMode').querySelectorAll('button').forEach(button => {
-            button.addEventListener('click', () => setupMediaMode('images', button.dataset.mode));
-        });
-        $('labDocMode').querySelectorAll('button').forEach(button => {
-            button.addEventListener('click', () => setupMediaMode('docs', button.dataset.mode));
-        });
+        mediaController.bind();
     }
 
     async function loadPublisherData(options = {}) {
@@ -294,20 +292,6 @@
         } catch (err) {
             setStatus(err.message || 'Unable to load Lab Publisher data', true);
         }
-    }
-
-    function setupMediaMode(kind, mode) {
-        const isImages = kind === 'images';
-        const stateKey = isImages ? 'imageMode' : 'docMode';
-        const control = $(isImages ? 'labImageMode' : 'labDocMode');
-        const linkInput = $(isImages ? 'labImageUrls' : 'labDocUrls');
-        const chooseBtn = $(isImages ? 'labImagesChooseBtn' : 'labDocsChooseBtn');
-        state[stateKey] = mode;
-        control.querySelectorAll('button').forEach(button => {
-            button.classList.toggle('active', button.dataset.mode === mode);
-        });
-        linkInput.hidden = mode !== 'link';
-        chooseBtn.hidden = mode !== 'upload';
     }
 
     async function publishLab() {
@@ -369,11 +353,12 @@
         resourceFeatureController.syncTypeFields();
         validateMarketplaceFields();
         const availability = availabilityController.getState();
+        const media = mediaController.getState();
         const content = metadataController.getState({
-            imageMode: state.imageMode,
-            docMode: state.docMode,
-            uploadedImages: state.imageMode === 'link' ? [] : assetsController.getUploadedImages(),
-            uploadedDocs: state.docMode === 'link' ? [] : assetsController.getUploadedDocs(),
+            imageMode: media.imageMode,
+            docMode: media.docMode,
+            uploadedImages: media.imageMode === 'link' ? [] : assetsController.getUploadedImages(),
+            uploadedDocs: media.docMode === 'link' ? [] : assetsController.getUploadedDocs(),
         });
         const imageUrls = content.imageUrls;
         const docs = content.docs;
@@ -589,8 +574,8 @@
             imageUrls: images,
             docUrls: docs,
         });
-        setupMediaMode('images', 'upload');
-        setupMediaMode('docs', 'upload');
+        mediaController.setMode('images', 'upload');
+        mediaController.setMode('docs', 'upload');
         assetsController.setUploadedAssets({ images, docs });
 
         if (metadata?.pricing) pricingController.hydrate(metadata.pricing);
@@ -686,8 +671,7 @@
         setContentId('');
         schedulingController.reset();
         resourceFeatureController.renderOptions();
-        setupMediaMode('images', 'link');
-        setupMediaMode('docs', 'link');
+        mediaController.reset();
         fmuMetadataController.reset(false);
         resourceFeatureController.syncSetupMode();
         resourceFeatureController.syncTypeFields();
