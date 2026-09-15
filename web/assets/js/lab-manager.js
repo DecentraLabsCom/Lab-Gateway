@@ -156,45 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!actionableReservationsModule) {
         throw new Error('LabManagerActionableReservations must load before lab-manager.js');
     }
-    const fmuSyncModule = window.LabManagerFmuSync;
-    if (!fmuSyncModule) {
-        throw new Error('LabManagerFmuSync must load before lab-manager.js');
-    }
-    const aasLinkModule = window.LabManagerAasLink;
-    if (!aasLinkModule) {
-        throw new Error('LabManagerAasLink must load before lab-manager.js');
-    }
-    const digitalTwinsModule = window.LabManagerDigitalTwins;
-    if (!digitalTwinsModule) {
-        throw new Error('LabManagerDigitalTwins must load before lab-manager.js');
-    }
-    const powerCredentialsModule = window.LabManagerPowerCredentials;
-    if (!powerCredentialsModule) {
-        throw new Error('LabManagerPowerCredentials must load before lab-manager.js');
-    }
-    const powerRenderersModule = window.LabManagerPowerRenderers;
-    if (!powerRenderersModule) {
-        throw new Error('LabManagerPowerRenderers must load before lab-manager.js');
-    }
-    const powerValuesModule = window.LabManagerPowerValues;
-    if (!powerValuesModule) {
-        throw new Error('LabManagerPowerValues must load before lab-manager.js');
-    }
-    const powerOperationsModule = window.LabManagerPowerOperations;
-    if (!powerOperationsModule) {
-        throw new Error('LabManagerPowerOperations must load before lab-manager.js');
-    }
-    const powerStatusModule = window.LabManagerPowerStatus;
-    if (!powerStatusModule) {
-        throw new Error('LabManagerPowerStatus must load before lab-manager.js');
-    }
-    const powerControllersModule = window.LabManagerPowerControllers;
-    if (!powerControllersModule) {
-        throw new Error('LabManagerPowerControllers must load before lab-manager.js');
-    }
-    const powerPoliciesModule = window.LabManagerPowerPolicies;
-    if (!powerPoliciesModule) {
-        throw new Error('LabManagerPowerPolicies must load before lab-manager.js');
+    const energyFeatureModule = window.LabManagerEnergyFeature;
+    if (!energyFeatureModule) {
+        throw new Error('LabManagerEnergyFeature must load before lab-manager.js');
     }
     const activityFeedController = activityModule.createController({
         document,
@@ -291,73 +255,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostListEl = $('#hostList');
     const opsHintEl = $('#opsHint');
     const guacamoleCandidateListEl = $('#guacamoleCandidateList');
-    const refreshPowerControllersBtn = $('#refreshPowerControllersBtn');
-    const powerControllerListEl = $('#powerControllerList');
-    const powerControllersStatusEl = $('#powerControllersStatus');
-    const powerControllersHintEl = $('#powerControllersHint');
-    const powerControllerSelectEl = $('#powerControllerSelect');
-    const powerControllerIdEl = $('#powerControllerId');
-    const powerControllerNameEl = $('#powerControllerName');
-    const powerControllerDriverEl = $('#powerControllerDriver');
-    const powerControllerEnabledEl = $('#powerControllerEnabled');
-    const powerControllerHostEl = $('#powerControllerHost');
-    const powerControllerPortEl = $('#powerControllerPort');
-    const powerControllerCredentialRefEl = $('#powerControllerCredentialRef');
-    const powerControllerNetioPathEl = $('#powerControllerNetioPath');
-    const powerControllerNetioHttpsEl = $('#powerControllerNetioHttps');
-    const powerControllerNetioVerifyTlsEl = $('#powerControllerNetioVerifyTls');
-    const powerControllerNetioPathFieldEl = $('#powerControllerNetioPathField');
-    const powerControllerNetioHttpsFieldEl = $('#powerControllerNetioHttpsField');
-    const powerControllerNetioVerifyTlsFieldEl = $('#powerControllerNetioVerifyTlsField');
-    const powerControllerProfileFieldEl = $('#powerControllerProfileField');
-    const powerControllerProfileEl = $('#powerControllerProfile');
-    const powerControllerTimeoutSecondsEl = $('#powerControllerTimeoutSeconds');
-    const powerControllerRetriesEl = $('#powerControllerRetries');
-    const powerControllerOutletsEl = $('#powerControllerOutlets');
-    const addPowerControllerOutletBtn = $('#addPowerControllerOutletBtn');
-    const savePowerControllerBtn = $('#savePowerControllerBtn');
-    const powerControllerEditorHintEl = $('#powerControllerEditorHint');
-    const refreshPowerCredentialsBtn = $('#refreshPowerCredentialsBtn');
-    const powerCredentialsListEl = $('#powerCredentialsList');
-    const powerCredentialsStatusEl = $('#powerCredentialsStatus');
-    const powerCredentialsHintEl = $('#powerCredentialsHint');
-    const powerCredentialSelectEl = $('#powerCredentialSelect');
-    const powerCredentialRefEl = $('#powerCredentialRef');
-    const powerCredentialTypeEl = $('#powerCredentialType');
-    const powerCredentialUsernameEl = $('#powerCredentialUsername');
-    const powerCredentialPasswordEl = $('#powerCredentialPassword');
-    const powerCredentialCommunityEl = $('#powerCredentialCommunity');
-    const powerCredentialAuthProtocolEl = $('#powerCredentialAuthProtocol');
-    const powerCredentialAuthPasswordEl = $('#powerCredentialAuthPassword');
-    const powerCredentialPrivProtocolEl = $('#powerCredentialPrivProtocol');
-    const powerCredentialPrivPasswordEl = $('#powerCredentialPrivPassword');
-    const powerCredentialContextNameEl = $('#powerCredentialContextName');
-    const powerCredentialUsernameFieldEl = $('#powerCredentialUsernameField');
-    const powerCredentialPasswordFieldEl = $('#powerCredentialPasswordField');
-    const powerCredentialCommunityFieldEl = $('#powerCredentialCommunityField');
-    const powerCredentialAuthProtocolFieldEl = $('#powerCredentialAuthProtocolField');
-    const powerCredentialAuthPasswordFieldEl = $('#powerCredentialAuthPasswordField');
-    const powerCredentialPrivProtocolFieldEl = $('#powerCredentialPrivProtocolField');
-    const powerCredentialPrivPasswordFieldEl = $('#powerCredentialPrivPasswordField');
-    const powerCredentialContextNameFieldEl = $('#powerCredentialContextNameField');
-    const powerCredentialSaveBtn = $('#powerCredentialSaveBtn');
-    const powerCredentialEditorHintEl = $('#powerCredentialEditorHint');
-    const powerOperationReasonEl = $('#powerOperationReason');
-    const powerCycleSecondsEl = $('#powerCycleSeconds');
-    const powerMaintenanceModeEl = $('#powerMaintenanceMode');
-    const powerPolicySelectEl = $('#powerPolicySelect');
-    const powerPolicyLabSelectEl = $('#powerPolicyLabSelect');
-    const powerPolicyNameEl = $('#powerPolicyName');
-    const powerPolicyEnabledEl = $('#powerPolicyEnabled');
-    const powerPolicyRespectLocalModeEl = $('#powerPolicyRespectLocalMode');
-    const powerPolicyMaintenanceModeEl = $('#powerPolicyMaintenanceMode');
-    const powerPolicyStartFailureModeEl = $('#powerPolicyStartFailureMode');
-    const powerPolicyEndFailureModeEl = $('#powerPolicyEndFailureMode');
-    const powerPolicyStepsEl = $('#powerPolicySteps');
-    const addPowerPolicyStepBtn = $('#addPowerPolicyStepBtn');
-    const savePowerPolicyBtn = $('#savePowerPolicyBtn');
-    const powerPoliciesStatusEl = $('#powerPoliciesStatus');
-    const powerPolicyEditorHintEl = $('#powerPolicyEditorHint');
     const hostState = {};
     const hostMetadata = {};
     let winrmTrustModalController;
@@ -367,18 +264,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const guacamoleCandidateState = {};
     const heartbeatSources = {};
     const heartbeatStreamErrorShown = {};
-    let powerControllersController;
-    let powerPoliciesController;
-    let digitalTwinsController;
-    const powerValuesController = powerValuesModule.createController();
-    const createPowerPolicyStepDraft = powerValuesController.createPowerPolicyStepDraft;
-    const createPowerControllerOutletDraft = powerValuesController.createPowerControllerOutletDraft;
-    const parsePowerPolicyInteger = powerValuesController.parsePowerPolicyInteger;
-    const powerOperationsController = powerOperationsModule.createController();
-    const buildPowerCommandPayload = powerOperationsController.buildPowerCommandPayload;
-    const powerStatusController = powerStatusModule.createController();
-    const mergePowerControllerStatuses = powerStatusController.mergePowerControllerStatuses;
-    const powerRenderersController = powerRenderersModule.createController({ escapeHtml });
     let hostNames = [];
 
     const hostRenderersController = hostRenderersModule.createController({
@@ -631,205 +516,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     modalBindingsController.bind();
 
-    powerControllersController = powerControllersModule.createController({
-        fields: {
-            refresh: refreshPowerControllersBtn,
-            list: powerControllerListEl,
-            status: powerControllersStatusEl,
-            hint: powerControllersHintEl,
-            select: powerControllerSelectEl,
-            id: powerControllerIdEl,
-            name: powerControllerNameEl,
-            driver: powerControllerDriverEl,
-            enabled: powerControllerEnabledEl,
-            host: powerControllerHostEl,
-            port: powerControllerPortEl,
-            credentialRef: powerControllerCredentialRefEl,
-            netioPath: powerControllerNetioPathEl,
-            netioHttps: powerControllerNetioHttpsEl,
-            netioVerifyTls: powerControllerNetioVerifyTlsEl,
-            netioPathField: powerControllerNetioPathFieldEl,
-            netioHttpsField: powerControllerNetioHttpsFieldEl,
-            netioVerifyTlsField: powerControllerNetioVerifyTlsFieldEl,
-            profileField: powerControllerProfileFieldEl,
-            profile: powerControllerProfileEl,
-            timeoutSeconds: powerControllerTimeoutSecondsEl,
-            retries: powerControllerRetriesEl,
-            outlets: powerControllerOutletsEl,
-            addOutlet: addPowerControllerOutletBtn,
-            saveButton: savePowerControllerBtn,
-            editorHint: powerControllerEditorHintEl,
-            operationReason: powerOperationReasonEl,
-            cycleSeconds: powerCycleSecondsEl,
-            maintenanceMode: powerMaintenanceModeEl,
-        },
-        fetchImpl: (...args) => fetch(...args),
-        showToast,
-        showOpsWarning,
-        renderPolicySteps: (...args) => powerPoliciesController?.renderSteps(...args),
-        renderControllerRowsMarkup: (...args) => powerRenderersController.renderPowerControllerRowsMarkup(...args),
-        renderControllerCredentialOptionsMarkup: (...args) => powerRenderersController.renderPowerControllerCredentialOptionsMarkup(...args),
-        renderControllerOutletsMarkup: (...args) => powerRenderersController.renderPowerControllerOutletsMarkup(...args),
-        mergePowerControllerStatuses,
-        createPowerControllerOutletDraft,
-        buildPowerCommandPayload,
-        logger: console,
+    const energyFeatureController = energyFeatureModule.createController({
         documentImpl: document,
-    });
-    powerPoliciesController = powerPoliciesModule.createController({
-        fields: {
-            select: powerPolicySelectEl,
-            labSelect: powerPolicyLabSelectEl,
-            name: powerPolicyNameEl,
-            enabled: powerPolicyEnabledEl,
-            respectLocalMode: powerPolicyRespectLocalModeEl,
-            maintenanceMode: powerPolicyMaintenanceModeEl,
-            startFailureMode: powerPolicyStartFailureModeEl,
-            endFailureMode: powerPolicyEndFailureModeEl,
-            steps: powerPolicyStepsEl,
-            addStep: addPowerPolicyStepBtn,
-            saveButton: savePowerPolicyBtn,
-            status: powerPoliciesStatusEl,
-            editorHint: powerPolicyEditorHintEl,
-        },
         fetchImpl: (...args) => fetch(...args),
         showToast,
         showOpsWarning,
-        getControllers: () => powerControllersController?.getControllers() || [],
-        getManagedLabs: () => digitalTwinsController?.getManagedLabs() || [],
-        resolveLabDisplayName: lab => digitalTwinsController?.resolveLabDisplayName(lab) || '',
-        renderPowerPolicyStepsMarkup: (...args) => powerRenderersController.renderPowerPolicyStepsMarkup(...args),
-        createPowerPolicyStepDraft,
-        parsePowerPolicyInteger,
-        logger: console,
-        documentImpl: document,
-    });
-    const loadPowerControllers = powerControllersController.load;
-    const loadPowerControllerStatuses = powerControllersController.loadStatuses;
-    const loadSelectedPowerController = powerControllersController.loadSelected;
-    const savePowerController = powerControllersController.save;
-    const updatePowerControllerDriverFields = powerControllersController.updateDriverFields;
-    const updatePowerControllerNetioPort = powerControllersController.updateNetioPort;
-    const suggestPowerControllerId = powerControllersController.suggestId;
-    const addPowerControllerOutlet = powerControllersController.addOutlet;
-    const handlePowerControllerOutletChange = powerControllersController.handleOutletChange;
-    const handlePowerControllerOutletActions = powerControllersController.handleOutletActions;
-    const handlePowerActions = powerControllersController.handleActions;
-    const loadPowerPolicies = powerPoliciesController.load;
-    const loadSelectedPowerPolicy = powerPoliciesController.loadSelected;
-    const savePowerPolicy = powerPoliciesController.save;
-    const handlePowerPolicyLabChange = powerPoliciesController.handleLabChange;
-    const addPowerPolicyStep = powerPoliciesController.addStep;
-    const handlePowerPolicyStepChange = powerPoliciesController.handleStepChange;
-    const handlePowerPolicyStepActions = powerPoliciesController.handleStepActions;
-    const resetPowerPolicyEditor = powerPoliciesController.resetEditor;
-
-    const powerCredentialsController = powerCredentialsModule.createController({
-        fields: {
-            select: powerCredentialSelectEl,
-            ref: powerCredentialRefEl,
-            type: powerCredentialTypeEl,
-            username: powerCredentialUsernameEl,
-            password: powerCredentialPasswordEl,
-            community: powerCredentialCommunityEl,
-            authProtocol: powerCredentialAuthProtocolEl,
-            authPassword: powerCredentialAuthPasswordEl,
-            privProtocol: powerCredentialPrivProtocolEl,
-            privPassword: powerCredentialPrivPasswordEl,
-            contextName: powerCredentialContextNameEl,
-            usernameField: powerCredentialUsernameFieldEl,
-            passwordField: powerCredentialPasswordFieldEl,
-            communityField: powerCredentialCommunityFieldEl,
-            authProtocolField: powerCredentialAuthProtocolFieldEl,
-            authPasswordField: powerCredentialAuthPasswordFieldEl,
-            privProtocolField: powerCredentialPrivProtocolFieldEl,
-            privPasswordField: powerCredentialPrivPasswordFieldEl,
-            contextNameField: powerCredentialContextNameFieldEl,
-            saveButton: powerCredentialSaveBtn,
-            list: powerCredentialsListEl,
-            status: powerCredentialsStatusEl,
-            hint: powerCredentialsHintEl,
-            editorHint: powerCredentialEditorHintEl,
-        },
-        fetchImpl: (...args) => fetch(...args),
-        showToast,
-        showOpsWarning,
-        refreshPowerControllerStatuses: (...args) => loadPowerControllerStatuses(...args),
-        renderControllerCredentialOptions: credentials => {
-            powerControllersController.setCredentials(credentials);
-        },
         escapeHtml,
-        documentImpl: document,
-    });
-    const loadPowerCredentials = powerCredentialsController.load;
-    powerCredentialsController.initialize();
-    powerControllersController.initialize();
-    powerPoliciesController.initialize();
-
-    // Digital twins: managed labs, FMU sync and AAS links.
-    const fmuSyncBtn = $('#fmuSyncBtn');
-    const fmuSyncKeyEl = $('#fmuSyncKey');
-    const fmuSyncLabSelectEl = $('#fmuSyncLabSelect');
-    const fmuSyncFileEl = $('#fmuSyncFile');
-    const fmuSyncFileNameEl = $('#fmuSyncFileName');
-    const fmuSyncResultEl = $('#fmuSyncResult');
-    const fmuSyncDescriptionEl = $('#fmuSyncDescription');
-    const fmuSyncLicenseEl = $('#fmuSyncLicense');
-    const fmuSyncDocsUrlEl = $('#fmuSyncDocsUrl');
-    const fmuSyncContactEmailEl = $('#fmuSyncContactEmail');
-    const fmuSyncDescriptionHintEl = $('#fmuSyncDescriptionHint');
-    const fmuSyncLicenseHintEl = $('#fmuSyncLicenseHint');
-    const aasLinkKeyEl = $('#aasLinkKey');
-    const aasLinkLabSelectEl = $('#aasLinkLabSelect');
-    const aasLinkAasIdEl = $('#aasLinkAasId');
-    const aasLinkSaveBtn = $('#aasLinkSaveBtn');
-    const aasLinkCheckBtn = $('#aasLinkCheckBtn');
-    const aasLinkDeleteBtn = $('#aasLinkDeleteBtn');
-    const aasLinkResultEl = $('#aasLinkResult');
-    digitalTwinsController = digitalTwinsModule.createController({
-        fields: {
-            powerPolicyLabSelect: powerPolicyLabSelectEl,
-            powerPolicySelect: powerPolicySelectEl,
-            fmuSyncKey: fmuSyncKeyEl,
-            fmuSyncLabSelect: fmuSyncLabSelectEl,
-            aasLinkLabSelect: aasLinkLabSelectEl,
-            fmuSync: {
-                syncButton: fmuSyncBtn,
-                keyInput: fmuSyncKeyEl,
-                labSelect: fmuSyncLabSelectEl,
-                fileInput: fmuSyncFileEl,
-                fileName: fmuSyncFileNameEl,
-                result: fmuSyncResultEl,
-                description: fmuSyncDescriptionEl,
-                license: fmuSyncLicenseEl,
-                docsUrl: fmuSyncDocsUrlEl,
-                contactEmail: fmuSyncContactEmailEl,
-                descriptionHint: fmuSyncDescriptionHintEl,
-                licenseHint: fmuSyncLicenseHintEl,
-            },
-            aasLink: {
-                keyInput: aasLinkKeyEl,
-                labSelect: aasLinkLabSelectEl,
-                aasIdInput: aasLinkAasIdEl,
-                saveButton: aasLinkSaveBtn,
-                checkButton: aasLinkCheckBtn,
-                deleteButton: aasLinkDeleteBtn,
-                result: aasLinkResultEl,
-            },
-        },
-        fetchImpl: (...args) => fetch(...args),
-        showToast,
-        showOpsWarning,
-        fmuSyncModule,
-        aasLinkModule,
         formDataCtor: FormData,
         urlSearchParamsCtor: URLSearchParams,
-        documentImpl: document,
         logger: console,
     });
-    const getManagedLabs = digitalTwinsController.getManagedLabs;
-    const loadManagedLabsOnce = digitalTwinsController.loadManagedLabsOnce;
-    digitalTwinsController.initialize();
+    energyFeatureController.initialize();
 
     // Reservation timeline elements
     const timelineInput = $('#timelineReservationId');
@@ -887,7 +584,7 @@ document.addEventListener('DOMContentLoaded', () => {
         hasHostList: Boolean(hostListEl),
         hasReservationList: Boolean(upcomingReservationsListEl),
         refreshSession: () => opsAccessController?.refreshSession(),
-        loadManagedLabs: (...args) => loadManagedLabsOnce(...args),
+        loadManagedLabs: (...args) => energyFeatureController.loadManagedLabsOnce(...args),
         checkAvailability: (...args) => checkOpsAvailability(...args),
         loadHostInventory: (...args) => loadHostInventory(...args),
         loadActionableReservations: (...args) => loadActionableReservations(...args),
@@ -899,7 +596,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     hostActionBindingsController.bind();
     if (hostListEl) hostViewController?.renderHosts();
-    if (refreshPowerCredentialsBtn) refreshPowerCredentialsBtn.addEventListener('click', loadPowerCredentials);
     hostViewController?.bind();
 
     document.addEventListener('lab-manager:tab-activated', event => {
@@ -917,16 +613,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (tabName === 'energy') {
-            if (powerControllerListEl || powerControllerSelectEl) loadPowerControllers({ skipAuthPrompt: true });
-            if (powerCredentialsListEl || powerCredentialSelectEl) loadPowerCredentials({ skipAuthPrompt: true });
-            if (powerPolicyLabSelectEl) loadManagedLabsOnce();
-            if (powerPolicySelectEl) loadPowerPolicies({ skipAuthPrompt: true });
+            energyFeatureController.initializeTab(tabName);
             return;
         }
         if (tabName === 'digital-twins') {
-            if (fmuSyncKeyEl || fmuSyncLabSelectEl || aasLinkLabSelectEl) {
-                loadManagedLabsOnce();
-            }
+            energyFeatureController.initializeTab(tabName);
             return;
         }
         if (tabName === 'notifications') {
@@ -945,8 +636,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const directName = [reservation?.labName, reservation?.name]
             .find(candidate => typeof candidate === 'string' && candidate.trim());
         if (directName) return directName.trim();
-        const managedLab = getManagedLabs().find(lab => String(lab?.labId ?? '') === String(reservation?.labId ?? ''));
-        return digitalTwinsController.resolveLabDisplayName(managedLab || reservation);
+        const managedLab = energyFeatureController.getManagedLabs()
+            .find(lab => String(lab?.labId ?? '') === String(reservation?.labId ?? ''));
+        return energyFeatureController.resolveLabDisplayName(managedLab || reservation);
     }
 
     function winrmTrustErrorMessage(body, status) {
