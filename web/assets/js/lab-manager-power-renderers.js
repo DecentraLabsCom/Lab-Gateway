@@ -37,6 +37,10 @@
                 </div>
                 <div class="form-grid power-policy-step-fields">
                     <label class="field">
+                        <span>Step label</span>
+                        <input type="text" maxlength="160" data-step-field="stepLabel" value="${escapeHtml(step.stepLabel)}" placeholder="Optional label">
+                    </label>
+                    <label class="field">
                         <span>Phase</span>
                         <select data-step-field="phase">${powerPolicySelectOptions(phases, step.phase, phaseLabels)}</select>
                     </label>
@@ -51,10 +55,6 @@
                     <label class="field">
                         <span>Action</span>
                         <select data-step-field="action">${powerPolicySelectOptions(['on', 'off', 'cycle'], step.action)}</select>
-                    </label>
-                    <label class="field">
-                        <span>Step label</span>
-                        <input type="text" maxlength="160" data-step-field="stepLabel" value="${escapeHtml(step.stepLabel)}" placeholder="Optional label">
                     </label>
                     ${step.action === 'cycle' ? `
                     <label class="field">
