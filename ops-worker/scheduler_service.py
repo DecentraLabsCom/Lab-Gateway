@@ -20,7 +20,7 @@ def start_scheduler(
     process_revocations: Callable[[], Any],
     now: Callable[[], Any],
     logger: Any,
-) -> None:
+) -> Any:
     """Register enabled jobs and start the scheduler when work is present."""
     scheduler = scheduler_factory()
     jobs = 0
@@ -85,10 +85,11 @@ def start_scheduler(
 
     if jobs == 0:
         logger.info("Scheduler not started (no jobs enabled)")
-        return
+        return scheduler
 
     scheduler.start()
     logger.info("Scheduler started with %s job(s)", jobs)
+    return scheduler
 
 
 __all__ = ["start_scheduler"]

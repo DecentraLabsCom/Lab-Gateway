@@ -29,7 +29,7 @@ def test_start_scheduler_contract_preserves_job_order_and_intervals():
     now = datetime(2026, 9, 14, tzinfo=timezone.utc)
     calls = []
 
-    start_scheduler(
+    result = start_scheduler(
         scheduler_factory=lambda: scheduler,
         poll_enabled=True,
         poll_interval_seconds=60,
@@ -59,13 +59,14 @@ def test_start_scheduler_contract_preserves_job_order_and_intervals():
     assert all(job[2]["replace_existing"] is True for job in scheduler.jobs)
     assert calls == [("reservation", scheduler)]
     assert scheduler.started is True
+    assert result is scheduler
 
 
 def test_start_scheduler_contract_always_registers_revocations_and_logs_start():
     scheduler = _Scheduler()
     logger = _Logger()
 
-    start_scheduler(
+    result = start_scheduler(
         scheduler_factory=lambda: scheduler,
         poll_enabled=False,
         poll_interval_seconds=60,
@@ -87,3 +88,4 @@ def test_start_scheduler_contract_always_registers_revocations_and_logs_start():
     assert scheduler.jobs[0][2]["id"] == "guacamole-token-revocation"
     assert scheduler.started is True
     assert any("Scheduler started with %s job(s)" in message for message, _ in logger.messages)
+    assert result is scheduler
