@@ -310,6 +310,7 @@ def sync_lab_to_basyx(
     np_id_enc = _encode_id(nameplate_id)
     td_id_enc = _encode_id(technical_id)
 
+    session = None
     try:
         session = requests.Session()
         session.headers.update({"Content-Type": "application/json", **_aas_request_headers()})
@@ -354,6 +355,9 @@ def sync_lab_to_basyx(
         logger.error("AAS endpoint policy rejected %s: %s", BASYX_AAS_URL, exc)
         result["error"] = "AAS endpoint policy rejected"
         return result
+    finally:
+        if session is not None:
+            session.close()
 
     result["synced"] = True
     return result
