@@ -23,6 +23,8 @@ const paginationScriptPath = new URL('web/assets/js/core/pagination.js', repoRoo
 const formattersScriptPath = new URL('web/assets/js/core/formatters.js', repoRoot);
 const reservationValuesScriptPath = new URL('web/assets/js/lab-manager-reservation-values.js', repoRoot);
 const reservationRenderersScriptPath = new URL('web/assets/js/lab-manager-reservation-renderers.js', repoRoot);
+const actionableReservationsScriptPath = new URL('web/assets/js/lab-manager-actionable-reservations.js', repoRoot);
+const timelineScriptPath = new URL('web/assets/js/lab-manager-timeline.js', repoRoot);
 const notificationsConfigScriptPath = new URL('web/assets/js/lab-manager-notifications-config.js', repoRoot);
 const notificationsScriptPath = new URL('web/assets/js/lab-manager-notifications.js', repoRoot);
 const fmuSyncScriptPath = new URL('web/assets/js/lab-manager-fmu-sync.js', repoRoot);
@@ -380,6 +382,12 @@ function loadLabManager({
   });
   vm.runInContext(fs.readFileSync(reservationRenderersScriptPath, 'utf8'), context, {
     filename: 'lab-manager-reservation-renderers.js',
+  });
+  vm.runInContext(fs.readFileSync(actionableReservationsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-actionable-reservations.js',
+  });
+  vm.runInContext(fs.readFileSync(timelineScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-timeline.js',
   });
   vm.runInContext(fs.readFileSync(notificationsConfigScriptPath, 'utf8'), context, {
     filename: 'lab-manager-notifications-config.js',
