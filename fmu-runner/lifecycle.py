@@ -18,21 +18,27 @@ def create_lifespan(
 
     @asynccontextmanager
     async def lifespan(_app):
-        if initialize_runtime is not None:
-            await initialize_runtime()
-        await init_db()
-        await preload_jwks()
-        manager = get_realtime_manager()
-        if manager is not None:
-            await manager.start()
+        manager = None
+        manager_started = False
         try:
-            yield
-        finally:
+            if initialize_runtime is not None:
+                await initialize_runtime()
+            await init_db()
+            await preload_jwks()
             manager = get_realtime_manager()
             if manager is not None:
-                await manager.stop()
-            shutdown_executor(get_executor())
-            await cleanup_temp_files()
+                manager_started = True
+                await manager.start()
+            yield
+        finally:
+            try:
+                if manager_started:
+                    await manager.stop()
+            finally:
+                try:
+                    shutdown_executor(get_executor())
+                finally:
+                    await cleanup_temp_files()
 
     return lifespan
 
