@@ -13,7 +13,10 @@ atomic_tls_copy() {
         return 1
     fi
     chmod "$mode" "$target_tmp" 2>/dev/null || true
-    mv -f "$target_tmp" "$target_path"
+    if ! mv -f "$target_tmp" "$target_path"; then
+        rm -f "$target_tmp"
+        return 1
+    fi
 }
 
 cert_pair_is_usable() {

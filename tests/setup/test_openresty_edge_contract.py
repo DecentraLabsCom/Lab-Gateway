@@ -1962,3 +1962,14 @@ def test_init_ssl_supervises_openresty_and_reaps_background_watchers():
     assert 'trap cleanup TERM INT EXIT' in script
     assert 'wait "$openresty_pid"' in script
     assert 'exec /usr/local/openresty/bin/openresty -g "daemon off;"' not in script
+
+
+def test_openresty_atomic_helpers_remove_temporary_files_when_move_fails():
+    script = _read(INIT_SSL)
+    tls = _read(INIT_SSL_TLS)
+    jwt_sync = _read(INIT_SSL_JWT_SYNC)
+
+    assert 'if ! mv -f "$target_tmp" "$target_path"; then' in script
+    assert 'if ! mv -f "$target_tmp" "$target_path"; then' in tls
+    assert 'if ! mv "$tmp_key" "$JWT_PUBLIC_KEY"; then' in jwt_sync
+    assert 'rm -f "$tmp_key"' in jwt_sync
