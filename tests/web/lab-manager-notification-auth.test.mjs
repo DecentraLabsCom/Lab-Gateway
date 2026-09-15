@@ -18,6 +18,7 @@ const winrmTrustScriptPath = new URL('web/assets/js/lab-manager-winrm-trust.js',
 const winrmTrustModalScriptPath = new URL('web/assets/js/lab-manager-winrm-trust-modal.js', repoRoot);
 const hostProvisioningScriptPath = new URL('web/assets/js/lab-manager-host-provisioning.js', repoRoot);
 const hostModalsScriptPath = new URL('web/assets/js/lab-manager-host-modals.js', repoRoot);
+const hostViewScriptPath = new URL('web/assets/js/lab-manager-host-view.js', repoRoot);
 const opsAccessScriptPath = new URL('web/assets/js/lab-manager-ops-access.js', repoRoot);
 const hostActionsScriptPath = new URL('web/assets/js/lab-manager-host-actions.js', repoRoot);
 const toastScriptPath = new URL('web/assets/js/core/toast.js', repoRoot);
@@ -370,6 +371,9 @@ function loadLabManager({
   });
   vm.runInContext(fs.readFileSync(hostModalsScriptPath, 'utf8'), context, {
     filename: 'lab-manager-host-modals.js',
+  });
+  vm.runInContext(fs.readFileSync(hostViewScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-host-view.js',
   });
   vm.runInContext(fs.readFileSync(opsAccessScriptPath, 'utf8'), context, {
     filename: 'lab-manager-ops-access.js',
@@ -1646,7 +1650,7 @@ test('uses a self-contained visible pencil icon for editable ops hosts', () => {
 
 test('renders station identity, connection counts, operation history and WinRM trust states', () => {
   const script = fs.readFileSync(hostRenderersScriptPath, 'utf8');
-  const bootstrap = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const hostView = fs.readFileSync(hostViewScriptPath, 'utf8');
   const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
 
   assert.match(script, /host-status-text/);
@@ -1673,9 +1677,9 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(styles, /\.host-status-action[\s\S]*display: inline/);
   assert.match(styles, /\.host-state-column[\s\S]*display: flex/);
   assert.match(styles, /\.host-history[\s\S]*display: flex/);
-  assert.match(bootstrap, /setupGuacamoleMatchPopover/);
-  assert.match(bootstrap, /addEventListener\('mouseenter'/);
-  assert.match(bootstrap, /addEventListener\('focusin'/);
+  assert.match(hostView, /setupGuacamoleMatchPopover/);
+  assert.match(hostView, /addEventListener\('mouseenter'/);
+  assert.match(hostView, /addEventListener\('focusin'/);
   assert.match(styles, /\.guacamole-match-popover[\s\S]*position: fixed/);
   assert.match(styles, /\.guacamole-match-popover\.is-visible[\s\S]*opacity: 1/);
 });
