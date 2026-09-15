@@ -27,17 +27,18 @@
             return steps.map((step, index) => `
             <div class="power-policy-step" data-step-index="${index}">
                 <div class="power-policy-step-header">
-                    <strong>Step ${index + 1}</strong>
+                    <div class="power-policy-step-title">
+                        <button class="mini-btn power-policy-drag-handle" type="button" draggable="true" data-step-drag-handle aria-label="Drag to reorder Step ${index + 1}" title="Drag to reorder">
+                            <i class="fas fa-grip-vertical" aria-hidden="true"></i>
+                        </button>
+                        <strong>Step ${index + 1}</strong>
+                    </div>
                     <button class="mini-btn danger" type="button" data-step-action="remove">Remove</button>
                 </div>
                 <div class="form-grid power-policy-step-fields">
                     <label class="field">
                         <span>Phase</span>
                         <select data-step-field="phase">${powerPolicySelectOptions(phases, step.phase, phaseLabels)}</select>
-                    </label>
-                    <label class="field">
-                        <span>Sequence</span>
-                        <input type="number" min="0" max="1000000" data-step-field="sequence" value="${step.sequence}" inputmode="numeric">
                     </label>
                     <label class="field">
                         <span>Controller</span>
@@ -124,26 +125,30 @@
             return options.join('');
         }
 
-        function renderPowerControllerOutletsMarkup(outletDrafts) {
+        function renderPowerControllerOutletsMarkup(outletDrafts, options = {}) {
             const outlets = Array.isArray(outletDrafts) ? outletDrafts : [];
+            const deviceManaged = options.deviceManaged === true;
             if (!outlets.length) {
-                return '<div class="empty">No outlets configured. Add at least one outlet before saving.</div>';
+                return deviceManaged
+                    ? '<div class="empty">No outputs reported by the controller. Refresh its live status.</div>'
+                    : '<div class="empty">No outlets configured. Add at least one outlet before saving.</div>';
             }
             return outlets.map((outlet, index) => `
             <div class="power-controller-outlet-config" data-controller-outlet-index="${index}">
                 <div class="power-controller-outlet-config-header">
-                    <strong>Outlet ${index + 1}</strong>
-                    <button class="mini-btn danger" type="button" data-controller-outlet-action="remove">Remove</button>
+                    <strong>${deviceManaged ? 'Output' : 'Outlet'} ${index + 1}</strong>
+                    ${deviceManaged ? '' : '<button class="mini-btn danger" type="button" data-controller-outlet-action="remove">Remove</button>'}
                 </div>
                 <div class="form-grid power-controller-outlet-fields">
                     <label class="field">
-                        <span>Outlet ID</span>
-                        <input type="text" maxlength="64" data-controller-outlet-field="outlet" value="${escapeHtml(outlet.outlet)}" placeholder="1">
+                        <span>Output ID (device)</span>
+                        <input type="text" maxlength="64" data-controller-outlet-field="outlet" value="${escapeHtml(outlet.outlet)}" placeholder="1"${deviceManaged ? ' readonly' : ''}>
                     </label>
+                    ${deviceManaged ? renderDeviceConfigurationFields(outlet) : `
                     <label class="field">
-                        <span>Display name</span>
+                        <span>Display name (Gateway)</span>
                         <input type="text" maxlength="160" data-controller-outlet-field="displayName" value="${escapeHtml(outlet.displayName)}" placeholder="PLC power">
-                    </label>
+                    </label>`}
                     <label class="field">
                         <span>Logical name</span>
                         <input type="text" maxlength="160" data-controller-outlet-field="logicalName" value="${escapeHtml(outlet.logicalName)}" placeholder="plc">
@@ -162,6 +167,32 @@
                 </div>
             </div>
         `).join('');
+        }
+
+        function renderDeviceConfigurationFields(outlet) {
+            const fields = Array.isArray(outlet.deviceConfigFields) ? outlet.deviceConfigFields : [];
+            const config = outlet.deviceConfig && typeof outlet.deviceConfig === 'object' ? outlet.deviceConfig : {};
+            const writable = outlet.deviceConfigWritable === true;
+            const labels = {
+                name: 'Device output name',
+                powerOnDelaySeconds: 'Power-on delay (seconds)',
+                powerOffDelaySeconds: 'Power-off delay (seconds)',
+                rebootDurationSeconds: 'Reboot duration (seconds)',
+            };
+            return fields.map(field => {
+                if (field === 'name') {
+                    return `<label class="field">
+                        <span>${labels[field]}${writable ? '' : ' (read-only)'}</span>
+                        <input type="text" maxlength="160" data-controller-outlet-field="deviceName" value="${escapeHtml(outlet.deviceName)}"${writable ? '' : ' readonly'}>
+                    </label>`;
+                }
+                if (!Object.prototype.hasOwnProperty.call(labels, field)) return '';
+                const value = config[field] ?? '';
+                return `<label class="field">
+                    <span>${labels[field]}${writable ? '' : ' (read-only)'}</span>
+                    <input type="number" min="${field === 'rebootDurationSeconds' ? '5' : '0'}" max="${field === 'rebootDurationSeconds' ? '60' : '7200'}" data-controller-device-config-field="${field}" value="${escapeHtml(value)}"${writable ? '' : ' readonly'}>
+                </label>`;
+            }).join('');
         }
 
         function renderPowerControllerRowsMarkup(powerControllers, statusLoading, statusError) {
@@ -216,7 +247,7 @@
             const outlets = Array.isArray(controller?.outlets) ? controller.outlets : [];
             const options = outlets.map(outlet => {
                 const outletId = String(outlet.outlet || '').trim();
-                const label = outlet.displayName || outlet.logicalName || outletId;
+                const label = outlet.deviceName || outlet.displayName || outlet.logicalName || outletId;
                 return `<option value="${escapeHtml(outletId)}"${outletId === step.outlet ? ' selected' : ''}>${escapeHtml(label)} (${escapeHtml(outletId)})</option>`;
             }).join('');
             return `<option value="">${outlets.length ? 'Select outlet' : 'No outlets available'}</option>${options}`;
@@ -230,7 +261,7 @@
             const protectedOutlet = outlet.protected === true;
             const state = String(outlet.state || 'unknown').toLowerCase();
             const stateClass = state === 'on' ? 'good' : state === 'off' ? 'soft' : 'warn';
-            const label = outlet.displayName || outlet.logicalName || outlet.outlet;
+            const label = outlet.deviceName || outlet.displayName || outlet.logicalName || outlet.outlet;
             return `
             <div class="power-outlet-row">
                 <div>

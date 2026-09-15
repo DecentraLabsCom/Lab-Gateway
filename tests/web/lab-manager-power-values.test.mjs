@@ -14,12 +14,11 @@ function loadValues() {
   return context.window.LabManagerPowerValues.createController();
 }
 
-test('normalizes power policy drafts and accepts legacy aliases', () => {
+test('normalizes power policy drafts without exposing an ordering sequence', () => {
   const values = loadValues();
   const draft = values.createPowerPolicyStepDraft({
     stepId: 'step-1',
     phase: ' START ',
-    sequence: '20',
     controller_id: 'pdu-1',
     outlet_key: '1',
     logical_name: 'PLC',
@@ -38,7 +37,6 @@ test('normalizes power policy drafts and accepts legacy aliases', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(draft)), {
     id: 'step-1',
     phase: 'start',
-    sequence: 20,
     controllerId: 'pdu-1',
     outlet: '1',
     logicalName: 'PLC',
@@ -61,7 +59,6 @@ test('keeps policy and outlet defaults stable for incomplete input', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(values.createPowerPolicyStepDraft({ action: 'invalid' }))), {
     id: '',
     phase: 'pre_start',
-    sequence: 10,
     controllerId: '',
     outlet: '',
     logicalName: '',
@@ -80,6 +77,11 @@ test('keeps policy and outlet defaults stable for incomplete input', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(values.createPowerControllerOutletDraft({ outletKey: '2', defaultState: 'on', protected: true }))), {
     outlet: '2',
     displayName: '',
+    deviceName: '',
+    deviceConfig: {},
+    deviceConfigFields: [],
+    deviceConfigWritable: false,
+    deviceManaged: false,
     logicalName: '',
     protected: true,
     critical: false,

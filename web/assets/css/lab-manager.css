@@ -1325,6 +1325,11 @@ body {
 .power-policy-steps { display: flex; flex-direction: column; gap: 12px; }
 .power-policy-step { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #0d1220; }
 .power-policy-step-header { margin-bottom: 12px; }
+.power-policy-step-title { display: flex; align-items: center; gap: 8px; }
+.power-policy-drag-handle { cursor: grab; padding: 6px 8px; color: var(--muted); }
+.power-policy-drag-handle:active { cursor: grabbing; }
+.power-policy-step.is-dragging { opacity: 0.55; }
+.power-policy-step.is-drag-over { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
 .power-policy-step-fields { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
 .power-policy-step-options { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
 .check-field { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 0.9rem; }

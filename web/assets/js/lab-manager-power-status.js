@@ -11,18 +11,32 @@
             return (Array.isArray(controllers) ? controllers : []).map(controller => {
                 const status = statusById.get(String(controller.id));
                 if (!status) return controller;
-                const statusOutlets = new Map(
-                    (Array.isArray(status.outlets) ? status.outlets : [])
+                const localOutlets = new Map(
+                    (Array.isArray(controller.outlets) ? controller.outlets : [])
                         .filter(outlet => outlet && outlet.outlet !== undefined)
                         .map(outlet => [String(outlet.outlet), outlet]),
                 );
+                const statusOutlets = (Array.isArray(status.outlets) ? status.outlets : [])
+                    .filter(outlet => outlet && outlet.outlet !== undefined)
+                    .map(outlet => {
+                        const local = localOutlets.get(String(outlet.outlet)) || {};
+                        return {
+                            ...local,
+                            ...outlet,
+                            state: outlet.state || 'unknown',
+                            deviceManaged: true,
+                        };
+                    });
                 return {
                     ...controller,
                     discovery: status.discovery || {},
-                    outlets: (Array.isArray(controller.outlets) ? controller.outlets : []).map(outlet => ({
-                        ...outlet,
-                        state: statusOutlets.get(String(outlet.outlet))?.state || 'unknown',
-                    })),
+                    deviceConfiguration: status.deviceConfiguration || controller.deviceConfiguration || {},
+                    outlets: Array.isArray(status.outlets)
+                        ? statusOutlets
+                        : (Array.isArray(controller.outlets) ? controller.outlets : []).map(outlet => ({
+                            ...outlet,
+                            state: 'unknown',
+                        })),
                 };
             });
         }

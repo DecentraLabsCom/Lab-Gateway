@@ -85,12 +85,13 @@ certificate validation.
 
 ### Local power-driver smoke tests
 
-The power controller catalog and live hardware status are separate operations.
-`GET /api/power/controllers` returns the provider-local catalog without
-contacting hardware. `GET /api/power/controllers/status` performs live driver
-checks and reuses the status snapshot for five seconds by default; append
-`?refresh=true` to bypass that cache. Configure the cache duration with
-`OPS_POWER_STATUS_CACHE_SECONDS`.
+The power controller catalog and live hardware configuration/status are
+separate operations. `GET /api/power/controllers` returns the provider-local
+controller definitions and Gateway safety metadata without contacting
+hardware. `GET /api/power/controllers/status` reads physical output IDs,
+names, configuration and state from the driver, and reuses the status snapshot
+for five seconds by default; append `?refresh=true` to bypass that cache.
+Configure the cache duration with `OPS_POWER_STATUS_CACHE_SECONDS`.
 
 The APC and NETIO drivers include deterministic local smoke tests. They start
 an in-process UDP/HTTP device double, perform discovery and outlet operations,
@@ -194,13 +195,13 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ demoId: "demo:<jti>", labId, reason: "expired"|"failed"|"disconnected" }`.
     Runs `release-session --reboot` and records the cleanup idempotently.
 - `GET /api/power/controllers`
-  - Returns the local power controller catalog, capabilities and configured outlets without contacting hardware.
+  - Returns the local power controller definitions and Gateway safety metadata without contacting hardware.
 - `GET /api/power/controllers/status`
-  - Returns live controller discovery and outlet state; `?refresh=true` bypasses the short status cache.
+  - Returns live controller discovery, physical output configuration and state; `?refresh=true` bypasses the short status cache.
 - `POST /api/power/controllers`
-  - Validates and atomically registers one provider-local controller and its outlets.
+  - Validates and atomically registers one provider-local controller and its Gateway safety metadata. Physical outputs are discovered by the driver.
 - `PUT /api/power/controllers/{controllerId}`
-  - Validates and atomically updates one provider-local controller and its outlets, then activates it in the current runtime.
+  - Validates and updates one provider-local controller and its Gateway safety metadata. An optional `deviceConfiguration` block is sent to a driver that supports physical writes before the local catalog is persisted.
 - `GET /api/power/credentials`
   - Returns only provider-local credential references and types; decrypted values never leave the worker.
 - `POST /api/power/credentials`
@@ -285,9 +286,9 @@ Power configuration:
   disable the cache for diagnostics.
 - Start from `power-controllers.sample.json`; copy it to the writable `ops-data` directory and change only provider-local values.
 - The `mock` driver is available for development and CI. The `apc-powernet-snmp` driver supports legacy PowerNet and `rPDU2` profiles, while `netio-json` controls NETIO devices through their `/netio.json` HTTP(S) API. Physical activation remains gated on pilot hardware validation.
-- The catalog contains `controllers`, `outlets` and `policies`. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` can manage the validated controller/outlet catalog and power policies through protected endpoints; all data remains provider-local.
+- The catalog contains `controllers`, Gateway-local `outlets` metadata and `policies`. Physical output IDs, names and supported device configuration are read from the driver and are not duplicated as authoritative catalog data. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` manages the validated controller overlay and power policies through protected endpoints; all data remains provider-local.
 - APC credentials are resolved by `credentialRef` from the encrypted, provider-local `power-credentials.json` store using `OPS_SECRETS_KEY`; the store is never returned by the API. Lab Manager can list references and rotate them without reading the current secret.
-- NETIO credentials, when enabled on the device, use the same encrypted store with a payload such as `{"username":"netio-api-user","password":"..."}`. The catalog may set `config.path` (default `/netio.json`), `config.useHttps`, `config.verifyTls`, `config.timeoutSeconds` and `config.retries`; it never contains the Basic-auth password.
+- NETIO credentials, when enabled on the device, use the same encrypted store with a payload such as `{"username":"netio-api-user","password":"..."}`. The catalog may set `config.path` (default `/netio.json`), `config.useHttps`, `config.verifyTls`, `config.timeoutSeconds` and `config.retries`; it never contains the Basic-auth password. NETIO output names/configuration are read-only through this JSON API and must be changed in the device web interface.
 - Provision credentials locally with `power_credentials.py` when working outside Lab Manager; the secret JSON is read from stdin and the command prints only the reference and type:
 
   ```powershell

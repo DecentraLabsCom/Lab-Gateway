@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v18">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v19">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -547,13 +547,13 @@
                         <div class="power-controller-outlets-editor">
                             <div class="power-controller-outlets-header">
                                 <div>
-                                    <h3>Outlets</h3>
-                                    <div class="hint">Define the sockets that policies can switch.</div>
+                                    <h3>Controller outputs</h3>
+                                    <div class="hint">Physical outputs and device names come from the controller. Gateway-only safety metadata is kept here.</div>
                                 </div>
-                                <button class="ghost-btn" type="button" id="addPowerControllerOutletBtn"><i class="fas fa-plus"></i> Add outlet</button>
+                                <button class="ghost-btn" type="button" id="addPowerControllerOutletBtn"><i class="fas fa-plus"></i> Add local outlet</button>
                             </div>
                             <div class="power-controller-outlets" id="powerControllerOutlets" aria-live="polite">
-                                <div class="empty">No outlets configured.</div>
+                                <div class="empty">No controller outputs discovered yet.</div>
                             </div>
                         </div>
                         <div class="power-controller-config-footer">
@@ -661,7 +661,7 @@
                                 <div class="power-policy-steps-header">
                                     <div>
                                         <h4>Policy steps</h4>
-                                        <div class="hint">Define the outlet actions and timing for each reservation phase.</div>
+                                    <div class="hint">Drag steps to define their order. Phases still run in their lifecycle order.</div>
                                     </div>
                                     <button class="ghost-btn" type="button" id="addPowerPolicyStepBtn"><i class="fas fa-plus"></i> Add step</button>
                                 </div>
@@ -1193,12 +1193,12 @@
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v1"></script>
     <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v1"></script>
     <script src="../assets/js/lab-manager-power-credentials.js?v=lab-manager-power-credentials-v1"></script>
-    <script src="../assets/js/lab-manager-power-renderers.js?v=lab-manager-power-renderers-v1"></script>
-    <script src="../assets/js/lab-manager-power-values.js?v=lab-manager-power-values-v1"></script>
+    <script src="../assets/js/lab-manager-power-renderers.js?v=lab-manager-power-renderers-v3"></script>
+    <script src="../assets/js/lab-manager-power-values.js?v=lab-manager-power-values-v3"></script>
     <script src="../assets/js/lab-manager-power-operations.js?v=lab-manager-power-operations-v1"></script>
-    <script src="../assets/js/lab-manager-power-status.js?v=lab-manager-power-status-v1"></script>
-    <script src="../assets/js/lab-manager-power-controllers.js?v=lab-manager-power-controllers-v1"></script>
-    <script src="../assets/js/lab-manager-power-policies.js?v=lab-manager-power-policies-v1"></script>
+    <script src="../assets/js/lab-manager-power-status.js?v=lab-manager-power-status-v2"></script>
+    <script src="../assets/js/lab-manager-power-controllers.js?v=lab-manager-power-controllers-v2"></script>
+    <script src="../assets/js/lab-manager-power-policies.js?v=lab-manager-power-policies-v3"></script>
     <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v1"></script>
     <script src="../assets/js/lab-manager-reservations-feature.js?v=lab-manager-reservations-feature-v1"></script>
     <script src="../assets/js/lab-manager.js?v=workflow-tabs-v18"></script>

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -26,6 +28,17 @@ POWER_PHASES = frozenset(
 POWER_ACTIONS = frozenset({"on", "off", "cycle"})
 POWER_STATES = frozenset({"on", "off", "unknown"})
 POWER_FAILURE_MODES = frozenset({"fail_reservation_start", "warn_and_continue"})
+POWER_PHASE_ORDER = (
+    "pre_start",
+    "start",
+    "post_start",
+    "pre_end",
+    "end",
+    "post_end",
+    "manual",
+    "maintenance",
+    "emergency_stop",
+)
 
 
 def _text(value: Any, field_name: str, *, max_length: int = 160) -> str:
@@ -59,6 +72,37 @@ def _non_negative_int(value: Any, field_name: str, *, default: int, maximum: int
     if parsed < 0 or parsed > maximum:
         raise ValidationError(f"{field_name} must be between 0 and {maximum}")
     return parsed
+
+
+def _step_identity(step: "PowerPolicyStep") -> Dict[str, Any]:
+    return {
+        "phase": step.phase,
+        "controllerId": step.controller_id,
+        "outlet": step.outlet,
+        "action": step.action,
+        "logicalName": step.logical_name,
+        "desiredState": step.desired_state,
+        "required": step.required,
+        "readBackRequired": step.read_back_required,
+        "offSeconds": step.off_seconds,
+        "delayBeforeSeconds": step.delay_before_seconds,
+        "delayAfterSeconds": step.delay_after_seconds,
+        "timeoutSeconds": step.timeout_seconds,
+        "retryCount": step.retry_count,
+        "allowProtected": step.allow_protected,
+        "conditions": step.conditions,
+    }
+
+
+def _generated_step_id(lab_id: str, step: "PowerPolicyStep", occurrence: int) -> str:
+    identity = {
+        "labId": lab_id,
+        "step": _step_identity(step),
+        "occurrence": occurrence,
+    }
+    serialized = json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    return f"step-{digest[:32]}"
 
 
 @dataclass
@@ -131,8 +175,12 @@ class PowerOutlet:
         if self.default_state not in {"on", "off"}:
             raise ValidationError("defaultState must be on or off")
 
-    def to_dict(self, state: str = "unknown") -> Dict[str, Any]:
-        return {
+    def to_dict(
+        self,
+        state: str = "unknown",
+        remote: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        result = {
             "outlet": self.outlet_key,
             "displayName": self.display_name,
             "logicalName": self.logical_name,
@@ -141,6 +189,21 @@ class PowerOutlet:
             "defaultState": self.default_state,
             "state": state,
         }
+        if isinstance(remote, Mapping):
+            device_name = remote.get("name")
+            if device_name is not None:
+                result["deviceName"] = str(device_name)
+                result["displayName"] = str(device_name)
+            if "deviceConfig" in remote:
+                result["deviceConfig"] = dict(remote.get("deviceConfig") or {})
+            if "deviceConfigWritable" in remote:
+                result["deviceConfigWritable"] = remote["deviceConfigWritable"] is True
+            if "deviceConfigFields" in remote:
+                result["deviceConfigFields"] = list(remote.get("deviceConfigFields") or [])
+            for key in ("load",):
+                if key in remote:
+                    result[key] = remote[key]
+        return result
 
 
 @dataclass
@@ -188,13 +251,19 @@ class PowerPolicyStep:
     conditions: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> "PowerPolicyStep":
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+        *,
+        sequence: Optional[int] = None,
+    ) -> "PowerPolicyStep":
         if not isinstance(value, Mapping):
             raise ValidationError("every policy step must be an object")
         phase = _text(value.get("phase"), "phase", max_length=32).lower()
         if phase not in POWER_PHASES:
             raise ValidationError(f"unsupported power phase: {phase}")
-        sequence = _non_negative_int(value.get("sequence"), "sequence", default=0, maximum=1_000_000)
+        if sequence is None:
+            sequence = _non_negative_int(value.get("sequence"), "sequence", default=0, maximum=1_000_000)
         controller_id = _text(value.get("controllerId", value.get("controller_id")), "controllerId", max_length=128)
         outlet = _text(value.get("outlet", value.get("outletKey", value.get("outlet_key"))), "outlet", max_length=64)
         action = _text(value.get("action"), "action", max_length=16).lower()
@@ -266,7 +335,6 @@ class PowerPolicyStep:
         return {
             "id": self.step_id,
             "phase": self.phase,
-            "sequence": self.sequence,
             "controllerId": self.controller_id,
             "outlet": self.outlet,
             "logicalName": self.logical_name,
@@ -308,21 +376,46 @@ class LabPowerPolicy:
             raise ValidationError(f"unsupported startFailureMode: {start_failure_mode}")
         if end_failure_mode not in POWER_FAILURE_MODES:
             raise ValidationError(f"unsupported endFailureMode: {end_failure_mode}")
+        policy_id = str(value.get("id") or "").strip() or None
 
-        steps = [PowerPolicyStep.from_mapping(step) for step in value.get("steps", [])]
-        seen = set()
-        for step in steps:
-            key = (step.phase, step.sequence)
-            if key in seen:
-                raise ValidationError(
-                    f"duplicate sequence {step.sequence} in phase {step.phase}"
-                )
-            seen.add(key)
+        raw_steps = value.get("steps", [])
+        if not isinstance(raw_steps, list):
+            raise ValidationError("steps must be an array")
+        parsed_steps = [(index, PowerPolicyStep.from_mapping(step)) for index, step in enumerate(raw_steps)]
+        legacy_sequence_order = bool(raw_steps) and all(
+            isinstance(step, Mapping) and "sequence" in step
+            for step in raw_steps
+        )
+        if legacy_sequence_order:
+            seen = set()
+            for _, step in parsed_steps:
+                key = (step.phase, step.sequence)
+                if key in seen:
+                    raise ValidationError(
+                        f"duplicate sequence {step.sequence} in phase {step.phase}"
+                    )
+                seen.add(key)
+            phase_order = {phase: index for index, phase in enumerate(POWER_PHASE_ORDER)}
+            parsed_steps.sort(key=lambda item: (phase_order[item[1].phase], item[1].sequence, item[0]))
+
+        steps: List[PowerPolicyStep] = []
+        phase_positions: Dict[str, int] = {}
+        identity_occurrences: Dict[str, int] = {}
+        for _, step in parsed_steps:
+            position = phase_positions.get(step.phase, 0) + 1
+            phase_positions[step.phase] = position
+            step.sequence = position * 10
+            if not step.step_id:
+                identity = json.dumps(_step_identity(step), sort_keys=True, separators=(",", ":"), default=str)
+                occurrence = identity_occurrences.get(identity, 0) + 1
+                identity_occurrences[identity] = occurrence
+                step.step_id = _generated_step_id(lab_id, step, occurrence)
+            steps.append(step)
         return cls(
             lab_id=lab_id,
             name=name,
             steps=steps,
-            policy_id=(str(value.get("id") or "").strip() or None),
+            policy_id=policy_id,
             enabled=_bool(value.get("enabled"), True),
             respect_local_mode=_bool(value.get("respectLocalMode", value.get("respect_local_mode")), True),
             maintenance_mode=_bool(value.get("maintenanceMode", value.get("maintenance_mode")), False),

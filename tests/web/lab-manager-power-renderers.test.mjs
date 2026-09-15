@@ -82,7 +82,6 @@ test('renders policy steps with controller and outlet choices', () => {
   const renderers = renderer();
   const html = renderers.renderPowerPolicyStepsMarkup([{
     phase: 'start',
-    sequence: 20,
     controllerId: 'pdu-1',
     outlet: '1',
     action: 'on',
@@ -104,6 +103,10 @@ test('renders policy steps with controller and outlet choices', () => {
   }]);
 
   assert.match(html, /data-step-field="phase"/);
+  assert.match(html, /data-step-drag-handle/);
+  assert.match(html, /draggable="true"/);
+  assert.match(html, /Step 1/);
+  assert.doesNotMatch(html, /data-step-field="sequence"/);
   assert.match(html, /value="pdu-1" selected/);
   assert.match(html, /value="1" selected/);
   assert.match(html, /&lt;PLC&gt;/);
@@ -126,4 +129,44 @@ test('renders controller outlet drafts with escaped editable values', () => {
   assert.match(html, /value="plc&amp;main"/);
   assert.match(html, /value="on" selected/);
   assert.match(html, /data-controller-outlet-field="protected" checked/);
+});
+
+test('renders physical outputs from the device and hides local inventory controls', () => {
+  const html = renderer().renderPowerControllerOutletsMarkup([{
+    outlet: '1',
+    deviceName: '<PLC>',
+    deviceConfig: {
+      powerOnDelaySeconds: 5,
+      powerOffDelaySeconds: 30,
+      rebootDurationSeconds: 10,
+    },
+    deviceConfigFields: ['name', 'powerOnDelaySeconds', 'powerOffDelaySeconds', 'rebootDurationSeconds'],
+    deviceConfigWritable: true,
+    deviceManaged: true,
+    logicalName: 'plc',
+    defaultState: 'off',
+    protected: false,
+    critical: false,
+  }], { deviceManaged: true });
+
+  assert.match(html, /Device output name/);
+  assert.match(html, /value="&lt;PLC&gt;"/);
+  assert.match(html, /data-controller-device-config-field="powerOnDelaySeconds"/);
+  assert.match(html, /value="30"/);
+  assert.doesNotMatch(html, /data-controller-outlet-action="remove"/);
+  assert.match(html, /data-controller-outlet-field="outlet"[^>]+readonly/);
+});
+
+test('renders NETIO physical output names as read-only', () => {
+  const html = renderer().renderPowerControllerOutletsMarkup([{
+    outlet: '2',
+    deviceName: 'HMI',
+    deviceConfigFields: ['name'],
+    deviceConfigWritable: false,
+    deviceManaged: true,
+  }], { deviceManaged: true });
+
+  assert.match(html, /Device output name \(read-only\)/);
+  assert.match(html, /data-controller-outlet-field="deviceName"[^>]+readonly/);
+  assert.doesNotMatch(html, /data-controller-outlet-action="remove"/);
 });

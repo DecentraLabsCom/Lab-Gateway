@@ -110,6 +110,73 @@ def test_apc_legacy_commands_use_powernet_values_and_read_back():
     assert cycle == {"outlet": "1", "state": "on", "success": True}
 
 
+def test_apc_legacy_reads_and_writes_outlet_configuration():
+    client = FakeSnmpClient(
+        {
+            APC_LEGACY_OIDS["outlet_count"]: 1,
+            APC_LEGACY_OIDS["state"] + ".1": 2,
+            APC_LEGACY_OIDS["config_name"] + ".1": "PLC",
+            APC_LEGACY_OIDS["power_on_delay"] + ".1": 0,
+            APC_LEGACY_OIDS["power_off_delay"] + ".1": 30,
+            APC_LEGACY_OIDS["reboot_duration"] + ".1": 10,
+        }
+    )
+    driver = ApcPowerNetSnmpDriver(
+        "pdu-1",
+        "192.0.2.20",
+        config={"profile": "legacy"},
+        credentials={"version": "v2c", "community": "private"},
+        client=client,
+    )
+
+    assert driver.read_configuration() == {
+        "writable": True,
+        "fields": [
+            "name",
+            "powerOnDelaySeconds",
+            "powerOffDelaySeconds",
+            "rebootDurationSeconds",
+        ],
+        "profile": "legacy",
+        "outlets": [{
+            "outlet": "1",
+            "name": "PLC",
+            "state": "off",
+            "deviceConfig": {
+                "powerOnDelaySeconds": 0,
+                "powerOffDelaySeconds": 30,
+                "rebootDurationSeconds": 10,
+            },
+            "deviceConfigWritable": True,
+            "deviceConfigFields": [
+                "name",
+                "powerOnDelaySeconds",
+                "powerOffDelaySeconds",
+                "rebootDurationSeconds",
+            ],
+        }],
+    }
+
+    driver.apply_configuration({
+        "outlets": [{
+            "outlet": "1",
+            "name": "PLC updated",
+            "config": {
+                "powerOnDelaySeconds": 5,
+                "powerOffDelaySeconds": 45,
+                "rebootDurationSeconds": 15,
+            },
+        }],
+    })
+
+    assert client.set_calls == [
+        (APC_LEGACY_OIDS["config_name"] + ".1", "PLC updated"),
+        (APC_LEGACY_OIDS["power_on_delay"] + ".1", 5),
+        (APC_LEGACY_OIDS["power_off_delay"] + ".1", 45),
+        (APC_LEGACY_OIDS["reboot_duration"] + ".1", 15),
+    ]
+
+
 def test_apc_rpdu2_discovers_outlets_from_status_table():
     status = APC_RPDU2_OIDS
     client = FakeSnmpClient(

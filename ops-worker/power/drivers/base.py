@@ -1,6 +1,6 @@
 """Small common interface shared by power controller drivers."""
 
-from typing import Any, Dict, List, Protocol
+from typing import Any, Dict, List, Mapping, Protocol
 
 from power.models import PowerCapabilities
 
@@ -16,6 +16,14 @@ class PowerDriver(Protocol):
         raise NotImplementedError
 
     def list_outlets(self) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def read_configuration(self) -> Dict[str, Any]:
+        """Read the physical controller/output configuration."""
+        raise NotImplementedError
+
+    def apply_configuration(self, configuration: Mapping[str, Any]) -> Dict[str, Any]:
+        """Apply supported physical configuration and return the read-back state."""
         raise NotImplementedError
 
     def get_outlet_state(self, outlet_id: str) -> Dict[str, Any]:

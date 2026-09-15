@@ -150,14 +150,14 @@ from the root `.env`: `OPS_ALLOWED_COMMANDS`, `OPS_POLL_ENABLED`,
 the Compose interpolation expressions so the service documentation and the
 deployed container use the same contract.
 
-Power controller configuration and encrypted device credentials are provider-
-local files under the persistent `ops-data` mount. `GET
-/ops/api/power/controllers` reads the local catalog without contacting
-hardware. Live discovery and outlet state are requested separately through
-`GET /ops/api/power/controllers/status`; the default five-second cache can be
-bypassed with `?refresh=true`. A controller being unreachable is a device or
-private-network condition, not by itself a failure of the public `/ops/health`
-endpoint.
+Power controller definitions, Gateway safety metadata and encrypted device
+credentials are provider-local files under the persistent `ops-data` mount.
+`GET /ops/api/power/controllers` reads the local definitions without
+contacting hardware. `GET /ops/api/power/controllers/status` reads the live
+physical output IDs, names, supported configuration and state; the default
+five-second cache can be bypassed with `?refresh=true`. A controller being
+unreachable is a device or private-network condition, not by itself a failure
+of the public `/ops/health` endpoint.
 
 `OPS_WINRM_TRUST_PATH` defaults to `/app/data/winrm-certificates`, which is
 inside the persistent `ops-data` bind mount. Each host certificate is placed
