@@ -226,6 +226,9 @@ class FakePySnmpModule:
 
     @staticmethod
     async def get_cmd(*_args):
+        var_binds = _args[4:]
+        if len(var_binds) > 1:
+            return None, 0, 0, [(None, f"value-{index}") for index, _ in enumerate(var_binds, 1)]
         return FakePySnmpModule.response
 
     @staticmethod
@@ -250,9 +253,10 @@ def test_pysnmp_adapter_covers_auth_requests_walk_and_running_loop(monkeypatch):
     )
 
     assert client.get("1.2.3") == "value"
+    assert client.get_many(["1.2.3", "1.2.4"]) == ["value-1", "value-2"]
     assert client.set("1.2.3", 1) == "value"
     assert list(client.walk("1.2.3")) == [("1.2.3", "value")]
-    assert module.engines_closed == 3
+    assert module.engines_closed == 4
 
     async def call_inside_loop():
         return client._run(asyncio.sleep(0, result="inside-loop"))

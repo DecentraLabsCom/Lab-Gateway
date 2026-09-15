@@ -51,6 +51,9 @@ class SnmpClient(Protocol):
     def get(self, oid: str) -> Any:
         raise NotImplementedError
 
+    def get_many(self, oids: Iterable[str]) -> List[Any]:
+        raise NotImplementedError
+
     def set(self, oid: str, value: Any) -> Any:
         raise NotImplementedError
 
@@ -106,6 +109,8 @@ def _error_code(exc: Exception) -> str:
 
 class ApcPowerNetSnmpDriver:
     """Control legacy and rPDU2 APC switched outlets over SNMP."""
+
+    _LEGACY_GET_BATCH_SIZE = 8
 
     capabilities = PowerCapabilities(
         per_outlet_switching=True,
@@ -295,12 +300,22 @@ class ApcPowerNetSnmpDriver:
             count = _int(self._get(APC_LEGACY_OIDS["outlet_count"]), "outlet count")
             if count <= 0 or count > 512:
                 raise ApcSnmpError("INVALID_RESPONSE", "APC SNMP returned an invalid outlet count")
-            states = self._table_values(APC_LEGACY_OIDS["state"])
-            configured_names = self._optional_table_values(APC_LEGACY_OIDS["config_name"])
-            names = configured_names or self._optional_table_values(APC_LEGACY_OIDS["name"])
-            power_on_delays = self._optional_table_values(APC_LEGACY_OIDS["power_on_delay"])
-            power_off_delays = self._optional_table_values(APC_LEGACY_OIDS["power_off_delay"])
-            reboot_durations = self._optional_table_values(APC_LEGACY_OIDS["reboot_duration"])
+            states = self._legacy_table_values(APC_LEGACY_OIDS["state"], count)
+            configured_names = self._legacy_table_values(
+                APC_LEGACY_OIDS["config_name"], count, optional=True
+            )
+            names = configured_names or self._legacy_table_values(
+                APC_LEGACY_OIDS["name"], count, optional=True
+            )
+            power_on_delays = self._legacy_table_values(
+                APC_LEGACY_OIDS["power_on_delay"], count, optional=True
+            )
+            power_off_delays = self._legacy_table_values(
+                APC_LEGACY_OIDS["power_off_delay"], count, optional=True
+            )
+            reboot_durations = self._legacy_table_values(
+                APC_LEGACY_OIDS["reboot_duration"], count, optional=True
+            )
             rows = []
             for number in range(1, count + 1):
                 suffix = str(number)
@@ -346,6 +361,46 @@ class ApcPowerNetSnmpDriver:
             })
             rows.append(row)
         return sorted(rows, key=lambda row: (int(row["outlet"]) if str(row["outlet"]).isdigit() else 0, row["outlet"]))
+
+    def _legacy_table_values(
+        self,
+        base: str,
+        count: int,
+        *,
+        optional: bool = False,
+    ) -> Dict[str, Any]:
+        """Read legacy outlet columns without relying on a potentially unbounded walk.
+
+        AP7920 firmware exposes the legacy PowerNet columns as indexed scalar
+        objects.  Some versions answer exact GETs reliably but do not terminate
+        GETNEXT walks at the end of the column.  Use the optional batched GET
+        capability of the real SNMP client and retain the walk fallback for
+        lightweight/test clients that only implement the original interface.
+        """
+        batch_get = getattr(self._client, "get_many", None)
+        if not callable(batch_get):
+            try:
+                return self._table_values(base)
+            except PowerDriverError:
+                if optional:
+                    return {}
+                raise
+
+        oids = [_oid(base, number) for number in range(1, count + 1)]
+        values: List[Any] = []
+        try:
+            for start in range(0, len(oids), self._LEGACY_GET_BATCH_SIZE):
+                values.extend(self._call("get_many", oids[start:start + self._LEGACY_GET_BATCH_SIZE]))
+        except PowerDriverError:
+            if optional:
+                return {}
+            raise
+        if len(values) != len(oids):
+            raise ApcSnmpError("INVALID_RESPONSE", "APC SNMP returned an invalid table response")
+        return {
+            str(number): value
+            for number, value in enumerate(values, 1)
+        }
 
     def _table_values(self, base: str) -> Dict[str, Any]:
         return {
@@ -612,6 +667,35 @@ class _PySnmpClient:
         finally:
             engine.close_dispatcher()
 
+    async def _request_many(self, oids: List[str]):
+        try:
+            module = importlib.import_module("pysnmp.hlapi.v3arch.asyncio")
+        except ImportError as exc:  # pragma: no cover - dependency is installed in image
+            raise ApcSnmpError("DEPENDENCY_MISSING", "PySNMP is not installed") from exc
+        engine = module.SnmpEngine()
+        try:
+            target = await module.UdpTransportTarget.create(
+                (self.host, self.port),
+                timeout=self.timeout_seconds,
+                retries=self.retries,
+            )
+            requests = [module.ObjectType(module.ObjectIdentity(oid)) for oid in oids]
+            error_indication, error_status, error_index, var_binds = await module.get_cmd(
+                engine,
+                self._auth(module),
+                target,
+                module.ContextData(),
+                *requests,
+            )
+            if error_indication or error_status:
+                detail = str(error_indication or error_status)
+                raise ApcSnmpError(_error_code(Exception(detail))) from None
+            if len(var_binds) != len(oids):
+                raise ApcSnmpError("INVALID_RESPONSE")
+            return [var_bind[1] for var_bind in var_binds]
+        finally:
+            engine.close_dispatcher()
+
     async def _walk_async(self, oid: str):
         try:
             module = importlib.import_module("pysnmp.hlapi.v3arch.asyncio")
@@ -642,6 +726,12 @@ class _PySnmpClient:
 
     def get(self, oid: str) -> Any:
         return self._run(self._request("get", oid))
+
+    def get_many(self, oids: Iterable[str]) -> List[Any]:
+        oid_list = [str(oid) for oid in oids]
+        if not oid_list:
+            return []
+        return self._run(self._request_many(oid_list))
 
     def set(self, oid: str, value: Any) -> Any:
         return self._run(self._request("set", oid, value))
