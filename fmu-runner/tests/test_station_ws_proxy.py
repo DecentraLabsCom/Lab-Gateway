@@ -618,10 +618,10 @@ async def test_station_proxy_start_and_stop_manage_cleanup_task():
     assert manager._cleanup_task is first_task
 
     await manager.stop()
-    await asyncio.sleep(0)
     assert manager._cleanup_task is None
     assert manager._sessions == {}
     assert first_task.done() is True
+    assert first_task.cancelled() is True
 
 
 @pytest.mark.asyncio

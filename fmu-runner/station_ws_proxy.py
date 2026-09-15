@@ -106,9 +106,15 @@ class StationRealtimeWsProxyManager:
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
     async def stop(self):
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
-            self._cleanup_task = None
+        cleanup_task = self._cleanup_task
+        if cleanup_task:
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._cleanup_task = None
         async with self._sessions_lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()

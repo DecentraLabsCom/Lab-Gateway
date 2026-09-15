@@ -1736,9 +1736,10 @@ async def test_realtime_manager_start_and_stop_manage_cleanup_task():
     assert manager._cleanup_task is first_task
 
     await manager.stop()
-    await asyncio.sleep(0)
 
     assert manager._cleanup_task is None
+    assert first_task.done() is True
+    assert first_task.cancelled() is True
     assert manager._sessions == {}
     assert session.terminated == ["service_shutdown"]
 
