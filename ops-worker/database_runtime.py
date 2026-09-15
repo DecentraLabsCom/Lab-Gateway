@@ -1,31 +1,28 @@
 """Composition adapter for database health checks."""
 
-from collections.abc import Mapping
 from typing import Any
+
+from database_context import DatabaseContext
 
 
 class DatabaseRuntime:
-    """Resolve database health checks from a live worker provider namespace."""
+    """Expose database health checks through explicit dependency ports."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: DatabaseContext):
+        self._context = context
 
     def database_is_usable(self, engine: Any, statement: str) -> bool:
-        get = self._get
-        return get("_database_is_usable_impl")(
+        return self._context.database_is_usable(
             engine,
             statement,
-            sql_text=get("text"),
-            logger=get("logging"),
+            sql_text=self._context.get_sql_text(),
+            logger=self._context.get_logger(),
         )
 
 
-def create_database_runtime(providers: Mapping[str, Any]) -> DatabaseRuntime:
-    """Create a database health adapter bound to live providers."""
-    return DatabaseRuntime(providers)
+def create_database_runtime(context: DatabaseContext) -> DatabaseRuntime:
+    """Create a database health adapter bound to explicit ports."""
+    return DatabaseRuntime(context)
 
 
 __all__ = ["DatabaseRuntime", "create_database_runtime"]

@@ -1,17 +1,15 @@
 """Composition adapter for Wake-on-LAN orchestration."""
 
-from collections.abc import Mapping
 from typing import Any, Optional, Tuple
+
+from wol_context import WolContext
 
 
 class WolRuntime:
-    """Resolve Wake-on-LAN dependencies from a live worker namespace."""
+    """Expose Wake-on-LAN orchestration through explicit dependency ports."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: WolContext):
+        self._context = context
 
     def wol_and_wait(
         self,
@@ -23,8 +21,7 @@ class WolRuntime:
         wait_seconds: float,
         probe_port: Optional[int] = None,
     ) -> Tuple[bool, int]:
-        get = self._get
-        return get("_wol_and_wait_impl")(
+        return self._context.wol_and_wait(
             mac,
             broadcast,
             port,
@@ -32,15 +29,15 @@ class WolRuntime:
             attempts,
             wait_seconds,
             probe_port=probe_port,
-            send_magic_packet=get("send_magic_packet"),
-            sleep=get("time").sleep,
-            host_is_up=get("host_is_up"),
+            send_magic_packet=self._context.get_send_magic_packet(),
+            sleep=self._context.get_sleep(),
+            host_is_up=self._context.get_host_is_up(),
         )
 
 
-def create_wol_runtime(providers: Mapping[str, Any]) -> WolRuntime:
-    """Create a WOL adapter bound to live providers."""
-    return WolRuntime(providers)
+def create_wol_runtime(context: WolContext) -> WolRuntime:
+    """Create a WOL adapter bound to explicit ports."""
+    return WolRuntime(context)
 
 
 __all__ = ["WolRuntime", "create_wol_runtime"]

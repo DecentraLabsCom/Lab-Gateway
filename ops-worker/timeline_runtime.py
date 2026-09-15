@@ -3,39 +3,36 @@
 from collections.abc import Mapping, Sequence
 from typing import Any, Dict, List, Optional
 
+from timeline_context import TimelineContext
+
 
 class TimelineRuntime:
-    """Resolve timeline formatting and query helpers from live providers."""
+    """Expose timeline formatting and query helpers through explicit ports."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: TimelineContext):
+        self._context = context
 
     def to_iso(self, value: Any) -> Optional[str]:
-        get = self._get
-        return get("_to_iso_impl")(
+        return self._context.to_iso_impl(
             value,
-            parse_datetime=get("datetime").fromisoformat,
-            utc_timezone=get("timezone").utc,
+            parse_datetime=self._context.get_datetime().fromisoformat,
+            utc_timezone=self._context.get_timezone().utc,
         )
 
     def sanitize_limit(self, value: Optional[str]) -> int:
-        get = self._get
-        return get("_sanitize_limit_impl")(
+        return self._context.sanitize_limit_impl(
             value,
-            default_limit=get("TIMELINE_DEFAULT_LIMIT"),
-            max_limit=get("TIMELINE_MAX_LIMIT"),
+            default_limit=self._context.get_default_limit(),
+            max_limit=self._context.get_max_limit(),
         )
 
     def sanitize_offset(self, value: Optional[str]) -> int:
-        return self._get("_sanitize_offset_impl")(value)
+        return self._context.sanitize_offset_impl(value)
 
     def rows_to_operations(self, rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-        return self._get("_rows_to_operations_impl")(
+        return self._context.rows_to_operations_impl(
             rows,
-            to_iso=self._get("_to_iso"),
+            to_iso=self._context.get_to_iso(),
         )
 
     def build_reservation_timeline(
@@ -44,38 +41,36 @@ class TimelineRuntime:
         limit: int,
         offset: int,
     ) -> Dict[str, Any]:
-        get = self._get
-        return get("_build_reservation_timeline_impl")(
+        return self._context.build_reservation_timeline_impl(
             reservation_id,
             limit,
             offset,
-            engine=get("DB_ENGINE"),
-            host_by_lab=get("HOSTS").get_by_lab,
-            sql_text=get("text"),
-            rows_to_operations=get("_rows_to_operations"),
-            to_iso=get("_to_iso"),
-            phase_lookback=get("TIMELINE_PHASE_LOOKBACK"),
-            fetch_latest_heartbeat=get("_fetch_latest_heartbeat"),
-            summarize_phases=get("_summarize_phases"),
+            engine=self._context.get_db_engine(),
+            host_by_lab=self._context.get_host_by_lab(),
+            sql_text=self._context.get_sql_text(),
+            rows_to_operations=self._context.get_rows_to_operations(),
+            to_iso=self._context.get_to_iso(),
+            phase_lookback=self._context.get_phase_lookback(),
+            fetch_latest_heartbeat=self._context.get_fetch_latest_heartbeat(),
+            summarize_phases=self._context.get_summarize_phases(),
         )
 
     def fetch_latest_heartbeat(self, conn: Any, host_name: str) -> Optional[Dict[str, Any]]:
-        get = self._get
-        return get("_fetch_latest_heartbeat_impl")(
+        return self._context.fetch_latest_heartbeat_impl(
             conn,
             host_name,
-            sql_text=get("text"),
-            json_loads=get("json").loads,
-            to_iso=get("_to_iso"),
+            sql_text=self._context.get_sql_text(),
+            json_loads=self._context.get_json_loads(),
+            to_iso=self._context.get_to_iso(),
         )
 
     def summarize_phases(self, operations: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
-        return self._get("_summarize_phases_impl")(operations)
+        return self._context.summarize_phases_impl(operations)
 
 
-def create_timeline_runtime(providers: Mapping[str, Any]) -> TimelineRuntime:
-    """Create a timeline adapter bound to live providers."""
-    return TimelineRuntime(providers)
+def create_timeline_runtime(context: TimelineContext) -> TimelineRuntime:
+    """Create a timeline adapter bound to explicit ports."""
+    return TimelineRuntime(context)
 
 
 __all__ = ["TimelineRuntime", "create_timeline_runtime"]

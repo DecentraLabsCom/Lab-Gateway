@@ -37,6 +37,12 @@ def test_ops_worker_image_copies_the_process_entrypoint_runtime_module():
     assert "COPY entrypoint_runtime.py /app/entrypoint_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_entrypoint_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY entrypoint_context.py /app/entrypoint_context.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_runtime_config_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
@@ -85,16 +91,34 @@ def test_ops_worker_image_copies_the_worker_compatibility_runtime_module():
     assert "COPY worker_compatibility_runtime.py /app/worker_compatibility_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_worker_compatibility_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY worker_compatibility_context.py /app/worker_compatibility_context.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_host_config_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY host_config_runtime.py /app/host_config_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_host_config_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_config_context.py /app/host_config_context.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_host_discovery_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY host_discovery_runtime.py /app/host_discovery_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_host_discovery_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_discovery_context.py /app/host_discovery_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_host_provisioning_runtime_module():
@@ -107,6 +131,12 @@ def test_ops_worker_image_copies_the_guacamole_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY guacamole_runtime.py /app/guacamole_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_guacamole_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY guacamole_context.py /app/guacamole_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_host_inventory_runtime_module():
@@ -127,10 +157,22 @@ def test_ops_worker_image_copies_the_reservation_lifecycle_runtime_module():
     assert "COPY reservation_lifecycle_runtime.py /app/reservation_lifecycle_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_reservation_lifecycle_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY reservation_lifecycle_context.py /app/reservation_lifecycle_context.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_timeline_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY timeline_runtime.py /app/timeline_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_timeline_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY timeline_context.py /app/timeline_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_credential_runtime_module():
@@ -139,10 +181,22 @@ def test_ops_worker_image_copies_the_credential_runtime_module():
     assert "COPY credential_runtime.py /app/credential_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_credential_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY credential_context.py /app/credential_context.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_app_hooks_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY app_hooks_runtime.py /app/app_hooks_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_app_hooks_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY app_hooks_context.py /app/app_hooks_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_database_runtime_module():
@@ -151,10 +205,22 @@ def test_ops_worker_image_copies_the_database_runtime_module():
     assert "COPY database_runtime.py /app/database_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_database_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY database_context.py /app/database_context.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_input_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY input_runtime.py /app/input_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_input_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY input_context.py /app/input_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_host_reload_runtime_module():
@@ -163,10 +229,22 @@ def test_ops_worker_image_copies_the_host_reload_runtime_module():
     assert "COPY host_reload_runtime.py /app/host_reload_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_host_reload_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY host_reload_context.py /app/host_reload_context.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_scheduler_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY scheduler_runtime.py /app/scheduler_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_scheduler_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY scheduler_context.py /app/scheduler_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_runtime_services_module():
@@ -215,6 +293,12 @@ def test_ops_worker_image_copies_the_wol_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY wol_runtime.py /app/wol_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_wol_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY wol_context.py /app/wol_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_network_probe_module():
@@ -271,10 +355,30 @@ def test_ops_worker_image_copies_the_winrm_runtime_module():
     assert "COPY winrm_runtime.py /app/winrm_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_explicit_context_modules():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+    text = dockerfile.read_text(encoding="utf-8")
+
+    for module in (
+        "heartbeat_context",
+        "host_inventory_context",
+        "host_provisioning_context",
+        "reservation_context",
+        "winrm_context",
+    ):
+        assert f"COPY {module}.py /app/{module}.py" in text
+
+
 def test_ops_worker_image_copies_the_session_observations_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY session_observations.py /app/session_observations.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_session_observation_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY session_observation_context.py /app/session_observation_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_session_observation_runtime_module():
@@ -301,6 +405,12 @@ def test_ops_worker_image_copies_the_reservation_execution_runtime_module():
     assert "COPY reservation_execution_runtime.py /app/reservation_execution_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
+def test_ops_worker_image_copies_the_reservation_execution_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY reservation_execution_context.py /app/reservation_execution_context.py" in dockerfile.read_text(encoding="utf-8")
+
+
 def test_ops_worker_image_copies_the_demo_operations_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
@@ -311,6 +421,12 @@ def test_ops_worker_image_copies_the_demo_runtime_module():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY demo_runtime.py /app/demo_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_demo_context_module():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY demo_context.py /app/demo_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_reservation_steps_module():
@@ -353,6 +469,12 @@ def test_ops_worker_image_copies_the_winrm_trust_runtime():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY winrm_trust_runtime.py /app/winrm_trust_runtime.py" in dockerfile.read_text(encoding="utf-8")
+
+
+def test_ops_worker_image_copies_the_winrm_trust_context():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
+
+    assert "COPY winrm_trust_context.py /app/winrm_trust_context.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_winrm_session_policy():
@@ -581,12 +703,6 @@ def test_ops_worker_image_copies_the_internal_ingest_blueprint():
     dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
 
     assert "COPY internal_ingest_blueprint.py /app/internal_ingest_blueprint.py" in dockerfile.read_text(encoding="utf-8")
-
-
-def test_ops_worker_image_copies_the_internal_ingest_runtime():
-    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile"
-
-    assert "COPY internal_ingest_runtime.py /app/internal_ingest_runtime.py" in dockerfile.read_text(encoding="utf-8")
 
 
 def test_ops_worker_image_copies_the_lifecycle_routes():

@@ -1,63 +1,58 @@
 """Composition adapter for demo readiness and lifecycle operations."""
 
-from collections.abc import Mapping
 from typing import Any, Dict, Optional, Tuple
+
+from demo_context import DemoContext
 
 
 class DemoRuntime:
-    """Resolve demo lifecycle dependencies from a live worker namespace."""
+    """Expose demo lifecycle operations through explicit dependency ports."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: DemoContext):
+        self._context = context
 
     def get_mandatory_field(self, payload: Dict[str, Any], *keys: str) -> Optional[str]:
-        return self._get("_get_mandatory_field_impl")(payload, *keys)
+        return self._context.get_mandatory_field_impl(payload, *keys)
 
     def canonical_demo_lab_id(self, value: Any) -> Optional[str]:
-        return self._get("_canonical_demo_lab_id_impl")(value)
+        return self._context.canonical_demo_lab_id_impl(value)
 
     def demo_readiness(self) -> Dict[str, Any]:
-        get = self._get
-        return get("_build_demo_readiness_impl")(
-            demo_lab_id=get("DEMO_LAB_ID"),
-            demo_connection_id=get("DEMO_CONNECTION_ID"),
-            demo_user=get("DEMO_USER"),
-            max_age_seconds=get("DEMO_HEARTBEAT_MAX_AGE_SECONDS"),
-            guacamole_db_engine=get("GUACAMOLE_DB_ENGINE"),
-            db_engine=get("DB_ENGINE"),
-            find_host_by_lab=get("HOSTS").get_by_lab,
-            fetch_latest_heartbeat=get("_fetch_latest_heartbeat"),
-            to_utc=get("to_utc"),
-            sql_text=get("text"),
-            now=lambda: get("datetime").now(get("timezone").utc),
-            logger=get("logging"),
+        return self._context.build_demo_readiness_impl(
+            demo_lab_id=self._context.get_demo_lab_id(),
+            demo_connection_id=self._context.get_demo_connection_id(),
+            demo_user=self._context.get_demo_user(),
+            max_age_seconds=self._context.get_demo_heartbeat_max_age(),
+            guacamole_db_engine=self._context.get_guacamole_db_engine(),
+            db_engine=self._context.get_db_engine(),
+            find_host_by_lab=self._context.get_find_host_by_lab(),
+            fetch_latest_heartbeat=self._context.get_fetch_latest_heartbeat(),
+            to_utc=self._context.get_to_utc(),
+            sql_text=self._context.get_sql_text(),
+            now=self._context.get_now(),
+            logger=self._context.get_logger(),
         )
 
     def demo_context(
         self,
         payload: Dict[str, Any],
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-        get = self._get
-        return get("_build_demo_context_impl")(
+        return self._context.build_demo_context_impl(
             payload,
-            operation_id_pattern=get("DEMO_OPERATION_ID_RE"),
-            canonical_lab_id=get("_canonical_demo_lab_id"),
-            configured_lab_id=get("DEMO_LAB_ID"),
-            find_host_by_lab=get("HOSTS").get_by_lab,
-            db_engine=get("DB_ENGINE"),
+            operation_id_pattern=self._context.get_demo_operation_id_pattern(),
+            canonical_lab_id=self._context.get_canonical_demo_lab_id(),
+            configured_lab_id=self._context.get_demo_lab_id(),
+            find_host_by_lab=self._context.get_find_host_by_lab(),
+            db_engine=self._context.get_db_engine(),
         )
 
     def operation_completed(self, demo_id: str, action: str) -> bool:
-        get = self._get
-        return get("_demo_operation_completed_impl")(
+        return self._context.operation_completed_impl(
             demo_id,
             action,
-            db_engine=get("DB_ENGINE"),
-            sql_text=get("text"),
-            logger=get("logging"),
+            db_engine=self._context.get_db_engine(),
+            sql_text=self._context.get_sql_text(),
+            logger=self._context.get_logger(),
         )
 
     def record_demo_event(
@@ -69,75 +64,61 @@ class DemoRuntime:
         payload: Optional[Dict[str, Any]] = None,
         message: Optional[str] = None,
     ) -> None:
-        get = self._get
-        return get("_record_demo_event_impl")(
+        return self._context.record_demo_event_impl(
             context,
             event,
             success,
-            event_actions=get("DEMO_EVENT_ACTIONS"),
-            record_operation=get("record_reservation_operation"),
+            event_actions=self._context.get_demo_event_actions(),
+            record_operation=self._context.get_record_reservation_operation(),
             payload=payload,
             message=message,
         )
 
     def host_is_ready(self, host: Dict[str, Any]) -> bool:
-        get = self._get
-        return get("_demo_host_is_ready_impl")(
+        return self._context.demo_host_is_ready_impl(
             host,
-            db_engine=get("DB_ENGINE"),
-            fetch_latest_heartbeat=get("_fetch_latest_heartbeat"),
-            to_utc=get("to_utc"),
-            max_age_seconds=get("DEMO_HEARTBEAT_MAX_AGE_SECONDS"),
-            now=lambda: get("datetime").now(get("timezone").utc),
-            logger=get("logging"),
+            db_engine=self._context.get_db_engine(),
+            fetch_latest_heartbeat=self._context.get_fetch_latest_heartbeat(),
+            to_utc=self._context.get_to_utc(),
+            max_age_seconds=self._context.get_demo_heartbeat_max_age(),
+            now=self._context.get_now(),
+            logger=self._context.get_logger(),
         )
 
     def handle_demo_start(self, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
-        get = self._get
-        return get("_handle_demo_start_impl")(
+        return self._context.handle_demo_start_impl(
             payload,
-            get_context=get("_demo_context"),
-            operation_completed=get("_demo_operation_completed"),
-            parse_bool=get("parse_bool"),
-            host_is_ready=get("_demo_host_is_ready"),
-            reservation_start=lambda value: get("handle_reservation_start")(value),
-            reservation_end=lambda value: get("handle_reservation_end")(value),
-            record_event=lambda *args, **kwargs: get("_record_demo_event")(
-                *args,
-                **kwargs,
-            ),
+            get_context=self._context.get_demo_context(),
+            operation_completed=self._context.get_operation_completed(),
+            parse_bool=self._context.get_parse_bool(),
+            host_is_ready=self._context.get_demo_host_is_ready(),
+            reservation_start=self._context.get_reservation_start(),
+            reservation_end=self._context.get_reservation_end(),
+            record_event=self._context.get_record_demo_event(),
         )
 
     def handle_demo_event(self, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
-        get = self._get
-        return get("_handle_demo_event_impl")(
+        return self._context.handle_demo_event_impl(
             payload,
-            get_context=get("_demo_context"),
-            operation_completed=get("_demo_operation_completed"),
-            record_event=lambda *args, **kwargs: get("_record_demo_event")(
-                *args,
-                **kwargs,
-            ),
-            event_actions=get("DEMO_EVENT_ACTIONS"),
+            get_context=self._context.get_demo_context(),
+            operation_completed=self._context.get_operation_completed(),
+            record_event=self._context.get_record_demo_event(),
+            event_actions=self._context.get_demo_event_actions(),
         )
 
     def handle_demo_end(self, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
-        get = self._get
-        return get("_handle_demo_end_impl")(
+        return self._context.handle_demo_end_impl(
             payload,
-            get_context=get("_demo_context"),
-            operation_completed=get("_demo_operation_completed"),
-            reservation_end=lambda value: get("handle_reservation_end")(value),
-            record_event=lambda *args, **kwargs: get("_record_demo_event")(
-                *args,
-                **kwargs,
-            ),
+            get_context=self._context.get_demo_context(),
+            operation_completed=self._context.get_operation_completed(),
+            reservation_end=self._context.get_reservation_end(),
+            record_event=self._context.get_record_demo_event(),
         )
 
 
-def create_demo_runtime(providers: Mapping[str, Any]) -> DemoRuntime:
-    """Create a demo adapter bound to live worker providers."""
-    return DemoRuntime(providers)
+def create_demo_runtime(context: DemoContext) -> DemoRuntime:
+    """Create a demo adapter bound to explicit ports."""
+    return DemoRuntime(context)
 
 
 __all__ = ["DemoRuntime", "create_demo_runtime"]

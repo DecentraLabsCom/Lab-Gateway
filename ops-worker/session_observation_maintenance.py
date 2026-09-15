@@ -29,6 +29,7 @@ from ops_dsn import build_ops_dsn
 from runtime_config import is_lite_gateway, load_runtime_paths, load_runtime_policy
 from runtime_values import HTTP_HEADER_NAME_RE
 from secret_values import env_or_secret_file
+from session_observation_context import SessionObservationContext
 from session_observation_runtime import create_session_observation_runtime
 from session_observations import SessionObservations, default_retry_delay_seconds
 from winrm_credential_store import decrypt_secret, encrypt_secret, load_fernet
@@ -100,72 +101,70 @@ def build_runtime(
         fernet_cache["value"] = value
         return value
 
-    providers: dict[str, Any] = {
-        "SessionObservations": SessionObservations,
-        "DB_ENGINE": _engine(ops_dsn),
-        "GUACAMOLE_DB_ENGINE": _engine(guacamole_dsn),
-        "requests": requests,
-        "text": text,
-        "IntegrityError": IntegrityError,
-        "_encrypt_secret_impl": encrypt_secret,
-        "_decrypt_secret_impl": decrypt_secret,
-        "_load_fernet": load_runtime_fernet,
-        "_encrypt_runtime_secret": lambda value: encrypt_secret(
+    ops_engine = _engine(ops_dsn)
+    guacamole_engine = _engine(guacamole_dsn)
+    http_get = requests.get
+    http_post = requests.post
+    http_delete = requests.delete
+    service_holder: dict[str, SessionObservations] = {}
+
+    if active_connections is not None:
+        http_get = lambda url, *args, **kwargs: (
+            _StaticResponse(active_connections)
+            if str(url).rstrip("/").endswith("/activeConnections")
+            else requests.get(url, *args, **kwargs)
+        )
+        http_post = requests.post
+        http_delete = requests.delete
+
+    context = SessionObservationContext(
+        get_session_observations_factory=lambda: SessionObservations,
+        get_db_engine=lambda: ops_engine,
+        get_guacamole_db_engine=lambda: guacamole_engine,
+        get_encrypt_secret=lambda: lambda value: encrypt_secret(
             value,
-            load_fernet=providers["_load_fernet"],
+            load_fernet=load_runtime_fernet,
         ),
-        "_decrypt_runtime_secret": lambda value: decrypt_secret(
+        get_decrypt_secret=lambda: lambda value: decrypt_secret(
             value,
-            load_fernet=providers["_load_fernet"],
+            load_fernet=load_runtime_fernet,
         ),
-        "session_observation_retry_delay_seconds": default_retry_delay_seconds,
-        "to_utc": lambda value: normalize_to_utc(
+        get_http_get=lambda: http_get,
+        get_http_post=lambda: http_post,
+        get_http_delete=lambda: http_delete,
+        get_sql_text=lambda: text,
+        get_integrity_error_type=lambda: IntegrityError,
+        get_enqueue_session_observation=lambda: (
+            lambda payload: service_holder["service"].enqueue_session_observation(payload)
+        ),
+        get_retry_delay=lambda: default_retry_delay_seconds,
+        get_to_utc=lambda: lambda value: normalize_to_utc(
             value,
             parse_datetime=datetime.fromisoformat,
             utc_timezone=timezone.utc,
         ),
-        "datetime": datetime,
-        "timezone": timezone,
-        "time": time,
-        "logging": logging,
-        "ACCESS_AUDIT_URL": policy.access_audit_url,
-        "SESSION_OBSERVER_GATEWAY_ID": policy.session_observer_gateway_id,
-        "SESSION_OBSERVER_SIGNING_SECRET": policy.session_observer_signing_secret,
-        "SESSION_OBSERVATION_OUTBOX_ENABLED": policy.session_observation_outbox_enabled,
-        "SESSION_OBSERVATION_OUTBOX_BATCH_SIZE": policy.session_observation_outbox_batch_size,
-        "SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS": policy.session_observation_outbox_max_attempts,
-        "SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS": policy.session_observation_outbox_request_timeout_seconds,
-        "GUAC_ADMIN_USER": policy.guac_admin_user,
-        "GUAC_ADMIN_PASS": policy.guac_admin_pass,
-        "GUAC_API_URL": policy.guac_api_url,
-        "GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS": policy.guac_token_revocation_max_attempts,
-        "GUACAMOLE_HISTORY_LOOKBACK_SECONDS": policy.guacamole_history_lookback_seconds,
-        "GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS": policy.guacamole_history_reconciliation_retention_seconds,
-    }
-    service_holder: dict[str, SessionObservations] = {}
-    providers["enqueue_session_observation"] = lambda payload: service_holder[
-        "service"
-    ].enqueue_session_observation(payload)
-    providers["_session_observations_service"] = lambda: service_holder["service"]
+        get_now=lambda: lambda: datetime.now(timezone.utc),
+        get_current_epoch=lambda: time.time,
+        get_config=lambda: {
+            "access_audit_url": policy.access_audit_url,
+            "session_observer_gateway_id": policy.session_observer_gateway_id,
+            "session_observer_signing_secret": policy.session_observer_signing_secret,
+            "session_observation_outbox_enabled": policy.session_observation_outbox_enabled,
+            "session_observation_outbox_batch_size": policy.session_observation_outbox_batch_size,
+            "session_observation_outbox_max_attempts": policy.session_observation_outbox_max_attempts,
+            "session_observation_outbox_request_timeout_seconds": policy.session_observation_outbox_request_timeout_seconds,
+            "guac_admin_user": policy.guac_admin_user,
+            "guac_admin_pass": policy.guac_admin_pass,
+            "guac_api_url": policy.guac_api_url,
+            "guac_token_revocation_max_attempts": policy.guac_token_revocation_max_attempts,
+            "guacamole_history_lookback_seconds": policy.guacamole_history_lookback_seconds,
+            "guacamole_history_reconciliation_retention_seconds": policy.guacamole_history_reconciliation_retention_seconds,
+        },
+        get_logger=lambda: logging,
+        get_service=lambda: service_holder["service"],
+    )
 
-    if active_connections is not None:
-        providers["requests"] = type(
-            "_RequestsAdapter",
-            (),
-            {
-                "get": staticmethod(
-                    lambda url, *args, **kwargs: (
-                        _StaticResponse(active_connections)
-                        if str(url).rstrip("/").endswith("/activeConnections")
-                        else requests.get(url, *args, **kwargs)
-                    )
-                ),
-                "post": staticmethod(requests.post),
-                "delete": staticmethod(requests.delete),
-            },
-        )
-
-    runtime = create_session_observation_runtime(providers)
+    runtime = create_session_observation_runtime(context)
     service_holder["service"] = runtime.create_service()
     return runtime
 

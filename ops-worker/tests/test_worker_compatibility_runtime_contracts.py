@@ -1,5 +1,9 @@
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
+import pytest
+
+from worker_compatibility_context import WorkerCompatibilityContext
 from worker_compatibility_runtime import (
     WorkerCompatibilityRuntime,
     create_worker_compatibility_runtime,
@@ -17,28 +21,33 @@ class _Lock:
         self._calls.append("lock-exit")
 
 
-def test_worker_compatibility_runtime_preserves_composition_helpers():
-    calls = []
-    registry = SimpleNamespace(get=lambda name: {"name": name} if name == "station-01" else None)
-    automator = SimpleNamespace(registry="old")
-    providers = {
-        "_is_lite_gateway_config_impl": lambda environ: environ["mode"] == "lite",
-        "os": SimpleNamespace(environ={"mode": "lite"}),
-        "datetime": SimpleNamespace(now=lambda timezone: ("now", timezone)),
-        "timezone": SimpleNamespace(utc="UTC"),
-        "HOSTS": registry,
-        "jsonify": lambda payload: ("json", payload),
-        "HOSTS_LOCK": _Lock(calls),
-        "_replace_host_registry_impl": lambda received, **kwargs: calls.append(
+def _context(*, hosts, calls, automator):
+    registry = {"value": hosts}
+    context = WorkerCompatibilityContext(
+        get_is_lite_gateway_impl=lambda: lambda environ: environ["mode"] == "lite",
+        get_environ=lambda: {"mode": "lite"},
+        get_datetime=lambda: SimpleNamespace(
+            now=lambda timezone: ("now", timezone)
+        ),
+        get_timezone=lambda: SimpleNamespace(utc="UTC"),
+        get_hosts=lambda: registry["value"],
+        get_jsonify=lambda: lambda payload: ("json", payload),
+        get_hosts_lock=lambda: _Lock(calls),
+        get_replace_host_registry_impl=lambda: lambda received, **kwargs: calls.append(
             ("replace", received, kwargs)
         ),
-        "RESERVATION_AUTOMATOR": automator,
-    }
-    providers["_set_host_registry"] = lambda received: providers.__setitem__(
-        "HOSTS",
-        received,
+        get_reservation_automator=lambda: automator,
+        set_host_registry=lambda received: registry.__setitem__("value", received),
     )
-    runtime = create_worker_compatibility_runtime(providers)
+    return context, registry
+
+
+def test_worker_compatibility_runtime_preserves_composition_helpers():
+    calls = []
+    hosts = {"station-01": {"name": "station-01"}}
+    automator = SimpleNamespace(registry="old")
+    context, registry = _context(hosts=hosts, calls=calls, automator=automator)
+    runtime = create_worker_compatibility_runtime(context)
 
     assert isinstance(runtime, WorkerCompatibilityRuntime)
     assert runtime.is_lite_gateway() is True
@@ -58,34 +67,35 @@ def test_worker_compatibility_runtime_preserves_composition_helpers():
         ),
     )
 
-    runtime.replace_host_registry("new")
+    runtime.replace_host_registry({"station-02": {"name": "station-02"}})
     assert calls[0] == "lock-enter"
-    assert calls[1][0:2] == ("replace", "new")
+    assert calls[1][0:2] == (
+        "replace",
+        {"station-02": {"name": "station-02"}},
+    )
     assert calls[1][2]["reservation_automator"] is automator
-    calls[1][2]["set_registry"]("published")
-    assert providers["HOSTS"] == "published"
+    calls[1][2]["set_registry"]({"station-03": {"name": "station-03"}})
+    assert registry["value"] == {"station-03": {"name": "station-03"}}
     assert calls[2] == "lock-exit"
 
 
-def test_worker_compatibility_runtime_publishes_registry_and_resolves_providers_lazily():
-    providers = {
-        "_is_lite_gateway_config_impl": lambda _environ: False,
-        "os": SimpleNamespace(environ={}),
-        "datetime": SimpleNamespace(now=lambda timezone: timezone),
-        "timezone": SimpleNamespace(utc="UTC"),
-        "HOSTS": SimpleNamespace(get=lambda _name: None),
-        "jsonify": lambda payload: payload,
-        "HOSTS_LOCK": _Lock([]),
-        "_replace_host_registry_impl": lambda *_args, **_kwargs: None,
-        "RESERVATION_AUTOMATOR": SimpleNamespace(registry=None),
-    }
-    providers["_set_host_registry"] = lambda received: providers.__setitem__(
-        "HOSTS",
-        received,
+def test_worker_compatibility_runtime_publishes_registry_and_resolves_hosts_lazily():
+    calls = []
+    hosts = {}
+    context, registry = _context(
+        hosts=hosts,
+        calls=calls,
+        automator=SimpleNamespace(registry=None),
     )
-    runtime = create_worker_compatibility_runtime(providers)
-    replacement = object()
+    runtime = create_worker_compatibility_runtime(context)
 
-    runtime.set_host_registry(replacement)
+    runtime.set_host_registry({"station": {"name": "station"}})
 
-    assert providers["HOSTS"] is replacement
+    assert registry["value"] == {"station": {"name": "station"}}
+
+
+def test_worker_compatibility_context_is_immutable():
+    context, _registry = _context(hosts={}, calls=[], automator=SimpleNamespace())
+
+    with pytest.raises(FrozenInstanceError):
+        context.get_environ = lambda: {}

@@ -1,58 +1,79 @@
-from types import SimpleNamespace
+import re
+from dataclasses import FrozenInstanceError
 
+import pytest
+
+from host_provisioning_context import HostProvisioningContext
 from host_provisioning_runtime import HostProvisioningRuntime, create_host_provisioning_runtime
 
 
-def test_host_provisioning_runtime_forwards_validation_and_payload_dependencies():
+def _context(**overrides):
+    values = {
+        "get_name_pattern": lambda: re.compile(r"[A-Za-z0-9._-]+"),
+        "normalize_mac": lambda value: "AA:BB:CC:DD:EE:FF",
+        "normalize_trust_ref": lambda value: "station-01",
+        "get_sanitize_host_name": lambda value, fallback: ("station-01", None),
+        "get_normalize_labs": lambda value: ["lab-1"],
+        "get_validate_labs_against_candidates": lambda labs, candidates: None,
+        "default_heartbeat_path": r"C:\LabStation\heartbeat.json",
+        "default_events_path": r"C:\LabStation\events.jsonl",
+    }
+    values.update(overrides)
+    return HostProvisioningContext(**values)
+
+
+def test_host_provisioning_runtime_uses_explicit_context_dependencies():
     calls = []
-    providers = {
-        "_sanitize_host_name_impl": lambda value, fallback, **kwargs: calls.append(
-            ("name", value, fallback, kwargs)
+    context = _context(
+        get_sanitize_host_name=lambda value, fallback: calls.append(
+            ("name", value, fallback)
         ) or ("station-01", None),
-        "HOST_NAME_RE": "name-pattern",
-        "_normalize_labs_impl": lambda value: calls.append(("labs", value)) or ["lab-1"],
-        "_validate_labs_against_candidates_impl": lambda labs, candidates: calls.append(
+        get_normalize_labs=lambda value: calls.append(("labs", value)) or ["lab-1"],
+        get_validate_labs_against_candidates=lambda labs, candidates: calls.append(
             ("validate-labs", labs, candidates)
         ) or None,
-        "_build_provisioned_host_impl": lambda payload, connection, **kwargs: calls.append(
-            ("build", payload, connection, kwargs)
-        ) or ({"name": "station-01"}, None),
-        "sanitize_host_name": lambda value, fallback: ("station-01", None),
-        "normalize_labs": lambda value: ["lab-1"],
-        "validate_labs_against_candidates": lambda labs, candidates: None,
-        "normalize_mac": lambda value: "AA:BB:CC:DD:EE:FF",
-        "normalize_winrm_trust_ref": lambda value: "station-01",
-    }
-    runtime = create_host_provisioning_runtime(providers)
+    )
+    runtime = create_host_provisioning_runtime(context)
 
     assert isinstance(runtime, HostProvisioningRuntime)
     assert runtime.sanitize_host_name("station-01", "fallback") == ("station-01", None)
     assert runtime.normalize_labs("lab-1") == ["lab-1"]
     assert runtime.validate_labs_against_candidates(["lab-1"], ["lab-1"]) is None
-    assert runtime.build_provisioned_host({"name": "station-01"}, {"hostname": "station-01"}) == (
-        {"name": "station-01"},
+    assert runtime.build_provisioned_host(
+        {"name": "station-01", "mac": "001122334455"}, {"hostname": "station-01"}
+    ) == (
+        {
+            "name": "station-01",
+            "address": "station-01",
+            "credential_ref": "station-01",
+            "winrm_trust_ref": "station-01",
+            "winrm_transport": "ntlm",
+            "winrm_use_ssl": True,
+            "winrm_port": 5986,
+            "heartbeat_path": r"C:\LabStation\heartbeat.json",
+            "events_path": r"C:\LabStation\events.jsonl",
+            "labs": ["lab-1"],
+            "mac": "AA:BB:CC:DD:EE:FF",
+        },
         None,
     )
-    assert any(call[0] == "build" for call in calls)
+    assert ("name", "station-01", "station-01") in calls
+    assert ("labs", None) in calls
+    assert ("validate-labs", ["lab-1"], None) in calls
 
 
-def test_host_provisioning_runtime_uses_mutable_normalization_callbacks():
-    providers = {
-        "_sanitize_host_name_impl": lambda value, fallback, **kwargs: (value or fallback, None),
-        "HOST_NAME_RE": "name-pattern",
-        "_normalize_labs_impl": lambda value: list(value or []),
-        "_validate_labs_against_candidates_impl": lambda labs, candidates: None,
-        "_build_provisioned_host_impl": lambda payload, connection, **kwargs: kwargs[
-            "normalize_trust_ref_fn"
-        ]("station"),
-        "sanitize_host_name": lambda value, fallback: (value or fallback, None),
-        "normalize_labs": lambda value: [],
-        "validate_labs_against_candidates": lambda labs, candidates: None,
-        "normalize_mac": lambda value: "first",
-        "normalize_winrm_trust_ref": lambda value: "first",
-    }
-    runtime = create_host_provisioning_runtime(providers)
+def test_host_provisioning_context_is_immutable_and_can_wrap_live_callbacks():
+    callbacks = {"trust_ref": lambda value: "first"}
+    context = _context(normalize_trust_ref=lambda value: callbacks["trust_ref"](value))
+    runtime = create_host_provisioning_runtime(context)
 
-    assert runtime.build_provisioned_host({}, {}) == "first"
-    providers["normalize_winrm_trust_ref"] = lambda value: "second"
-    assert runtime.build_provisioned_host({}, {}) == "second"
+    assert runtime.build_provisioned_host({}, {"hostname": "station-01"})[0][
+        "winrm_trust_ref"
+    ] == "first"
+    callbacks["trust_ref"] = lambda value: "second"
+    assert runtime.build_provisioned_host({}, {"hostname": "station-01"})[0][
+        "winrm_trust_ref"
+    ] == "second"
+
+    with pytest.raises(FrozenInstanceError):
+        context.default_heartbeat_path = r"C:\other.json"

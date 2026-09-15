@@ -20,7 +20,6 @@ def create_runtime_services(
     reservation_factory: Callable[..., Any],
     reservation_engine: Any,
     reservation_registry: Any,
-    reservation_arguments: Mapping[str, Any],
 ) -> RuntimeServices:
     """Build mutable service runtimes in their historical order.
 
@@ -32,7 +31,6 @@ def create_runtime_services(
     reservation_automator = reservation_factory(
         reservation_engine,
         reservation_registry,
-        **dict(reservation_arguments),
     )
     return RuntimeServices(
         power_state=power_state,

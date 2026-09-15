@@ -1,43 +1,42 @@
 """Composition adapter for Guacamole catalog and temporary-user operations."""
 
-from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
+
+from guacamole_context import GuacamoleContext
 
 
 class GuacamoleRuntime:
-    """Resolve Guacamole operations from a live worker provider namespace."""
+    """Expose Guacamole operations through explicit dependencies."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: GuacamoleContext):
+        self._context = context
 
     def load_guacamole_connections(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        get = self._get
-        return get("_load_guacamole_connections_impl")(
-            get("GUACAMOLE_DB_ENGINE"),
-            sql_text=get("text"),
-            logger=get("logging"),
+        context = self._context
+        return context.get_load_connections_impl()(
+            context.get_db_engine(),
+            sql_text=context.get_sql_text(),
+            logger=context.get_logger(),
         )
 
     def require_guacamole_provisioner_auth(self) -> Any:
-        get = self._get
-        return get("_check_guacamole_provisioner_auth_impl")(
-            get("request").headers,
-            expected_token=get("GUACAMOLE_PROVISIONER_TOKEN"),
-            token_header=get("GUACAMOLE_PROVISIONER_TOKEN_HEADER"),
-            jsonify=get("jsonify"),
+        context = self._context
+        return context.get_check_auth_impl()(
+            context.get_request_headers(),
+            expected_token=context.get_expected_token(),
+            token_header=context.get_token_header(),
+            jsonify=context.get_jsonify(),
         )
 
     def parse_guacamole_selector(self, selector: Any) -> int:
-        return self._get("_parse_guacamole_selector_impl")(
+        context = self._context
+        return context.get_parse_selector_impl()(
             selector,
-            selector_pattern=self._get("GUAC_SELECTOR_RE"),
+            selector_pattern=context.get_selector_pattern(),
         )
 
     def safe_connection_response(self, connection: Dict[str, Any]) -> Dict[str, Any]:
-        return self._get("_safe_connection_response_impl")(connection)
+        return self._context.get_safe_connection_response_impl()(connection)
 
     def provision_guacamole_temporary_user(
         self,
@@ -46,45 +45,45 @@ class GuacamoleRuntime:
         valid_until_epoch: Optional[Any],
         activate: bool = True,
     ) -> Dict[str, Any]:
-        get = self._get
-        return get("_provision_guacamole_user_impl")(
+        context = self._context
+        return context.get_provision_impl()(
             selector,
             session_id,
             valid_until_epoch,
             activate,
-            engine=get("GUACAMOLE_DB_ENGINE"),
-            parse_selector=get("parse_guacamole_selector"),
-            resolve_connection=get("resolve_guacamole_connection"),
-            safe_connection_response=get("safe_connection_response"),
-            sql_text=get("text"),
-            date_from_epoch=lambda epoch: get("datetime").fromtimestamp(
+            engine=context.get_db_engine(),
+            parse_selector=context.get_parse_selector(),
+            resolve_connection=context.get_resolve_connection(),
+            safe_connection_response=context.get_safe_connection_response(),
+            sql_text=context.get_sql_text(),
+            date_from_epoch=lambda epoch: context.get_datetime().fromtimestamp(
                 epoch,
-                tz=get("timezone").utc,
+                tz=context.get_timezone().utc,
             ).date().isoformat(),
-            logger=get("logging"),
+            logger=context.get_logger(),
         )
 
     def delete_guacamole_temporary_user(self, session_id: str) -> bool:
-        get = self._get
-        return get("_delete_guacamole_user_impl")(
+        context = self._context
+        return context.get_delete_impl()(
             session_id,
-            engine=get("GUACAMOLE_DB_ENGINE"),
-            sql_text=get("text"),
-            logger=get("logging"),
+            engine=context.get_db_engine(),
+            sql_text=context.get_sql_text(),
+            logger=context.get_logger(),
         )
 
     def cleanup_expired_guacamole_temp_users(self) -> int:
-        get = self._get
-        return get("_cleanup_guacamole_users_impl")(
-            engine=get("GUACAMOLE_DB_ENGINE"),
-            sql_text=get("text"),
-            logger=get("logging"),
+        context = self._context
+        return context.get_cleanup_impl()(
+            engine=context.get_db_engine(),
+            sql_text=context.get_sql_text(),
+            logger=context.get_logger(),
         )
 
 
-def create_guacamole_runtime(providers: Mapping[str, Any]) -> GuacamoleRuntime:
-    """Create a Guacamole adapter bound to live providers."""
-    return GuacamoleRuntime(providers)
+def create_guacamole_runtime(context: GuacamoleContext) -> GuacamoleRuntime:
+    """Create a Guacamole runtime bound to explicit dependencies."""
+    return GuacamoleRuntime(context)
 
 
 __all__ = ["GuacamoleRuntime", "create_guacamole_runtime"]

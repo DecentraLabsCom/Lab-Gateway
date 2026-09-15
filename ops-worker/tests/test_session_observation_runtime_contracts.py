@@ -1,52 +1,68 @@
+from datetime import datetime
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
+import pytest
+
+from session_observation_context import SessionObservationContext
 from session_observation_runtime import (
     SessionObservationRuntime,
     create_session_observation_runtime,
 )
 
 
-def test_session_observation_runtime_builds_service_from_live_providers():
+def _context(**overrides):
+    values = {
+        "get_session_observations_factory": lambda: SimpleNamespace,
+        "get_db_engine": lambda: "ops-db",
+        "get_guacamole_db_engine": lambda: "guac-db",
+        "get_encrypt_secret": lambda: lambda value: f"enc:{value}",
+        "get_decrypt_secret": lambda: lambda value: f"dec:{value}",
+        "get_http_get": lambda: "http-get",
+        "get_http_post": lambda: "http-post",
+        "get_http_delete": lambda: "http-delete",
+        "get_sql_text": lambda: "sql-text",
+        "get_integrity_error_type": lambda: RuntimeError,
+        "get_enqueue_session_observation": lambda: lambda payload: (
+            "enqueued",
+            payload,
+        ),
+        "get_retry_delay": lambda: lambda attempts: attempts + 1,
+        "get_to_utc": lambda: lambda value: ("utc", value),
+        "get_now": lambda: lambda: datetime(2026, 1, 1),
+        "get_current_epoch": lambda: lambda: 123.0,
+        "get_config": lambda: {
+            "access_audit_url": "https://audit",
+            "session_observer_gateway_id": "gateway-1",
+            "session_observer_signing_secret": "signing-secret",
+            "session_observation_outbox_enabled": True,
+            "session_observation_outbox_batch_size": 20,
+            "session_observation_outbox_max_attempts": 4,
+            "session_observation_outbox_request_timeout_seconds": 5,
+            "guac_admin_user": "admin",
+            "guac_admin_pass": "password",
+            "guac_api_url": "https://guac",
+            "guac_token_revocation_max_attempts": 3,
+            "guacamole_history_lookback_seconds": 30,
+            "guacamole_history_reconciliation_retention_seconds": 300,
+        },
+        "get_logger": lambda: "logger",
+        "get_service": lambda: None,
+    }
+    values.update(overrides)
+    return SessionObservationContext(**values)
+
+
+def test_session_observation_runtime_builds_service_from_explicit_context():
     captured = {}
 
     class FakeSessionObservations:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-    providers = {
-        "SessionObservations": FakeSessionObservations,
-        "DB_ENGINE": "ops-db",
-        "GUACAMOLE_DB_ENGINE": "guac-db",
-        "_encrypt_runtime_secret": lambda value: f"enc:{value}",
-        "_decrypt_runtime_secret": lambda value: f"dec:{value}",
-        "requests": SimpleNamespace(
-            get="http-get", post="http-post", delete="http-delete"
-        ),
-        "text": "sql-text",
-        "IntegrityError": RuntimeError,
-        "enqueue_session_observation": lambda payload: ("enqueued", payload),
-        "session_observation_retry_delay_seconds": lambda attempts: attempts + 1,
-        "to_utc": lambda value: ("utc", value),
-        "datetime": SimpleNamespace(now=lambda timezone: ("now", timezone)),
-        "timezone": SimpleNamespace(utc="UTC"),
-        "time": SimpleNamespace(time="epoch"),
-        "ACCESS_AUDIT_URL": "https://audit",
-        "SESSION_OBSERVER_GATEWAY_ID": "gateway-1",
-        "SESSION_OBSERVER_SIGNING_SECRET": "signing-secret",
-        "SESSION_OBSERVATION_OUTBOX_ENABLED": True,
-        "SESSION_OBSERVATION_OUTBOX_BATCH_SIZE": 20,
-        "SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS": 4,
-        "SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS": 5,
-        "GUAC_ADMIN_USER": "admin",
-        "GUAC_ADMIN_PASS": "password",
-        "GUAC_API_URL": "https://guac",
-        "GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS": 3,
-        "GUACAMOLE_HISTORY_LOOKBACK_SECONDS": 30,
-        "GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS": 300,
-        "logging": "logger",
-    }
+    context = _context(get_session_observations_factory=lambda: FakeSessionObservations)
+    runtime = create_session_observation_runtime(context)
 
-    runtime = create_session_observation_runtime(providers)
     assert isinstance(runtime, SessionObservationRuntime)
     runtime.create_service()
 
@@ -81,51 +97,24 @@ def test_session_observation_runtime_builds_service_from_live_providers():
     }
 
 
-def test_session_observation_runtime_resolves_mutable_callbacks_at_service_creation():
-    captured = []
+def test_session_observation_context_resolves_mutable_dependencies_at_use_time():
+    retry_delay = lambda _attempts: 1
+    service = object()
+    context = _context(
+        get_retry_delay=lambda: retry_delay,
+        get_service=lambda: service,
+    )
+    runtime = create_session_observation_runtime(context)
 
-    class FakeSessionObservations:
-        def __init__(self, **kwargs):
-            captured.append(kwargs["retry_delay"])
+    retry_delay = lambda _attempts: 9
+    assert runtime.retry_delay_seconds(1) == 9
+    assert runtime._service() is service
 
-    providers = {
-        "SessionObservations": FakeSessionObservations,
-        "DB_ENGINE": None,
-        "GUACAMOLE_DB_ENGINE": None,
-        "_encrypt_runtime_secret": lambda value: value,
-        "_decrypt_runtime_secret": lambda value: value,
-        "requests": SimpleNamespace(get=None, post=None, delete=None),
-        "text": None,
-        "IntegrityError": RuntimeError,
-        "enqueue_session_observation": lambda _payload: False,
-        "session_observation_retry_delay_seconds": lambda _attempts: 1,
-        "to_utc": lambda value: value,
-        "datetime": SimpleNamespace(now=lambda timezone: timezone),
-        "timezone": SimpleNamespace(utc="UTC"),
-        "time": SimpleNamespace(time=lambda: 0),
-        "ACCESS_AUDIT_URL": "",
-        "SESSION_OBSERVER_GATEWAY_ID": "",
-        "SESSION_OBSERVER_SIGNING_SECRET": "",
-        "SESSION_OBSERVATION_OUTBOX_ENABLED": False,
-        "SESSION_OBSERVATION_OUTBOX_BATCH_SIZE": 0,
-        "SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS": 0,
-        "SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS": 0,
-        "GUAC_ADMIN_USER": "",
-        "GUAC_ADMIN_PASS": "",
-        "GUAC_API_URL": "",
-        "GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS": 0,
-        "GUACAMOLE_HISTORY_LOOKBACK_SECONDS": 0,
-        "GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS": 0,
-        "logging": None,
-    }
-    runtime = create_session_observation_runtime(providers)
-    providers["session_observation_retry_delay_seconds"] = lambda _attempts: 9
-
-    runtime.create_service()
-    assert captured[0](1) == 9
+    with pytest.raises(FrozenInstanceError):
+        context.get_service = lambda: None
 
 
-def test_session_observation_runtime_forwards_service_facades_dynamically():
+def test_session_observation_runtime_forwards_service_operations():
     calls = []
 
     class FakeService:
@@ -171,14 +160,13 @@ def test_session_observation_runtime_forwards_service_facades_dynamically():
             return 3
 
     service = FakeService()
-    providers = {
-        "_session_observations_service": lambda: service,
-        "_default_retry_delay_seconds_impl": lambda attempts: attempts + 1,
-        "_encrypt_secret_impl": lambda value, **kwargs: f"enc:{value}",
-        "_decrypt_secret_impl": lambda value, **kwargs: f"dec:{value}",
-        "_load_fernet": lambda: "fernet",
-    }
-    runtime = create_session_observation_runtime(providers)
+    context = _context(
+        get_service=lambda: service,
+        get_retry_delay=lambda: lambda attempts: attempts + 1,
+        get_encrypt_secret=lambda: lambda value: f"enc:{value}",
+        get_decrypt_secret=lambda: lambda value: f"dec:{value}",
+    )
+    runtime = create_session_observation_runtime(context)
 
     assert runtime.retry_delay_seconds(2) == 3
     assert runtime.encrypt_runtime_secret("token") == "enc:token"

@@ -46,3 +46,10 @@ def test_worker_does_not_publish_legacy_facades():
 
 def test_compose_worker_app_has_no_legacy_factory_parameter():
     assert "legacy_factory" not in inspect.signature(compose_worker_app).parameters
+
+
+def test_internal_ingest_has_no_dead_runtime_facade():
+    worker_path = Path(worker.__file__)
+    assert not worker_path.with_name("internal_ingest_runtime.py").exists()
+    source = worker_path.read_text(encoding="utf-8")
+    assert "create_internal_ingest_runtime" not in source

@@ -1,17 +1,18 @@
 """Composition adapter for the public host inventory."""
 
-from collections.abc import Mapping
-from typing import Any, Dict
+from collections.abc import Callable
+from typing import Any, Dict, Optional
+
+from host_inventory_context import HostInventoryContext
+from host_inventory_service import build_host_inventory_from_sources
+from host_inventory_values import safe_host_inventory_entry
 
 
 class HostInventoryRuntime:
-    """Resolve inventory projection and source coordination from live providers."""
+    """Coordinate inventory projection and source loading from explicit inputs."""
 
-    def __init__(self, providers: Mapping[str, Any]):
-        self._providers = providers
-
-    def _get(self, name: str) -> Any:
-        return self._providers[name]
+    def __init__(self, context: HostInventoryContext):
+        self._context = context
 
     def safe_host_inventory_entry(
         self,
@@ -19,31 +20,40 @@ class HostInventoryRuntime:
         *,
         editable: bool = False,
     ) -> Dict[str, Any]:
-        get = self._get
-        return get("_safe_host_inventory_entry_impl")(
+        context = self._context
+        return safe_host_inventory_entry(
             host,
             editable=editable,
-            credential_ref_for_host=get("credential_ref_for_host"),
-            inspect_winrm_trust=get("inspect_winrm_trust"),
-            winrm_credentials_configured=get("winrm_credentials_configured"),
-            default_heartbeat_path=r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
+            credential_ref_for_host=context.credential_ref_for_host,
+            inspect_winrm_trust=context.inspect_winrm_trust,
+            winrm_credentials_configured=context.winrm_credentials_configured,
+            default_heartbeat_path=context.default_heartbeat_path,
         )
 
-    def build_host_inventory(self) -> Dict[str, Any]:
-        get = self._get
-        return get("_build_host_inventory_from_sources_impl")(
-            get("HOSTS"),
-            hosts_lock=get("HOSTS_LOCK"),
-            load_dynamic_config=get("load_dynamic_config"),
-            load_guacamole_connections=get("load_guacamole_connections"),
-            normalize_key=get("normalize_match_key"),
-            safe_entry=get("safe_host_inventory_entry"),
+    def build_host_inventory(
+        self,
+        *,
+        safe_entry: Optional[Callable[..., Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Build inventory using the current source snapshot and projection."""
+        context = self._context
+        return build_host_inventory_from_sources(
+            context.get_host_registry(),
+            hosts_lock=context.get_hosts_lock(),
+            load_dynamic_config=context.load_dynamic_config,
+            load_guacamole_connections=context.load_guacamole_connections,
+            normalize_key=context.normalize_match_key,
+            safe_entry=(
+                safe_entry
+                if safe_entry is not None
+                else self.safe_host_inventory_entry
+            ),
         )
 
 
-def create_host_inventory_runtime(providers: Mapping[str, Any]) -> HostInventoryRuntime:
-    """Create an inventory adapter bound to live providers."""
-    return HostInventoryRuntime(providers)
+def create_host_inventory_runtime(context: HostInventoryContext) -> HostInventoryRuntime:
+    """Create an inventory adapter bound to explicit dependencies."""
+    return HostInventoryRuntime(context)
 
 
 __all__ = ["HostInventoryRuntime", "create_host_inventory_runtime"]
