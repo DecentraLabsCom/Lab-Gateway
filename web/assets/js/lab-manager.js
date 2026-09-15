@@ -128,33 +128,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const formatDate = formattersModule.formatDate;
     const formatBool = formattersModule.formatBool;
     const htmlEscape = formattersModule.htmlEscape;
-    const reservationValuesModule = window.LabManagerReservationValues;
-    if (!reservationValuesModule) {
-        throw new Error('LabManagerReservationValues must load before lab-manager.js');
-    }
-    const reservationValuesController = reservationValuesModule.createController({
-        dateTimeFormatCtor: Intl.DateTimeFormat,
-        dateCtor: Date,
-        formatDate,
-        now: () => Date.now(),
-    });
-    const formatReservationDate = reservationValuesController.formatReservationDate;
-    const formatRange = reservationValuesController.formatRange;
-    const isReservationWindowEnded = reservationValuesController.isReservationWindowEnded;
-    const normalizeReservationStatus = reservationValuesController.normalizeReservationStatus;
-    const cancellationButtonLabel = reservationValuesController.cancellationButtonLabel;
-    const shortAddress = reservationValuesController.shortAddress;
-    const reservationRenderersModule = window.LabManagerReservationRenderers;
-    if (!reservationRenderersModule) {
-        throw new Error('LabManagerReservationRenderers must load before lab-manager.js');
-    }
-    const timelineModule = window.LabManagerTimeline;
-    if (!timelineModule) {
-        throw new Error('LabManagerTimeline must load before lab-manager.js');
-    }
-    const actionableReservationsModule = window.LabManagerActionableReservations;
-    if (!actionableReservationsModule) {
-        throw new Error('LabManagerActionableReservations must load before lab-manager.js');
+    const reservationsFeatureModule = window.LabManagerReservationsFeature;
+    if (!reservationsFeatureModule) {
+        throw new Error('LabManagerReservationsFeature must load before lab-manager.js');
     }
     const energyFeatureModule = window.LabManagerEnergyFeature;
     if (!energyFeatureModule) {
@@ -528,66 +504,41 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     energyFeatureController.initialize();
 
-    // Reservation timeline elements
-    const timelineInput = $('#timelineReservationId');
-    const timelineBtn = $('#loadTimelineBtn');
-    const timelineResult = $('#timelineResult');
-    const upcomingReservationsListEl = $('#upcomingReservationsList');
-    const upcomingReservationsStatusEl = $('#upcomingReservationsStatus');
-    opsAccessController = opsAccessModule.createController({
-        opsHintEl,
-        refreshHostsBtn,
-        timelineBtn,
+    const reservationsFeatureController = reservationsFeatureModule.createController({
+        documentImpl: document,
         fetchImpl: (...args) => fetch(...args),
-        groupCandidates: candidates => hostViewController?.groupCandidates(candidates) || [],
-        logger: console,
-    });
-    const reservationRenderersController = reservationRenderersModule.createController({
+        normalizePagination,
         escapeHtml,
         htmlEscape,
         formatDate,
         formatBool,
-        formatReservationDate,
-        formatRange,
-        isReservationWindowEnded,
-        normalizeReservationStatus,
-        cancellationButtonLabel,
-        shortAddress,
-        resolveReservationLabDisplayName,
-    });
-    const timelineController = timelineModule.createController({
-        timelineInput,
-        timelineBtn,
-        timelineResult,
-        fetchImpl: (...args) => fetch(...args),
-        normalizePagination,
-        renderTimelineMarkup: (...args) => reservationRenderersController.renderTimelineMarkup(...args),
         showToast,
-        logger: console,
-    });
-    timelineController.bind();
-    const actionableReservationsController = actionableReservationsModule.createController({
-        listEl: upcomingReservationsListEl,
-        statusEl: upcomingReservationsStatusEl,
-        fetchImpl: (...args) => fetch(...args),
-        renderMarkup: (...args) => reservationRenderersController.renderUpcomingReservationsMarkup(...args),
-        escapeHtml,
-        normalizeReservationStatus,
-        cancellationButtonLabel,
-        showToast,
+        getManagedLabs: (...args) => energyFeatureController.getManagedLabs(...args),
+        resolveLabDisplayName: (...args) => energyFeatureController.resolveLabDisplayName(...args),
         confirmImpl: message => window.confirm(message),
+        dateTimeFormatCtor: Intl.DateTimeFormat,
+        dateCtor: Date,
+        now: () => Date.now(),
         logger: console,
     });
-    const loadActionableReservations = actionableReservationsController.load;
-    actionableReservationsController.bind();
+    reservationsFeatureController.initialize();
+
+    opsAccessController = opsAccessModule.createController({
+        opsHintEl,
+        refreshHostsBtn,
+        timelineBtn: reservationsFeatureController.timelineButton,
+        fetchImpl: (...args) => fetch(...args),
+        groupCandidates: candidates => hostViewController?.groupCandidates(candidates) || [],
+        logger: console,
+    });
     const operationsLifecycleController = operationsLifecycleModule.createController({
         hasHostList: Boolean(hostListEl),
-        hasReservationList: Boolean(upcomingReservationsListEl),
+        hasReservationList: reservationsFeatureController.hasReservationList(),
         refreshSession: () => opsAccessController?.refreshSession(),
         loadManagedLabs: (...args) => energyFeatureController.loadManagedLabsOnce(...args),
         checkAvailability: (...args) => checkOpsAvailability(...args),
         loadHostInventory: (...args) => loadHostInventory(...args),
-        loadActionableReservations: (...args) => loadActionableReservations(...args),
+        loadActionableReservations: (...args) => reservationsFeatureController.loadActionableReservations(...args),
         loadActivityFeed: (...args) => loadActivityFeed(...args),
     });
 
@@ -630,15 +581,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---- Lab Station ops helpers ----
     function updateOpsHint(data) {
         return opsAccessController?.updateHint(data);
-    }
-
-    function resolveReservationLabDisplayName(reservation) {
-        const directName = [reservation?.labName, reservation?.name]
-            .find(candidate => typeof candidate === 'string' && candidate.trim());
-        if (directName) return directName.trim();
-        const managedLab = energyFeatureController.getManagedLabs()
-            .find(lab => String(lab?.labId ?? '') === String(reservation?.labId ?? ''));
-        return energyFeatureController.resolveLabDisplayName(managedLab || reservation);
     }
 
     function winrmTrustErrorMessage(body, status) {
