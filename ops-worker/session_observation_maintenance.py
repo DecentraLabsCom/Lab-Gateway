@@ -103,6 +103,17 @@ def build_runtime(
 
     ops_engine = _engine(ops_dsn)
     guacamole_engine = _engine(guacamole_dsn)
+
+    def close_engines() -> None:
+        if ops_engine is not None:
+            try:
+                ops_engine.dispose()
+            finally:
+                if guacamole_engine is not None:
+                    guacamole_engine.dispose()
+        elif guacamole_engine is not None:
+            guacamole_engine.dispose()
+
     http_get = requests.get
     http_post = requests.post
     http_delete = requests.delete
@@ -164,7 +175,7 @@ def build_runtime(
         get_service=lambda: service_holder["service"],
     )
 
-    runtime = create_session_observation_runtime(context)
+    runtime = create_session_observation_runtime(context, close=close_engines)
     service_holder["service"] = runtime.create_service()
     return runtime
 
@@ -177,10 +188,14 @@ def run_reconciliation(
     runtime_factory: Callable[[Optional[Mapping[str, Any]]], Any] = build_runtime,
 ) -> None:
     """Run reconciliation through an explicitly supplied runtime boundary."""
-    runtime_factory(active_connections).reconcile_guacamole_observations(
-        admin_token,
-        data_source,
-    )
+    runtime = runtime_factory(active_connections)
+    try:
+        runtime.reconcile_guacamole_observations(
+            admin_token,
+            data_source,
+        )
+    finally:
+        runtime.close()
 
 
 def _parse_active_connections(value: Optional[str]) -> Optional[Mapping[str, Any]]:
