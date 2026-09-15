@@ -19,6 +19,7 @@ const fmuMetadataFeatureScriptPath = new URL('web/assets/js/lab-publisher-fmu-me
 const metadataFeatureScriptPath = new URL('web/assets/js/lab-publisher-metadata-feature.js', repoRoot);
 const pricingFeatureScriptPath = new URL('web/assets/js/lab-publisher-pricing-feature.js', repoRoot);
 const mediaFeatureScriptPath = new URL('web/assets/js/lab-publisher-media-feature.js', repoRoot);
+const validationFeatureScriptPath = new URL('web/assets/js/lab-publisher-validation-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -145,6 +146,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const metadataFeatureSource = fs.readFileSync(metadataFeatureScriptPath, 'utf8');
   const pricingFeatureSource = fs.readFileSync(pricingFeatureScriptPath, 'utf8');
   const mediaFeatureSource = fs.readFileSync(mediaFeatureScriptPath, 'utf8');
+  const validationFeatureSource = fs.readFileSync(validationFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
@@ -162,6 +164,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
       setMetadataFeatureController: controller => { metadataController = controller; },
       setPricingFeatureController: controller => { pricingController = controller; },
       setMediaFeatureController: controller => { mediaController = controller; },
+      setValidationFeatureController: controller => { validationController = controller; },
     };
 })();`
   );
@@ -183,6 +186,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(metadataFeatureSource, context, { filename: 'lab-publisher-metadata-feature.js' });
   vm.runInContext(pricingFeatureSource, context, { filename: 'lab-publisher-pricing-feature.js' });
   vm.runInContext(mediaFeatureSource, context, { filename: 'lab-publisher-media-feature.js' });
+  vm.runInContext(validationFeatureSource, context, { filename: 'lab-publisher-validation-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   const hooks = context.window.__labPublisherTestHooks;
   const values = context.window.LabPublisherValues;
@@ -251,6 +255,19 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   hooks.setPricingFeatureController(pricingController);
   const mediaController = context.window.LabPublisherMediaFeature.createController({ documentImpl: document });
   hooks.setMediaFeatureController(mediaController);
+  const validationController = context.window.LabPublisherValidationFeature.createController({
+    documentImpl: document,
+    getContentState: () => metadataController.getState(),
+    getPricingState: () => pricingController.getState(),
+    getAvailabilityState: () => availabilityController.getState(),
+    getBookingMode: () => schedulingController.getDerivedBookingMode(),
+    getAllowedPeriodRange: () => schedulingController.getSelectedAllowedPeriodRange(),
+    getFordField: values.getFordField,
+    expandAllowedDurations: values.expandAllowedDurations,
+    splitCsv: values.splitCsv,
+    dateInputToUnix: values.dateInputToUnix,
+  });
+  hooks.setValidationFeatureController(validationController);
   return {
     document,
     availabilityController,
@@ -260,6 +277,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
     metadataController,
     pricingController,
     mediaController,
+    validationController,
     hooks: {
       ...hooks,
       syncResourceTypeFields: resourceController.syncTypeFields,
