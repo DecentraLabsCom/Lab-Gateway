@@ -289,6 +289,7 @@ class TestSyncLabToBasyxDegradation:
             assert result.get("synced") is True
             assert result.get("created") is True
             assert "error" not in result
+            session_instance.close.assert_called_once_with()
         finally:
             _mod.BASYX_AAS_URL = original
 
@@ -311,5 +312,6 @@ class TestSyncLabToBasyxDegradation:
 
             assert "error" in result
             assert result.get("synced") is None
+            session_instance.close.assert_called_once_with()
         finally:
             _mod.BASYX_AAS_URL = original
