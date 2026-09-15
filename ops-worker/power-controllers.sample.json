@@ -34,7 +34,6 @@
       "steps": [
         {
           "phase": "pre_start",
-          "sequence": 10,
           "controllerId": "mock-lab-01",
           "outlet": "1",
           "action": "on",
@@ -43,7 +42,6 @@
         },
         {
           "phase": "pre_start",
-          "sequence": 20,
           "controllerId": "mock-lab-01",
           "outlet": "2",
           "action": "on",
@@ -52,7 +50,6 @@
         },
         {
           "phase": "post_end",
-          "sequence": 10,
           "controllerId": "mock-lab-01",
           "outlet": "2",
           "action": "off",
@@ -60,7 +57,6 @@
         },
         {
           "phase": "post_end",
-          "sequence": 20,
           "controllerId": "mock-lab-01",
           "outlet": "1",
           "action": "off",

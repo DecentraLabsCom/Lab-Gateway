@@ -119,7 +119,7 @@ class PowerRegistry:
                 if outlet.outlet_key not in controller_outlets:
                     controller_outlets[outlet.outlet_key] = outlet
 
-            if not controller_outlets:
+            if not controller_outlets and definition.driver_name == "mock":
                 raise ValidationError(f"controller {definition.id} requires at least one outlet")
             if definition.driver_name == "mock":
                 driver = MockPowerDriver(
@@ -198,8 +198,71 @@ class PowerRegistry:
         controller = self.get(controller_id)
         outlet = controller.outlets.get(str(outlet_id))
         if outlet is None:
+            try:
+                self._refresh_outlets(controller)
+            except PowerDriverError:
+                pass
+            outlet = controller.outlets.get(str(outlet_id))
+        if outlet is None:
             raise KeyError(f"outlet '{outlet_id}' not found on controller '{controller_id}'")
         return controller, outlet
+
+    @staticmethod
+    def _read_configuration(controller: RegisteredController) -> Dict[str, Any]:
+        reader = getattr(controller.driver, "read_configuration", None)
+        if callable(reader):
+            try:
+                configuration = reader()
+            except NotImplementedError:
+                configuration = None
+            if configuration is None:
+                return {
+                    "writable": False,
+                    "fields": [],
+                    "outlets": controller.driver.list_outlets(),
+                }
+            if not isinstance(configuration, Mapping):
+                raise PowerDriverError("power driver returned an invalid configuration")
+            return dict(configuration)
+        return {
+            "writable": False,
+            "fields": [],
+            "outlets": controller.driver.list_outlets(),
+        }
+
+    @staticmethod
+    def _remote_outlets(configuration: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+        outlets = configuration.get("outlets", [])
+        if not isinstance(outlets, list):
+            raise PowerDriverError("power driver returned an invalid outlet configuration")
+        if any(not isinstance(outlet, Mapping) for outlet in outlets):
+            raise PowerDriverError("power driver returned an invalid outlet configuration")
+        return list(outlets)
+
+    def _refresh_outlets(self, controller: RegisteredController) -> List[Mapping[str, Any]]:
+        configuration = self._read_configuration(controller)
+        remote_outlets = self._remote_outlets(configuration)
+        return self._merge_remote_outlets(controller, remote_outlets)
+
+    @staticmethod
+    def _merge_remote_outlets(
+        controller: RegisteredController,
+        remote_outlets: Iterable[Mapping[str, Any]],
+    ) -> List[Mapping[str, Any]]:
+        remote_outlets = list(remote_outlets)
+        refreshed: Dict[str, PowerOutlet] = {}
+        for remote in remote_outlets:
+            outlet_id = str(remote.get("outlet") or remote.get("outletKey") or "").strip()
+            if not outlet_id:
+                raise PowerDriverError("power driver returned an outlet without an ID")
+            if outlet_id in refreshed:
+                raise PowerDriverError(f"power driver returned duplicate outlet '{outlet_id}'")
+            local = controller.outlets.get(outlet_id)
+            if local is None:
+                local = PowerOutlet(controller.definition.id, outlet_id)
+            refreshed[outlet_id] = local
+        controller.outlets = refreshed
+        return remote_outlets
 
     @staticmethod
     def _public_metadata(controller: RegisteredController) -> Dict[str, Any]:
@@ -236,6 +299,7 @@ class PowerRegistry:
         """Return local controller configuration without contacting hardware."""
         public = self._public_metadata(controller)
         public["discovery"] = {}
+        public["deviceConfiguration"] = {"writable": False, "fields": []}
         public["outlets"] = [
             outlet.to_dict("unknown")
             for _, outlet in sorted(controller.outlets.items())
@@ -243,14 +307,14 @@ class PowerRegistry:
         return public
 
     def public_description(self, controller: RegisteredController) -> Dict[str, Any]:
-        """Return controller configuration enriched with live hardware state."""
+        """Return local safety metadata enriched with live hardware configuration."""
+        configuration: Dict[str, Any] = {}
         try:
-            states = {
-                item["outlet"]: item.get("state", "unknown")
-                for item in controller.driver.list_outlets()
-            }
+            configuration = self._read_configuration(controller)
+            remote_outlets = self._remote_outlets(configuration)
+            self._merge_remote_outlets(controller, remote_outlets)
         except PowerDriverError:
-            states = {}
+            remote_outlets = []
         try:
             discovery = controller.driver.discover()
         except PowerDriverError as exc:
@@ -260,8 +324,19 @@ class PowerRegistry:
             }
         public = self._public_metadata(controller)
         public["discovery"] = discovery
+        public["deviceConfiguration"] = {
+            "writable": configuration.get("writable", False) is True,
+            "fields": list(configuration.get("fields") or []),
+        }
+        remote_by_id = {
+            str(item.get("outlet") or item.get("outletKey") or "").strip(): item
+            for item in remote_outlets
+        }
         public["outlets"] = [
-            outlet.to_dict(states.get(outlet_id, "unknown"))
+            outlet.to_dict(
+                remote_by_id.get(outlet_id, {}).get("state", "unknown"),
+                remote_by_id.get(outlet_id),
+            )
             for outlet_id, outlet in sorted(controller.outlets.items())
         ]
         return public

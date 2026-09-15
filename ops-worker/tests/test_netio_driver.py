@@ -85,6 +85,41 @@ def test_netio_driver_reads_identity_and_outlets_and_uses_basic_auth():
     }
 
 
+def test_netio_reads_output_names_but_rejects_configuration_writes():
+    client = FakeHttpClient()
+    driver = build_driver(client)
+
+    assert driver.read_configuration() == {
+        "writable": False,
+        "fields": ["name"],
+        "outlets": [
+            {
+                "outlet": "1",
+                "name": "PLC",
+                "state": "off",
+                "deviceConfig": {},
+                "deviceConfigWritable": False,
+                "deviceConfigFields": ["name"],
+                "load": 12.5,
+            },
+            {
+                "outlet": "2",
+                "name": "HMI",
+                "state": "on",
+                "deviceConfig": {},
+                "deviceConfigWritable": False,
+                "deviceConfigFields": ["name"],
+                "load": 0,
+            },
+        ],
+    }
+
+    with pytest.raises(NetioJsonError, match="managed in the NETIO web interface"):
+        driver.apply_configuration({
+            "outlets": [{"outlet": "1", "name": "PLC updated"}],
+        })
+
+
 def test_netio_driver_posts_on_off_and_cycles_with_explicit_states():
     client = FakeHttpClient()
     slept = []

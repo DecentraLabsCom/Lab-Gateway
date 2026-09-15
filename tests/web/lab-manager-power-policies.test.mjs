@@ -23,7 +23,6 @@ function createDraft(step = {}) {
   return {
     id: step.id || '',
     phase: step.phase || 'pre_start',
-    sequence: step.sequence ?? 10,
     controllerId: step.controllerId || '',
     outlet: step.outlet || '',
     logicalName: step.logicalName || '',
@@ -47,6 +46,31 @@ function parseInteger(value, fieldName, maximum) {
     throw new Error(`${fieldName} must be between 0 and ${maximum}`);
   }
   return parsed;
+}
+
+function stepChangeTarget(index, field, value) {
+  return {
+    dataset: { stepField: field },
+    type: 'select',
+    value,
+    closest: () => ({ dataset: { stepIndex: String(index) } }),
+  };
+}
+
+function stepDragTarget(index) {
+  return {
+    closest: () => ({ dataset: { stepIndex: String(index) }, classList: { add() {}, remove() {} } }),
+  };
+}
+
+function dataTransfer() {
+  const values = new Map();
+  return {
+    dropEffect: '',
+    effectAllowed: '',
+    setData(type, value) { values.set(type, value); },
+    getData(type) { return values.get(type) || ''; },
+  };
 }
 
 function loadPolicies(overrides = {}) {
@@ -105,7 +129,6 @@ test('preserves policy form payload normalization and validation messages', () =
     endFailureMode: 'warn_and_continue',
     steps: [{
       phase: 'pre_start',
-      sequence: 10,
       controllerId: 'pdu-1',
       outlet: '1',
       action: 'cycle',
@@ -135,7 +158,6 @@ test('adds policy steps using the first available controller and outlet', () => 
   assert.deepEqual(JSON.parse(JSON.stringify(controller.getStepDrafts())), [{
     id: '',
     phase: 'pre_start',
-    sequence: 10,
     controllerId: 'pdu-1',
     outlet: '1',
     logicalName: '',
@@ -151,6 +173,52 @@ test('adds policy steps using the first available controller and outlet', () => 
     allowProtected: false,
     conditionsText: '{}',
   }]);
+});
+
+test('reorders policy steps through drag and drop and preserves that order on save', () => {
+  const { controller, fields } = loadPolicies({
+    renderPowerPolicyStepsMarkup: steps => steps.map(step => step.logicalName).join('|'),
+  });
+
+  controller.addStep();
+  controller.handleStepChange({ target: stepChangeTarget(0, 'logicalName', 'first') });
+  controller.addStep();
+  controller.handleStepChange({ target: stepChangeTarget(1, 'logicalName', 'second') });
+  controller.addStep();
+  controller.handleStepChange({ target: stepChangeTarget(2, 'logicalName', 'third') });
+
+  const transfer = dataTransfer();
+  controller.handleStepDragStart({ target: stepDragTarget(2), dataTransfer: transfer });
+  let prevented = false;
+  controller.handleStepDragOver({
+    target: stepDragTarget(0),
+    dataTransfer: transfer,
+    preventDefault() { prevented = true; },
+  });
+  controller.handleStepDrop({
+    target: stepDragTarget(0),
+    dataTransfer: transfer,
+    preventDefault() { prevented = true; },
+  });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(controller.getStepDrafts().map(step => step.logicalName))),
+    [
+      'third',
+      'first',
+      'second',
+    ],
+  );
+  assert.equal(prevented, true);
+  assert.equal(fields.steps.innerHTML, 'third|first|second');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(controller.readForm().steps.map(step => ({ logicalName: step.logicalName })))),
+    [
+      { logicalName: 'third' },
+      { logicalName: 'first' },
+      { logicalName: 'second' },
+    ],
+  );
 });
 
 test('preserves policy PUT endpoint, body and status lifecycle', async () => {

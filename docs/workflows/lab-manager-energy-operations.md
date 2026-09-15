@@ -1,7 +1,7 @@
 # Laboratory Energy Operations from Lab Manager
 
 This guide describes the implemented workflow for registering power
-controllers, storing their credentials, defining outlets, and associating them
+controllers, storing their credentials, discovering outputs, and associating them
 with laboratory energy policies. Control names remain in English because they
 are the labels currently shown in Lab Manager.
 
@@ -10,14 +10,16 @@ are the labels currently shown in Lab Manager.
 | Element | Lab Manager section | Current persistence |
 | --- | --- | --- |
 | APC/SNMP/NETIO credentials | `Energy Credentials` | Encrypted local JSON store at `OPS_POWER_CREDENTIALS_PATH`. Only references and types are returned. |
-| Controllers and outlets | `Power Controllers` | Local JSON catalog at `OPS_POWER_CONFIG`. |
+| Controllers and Gateway metadata | `Power Controllers` | Local JSON catalog at `OPS_POWER_CONFIG`; physical outputs are read from the device. |
+| Device output names and supported timing configuration | `Power Controllers` | Read from the physical controller; supported APC changes are written back to the device. |
 | Laboratory policies | `Lab Power Control` → `Lab power policy` | The same local JSON catalog. |
 | Operation results and idempotency | `Lab Power Control`, timeline, and Ops APIs | MySQL, primarily `power_operations`; migration `mysql/003-energy-policies.sql`. |
 | WoL, WinRM, and station shutdown | `Lab Station Ops` | Ops Worker, Lab Station, and their operational records; these are not PDU controllers. |
 
-In the MVP, `controllers`, `outlets`, and `policies` remain JSON-backed. The
-MySQL table does not replace that catalog: it keeps operation detail and
-idempotency for executed actions.
+In the MVP, controller definitions, Gateway outlet metadata and policies remain
+JSON-backed. Physical output names and device configuration are not copied
+into that catalog. The MySQL table does not replace that catalog: it keeps
+operation detail and idempotency for executed actions.
 
 ## Before starting
 
@@ -76,7 +78,7 @@ reference starts a rotation: enter the replacement secret and click
 `Save Credential` again. The controller keeps the same reference and the
 runtime is reloaded when possible.
 
-### 2. Register the controller and outlets
+### 2. Register the controller and synchronize its outputs
 
 In `Energy` → `Power Controllers`, select `New controller`. The `Existing
 controller` selector is populated from the provider-local catalog; it does not
@@ -118,28 +120,42 @@ For NETIO:
   certificate can be verified; and
 - use a `NETIO HTTP Basic` credential.
 
-Then, under `Outlets`, click `Add outlet` for every socket that a policy may
-switch. Define:
+For a physical controller, the `Controller outputs` panel is populated after
+the live status check. Do not create a duplicate list of sockets: output IDs,
+device names, state and supported device configuration come from the
+controller. The Gateway stores only its local overlay:
 
-- the device's real outlet identifier (`outlet`);
-- `Display name` and `Logical name` for operator recognition;
+- `Logical name` for policy/operator recognition;
 - `Default state`, normally `Off`;
 - `Critical` for equipment required to start or close the laboratory; and
 - `Protected` for outlets that must not be switched accidentally.
 
-Outlet identifiers must be unique within the controller. Click `Save
-Controller`. The catalog is written to `OPS_POWER_CONFIG` and the worker
-reloads its runtime. If the physical controller is unavailable during reload,
-the configuration may still persist, but actions will fail until connectivity
-or credentials are fixed.
+For APC SNMP, the device output name and power-on delay, power-off delay and
+reboot duration fields are editable in this panel. Saving a change writes it
+to the APC first and then persists the Gateway overlay; the driver reads the
+values back. The SNMP credential must have write permission. The supported
+delay ranges are 0--7200 seconds and reboot duration is 5--60 seconds.
 
-The catalog and live hardware status are loaded separately. The controller
-selector and configuration cards can render from the local catalog before the
-Gateway contacts the device. The status card may briefly show `checking` or
-`unknown` while discovery and outlet read-back run in the background. The
-`Refresh` button reloads the catalog and forces a live status refresh; normal
-status requests use a short cache of five seconds by default, configurable
-with `OPS_POWER_STATUS_CACHE_SECONDS`.
+NETIO's `/netio.json` endpoint exposes output names and live state, but does
+not expose those device-configuration writes. NETIO names and configuration
+are therefore shown as read-only and must be changed in the NETIO web
+interface. Switching and cycling outputs through the JSON API remain
+available.
+
+Click `Save Controller` after changing Gateway metadata or supported APC
+fields. The local file contains controller definitions and the Gateway
+overlay, not a second authoritative copy of the physical output
+configuration. If the device is unavailable, a physical controller can still
+be registered, but live outputs will appear after connectivity and credentials
+are fixed.
+
+The controller selector and controller fields can render from the local
+catalog before the Gateway contacts the device. The output editor is then
+replaced with the live physical outputs. The status card may briefly show
+`checking` or `unknown` while discovery and read-back run in the background.
+The `Refresh` button forces a live status refresh; normal status requests use
+a short cache of five seconds by default, configurable with
+`OPS_POWER_STATUS_CACHE_SECONDS`.
 
 ### 3. Create the laboratory policy
 
@@ -158,11 +174,14 @@ In `Energy` → `Lab Power Control` → `Lab power policy`:
    shutdown should not block the rest of the flow.
 7. Click `Add step` and define the actions.
 
-Each step contains at least `Phase`, `Sequence`, `Controller`, `Outlet`, and
-`Action`. Actions are `on`, `off`, and `cycle`. You can also set `Desired
-state`, cycle timing, delays, timeout, retries, and `Required`, `Read back
-state`, and `Allow protected outlet`. `Conditions` is optional advanced JSON;
-it must contain a valid JSON object.
+Each step contains at least `Phase`, `Controller`, `Outlet`, and `Action`.
+Steps are shown as `Step 1`, `Step 2`, and so on; drag a step to change its
+position in the policy. The position determines the order of steps within the
+same phase, while phases still execute according to their lifecycle order.
+Actions are `on`, `off`, and `cycle`. You can also set `Desired state`, cycle
+timing, delays, timeout, retries, and `Required`, `Read back state`, and
+`Allow protected outlet`. `Conditions` is optional advanced JSON; it must
+contain a valid JSON object.
 
 Available phases are:
 
@@ -174,11 +193,10 @@ Available phases are:
 | `end` / `post_end` | Turn off non-critical and then critical outlets. |
 | `manual`, `maintenance`, `emergency_stop` | Explicit procedures outside the normal cycle. |
 
-`Sequence` must be unique within each phase. A typical initial policy powers
-critical outlets on in `pre_start` and powers them off in reverse order in
-`post_end`. Do not include the strip itself, the network switch, the Gateway,
-the Guacamole host, or any equipment required to keep laboratory control and
-connectivity alive.
+A typical initial policy powers critical outlets on in `pre_start` and powers
+them off in reverse order in `post_end`. Do not include the strip itself, the
+network switch, the Gateway, the Guacamole host, or any equipment required to
+keep laboratory control and connectivity alive.
 
 Click `Save Policy`. The policy is associated with the selected `labId`, not
 the visible laboratory name. Renaming the lab must not create a second policy.

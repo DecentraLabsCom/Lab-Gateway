@@ -220,6 +220,10 @@ class FakePySnmpModule:
         def __init__(self, value):
             self.value = value
 
+    class OctetString:
+        def __init__(self, value):
+            self.value = value
+
     @staticmethod
     async def get_cmd(*_args):
         return FakePySnmpModule.response
@@ -261,6 +265,25 @@ def test_pysnmp_adapter_covers_auth_requests_walk_and_running_loop(monkeypatch):
     assert _PySnmpClient(
         "host", 161, {"version": "v2c", "community": "public"}, timeout_seconds=1, retries=1
     )._auth(module).mpModel == 1
+
+
+def test_pysnmp_adapter_encodes_string_sets_as_octet_strings(monkeypatch):
+    module = FakePySnmpModule
+    requests = []
+
+    async def set_cmd(*args):
+        requests.append(args[-1])
+        return FakePySnmpModule.response
+
+    monkeypatch.setattr(importlib, "import_module", lambda _name: module)
+    monkeypatch.setattr(module, "set_cmd", set_cmd)
+    client = _PySnmpClient(
+        "host", 161, {"version": "v2c", "community": "public"}, timeout_seconds=1, retries=1
+    )
+
+    assert client.set("1.2.3", "PLC") == "value"
+    assert isinstance(requests[0].value, module.OctetString)
+    assert requests[0].value.value == "PLC"
 
 
 def test_pysnmp_adapter_translates_protocol_errors_and_empty_responses(monkeypatch):

@@ -17,6 +17,9 @@
     }) {
         let powerPolicies = [];
         let powerPolicyStepDrafts = [];
+        let draggedStepIndex = -1;
+        let draggedRow = null;
+        let dragOverRow = null;
 
         function renderSteps() {
             if (!fields.steps) return;
@@ -58,6 +61,57 @@
             return Number.isInteger(index) && index >= 0 && index < powerPolicyStepDrafts.length ? index : -1;
         }
 
+        function clearDragState() {
+            draggedRow?.classList?.remove('is-dragging');
+            dragOverRow?.classList?.remove('is-drag-over');
+            draggedRow = null;
+            dragOverRow = null;
+            draggedStepIndex = -1;
+        }
+
+        function handleStepDragStart(event) {
+            const index = getStepIndex(event.target);
+            if (index < 0) return;
+            draggedStepIndex = index;
+            draggedRow = event.target?.closest?.('[data-step-index]') || null;
+            event.dataTransfer?.setData?.('text/plain', String(index));
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+            draggedRow?.classList?.add('is-dragging');
+        }
+
+        function handleStepDragOver(event) {
+            if (draggedStepIndex < 0) return;
+            const row = event.target?.closest?.('[data-step-index]');
+            const index = getStepIndex(event.target);
+            if (!row || index < 0) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            if (dragOverRow !== row) {
+                dragOverRow?.classList?.remove('is-drag-over');
+                dragOverRow = row;
+                dragOverRow.classList?.add('is-drag-over');
+            }
+        }
+
+        function handleStepDrop(event) {
+            const targetIndex = getStepIndex(event.target);
+            const transferredIndex = Number.parseInt(event.dataTransfer?.getData?.('text/plain'), 10);
+            const sourceIndex = Number.isInteger(transferredIndex) ? transferredIndex : draggedStepIndex;
+            if (sourceIndex < 0 || sourceIndex >= powerPolicyStepDrafts.length || targetIndex < 0) return;
+            event.preventDefault();
+            if (sourceIndex !== targetIndex) {
+                const [movedStep] = powerPolicyStepDrafts.splice(sourceIndex, 1);
+                const insertionIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+                powerPolicyStepDrafts.splice(insertionIndex, 0, movedStep);
+            }
+            clearDragState();
+            renderSteps();
+        }
+
+        function handleStepDragEnd() {
+            clearDragState();
+        }
+
         function handleStepChange(event) {
             const field = event.target?.dataset?.stepField;
             if (!field) return;
@@ -65,7 +119,9 @@
             if (index < 0) return;
             const step = powerPolicyStepDrafts[index];
             step[field] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
-            if (field === 'controllerId') {
+            if (field === 'phase') {
+                step.phase = String(event.target.value || '').trim().toLowerCase();
+            } else if (field === 'controllerId') {
                 step.outlet = '';
                 renderSteps();
             } else if (field === 'action') {
@@ -84,15 +140,10 @@
         }
 
         function addStep() {
-            const phase = 'pre_start';
-            const phaseSequences = powerPolicyStepDrafts
-                .filter(step => step.phase === phase)
-                .map(step => Number(step.sequence) || 0);
             const firstController = getControllers()[0];
             const firstOutlet = Array.isArray(firstController?.outlets) ? firstController.outlets[0] : null;
             powerPolicyStepDrafts.push(createPowerPolicyStepDraft({
-                phase,
-                sequence: (phaseSequences.length ? Math.max(...phaseSequences) : 0) + 10,
+                phase: 'pre_start',
                 controllerId: firstController?.id || '',
                 outlet: firstOutlet?.outlet || '',
             }));
@@ -132,7 +183,6 @@
                 }
                 const normalized = {
                     phase: step.phase,
-                    sequence: parsePowerPolicyInteger(step.sequence, 'Sequence', 1000000),
                     controllerId: step.controllerId,
                     outlet: step.outlet,
                     action: step.action,
@@ -288,6 +338,10 @@
             fields.steps?.addEventListener('change', handleStepChange);
             fields.steps?.addEventListener('input', handleStepChange);
             fields.steps?.addEventListener('click', handleStepActions);
+            fields.steps?.addEventListener('dragstart', handleStepDragStart);
+            fields.steps?.addEventListener('dragover', handleStepDragOver);
+            fields.steps?.addEventListener('drop', handleStepDrop);
+            fields.steps?.addEventListener('dragend', handleStepDragEnd);
             fields.saveButton?.addEventListener('click', save);
             if (fields.name && !fields.name.value) resetEditor();
         }
@@ -299,6 +353,10 @@
             handleLabChange,
             handleStepChange,
             handleStepActions,
+            handleStepDragEnd,
+            handleStepDragOver,
+            handleStepDragStart,
+            handleStepDrop,
             initialize,
             load,
             loadSelected,

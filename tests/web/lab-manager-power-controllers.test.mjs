@@ -103,7 +103,6 @@ test('preserves controller form validation and NETIO payload shape', () => {
     },
     outlets: [{
       outlet: '1',
-      displayName: '',
       logicalName: '',
       protected: false,
       critical: false,
@@ -150,4 +149,57 @@ test('preserves controller load status and authorization request behavior', asyn
   assert.equal(calls[0].options.cache, 'no-store');
   assert.equal(calls[1].url, '/ops/api/power/controllers/status?refresh=true');
   assert.equal(calls[1].options.cache, 'no-store');
+});
+
+test('sends physical output changes separately from Gateway-local metadata', () => {
+  const { controller, fields } = loadControllers({
+    createPowerControllerOutletDraft: outlet => ({
+      outlet: String(outlet.outlet || ''),
+      displayName: '',
+      deviceName: outlet.deviceName || '',
+      deviceConfig: { ...(outlet.deviceConfig || {}) },
+      deviceConfigFields: outlet.deviceConfigFields || ['name', 'powerOnDelaySeconds'],
+      deviceConfigWritable: true,
+      deviceManaged: true,
+      logicalName: '',
+      protected: false,
+      critical: false,
+      defaultState: 'off',
+    }),
+  });
+  controller.populateForm({
+    id: 'apc-1',
+    name: 'APC',
+    driver: 'apc-powernet-snmp',
+    host: '192.0.2.20',
+    port: 161,
+    credentialRef: 'apc-1',
+    config: { profile: 'legacy' },
+    outlets: [{
+      outlet: '1',
+      deviceName: 'PLC',
+      deviceConfig: { powerOnDelaySeconds: 0 },
+      deviceConfigFields: ['name', 'powerOnDelaySeconds'],
+      deviceConfigWritable: true,
+      logicalName: 'plc',
+    }],
+  });
+  const target = {
+    type: 'text',
+    value: 'PLC updated',
+    dataset: { controllerOutletField: 'deviceName' },
+    closest: () => ({ dataset: { controllerOutletIndex: '0' } }),
+  };
+  controller.handleOutletChange({ target });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(controller.readForm().deviceConfiguration)), {
+    outlets: [{ outlet: '1', name: 'PLC updated', config: { powerOnDelaySeconds: 0 } }],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(controller.readForm().outlets)), [{
+    outlet: '1',
+    logicalName: '',
+    protected: false,
+    critical: false,
+    defaultState: 'off',
+  }]);
 });

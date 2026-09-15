@@ -263,6 +263,42 @@ class NetioJsonDriver:
                 "errorCode": exc.error_code,
             }
 
+    def read_configuration(self) -> Dict[str, Any]:
+        """Read NETIO output names exposed by /netio.json.
+
+        The JSON API is intentionally read-only for these fields.  Output
+        names and the remaining device configuration are managed by NETIO's
+        web administration interface.
+        """
+        body = self._request("GET")
+        outlets = []
+        for output in self._outputs(body):
+            outlet = {
+                "outlet": _output_id(output.get("ID")),
+                "name": str(output.get("Name") or "").strip() or None,
+                "state": self._state(output.get("State")),
+                "deviceConfig": {},
+                "deviceConfigWritable": False,
+                "deviceConfigFields": ["name"],
+            }
+            if output.get("Load") is not None:
+                outlet["load"] = output["Load"]
+            outlets.append(outlet)
+        return {
+            "writable": False,
+            "fields": ["name"],
+            "outlets": outlets,
+        }
+
+    def apply_configuration(self, configuration: Mapping[str, Any]) -> Dict[str, Any]:
+        raw_outlets = configuration.get("outlets") if isinstance(configuration, Mapping) else None
+        if raw_outlets:
+            raise NetioJsonError(
+                "CONFIGURATION_READ_ONLY",
+                "NETIO output configuration is managed in the NETIO web interface",
+            )
+        return self.read_configuration()
+
     def list_outlets(self) -> List[Dict[str, Any]]:
         result = []
         for output in self._outputs(self._request("GET")):

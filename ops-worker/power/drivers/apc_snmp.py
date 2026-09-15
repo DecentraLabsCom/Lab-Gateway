@@ -24,6 +24,10 @@ APC_LEGACY_OIDS = {
     "state": "1.3.6.1.4.1.318.1.1.4.4.2.1.3",
     "name": "1.3.6.1.4.1.318.1.1.4.4.2.1.4",
     "command": "1.3.6.1.4.1.318.1.1.4.4.2.1.3",
+    "config_name": "1.3.6.1.4.1.318.1.1.4.5.2.1.2",
+    "power_on_delay": "1.3.6.1.4.1.318.1.1.4.5.2.1.4",
+    "power_off_delay": "1.3.6.1.4.1.318.1.1.4.5.2.1.5",
+    "reboot_duration": "1.3.6.1.4.1.318.1.1.4.5.2.1.6",
 }
 
 APC_RPDU2_OIDS = {
@@ -35,6 +39,9 @@ APC_RPDU2_OIDS = {
     "number": "1.3.6.1.4.1.318.1.1.26.9.2.3.1.4",
     "state": "1.3.6.1.4.1.318.1.1.26.9.2.3.1.5",
     "command": "1.3.6.1.4.1.318.1.1.26.9.2.4.1.5",
+    "power_on_delay": "1.3.6.1.4.1.318.1.1.26.9.2.3.1.5",
+    "power_off_delay": "1.3.6.1.4.1.318.1.1.26.9.2.3.1.6",
+    "reboot_duration": "1.3.6.1.4.1.318.1.1.26.9.2.3.1.7",
 }
 
 SYS_DESCR_OID = "1.3.6.1.2.1.1.1.0"
@@ -44,7 +51,7 @@ class SnmpClient(Protocol):
     def get(self, oid: str) -> Any:
         raise NotImplementedError
 
-    def set(self, oid: str, value: int) -> Any:
+    def set(self, oid: str, value: Any) -> Any:
         raise NotImplementedError
 
     def walk(self, oid: str) -> Iterable[Tuple[str, Any]]:
@@ -291,31 +298,48 @@ class ApcPowerNetSnmpDriver:
             rows = []
             for number in range(1, count + 1):
                 suffix = str(number)
-                name = self._optional_get(_oid(APC_LEGACY_OIDS["name"], suffix))
+                configured_name = self._optional_get(_oid(APC_LEGACY_OIDS["config_name"], suffix))
+                name = configured_name
+                if name is None:
+                    name = self._optional_get(_oid(APC_LEGACY_OIDS["name"], suffix))
                 state = self._state(self._get(_oid(APC_LEGACY_OIDS["state"], suffix)), profile)
-                rows.append({
+                row = {
                     "outlet": suffix,
                     "name": _text(name) if name is not None else None,
                     "state": state,
+                }
+                self._add_remote_configuration(row, {
+                    key: self._optional_get(_oid(APC_LEGACY_OIDS[key], suffix))
+                    for key in ("power_on_delay", "power_off_delay", "reboot_duration")
                 })
+                rows.append(row)
             return rows
 
         index_rows = self._walk(APC_RPDU2_OIDS["index"])
         names = self._table_values(APC_RPDU2_OIDS["name"])
         numbers = self._table_values(APC_RPDU2_OIDS["number"])
         states = self._table_values(APC_RPDU2_OIDS["state"])
+        power_on_delays = self._optional_table_values(APC_RPDU2_OIDS["power_on_delay"])
+        power_off_delays = self._optional_table_values(APC_RPDU2_OIDS["power_off_delay"])
+        reboot_durations = self._optional_table_values(APC_RPDU2_OIDS["reboot_duration"])
         rows = []
         for row_oid, _ in index_rows:
             index = _row_suffix(APC_RPDU2_OIDS["index"], row_oid)
             if index not in states:
                 raise ApcSnmpError("INVALID_RESPONSE", "APC SNMP outlet state is missing")
             outlet = _text(numbers.get(index, index))
-            rows.append({
+            row = {
                 "outlet": outlet,
                 "name": _text(names[index]) if index in names else None,
                 "state": self._state(states[index], profile),
                 "index": index,
+            }
+            self._add_remote_configuration(row, {
+                "power_on_delay": power_on_delays.get(index),
+                "power_off_delay": power_off_delays.get(index),
+                "reboot_duration": reboot_durations.get(index),
             })
+            rows.append(row)
         return sorted(rows, key=lambda row: (int(row["outlet"]) if str(row["outlet"]).isdigit() else 0, row["outlet"]))
 
     def _table_values(self, base: str) -> Dict[str, Any]:
@@ -324,9 +348,116 @@ class ApcPowerNetSnmpDriver:
             for row_oid, value in self._walk(base)
         }
 
+    def _optional_table_values(self, base: str) -> Dict[str, Any]:
+        try:
+            return self._table_values(base)
+        except PowerDriverError:
+            return {}
+
+    @staticmethod
+    def _add_remote_configuration(row: Dict[str, Any], values: Mapping[str, Any]) -> None:
+        names = {
+            "power_on_delay": "powerOnDelaySeconds",
+            "power_off_delay": "powerOffDelaySeconds",
+            "reboot_duration": "rebootDurationSeconds",
+        }
+        configuration = {}
+        for source_name, public_name in names.items():
+            value = values.get(source_name)
+            if value is None:
+                continue
+            try:
+                configuration[public_name] = _int(value, public_name)
+            except ApcSnmpError:
+                continue
+        row["deviceConfig"] = configuration
+        row["deviceConfigWritable"] = True
+        row["deviceConfigFields"] = [
+            "name",
+            "powerOnDelaySeconds",
+            "powerOffDelaySeconds",
+            "rebootDurationSeconds",
+        ]
+
+    def read_configuration(self) -> Dict[str, Any]:
+        profile = self._profile()
+        return {
+            "writable": True,
+            "fields": [
+                "name",
+                "powerOnDelaySeconds",
+                "powerOffDelaySeconds",
+                "rebootDurationSeconds",
+            ],
+            "profile": profile,
+            "outlets": self._outlet_rows(),
+        }
+
+    @staticmethod
+    def _configuration_int(value: Any, field_name: str) -> int:
+        if isinstance(value, bool):
+            raise ApcSnmpError("CONFIGURATION", f"APC {field_name} is invalid")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ApcSnmpError("CONFIGURATION", f"APC {field_name} is invalid") from exc
+        minimum = 5 if field_name == "rebootDurationSeconds" else 0
+        maximum = 60 if field_name == "rebootDurationSeconds" else 7200
+        if parsed < minimum or parsed > maximum:
+            raise ApcSnmpError(
+                "CONFIGURATION",
+                f"APC {field_name} must be between {minimum} and {maximum}",
+            )
+        return parsed
+
+    def apply_configuration(self, configuration: Mapping[str, Any]) -> Dict[str, Any]:
+        if not isinstance(configuration, Mapping):
+            raise ApcSnmpError("CONFIGURATION", "APC device configuration is invalid")
+        raw_outlets = configuration.get("outlets")
+        if not isinstance(raw_outlets, list):
+            raise ApcSnmpError("CONFIGURATION", "APC device outlets configuration is invalid")
+        profile = self._profile()
+        rows = self._outlet_rows()
+        rows_by_outlet = {str(row["outlet"]): row for row in rows}
+        oids = APC_LEGACY_OIDS if profile == "legacy" else APC_RPDU2_OIDS
+        for raw_outlet in raw_outlets:
+            if not isinstance(raw_outlet, Mapping):
+                raise ApcSnmpError("CONFIGURATION", "APC device outlet configuration is invalid")
+            outlet = str(raw_outlet.get("outlet") or "").strip()
+            row = rows_by_outlet.get(outlet)
+            if row is None:
+                raise ApcSnmpError("OUTLET_NOT_FOUND", f"APC outlet '{outlet}' was not found")
+            suffix = row.get("index", outlet)
+            raw_config = raw_outlet.get("config") or {}
+            if not isinstance(raw_config, Mapping):
+                raise ApcSnmpError("CONFIGURATION", "APC device outlet config is invalid")
+            if "name" in raw_outlet:
+                name = str(raw_outlet.get("name") or "").strip()
+                if len(name) > 160:
+                    raise ApcSnmpError("CONFIGURATION", "APC outlet name is too long")
+                if name != str(row.get("name") or ""):
+                    name_oid = oids["config_name"] if profile == "legacy" else oids["name"]
+                    self._call("set", _oid(name_oid, suffix), name)
+            current = row.get("deviceConfig") or {}
+            for field_name, oid_key in (
+                ("powerOnDelaySeconds", "power_on_delay"),
+                ("powerOffDelaySeconds", "power_off_delay"),
+                ("rebootDurationSeconds", "reboot_duration"),
+            ):
+                if field_name not in raw_config:
+                    continue
+                value = self._configuration_int(raw_config[field_name], field_name)
+                if current.get(field_name) != value:
+                    self._call("set", _oid(oids[oid_key], suffix), value)
+        return self.read_configuration()
+
     def list_outlets(self) -> List[Dict[str, Any]]:
         return [
-            {key: value for key, value in row.items() if key != "index"}
+            {
+                key: value
+                for key, value in row.items()
+                if key in {"outlet", "name", "state"}
+            }
             for row in self._outlet_rows()
         ]
 
@@ -438,7 +569,7 @@ class _PySnmpClient:
         except KeyError as exc:
             raise ApcSnmpError("CONFIGURATION", "unsupported SNMPv3 security protocol") from exc
 
-    async def _request(self, operation: str, oid: str, value: Optional[int] = None):
+    async def _request(self, operation: str, oid: str, value: Any = None):
         try:
             module = importlib.import_module("pysnmp.hlapi.v3arch.asyncio")
         except ImportError as exc:  # pragma: no cover - dependency is installed in image
@@ -451,7 +582,12 @@ class _PySnmpClient:
                 retries=self.retries,
             )
             if operation == "set":
-                request = module.ObjectType(module.ObjectIdentity(oid), module.Integer(value))
+                snmp_value = (
+                    module.OctetString(value)
+                    if isinstance(value, (str, bytes))
+                    else module.Integer(value)
+                )
+                request = module.ObjectType(module.ObjectIdentity(oid), snmp_value)
             else:
                 request = module.ObjectType(module.ObjectIdentity(oid))
             command = module.get_cmd if operation == "get" else module.set_cmd
@@ -502,7 +638,7 @@ class _PySnmpClient:
     def get(self, oid: str) -> Any:
         return self._run(self._request("get", oid))
 
-    def set(self, oid: str, value: int) -> Any:
+    def set(self, oid: str, value: Any) -> Any:
         return self._run(self._request("set", oid, value))
 
     def walk(self, oid: str) -> Iterable[Tuple[str, Any]]:

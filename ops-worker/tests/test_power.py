@@ -49,6 +49,38 @@ class CountingPowerDriver(PowerDriver):
         raise NotImplementedError
 
 
+class LiveConfigurationDriver(PowerDriver):
+    capabilities = PowerCapabilities(per_outlet_switching=True, read_back_state=True)
+
+    def read_configuration(self) -> Dict[str, Any]:
+        return {
+            "writable": True,
+            "fields": ["name"],
+            "outlets": [
+                {"outlet": "1", "name": "PLC", "state": "off", "deviceConfigFields": ["name"]},
+                {"outlet": "4", "name": "HMI", "state": "on", "deviceConfigFields": ["name"]},
+            ],
+        }
+
+    def apply_configuration(self, configuration):
+        return self.read_configuration()
+
+    def list_outlets(self):
+        return self.read_configuration()["outlets"]
+
+    def discover(self):
+        return {"reachable": True, "driver": "live-test", "outletCount": 2}
+
+    def get_outlet_state(self, outlet_id):
+        return {"outlet": outlet_id, "state": "off"}
+
+    def set_outlet_state(self, outlet_id, state, timeout_seconds=20):
+        return {"outlet": outlet_id, "state": state, "success": True}
+
+    def cycle_outlet(self, outlet_id, off_seconds=10, timeout_seconds=30):
+        return {"outlet": outlet_id, "state": "on", "success": True}
+
+
 def mock_driver(runtime: PowerRuntime) -> MockPowerDriver:
     driver = runtime.registry.get("mock-lab-01").driver
     assert isinstance(driver, MockPowerDriver)
@@ -140,7 +172,7 @@ def build_runtime(*, record_operation=None, sleep_fn=None, operation_store=None)
     )
 
 
-def test_policy_steps_are_sorted_and_reject_duplicate_phase_sequence():
+def test_legacy_policy_steps_are_sorted_and_reject_duplicate_phase_sequence():
     policy = LabPowerPolicy.from_mapping(
         {
             "labId": "lab-1",
@@ -191,6 +223,46 @@ def test_policy_steps_are_sorted_and_reject_duplicate_phase_sequence():
         )
 
 
+def test_policy_steps_follow_ui_order_without_exposing_sequence():
+    policy = LabPowerPolicy.from_mapping(
+        {
+            "labId": "lab-1",
+            "policyName": "ordered",
+            "steps": [
+                {
+                    "phase": "pre_start",
+                    "controllerId": "controller",
+                    "outlet": "2",
+                    "action": "on",
+                },
+                {
+                    "phase": "pre_start",
+                    "controllerId": "controller",
+                    "outlet": "1",
+                    "action": "on",
+                },
+                {
+                    "phase": "end",
+                    "controllerId": "controller",
+                    "outlet": "1",
+                    "action": "off",
+                },
+            ],
+        }
+    )
+
+    assert [step.outlet for step in policy.steps_for_phase("pre_start")] == ["2", "1"]
+    assert [step.sequence for step in policy.steps_for_phase("pre_start")] == [10, 20]
+    serialized = policy.to_dict()
+    assert [step["outlet"] for step in serialized["steps"]] == ["2", "1", "1"]
+    assert all("sequence" not in step for step in serialized["steps"])
+    assert len({step["id"] for step in serialized["steps"]}) == 3
+
+    reloaded = LabPowerPolicy.from_mapping(serialized)
+    assert [step.outlet for step in reloaded.steps_for_phase("pre_start")] == ["2", "1"]
+    assert [step.step_id for step in reloaded.steps] == [step["id"] for step in serialized["steps"]]
+
+
 def test_executor_runs_phases_in_order_and_is_idempotent():
     operations = []
     runtime = build_runtime(record_operation=operations.append)
@@ -225,7 +297,6 @@ def test_required_failure_stops_phase_but_optional_failure_continues():
             "steps": [
                 {
                     "phase": "pre_start",
-                    "sequence": 10,
                     "controllerId": "mock-lab-01",
                     "outlet": "1",
                     "action": "on",
@@ -341,6 +412,23 @@ def test_power_runtime_separates_catalog_from_cached_status():
     assert driver.discover_calls == 2
 
 
+def test_registry_uses_live_outputs_without_a_duplicated_local_catalog():
+    driver = LiveConfigurationDriver()
+    controller = RegisteredController(
+        PowerController("live-1", "Live controller", "live-test"),
+        driver,
+        {},
+    )
+    registry = PowerRegistry([controller])
+
+    description = registry.public_description(controller)
+
+    assert [outlet["outlet"] for outlet in description["outlets"]] == ["1", "4"]
+    assert [outlet["deviceName"] for outlet in description["outlets"]] == ["PLC", "HMI"]
+    assert [outlet["displayName"] for outlet in description["outlets"]] == ["PLC", "HMI"]
+    assert registry.get_outlet("live-1", "4")[1].outlet_key == "4"
+
+
 def test_power_controller_status_api_can_bypass_status_cache(client, monkeypatch):
     runtime, driver = build_counting_status_runtime()
     monkeypatch.setitem(worker.APP.extensions, "power_runtime", runtime)
@@ -362,7 +450,10 @@ def test_power_controller_api_creates_and_updates_provider_catalog(client, tmp_p
         json.dumps({"controllers": [], "outlets": [], "policies": []}),
         encoding="utf-8",
     )
-    runtime = PowerRuntime.from_path(str(config_path))
+    runtime = PowerRuntime.from_path(
+        str(config_path),
+        credential_resolver=lambda _reference: {"version": "v2c", "community": "private"},
+    )
     monkeypatch.setitem(worker.APP.extensions, "power_runtime", runtime)
 
     created = client.post(
@@ -405,6 +496,53 @@ def test_power_controller_api_creates_and_updates_provider_catalog(client, tmp_p
     persisted = json.loads(config_path.read_text(encoding="utf-8"))
     assert persisted["controllers"][0]["name"] == "Bench PDU Updated"
     assert [outlet["outlet"] for outlet in persisted["outlets"]] == ["1", "2"]
+
+
+def test_power_controller_update_synchronizes_device_configuration_before_persisting(tmp_path, monkeypatch):
+    config_path = tmp_path / "power-controllers.json"
+    config_path.write_text(json.dumps({"controllers": [], "outlets": [], "policies": []}), encoding="utf-8")
+    runtime = PowerRuntime.from_path(
+        str(config_path),
+        credential_resolver=lambda _reference: {"version": "v2c", "community": "private"},
+    )
+    original_from_config = PowerRuntime.from_config.__func__
+    applied = []
+
+    def build_candidate(cls, config, **kwargs):
+        candidate = original_from_config(cls, config, **kwargs)
+        candidate.registry.get("pdu-1").driver.apply_configuration = applied.append
+        return candidate
+
+    monkeypatch.setattr(PowerRuntime, "from_config", classmethod(build_candidate))
+
+    updated = runtime.update_controller({
+        "id": "pdu-1",
+        "name": "APC PDU",
+        "driver": "apc-powernet-snmp",
+        "host": "192.0.2.20",
+        "credentialRef": "pdu-1",
+        "config": {"profile": "legacy"},
+        "outlets": [],
+        "deviceConfiguration": {
+            "outlets": [{
+                "outlet": "1",
+                "name": "PLC",
+                "config": {"powerOnDelaySeconds": 5},
+            }],
+        },
+    })
+
+    assert updated["id"] == "pdu-1"
+    assert applied == [{
+        "outlets": [{
+            "outlet": "1",
+            "name": "PLC",
+            "config": {"powerOnDelaySeconds": 5},
+        }],
+    }]
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "deviceConfiguration" not in persisted["controllers"][0]
+    assert persisted["outlets"] == []
 
 
 def test_power_controller_api_rejects_secret_config_without_changing_catalog(client, tmp_path, monkeypatch):
@@ -642,17 +780,30 @@ def test_power_policy_update_is_validated_persisted_and_applied(tmp_path):
             "enabled": True,
             "steps": [
                 {
-                    "phase": "pre_start",
-                    "sequence": 10,
+                    "phase": "start",
                     "controllerId": "mock-lab-01",
                     "outlet": "1",
                     "action": "on",
-                }
+                },
+                {
+                    "phase": "end",
+                    "controllerId": "mock-lab-01",
+                    "outlet": "1",
+                    "action": "off",
+                },
+                {
+                    "phase": "start",
+                    "controllerId": "mock-lab-01",
+                    "outlet": "1",
+                    "action": "on",
+                },
             ],
         }
     )
 
     assert updated["policyName"] == "Updated"
+    assert [step["phase"] for step in updated["steps"]] == ["start", "end", "start"]
+    assert all("sequence" not in step for step in updated["steps"])
     assert runtime.describe_policies() == [updated]
     persisted = json.loads(config_path.read_text(encoding="utf-8"))
     assert persisted["policies"] == [updated]
@@ -719,6 +870,37 @@ def test_power_policy_api_lists_and_updates_provider_policy(client, tmp_path, mo
     )
     assert updated.status_code == 200
     assert updated.json["policy"]["labId"] == "lab-1"
+
+    policy_with_ordered_steps = client.put(
+        "/api/power/policies/lab-1",
+        json={
+            "policyName": "Provider ordered policy",
+            "steps": [
+                {
+                    "phase": "start",
+                    "controllerId": "controller",
+                    "outlet": "1",
+                    "action": "on",
+                },
+                {
+                    "phase": "end",
+                    "controllerId": "controller",
+                    "outlet": "1",
+                    "action": "off",
+                },
+                {
+                    "phase": "start",
+                    "controllerId": "controller",
+                    "outlet": "2",
+                    "action": "on",
+                },
+            ],
+        },
+    )
+    assert policy_with_ordered_steps.status_code == 200
+    saved_steps = policy_with_ordered_steps.json["policy"]["steps"]
+    assert [step["phase"] for step in saved_steps] == ["start", "end", "start"]
+    assert all("sequence" not in step for step in saved_steps)
 
     mismatch = client.put(
         "/api/power/policies/lab-2",

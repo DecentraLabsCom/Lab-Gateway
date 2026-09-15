@@ -154,6 +154,8 @@ def _update_controller(runtime: PowerRuntime, controller_id: Optional[str] = Non
         updated = runtime.update_controller(body)
     except ValidationError:
         return jsonify({"success": False, "error": "Power controller configuration is invalid"}), 400
+    except PowerDriverError:
+        return jsonify({"success": False, "error": "Power controller configuration could not be synchronized"}), 502
     except PowerConfigError:
         return jsonify({"success": False, "error": "Power controller could not be persisted"}), 503
     return jsonify({"success": True, "controller": updated})

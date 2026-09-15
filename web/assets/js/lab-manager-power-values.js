@@ -7,7 +7,6 @@
             const conditions = step.conditions && typeof step.conditions === 'object' && !Array.isArray(step.conditions)
                 ? step.conditions
                 : {};
-            const parsedSequence = Number.parseInt(step.sequence, 10);
             const readInteger = (value, fallback) => {
                 const parsed = Number.parseInt(value, 10);
                 return Number.isInteger(parsed) ? parsed : fallback;
@@ -15,7 +14,6 @@
             return {
                 id: String(step.id || step.stepId || '').trim(),
                 phase: String(step.phase || 'pre_start').trim().toLowerCase(),
-                sequence: Number.isInteger(parsedSequence) && parsedSequence >= 0 ? parsedSequence : 10,
                 controllerId: String(step.controllerId || step.controller_id || '').trim(),
                 outlet: String(step.outlet || step.outletKey || step.outlet_key || '').trim(),
                 logicalName: String(step.logicalName || step.logical_name || '').trim(),
@@ -34,9 +32,20 @@
         }
 
         function createPowerControllerOutletDraft(outlet = {}) {
+            const deviceConfig = outlet.deviceConfig && typeof outlet.deviceConfig === 'object' && !Array.isArray(outlet.deviceConfig)
+                ? { ...outlet.deviceConfig }
+                : {};
+            const deviceConfigFields = Array.isArray(outlet.deviceConfigFields)
+                ? outlet.deviceConfigFields.map(field => String(field))
+                : [];
             return {
                 outlet: String(outlet.outlet || outlet.outletKey || '').trim(),
                 displayName: String(outlet.displayName || '').trim(),
+                deviceName: String(outlet.deviceName || outlet.name || '').trim(),
+                deviceConfig,
+                deviceConfigFields,
+                deviceConfigWritable: outlet.deviceConfigWritable === true,
+                deviceManaged: outlet.deviceManaged === true || deviceConfigFields.length > 0,
                 logicalName: String(outlet.logicalName || '').trim(),
                 protected: outlet.protected === true,
                 critical: outlet.critical === true,

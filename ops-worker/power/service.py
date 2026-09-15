@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, Mapping, Optional
 from power.models import LabPowerPolicy, ValidationError
 
 from .executor import OperationRecorder, PowerPolicyExecutor
+from .drivers.base import PowerDriverError
 from .persistence import PowerOperationStore
 from .registry import CredentialResolver, PowerRegistry
 
@@ -33,7 +34,18 @@ def _secure_file(path: Path) -> None:
 LOGGER = logging.getLogger(__name__)
 
 _CONTROLLER_FIELDS = frozenset(
-    {"id", "name", "driver", "enabled", "host", "port", "credentialRef", "config", "outlets"}
+    {
+        "id",
+        "name",
+        "driver",
+        "enabled",
+        "host",
+        "port",
+        "credentialRef",
+        "config",
+        "outlets",
+        "deviceConfiguration",
+    }
 )
 _CONTROLLER_CONFIG_FIELDS = frozenset(
     {
@@ -46,6 +58,9 @@ _CONTROLLER_CONFIG_FIELDS = frozenset(
         "useHttps",
         "verifyTls",
     }
+)
+_DEVICE_CONFIGURATION_FIELDS = frozenset(
+    {"powerOnDelaySeconds", "powerOffDelaySeconds", "rebootDurationSeconds"}
 )
 
 
@@ -71,7 +86,65 @@ def _controller_int(value: Any, field_name: str, *, minimum: int, maximum: int) 
     return parsed
 
 
-def _controller_payload(raw_controller: Mapping[str, Any]) -> tuple[Dict[str, Any], list[Dict[str, Any]]]:
+def _device_configuration_payload(
+    raw_configuration: Any,
+    *,
+    controller_id: str,
+) -> Optional[Dict[str, Any]]:
+    if raw_configuration is None:
+        return None
+    if not isinstance(raw_configuration, Mapping):
+        raise ValidationError("deviceConfiguration must be an object")
+    if set(raw_configuration) - {"outlets"}:
+        raise ValidationError("deviceConfiguration contains unsupported fields")
+    raw_outlets = raw_configuration.get("outlets")
+    if not isinstance(raw_outlets, list):
+        raise ValidationError("deviceConfiguration outlets must be an array")
+    outlets = []
+    seen = set()
+    for raw_outlet in raw_outlets:
+        if not isinstance(raw_outlet, Mapping):
+            raise ValidationError("every device outlet configuration must be an object")
+        outlet_id = str(raw_outlet.get("outlet", raw_outlet.get("outletKey")) or "").strip()
+        if not outlet_id:
+            raise ValidationError("device outlet is required")
+        if outlet_id in seen:
+            raise ValidationError(f"duplicate device outlet {outlet_id} for controller {controller_id}")
+        seen.add(outlet_id)
+        unknown = set(raw_outlet) - {"outlet", "outletKey", "name", "config"}
+        if unknown:
+            raise ValidationError("device outlet configuration contains unsupported fields")
+        item: Dict[str, Any] = {"outlet": outlet_id}
+        if "name" in raw_outlet:
+            name = str(raw_outlet.get("name") or "").strip()
+            if len(name) > 160 or "\n" in name or "\r" in name:
+                raise ValidationError("device outlet name is too long")
+            item["name"] = name
+        raw_config = raw_outlet.get("config", {})
+        if not isinstance(raw_config, Mapping):
+            raise ValidationError("device outlet config must be an object")
+        if set(raw_config) - _DEVICE_CONFIGURATION_FIELDS:
+            raise ValidationError("device outlet config contains unsupported fields")
+        device_config = {}
+        for field_name in _DEVICE_CONFIGURATION_FIELDS:
+            if field_name not in raw_config:
+                continue
+            minimum = 5 if field_name == "rebootDurationSeconds" else 0
+            device_config[field_name] = _controller_int(
+                raw_config[field_name],
+                field_name,
+                minimum=minimum,
+                maximum=60 if field_name == "rebootDurationSeconds" else 7200,
+            )
+        if device_config:
+            item["config"] = device_config
+        outlets.append(item)
+    return {"outlets": outlets}
+
+
+def _controller_payload(
+    raw_controller: Mapping[str, Any],
+) -> tuple[Dict[str, Any], list[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if not isinstance(raw_controller, Mapping):
         raise ValidationError("power controller must be an object")
     unknown_fields = set(raw_controller) - _CONTROLLER_FIELDS
@@ -150,7 +223,10 @@ def _controller_payload(raw_controller: Mapping[str, Any]) -> tuple[Dict[str, An
         "credentialRef": str(raw_controller.get("credentialRef") or "").strip() or None,
         "config": config,
     }
-    return controller, outlets
+    return controller, outlets, _device_configuration_payload(
+        raw_controller.get("deviceConfiguration"),
+        controller_id=controller_id,
+    )
 
 
 class PowerRuntime:
@@ -390,7 +466,7 @@ class PowerRuntime:
 
     def update_controller(self, raw_controller: Mapping[str, Any]) -> Dict[str, Any]:
         """Validate, persist and activate one provider-local controller."""
-        controller, outlets = _controller_payload(raw_controller)
+        controller, outlets, device_configuration = _controller_payload(raw_controller)
         if self.config_path is None:
             raise PowerConfigError("power configuration persistence is not configured")
 
@@ -436,6 +512,12 @@ class PowerRuntime:
                 config_path=self.config_path,
                 status_cache_ttl_seconds=self.status_cache_ttl_seconds,
             )
+            if device_configuration and device_configuration.get("outlets"):
+                registered = candidate_runtime.registry.get(controller["id"])
+                apply_configuration = getattr(registered.driver, "apply_configuration", None)
+                if not callable(apply_configuration):
+                    raise PowerDriverError("power driver does not support configuration writes")
+                apply_configuration(device_configuration)
             self._write_config(candidate_config)
             self.registry = candidate_runtime.registry
             self.policies = candidate_runtime.policies

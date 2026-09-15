@@ -24,9 +24,16 @@
         let powerControllerIdWasSuggested = false;
         let lastPowerControllerDriver = 'mock';
         let powerCredentials = [];
+        let powerControllerEditorDirty = false;
+        let powerControllerDeviceConfigurationDirty = false;
+
+        function isDeviceController() {
+            return ['apc-powernet-snmp', 'netio-json'].includes(fields.driver?.value || '');
+        }
 
         function updateDriverFields() {
             const driver = fields.driver?.value || 'mock';
+            powerControllerEditorDirty = true;
             const isNetio = driver === 'netio-json';
             const isApc = driver === 'apc-powernet-snmp';
             const currentPort = String(fields.port?.value || '');
@@ -44,12 +51,14 @@
 
         function updateNetioPort() {
             if (fields.driver?.value !== 'netio-json' || !fields.port) return;
+            powerControllerEditorDirty = true;
             if (['80', '443'].includes(String(fields.port.value || ''))) {
                 fields.port.value = fields.netioHttps?.checked === true ? '443' : '80';
             }
         }
 
         function suggestId() {
+            powerControllerEditorDirty = true;
             if (!fields.id || fields.select?.value) return;
             const host = String(fields.host?.value || '').trim().toLowerCase();
             if (!host) {
@@ -77,7 +86,18 @@
 
         function renderOutlets() {
             if (!fields.outlets) return;
-            fields.outlets.innerHTML = renderControllerOutletsMarkup(powerControllerOutletDrafts);
+            const drafts = isDeviceController() && !fields.select?.value
+                ? powerControllerOutletDrafts.filter(outlet => outlet.deviceManaged === true)
+                : powerControllerOutletDrafts;
+            fields.outlets.innerHTML = renderControllerOutletsMarkup(drafts, {
+                deviceManaged: isDeviceController(),
+            });
+            if (fields.addOutlet) fields.addOutlet.hidden = isDeviceController();
+            if (fields.editorHint && isDeviceController()) {
+                fields.editorHint.textContent = 'Physical output IDs and names come from the controller. APC device fields are written back on save; NETIO device fields are read-only here.';
+            } else if (fields.editorHint) {
+                fields.editorHint.textContent = '';
+            }
         }
 
         function renderCredentialOptions() {
@@ -114,6 +134,8 @@
             updateDriverFields();
             renderCredentialOptions();
             powerControllerOutletDrafts = [createPowerControllerOutletDraft({ outlet: '1' })];
+            powerControllerEditorDirty = false;
+            powerControllerDeviceConfigurationDirty = false;
             renderOutlets();
             if (fields.editorHint) fields.editorHint.textContent = '';
         }
@@ -145,6 +167,8 @@
             powerControllerOutletDrafts = Array.isArray(controller.outlets)
                 ? controller.outlets.map(createPowerControllerOutletDraft)
                 : [];
+            powerControllerEditorDirty = false;
+            powerControllerDeviceConfigurationDirty = false;
             renderOutlets();
         }
 
@@ -206,6 +230,16 @@
         }
 
         function handleOutletChange(event) {
+            const deviceField = event.target?.dataset?.controllerDeviceConfigField;
+            if (deviceField) {
+                const index = getOutletIndex(event.target);
+                if (index < 0) return;
+                if (powerControllerOutletDrafts[index].deviceConfigWritable !== true) return;
+                powerControllerOutletDrafts[index].deviceConfig[deviceField] = event.target.value;
+                powerControllerEditorDirty = true;
+                powerControllerDeviceConfigurationDirty = true;
+                return;
+            }
             const field = event.target?.dataset?.controllerOutletField;
             if (!field) return;
             const index = getOutletIndex(event.target);
@@ -213,6 +247,8 @@
             powerControllerOutletDrafts[index][field] = event.target.type === 'checkbox'
                 ? event.target.checked
                 : event.target.value;
+            powerControllerEditorDirty = true;
+            if (field === 'deviceName') powerControllerDeviceConfigurationDirty = true;
         }
 
         function handleOutletActions(event) {
@@ -225,11 +261,46 @@
         }
 
         function addOutlet() {
+            if (isDeviceController()) return;
             const usedIds = new Set(powerControllerOutletDrafts.map(outlet => outlet.outlet));
             let nextId = 1;
             while (usedIds.has(String(nextId))) nextId += 1;
             powerControllerOutletDrafts.push(createPowerControllerOutletDraft({ outlet: String(nextId) }));
+            powerControllerEditorDirty = true;
             renderOutlets();
+        }
+
+        function readDeviceConfiguration() {
+            if (!powerControllerDeviceConfigurationDirty) return undefined;
+            const sourceOutlets = isDeviceController() && !fields.select?.value
+                ? powerControllerOutletDrafts.filter(outlet => outlet.deviceManaged === true)
+                : powerControllerOutletDrafts;
+            const outlets = sourceOutlets.map((outlet, index) => {
+                if (outlet.deviceConfigWritable !== true) return null;
+                const outletId = String(outlet.outlet || '').trim();
+                if (!outletId) throw new Error(`Output ${index + 1}: device ID is required`);
+                const item = { outlet: outletId };
+                if (Array.isArray(outlet.deviceConfigFields) && outlet.deviceConfigFields.includes('name')) {
+                    if (String(outlet.deviceName || '').length > 160) throw new Error(`Output ${index + 1}: device name is too long`);
+                    item.name = String(outlet.deviceName || '').trim();
+                }
+                const config = {};
+                ['powerOnDelaySeconds', 'powerOffDelaySeconds', 'rebootDurationSeconds'].forEach(field => {
+                    if (!Object.prototype.hasOwnProperty.call(outlet.deviceConfig || {}, field)) return;
+                    const raw = outlet.deviceConfig[field];
+                    if (raw === '' || raw === null || raw === undefined) return;
+                    const value = Number.parseInt(raw, 10);
+                    const minimum = field === 'rebootDurationSeconds' ? 5 : 0;
+                    const maximum = field === 'rebootDurationSeconds' ? 60 : 7200;
+                    if (!Number.isInteger(value) || value < minimum || value > maximum) {
+                        throw new Error(`Output ${index + 1}: ${field} must be between ${minimum} and ${maximum}`);
+                    }
+                    config[field] = value;
+                });
+                if (Object.keys(config).length) item.config = config;
+                return item;
+            }).filter(Boolean);
+            return { outlets };
         }
 
         function readForm() {
@@ -256,16 +327,17 @@
             const outlets = powerControllerOutletDrafts.map((outlet, index) => {
                 const outletId = String(outlet.outlet || '').trim();
                 if (!outletId) throw new Error(`Outlet ${index + 1}: ID is required`);
-                return {
+                const local = {
                     outlet: outletId,
-                    displayName: outlet.displayName || '',
                     logicalName: outlet.logicalName || '',
                     protected: outlet.protected === true,
                     critical: outlet.critical === true,
                     defaultState: outlet.defaultState === 'on' ? 'on' : 'off',
                 };
+                if (!isDeviceController()) local.displayName = outlet.displayName || '';
+                return local;
             });
-            if (!outlets.length) throw new Error('At least one outlet is required');
+            if (!isDeviceController() && !outlets.length) throw new Error('At least one outlet is required');
             if (new Set(outlets.map(outlet => outlet.outlet)).size !== outlets.length) throw new Error('Outlet IDs must be unique');
 
             const config = driver === 'netio-json'
@@ -284,7 +356,7 @@
             if (driver === 'netio-json' && (!config.path || !config.path.startsWith('/') || config.path.includes('\n') || config.path.includes('\r'))) {
                 throw new Error('NETIO API path must start with /');
             }
-            return {
+            const controller = {
                 id,
                 name,
                 driver,
@@ -295,6 +367,9 @@
                 config,
                 outlets,
             };
+            const deviceConfiguration = isDeviceController() ? readDeviceConfiguration() : undefined;
+            if (deviceConfiguration) controller.deviceConfiguration = deviceConfiguration;
+            return controller;
         }
 
         async function save() {
@@ -474,6 +549,8 @@
                 if (requestId !== powerControllerStatusRequestId) return;
                 powerControllers = mergePowerControllerStatuses(powerControllers, body.controllers);
                 powerControllerStatusError = false;
+                if (!powerControllerEditorDirty && fields.select?.value) loadSelected();
+                renderPolicySteps();
             } catch (error) {
                 if (requestId !== powerControllerStatusRequestId) return;
                 logger.warn('Unable to load power controller status', error);
@@ -496,6 +573,7 @@
             fields.host?.addEventListener('input', suggestId);
             fields.id?.addEventListener('input', () => {
                 powerControllerIdWasSuggested = false;
+                powerControllerEditorDirty = true;
             });
             fields.netioHttps?.addEventListener('change', updateNetioPort);
             fields.addOutlet?.addEventListener('click', addOutlet);
@@ -503,6 +581,20 @@
             fields.outlets?.addEventListener('input', handleOutletChange);
             fields.outlets?.addEventListener('click', handleOutletActions);
             fields.saveButton?.addEventListener('click', save);
+            [
+                fields.name,
+                fields.enabled,
+                fields.port,
+                fields.credentialRef,
+                fields.netioPath,
+                fields.netioVerifyTls,
+                fields.profile,
+                fields.timeoutSeconds,
+                fields.retries,
+            ].forEach(field => {
+                field?.addEventListener('input', () => { powerControllerEditorDirty = true; });
+                field?.addEventListener('change', () => { powerControllerEditorDirty = true; });
+            });
             updateDriverFields();
         }
 

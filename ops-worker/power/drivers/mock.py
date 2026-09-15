@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from threading import RLock
-from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Set, Tuple
 
 from power.models import PowerCapabilities
 
@@ -71,6 +71,22 @@ class MockPowerDriver:
                 {"outlet": outlet_id, "state": state}
                 for outlet_id, state in sorted(self.states.items())
             ]
+
+    def read_configuration(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "writable": False,
+                "fields": [],
+                "outlets": [
+                    {"outlet": outlet_id, "state": state}
+                    for outlet_id, state in sorted(self.states.items())
+                ],
+            }
+
+    def apply_configuration(self, configuration: Mapping[str, Any]) -> Dict[str, Any]:
+        if configuration.get("outlets"):
+            raise PowerDriverError("mock device configuration is read-only")
+        return self.read_configuration()
 
     def get_outlet_state(self, outlet_id: str) -> Dict[str, Any]:
         with self._lock:
