@@ -23,14 +23,16 @@
     if (!publisherLabActions) {
         throw new Error('LabPublisherLabActions must load before lab-publisher.js');
     }
+    const publisherAssetsFeature = window.LabPublisherAssetsFeature;
+    if (!publisherAssetsFeature) {
+        throw new Error('LabPublisherAssetsFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
         hosts: [],
         guacamole: [],
         fmus: [],
-        uploadedImages: [],
-        uploadedDocs: [],
         selectedCategories: [],
         selectedIscedCodes: [],
         iscedSelectionTouched: false,
@@ -129,6 +131,20 @@
 
         if (!refresh || !submit) return;
 
+        const assetsController = publisherAssetsFeature.createController({
+            assetListElement: assetList,
+            inputs: { images, docs },
+            ensureContentId,
+            fetchJson,
+            buildAssetUploadRequest,
+            buildAssetDeleteRequest,
+            renderAssetList,
+            escapeHtml,
+            escapeAttr,
+            callbacks: { setStatus },
+        });
+        assetsController.bind();
+
         const labActionsController = publisherLabActions.createController({
             listElement: labList,
             getLabs: () => state.labs,
@@ -165,11 +181,10 @@
         setupMode.addEventListener('change', syncSetupMode);
         if (priceUnit) priceUnit.addEventListener('change', syncBookingModeFields);
         if (periodUnit) periodUnit.addEventListener('change', () => normalizeAllowedPeriodRange());
-        images.addEventListener('change', () => uploadAssets(images.files, 'images'));
-        docs.addEventListener('change', () => uploadAssets(docs.files, 'docs'));
+        images.addEventListener('change', () => void assetsController.upload(images.files, 'images'));
+        docs.addEventListener('change', () => void assetsController.upload(docs.files, 'docs'));
         imageChoose.addEventListener('click', () => images.click());
         docChoose.addEventListener('click', () => docs.click());
-        if (assetList) assetList.addEventListener('click', handleAssetListClick);
         addWindow.addEventListener('click', addUnavailableWindow);
         termsUrl.addEventListener('blur', autoFetchTermsMetadata);
         if (educationalProgramLinked) {
@@ -686,26 +701,6 @@
         });
     }
 
-    async function uploadAssets(files, kind) {
-        const list = Array.from(files || []);
-        if (!list.length) return;
-        const contentId = ensureContentId();
-        try {
-            for (const file of list) {
-                const request = buildAssetUploadRequest({ contentId, kind, file });
-                const result = await fetchJson(request.url, request.options);
-                if (kind === 'images') state.uploadedImages.push(result.url);
-                else state.uploadedDocs.push(result.url);
-            }
-        } catch (err) {
-            setStatus(err.message || 'Upload failed', true);
-        } finally {
-            const input = $(kind === 'images' ? 'labImages' : 'labDocs');
-            if (input) input.value = '';
-            renderAssets();
-        }
-    }
-
     async function publishLab() {
         try {
             const payload = buildLabPayload();
@@ -766,10 +761,10 @@
         validateMarketplaceFields();
         const imageUrls = state.imageMode === 'link'
             ? splitCsv($('labImageUrls').value)
-            : [...state.uploadedImages];
+            : assetsController.getUploadedImages();
         const docs = state.docMode === 'link'
             ? splitCsv($('labDocUrls').value)
-            : [...state.uploadedDocs];
+            : assetsController.getUploadedDocs();
         const classification = buildClassificationEntries({
             fordCodes: state.selectedCategories,
             iscedCodes: state.selectedIscedCodes,
@@ -896,35 +891,6 @@
         const display = $('labContentIdDisplay');
         if (input) input.value = normalized;
         if (display) display.textContent = normalized || 'auto-generated';
-    }
-
-    function renderAssets() {
-        const target = $('labAssetList');
-        target.innerHTML = renderAssetList({
-            uploadedImages: state.uploadedImages,
-            uploadedDocs: state.uploadedDocs,
-            escapeHtml,
-            escapeAttr,
-        });
-    }
-
-    async function handleAssetListClick(event) {
-        const button = event.target.closest('button[data-url][data-kind]');
-        if (!button) return;
-        const url = button.dataset.url || '';
-        const kind = button.dataset.kind || '';
-        button.disabled = true;
-        try {
-            const request = buildAssetDeleteRequest(url);
-            await fetchJson(request.url, request.options);
-            const stateKey = kind === 'images' ? 'uploadedImages' : 'uploadedDocs';
-            state[stateKey] = state[stateKey].filter(item => item !== url);
-            setStatus('Asset deleted.', false);
-        } catch (err) {
-            setStatus(err.message || 'Delete failed', true);
-        } finally {
-            renderAssets();
-        }
     }
 
     async function autoFetchTermsMetadata() {
@@ -1120,11 +1086,9 @@
         );
         setupMediaMode('images', 'upload');
         setupMediaMode('docs', 'upload');
-        state.uploadedImages = images;
-        state.uploadedDocs = docs;
+        assetsController.setUploadedAssets({ images, docs });
         $('labImageUrls').value = images.join(', ');
         $('labDocUrls').value = docs.join(', ');
-        renderAssets();
         $('labDemoEnabled').checked = metadata?.demoEnabled === true;
 
         if (metadata?.pricing?.displayUnit) {
@@ -1224,8 +1188,7 @@
         state.availableDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
         state.unavailableWindows = [];
         state.modelVariables = [];
-        state.uploadedImages = [];
-        state.uploadedDocs = [];
+        assetsController.clearUploadedAssets();
 
         setValue('labResourceType', '0');
         setValue('labSetupMode', 'full');
@@ -1271,7 +1234,6 @@
         renderUnavailableWindows();
         setupMediaMode('images', 'link');
         setupMediaMode('docs', 'link');
-        renderAssets();
         resetFmuDescribeFields(false);
         syncSetupMode();
         syncResourceTypeFields();
