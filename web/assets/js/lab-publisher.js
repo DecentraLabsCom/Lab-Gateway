@@ -43,16 +43,18 @@
     if (!publisherTermsFeature) {
         throw new Error('LabPublisherTermsFeature must load before lab-publisher.js');
     }
+    const publisherFmuMetadataFeature = window.LabPublisherFmuMetadataFeature;
+    if (!publisherFmuMetadataFeature) {
+        throw new Error('LabPublisherFmuMetadataFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
         hosts: [],
         guacamole: [],
         fmus: [],
-        modelVariables: [],
         imageMode: 'link',
         docMode: 'link',
-        fmuDescribeController: null,
         labs: [],
         editingLabId: null,
         originalRawPrice: null,
@@ -112,6 +114,7 @@
     let availabilityController;
     let schedulingController;
     let termsController;
+    let fmuMetadataController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
@@ -150,8 +153,8 @@
             formatConnectionUsers,
             resolveConnectionAccessKey,
             normalizeMaxConcurrentUsers,
-            resetFmuDescribeFields,
-            autoDetectFmuMetadata,
+            resetFmuDescribeFields: (...args) => fmuMetadataController.reset(...args),
+            autoDetectFmuMetadata: () => fmuMetadataController.autoDetect(),
         });
         resourceFeatureController.bind();
 
@@ -181,6 +184,14 @@
             guessVersionFromUrl: publisherValues.guessVersionFromUrl,
         });
         termsController.bind();
+
+        fmuMetadataController = publisherFmuMetadataFeature.createController({
+            documentImpl: document,
+            fetchFmuMetadata,
+            fetchImpl: fetch,
+            renderModelVariables: renderModelVariablesTable,
+            escapeHtml,
+        });
 
         labActionsController = publisherLabActions.createController({
             listElement: labList,
@@ -406,7 +417,7 @@
             timezone: $('labTimezone').value.trim() || '',
             fmiVersion: $('labFmiVersion').value.trim(),
             simulationType: $('labSimulationType').value.trim(),
-            modelVariables: state.modelVariables,
+            modelVariables: fmuMetadataController.getModelVariables(),
             defaultStartTime: $('labDefaultStartTime').value,
             defaultStopTime: $('labDefaultStopTime').value,
             defaultStepSize: $('labDefaultStepSize').value,
@@ -472,76 +483,6 @@
         if (display) display.textContent = normalized || 'auto-generated';
     }
 
-    async function autoDetectFmuMetadata() {
-        const fmuFileName = $('labFmuFileName').value.trim();
-        const gatewayUrl = $('labAccessURI').value.trim();
-        const status = $('labFmuDescribeStatus');
-        if (!fmuFileName) {
-            status.textContent = 'Set FMU File Name first.';
-            return;
-        }
-        if (!gatewayUrl) {
-            status.textContent = 'Set Access URI first.';
-            return;
-        }
-        if (state.fmuDescribeController) state.fmuDescribeController.abort();
-        const controller = new AbortController();
-        state.fmuDescribeController = controller;
-        resetFmuDescribeFields(true);
-        status.textContent = 'Loading FMU metadata...';
-        try {
-            const metadata = await fetchFmuMetadata({
-                fmuFileName,
-                gatewayUrl,
-                signal: controller.signal,
-                fetchImpl: fetch,
-            });
-            if (state.fmuDescribeController !== controller) return;
-            applyFmuMetadata(metadata);
-            status.textContent = 'FMU metadata loaded successfully.';
-        } catch (err) {
-            if (err.name === 'AbortError') return;
-            status.textContent = `Auto-detect failed: ${err.message}`;
-        } finally {
-            if (state.fmuDescribeController === controller) state.fmuDescribeController = null;
-        }
-    }
-
-    function resetFmuDescribeFields(keepStatus) {
-        $('labFmiVersion').value = '';
-        $('labSimulationType').value = '';
-        $('labDefaultStartTime').value = '';
-        $('labDefaultStopTime').value = '';
-        $('labDefaultStepSize').value = '';
-        state.modelVariables = [];
-        renderModelVariables();
-        if (!keepStatus) $('labFmuDescribeStatus').textContent = 'Set Access URI and FMU File Name to enable auto-detect.';
-    }
-
-    function applyFmuMetadata(metadata) {
-        $('labFmiVersion').value = metadata.fmiVersion || '';
-        $('labSimulationType').value = metadata.simulationType || '';
-        $('labDefaultStartTime').value = metadata.defaultStartTime ?? '';
-        $('labDefaultStopTime').value = metadata.defaultStopTime ?? '';
-        $('labDefaultStepSize').value = metadata.defaultStepSize ?? '';
-        if (metadata.modelName) {
-            $('labName').value = metadata.modelName;
-        }
-        state.modelVariables = Array.isArray(metadata.modelVariables) ? metadata.modelVariables : [];
-        renderModelVariables();
-    }
-
-    function renderModelVariables() {
-        const wrap = $('labModelVariablesWrap');
-        const body = $('labModelVariables');
-        const rendered = renderModelVariablesTable({
-            modelVariables: state.modelVariables,
-            escapeHtml,
-        });
-        wrap.hidden = rendered.hidden;
-        body.innerHTML = rendered.html;
-    }
-
     function resolveStateLabDisplayName(labId) {
         const lab = state.labs.find(item => String(item?.labId) === String(labId));
         return resolveLabDisplayName(lab || { labId });
@@ -549,7 +490,7 @@
 
     async function enterEditMode(lab) {
         state.editingLabId = String(lab.labId);
-        resetFmuDescribeFields(false);
+        fmuMetadataController.reset(false);
         applyLabBaseFields(lab);
         await applyLabMetadata(lab);
         captureOriginalEditPrice(lab);
@@ -690,15 +631,12 @@
         setAttributeValue(attributes, 'fmuFileName', value => {
             if (value) $('labFmuFileName').value = value;
         });
-        setAttributeValue(attributes, 'fmiVersion', value => $('labFmiVersion').value = value || '');
-        setAttributeValue(attributes, 'simulationType', value => $('labSimulationType').value = value || '');
-        setAttributeValue(attributes, 'defaultStartTime', value => $('labDefaultStartTime').value = value ?? '');
-        setAttributeValue(attributes, 'defaultStopTime', value => $('labDefaultStopTime').value = value ?? '');
-        setAttributeValue(attributes, 'defaultStepSize', value => $('labDefaultStepSize').value = value ?? '');
-        setAttributeValue(attributes, 'modelVariables', value => {
-            state.modelVariables = Array.isArray(value) ? value : [];
-            renderModelVariables();
-        });
+        setAttributeValue(attributes, 'fmiVersion', value => fmuMetadataController.hydrate({ fmiVersion: value }));
+        setAttributeValue(attributes, 'simulationType', value => fmuMetadataController.hydrate({ simulationType: value }));
+        setAttributeValue(attributes, 'defaultStartTime', value => fmuMetadataController.hydrate({ defaultStartTime: value }));
+        setAttributeValue(attributes, 'defaultStopTime', value => fmuMetadataController.hydrate({ defaultStopTime: value }));
+        setAttributeValue(attributes, 'defaultStepSize', value => fmuMetadataController.hydrate({ defaultStepSize: value }));
+        setAttributeValue(attributes, 'modelVariables', value => fmuMetadataController.hydrate({ modelVariables: Array.isArray(value) ? value : [] }));
     }
 
     function clearEditMode(resetStatus = true) {
@@ -712,13 +650,7 @@
     }
 
     function resetLabPublisherForm() {
-        if (state.fmuDescribeController) {
-            state.fmuDescribeController.abort();
-            state.fmuDescribeController = null;
-        }
-
         availabilityController.reset();
-        state.modelVariables = [];
         assetsController.clearUploadedAssets();
 
         setValue('labResourceType', '0');
@@ -755,7 +687,7 @@
         resourceFeatureController.renderOptions();
         setupMediaMode('images', 'link');
         setupMediaMode('docs', 'link');
-        resetFmuDescribeFields(false);
+        fmuMetadataController.reset(false);
         resourceFeatureController.syncSetupMode();
         resourceFeatureController.syncTypeFields();
     }
