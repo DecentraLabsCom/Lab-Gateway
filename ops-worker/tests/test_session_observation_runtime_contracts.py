@@ -114,6 +114,17 @@ def test_session_observation_context_resolves_mutable_dependencies_at_use_time()
         context.get_service = lambda: None
 
 
+def test_session_observation_runtime_closes_injected_resources():
+    calls = []
+    runtime = create_session_observation_runtime(
+        _context(),
+        close=lambda: calls.append("close"),
+    )
+
+    assert runtime.close() is None
+    assert calls == ["close"]
+
+
 def test_session_observation_runtime_forwards_service_operations():
     calls = []
 

@@ -1,7 +1,7 @@
 """Composition adapter for the durable session-observation service."""
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Callable
 
 from session_observation_context import SessionObservationContext
 
@@ -9,8 +9,17 @@ from session_observation_context import SessionObservationContext
 class SessionObservationRuntime:
     """Coordinate observation operations from explicit dependencies."""
 
-    def __init__(self, context: SessionObservationContext):
+    def __init__(
+        self,
+        context: SessionObservationContext,
+        *,
+        close: Callable[[], Any] | None = None,
+    ):
         self._context = context
+        self._close = close or (lambda: None)
+
+    def close(self) -> None:
+        self._close()
 
     def create_service(self) -> Any:
         context = self._context
@@ -93,9 +102,11 @@ class SessionObservationRuntime:
 
 def create_session_observation_runtime(
     context: SessionObservationContext,
+    *,
+    close: Callable[[], Any] | None = None,
 ) -> SessionObservationRuntime:
     """Create an observation runtime bound to explicit dependencies."""
-    return SessionObservationRuntime(context)
+    return SessionObservationRuntime(context, close=close)
 
 
 __all__ = ["SessionObservationRuntime", "create_session_observation_runtime"]
