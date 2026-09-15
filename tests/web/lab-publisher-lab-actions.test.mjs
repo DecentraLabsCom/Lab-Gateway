@@ -4,9 +4,9 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const repoRoot = new URL('../../', import.meta.url);
-const scriptPath = new URL('web/assets/js/lab-publisher.js', repoRoot);
 const valuesScriptPath = new URL('web/assets/js/lab-publisher-values.js', repoRoot);
 const renderersScriptPath = new URL('web/assets/js/lab-publisher-renderers.js', repoRoot);
+const actionsScriptPath = new URL('web/assets/js/lab-publisher-lab-actions.js', repoRoot);
 const resourcesScriptPath = new URL('web/assets/js/lab-publisher-resources.js', repoRoot);
 const assetsScriptPath = new URL('web/assets/js/lab-publisher-assets.js', repoRoot);
 const metadataScriptPath = new URL('web/assets/js/lab-publisher-metadata.js', repoRoot);
@@ -14,9 +14,9 @@ const stylesheetPath = new URL('web/assets/css/lab-manager.css', repoRoot);
 const indexPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function loadPublisherHooks() {
-  const source = fs.readFileSync(scriptPath, 'utf8');
   const valuesSource = fs.readFileSync(valuesScriptPath, 'utf8');
   const renderersSource = fs.readFileSync(renderersScriptPath, 'utf8');
+  const actionsSource = fs.readFileSync(actionsScriptPath, 'utf8');
   const resourcesSource = fs.readFileSync(resourcesScriptPath, 'utf8');
   const assetsSource = fs.readFileSync(assetsScriptPath, 'utf8');
   const metadataSource = fs.readFileSync(metadataScriptPath, 'utf8');
@@ -35,21 +35,25 @@ function loadPublisherHooks() {
     },
   };
   const window = {};
-  const instrumented = source.replace(
-    /\}\)\(\);\s*$/,
-    `
-    window.__labPublisherTestHooks = { renderLabs };
-})();`,
-  );
-
   const context = vm.createContext({ document, window, console });
   vm.runInContext(valuesSource, context, { filename: 'lab-publisher-values.js' });
   vm.runInContext(renderersSource, context, { filename: 'lab-publisher-renderers.js' });
   vm.runInContext(resourcesSource, context, { filename: 'lab-publisher-resources.js' });
   vm.runInContext(assetsSource, context, { filename: 'lab-publisher-assets.js' });
   vm.runInContext(metadataSource, context, { filename: 'lab-publisher-metadata.js' });
-  vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
-  return { labList, hooks: context.window.__labPublisherTestHooks };
+  vm.runInContext(actionsSource, context, { filename: 'lab-publisher-lab-actions.js' });
+  const values = context.window.LabPublisherValues;
+  const renderers = context.window.LabPublisherRenderers;
+  const controller = context.window.LabPublisherLabActions.createController({
+    listElement: labList,
+    renderLabActionIcon: renderers.renderLabActionIcon,
+    escapeHtml: values.escapeHtml,
+    escapeAttr: values.escapeAttr,
+    formatRawPriceForUnit: values.formatRawPriceForUnit,
+    resolveLabPriceUnit: values.resolveLabPriceUnit,
+    resolveLabDisplayName: values.resolveLabDisplayName,
+  });
+  return { labList, hooks: { renderLabs: labs => controller.render(labs) } };
 }
 
 test('renders self-contained lab action icons for edit, list/unlist and delete', () => {
@@ -111,8 +115,8 @@ test('cache-busts the lab manager assets after lab display updates', () => {
 
   assert.match(index, /lab-manager\.css\?v=workflow-tabs-v18/);
   assert.match(index, /lab-manager\.js\?v=workflow-tabs-v18/);
-  assert.match(index, /lab-publisher-values\.js\?v=publisher-values-v1[\s\S]*lab-publisher-renderers\.js\?v=publisher-renderers-v1[\s\S]*lab-publisher-resources\.js\?v=publisher-resources-v1[\s\S]*lab-publisher-assets\.js\?v=publisher-assets-v1[\s\S]*lab-publisher-metadata\.js\?v=publisher-metadata-v1[\s\S]*lab-publisher\.js\?v=workflow-tabs-v2/);
-  assert.match(index, /lab-publisher\.js\?v=workflow-tabs-v2/);
+  assert.match(index, /lab-publisher-values\.js\?v=publisher-values-v1[\s\S]*lab-publisher-renderers\.js\?v=publisher-renderers-v1[\s\S]*lab-publisher-resources\.js\?v=publisher-resources-v1[\s\S]*lab-publisher-assets\.js\?v=publisher-assets-v1[\s\S]*lab-publisher-metadata\.js\?v=publisher-metadata-v1[\s\S]*lab-publisher-lab-actions\.js\?v=publisher-lab-actions-v1[\s\S]*lab-publisher\.js\?v=workflow-tabs-v2/);
+  assert.match(index, /lab-publisher-lab-actions\.js\?v=publisher-lab-actions-v1[\s\S]*lab-publisher\.js\?v=workflow-tabs-v2/);
 });
 
 test('labels pending station candidates and does not expose a manual lab selector', () => {
