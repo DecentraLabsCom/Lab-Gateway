@@ -10,6 +10,7 @@ const resourcesScriptPath = new URL('web/assets/js/lab-publisher-resources.js', 
 const assetsScriptPath = new URL('web/assets/js/lab-publisher-assets.js', repoRoot);
 const metadataScriptPath = new URL('web/assets/js/lab-publisher-metadata.js', repoRoot);
 const actionsScriptPath = new URL('web/assets/js/lab-publisher-lab-actions.js', repoRoot);
+const assetsFeatureScriptPath = new URL('web/assets/js/lab-publisher-assets-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -127,6 +128,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const assetsSource = fs.readFileSync(assetsScriptPath, 'utf8');
   const metadataSource = fs.readFileSync(metadataScriptPath, 'utf8');
   const actionsSource = fs.readFileSync(actionsScriptPath, 'utf8');
+  const assetsFeatureSource = fs.readFileSync(assetsFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
@@ -148,6 +150,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(assetsSource, context, { filename: 'lab-publisher-assets.js' });
   vm.runInContext(metadataSource, context, { filename: 'lab-publisher-metadata.js' });
   vm.runInContext(actionsSource, context, { filename: 'lab-publisher-lab-actions.js' });
+  vm.runInContext(assetsFeatureSource, context, { filename: 'lab-publisher-assets-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   return { document, hooks: context.window.__labPublisherTestHooks };
 }
