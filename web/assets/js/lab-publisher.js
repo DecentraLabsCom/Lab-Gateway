@@ -63,6 +63,10 @@
     if (!publisherValidationFeature) {
         throw new Error('LabPublisherValidationFeature must load before lab-publisher.js');
     }
+    const publisherPayloadFeature = window.LabPublisherPayloadFeature;
+    if (!publisherPayloadFeature) {
+        throw new Error('LabPublisherPayloadFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
@@ -128,6 +132,7 @@
     let pricingController;
     let mediaController;
     let validationController;
+    let payloadController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
@@ -232,6 +237,37 @@
             dateInputToUnix,
         });
 
+        payloadController = publisherPayloadFeature.createController({
+            documentImpl: document,
+            RESOURCE_TYPES,
+            syncResourceTypeFields: () => resourceFeatureController.syncTypeFields(),
+            validate: () => validationController.validate(),
+            ensureContentId,
+            getContentState: options => metadataController.getState(options),
+            getMediaState: () => mediaController.getState(),
+            getUploadedAssets: () => ({
+                images: assetsController.getUploadedImages(),
+                docs: assetsController.getUploadedDocs(),
+            }),
+            getAvailabilityState: () => availabilityController.getState(),
+            getPricingState: () => pricingController.getState(),
+            resolvePayloadRawPrice: () => pricingController.resolvePayloadRawPrice(),
+            getBookingMode: () => schedulingController.getDerivedBookingMode(),
+            getAllowedPeriodRange: () => schedulingController.getSelectedAllowedPeriodRange(),
+            getTermsState: () => termsController.getState(),
+            getModelVariables: () => fmuMetadataController.getModelVariables(),
+            buildClassificationEntries,
+            sanitizeUnavailableWindows,
+            expandAllowedDurations,
+            buildPeriodRules,
+            sanitizeTermsOfUse,
+            sanitizeAvailableHours,
+            normalizeMaxConcurrentUsers,
+            dateInputToUnix,
+            splitCsv,
+            buildMetadataPayload,
+        });
+
         labActionsController = publisherLabActions.createController({
             listElement: labList,
             getLabs: () => state.labs,
@@ -314,7 +350,7 @@
 
     async function publishLab() {
         try {
-            const payload = buildLabPayload();
+            const payload = payloadController.buildLabPayload();
             const editing = !!state.editingLabId;
 
             $('labPublisherSubmitBtn').disabled = true;
@@ -341,100 +377,6 @@
         } finally {
             $('labPublisherSubmitBtn').disabled = false;
         }
-    }
-
-    function buildLabPayload() {
-        resourceFeatureController.syncTypeFields();
-        const setupMode = $('labSetupMode').value;
-        const isFmu = $('labResourceType').value === '1';
-        if (isFmu && !$('labFmuFileName').value.trim()) {
-            throw new Error('FMU File Name is required');
-        }
-        const payload = {
-            setupMode,
-            listImmediately: $('labListImmediately').value === 'true',
-            price: pricingController.resolvePayloadRawPrice(),
-            accessURI: $('labAccessURI').value.trim(),
-            accessKey: $('labAccessKey').value.trim(),
-            resourceType: Number($('labResourceType').value),
-            creatorPucHash: $('labCreatorPucHash').value.trim(),
-        };
-        if (setupMode === 'quick') {
-            payload.metadataUrl = $('labMetadataUrl').value.trim();
-        } else {
-            payload.metadata = buildMetadata();
-        }
-        return payload;
-    }
-
-    function buildMetadata() {
-        resourceFeatureController.syncTypeFields();
-        validationController.validate();
-        const availability = availabilityController.getState();
-        const media = mediaController.getState();
-        const content = metadataController.getState({
-            imageMode: media.imageMode,
-            docMode: media.docMode,
-            uploadedImages: media.imageMode === 'link' ? [] : assetsController.getUploadedImages(),
-            uploadedDocs: media.docMode === 'link' ? [] : assetsController.getUploadedDocs(),
-        });
-        const imageUrls = content.imageUrls;
-        const docs = content.docs;
-        const classification = buildClassificationEntries({
-            fordCodes: availability.selectedCategories,
-            iscedCodes: availability.selectedIscedCodes,
-            educationalProgramLinked: availability.educationalProgramLinked,
-        });
-        const keywords = content.keywords;
-        const resourceType = $('labResourceType').value === '1' ? RESOURCE_TYPES.FMU : RESOURCE_TYPES.LAB;
-        const fmuFileName = $('labFmuFileName').value.trim();
-        const unavailableWindows = sanitizeUnavailableWindows(availability.unavailableWindows);
-        const pricing = pricingController.getState();
-        const bookingMode = schedulingController.getDerivedBookingMode();
-        const timeSlots = splitCsv($('labTimeSlots').value).map(Number).filter(Number.isFinite);
-        const allowedDurationRange = bookingMode === 'calendar-period'
-            ? schedulingController.getSelectedAllowedPeriodRange()
-            : null;
-        const allowedDurations = bookingMode === 'calendar-period'
-            ? expandAllowedDurations(allowedDurationRange)
-            : timeSlots.map(slot => ({ unit: 'minute', value: slot }));
-        const periodRules = bookingMode === 'calendar-period'
-            ? buildPeriodRules(allowedDurationRange)
-            : null;
-        const termsOfUse = sanitizeTermsOfUse(termsController.getState());
-        return buildMetadataPayload({
-            contentId: ensureContentId(),
-            name: content.name,
-            description: content.description,
-            imageUrls,
-            docs,
-            demoEnabled: content.demoEnabled,
-            classification,
-            educationalProgramLinked: availability.educationalProgramLinked,
-            keywords,
-            resourceType,
-            fmuFileName,
-            unavailableWindows,
-            bookingMode,
-            timeSlots,
-            allowedDurationRange,
-            allowedDurations,
-            periodRules,
-            pricing,
-            termsOfUse,
-            opens: dateInputToUnix($('labOpens').value),
-            closes: dateInputToUnix($('labCloses').value),
-            availableDays: availability.availableDays,
-            availableHours: sanitizeAvailableHours($('labAvailableHoursStart').value, $('labAvailableHoursEnd').value),
-            maxConcurrentUsers: normalizeMaxConcurrentUsers($('labMaxConcurrentUsers').value, resourceType === RESOURCE_TYPES.FMU),
-            timezone: $('labTimezone').value.trim() || '',
-            fmiVersion: $('labFmiVersion').value.trim(),
-            simulationType: $('labSimulationType').value.trim(),
-            modelVariables: fmuMetadataController.getModelVariables(),
-            defaultStartTime: $('labDefaultStartTime').value,
-            defaultStopTime: $('labDefaultStopTime').value,
-            defaultStepSize: $('labDefaultStepSize').value,
-        });
     }
 
     function ensureContentId() {

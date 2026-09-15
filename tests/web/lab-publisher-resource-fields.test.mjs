@@ -20,6 +20,7 @@ const metadataFeatureScriptPath = new URL('web/assets/js/lab-publisher-metadata-
 const pricingFeatureScriptPath = new URL('web/assets/js/lab-publisher-pricing-feature.js', repoRoot);
 const mediaFeatureScriptPath = new URL('web/assets/js/lab-publisher-media-feature.js', repoRoot);
 const validationFeatureScriptPath = new URL('web/assets/js/lab-publisher-validation-feature.js', repoRoot);
+const payloadFeatureScriptPath = new URL('web/assets/js/lab-publisher-payload-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -147,12 +148,13 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const pricingFeatureSource = fs.readFileSync(pricingFeatureScriptPath, 'utf8');
   const mediaFeatureSource = fs.readFileSync(mediaFeatureScriptPath, 'utf8');
   const validationFeatureSource = fs.readFileSync(validationFeatureScriptPath, 'utf8');
+  const payloadFeatureSource = fs.readFileSync(payloadFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
     window.__labPublisherTestHooks = {
       state,
-      buildMetadata,
+      buildMetadata: (...args) => payloadController.buildMetadata(...args),
       assertLabMutationSuccess,
       autoDetectFmuMetadata: (...args) => fmuMetadataController.autoDetect(...args),
       resetFmuDescribeFields: (...args) => fmuMetadataController.reset(...args),
@@ -165,6 +167,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
       setPricingFeatureController: controller => { pricingController = controller; },
       setMediaFeatureController: controller => { mediaController = controller; },
       setValidationFeatureController: controller => { validationController = controller; },
+      setPayloadFeatureController: controller => { payloadController = controller; },
     };
 })();`
   );
@@ -187,6 +190,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(pricingFeatureSource, context, { filename: 'lab-publisher-pricing-feature.js' });
   vm.runInContext(mediaFeatureSource, context, { filename: 'lab-publisher-media-feature.js' });
   vm.runInContext(validationFeatureSource, context, { filename: 'lab-publisher-validation-feature.js' });
+  vm.runInContext(payloadFeatureSource, context, { filename: 'lab-publisher-payload-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   const hooks = context.window.__labPublisherTestHooks;
   const values = context.window.LabPublisherValues;
@@ -268,6 +272,38 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
     dateInputToUnix: values.dateInputToUnix,
   });
   hooks.setValidationFeatureController(validationController);
+  const payloadController = context.window.LabPublisherPayloadFeature.createController({
+    documentImpl: document,
+    RESOURCE_TYPES: { LAB: 'lab', FMU: 'fmu' },
+    syncResourceTypeFields: resourceController.syncTypeFields,
+    validate: () => validationController.validate(),
+    ensureContentId: () => {
+      const input = document.getElementById('labContentId');
+      if (!input.value.trim()) input.value = 'lab-test-content';
+      return input.value.trim();
+    },
+    getContentState: options => metadataController.getState(options),
+    getMediaState: () => mediaController.getState(),
+    getUploadedAssets: () => ({ images: [], docs: [] }),
+    getAvailabilityState: () => availabilityController.getState(),
+    getPricingState: () => pricingController.getState(),
+    resolvePayloadRawPrice: () => pricingController.resolvePayloadRawPrice(),
+    getBookingMode: () => schedulingController.getDerivedBookingMode(),
+    getAllowedPeriodRange: () => schedulingController.getSelectedAllowedPeriodRange(),
+    getTermsState: () => termsController.getState(),
+    getModelVariables: () => fmuMetadataController.getModelVariables(),
+    buildClassificationEntries: values.buildClassificationEntries,
+    sanitizeUnavailableWindows: values.sanitizeUnavailableWindows,
+    expandAllowedDurations: values.expandAllowedDurations,
+    buildPeriodRules: values.buildPeriodRules,
+    sanitizeTermsOfUse: values.sanitizeTermsOfUse,
+    sanitizeAvailableHours: values.sanitizeAvailableHours,
+    normalizeMaxConcurrentUsers: values.normalizeMaxConcurrentUsers,
+    dateInputToUnix: values.dateInputToUnix,
+    splitCsv: values.splitCsv,
+    buildMetadataPayload: context.window.LabPublisherMetadata.buildMetadata,
+  });
+  hooks.setPayloadFeatureController(payloadController);
   return {
     document,
     availabilityController,
