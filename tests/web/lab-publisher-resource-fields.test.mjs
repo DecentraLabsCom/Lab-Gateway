@@ -13,6 +13,7 @@ const actionsScriptPath = new URL('web/assets/js/lab-publisher-lab-actions.js', 
 const assetsFeatureScriptPath = new URL('web/assets/js/lab-publisher-assets-feature.js', repoRoot);
 const resourceFeatureScriptPath = new URL('web/assets/js/lab-publisher-resource-feature.js', repoRoot);
 const availabilityFeatureScriptPath = new URL('web/assets/js/lab-publisher-availability-feature.js', repoRoot);
+const schedulingFeatureScriptPath = new URL('web/assets/js/lab-publisher-scheduling-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -133,6 +134,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const assetsFeatureSource = fs.readFileSync(assetsFeatureScriptPath, 'utf8');
   const resourceFeatureSource = fs.readFileSync(resourceFeatureScriptPath, 'utf8');
   const availabilityFeatureSource = fs.readFileSync(availabilityFeatureScriptPath, 'utf8');
+  const schedulingFeatureSource = fs.readFileSync(schedulingFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
@@ -144,6 +146,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
       resetFmuDescribeFields,
       setResourceFeatureController: controller => { resourceFeatureController = controller; },
       setAvailabilityFeatureController: controller => { availabilityController = controller; },
+      setSchedulingFeatureController: controller => { schedulingController = controller; },
     };
 })();`
   );
@@ -159,6 +162,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(assetsFeatureSource, context, { filename: 'lab-publisher-assets-feature.js' });
   vm.runInContext(resourceFeatureSource, context, { filename: 'lab-publisher-resource-feature.js' });
   vm.runInContext(availabilityFeatureSource, context, { filename: 'lab-publisher-availability-feature.js' });
+  vm.runInContext(schedulingFeatureSource, context, { filename: 'lab-publisher-scheduling-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   const hooks = context.window.__labPublisherTestHooks;
   const values = context.window.LabPublisherValues;
@@ -190,9 +194,19 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   });
   availabilityController.initialize();
   hooks.setAvailabilityFeatureController(availabilityController);
+  const schedulingController = context.window.LabPublisherSchedulingFeature.createController({
+    documentImpl: document,
+    normalizePricingUnit: values.normalizePricingUnit,
+    normalizePeriodUnit: values.normalizePeriodUnit,
+    resolveSupportedTimezones: values.resolveSupportedTimezones,
+    resolveBrowserTimezone: values.resolveBrowserTimezone,
+  });
+  schedulingController.initialize();
+  hooks.setSchedulingFeatureController(schedulingController);
   return {
     document,
     availabilityController,
+    schedulingController,
     hooks: {
       ...hooks,
       syncResourceTypeFields: resourceController.syncTypeFields,
