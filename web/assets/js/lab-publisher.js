@@ -31,18 +31,16 @@
     if (!publisherResourceFeature) {
         throw new Error('LabPublisherResourceFeature must load before lab-publisher.js');
     }
+    const publisherAvailabilityFeature = window.LabPublisherAvailabilityFeature;
+    if (!publisherAvailabilityFeature) {
+        throw new Error('LabPublisherAvailabilityFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
         hosts: [],
         guacamole: [],
         fmus: [],
-        selectedCategories: [],
-        selectedIscedCodes: [],
-        iscedSelectionTouched: false,
-        educationalProgramLinked: false,
-        availableDays: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'],
-        unavailableWindows: [],
         modelVariables: [],
         imageMode: 'link',
         docMode: 'link',
@@ -64,14 +62,9 @@
     const assertLabMutationSuccess = publisherValues.assertLabMutationSuccess;
     const CLASSIFICATION_SCHEMES = publisherValues.CLASSIFICATION_SCHEMES;
     const CLASSIFICATION_SCHEME_VERSIONS = publisherValues.CLASSIFICATION_SCHEME_VERSIONS;
-    const FORD_FIELDS_GROUPED = publisherValues.FORD_FIELDS_GROUPED;
-    const FORD_FIELDS = publisherValues.FORD_FIELDS;
-    const ISCED_F_FIELDS = publisherValues.ISCED_F_FIELDS;
     const getFordField = publisherValues.getFordField;
-    const getIscedField = publisherValues.getIscedField;
     const normalizeClassificationEntries = publisherValues.normalizeClassificationEntries;
     const buildClassificationEntries = publisherValues.buildClassificationEntries;
-    const getSuggestedIscedCodes = publisherValues.getSuggestedIscedCodes;
     const normalizeMaxConcurrentUsers = publisherValues.normalizeMaxConcurrentUsers;
     const sanitizeAvailableHours = publisherValues.sanitizeAvailableHours;
     const sanitizeUnavailableWindows = publisherValues.sanitizeUnavailableWindows;
@@ -81,7 +74,6 @@
     const buildPeriodRules = publisherValues.buildPeriodRules;
     const deriveAllowedPeriodRange = publisherValues.deriveAllowedPeriodRange;
     const resolveLabDisplayName = publisherValues.resolveLabDisplayName;
-    const WEEKDAY_OPTIONS = publisherValues.WEEKDAY_OPTIONS;
     const resolveSupportedTimezones = publisherValues.resolveSupportedTimezones;
     const resolveBrowserTimezone = publisherValues.resolveBrowserTimezone;
     const metadataAttributes = publisherValues.metadataAttributes;
@@ -114,6 +106,7 @@
     let assetsController;
     let resourceFeatureController;
     let labActionsController;
+    let availabilityController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
@@ -125,10 +118,7 @@
         const imageChoose = $('labImagesChooseBtn');
         const docChoose = $('labDocsChooseBtn');
         const assetList = $('labAssetList');
-        const addWindow = $('labAddUnavailableWindow');
         const termsUrl = $('labTermsUrl');
-        const categorySelect = $('labCategorySelect');
-        const educationalProgramLinked = $('labEducationalProgramLinked');
         const priceUnit = $('labPriceUnit');
         const periodUnit = $('labAllowedPeriodUnit');
 
@@ -163,6 +153,18 @@
         });
         resourceFeatureController.bind();
 
+        availabilityController = publisherAvailabilityFeature.createController({
+            documentImpl: document,
+            fordFieldsGrouped: publisherValues.FORD_FIELDS_GROUPED,
+            iscedFields: publisherValues.ISCED_F_FIELDS,
+            getSuggestedIscedCodes: publisherValues.getSuggestedIscedCodes,
+            weekdayOptions: publisherValues.WEEKDAY_OPTIONS,
+            escapeHtml,
+            escapeAttr,
+            dateCtor: Date,
+        });
+        availabilityController.initialize();
+
         labActionsController = publisherLabActions.createController({
             listElement: labList,
             getLabs: () => state.labs,
@@ -195,38 +197,7 @@
         docs.addEventListener('change', () => void assetsController.upload(docs.files, 'docs'));
         imageChoose.addEventListener('click', () => images.click());
         docChoose.addEventListener('click', () => docs.click());
-        addWindow.addEventListener('click', addUnavailableWindow);
         termsUrl.addEventListener('blur', autoFetchTermsMetadata);
-        if (educationalProgramLinked) {
-            educationalProgramLinked.addEventListener('change', () => {
-                state.educationalProgramLinked = educationalProgramLinked.checked;
-                if (state.educationalProgramLinked) {
-                    if (!state.selectedIscedCodes.length && !state.iscedSelectionTouched) {
-                        state.selectedIscedCodes = getSuggestedIscedCodes(state.selectedCategories);
-                    }
-                } else {
-                    state.selectedIscedCodes = [];
-                }
-                renderIscedSuggestions();
-            });
-        }
-        categorySelect.addEventListener('click', toggleCategoryMenu);
-        categorySelect.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                toggleCategoryMenu();
-            }
-            if (event.key === 'Escape') closeCategoryMenu();
-        });
-        document.addEventListener('click', (event) => {
-            const menu = $('labCategoryMenu');
-            if (!categorySelect.contains(event.target) && !menu.contains(event.target)) {
-                closeCategoryMenu();
-            }
-        });
-        $('labCategoryMenu').addEventListener('click', (event) => {
-            event.stopPropagation();
-        });
 
         resourceFeatureController.syncSetupMode();
         resourceFeatureController.syncTypeFields();
@@ -248,11 +219,6 @@
     function initMarketplaceFields() {
         populateTimezoneOptions();
         normalizeAllowedPeriodRange();
-        renderCategoryMenu();
-        renderCategoryChips();
-        renderIscedSuggestions();
-        renderDayToggles();
-        renderUnavailableWindows();
         setupMediaMode('images', 'link');
         setupMediaMode('docs', 'link');
         syncBookingModeFields();
@@ -369,202 +335,6 @@
         }
     }
 
-    function renderCategoryMenu() {
-        const menu = $('labCategoryMenu');
-        menu.innerHTML = Object.entries(FORD_FIELDS_GROUPED).map(([groupName, categories]) => `
-            <div class="multi-select-group">
-                <div class="multi-select-group-title">${escapeHtml(groupName)}</div>
-                ${categories.map(category => `
-                    <label class="multi-select-option">
-                        <input type="checkbox" value="${escapeAttr(category.code)}" autocomplete="off">
-                        <span>${escapeHtml(category.label)}</span>
-                        <small>${escapeHtml(category.code)}</small>
-                    </label>
-                `).join('')}
-            </div>
-        `).join('');
-        menu.querySelectorAll('.multi-select-option').forEach(option => {
-            option.addEventListener('click', (event) => {
-                event.stopPropagation();
-            });
-        });
-        menu.querySelectorAll('input[type="checkbox"]').forEach(input => {
-            input.checked = false;
-            input.addEventListener('click', (event) => {
-                event.stopPropagation();
-            });
-            input.addEventListener('change', (event) => {
-                event.stopPropagation();
-                toggleCategory(input.value);
-            });
-        });
-    }
-
-    function toggleCategoryMenu() {
-        const select = $('labCategorySelect');
-        const menu = $('labCategoryMenu');
-        const open = !menu.classList.contains('open');
-        menu.classList.toggle('open', open);
-        select.classList.toggle('open', open);
-        select.setAttribute('aria-expanded', String(open));
-        if (open) {
-            renderCategoryChips();
-            const rect = select.getBoundingClientRect();
-            menu.style.left = `${rect.left}px`;
-            menu.style.top = `${rect.bottom + 4}px`;
-        }
-    }
-
-    function closeCategoryMenu() {
-        $('labCategoryMenu').classList.remove('open');
-        $('labCategorySelect').classList.remove('open');
-        $('labCategorySelect').setAttribute('aria-expanded', 'false');
-    }
-
-    function toggleCategory(category) {
-        state.selectedCategories = state.selectedCategories.includes(category)
-            ? state.selectedCategories.filter(item => item !== category)
-            : [...state.selectedCategories, category];
-        renderCategoryChips();
-        renderIscedSuggestions();
-    }
-
-    function renderCategoryChips() {
-        const chips = $('labCategoryChips');
-        const menu = $('labCategoryMenu');
-        chips.innerHTML = state.selectedCategories.length
-            ? state.selectedCategories.map(category => `
-                <span class="chip">
-                    ${escapeHtml(getFordField(category)?.label || category)}
-                    <button type="button" data-category="${escapeAttr(category)}" aria-label="Remove ${escapeAttr(category)}">&times;</button>
-                </span>
-            `).join('')
-            : '<span class="placeholder">Select one or more OECD FORD fields...</span>';
-        chips.querySelectorAll('button[data-category]').forEach(button => {
-            button.addEventListener('click', (event) => {
-                event.stopPropagation();
-                toggleCategory(button.dataset.category);
-            });
-        });
-        menu.querySelectorAll('input[type="checkbox"]').forEach(input => {
-            input.checked = state.selectedCategories.includes(input.value);
-        });
-    }
-
-    function renderIscedSuggestions() {
-        const linked = $('labEducationalProgramLinked');
-        const target = $('labIscedSuggestions');
-        if (!linked || !target) return;
-        linked.checked = state.educationalProgramLinked;
-        target.hidden = !state.educationalProgramLinked;
-        if (!state.educationalProgramLinked) {
-            target.innerHTML = '';
-            return;
-        }
-        const suggested = getSuggestedIscedCodes(state.selectedCategories);
-        const codes = suggested.length ? suggested : ISCED_F_FIELDS.map(field => field.code);
-        target.innerHTML = codes.map(code => {
-            const field = getIscedField(code);
-            if (!field) return '';
-            const checked = state.selectedIscedCodes.includes(code);
-            return `<button type="button" class="mini-btn ${checked ? 'primary' : ''}" data-isced-code="${escapeAttr(code)}">${escapeHtml(code)} ${escapeHtml(field.label)}</button>`;
-        }).join('');
-        target.querySelectorAll('button[data-isced-code]').forEach(button => {
-            button.addEventListener('click', () => {
-                const code = button.dataset.iscedCode;
-                state.selectedIscedCodes = state.selectedIscedCodes.includes(code)
-                    ? state.selectedIscedCodes.filter(item => item !== code)
-                    : [...state.selectedIscedCodes, code];
-                state.iscedSelectionTouched = true;
-                renderIscedSuggestions();
-            });
-        });
-    }
-
-    function renderDayToggles() {
-        const target = $('labAvailableDays');
-        target.innerHTML = WEEKDAY_OPTIONS.map(day => `
-            <button type="button" data-day="${day.value}" class="${state.availableDays.includes(day.value) ? 'active' : ''}">
-                ${day.label}
-            </button>
-        `).join('');
-        target.querySelectorAll('button[data-day]').forEach(button => {
-            button.addEventListener('click', () => {
-                const day = button.dataset.day;
-                state.availableDays = state.availableDays.includes(day)
-                    ? state.availableDays.filter(item => item !== day)
-                    : [...state.availableDays, day];
-                renderDayToggles();
-            });
-        });
-    }
-
-    function addUnavailableWindow() {
-        state.unavailableWindows.push({
-            clientId: cryptoRandomId(),
-            startUnix: null,
-            endUnix: null,
-            reason: '',
-        });
-        renderUnavailableWindows();
-    }
-
-    function renderUnavailableWindows() {
-        const target = $('labUnavailableWindows');
-        target.innerHTML = state.unavailableWindows.length
-            ? state.unavailableWindows.map((window, index) => `
-                <div class="unavailable-window" data-index="${index}">
-                    <div class="form-grid">
-                        <label class="field">
-                            <span>Starts</span>
-                            <input type="datetime-local" data-field="startUnix" value="${escapeAttr(toDatetimeLocal(window.startUnix))}">
-                        </label>
-                        <label class="field">
-                            <span>Ends</span>
-                            <input type="datetime-local" data-field="endUnix" value="${escapeAttr(toDatetimeLocal(window.endUnix))}">
-                        </label>
-                        <label class="field">
-                            <span>Reason</span>
-                            <input type="text" data-field="reason" placeholder="Reason (e.g., Maintenance, Calibration)" value="${escapeAttr(window.reason || '')}">
-                        </label>
-                        <label class="field action-field">
-                            <span>Remove</span>
-                            <button class="mini-btn danger" type="button" data-remove-window="${index}">
-                                <i class="fas fa-trash"></i> Remove
-                            </button>
-                        </label>
-                    </div>
-                </div>
-            `).join('')
-            : '<div class="hint">No unavailable windows configured.</div>';
-
-        target.querySelectorAll('.unavailable-window').forEach(row => {
-            const index = Number(row.dataset.index);
-            row.querySelectorAll('[data-field]').forEach(input => {
-                input.addEventListener('change', () => updateUnavailableWindow(index, input.dataset.field, input.value));
-                input.addEventListener('input', () => {
-                    if (input.dataset.field === 'reason') updateUnavailableWindow(index, input.dataset.field, input.value);
-                });
-            });
-        });
-        target.querySelectorAll('[data-remove-window]').forEach(button => {
-            button.addEventListener('click', () => {
-                state.unavailableWindows.splice(Number(button.dataset.removeWindow), 1);
-                renderUnavailableWindows();
-            });
-        });
-    }
-
-    function updateUnavailableWindow(index, field, value) {
-        const current = state.unavailableWindows[index];
-        if (!current) return;
-        if (field === 'startUnix' || field === 'endUnix') {
-            current[field] = value ? Math.floor(new Date(value).getTime() / 1000) : null;
-            return;
-        }
-        current[field] = value;
-    }
-
     function setupMediaMode(kind, mode) {
         const isImages = kind === 'images';
         const stateKey = isImages ? 'imageMode' : 'docMode';
@@ -637,6 +407,7 @@
     function buildMetadata() {
         resourceFeatureController.syncTypeFields();
         validateMarketplaceFields();
+        const availability = availabilityController.getState();
         const imageUrls = state.imageMode === 'link'
             ? splitCsv($('labImageUrls').value)
             : assetsController.getUploadedImages();
@@ -644,14 +415,14 @@
             ? splitCsv($('labDocUrls').value)
             : assetsController.getUploadedDocs();
         const classification = buildClassificationEntries({
-            fordCodes: state.selectedCategories,
-            iscedCodes: state.selectedIscedCodes,
-            educationalProgramLinked: state.educationalProgramLinked,
+            fordCodes: availability.selectedCategories,
+            iscedCodes: availability.selectedIscedCodes,
+            educationalProgramLinked: availability.educationalProgramLinked,
         });
         const keywords = splitCsv($('labKeywords').value);
         const resourceType = $('labResourceType').value === '1' ? RESOURCE_TYPES.FMU : RESOURCE_TYPES.LAB;
         const fmuFileName = $('labFmuFileName').value.trim();
-        const unavailableWindows = sanitizeUnavailableWindows(state.unavailableWindows);
+        const unavailableWindows = sanitizeUnavailableWindows(availability.unavailableWindows);
         const priceUnit = normalizePricingUnit($('labPriceUnit').value || 'hour');
         const rawPricePerSecond = convertDisplayCreditsToRawPerSecond($('labPrice').value || '0', priceUnit);
         const bookingMode = getDerivedBookingMode();
@@ -686,7 +457,7 @@
             docs,
             demoEnabled: $('labDemoEnabled').checked === true,
             classification,
-            educationalProgramLinked: state.educationalProgramLinked,
+            educationalProgramLinked: availability.educationalProgramLinked,
             keywords,
             resourceType,
             fmuFileName,
@@ -700,7 +471,7 @@
             termsOfUse,
             opens: dateInputToUnix($('labOpens').value),
             closes: dateInputToUnix($('labCloses').value),
-            availableDays: state.availableDays,
+            availableDays: availability.availableDays,
             availableHours: sanitizeAvailableHours($('labAvailableHoursStart').value, $('labAvailableHoursEnd').value),
             maxConcurrentUsers: normalizeMaxConcurrentUsers($('labMaxConcurrentUsers').value, resourceType === RESOURCE_TYPES.FMU),
             timezone: $('labTimezone').value.trim() || '',
@@ -731,8 +502,9 @@
         }
         const missing = required.find(([, value]) => !value);
         if (missing) throw new Error(`${missing[0]} is required`);
-        if (!state.selectedCategories.some(code => getFordField(code))) throw new Error('At least one valid OECD FORD field is required');
-        if (!state.availableDays.length) throw new Error('Select at least one available day');
+        const availability = availabilityController.getState();
+        if (!availability.selectedCategories.some(code => getFordField(code))) throw new Error('At least one valid OECD FORD field is required');
+        if (!availability.availableDays.length) throw new Error('Select at least one available day');
         if (bookingMode === 'slot' && !splitCsv($('labTimeSlots').value).map(Number).some(Number.isFinite)) {
             throw new Error('Time Slots must include at least one duration in minutes');
         }
@@ -942,15 +714,20 @@
         const keywordsFromAttributes = getAttributeValue(attributes, 'keywords');
         $('labKeywords').value = normalizeArray(metadata?.keywords ?? keywordsFromAttributes).join(', ');
         const normalizedClassification = normalizeClassificationEntries(metadata?.classification ?? classificationFromAttributes);
-        state.selectedCategories = normalizedClassification
+        const selectedCategories = normalizedClassification
             .filter(entry => entry.scheme === CLASSIFICATION_SCHEMES.FORD)
             .map(entry => entry.code);
-        state.selectedIscedCodes = normalizedClassification
+        const selectedIscedCodes = normalizedClassification
             .filter(entry => entry.scheme === CLASSIFICATION_SCHEMES.ISCED_F)
             .map(entry => entry.code);
-        state.iscedSelectionTouched = state.selectedIscedCodes.length > 0;
-        state.educationalProgramLinked = state.selectedIscedCodes.length > 0
+        const educationalProgramLinked = selectedIscedCodes.length > 0
             || getAttributeValue(attributes, 'educationalProgramLinked') === true;
+        availabilityController.hydrate({
+            selectedCategories,
+            selectedIscedCodes,
+            iscedSelectionTouched: selectedIscedCodes.length > 0,
+            educationalProgramLinked,
+        });
         const images = mergeMediaUrls(
             metadata?.image,
             metadata?.images,
@@ -1003,8 +780,7 @@
         setAttributeValue(attributes, 'opens', value => $('labOpens').value = unixToDateInput(value));
         setAttributeValue(attributes, 'closes', value => $('labCloses').value = unixToDateInput(value));
         setAttributeValue(attributes, 'availableDays', value => {
-            state.availableDays = normalizeArray(value);
-            renderDayToggles();
+            availabilityController.hydrate({ availableDays: normalizeArray(value) });
         });
         setAttributeValue(attributes, 'availableHours', value => {
             $('labAvailableHoursStart').value = sanitizeTime(value?.start || '') || '09:00';
@@ -1015,8 +791,7 @@
             $('labMaxConcurrentUsers').value = String(normalizeMaxConcurrentUsers(value, isFmu));
         });
         setAttributeValue(attributes, 'unavailableWindows', value => {
-            state.unavailableWindows = Array.isArray(value) ? value.map(window => ({ ...window, clientId: cryptoRandomId() })) : [];
-            renderUnavailableWindows();
+            availabilityController.hydrate({ unavailableWindows: Array.isArray(value) ? value : [] });
         });
         setAttributeValue(attributes, 'termsOfUse', value => {
             $('labTermsUrl').value = value?.url || '';
@@ -1039,8 +814,6 @@
             state.modelVariables = Array.isArray(value) ? value : [];
             renderModelVariables();
         });
-        renderCategoryChips();
-        renderIscedSuggestions();
     }
 
     function clearEditMode(resetStatus = true) {
@@ -1059,12 +832,7 @@
             state.fmuDescribeController = null;
         }
 
-        state.selectedCategories = [];
-        state.selectedIscedCodes = [];
-        state.iscedSelectionTouched = false;
-        state.educationalProgramLinked = false;
-        state.availableDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
-        state.unavailableWindows = [];
+        availabilityController.reset();
         state.modelVariables = [];
         assetsController.clearUploadedAssets();
 
@@ -1102,14 +870,8 @@
         setChecked('labEducationalProgramLinked', false);
         setChecked('labDemoEnabled', false);
         setContentId('');
-        closeCategoryMenu();
         populateTimezoneOptions();
         resourceFeatureController.renderOptions();
-        renderCategoryMenu();
-        renderCategoryChips();
-        renderIscedSuggestions();
-        renderDayToggles();
-        renderUnavailableWindows();
         setupMediaMode('images', 'link');
         setupMediaMode('docs', 'link');
         resetFmuDescribeFields(false);
@@ -1186,23 +948,6 @@
         if (!el) return;
         el.textContent = message;
         el.classList.toggle('error', !!isError);
-    }
-
-    function cryptoRandomId() {
-        if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-        return `${Date.now()}-${Math.random()}`;
-    }
-
-    function toDatetimeLocal(unixSeconds) {
-        const timestamp = Number(unixSeconds);
-        if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
-        const date = new Date(timestamp * 1000);
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        return `${year}-${month}-${day}T${hours}:${minutes}`;
     }
 
     async function sha256Hex(buffer) {
