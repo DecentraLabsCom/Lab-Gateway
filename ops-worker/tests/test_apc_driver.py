@@ -27,9 +27,12 @@ class FakeSnmpClient:
     def __init__(self, values=None, walks=None):
         self.values = dict(values or {})
         self.walks = {key: list(value) for key, value in (walks or {}).items()}
+        self.get_calls = []
+        self.walk_calls = []
         self.set_calls = []
 
     def get(self, oid):
+        self.get_calls.append(oid)
         if oid not in self.values:
             raise PowerDriverError(f"missing fake OID {oid}")
         return self.values[oid]
@@ -40,6 +43,7 @@ class FakeSnmpClient:
         return value
 
     def walk(self, oid):
+        self.walk_calls.append(oid)
         if oid not in self.walks:
             raise PowerDriverError(f"missing fake walk {oid}")
         return list(self.walks[oid])
@@ -60,17 +64,21 @@ def test_apc_legacy_discovers_model_firmware_and_outlet_states():
         APC_LEGACY_OIDS["model"]: "AP7920B",
         APC_LEGACY_OIDS["firmware"]: "v3.9.4",
         APC_LEGACY_OIDS["outlet_count"]: 2,
-        APC_LEGACY_OIDS["state"] + ".1": 1,
-        APC_LEGACY_OIDS["state"] + ".2": 2,
-        APC_LEGACY_OIDS["name"] + ".1": "PLC",
-        APC_LEGACY_OIDS["name"] + ".2": "HMI",
     }
+    state = APC_LEGACY_OIDS["state"]
+    name = APC_LEGACY_OIDS["name"]
     driver = ApcPowerNetSnmpDriver(
         "pdu-1",
         "192.0.2.20",
         config={"profile": "legacy"},
         credentials={"version": "v2c", "community": "test"},
-        client=FakeSnmpClient(values),
+        client=FakeSnmpClient(
+            values,
+            walks={
+                state: [(state + ".1", 1), (state + ".2", 2)],
+                name: [(name + ".1", "PLC"), (name + ".2", "HMI")],
+            },
+        ),
     )
 
     discovered = driver.discover()
@@ -114,12 +122,14 @@ def test_apc_legacy_reads_and_writes_outlet_configuration():
     client = FakeSnmpClient(
         {
             APC_LEGACY_OIDS["outlet_count"]: 1,
-            APC_LEGACY_OIDS["state"] + ".1": 2,
-            APC_LEGACY_OIDS["config_name"] + ".1": "PLC",
-            APC_LEGACY_OIDS["power_on_delay"] + ".1": 0,
-            APC_LEGACY_OIDS["power_off_delay"] + ".1": 30,
-            APC_LEGACY_OIDS["reboot_duration"] + ".1": 10,
-        }
+        },
+        walks={
+            APC_LEGACY_OIDS["state"]: [(APC_LEGACY_OIDS["state"] + ".1", 2)],
+            APC_LEGACY_OIDS["config_name"]: [(APC_LEGACY_OIDS["config_name"] + ".1", "PLC")],
+            APC_LEGACY_OIDS["power_on_delay"]: [(APC_LEGACY_OIDS["power_on_delay"] + ".1", 0)],
+            APC_LEGACY_OIDS["power_off_delay"]: [(APC_LEGACY_OIDS["power_off_delay"] + ".1", 30)],
+            APC_LEGACY_OIDS["reboot_duration"]: [(APC_LEGACY_OIDS["reboot_duration"] + ".1", 10)],
+        },
     )
     driver = ApcPowerNetSnmpDriver(
         "pdu-1",
@@ -182,12 +192,14 @@ def test_apc_legacy_configuration_uses_powernet_table_column_order():
     client = FakeSnmpClient(
         {
             APC_LEGACY_OIDS["outlet_count"]: 1,
-            APC_LEGACY_OIDS["state"] + ".1": 2,
-            config_entry + ".2.1": 15,
-            config_entry + ".3.1": "PLC",
-            config_entry + ".4.1": 30,
-            config_entry + ".5.1": 10,
-        }
+        },
+        walks={
+            APC_LEGACY_OIDS["state"]: [(APC_LEGACY_OIDS["state"] + ".1", 2)],
+            APC_LEGACY_OIDS["config_name"]: [(config_entry + ".3.1", "PLC")],
+            APC_LEGACY_OIDS["power_on_delay"]: [(config_entry + ".2.1", 15)],
+            APC_LEGACY_OIDS["power_off_delay"]: [(config_entry + ".4.1", 30)],
+            APC_LEGACY_OIDS["reboot_duration"]: [(config_entry + ".5.1", 10)],
+        },
     )
     driver = ApcPowerNetSnmpDriver(
         "pdu-1",
@@ -214,6 +226,55 @@ def test_apc_legacy_configuration_uses_powernet_table_column_order():
             "rebootDurationSeconds",
         ],
     }]
+
+
+def test_apc_legacy_multioutlet_configuration_uses_table_walks():
+    count = 8
+    state = APC_LEGACY_OIDS["state"]
+    config_name = APC_LEGACY_OIDS["config_name"]
+    power_on_delay = APC_LEGACY_OIDS["power_on_delay"]
+    power_off_delay = APC_LEGACY_OIDS["power_off_delay"]
+    reboot_duration = APC_LEGACY_OIDS["reboot_duration"]
+    client = FakeSnmpClient(
+        values={APC_LEGACY_OIDS["outlet_count"]: count},
+        walks={
+            state: [(f"{state}.{index}", 2) for index in range(1, count + 1)],
+            config_name: [(f"{config_name}.{index}", f"Output {index}") for index in range(1, count + 1)],
+            power_on_delay: [(f"{power_on_delay}.{index}", 15) for index in range(1, count + 1)],
+            power_off_delay: [(f"{power_off_delay}.{index}", 30) for index in range(1, count + 1)],
+            reboot_duration: [(f"{reboot_duration}.{index}", 10) for index in range(1, count + 1)],
+        },
+    )
+    driver = ApcPowerNetSnmpDriver(
+        "pdu-1",
+        "192.0.2.20",
+        config={"profile": "legacy"},
+        credentials={"version": "v2c", "community": "private"},
+        client=client,
+    )
+
+    outlets = driver.read_configuration()["outlets"]
+
+    assert len(outlets) == count
+    assert outlets[0] == {
+        "outlet": "1",
+        "name": "Output 1",
+        "state": "off",
+        "deviceConfig": {
+            "powerOnDelaySeconds": 15,
+            "powerOffDelaySeconds": 30,
+            "rebootDurationSeconds": 10,
+        },
+        "deviceConfigWritable": True,
+        "deviceConfigFields": [
+            "name",
+            "powerOnDelaySeconds",
+            "powerOffDelaySeconds",
+            "rebootDurationSeconds",
+        ],
+    }
+    assert client.get_calls == [APC_LEGACY_OIDS["outlet_count"]]
+    assert client.walk_calls == [state, config_name, power_on_delay, power_off_delay, reboot_duration]
 
 
 def test_apc_rpdu2_discovers_outlets_from_status_table():

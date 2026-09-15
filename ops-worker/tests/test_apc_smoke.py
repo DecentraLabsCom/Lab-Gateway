@@ -68,7 +68,16 @@ class ApcSmokeUdpServer(socketserver.ThreadingUDPServer):
         raise KeyError(oid)
 
     def walk_values(self, oid):
-        del oid
+        if oid == APC_LEGACY_OIDS["state"]:
+            return [
+                (f"{oid}.1", self.state[1]),
+                (f"{oid}.2", self.state[2]),
+            ]
+        if oid == APC_LEGACY_OIDS["name"]:
+            return [
+                (f"{oid}.1", "PLC"),
+                (f"{oid}.2", "HMI"),
+            ]
         return []
 
 
