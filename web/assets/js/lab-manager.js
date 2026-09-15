@@ -79,6 +79,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!hostViewModule) {
         throw new Error('LabManagerHostView must load before lab-manager.js');
     }
+    const hostActionBindingsModule = window.LabManagerHostActionBindings;
+    if (!hostActionBindingsModule) {
+        throw new Error('LabManagerHostActionBindings must load before lab-manager.js');
+    }
     const hostActionsModule = window.LabManagerHostActions;
     if (!hostActionsModule) {
         throw new Error('LabManagerHostActions must load before lab-manager.js');
@@ -435,6 +439,20 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast,
         },
         logger: console,
+    });
+    const hostActionBindingsController = hostActionBindingsModule.createController({
+        hostListEl,
+        hostState,
+        callbacks: {
+            onEditHost: openEditHostModal,
+            onPoll: pollHeartbeat,
+            onWakeOnLan: host => hostActionsController.triggerWol(host),
+            onWinrm: (...args) => hostActionsController.triggerWinrm(...args),
+            onToggleLocalMode: (...args) => hostActionsController.toggleLocalMode(...args),
+            onCredentials: openWinrmCredentialsModal,
+            onTrust: openWinrmTrustModal,
+            onSyncAas: host => hostActionsController.syncAasHost(host),
+        },
     });
     const hostDiscoveryController = hostDiscoveryModule.createController({
         fetchImpl: (...args) => fetch(...args),
@@ -844,10 +862,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (refreshHostsBtn) {
         refreshHostsBtn.addEventListener('click', refreshAllHosts);
     }
-    if (hostListEl) {
-        hostListEl.addEventListener('click', handleHostActions);
-        hostViewController?.renderHosts();
-    }
+    hostActionBindingsController.bind();
+    if (hostListEl) hostViewController?.renderHosts();
     if (refreshPowerCredentialsBtn) refreshPowerCredentialsBtn.addEventListener('click', loadPowerCredentials);
     hostViewController?.bind();
 
@@ -966,70 +982,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function deleteWinrmTrust() {
         return winrmTrustModalController?.delete();
     }
-    function handleHostActions(e) {
-        const btn = e.target.closest('button[data-action]');
-        if (!btn) return;
-        const host = btn.closest('.host-row')?.dataset.host;
-        if (!host) return;
-        const action = btn.dataset.action;
-        if (action === 'edit-host') {
-            openEditHostModal(host);
-            return;
-        }
-        if (action === 'poll') {
-            pollHeartbeat(host);
-            return;
-        }
-        if (action === 'wol') {
-            triggerWol(host);
-            return;
-        }
-        if (action === 'prepare') {
-            triggerWinrm(host, 'prepare-session', ['--guard-grace=90']);
-            return;
-        }
-        if (action === 'release') {
-            triggerWinrm(host, 'release-session', ['--reboot']);
-            return;
-        }
-        if (action === 'shutdown') {
-            triggerWinrm(host, 'power', ['shutdown', '--delay=60', '--reason=Remote order']);
-            return;
-        }
-        if (action === 'toggle-local-mode') {
-            const currentMode = hostState[host]?.heartbeat?.status?.localModeEnabled;
-            toggleLocalMode(host, !currentMode);
-            return;
-        }
-        if (action === 'set-winrm-credentials') {
-            openWinrmCredentialsModal(host);
-            return;
-        }
-        if (action === 'manage-winrm-trust') {
-            openWinrmTrustModal(host);
-            return;
-        }
-        if (action === 'sync-aas') {
-            syncAasHost(host);
-        }
-    }
-
-    async function toggleLocalMode(host, enabled) {
-        return hostActionsController.toggleLocalMode(host, enabled);
-    }
-
-    async function triggerWol(host) {
-        return hostActionsController.triggerWol(host);
-    }
-
-    async function triggerWinrm(host, command, args = []) {
-        return hostActionsController.triggerWinrm(host, command, args);
-    }
-
-    async function syncAasHost(host) {
-        return hostActionsController.syncAasHost(host);
-    }
-
     async function checkOpsAvailability() {
         return opsAccessController ? opsAccessController.checkAvailability() : false;
     }
