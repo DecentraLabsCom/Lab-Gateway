@@ -47,6 +47,10 @@
     if (!publisherFmuMetadataFeature) {
         throw new Error('LabPublisherFmuMetadataFeature must load before lab-publisher.js');
     }
+    const publisherMetadataFeature = window.LabPublisherMetadataFeature;
+    if (!publisherMetadataFeature) {
+        throw new Error('LabPublisherMetadataFeature must load before lab-publisher.js');
+    }
 
     const state = {
         status: null,
@@ -115,6 +119,7 @@
     let schedulingController;
     let termsController;
     let fmuMetadataController;
+    let metadataController;
 
     document.addEventListener('DOMContentLoaded', () => {
         const refresh = $('labPublisherRefreshBtn');
@@ -191,6 +196,11 @@
             fetchImpl: fetch,
             renderModelVariables: renderModelVariablesTable,
             escapeHtml,
+        });
+
+        metadataController = publisherMetadataFeature.createController({
+            documentImpl: document,
+            splitCsv,
         });
 
         labActionsController = publisherLabActions.createController({
@@ -353,18 +363,20 @@
         resourceFeatureController.syncTypeFields();
         validateMarketplaceFields();
         const availability = availabilityController.getState();
-        const imageUrls = state.imageMode === 'link'
-            ? splitCsv($('labImageUrls').value)
-            : assetsController.getUploadedImages();
-        const docs = state.docMode === 'link'
-            ? splitCsv($('labDocUrls').value)
-            : assetsController.getUploadedDocs();
+        const content = metadataController.getState({
+            imageMode: state.imageMode,
+            docMode: state.docMode,
+            uploadedImages: state.imageMode === 'link' ? [] : assetsController.getUploadedImages(),
+            uploadedDocs: state.docMode === 'link' ? [] : assetsController.getUploadedDocs(),
+        });
+        const imageUrls = content.imageUrls;
+        const docs = content.docs;
         const classification = buildClassificationEntries({
             fordCodes: availability.selectedCategories,
             iscedCodes: availability.selectedIscedCodes,
             educationalProgramLinked: availability.educationalProgramLinked,
         });
-        const keywords = splitCsv($('labKeywords').value);
+        const keywords = content.keywords;
         const resourceType = $('labResourceType').value === '1' ? RESOURCE_TYPES.FMU : RESOURCE_TYPES.LAB;
         const fmuFileName = $('labFmuFileName').value.trim();
         const unavailableWindows = sanitizeUnavailableWindows(availability.unavailableWindows);
@@ -391,11 +403,11 @@
         const termsOfUse = sanitizeTermsOfUse(termsController.getState());
         return buildMetadataPayload({
             contentId: ensureContentId(),
-            name: $('labName').value.trim(),
-            description: $('labDescription').value.trim(),
+            name: content.name,
+            description: content.description,
             imageUrls,
             docs,
-            demoEnabled: $('labDemoEnabled').checked === true,
+            demoEnabled: content.demoEnabled,
             classification,
             educationalProgramLinked: availability.educationalProgramLinked,
             keywords,
@@ -426,9 +438,10 @@
 
     function validateMarketplaceFields() {
         const isFmu = $('labResourceType').value === '1';
+        const content = metadataController.getState();
         const required = [
-            ['Name', $('labName').value.trim()],
-            ['Description', $('labDescription').value.trim()],
+            ['Name', content.name],
+            ['Description', content.description],
             ['Price', $('labPrice').value.trim()],
             ['Access URI', $('labAccessURI').value.trim()],
             ['Timezone', $('labTimezone').value.trim()],
@@ -538,12 +551,9 @@
     }
 
     function populateMetadataForm(metadata) {
-        $('labName').value = metadata?.name || '';
-        $('labDescription').value = metadata?.description || '';
         const attributes = metadataAttributes(metadata?.attributes);
         const classificationFromAttributes = getAttributeValue(attributes, 'classification');
         const keywordsFromAttributes = getAttributeValue(attributes, 'keywords');
-        $('labKeywords').value = normalizeArray(metadata?.keywords ?? keywordsFromAttributes).join(', ');
         const normalizedClassification = normalizeClassificationEntries(metadata?.classification ?? classificationFromAttributes);
         const selectedCategories = normalizedClassification
             .filter(entry => entry.scheme === CLASSIFICATION_SCHEMES.FORD)
@@ -570,12 +580,17 @@
             getAttributeValue(attributes, 'docs'),
             getAttributeValue(attributes, 'documents')
         );
+        metadataController.hydrate({
+            name: metadata?.name || '',
+            description: metadata?.description || '',
+            keywords: normalizeArray(metadata?.keywords ?? keywordsFromAttributes),
+            demoEnabled: metadata?.demoEnabled === true,
+            imageUrls: images,
+            docUrls: docs,
+        });
         setupMediaMode('images', 'upload');
         setupMediaMode('docs', 'upload');
         assetsController.setUploadedAssets({ images, docs });
-        $('labImageUrls').value = images.join(', ');
-        $('labDocUrls').value = docs.join(', ');
-        $('labDemoEnabled').checked = metadata?.demoEnabled === true;
 
         if (metadata?.pricing?.displayUnit) {
             $('labPriceUnit').value = normalizePricingUnit(metadata.pricing.displayUnit);
@@ -652,6 +667,7 @@
     function resetLabPublisherForm() {
         availabilityController.reset();
         assetsController.clearUploadedAssets();
+        metadataController.reset();
 
         setValue('labResourceType', '0');
         setValue('labSetupMode', 'full');
@@ -662,9 +678,6 @@
         setValue('labAccessURI', '');
         setValue('labCreatorPucHash', '');
         setValue('labMetadataUrl', '');
-        setValue('labName', '');
-        setValue('labKeywords', '');
-        setValue('labDescription', '');
         setValue('labOpens', '');
         setValue('labCloses', '');
         setValue('labTimeSlots', '30,60');
@@ -676,12 +689,9 @@
         setValue('labMaxConcurrentUsers', '1');
         termsController.reset();
         setValue('labFmuFileName', '');
-        setValue('labImageUrls', '');
-        setValue('labDocUrls', '');
         setValue('labImages', '');
         setValue('labDocs', '');
         setChecked('labEducationalProgramLinked', false);
-        setChecked('labDemoEnabled', false);
         setContentId('');
         schedulingController.reset();
         resourceFeatureController.renderOptions();

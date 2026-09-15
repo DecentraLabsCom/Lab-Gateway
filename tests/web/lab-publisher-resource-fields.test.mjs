@@ -16,6 +16,7 @@ const availabilityFeatureScriptPath = new URL('web/assets/js/lab-publisher-avail
 const schedulingFeatureScriptPath = new URL('web/assets/js/lab-publisher-scheduling-feature.js', repoRoot);
 const termsFeatureScriptPath = new URL('web/assets/js/lab-publisher-terms-feature.js', repoRoot);
 const fmuMetadataFeatureScriptPath = new URL('web/assets/js/lab-publisher-fmu-metadata-feature.js', repoRoot);
+const metadataFeatureScriptPath = new URL('web/assets/js/lab-publisher-metadata-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -139,6 +140,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const schedulingFeatureSource = fs.readFileSync(schedulingFeatureScriptPath, 'utf8');
   const termsFeatureSource = fs.readFileSync(termsFeatureScriptPath, 'utf8');
   const fmuMetadataFeatureSource = fs.readFileSync(fmuMetadataFeatureScriptPath, 'utf8');
+  const metadataFeatureSource = fs.readFileSync(metadataFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
@@ -153,6 +155,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
       setSchedulingFeatureController: controller => { schedulingController = controller; },
       setTermsFeatureController: controller => { termsController = controller; },
       setFmuMetadataFeatureController: controller => { fmuMetadataController = controller; },
+      setMetadataFeatureController: controller => { metadataController = controller; },
     };
 })();`
   );
@@ -171,6 +174,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(schedulingFeatureSource, context, { filename: 'lab-publisher-scheduling-feature.js' });
   vm.runInContext(termsFeatureSource, context, { filename: 'lab-publisher-terms-feature.js' });
   vm.runInContext(fmuMetadataFeatureSource, context, { filename: 'lab-publisher-fmu-metadata-feature.js' });
+  vm.runInContext(metadataFeatureSource, context, { filename: 'lab-publisher-metadata-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   const hooks = context.window.__labPublisherTestHooks;
   const values = context.window.LabPublisherValues;
@@ -226,12 +230,18 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
     escapeHtml: values.escapeHtml,
   });
   hooks.setFmuMetadataFeatureController(fmuMetadataController);
+  const metadataController = context.window.LabPublisherMetadataFeature.createController({
+    documentImpl: document,
+    splitCsv: values.splitCsv,
+  });
+  hooks.setMetadataFeatureController(metadataController);
   return {
     document,
     availabilityController,
     schedulingController,
     termsController,
     fmuMetadataController,
+    metadataController,
     hooks: {
       ...hooks,
       syncResourceTypeFields: resourceController.syncTypeFields,
