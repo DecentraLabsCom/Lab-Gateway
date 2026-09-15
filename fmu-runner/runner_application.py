@@ -18,7 +18,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional
 from concurrent.futures import ProcessPoolExecutor, Future
 from uuid import uuid4
 
@@ -27,9 +27,7 @@ import jwt
 from fmpy import read_model_description
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
 from fastapi.responses import StreamingResponse, Response
-from fastapi.routing import APIRoute
 from starlette.datastructures import UploadFile
-from starlette.routing import WebSocketRoute
 from xml.etree import ElementTree as ET
 
 from auth import _fetch_jwks, verify_jwt, verify_jwt_token, jwks_health
@@ -1003,10 +1001,6 @@ def _get_realtime_manager_for_route():
 _realtime_router = create_realtime_router(
     get_realtime_manager=_get_realtime_manager_for_route,
 )
-# Keep the historical private symbols available to callers and tests while
-# the registered endpoints live in the dedicated router.
-fmu_realtime_sessions = cast(WebSocketRoute, _realtime_router.routes[0]).endpoint
-fmu_realtime_sessions_internal = cast(WebSocketRoute, _realtime_router.routes[1]).endpoint
 
 
 def _run_enforce_fmu_claim(claims: dict):
@@ -1203,9 +1197,6 @@ _proxy_router = create_proxy_router(
     get_signing_key=lambda: FMU_PROXY_SIGNING_KEY,
     logger=logger,
 )
-# Keep the historical private symbol available to callers and tests while the
-# registered endpoint lives in the dedicated router.
-download_proxy_fmu = cast(APIRoute, _proxy_router.routes[0]).endpoint
 
 
 _run_router = create_run_router(
@@ -1233,9 +1224,6 @@ _run_router = create_run_router(
     save_history=_run_save_history,
     logger=logger,
 )
-# Keep the historical private symbol available to callers and tests while the
-# registered endpoint lives in the dedicated router.
-run_simulation = cast(APIRoute, _run_router.routes[0]).endpoint
 
 
 # ---------------------------------------------------------------------------
@@ -1253,9 +1241,6 @@ _cancel_router = create_cancel_router(
     shutdown_executor=_shutdown_simulation_executor,
     finalize_tracking=_finalize_simulation_tracking,
 )
-# Keep the historical private symbol available to callers and tests while the
-# registered endpoint lives in the dedicated router.
-cancel_simulation = cast(APIRoute, _cancel_router.routes[0]).endpoint
 
 
 _stream_router = create_stream_router(
@@ -1285,9 +1270,6 @@ _stream_router = create_stream_router(
     sleep=_stream_sleep,
     logger=logger,
 )
-# Keep the historical private symbol available to callers and tests while the
-# registered endpoint lives in the dedicated router.
-stream_simulation = cast(APIRoute, _stream_router.routes[0]).endpoint
 
 # ---------------------------------------------------------------------------
 # Temp file cleanup (FMPy extracts FMUs to tempdir)
