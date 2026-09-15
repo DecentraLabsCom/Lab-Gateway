@@ -25,9 +25,8 @@ function createDraft(step = {}) {
     phase: step.phase || 'pre_start',
     controllerId: step.controllerId || '',
     outlet: step.outlet || '',
-    logicalName: step.logicalName || '',
+    stepLabel: step.stepLabel || '',
     action,
-    desiredState: step.desiredState || (action === 'on' || action === 'off' ? action : ''),
     required: step.required !== false,
     readBackRequired: step.readBackRequired !== false,
     offSeconds: step.offSeconds ?? 10,
@@ -150,6 +149,26 @@ test('preserves policy form payload normalization and validation messages', () =
   assert.throws(() => controller.readForm(), { message: 'Policy name is required' });
 });
 
+test('derives the target state from action and omits cycle timing for non-cycle steps', () => {
+  const { controller } = loadPolicies();
+  controller.populateForm({
+    policyName: 'Policy 1',
+    steps: [{
+      controllerId: 'pdu-1',
+      outlet: '1',
+      action: 'on',
+      stepLabel: 'PLC boot',
+      offSeconds: 99,
+    }],
+  });
+
+  const step = controller.readForm().steps[0];
+  assert.equal(step.action, 'on');
+  assert.equal(step.stepLabel, 'PLC boot');
+  assert.equal('desiredState' in step, false);
+  assert.equal('offSeconds' in step, false);
+});
+
 test('adds policy steps using the first available controller and outlet', () => {
   const { controller, fields } = loadPolicies();
   controller.resetEditor();
@@ -160,9 +179,8 @@ test('adds policy steps using the first available controller and outlet', () => 
     phase: 'pre_start',
     controllerId: 'pdu-1',
     outlet: '1',
-    logicalName: '',
+    stepLabel: '',
     action: 'on',
-    desiredState: 'on',
     required: true,
     readBackRequired: true,
     offSeconds: 10,
@@ -177,15 +195,15 @@ test('adds policy steps using the first available controller and outlet', () => 
 
 test('reorders policy steps through drag and drop and preserves that order on save', () => {
   const { controller, fields } = loadPolicies({
-    renderPowerPolicyStepsMarkup: steps => steps.map(step => step.logicalName).join('|'),
+    renderPowerPolicyStepsMarkup: steps => steps.map(step => step.stepLabel).join('|'),
   });
 
   controller.addStep();
-  controller.handleStepChange({ target: stepChangeTarget(0, 'logicalName', 'first') });
+  controller.handleStepChange({ target: stepChangeTarget(0, 'stepLabel', 'first') });
   controller.addStep();
-  controller.handleStepChange({ target: stepChangeTarget(1, 'logicalName', 'second') });
+  controller.handleStepChange({ target: stepChangeTarget(1, 'stepLabel', 'second') });
   controller.addStep();
-  controller.handleStepChange({ target: stepChangeTarget(2, 'logicalName', 'third') });
+  controller.handleStepChange({ target: stepChangeTarget(2, 'stepLabel', 'third') });
 
   const transfer = dataTransfer();
   controller.handleStepDragStart({ target: stepDragTarget(2), dataTransfer: transfer });
@@ -202,7 +220,7 @@ test('reorders policy steps through drag and drop and preserves that order on sa
   });
 
   assert.deepEqual(
-    JSON.parse(JSON.stringify(controller.getStepDrafts().map(step => step.logicalName))),
+    JSON.parse(JSON.stringify(controller.getStepDrafts().map(step => step.stepLabel))),
     [
       'third',
       'first',
@@ -212,11 +230,11 @@ test('reorders policy steps through drag and drop and preserves that order on sa
   assert.equal(prevented, true);
   assert.equal(fields.steps.innerHTML, 'third|first|second');
   assert.deepEqual(
-    JSON.parse(JSON.stringify(controller.readForm().steps.map(step => ({ logicalName: step.logicalName })))),
+    JSON.parse(JSON.stringify(controller.readForm().steps.map(step => ({ stepLabel: step.stepLabel })))),
     [
-      { logicalName: 'third' },
-      { logicalName: 'first' },
-      { logicalName: 'second' },
+      { stepLabel: 'third' },
+      { stepLabel: 'first' },
+      { stepLabel: 'second' },
     ],
   );
 });

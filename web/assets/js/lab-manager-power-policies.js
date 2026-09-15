@@ -125,7 +125,6 @@
                 step.outlet = '';
                 renderSteps();
             } else if (field === 'action') {
-                if (event.target.value === 'on' || event.target.value === 'off') step.desiredState = event.target.value;
                 renderSteps();
             }
         }
@@ -163,9 +162,6 @@
                 if (!['on', 'off', 'cycle'].includes(step.action)) {
                     throw new Error(`Step ${index + 1}: unsupported action`);
                 }
-                if (step.desiredState && !['on', 'off', 'unknown'].includes(step.desiredState)) {
-                    throw new Error(`Step ${index + 1}: unsupported desired state`);
-                }
                 let conditions = {};
                 if (step.conditionsText?.trim()) {
                     try {
@@ -177,10 +173,6 @@
                         throw new Error(`Step ${index + 1}: conditions must be an object`);
                     }
                 }
-                const offSeconds = parsePowerPolicyInteger(step.offSeconds, 'Cycle off time', 3600);
-                if (step.action === 'cycle' && offSeconds === 0) {
-                    throw new Error(`Step ${index + 1}: cycle off time must be greater than zero`);
-                }
                 const normalized = {
                     phase: step.phase,
                     controllerId: step.controllerId,
@@ -188,7 +180,6 @@
                     action: step.action,
                     required: step.required === true,
                     readBackRequired: step.readBackRequired === true,
-                    offSeconds,
                     delayBeforeSeconds: parsePowerPolicyInteger(step.delayBeforeSeconds, 'Delay before', 3600),
                     delayAfterSeconds: parsePowerPolicyInteger(step.delayAfterSeconds, 'Delay after', 3600),
                     timeoutSeconds: parsePowerPolicyInteger(step.timeoutSeconds, 'Timeout', 300),
@@ -196,9 +187,15 @@
                     allowProtected: step.allowProtected === true,
                     conditions,
                 };
+                if (step.action === 'cycle') {
+                    const offSeconds = parsePowerPolicyInteger(step.offSeconds, 'Cycle off time', 3600);
+                    if (offSeconds === 0) {
+                        throw new Error(`Step ${index + 1}: cycle off time must be greater than zero`);
+                    }
+                    normalized.offSeconds = offSeconds;
+                }
                 if (step.id) normalized.id = step.id;
-                if (step.logicalName) normalized.logicalName = step.logicalName;
-                if (step.desiredState) normalized.desiredState = step.desiredState;
+                if (step.stepLabel) normalized.stepLabel = step.stepLabel;
                 return normalized;
             });
             return {

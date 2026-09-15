@@ -85,9 +85,7 @@ test('renders policy steps with controller and outlet choices', () => {
     controllerId: 'pdu-1',
     outlet: '1',
     action: 'on',
-    desiredState: 'on',
-    logicalName: '<PLC>',
-    offSeconds: 10,
+    stepLabel: '<PLC>',
     delayBeforeSeconds: 1,
     delayAfterSeconds: 2,
     timeoutSeconds: 20,
@@ -110,9 +108,27 @@ test('renders policy steps with controller and outlet choices', () => {
   assert.match(html, /value="pdu-1" selected/);
   assert.match(html, /value="1" selected/);
   assert.match(html, /&lt;PLC&gt;/);
+  assert.match(html, /Step label/);
+  assert.doesNotMatch(html, /Desired state/);
+  assert.doesNotMatch(html, /data-step-field="offSeconds"/);
   assert.match(html, /data-step-field="allowProtected" checked/);
   assert.doesNotMatch(html, /data-step-field="readBackRequired" checked/);
   assert.match(renderers.renderPowerPolicyStepsMarkup([], []), /No steps configured/);
+});
+
+test('renders cycle timing only for cycle actions', () => {
+  const renderers = renderer();
+  const html = renderers.renderPowerPolicyStepsMarkup([{
+    phase: 'start',
+    controllerId: 'pdu-1',
+    outlet: '1',
+    action: 'cycle',
+    stepLabel: 'Restart PLC',
+    offSeconds: 15,
+  }], [{ id: 'pdu-1', outlets: [{ outlet: '1' }] }]);
+
+  assert.match(html, /data-step-field="offSeconds"/);
+  assert.match(html, /value="15"/);
 });
 
 test('renders controller outlet drafts with escaped editable values', () => {

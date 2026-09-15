@@ -277,6 +277,7 @@ class PowerPolicyExecutor:
         started = time.monotonic()
         before: Optional[str] = None
         after: Optional[str] = None
+        expected_state = step.action if step.action in {"on", "off"} else None
         message: Optional[str] = None
         success = False
         status = "failed"
@@ -284,7 +285,7 @@ class PowerPolicyExecutor:
             supports_readback = controller.driver.capabilities.read_back_state
             if supports_readback:
                 before = controller.driver.get_outlet_state(step.outlet).get("state")
-            if step.action in {"on", "off"} and before == step.desired_state:
+            if expected_state is not None and before == expected_state:
                 after = before
                 success = True
                 status = "skipped_already_in_state"
@@ -315,9 +316,9 @@ class PowerPolicyExecutor:
                     raise last_error
                 if supports_readback:
                     after = controller.driver.get_outlet_state(step.outlet).get("state")
-                if step.read_back_required and step.desired_state and after != step.desired_state:
+                if step.read_back_required and expected_state and after != expected_state:
                     raise PowerDriverError(
-                        f"readback for outlet '{step.outlet}' was '{after}', expected '{step.desired_state}'"
+                        f"readback for outlet '{step.outlet}' was '{after}', expected '{expected_state}'"
                     )
                 success = True
                 status = "completed"
@@ -339,7 +340,6 @@ class PowerPolicyExecutor:
             "action": step.action,
             "policyId": policy_id,
             "stepId": step_id,
-            "desiredState": step.desired_state,
             "required": step.required,
             "success": success,
             "status": status,

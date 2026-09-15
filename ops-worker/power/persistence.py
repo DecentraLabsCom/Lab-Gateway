@@ -149,7 +149,7 @@ class PowerOperationStore:
             "controller_id": operation.get("controllerId"),
             "outlet_key": operation.get("outlet"),
             "action": action,
-            "requested_state": operation.get("desiredState") or (action if action in {"on", "off"} else None),
+            "requested_state": action if action in {"on", "off"} else None,
             "observed_state_before": operation.get("observedStateBefore"),
             "observed_state_after": operation.get("observedStateAfter"),
             "status": operation.get("status") or "failed",
