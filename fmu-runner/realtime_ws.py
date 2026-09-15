@@ -30,6 +30,17 @@ def _normalize_binding(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+async def _cancel_task(task: Optional[asyncio.Task]) -> None:
+    if task is None or task is asyncio.current_task():
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 @dataclass
 class _StreamSubscription:
     variables: Optional[list[str]] = None
@@ -129,19 +140,19 @@ class _RealtimeSession:
     async def attach(self, connection: _WsConnection):
         self.attach_deadline = None
         if self.connection and self.connection is not connection and self.connection.sender_task:
-            self.connection.sender_task.cancel()
+            await _cancel_task(self.connection.sender_task)
         self.connection = connection
         connection.sender_task = asyncio.create_task(self._sender_loop(connection))
         if self._heartbeat_task:
-            self._heartbeat_task.cancel()
+            await _cancel_task(self._heartbeat_task)
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def detach(self):
         if self.connection and self.connection.sender_task:
-            self.connection.sender_task.cancel()
+            await _cancel_task(self.connection.sender_task)
         self.connection = None
         if self._heartbeat_task:
-            self._heartbeat_task.cancel()
+            await _cancel_task(self._heartbeat_task)
             self._heartbeat_task = None
         self.attach_deadline = time.time() + self.manager.ws_attach_grace_seconds
 
@@ -457,8 +468,7 @@ class _RealtimeSession:
         self._ensure_model_loaded()
         if self._model_payload and self._model_payload.get("simulationKind") != "coSimulation":
             raise HTTPException(status_code=400, detail="Realtime sessions currently support only coSimulation FMUs")
-        if self._runner_task and not self._runner_task.done():
-            self._runner_task.cancel()
+        await _cancel_task(self._runner_task)
         self._runner_task = None
 
         self.current_time = self.manager.coerce_float(options.get("startTime"), 0.0)
@@ -515,8 +525,7 @@ class _RealtimeSession:
     async def pause(self):
         if self.state != "running":
             return
-        if self._runner_task and not self._runner_task.done():
-            self._runner_task.cancel()
+        await _cancel_task(self._runner_task)
         self._runner_task = None
         self.state = "paused"
         await self._emit_state()
@@ -555,8 +564,7 @@ class _RealtimeSession:
             "sessionId": self.session_id,
             "reason": reason,
         }
-        if self._runner_task and not self._runner_task.done():
-            self._runner_task.cancel()
+        await _cancel_task(self._runner_task)
         self._runner_task = None
         if self.connection is not None and reason != "client_terminated":
             try:

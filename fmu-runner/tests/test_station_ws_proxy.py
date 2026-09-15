@@ -575,11 +575,20 @@ async def test_station_proxy_expired_attach_closes_the_client_channel(monkeypatc
 async def test_station_proxy_closes_public_channel_when_station_expires(monkeypatch):
     manager = _build_manager()
     fake_station = _ExpiredStationConnection()
+    reader_tasks = []
+    real_create_task = asyncio.create_task
+
+    def _capture_reader_task(coro):
+        task = real_create_task(coro)
+        if getattr(coro, "cr_code", None) is not None and coro.cr_code.co_name == "_station_reader":
+            reader_tasks.append(task)
+        return task
 
     async def _fake_connect(_headers):
         return fake_station
 
     monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    monkeypatch.setattr("station_ws_proxy.asyncio.create_task", _capture_reader_task)
     websocket = _AsyncTestWebSocket(
         messages=[json.dumps({
             "type": "session.create",
@@ -597,6 +606,8 @@ async def test_station_proxy_closes_public_channel_when_station_expires(monkeypa
     ]
     assert websocket.closed_code == 4003
     assert fake_station.closed is True
+    assert reader_tasks
+    assert reader_tasks[0].done() is True
 
 
 @pytest.mark.asyncio

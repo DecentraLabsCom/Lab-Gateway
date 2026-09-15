@@ -13,6 +13,17 @@ from typing import Any, Awaitable, Callable, Optional, Protocol, cast
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 
+async def _cancel_task(task: Optional[asyncio.Task]) -> None:
+    if task is None or task is asyncio.current_task():
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 class _StationWebSocket(Protocol):
     def __aiter__(self) -> AsyncIterator[str | bytes]:
         raise NotImplementedError
@@ -244,8 +255,9 @@ class StationRealtimeWsProxyManager:
 
         async def _close_station():
             nonlocal station_ws, station_reader_task
-            if station_reader_task:
-                station_reader_task.cancel()
+            reader_task = station_reader_task
+            if reader_task:
+                await _cancel_task(reader_task)
                 station_reader_task = None
             connection = station_ws
             if connection is not None:

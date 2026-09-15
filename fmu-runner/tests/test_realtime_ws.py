@@ -1342,20 +1342,22 @@ async def test_realtime_session_attach_and_detach_manage_tasks(monkeypatch):
 
     new_connection = _WsConnection(websocket=SimpleNamespace(send_json=lambda payload: None), queue_size=1)
     await session.attach(new_connection)
-    await asyncio.sleep(0)
 
     assert session.connection is new_connection
+    assert previous_connection.sender_task.done() is True
     assert previous_connection.sender_task.cancelled() is True
     assert sender_tasks[-1] is new_connection.sender_task
     assert session._heartbeat_task is heartbeat_tasks[-1]
+    heartbeat_task = session._heartbeat_task
 
     monkeypatch.setattr("realtime_ws.time.time", lambda: 100)
     await session.detach()
-    await asyncio.sleep(0)
 
     assert session.connection is None
     assert session._heartbeat_task is None
+    assert new_connection.sender_task.done() is True
     assert new_connection.sender_task.cancelled() is True
+    assert heartbeat_task.done() is True
     assert session.attach_deadline == 100 + session.manager.ws_attach_grace_seconds
 
     for task in sender_tasks + heartbeat_tasks:
@@ -1665,8 +1667,8 @@ async def test_realtime_session_start_pause_resume_reset_run_until_and_terminate
     assert len(runner_tasks) == 1
 
     await session.pause()
-    await asyncio.sleep(0)
     assert session.state == "paused"
+    assert runner_tasks[0].done() is True
     assert runner_tasks[0].cancelled() is True
 
     session.state = "stopped"
