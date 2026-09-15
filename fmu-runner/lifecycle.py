@@ -6,6 +6,7 @@ from typing import Any
 
 def create_lifespan(
     *,
+    initialize_runtime: Any = None,
     init_db: Any,
     preload_jwks: Any,
     get_realtime_manager: Any,
@@ -17,6 +18,8 @@ def create_lifespan(
 
     @asynccontextmanager
     async def lifespan(_app):
+        if initialize_runtime is not None:
+            await initialize_runtime()
         await init_db()
         await preload_jwks()
         manager = get_realtime_manager()

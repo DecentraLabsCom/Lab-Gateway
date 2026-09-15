@@ -7,7 +7,7 @@ from execution_slots import ConcurrencySlots
 from execution_tracking import SimulationRegistry
 
 
-@dataclass(frozen=True)
+@dataclass
 class ExecutionState:
     """Resources shared by local simulation and cancellation callbacks."""
 

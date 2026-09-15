@@ -1,5 +1,5 @@
 """
-Tests for FMU Runner — main.py
+Tests for FMU Runner — runner_application.py
 
 Uses pytest + httpx (TestClient for FastAPI).
 Mocks fmpy functions and JWT auth to test endpoints in isolation.
@@ -25,7 +25,7 @@ from fmpy import read_model_description
 
 # Patch auth before importing main so the import doesn't fail
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "accessKey": "test.fmu"}):
-    from main import (
+    from runner_application import (
         app,
         _init_db,
         _effective_timeout_seconds,
@@ -42,9 +42,11 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
         _shutdown_simulation_executor,
         _resolve_fmu_path,
         _enforce_fmu_claim,
-        FMU_WORKER_ADDRESS_SPACE_LIMIT,
     )
     from auth import verify_jwt as _original_verify_jwt
+
+from config import FMU_WORKER_ADDRESS_SPACE_LIMIT
+import runner_application
 
 
 # Override FastAPI dependency so all endpoints skip real JWT validation
@@ -74,7 +76,7 @@ client = TestClient(app)
 def test_preload_jwks_is_enabled_by_default(monkeypatch):
     fetch_jwks = AsyncMock()
     monkeypatch.delenv("JWKS_PRELOAD_ON_STARTUP", raising=False)
-    monkeypatch.setattr("main._fetch_jwks", fetch_jwks)
+    monkeypatch.setattr("runner_application._fetch_jwks", fetch_jwks)
 
     assert asyncio.run(_preload_jwks_if_enabled()) is True
     fetch_jwks.assert_awaited_once_with(force=True)
@@ -84,7 +86,7 @@ def test_preload_jwks_is_enabled_by_default(monkeypatch):
 def test_preload_jwks_accepts_disabled_environment_values(monkeypatch, disabled_value):
     fetch_jwks = AsyncMock()
     monkeypatch.setenv("JWKS_PRELOAD_ON_STARTUP", disabled_value)
-    monkeypatch.setattr("main._fetch_jwks", fetch_jwks)
+    monkeypatch.setattr("runner_application._fetch_jwks", fetch_jwks)
 
     assert asyncio.run(_preload_jwks_if_enabled()) is False
     fetch_jwks.assert_not_awaited()
@@ -102,7 +104,7 @@ def test_provider_describe_claims_are_allowed_only_for_metadata():
 
 
 def test_proxy_gateway_ws_url_facade_preserves_http_error_contract(monkeypatch):
-    monkeypatch.setattr("main.FMU_PROXY_GATEWAY_WS_URL", "")
+    monkeypatch.setattr("runner_application.FMU_PROXY_GATEWAY_WS_URL", "")
 
     with pytest.raises(HTTPException) as error:
         _derive_gateway_ws_url({})
@@ -163,7 +165,7 @@ def test_native_worker_is_killed_when_isolated_executor_is_forced_to_stop():
 @pytest.fixture(autouse=True)
 def _stub_browser_session_observation(monkeypatch):
     observer = AsyncMock(return_value=True)
-    monkeypatch.setattr("main._record_browser_session_started", observer)
+    monkeypatch.setattr("runner_application._record_browser_session_started", observer)
     return observer
 
 
@@ -199,7 +201,7 @@ class _FakeAsyncClient:
 # ─── /health ─────────────────────────────────────────────────────────
 
 def test_health_returns_status():
-    with patch("main._fetch_jwks", new_callable=AsyncMock):
+    with patch("runner_application._fetch_jwks", new_callable=AsyncMock):
         response = client.get("/health")
     data = response.json()
     assert data["status"] in ("UP", "DEGRADED", "DOWN")
@@ -209,8 +211,8 @@ def test_health_returns_status():
 
 
 def test_health_reports_down_when_jwks_has_never_loaded():
-    with patch("main._fetch_jwks", new_callable=AsyncMock), \
-         patch("main.jwks_health", return_value={
+    with patch("runner_application._fetch_jwks", new_callable=AsyncMock), \
+         patch("runner_application.jwks_health", return_value={
         "status": "DOWN",
         "stale": False,
         "cachedKeys": 0,
@@ -224,8 +226,8 @@ def test_health_reports_down_when_jwks_has_never_loaded():
 
 
 def test_health_refreshes_jwks_before_evaluating_cache_age():
-    with patch("main._fetch_jwks", new_callable=AsyncMock) as refresh, \
-         patch("main.jwks_health", return_value={
+    with patch("runner_application._fetch_jwks", new_callable=AsyncMock) as refresh, \
+         patch("runner_application.jwks_health", return_value={
              "status": "UP",
              "stale": False,
              "cachedKeys": 1,
@@ -242,7 +244,7 @@ def test_issue_session_ticket_uses_authorization_header_and_payload():
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client):
+    with patch("runner_application.httpx.AsyncClient", return_value=fake_client):
         ticket, expires_at = asyncio.run(
             _issue_session_ticket(
                 "Bearer token-123",
@@ -275,7 +277,7 @@ def test_issue_session_ticket_surfaces_json_error_message():
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client):
+    with patch("runner_application.httpx.AsyncClient", return_value=fake_client):
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(
                 _issue_session_ticket(
@@ -297,9 +299,9 @@ def test_redeem_session_ticket_returns_claims_payload():
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client), \
-         patch("main.SESSION_OBSERVER_GATEWAY_ID", "gateway.example"), \
-         patch("main.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
+    with patch("runner_application.httpx.AsyncClient", return_value=fake_client), \
+         patch("runner_application.SESSION_OBSERVER_GATEWAY_ID", "gateway.example"), \
+         patch("runner_application.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
         claims = asyncio.run(
             _redeem_session_ticket(
                 session_ticket="st_ticket_1",
@@ -326,9 +328,9 @@ def test_redeem_session_ticket_fails_closed_without_gateway_credentials():
     fake_response = _FakeHttpxResponse(json_data={"claims": {"sub": "test-user"}})
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client), \
-         patch("main.SESSION_OBSERVER_GATEWAY_ID", ""), \
-         patch("main.SESSION_OBSERVER_SIGNING_SECRET", ""):
+    with patch("runner_application.httpx.AsyncClient", return_value=fake_client), \
+         patch("runner_application.SESSION_OBSERVER_GATEWAY_ID", ""), \
+         patch("runner_application.SESSION_OBSERVER_SIGNING_SECRET", ""):
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(
                 _redeem_session_ticket(
@@ -356,10 +358,10 @@ def test_confirm_fmu_session_started_uses_authenticated_gateway_and_hashed_ticke
     })
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client), \
-         patch("main.ACCESS_AUDIT_URL", "https://full.example/access-audit/internal/session-observed"), \
-         patch("main.SESSION_OBSERVER_GATEWAY_ID", "lite-a"), \
-         patch("main.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
+    with patch("runner_application.httpx.AsyncClient", return_value=fake_client), \
+         patch("runner_application.ACCESS_AUDIT_URL", "https://full.example/access-audit/internal/session-observed"), \
+         patch("runner_application.SESSION_OBSERVER_GATEWAY_ID", "lite-a"), \
+         patch("runner_application.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
         assert asyncio.run(_confirm_fmu_session_started(
             session_ticket="st_secret-ticket",
             claims={"reservationKey": "RES-1"},
@@ -386,9 +388,9 @@ def test_redeem_session_ticket_preserves_json_error_payload():
     )
     fake_client = _FakeAsyncClient(fake_response)
 
-    with patch("main.httpx.AsyncClient", return_value=fake_client), \
-         patch("main.SESSION_OBSERVER_GATEWAY_ID", "gateway.example"), \
-         patch("main.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
+    with patch("runner_application.httpx.AsyncClient", return_value=fake_client), \
+         patch("runner_application.SESSION_OBSERVER_GATEWAY_ID", "gateway.example"), \
+         patch("runner_application.SESSION_OBSERVER_SIGNING_SECRET", "YS0zMi1ieXRlLXNlc3Npb24tb2JzZXJ2ZXItc2VjcmV0ISE"):
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(
                 _redeem_session_ticket(
@@ -420,10 +422,10 @@ def test_browser_observation_retries_confirmation_failure_before_caching():
     redeem = AsyncMock(return_value=claims)
     confirm = AsyncMock(side_effect=[first_failure, True])
 
-    with patch("main._issue_session_ticket", issue), \
-         patch("main._redeem_session_ticket", redeem), \
-         patch("main._confirm_fmu_session_started", confirm), \
-         patch("main.asyncio.sleep", AsyncMock()):
+    with patch("runner_application._issue_session_ticket", issue), \
+         patch("runner_application._redeem_session_ticket", redeem), \
+         patch("runner_application._confirm_fmu_session_started", confirm), \
+         patch("runner_application.asyncio.sleep", AsyncMock()):
         assert asyncio.run(_record_browser_session_started(request, claims, "sim-retry")) is True
 
     assert redeem.await_count == 1
@@ -452,9 +454,9 @@ def test_browser_observation_uses_execution_scoped_session_id():
     redeem = AsyncMock(side_effect=[first_claims, second_claims])
     confirm = AsyncMock(return_value=True)
 
-    with patch("main._issue_session_ticket", issue), \
-         patch("main._redeem_session_ticket", redeem), \
-         patch("main._confirm_fmu_session_started", confirm):
+    with patch("runner_application._issue_session_ticket", issue), \
+         patch("runner_application._redeem_session_ticket", redeem), \
+         patch("runner_application._confirm_fmu_session_started", confirm):
         assert asyncio.run(_record_browser_session_started(request, first_claims, "sim-one")) is True
         assert asyncio.run(_record_browser_session_started(request, second_claims, "sim-two")) is True
 
@@ -557,8 +559,8 @@ class MockFmi3WideIntegerDescription:
     ]
 
 
-@patch("main.read_model_description", return_value=MockModelDescription())
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockModelDescription())
+@patch("runner_application._resolve_fmu_path")
 def test_describe_returns_model_metadata(mock_resolve, mock_read):
     mock_resolve.return_value = "/fake/path/test.fmu"
 
@@ -577,8 +579,8 @@ def test_describe_returns_model_metadata(mock_resolve, mock_read):
     assert data["modelVariables"][0]["causality"] == "input"
 
 
-@patch("main.read_model_description", return_value=MockModelDescription())
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockModelDescription())
+@patch("runner_application._resolve_fmu_path")
 def test_provider_describe_token_is_accepted_by_metadata_endpoint(mock_resolve, mock_read):
     mock_resolve.return_value = "/fake/path/StateSpace.fmu"
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
@@ -597,8 +599,8 @@ def test_provider_describe_token_is_accepted_by_metadata_endpoint(mock_resolve, 
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main.read_model_description", return_value=MockFmi3WideIntegerDescription())
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockFmi3WideIntegerDescription())
+@patch("runner_application._resolve_fmu_path")
 def test_describe_preserves_exact_fmi3_int64_and_uint64_starts(mock_resolve, mock_read):
     mock_resolve.return_value = "/fake/path/wide.fmu"
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(accessKey="wide.fmu", resourceType="fmu")
@@ -1049,20 +1051,20 @@ def test_effective_timeout_caps_to_configured_max_without_exp():
 
 
 def test_effective_timeout_caps_to_jwt_exp():
-    with patch("main.time.time", return_value=1000.0):
+    with patch("runner_application.time.time", return_value=1000.0):
         assert _effective_timeout_seconds(120, {"exp": 1005}) == 5
 
 
 def test_effective_timeout_rejects_expired_jwt():
-    with patch("main.time.time", return_value=1000.0):
+    with patch("runner_application.time.time", return_value=1000.0):
         with pytest.raises(HTTPException) as exc:
             _effective_timeout_seconds(120, {"exp": 999})
         assert exc.value.status_code == 401
 
 
-@patch("main._resolve_fmu_path")
-@patch("main.read_model_description")
-@patch("main._executor")
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application.read_model_description")
+@patch("runner_application._runner_runtime.execution.executor")
 def test_run_executes_simulation(mock_exec, mock_md, mock_resolve, _stub_browser_session_observation):
     mock_resolve.return_value = "/fake/path/spring.fmu"
     md_obj = MagicMock(); md_obj.coSimulation = True; md_obj.modelExchange = False
@@ -1091,9 +1093,9 @@ def test_run_executes_simulation(mock_exec, mock_md, mock_resolve, _stub_browser
     assert data["fmiType"] == "CoSimulation"
 
 
-@patch("main._resolve_fmu_path")
-@patch("main.read_model_description")
-@patch("main._executor")
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application.read_model_description")
+@patch("runner_application._runner_runtime.execution.executor")
 def test_run_still_observes_when_worker_submission_fails(
     mock_exec,
     mock_md,
@@ -1115,7 +1117,7 @@ def test_run_still_observes_when_worker_submission_fails(
     _stub_browser_session_observation.assert_awaited_once()
 
 
-@patch("main._resolve_fmu_path")
+@patch("runner_application._resolve_fmu_path")
 def test_run_rejects_invalid_time_range(mock_resolve):
     mock_resolve.return_value = "/fake/path/spring.fmu"
 
@@ -1129,7 +1131,7 @@ def test_run_rejects_invalid_time_range(mock_resolve):
     assert "stopTime" in response.json()["detail"]
 
 
-@patch("main._resolve_fmu_path")
+@patch("runner_application._resolve_fmu_path")
 def test_run_rejects_zero_step_size(mock_resolve):
     mock_resolve.return_value = "/fake/path/spring.fmu"
 
@@ -1143,7 +1145,7 @@ def test_run_rejects_zero_step_size(mock_resolve):
     assert "stepSize" in response.json()["detail"]
 
 
-@patch("main._resolve_fmu_path")
+@patch("runner_application._resolve_fmu_path")
 def test_run_rejects_non_positive_timeout(mock_resolve):
     mock_resolve.return_value = "/fake/path/spring.fmu"
 
@@ -1157,9 +1159,9 @@ def test_run_rejects_non_positive_timeout(mock_resolve):
     assert "timeout" in response.json()["detail"]
 
 
-@patch("main._resolve_fmu_path")
-@patch("main.read_model_description")
-@patch("main._executor")
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application.read_model_description")
+@patch("runner_application._runner_runtime.execution.executor")
 def test_run_times_out_when_exceeding_timeout(mock_exec, mock_md, mock_resolve):
     mock_resolve.return_value = "/fake/path/spring.fmu"
     md_obj = MagicMock(); md_obj.coSimulation = True; md_obj.modelExchange = False
@@ -1211,7 +1213,7 @@ def test_run_rejects_missing_access_key():
 # ─── Concurrency ────────────────────────────────────────────────────
 
 
-@patch("main._resolve_fmu_path")
+@patch("runner_application._resolve_fmu_path")
 def test_run_rejects_lab_id_mismatch(mock_resolve):
     mock_resolve.return_value = "/fake/path/spring.fmu"
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(labId="99", accessKey="test.fmu")
@@ -1226,8 +1228,8 @@ def test_run_rejects_lab_id_mismatch(mock_resolve):
     finally:
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
-@patch("main.MAX_CONCURRENT_PER_MODEL", 0)
-@patch("main._resolve_fmu_path")
+@patch("runner_application.MAX_CONCURRENT_PER_MODEL", 0)
+@patch("runner_application._resolve_fmu_path")
 def test_run_returns_429_when_concurrency_exceeded(mock_resolve):
     mock_resolve.return_value = "/fake/path/spring.fmu"
 
@@ -1243,9 +1245,9 @@ def test_run_returns_429_when_concurrency_exceeded(mock_resolve):
 
 # ─── NDJSON Streaming ─────────────────────────────────────────
 
-@patch("main._resolve_fmu_path")
-@patch("main._executor")
-@patch("main.read_model_description")
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application._runner_runtime.execution.executor")
+@patch("runner_application.read_model_description")
 def test_stream_returns_ndjson_events(mock_md, mock_exec, mock_resolve):
     mock_resolve.return_value = "/fake/path/spring.fmu"
     mock_md_obj = MagicMock()
@@ -1274,9 +1276,9 @@ def test_stream_returns_ndjson_events(mock_md, mock_exec, mock_resolve):
     assert "simId" in started
 
 
-@patch("main._resolve_fmu_path")
-@patch("main.read_model_description")
-@patch("main._executor")
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application.read_model_description")
+@patch("runner_application._runner_runtime.execution.executor")
 def test_stream_logs_worker_exception_details(mock_exec, mock_md, mock_resolve, caplog):
     mock_resolve.return_value = "/fake/path/spring.fmu"
     mock_md_obj = MagicMock()
@@ -1300,9 +1302,9 @@ def test_stream_logs_worker_exception_details(mock_exec, mock_md, mock_resolve, 
     assert any(record.exc_info for record in caplog.records if record.name == "fmu-runner")
 
 
-@patch("main._resolve_fmu_path")
-@patch("main.read_model_description")
-@patch("main._executor")
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application.read_model_description")
+@patch("runner_application._runner_runtime.execution.executor")
 def test_stream_preserves_safe_structured_error_details(mock_exec, mock_md, mock_resolve):
     mock_resolve.return_value = "/fake/path/spring.fmu"
     mock_md_obj = MagicMock()
@@ -1319,7 +1321,7 @@ def test_stream_preserves_safe_structured_error_details(mock_exec, mock_md, mock
             },
         )
 
-    with patch("main._record_browser_session_started", fail_session_observation):
+    with patch("runner_application._record_browser_session_started", fail_session_observation):
         response = client.post("/api/v1/simulations/stream", json={
             "labId": 1,
             "parameters": {},
@@ -1348,7 +1350,7 @@ def test_list_fmus_returns_only_provisioned_file(tmp_path, monkeypatch):
     model_file = tmp_path / "provider-1" / "test.fmu"
     model_file.parent.mkdir(parents=True, exist_ok=True)
     model_file.write_bytes(b"dummy")
-    monkeypatch.setattr("main.FMU_DATA_PATH", str(tmp_path))
+    monkeypatch.setattr("runner_application.FMU_DATA_PATH", str(tmp_path))
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(accessKey="test.fmu", resourceType="fmu")
     try:
         response = client.get("/api/v1/fmu/list")
@@ -1365,7 +1367,7 @@ def test_resolve_fmu_path_finds_direct_file_without_constructing_user_path(tmp_p
     fmu = tmp_path / "direct.fmu"
     fmu.write_bytes(b"direct")
 
-    with patch("main.FMU_DATA_PATH", str(tmp_path)):
+    with patch("runner_application.FMU_DATA_PATH", str(tmp_path)):
         assert _resolve_fmu_path("direct.fmu") == fmu.resolve()
 
 
@@ -1374,13 +1376,13 @@ def test_resolve_fmu_path_finds_one_level_provider_file(tmp_path):
     fmu.parent.mkdir()
     fmu.write_bytes(b"provider")
 
-    with patch("main.FMU_DATA_PATH", str(tmp_path)):
+    with patch("runner_application.FMU_DATA_PATH", str(tmp_path)):
         assert _resolve_fmu_path("provider.fmu") == fmu.resolve()
 
 
 @pytest.mark.parametrize("filename", ["../outside.fmu", "provider/../../outside.fmu", "provider\\outside.fmu"])
 def test_resolve_fmu_path_rejects_path_traversal(tmp_path, filename):
-    with patch("main.FMU_DATA_PATH", str(tmp_path)):
+    with patch("runner_application.FMU_DATA_PATH", str(tmp_path)):
         with pytest.raises(HTTPException) as exc_info:
             _resolve_fmu_path(filename)
     assert exc_info.value.status_code == 400
@@ -1395,7 +1397,7 @@ def test_resolve_fmu_path_rejects_symlink_outside_root(tmp_path):
     except OSError:
         pytest.skip("symlinks are unavailable in this test environment")
 
-    with patch("main.FMU_DATA_PATH", str(tmp_path)):
+    with patch("runner_application.FMU_DATA_PATH", str(tmp_path)):
         with pytest.raises(HTTPException) as exc_info:
             _resolve_fmu_path("outside.fmu")
     assert exc_info.value.status_code == 404
@@ -1410,9 +1412,9 @@ def test_list_fmus_requires_access_key():
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main.read_model_description", return_value=MockModelDescription())
-@patch("main._issue_session_ticket", new_callable=AsyncMock)
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockModelDescription())
+@patch("runner_application._issue_session_ticket", new_callable=AsyncMock)
+@patch("runner_application._resolve_fmu_path")
 def test_proxy_download_generates_fmu_archive(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
     mock_resolve.return_value = tmp_path / "test.fmu"
     mock_issue_ticket.return_value = ("st_ticket_1", 4102444800)
@@ -1421,7 +1423,7 @@ def test_proxy_download_generates_fmu_archive(mock_resolve, mock_issue_ticket, m
     runtime_bin = runtime_root / "binaries" / "linux64"
     runtime_bin.mkdir(parents=True, exist_ok=True)
     (runtime_bin / "decentralabs_proxy.so").write_bytes(b"binary")
-    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
+    monkeypatch.setattr("runner_application.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
 
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
         accessKey="test.fmu",
@@ -1457,9 +1459,9 @@ def test_proxy_download_generates_fmu_archive(mock_resolve, mock_issue_ticket, m
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main.read_model_description", return_value=MockModelDescription())
-@patch("main._issue_session_ticket", new_callable=AsyncMock)
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockModelDescription())
+@patch("runner_application._issue_session_ticket", new_callable=AsyncMock)
+@patch("runner_application._resolve_fmu_path")
 def test_proxy_fmu_is_loadable_by_python_fmi_tools(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
     mock_resolve.return_value = tmp_path / "test.fmu"
     mock_issue_ticket.return_value = ("st_ticket_1", 4102444800)
@@ -1468,7 +1470,7 @@ def test_proxy_fmu_is_loadable_by_python_fmi_tools(mock_resolve, mock_issue_tick
     runtime_bin = runtime_root / "binaries" / "linux64"
     runtime_bin.mkdir(parents=True, exist_ok=True)
     (runtime_bin / "decentralabs_proxy.so").write_bytes(b"binary")
-    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
+    monkeypatch.setattr("runner_application.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
 
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
         accessKey="test.fmu",
@@ -1494,9 +1496,9 @@ def test_proxy_fmu_is_loadable_by_python_fmi_tools(mock_resolve, mock_issue_tick
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main.read_model_description", return_value=MockFmi3ModelDescription())
-@patch("main._issue_session_ticket", new_callable=AsyncMock)
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockFmi3ModelDescription())
+@patch("runner_application._issue_session_ticket", new_callable=AsyncMock)
+@patch("runner_application._resolve_fmu_path")
 def test_proxy_download_generates_fmi3_archive_layout(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
     mock_resolve.return_value = tmp_path / "test-fmi3.fmu"
     mock_issue_ticket.return_value = ("st_ticket_3", 4102444800)
@@ -1505,7 +1507,7 @@ def test_proxy_download_generates_fmi3_archive_layout(mock_resolve, mock_issue_t
     runtime_bin = runtime_root / "binaries" / "win64"
     runtime_bin.mkdir(parents=True, exist_ok=True)
     (runtime_bin / "decentralabs_proxy.dll").write_bytes(b"binary")
-    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
+    monkeypatch.setattr("runner_application.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
 
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
         accessKey="test-fmi3.fmu",
@@ -1540,9 +1542,9 @@ def test_proxy_download_generates_fmi3_archive_layout(mock_resolve, mock_issue_t
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main.read_model_description", return_value=MockFmi3ModelDescription())
-@patch("main._issue_session_ticket", new_callable=AsyncMock)
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockFmi3ModelDescription())
+@patch("runner_application._issue_session_ticket", new_callable=AsyncMock)
+@patch("runner_application._resolve_fmu_path")
 def test_proxy_model_description_matches_public_describe_payload(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
     mock_resolve.return_value = tmp_path / "test-fmi3.fmu"
     mock_issue_ticket.return_value = ("st_ticket_3", 4102444800)
@@ -1551,7 +1553,7 @@ def test_proxy_model_description_matches_public_describe_payload(mock_resolve, m
     runtime_bin = runtime_root / "binaries" / "win64"
     runtime_bin.mkdir(parents=True, exist_ok=True)
     (runtime_bin / "decentralabs_proxy.dll").write_bytes(b"binary")
-    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
+    monkeypatch.setattr("runner_application.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
 
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
         accessKey="test-fmi3.fmu",
@@ -1606,9 +1608,9 @@ def test_proxy_model_description_matches_public_describe_payload(mock_resolve, m
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main.read_model_description", return_value=MockModelDescription())
-@patch("main._issue_session_ticket", new_callable=AsyncMock)
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockModelDescription())
+@patch("runner_application._issue_session_ticket", new_callable=AsyncMock)
+@patch("runner_application._resolve_fmu_path")
 def test_proxy_download_adds_hmac_signature_header(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
     mock_resolve.return_value = tmp_path / "test.fmu"
     mock_issue_ticket.return_value = ("st_ticket_1", 4102444800)
@@ -1617,8 +1619,8 @@ def test_proxy_download_adds_hmac_signature_header(mock_resolve, mock_issue_tick
     runtime_bin = runtime_root / "binaries" / "linux64"
     runtime_bin.mkdir(parents=True, exist_ok=True)
     (runtime_bin / "decentralabs_proxy.so").write_bytes(b"binary")
-    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
-    monkeypatch.setattr("main.FMU_PROXY_SIGNING_KEY", "top-secret")
+    monkeypatch.setattr("runner_application.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
+    monkeypatch.setattr("runner_application.FMU_PROXY_SIGNING_KEY", "top-secret")
 
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
         accessKey="test.fmu",
@@ -1639,13 +1641,13 @@ def test_proxy_download_adds_hmac_signature_header(mock_resolve, mock_issue_tick
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main.read_model_description", return_value=MockModelDescription())
-@patch("main._issue_session_ticket", new_callable=AsyncMock)
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockModelDescription())
+@patch("runner_application._issue_session_ticket", new_callable=AsyncMock)
+@patch("runner_application._resolve_fmu_path")
 def test_proxy_download_requires_runtime_binaries(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
     mock_resolve.return_value = tmp_path / "test.fmu"
     mock_issue_ticket.return_value = ("st_ticket_1", 4102444800)
-    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(tmp_path / "missing-runtime"))
+    monkeypatch.setattr("runner_application.FMU_PROXY_RUNTIME_PATH", str(tmp_path / "missing-runtime"))
 
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
         accessKey="test.fmu",
@@ -1664,9 +1666,9 @@ def test_proxy_download_requires_runtime_binaries(mock_resolve, mock_issue_ticke
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main.read_model_description", return_value=MockModelDescription())
-@patch("main._issue_session_ticket", new_callable=AsyncMock)
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockModelDescription())
+@patch("runner_application._issue_session_ticket", new_callable=AsyncMock)
+@patch("runner_application._resolve_fmu_path")
 def test_proxy_download_rate_limited(mock_resolve, mock_issue_ticket, mock_read_md, tmp_path, monkeypatch):
     mock_resolve.return_value = tmp_path / "test.fmu"
     mock_issue_ticket.return_value = ("st_ticket_1", 4102444800)
@@ -1675,9 +1677,9 @@ def test_proxy_download_rate_limited(mock_resolve, mock_issue_ticket, mock_read_
     runtime_bin = runtime_root / "binaries" / "linux64"
     runtime_bin.mkdir(parents=True, exist_ok=True)
     (runtime_bin / "decentralabs_proxy.so").write_bytes(b"binary")
-    monkeypatch.setattr("main.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
-    monkeypatch.setattr("main.PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE", 0)
-    monkeypatch.setattr("main._proxy_download_hits", defaultdict(deque))
+    monkeypatch.setattr("runner_application.FMU_PROXY_RUNTIME_PATH", str(runtime_root))
+    monkeypatch.setattr("runner_application.PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE", 0)
+    monkeypatch.setattr("runner_application._runner_runtime.proxy_download_hits", defaultdict(deque))
 
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(
         accessKey="test.fmu",
@@ -1696,7 +1698,7 @@ def test_proxy_download_rate_limited(mock_resolve, mock_issue_ticket, mock_read_
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 def test_history_empty_initially(tmp_path, monkeypatch):
-    monkeypatch.setattr("main.HISTORY_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr(runner_application._runner_runtime, "history_db_path", str(tmp_path / "test.db"))
     # Ensure schema exists
     asyncio.run(_init_db())
 
@@ -1734,9 +1736,9 @@ def test_aas_routes_are_registered_once_and_openapi_is_warning_free():
     assert duplicate_warnings == []
 
 
-@patch("main._resolve_fmu_path")
-@patch("main._executor")
-@patch("main.read_model_description")
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application._runner_runtime.execution.executor")
+@patch("runner_application.read_model_description")
 def test_run_persists_to_history(mock_md, mock_exec, mock_resolve, tmp_path, monkeypatch):
     """After a successful run, the simulation appears in the history endpoint."""
     mock_resolve.return_value = "/fake/path/spring.fmu"
@@ -1747,7 +1749,7 @@ def test_run_persists_to_history(mock_md, mock_exec, mock_resolve, tmp_path, mon
     mock_exec.submit.return_value = _make_future(_make_run_result())
 
     db_path = str(tmp_path / "hist.db")
-    monkeypatch.setattr("main.HISTORY_DB_PATH", db_path)
+    monkeypatch.setattr(runner_application._runner_runtime, "history_db_path", db_path)
     asyncio.run(_init_db())
 
     # Run a simulation
@@ -1811,8 +1813,8 @@ class MockModelExchangeDescription:
     ]
 
 
-@patch("main.read_model_description", return_value=MockModelExchangeDescription())
-@patch("main._resolve_fmu_path")
+@patch("runner_application.read_model_description", return_value=MockModelExchangeDescription())
+@patch("runner_application._resolve_fmu_path")
 def test_describe_model_exchange(mock_resolve, mock_read):
     mock_resolve.return_value = "/fake/path/pendulum.fmu"
     app.dependency_overrides[_original_verify_jwt] = _fake_jwt(accessKey="pendulum.fmu")
@@ -1827,9 +1829,9 @@ def test_describe_model_exchange(mock_resolve, mock_read):
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
 
-@patch("main._resolve_fmu_path")
-@patch("main._executor")
-@patch("main.read_model_description", return_value=MockModelExchangeDescription())
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application._runner_runtime.execution.executor")
+@patch("runner_application.read_model_description", return_value=MockModelExchangeDescription())
 def test_run_model_exchange_auto_detect(mock_md, mock_exec, mock_resolve):
     """When fmiType is not specified, auto-detect from model description."""
     mock_resolve.return_value = "/fake/path/pendulum.fmu"
@@ -1849,9 +1851,9 @@ def test_run_model_exchange_auto_detect(mock_md, mock_exec, mock_resolve):
     assert call_args[0][7] == "ModelExchange"
 
 
-@patch("main._resolve_fmu_path")
-@patch("main._executor")
-@patch("main.read_model_description", return_value=MockModelExchangeDescription())
+@patch("runner_application._resolve_fmu_path")
+@patch("runner_application._runner_runtime.execution.executor")
+@patch("runner_application.read_model_description", return_value=MockModelExchangeDescription())
 def test_run_explicit_fmi_type_and_solver(mock_md, mock_exec, mock_resolve):
     """Client can explicitly set fmiType and solver in options."""
     mock_resolve.return_value = "/fake/path/pendulum.fmu"
