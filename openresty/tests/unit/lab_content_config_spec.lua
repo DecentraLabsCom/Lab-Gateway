@@ -19,20 +19,20 @@ local function resolve_conf_path()
     local dir = source:match("^(.*)/[^/]+$") or "."
 
     local candidates = {
-        dir .. "/../../lab_access.conf",
-        dir .. "/../lab_access.conf",
-        "openresty/lab_access.conf",
-        "lab_access.conf"
+        dir .. "/../../gateway.conf",
+        dir .. "/../gateway.conf",
+        "openresty/gateway.conf",
+        "gateway.conf"
     }
 
     for _, path in ipairs(candidates) do
         local content = read_file(path)
         if content then
             local include_candidates = {
-                dir .. "/../../lab_access_lab_admin.conf",
-                dir .. "/../lab_access_lab_admin.conf",
-                "openresty/lab_access_lab_admin.conf",
-                "lab_access_lab_admin.conf"
+                dir .. "/../../gateway_lab_admin.conf",
+                dir .. "/../gateway_lab_admin.conf",
+                "openresty/conf.d/gateway_lab_admin.conf",
+                "conf.d/gateway_lab_admin.conf"
             }
             for _, include_path in ipairs(include_candidates) do
                 local fragment = read_file(include_path)
@@ -42,10 +42,10 @@ local function resolve_conf_path()
                 end
             end
             include_candidates = {
-                dir .. "/../../lab_access_lab_content.conf",
-                dir .. "/../lab_access_lab_content.conf",
-                "openresty/lab_access_lab_content.conf",
-                "lab_access_lab_content.conf"
+                dir .. "/../../gateway_lab_content.conf",
+                dir .. "/../gateway_lab_content.conf",
+                "openresty/conf.d/gateway_lab_content.conf",
+                "conf.d/gateway_lab_content.conf"
             }
             for _, include_path in ipairs(include_candidates) do
                 local fragment = read_file(include_path)
@@ -58,7 +58,7 @@ local function resolve_conf_path()
         end
     end
 
-    error("Cannot locate lab_access.conf for tests")
+    error("Cannot locate gateway.conf for tests")
 end
 
 local function extract_location_block(conf, location)

@@ -56,7 +56,7 @@ docker run -d --name "$LITE_CONTAINER" --network "$NETWORK_NAME" \
     -e ISSUER="http://${KEYSERVER_CONTAINER}:8000/auth" \
     -v "${TEMP_ROOT}/lite-certs:/etc/ssl/private" \
     -v "${PROJECT_ROOT}/openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro" \
-    -v "${PROJECT_ROOT}/openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro" \
+    -v "${PROJECT_ROOT}/openresty/gateway.conf:/etc/openresty/gateway.conf:ro" \
     -v "${PROJECT_ROOT}/openresty/lua:/etc/openresty/lua:ro" \
     -v "${PROJECT_ROOT}/web:/var/www/html:ro" \
     labgateway-openresty:latest >/dev/null

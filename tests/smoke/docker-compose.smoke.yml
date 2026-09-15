@@ -33,7 +33,7 @@ services:
     volumes:
       - ./certs:/etc/ssl/private
       - ./certs/public_key.pem:/etc/openresty/jwt-keys/public_key.pem:ro
-      - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
+      - ../../openresty/gateway.conf:/etc/openresty/gateway.conf:ro
       - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ../../openresty/lua:/etc/openresty/lua:ro
       - ../../web:/var/www/html:ro

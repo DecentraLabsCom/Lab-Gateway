@@ -7,7 +7,6 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 OPS_WORKER_ROOT = ROOT / "ops-worker"
 OPENRESTY_ROOT = ROOT / "openresty"
@@ -17,7 +16,6 @@ STANDALONE_COMMAND_FILES = (
     ROOT / "blockchain-services" / "test-wallet-local.sh",
     ROOT / "blockchain-services" / "test-wallet-local.ps1",
 )
-
 
 def _worker_module():
     worker_path = str(OPS_WORKER_ROOT)
@@ -167,7 +165,7 @@ def test_composable_ops_worker_modules_do_not_run_external_work_at_import():
 
 
 def test_every_openresty_access_fragment_is_included_and_packaged():
-    access_conf = (OPENRESTY_ROOT / "lab_access.conf").read_text(encoding="utf-8")
+    access_conf = (OPENRESTY_ROOT / "gateway.conf").read_text(encoding="utf-8")
     dockerfile = (OPENRESTY_ROOT / "Dockerfile").read_text(encoding="utf-8")
     fragments = {path.name for path in OPENRESTY_ROOT.glob("lab_access_*.conf")}
     included = set(

@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SETUP_SH = ROOT / "setup.sh"
 SETUP_BAT = ROOT / "setup.bat"
@@ -24,7 +23,6 @@ MANUAL_INSTALL_EN = ROOT / "docs" / "install" / "install-manual-compose.md"
 MANUAL_INSTALL_ES = ROOT / "docs" / "install" / "instalar-compose-manual.md"
 NIXOS_INSTALL_EN = ROOT / "docs" / "install" / "install-nixos.md"
 NIXOS_INSTALL_ES = ROOT / "docs" / "install" / "instalar-nixos.md"
-
 
 def _service_block(service_name: str, compose_text: str) -> str:
     marker_match = re.search(
@@ -318,8 +316,8 @@ class SetupEnvContractTest(unittest.TestCase):
                 self.assertIn(snippet, sync_powershell)
 
     def test_openresty_does_not_use_an_unrendered_server_name_placeholder(self):
-        lab_access = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
-        ops_include = (ROOT / "openresty" / "lab_access_ops.conf").read_text(encoding="utf-8")
+        lab_access = (ROOT / "openresty" / "gateway.conf").read_text(encoding="utf-8")
+        ops_include = (ROOT / "openresty" / "conf.d" / "gateway_ops.conf").read_text(encoding="utf-8")
         self.assertNotIn("${SERVER_NAME}", lab_access)
         self.assertIn("server_name _;", lab_access)
         self.assertIn("set_by_lua_block $ops_origin", ops_include)

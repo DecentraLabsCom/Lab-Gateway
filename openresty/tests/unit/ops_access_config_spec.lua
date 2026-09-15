@@ -19,18 +19,18 @@ local function resolve_conf_path()
     local dir = source:match("^(.*)/[^/]+$") or "."
 
     local candidates = {
-        dir .. "/../../lab_access.conf",
-        dir .. "/../lab_access.conf",
-        "openresty/lab_access.conf",
-        "lab_access.conf"
+        dir .. "/../../gateway.conf",
+        dir .. "/../gateway.conf",
+        "openresty/gateway.conf",
+        "gateway.conf"
     }
 
     for _, path in ipairs(candidates) do
         local content = read_file(path)
         if content then
             for _, include_name in ipairs({
-                "lab_access_lab_manager.conf",
-                "lab_access_ops.conf"
+                "conf.d/gateway_lab_manager.conf",
+                "conf.d/gateway_ops.conf"
             }) do
                 local include_candidates = {
                     dir .. "/../../" .. include_name,
@@ -50,7 +50,7 @@ local function resolve_conf_path()
         end
     end
 
-    error("Cannot locate lab_access.conf for tests")
+    error("Cannot locate gateway.conf for tests")
 end
 
 local function extract_location_block(conf, location)

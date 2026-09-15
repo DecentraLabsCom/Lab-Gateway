@@ -1,14 +1,12 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
-
 
 def test_guacamole_manual_login_has_ip_and_user_rate_limits():
     nginx = (ROOT / "openresty" / "nginx.conf").read_text(encoding="utf-8")
-    conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    conf = (ROOT / "openresty" / "gateway.conf").read_text(encoding="utf-8")
     guacamole_auth = (
-        ROOT / "openresty" / "lab_access_guacamole_auth.conf"
+        ROOT / "openresty" / "conf.d" / "gateway_guacamole_auth.conf"
     ).read_text(encoding="utf-8")
     guard = (ROOT / "openresty" / "lua" / "modules" / "guacamole_login_guard.lua").read_text(encoding="utf-8")
     dockerfile = (ROOT / "guacamole" / "Dockerfile").read_text(encoding="utf-8")

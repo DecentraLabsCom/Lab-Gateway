@@ -1,6 +1,6 @@
 -- Shared helpers for stripping the bootstrap ?token= parameter from URLs
 -- and redirecting to the clean path.  Used by the exact-path bootstrap
--- blocks in lab_access.conf (/lab-manager, /wallet-dashboard,
+-- blocks in gateway.conf (/lab-manager, /wallet-dashboard,
 -- /institution-config) and by billing_access.lua / lab_manager_access.lua.
 
 local _M = {}

@@ -1,38 +1,36 @@
 from pathlib import Path
 import re
 
-
 ROOT = Path(__file__).resolve().parents[2]
 OPENRESTY_ROOT = ROOT / "openresty"
-ACCESS_CONF = OPENRESTY_ROOT / "lab_access.conf"
-LAB_MANAGER_INCLUDE = OPENRESTY_ROOT / "lab_access_lab_manager.conf"
-LAB_ADMIN_INCLUDE = OPENRESTY_ROOT / "lab_access_lab_admin.conf"
-LAB_CONTENT_INCLUDE = OPENRESTY_ROOT / "lab_access_lab_content.conf"
-INTERNAL_HEALTH_INCLUDE = OPENRESTY_ROOT / "lab_access_health_internal.conf"
-AUTH_HANDOFF_INCLUDE = OPENRESTY_ROOT / "lab_access_auth_handoff.conf"
-AUTH_BACKEND_INCLUDE = OPENRESTY_ROOT / "lab_access_auth_backend.conf"
-BILLING_INCLUDE = OPENRESTY_ROOT / "lab_access_billing.conf"
-WALLET_INCLUDE = OPENRESTY_ROOT / "lab_access_wallet.conf"
-WALLET_DASHBOARD_INCLUDE = OPENRESTY_ROOT / "lab_access_wallet_dashboard.conf"
-INSTITUTION_CONFIG_INCLUDE = OPENRESTY_ROOT / "lab_access_institution_config.conf"
-ADMIN_SESSION_INCLUDE = OPENRESTY_ROOT / "lab_access_admin_session.conf"
-INTENTS_INCLUDE = OPENRESTY_ROOT / "lab_access_intents.conf"
-OPS_INCLUDE = OPENRESTY_ROOT / "lab_access_ops.conf"
-ONBOARDING_INCLUDE = OPENRESTY_ROOT / "lab_access_onboarding_webauthn.conf"
-GUACAMOLE_AUTH_INCLUDE = OPENRESTY_ROOT / "lab_access_guacamole_auth.conf"
-GUACAMOLE_PROXY_INCLUDE = OPENRESTY_ROOT / "lab_access_guacamole_proxy.conf"
-PROVISIONER_INCLUDE = OPENRESTY_ROOT / "lab_access_guacamole_provisioner.conf"
-AAS_PUBLIC_INCLUDE = OPENRESTY_ROOT / "lab_access_aas_public.conf"
-AAS_ADMIN_INCLUDE = OPENRESTY_ROOT / "lab_access_aas_admin.conf"
-AAS_RESOLVE_INCLUDE = OPENRESTY_ROOT / "lab_access_aas_resolve.conf"
-GATEWAY_MODE_INCLUDE = OPENRESTY_ROOT / "lab_access_gateway_mode.conf"
-FMU_INCLUDE = OPENRESTY_ROOT / "lab_access_fmu.conf"
+ACCESS_CONF = OPENRESTY_ROOT / "gateway.conf"
+LAB_MANAGER_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_lab_manager.conf"
+LAB_ADMIN_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_lab_admin.conf"
+LAB_CONTENT_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_lab_content.conf"
+INTERNAL_HEALTH_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_health_internal.conf"
+AUTH_HANDOFF_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_auth_handoff.conf"
+AUTH_BACKEND_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_auth_backend.conf"
+BILLING_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_billing.conf"
+WALLET_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_wallet.conf"
+WALLET_DASHBOARD_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_wallet_dashboard.conf"
+INSTITUTION_CONFIG_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_institution_config.conf"
+ADMIN_SESSION_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_admin_session.conf"
+INTENTS_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_intents.conf"
+OPS_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_ops.conf"
+ONBOARDING_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_onboarding_webauthn.conf"
+GUACAMOLE_AUTH_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_guacamole_auth.conf"
+GUACAMOLE_PROXY_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_guacamole_proxy.conf"
+PROVISIONER_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_guacamole_provisioner.conf"
+AAS_PUBLIC_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_aas_public.conf"
+AAS_ADMIN_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_aas_admin.conf"
+AAS_RESOLVE_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_aas_resolve.conf"
+GATEWAY_MODE_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_gateway_mode.conf"
+FMU_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_fmu.conf"
 INIT_SSL = OPENRESTY_ROOT / "init-ssl.sh"
 INIT_SSL_SECRETS = OPENRESTY_ROOT / "init-ssl-secrets.sh"
 INIT_SSL_TLS = OPENRESTY_ROOT / "init-ssl-tls.sh"
 INIT_SSL_JWT_SYNC = OPENRESTY_ROOT / "init-ssl-jwt-sync.sh"
 INIT_SSL_JWT_WATCHERS = OPENRESTY_ROOT / "init-ssl-jwt-watchers.sh"
-
 
 EXPECTED_LOCATION_MATRIX = (
     "/.well-known/pki-validation/",
@@ -404,7 +402,7 @@ def test_lab_access_location_matrix_and_order_are_frozen():
     assert lab_admin_locations == EXPECTED_LAB_ADMIN_LOCATIONS
     assert lab_content_locations == EXPECTED_LAB_CONTENT_LOCATIONS
     assert auth_backend_locations == EXPECTED_AUTH_BACKEND_LOCATIONS
-    assert conf.index("include /etc/openresty/lab_access_auth_backend.conf;") < conf.index("include /etc/openresty/lab_access_auth_handoff.conf;")
+    assert conf.index("include /etc/openresty/conf.d/gateway_auth_backend.conf;") < conf.index("include /etc/openresty/conf.d/gateway_auth_handoff.conf;")
     assert billing_locations == EXPECTED_BILLING_LOCATIONS
     assert wallet_locations == EXPECTED_WALLET_LOCATIONS
     assert wallet_dashboard_locations == EXPECTED_WALLET_DASHBOARD_LOCATIONS
@@ -589,13 +587,13 @@ def test_well_known_locations_are_grouped_before_server_catchalls():
 def test_lab_manager_routes_keep_access_redirect_policy_and_static_ui_contract():
     conf = _read(ACCESS_CONF)
     include = _read(LAB_MANAGER_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_lab_manager.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_lab_manager.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_LAB_MANAGER_LOCATIONS
     assert conf.index("listen 443 ssl;") < conf.index(include_line)
     assert conf.index(include_line) < conf.index(
-        "include /etc/openresty/lab_access_lab_admin.conf;"
+        "include /etc/openresty/conf.d/gateway_lab_admin.conf;"
     )
 
     root_block = _location_block(include, "= /lab-manager")
@@ -644,17 +642,17 @@ def test_lab_manager_routes_keep_access_redirect_policy_and_static_ui_contract()
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_lab_manager.conf "
-        "/etc/openresty/lab_access_lab_manager.conf"
+        "COPY conf.d/gateway_lab_manager.conf "
+        "/etc/openresty/conf.d/gateway_lab_manager.conf"
     ) in dockerfile
 
 
 def test_lab_admin_route_keeps_guard_headers_timeouts_and_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(LAB_ADMIN_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_lab_admin.conf;"
-    lab_manager_include_line = "include /etc/openresty/lab_access_lab_manager.conf;"
-    lab_content_include_line = "include /etc/openresty/lab_access_lab_content.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_lab_admin.conf;"
+    lab_manager_include_line = "include /etc/openresty/conf.d/gateway_lab_manager.conf;"
+    lab_content_include_line = "include /etc/openresty/conf.d/gateway_lab_content.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_LAB_ADMIN_LOCATIONS
@@ -692,19 +690,19 @@ def test_lab_admin_route_keeps_guard_headers_timeouts_and_proxy_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_lab_admin.conf "
-        "/etc/openresty/lab_access_lab_admin.conf"
+        "COPY conf.d/gateway_lab_admin.conf "
+        "/etc/openresty/conf.d/gateway_lab_admin.conf"
     ) in dockerfile
 
 
 def test_lab_content_route_keeps_read_only_static_alias_and_cors_contract():
     conf = _read(ACCESS_CONF)
     include = _read(LAB_CONTENT_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_lab_content.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_lab_content.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_LAB_CONTENT_LOCATIONS
-    assert conf.index("include /etc/openresty/lab_access_lab_admin.conf;") < conf.index(
+    assert conf.index("include /etc/openresty/conf.d/gateway_lab_admin.conf;") < conf.index(
         include_line
     )
     assert conf.index(include_line) < conf.index(
@@ -738,15 +736,15 @@ def test_lab_content_route_keeps_read_only_static_alias_and_cors_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_lab_content.conf "
-        "/etc/openresty/lab_access_lab_content.conf"
+        "COPY conf.d/gateway_lab_content.conf "
+        "/etc/openresty/conf.d/gateway_lab_content.conf"
     ) in dockerfile
 
 
 def test_gateway_mode_route_keeps_public_full_lite_payload_and_options():
     conf = _read(ACCESS_CONF)
     include = _read(GATEWAY_MODE_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_gateway_mode.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_gateway_mode.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_GATEWAY_MODE_LOCATIONS
@@ -766,8 +764,8 @@ def test_gateway_mode_route_keeps_public_full_lite_payload_and_options():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_gateway_mode.conf "
-        "/etc/openresty/lab_access_gateway_mode.conf"
+        "COPY conf.d/gateway_gateway_mode.conf "
+        "/etc/openresty/conf.d/gateway_gateway_mode.conf"
     ) in dockerfile
 
 
@@ -805,7 +803,7 @@ def test_public_and_internal_health_routes_keep_their_security_boundaries():
 def test_internal_health_routes_are_included_inside_the_https_server():
     conf = _read(ACCESS_CONF)
     include = _read(INTERNAL_HEALTH_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_health_internal.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_health_internal.conf;"
 
     assert conf.count(include_line) == 1
     assert include.count("location = ") == len(EXPECTED_INTERNAL_HEALTH_LOCATIONS)
@@ -830,15 +828,15 @@ def test_internal_health_routes_are_included_inside_the_https_server():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_health_internal.conf "
-        "/etc/openresty/lab_access_health_internal.conf"
+        "COPY conf.d/gateway_health_internal.conf "
+        "/etc/openresty/conf.d/gateway_health_internal.conf"
     ) in dockerfile
 
 
 def test_auth_handoff_routes_are_included_without_changing_their_contract():
     conf = _read(ACCESS_CONF)
     include = _read(AUTH_HANDOFF_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_auth_handoff.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_auth_handoff.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_AUTH_HANDOFF_LOCATIONS
@@ -867,15 +865,15 @@ def test_auth_handoff_routes_are_included_without_changing_their_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_auth_handoff.conf "
-        "/etc/openresty/lab_access_auth_handoff.conf"
+        "COPY conf.d/gateway_auth_handoff.conf "
+        "/etc/openresty/conf.d/gateway_auth_handoff.conf"
     ) in dockerfile
 
 
 def test_guacamole_token_route_is_included_with_login_limits_intact():
     conf = _read(ACCESS_CONF)
     include = _read(GUACAMOLE_AUTH_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_guacamole_auth.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_guacamole_auth.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_GUACAMOLE_AUTH_LOCATIONS
@@ -896,20 +894,20 @@ def test_guacamole_token_route_is_included_with_login_limits_intact():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_guacamole_auth.conf "
-        "/etc/openresty/lab_access_guacamole_auth.conf"
+        "COPY conf.d/gateway_guacamole_auth.conf "
+        "/etc/openresty/conf.d/gateway_guacamole_auth.conf"
     ) in dockerfile
 
 
 def test_guacamole_websocket_proxy_keeps_hooks_headers_and_timeouts():
     conf = _read(ACCESS_CONF)
     include = _read(GUACAMOLE_PROXY_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_guacamole_proxy.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_guacamole_proxy.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_GUACAMOLE_PROXY_LOCATIONS
-    token_include_line = "include /etc/openresty/lab_access_guacamole_auth.conf;"
-    aas_public_include_line = "include /etc/openresty/lab_access_aas_public.conf;"
+    token_include_line = "include /etc/openresty/conf.d/gateway_guacamole_auth.conf;"
+    aas_public_include_line = "include /etc/openresty/conf.d/gateway_aas_public.conf;"
     assert conf.index(token_include_line) < conf.index(include_line)
     assert conf.index(include_line) < conf.index(aas_public_include_line)
 
@@ -956,15 +954,15 @@ def test_guacamole_websocket_proxy_keeps_hooks_headers_and_timeouts():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_guacamole_proxy.conf "
-        "/etc/openresty/lab_access_guacamole_proxy.conf"
+        "COPY conf.d/gateway_guacamole_proxy.conf "
+        "/etc/openresty/conf.d/gateway_guacamole_proxy.conf"
     ) in dockerfile
 
 
 def test_guacamole_provisioner_route_keeps_token_guard_and_rewrite():
     conf = _read(ACCESS_CONF)
     include = _read(PROVISIONER_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_guacamole_provisioner.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_guacamole_provisioner.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_PROVISIONER_LOCATIONS
@@ -997,15 +995,15 @@ def test_guacamole_provisioner_route_keeps_token_guard_and_rewrite():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_guacamole_provisioner.conf "
-        "/etc/openresty/lab_access_guacamole_provisioner.conf"
+        "COPY conf.d/gateway_guacamole_provisioner.conf "
+        "/etc/openresty/conf.d/gateway_guacamole_provisioner.conf"
     ) in dockerfile
 
 
 def test_aas_public_route_keeps_read_only_policy_and_upstream_resolution():
     conf = _read(ACCESS_CONF)
     include = _read(AAS_PUBLIC_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_aas_public.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_aas_public.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_AAS_PUBLIC_LOCATIONS
@@ -1042,15 +1040,15 @@ def test_aas_public_route_keeps_read_only_policy_and_upstream_resolution():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_aas_public.conf "
-        "/etc/openresty/lab_access_aas_public.conf"
+        "COPY conf.d/gateway_aas_public.conf "
+        "/etc/openresty/conf.d/gateway_aas_public.conf"
     ) in dockerfile
 
 
 def test_aas_admin_routes_keep_full_lite_guards_auth_and_destinations():
     conf = _read(ACCESS_CONF)
     include = _read(AAS_ADMIN_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_aas_admin.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_aas_admin.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_AAS_ADMIN_LOCATIONS
@@ -1121,15 +1119,15 @@ def test_aas_admin_routes_keep_full_lite_guards_auth_and_destinations():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_aas_admin.conf "
-        "/etc/openresty/lab_access_aas_admin.conf"
+        "COPY conf.d/gateway_aas_admin.conf "
+        "/etc/openresty/conf.d/gateway_aas_admin.conf"
     ) in dockerfile
 
 
 def test_aas_resolve_subrequest_keeps_internal_fmu_gate_and_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(AAS_RESOLVE_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_aas_resolve.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_aas_resolve.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_AAS_RESOLVE_LOCATIONS
@@ -1150,16 +1148,16 @@ def test_aas_resolve_subrequest_keeps_internal_fmu_gate_and_proxy_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_aas_resolve.conf "
-        "/etc/openresty/lab_access_aas_resolve.conf"
+        "COPY conf.d/gateway_aas_resolve.conf "
+        "/etc/openresty/conf.d/gateway_aas_resolve.conf"
     ) in dockerfile
 
 
 def test_fmu_route_keeps_availability_limits_cors_auth_and_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(FMU_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_fmu.conf;"
-    aas_resolve_include_line = "include /etc/openresty/lab_access_aas_resolve.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_fmu.conf;"
+    aas_resolve_include_line = "include /etc/openresty/conf.d/gateway_aas_resolve.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_FMU_LOCATIONS
@@ -1218,15 +1216,15 @@ def test_fmu_route_keeps_availability_limits_cors_auth_and_proxy_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_fmu.conf "
-        "/etc/openresty/lab_access_fmu.conf"
+        "COPY conf.d/gateway_fmu.conf "
+        "/etc/openresty/conf.d/gateway_fmu.conf"
     ) in dockerfile
 
 
 def test_auth_route_keeps_lite_guard_cors_and_backend_contract():
     conf = _read(ACCESS_CONF)
     include = _read(AUTH_BACKEND_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_auth_backend.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_auth_backend.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_AUTH_BACKEND_LOCATIONS
@@ -1272,15 +1270,15 @@ def test_auth_route_keeps_lite_guard_cors_and_backend_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_auth_backend.conf "
-        "/etc/openresty/lab_access_auth_backend.conf"
+        "COPY conf.d/gateway_auth_backend.conf "
+        "/etc/openresty/conf.d/gateway_auth_backend.conf"
     ) in dockerfile
 
 
 def test_billing_routes_keep_admin_and_read_scope_proxy_contracts():
     conf = _read(ACCESS_CONF)
     include = _read(BILLING_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_billing.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_billing.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_BILLING_LOCATIONS
@@ -1354,7 +1352,7 @@ def test_billing_routes_keep_admin_and_read_scope_proxy_contracts():
 def test_wallet_route_keeps_guard_cors_and_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(WALLET_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_wallet.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_wallet.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_WALLET_LOCATIONS
@@ -1399,15 +1397,15 @@ def test_wallet_route_keeps_guard_cors_and_proxy_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_wallet.conf "
-        "/etc/openresty/lab_access_wallet.conf"
+        "COPY conf.d/gateway_wallet.conf "
+        "/etc/openresty/conf.d/gateway_wallet.conf"
     ) in dockerfile
 
 
 def test_wallet_dashboard_routes_keep_redirect_login_and_static_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(WALLET_DASHBOARD_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_wallet_dashboard.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_wallet_dashboard.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_WALLET_DASHBOARD_LOCATIONS
@@ -1449,8 +1447,8 @@ def test_wallet_dashboard_routes_keep_redirect_login_and_static_proxy_contract()
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_wallet_dashboard.conf "
-        "/etc/openresty/lab_access_wallet_dashboard.conf"
+        "COPY conf.d/gateway_wallet_dashboard.conf "
+        "/etc/openresty/conf.d/gateway_wallet_dashboard.conf"
     ) in dockerfile
 
 
@@ -1458,15 +1456,15 @@ def test_wallet_dashboard_routes_keep_redirect_login_and_static_proxy_contract()
 def test_institution_config_routes_keep_bootstrap_login_and_internal_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(INSTITUTION_CONFIG_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_institution_config.conf;"
-    wallet_dashboard_include_line = "include /etc/openresty/lab_access_wallet_dashboard.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_institution_config.conf;"
+    wallet_dashboard_include_line = "include /etc/openresty/conf.d/gateway_wallet_dashboard.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_INSTITUTION_CONFIG_LOCATIONS
     assert conf.index("listen 443 ssl;") < conf.index(include_line)
     assert conf.index(wallet_dashboard_include_line) < conf.index(include_line)
     assert conf.index(include_line) < conf.index(
-        "include /etc/openresty/lab_access_admin_session.conf;"
+        "include /etc/openresty/conf.d/gateway_admin_session.conf;"
     )
 
     bootstrap_block = _location_block(include, "= /institution-config")
@@ -1537,17 +1535,17 @@ def test_institution_config_routes_keep_bootstrap_login_and_internal_proxy_contr
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_institution_config.conf "
-        "/etc/openresty/lab_access_institution_config.conf"
+        "COPY conf.d/gateway_institution_config.conf "
+        "/etc/openresty/conf.d/gateway_institution_config.conf"
     ) in dockerfile
 
 
 def test_admin_session_routes_keep_handlers_and_static_security_contract():
     conf = _read(ACCESS_CONF)
     include = _read(ADMIN_SESSION_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_admin_session.conf;"
-    institution_include_line = "include /etc/openresty/lab_access_institution_config.conf;"
-    billing_include_line = "include /etc/openresty/lab_access_billing.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_admin_session.conf;"
+    institution_include_line = "include /etc/openresty/conf.d/gateway_institution_config.conf;"
+    billing_include_line = "include /etc/openresty/conf.d/gateway_billing.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_ADMIN_SESSION_LOCATIONS
@@ -1575,17 +1573,17 @@ def test_admin_session_routes_keep_handlers_and_static_security_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_admin_session.conf "
-        "/etc/openresty/lab_access_admin_session.conf"
+        "COPY conf.d/gateway_admin_session.conf "
+        "/etc/openresty/conf.d/gateway_admin_session.conf"
     ) in dockerfile
 
 
 def test_intents_routes_keep_lite_guard_redirect_cors_limits_and_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(INTENTS_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_intents.conf;"
-    onboarding_include_line = "include /etc/openresty/lab_access_onboarding_webauthn.conf;"
-    ops_include_line = "include /etc/openresty/lab_access_ops.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_intents.conf;"
+    onboarding_include_line = "include /etc/openresty/conf.d/gateway_onboarding_webauthn.conf;"
+    ops_include_line = "include /etc/openresty/conf.d/gateway_ops.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_INTENTS_LOCATIONS
@@ -1662,15 +1660,15 @@ def test_intents_routes_keep_lite_guard_redirect_cors_limits_and_proxy_contract(
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_intents.conf "
-        "/etc/openresty/lab_access_intents.conf"
+        "COPY conf.d/gateway_intents.conf "
+        "/etc/openresty/conf.d/gateway_intents.conf"
     ) in dockerfile
 
 
 def test_ops_route_keeps_manager_guard_cors_rewrite_and_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(OPS_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_ops.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_ops.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_OPS_LOCATIONS
@@ -1738,15 +1736,15 @@ def test_ops_route_keeps_manager_guard_cors_rewrite_and_proxy_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_ops.conf "
-        "/etc/openresty/lab_access_ops.conf"
+        "COPY conf.d/gateway_ops.conf "
+        "/etc/openresty/conf.d/gateway_ops.conf"
     ) in dockerfile
 
 
 def test_onboarding_webauthn_route_keeps_guard_cors_limits_and_proxy_contract():
     conf = _read(ACCESS_CONF)
     include = _read(ONBOARDING_INCLUDE)
-    include_line = "include /etc/openresty/lab_access_onboarding_webauthn.conf;"
+    include_line = "include /etc/openresty/conf.d/gateway_onboarding_webauthn.conf;"
 
     assert conf.count(include_line) == 1
     assert tuple(_location_signatures(include)) == EXPECTED_ONBOARDING_LOCATIONS
@@ -1790,8 +1788,8 @@ def test_onboarding_webauthn_route_keeps_guard_cors_limits_and_proxy_contract():
 
     dockerfile = _read(OPENRESTY_ROOT / "Dockerfile")
     assert (
-        "COPY lab_access_onboarding_webauthn.conf "
-        "/etc/openresty/lab_access_onboarding_webauthn.conf"
+        "COPY conf.d/gateway_onboarding_webauthn.conf "
+        "/etc/openresty/conf.d/gateway_onboarding_webauthn.conf"
     ) in dockerfile
 
 
