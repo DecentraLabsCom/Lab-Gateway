@@ -12,6 +12,7 @@ const metadataScriptPath = new URL('web/assets/js/lab-publisher-metadata.js', re
 const actionsScriptPath = new URL('web/assets/js/lab-publisher-lab-actions.js', repoRoot);
 const assetsFeatureScriptPath = new URL('web/assets/js/lab-publisher-assets-feature.js', repoRoot);
 const resourceFeatureScriptPath = new URL('web/assets/js/lab-publisher-resource-feature.js', repoRoot);
+const availabilityFeatureScriptPath = new URL('web/assets/js/lab-publisher-availability-feature.js', repoRoot);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement({ id = '', className = '' } = {}) {
@@ -131,6 +132,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   const actionsSource = fs.readFileSync(actionsScriptPath, 'utf8');
   const assetsFeatureSource = fs.readFileSync(assetsFeatureScriptPath, 'utf8');
   const resourceFeatureSource = fs.readFileSync(resourceFeatureScriptPath, 'utf8');
+  const availabilityFeatureSource = fs.readFileSync(availabilityFeatureScriptPath, 'utf8');
   const instrumented = source.replace(
     /\}\)\(\);\s*$/,
     `
@@ -141,6 +143,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
       autoDetectFmuMetadata,
       resetFmuDescribeFields,
       setResourceFeatureController: controller => { resourceFeatureController = controller; },
+      setAvailabilityFeatureController: controller => { availabilityController = controller; },
     };
 })();`
   );
@@ -155,6 +158,7 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   vm.runInContext(actionsSource, context, { filename: 'lab-publisher-lab-actions.js' });
   vm.runInContext(assetsFeatureSource, context, { filename: 'lab-publisher-assets-feature.js' });
   vm.runInContext(resourceFeatureSource, context, { filename: 'lab-publisher-resource-feature.js' });
+  vm.runInContext(availabilityFeatureSource, context, { filename: 'lab-publisher-availability-feature.js' });
   vm.runInContext(instrumented, context, { filename: 'lab-publisher.js' });
   const hooks = context.window.__labPublisherTestHooks;
   const values = context.window.LabPublisherValues;
@@ -173,8 +177,22 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
     autoDetectFmuMetadata: (...args) => hooks.autoDetectFmuMetadata(...args),
   });
   hooks.setResourceFeatureController(resourceController);
+  const availabilityController = context.window.LabPublisherAvailabilityFeature.createController({
+    documentImpl: document,
+    fordFieldsGrouped: values.FORD_FIELDS_GROUPED,
+    iscedFields: values.ISCED_F_FIELDS,
+    getSuggestedIscedCodes: values.getSuggestedIscedCodes,
+    weekdayOptions: values.WEEKDAY_OPTIONS,
+    escapeHtml: values.escapeHtml,
+    escapeAttr: values.escapeAttr,
+    createClientId: () => 'test-window',
+    dateCtor: Date,
+  });
+  availabilityController.initialize();
+  hooks.setAvailabilityFeatureController(availabilityController);
   return {
     document,
+    availabilityController,
     hooks: {
       ...hooks,
       syncResourceTypeFields: resourceController.syncTypeFields,
@@ -309,8 +327,10 @@ assert.equal(autoDetect.document.getElementById('labFmiVersion').value, '2.0');
 assert.match(autoDetect.document.getElementById('labModelVariables').innerHTML, /speed/);
 
 autoDetect.document.getElementById('labMaxConcurrentUsers').value = '8';
-autoDetect.hooks.state.selectedCategories = ['1.2'];
-autoDetect.hooks.state.availableDays = ['MONDAY'];
+autoDetect.availabilityController.hydrate({
+  selectedCategories: ['1.2'],
+  availableDays: ['MONDAY'],
+});
 autoDetect.document.getElementById('labDescription').value = 'FMU test metadata';
 autoDetect.document.getElementById('labPrice').value = '1';
 autoDetect.document.getElementById('labPriceUnit').value = 'hour';
