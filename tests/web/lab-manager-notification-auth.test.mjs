@@ -17,6 +17,8 @@ const winrmCredentialsScriptPath = new URL('web/assets/js/lab-manager-winrm-cred
 const winrmTrustScriptPath = new URL('web/assets/js/lab-manager-winrm-trust.js', repoRoot);
 const winrmTrustModalScriptPath = new URL('web/assets/js/lab-manager-winrm-trust-modal.js', repoRoot);
 const hostProvisioningScriptPath = new URL('web/assets/js/lab-manager-host-provisioning.js', repoRoot);
+const hostModalsScriptPath = new URL('web/assets/js/lab-manager-host-modals.js', repoRoot);
+const opsAccessScriptPath = new URL('web/assets/js/lab-manager-ops-access.js', repoRoot);
 const hostActionsScriptPath = new URL('web/assets/js/lab-manager-host-actions.js', repoRoot);
 const toastScriptPath = new URL('web/assets/js/core/toast.js', repoRoot);
 const notificationsAccessScriptPath = new URL('web/assets/js/lab-manager-notifications-access.js', repoRoot);
@@ -365,6 +367,12 @@ function loadLabManager({
   });
   vm.runInContext(fs.readFileSync(hostProvisioningScriptPath, 'utf8'), context, {
     filename: 'lab-manager-host-provisioning.js',
+  });
+  vm.runInContext(fs.readFileSync(hostModalsScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-host-modals.js',
+  });
+  vm.runInContext(fs.readFileSync(opsAccessScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-ops-access.js',
   });
   vm.runInContext(fs.readFileSync(hostActionsScriptPath, 'utf8'), context, {
     filename: 'lab-manager-host-actions.js',
