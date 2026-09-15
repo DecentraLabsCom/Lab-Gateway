@@ -75,6 +75,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!opsAccessModule) {
         throw new Error('LabManagerOpsAccess must load before lab-manager.js');
     }
+    const hostViewModule = window.LabManagerHostView;
+    if (!hostViewModule) {
+        throw new Error('LabManagerHostView must load before lab-manager.js');
+    }
     const hostActionsModule = window.LabManagerHostActions;
     if (!hostActionsModule) {
         throw new Error('LabManagerHostActions must load before lab-manager.js');
@@ -367,8 +371,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let winrmTrustModalController;
     let hostModalsController;
     let opsAccessController;
+    let hostViewController;
     const guacamoleCandidateState = {};
-    const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
     const heartbeatStreamErrorShown = {};
     let powerControllersController;
@@ -384,8 +388,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const mergePowerControllerStatuses = powerStatusController.mergePowerControllerStatuses;
     const powerRenderersController = powerRenderersModule.createController({ escapeHtml });
     let hostNames = [];
-    let guacamoleCandidates = [];
-    let guacamoleStationCandidates = [];
 
     const hostRenderersController = hostRenderersModule.createController({
         documentCtor: document,
@@ -407,15 +409,12 @@ document.addEventListener('DOMContentLoaded', () => {
             setHostNames: nextHostNames => { hostNames = nextHostNames; },
         },
         callbacks: {
-            renderHosts,
+            renderHosts: (...args) => hostViewController?.renderHosts(...args),
             loadActivityFeed,
-            setGuacamoleCandidates: candidates => { guacamoleCandidates = candidates; },
-            renderGuacamoleCandidates: candidates => {
-                guacamoleStationCandidates = candidates;
-                renderGuacamoleCandidates(candidates);
-            },
-            rememberGuacamoleCandidate,
-            groupGuacamoleCandidates,
+            setGuacamoleCandidates: candidates => hostViewController?.setCandidates(candidates),
+            renderGuacamoleCandidates: candidates => hostViewController?.renderCandidates(candidates),
+            rememberGuacamoleCandidate: candidate => hostViewController?.rememberCandidate(candidate),
+            groupGuacamoleCandidates: candidates => hostViewController?.groupCandidates(candidates) || [],
             updateOpsHint,
             showOpsWarning,
             showToast,
@@ -441,7 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchImpl: (...args) => fetch(...args),
         candidateState: guacamoleCandidateState,
         callbacks: {
-            renderCandidates: () => renderGuacamoleCandidates(guacamoleStationCandidates),
+            renderCandidates: () => hostViewController?.renderCandidates(),
             loadHostInventory,
             showToast,
         },
@@ -538,7 +537,7 @@ document.addEventListener('DOMContentLoaded', () => {
         hostMetadata,
         hostState,
         candidateState: guacamoleCandidateState,
-        getStation: findGuacamoleStationCandidate,
+        getStation: stationKey => hostViewController?.findStationCandidate(stationKey),
         fetchImpl: (...args) => fetch(...args),
         provisioningController: hostProvisioningController,
         credentialsController: winrmCredentialsController,
@@ -549,6 +548,21 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         documentImpl: document,
         logger: console,
+    });
+    hostViewController = hostViewModule.createController({
+        hostListEl,
+        candidateListEl: guacamoleCandidateListEl,
+        getHostNames: () => hostNames,
+        hostState,
+        hostMetadata,
+        candidateState: guacamoleCandidateState,
+        hostRenderersController,
+        documentImpl: document,
+        windowImpl: window,
+        callbacks: {
+            onConfigureCandidate: openProvisionHostModal,
+            onProbeCandidate: (...args) => hostDiscoveryController.probe(...args),
+        },
     });
     winrmTrustModalController = winrmTrustModalModule.createController({
         fields: {
@@ -785,7 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshHostsBtn,
         timelineBtn,
         fetchImpl: (...args) => fetch(...args),
-        groupCandidates: groupGuacamoleCandidates,
+        groupCandidates: candidates => hostViewController?.groupCandidates(candidates) || [],
         logger: console,
     });
     const reservationRenderersController = reservationRenderersModule.createController({
@@ -832,12 +846,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (hostListEl) {
         hostListEl.addEventListener('click', handleHostActions);
-        renderHosts();
+        hostViewController?.renderHosts();
     }
     if (refreshPowerCredentialsBtn) refreshPowerCredentialsBtn.addEventListener('click', loadPowerCredentials);
-    if (guacamoleCandidateListEl) {
-        guacamoleCandidateListEl.addEventListener('click', handleGuacamoleCandidateActions);
-    }
+    hostViewController?.bind();
 
     document.addEventListener('lab-manager:tab-activated', event => {
         initializeManagerTab(event.detail && event.detail.tab);
@@ -899,201 +911,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (directName) return directName.trim();
         const managedLab = getManagedLabs().find(lab => String(lab?.labId ?? '') === String(reservation?.labId ?? ''));
         return digitalTwinsController.resolveLabDisplayName(managedLab || reservation);
-    }
-
-    function closeAllGuacamoleMatchPopovers() {
-        Array.from(guacamolePopoverClosers).forEach(closePopover => closePopover());
-    }
-
-    function setupGuacamoleMatchPopover(row) {
-        const trigger = row.querySelector?.('.guacamole-match-trigger');
-        const popover = row.querySelector?.('.guacamole-match-popover');
-        if (!trigger || !popover || !document.body) return;
-
-        let hideTimer = null;
-        let isShown = false;
-
-        function clearHideTimer() {
-            if (hideTimer === null) return;
-            window.clearTimeout(hideTimer);
-            hideTimer = null;
-        }
-
-        function positionPopover() {
-            if (!isShown) return;
-
-            const triggerRect = trigger.getBoundingClientRect();
-            const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-            const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-            const viewportMargin = 12;
-            const popoverWidth = popover.offsetWidth;
-            const popoverHeight = popover.offsetHeight;
-            let left = triggerRect.left;
-            let top = triggerRect.bottom + 8;
-
-            if (
-                top + popoverHeight > viewportHeight - viewportMargin
-                && triggerRect.top - popoverHeight - 8 >= viewportMargin
-            ) {
-                top = triggerRect.top - popoverHeight - 8;
-            }
-            left = Math.min(
-                Math.max(viewportMargin, left),
-                Math.max(viewportMargin, viewportWidth - popoverWidth - viewportMargin),
-            );
-            popover.style.left = Math.round(left) + 'px';
-            popover.style.top = Math.round(top) + 'px';
-        }
-
-        function closePopover() {
-            clearHideTimer();
-            isShown = false;
-            popover.classList.remove('is-visible');
-            popover.style.left = '';
-            popover.style.top = '';
-            if (popover.parentElement === document.body) popover.remove();
-            window.removeEventListener('resize', positionPopover);
-            window.removeEventListener('scroll', positionPopover, true);
-            guacamolePopoverClosers.delete(closePopover);
-        }
-
-        function showPopover() {
-            clearHideTimer();
-            if (popover.parentElement !== document.body) document.body.appendChild(popover);
-            isShown = true;
-            guacamolePopoverClosers.add(closePopover);
-            popover.classList.add('is-visible');
-            positionPopover();
-            window.addEventListener('resize', positionPopover);
-            window.addEventListener('scroll', positionPopover, true);
-        }
-
-        function scheduleClosePopover() {
-            clearHideTimer();
-            hideTimer = window.setTimeout(() => {
-                const triggerHovered = trigger.matches?.(':hover');
-                const popoverHovered = popover.matches?.(':hover');
-                const triggerFocused = document.activeElement === trigger;
-                if (triggerHovered || popoverHovered || triggerFocused) return;
-                closePopover();
-            }, 120);
-        }
-
-        trigger.addEventListener('mouseenter', showPopover);
-        trigger.addEventListener('mouseleave', scheduleClosePopover);
-        trigger.addEventListener('focusin', showPopover);
-        trigger.addEventListener('focusout', scheduleClosePopover);
-        trigger.addEventListener('keydown', event => {
-            if (event.key === 'Escape') closePopover();
-        });
-        popover.addEventListener('mouseenter', showPopover);
-        popover.addEventListener('mouseleave', scheduleClosePopover);
-    }
-
-    function renderHosts() {
-        if (!hostListEl) return;
-        closeAllGuacamoleMatchPopovers();
-        hostListEl.innerHTML = '';
-        if (!hostNames.length) {
-            hostListEl.innerHTML = '<div class="empty">No ops hosts loaded. Configure ops-worker/hosts.json.</div>';
-            return;
-        }
-        hostNames.forEach(host => {
-            hostListEl.appendChild(buildHostRow(host));
-        });
-    }
-
-    function buildHostRow(host) {
-        const row = hostRenderersController.buildHostRow(
-            host,
-            hostState[host] || {},
-            hostMetadata[host] || {},
-        );
-        setupGuacamoleMatchPopover(row);
-        return row;
-    }
-
-    function renderGuacamoleCandidates(candidates) {
-        if (!guacamoleCandidateListEl) return;
-        guacamoleCandidateListEl.innerHTML = '';
-        if (!Array.isArray(candidates) || !candidates.length) {
-            guacamoleCandidateListEl.innerHTML = '<div class="empty">All Lab Station candidates are configured or no connections are available.</div>';
-            return;
-        }
-        candidates.forEach(station => {
-            guacamoleCandidateListEl.appendChild(buildGuacamoleCandidateRow(station));
-        });
-    }
-
-    function buildGuacamoleCandidateRow(station) {
-        return hostRenderersController.buildGuacamoleCandidateRow(
-            station,
-            guacamoleCandidateState,
-        );
-    }
-
-    async function handleGuacamoleCandidateActions(e) {
-        const btn = e.target.closest('button[data-action]');
-        if (!btn) return;
-        const row = btn.closest('.host-row');
-        const stationKey = row?.dataset.stationKey;
-        if (!stationKey) return;
-        if (btn.dataset.action === 'configure-candidate') {
-            openProvisionHostModal(stationKey);
-            return;
-        }
-        if (btn.dataset.action !== 'probe-candidate') return;
-        const station = findGuacamoleStationCandidate(stationKey);
-        if (!station) return;
-        await hostDiscoveryController.probe(stationKey, station, btn);
-    }
-
-    function stationCandidateKey(candidate) {
-        const address = normalizeMatchValue(candidate?.hostname);
-        return address ? `host:${address}` : `connection:${String(candidate?.id ?? '')}`;
-    }
-
-    function groupGuacamoleCandidates(candidates) {
-        const groups = new Map();
-        (Array.isArray(candidates) ? candidates : []).forEach(candidate => {
-            const key = stationCandidateKey(candidate);
-            if (!key || key.endsWith(':')) return;
-            let station = groups.get(key);
-            if (!station) {
-                station = {
-                    key,
-                    address: candidate?.hostname || '',
-                    nameCandidates: [],
-                    connections: []
-                };
-                groups.set(key, station);
-            }
-            station.connections.push(candidate);
-            const name = String(candidate?.name || '').trim();
-            if (name && !station.nameCandidates.includes(name)) {
-                station.nameCandidates.push(name);
-            }
-        });
-        return Array.from(groups.values());
-    }
-
-    function findGuacamoleStationCandidate(stationKey) {
-        return guacamoleStationCandidates.find(station => station.key === stationKey)
-            || null;
-    }
-
-    function rememberGuacamoleCandidate(candidate) {
-        const key = stationCandidateKey(candidate);
-        if (!key || key.endsWith(':')) return;
-        guacamoleCandidateState[key] = {
-            ...(guacamoleCandidateState[key] || {}),
-            candidate: guacamoleCandidateState[key]?.candidate || candidate,
-            connectionId: guacamoleCandidateState[key]?.connectionId || candidate?.id
-        };
-    }
-
-    function normalizeMatchValue(value) {
-        return (value || '').toString().trim().toLowerCase();
     }
 
     function winrmTrustErrorMessage(body, status) {
