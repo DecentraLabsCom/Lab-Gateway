@@ -1,9 +1,7 @@
 import ast
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
-
 
 def test_gateway_error_contract_does_not_return_exception_text():
     ops = (ROOT / "ops-worker" / "worker.py").read_text(encoding="utf-8")
@@ -50,9 +48,9 @@ def test_full_lite_fixture_does_not_expose_exception_text_or_vary_response_tuple
 
 def test_guacamole_proxy_normalizes_connection_upgrade_header():
     nginx = (ROOT / "openresty" / "nginx.conf").read_text(encoding="utf-8")
-    conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    conf = (ROOT / "openresty" / "gateway.conf").read_text(encoding="utf-8")
     guacamole_proxy = (
-        ROOT / "openresty" / "lab_access_guacamole_proxy.conf"
+        ROOT / "openresty" / "conf.d" / "gateway_guacamole_proxy.conf"
     ).read_text(encoding="utf-8")
     effective_conf = conf + "\n" + guacamole_proxy
 

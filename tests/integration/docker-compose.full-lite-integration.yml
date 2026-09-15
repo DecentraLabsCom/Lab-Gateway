@@ -214,7 +214,7 @@ services:
     volumes:
       - full_lite_full_ssl:/etc/ssl/private
       - full_lite_jwt_keys:/etc/openresty/jwt-keys:ro
-      - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
+      - ../../openresty/gateway.conf:/etc/openresty/gateway.conf:ro
       - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ../../openresty/lua:/etc/openresty/lua:ro
       - ../../web:/var/www/html:ro
@@ -278,7 +278,7 @@ services:
       CORS_ALLOWED_ORIGINS: https://lite.local
     volumes:
       - full_lite_lite_ssl:/etc/ssl/private
-      - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
+      - ../../openresty/gateway.conf:/etc/openresty/gateway.conf:ro
       - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ../../openresty/lua:/etc/openresty/lua:ro
       - ../../web:/var/www/html:ro

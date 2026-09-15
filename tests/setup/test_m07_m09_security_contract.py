@@ -1,8 +1,6 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
-
 
 def test_aas_profile_isolated_and_authenticated():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
@@ -35,12 +33,12 @@ def test_aas_profile_isolated_and_authenticated():
 
 
 def test_external_aas_policy_is_applied_to_proxy_and_workers():
-    conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    conf = (ROOT / "openresty" / "gateway.conf").read_text(encoding="utf-8")
     aas_public = (
-        ROOT / "openresty" / "lab_access_aas_public.conf"
+        ROOT / "openresty" / "conf.d" / "gateway_aas_public.conf"
     ).read_text(encoding="utf-8")
     internal_health = (
-        ROOT / "openresty" / "lab_access_health_internal.conf"
+        ROOT / "openresty" / "conf.d" / "gateway_health_internal.conf"
     ).read_text(encoding="utf-8")
     ops = (ROOT / "ops-worker" / "aas_generator.py").read_text(encoding="utf-8")
     fmu = (ROOT / "fmu-runner" / "aas_generator.py").read_text(encoding="utf-8")
@@ -112,18 +110,18 @@ def test_demo_guacamole_principal_is_managed_and_reconciled_fail_closed():
 
 
 def test_cors_denied_preflight_is_not_reflected():
-    conf = (ROOT / "openresty" / "lab_access.conf").read_text(encoding="utf-8")
+    conf = (ROOT / "openresty" / "gateway.conf").read_text(encoding="utf-8")
     aas_public = (
-        ROOT / "openresty" / "lab_access_aas_public.conf"
+        ROOT / "openresty" / "conf.d" / "gateway_aas_public.conf"
     ).read_text(encoding="utf-8")
-    fmu = (ROOT / "openresty" / "lab_access_fmu.conf").read_text(
+    fmu = (ROOT / "openresty" / "conf.d" / "gateway_fmu.conf").read_text(
         encoding="utf-8"
     )
     auth_backend = (
-        ROOT / "openresty" / "lab_access_auth_backend.conf"
+        ROOT / "openresty" / "conf.d" / "gateway_auth_backend.conf"
     ).read_text(encoding="utf-8")
     onboarding = (
-        ROOT / "openresty" / "lab_access_onboarding_webauthn.conf"
+        ROOT / "openresty" / "conf.d" / "gateway_onboarding_webauthn.conf"
     ).read_text(encoding="utf-8")
     conf_with_aas_public = (
         conf

@@ -1,14 +1,12 @@
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SMOKE_SCRIPT = ROOT / "tests" / "integration" / "verify-compose-profiles.ps1"
 INIT_SSL = ROOT / "openresty" / "init-ssl.sh"
 INIT_LUA = ROOT / "openresty" / "lua" / "init.lua"
 NGINX_CONF = ROOT / "openresty" / "nginx.conf"
-ACCESS_CONF = ROOT / "openresty" / "lab_access.conf"
-
+ACCESS_CONF = ROOT / "openresty" / "gateway.conf"
 
 class ComposeProfileSmokeContractTest(unittest.TestCase):
     @classmethod

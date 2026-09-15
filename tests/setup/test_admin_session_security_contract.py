@@ -1,14 +1,12 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
-
 
 def test_admin_bootstrap_is_post_only_and_cookies_are_path_scoped():
     openresty_root = ROOT / "openresty"
     conf = "\n".join(
         (openresty_root / name).read_text(encoding="utf-8")
-        for name in ("lab_access.conf", "lab_access_admin_session.conf")
+        for name in ("gateway.conf", "conf.d/gateway_admin_session.conf")
     )
     login = (ROOT / "openresty" / "lua" / "admin_login.lua").read_text(encoding="utf-8")
     lab_access = (ROOT / "openresty" / "lua" / "lab_manager_access.lua").read_text(encoding="utf-8")
@@ -41,11 +39,11 @@ def test_gateway_static_locations_send_strict_csp():
     conf = "\n".join(
         (openresty_root / name).read_text(encoding="utf-8")
         for name in (
-            "lab_access.conf",
-            "lab_access_lab_manager.conf",
-            "lab_access_wallet_dashboard.conf",
-            "lab_access_institution_config.conf",
-            "lab_access_admin_session.conf",
+            "gateway.conf",
+            "conf.d/gateway_lab_manager.conf",
+            "conf.d/gateway_wallet_dashboard.conf",
+            "conf.d/gateway_institution_config.conf",
+            "conf.d/gateway_admin_session.conf",
         )
     )
     assert conf.count("Content-Security-Policy") >= 3

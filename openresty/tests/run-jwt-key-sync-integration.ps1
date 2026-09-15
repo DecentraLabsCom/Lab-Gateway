@@ -66,7 +66,7 @@ try {
         -e ISSUER=http://lgw-key-sync-keysrv:8000/auth `
         -v "${TempRootDocker}/lite-certs:/etc/ssl/private" `
         -v "${ProjectRootDocker}/openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro" `
-        -v "${ProjectRootDocker}/openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro" `
+        -v "${ProjectRootDocker}/openresty/gateway.conf:/etc/openresty/gateway.conf:ro" `
         -v "${ProjectRootDocker}/openresty/lua:/etc/openresty/lua:ro" `
         -v "${ProjectRootDocker}/web:/var/www/html:ro" `
         labgateway-openresty:latest | Out-Null

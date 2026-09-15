@@ -191,7 +191,7 @@ The reservation timeline endpoint provides the combined operational view. It is 
 
 ## Related implementation surfaces
 
-- Gateway proxy and protection: `openresty/lab_access.conf`
+- Gateway proxy and protection: `openresty/gateway.conf`
 - Ops worker: `ops-worker/worker.py`
 - Host configuration: `ops-worker/hosts.example.json`
 - Lab Station CLI and service: `Lab Station/labstation/`

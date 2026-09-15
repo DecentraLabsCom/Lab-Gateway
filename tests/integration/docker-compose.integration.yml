@@ -79,7 +79,7 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:3000
     volumes:
       - ./certs:/etc/ssl/private
-      - ../../openresty/lab_access.conf:/etc/openresty/lab_access.conf:ro
+      - ../../openresty/gateway.conf:/etc/openresty/gateway.conf:ro
       - ../../openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ../../openresty/lua:/etc/openresty/lua:ro
       - ../../web:/var/www/html:ro
