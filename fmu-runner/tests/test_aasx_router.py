@@ -1,6 +1,7 @@
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+from aas_association_service import AasAssociationService
 from aasx_catalog import AasxPackageCatalog
 from aasx_router import create_aasx_router
 from fastapi import FastAPI
@@ -26,17 +27,26 @@ def _client(tmp_path: Path, delete_resources=None):
             "mediaType": "application/asset-administration-shell-package+xml",
         }
 
+    async def discover_basyx_shells():
+        return {"shells": []}
+
+    association_service = AasAssociationService(
+        package_catalog=catalog,
+        link_data_path=tmp_path / "links",
+        discover_basyx_shells=discover_basyx_shells,
+        delete_resources=delete_resources or default_delete_resources,
+    )
+
     app = FastAPI()
     app.include_router(create_aasx_router(
-        catalog=catalog,
+        association_service=association_service,
         serialize_resources=default_serialize_resources,
-        delete_resources=delete_resources or default_delete_resources,
     ))
-    return TestClient(app), catalog, delete_calls, serialize_calls
+    return TestClient(app), catalog, delete_calls, serialize_calls, tmp_path / "links"
 
 
 def test_catalog_view_download_and_delete_follow_the_lab_association(tmp_path: Path):
-    client, catalog, delete_calls, serialize_calls = _client(tmp_path)
+    client, catalog, delete_calls, serialize_calls, _ = _client(tmp_path)
     catalog.record(
         lab_id="42",
         filename="physical-lab.aasx",
@@ -50,7 +60,7 @@ def test_catalog_view_download_and_delete_follow_the_lab_association(tmp_path: P
     deleted = client.delete("/aas-admin/aas/42")
 
     assert catalog_response.status_code == 200
-    assert catalog_response.json()["packages"][0]["labId"] == "42"
+    assert catalog_response.json()["associations"][0]["labId"] == "42"
     assert view.status_code == 200
     assert view.json()["filename"] == "physical-lab.aasx"
     assert view.json()["shellIds"] == ["urn:decentralabs:lab:42"]
@@ -69,13 +79,14 @@ def test_catalog_view_download_and_delete_follow_the_lab_association(tmp_path: P
     assert deleted.json() == {
         "deleted": True,
         "labId": "42",
+        "source": "imported",
         "deletedAasIds": ["urn:decentralabs:lab:42"],
         "deletedSubmodelIds": [],
     }
 
 
 def test_aasx_router_returns_not_found_for_unknown_packages(tmp_path: Path):
-    client, _, _, _ = _client(tmp_path)
+    client, _, _, _, _ = _client(tmp_path)
 
     assert client.get("/aas-admin/aas/missing/view").status_code == 404
     assert client.get("/aas-admin/aas/missing/download").status_code == 404
@@ -86,7 +97,7 @@ def test_aasx_router_keeps_the_catalog_when_basyx_deletion_fails(tmp_path: Path)
     async def delete_resources(**kwargs):
         return {"error": "BaSyx resource deletion failed", "failed": [{"status": 500}]}
 
-    client, catalog, _, _ = _client(tmp_path, delete_resources=delete_resources)
+    client, catalog, _, _, _ = _client(tmp_path, delete_resources=delete_resources)
     catalog.record(
         lab_id="42",
         filename="physical-lab.aasx",
@@ -111,11 +122,16 @@ def test_aasx_router_returns_gateway_error_when_serialization_fails(tmp_path: Pa
         content=b"aasx-bytes",
         sync_result={"uploadedAasIds": ["urn:decentralabs:lab:42"]},
     )
+    association_service = AasAssociationService(
+        package_catalog=catalog,
+        link_data_path=tmp_path / "links",
+        discover_basyx_shells=AsyncMock(return_value={"shells": []}),
+        delete_resources=AsyncMock(),
+    )
     app = FastAPI()
     app.include_router(create_aasx_router(
-        catalog=catalog,
+        association_service=association_service,
         serialize_resources=serialize_resources,
-        delete_resources=AsyncMock(),
     ))
 
     response = TestClient(app).get("/aas-admin/aas/42/download")

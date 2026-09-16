@@ -178,6 +178,7 @@ from aas_hints_router import create_aas_hints_router
 from aas_sync_router import create_aas_sync_router
 from aasx_router import create_aasx_router
 from aasx_catalog import AasxPackageCatalog
+from aas_association_service import AasAssociationService
 from proxy_router import create_proxy_router
 
 # ---------------------------------------------------------------------------
@@ -417,6 +418,12 @@ async def _aas_serialize_resources(**kwargs):
     return await serialize_aasx_resources(**kwargs)
 
 
+async def _aas_discover_shells():
+    from aas_generator import discover_basyx_shells
+
+    return await discover_basyx_shells()
+
+
 async def _aas_sync_runtime_status(lab_id: str):
     """Return bounded runner status to publish in the generated AAS."""
     health = dict(await _runner_runtime.backend.health())
@@ -465,9 +472,13 @@ _aas_sync_router = create_aas_sync_router(
     record_aasx=_record_aasx_association,
 )
 _aasx_router = create_aasx_router(
-    catalog=_aasx_catalog,
+    association_service=AasAssociationService(
+        package_catalog=_aasx_catalog,
+        link_data_path=_AAS_LINK_DATA_PATH,
+        discover_basyx_shells=_aas_discover_shells,
+        delete_resources=_aas_delete_resources,
+    ),
     serialize_resources=_aas_serialize_resources,
-    delete_resources=_aas_delete_resources,
 )
 
 

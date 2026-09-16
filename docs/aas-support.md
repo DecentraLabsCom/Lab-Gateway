@@ -152,6 +152,13 @@ resource IDs, filename, size, checksum and timestamps in its local catalog.
 The uploaded archive is not retained. The download action serializes the
 current shell and submodels from BaSyx, so it reflects later BaSyx updates.
 
+The Lab Manager's **AAS Associations** list combines three sources: `Generated`
+shells discovered in BaSyx after an empty `Sync AAS`, `Imported` shells with
+the provenance metadata described above, and `Linked` shells resolved through
+the external-link records. Generated and imported entries can be deleted from
+BaSyx; deleting a linked entry only removes the local link and never deletes
+the externally managed shell.
+
 ### 4. Link an existing external AAS
 
 When the provider already owns a shell elsewhere, it can link any laboratory
@@ -239,7 +246,7 @@ OpenResty separates public read access from provider administration:
 ~~~text
 /aas/                -> BaSyx or BASYX_AAS_URL
 /aas-admin/fmu/      -> fmu-runner
-/aas-admin/aas/      -> fmu-runner (provider-prepared AASX)
+/aas-admin/aas/      -> fmu-runner (unified AAS association administration)
 /aas-admin/lab/      -> ops-worker
 ~~~
 
@@ -264,7 +271,8 @@ Implemented in the Gateway ecosystem:
 - physical-lab Nameplate and TechnicalData generation in `ops-worker`;
 - unified lab-manager synchronization for FMUs and physical laboratories;
 - provider-prepared AASX import for any laboratory resource;
-- Marketplace shell discovery, AAS panel and AASX download;
+- Marketplace shell discovery, AAS panel and AASX download from current BaSyx resources;
+- unified Lab Manager associations for generated, imported and externally linked AAS shells;
 - transparent links to existing external AAS shells; and
 - IDTA 02006 simulation-model mapping including FMI ports, units and integrity metadata.
 
