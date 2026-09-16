@@ -163,3 +163,27 @@ test('loads an existing credential and rotates it with overwrite', async () => {
   assert.equal(controllerStatuses.length, 1);
   assert.equal(controllerStatuses[0].forceRefresh, true);
 });
+
+test('reports a successful explicit credentials refresh', async () => {
+  const { controller, toasts } = loadController();
+
+  await controller.load({ notifySuccess: true });
+
+  assert.deepEqual(toasts, [{ message: 'Energy credentials refreshed', type: 'success' }]);
+});
+
+test('reports access denial when saving an energy credential', async () => {
+  const { controller, fields, toasts } = loadController({
+    fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}) }),
+  });
+  fields.ref.value = 'netio-lab-01-http';
+  fields.username.value = 'netio-api';
+  fields.password.value = 'secret-from-form';
+
+  await controller.save();
+
+  assert.deepEqual(toasts, [
+    { message: 'ops-warning', type: 'warning' },
+    { message: 'Access denied: /ops blocked by Lab Manager access policy', type: 'error' },
+  ]);
+});

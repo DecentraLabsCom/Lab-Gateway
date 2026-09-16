@@ -31,6 +31,7 @@ function loadFeature() {
   let uploadedImages = [];
   let uploadedDocs = [];
   const calls = [];
+  const toasts = [];
   const controller = context.window.LabPublisherAssetsFeature.createController({
     assetListElement,
     inputs: { images: imageInput, docs: docInput },
@@ -56,6 +57,7 @@ function loadFeature() {
     escapeAttr: value => String(value ?? ''),
     callbacks: {
       setStatus: (message, isError) => calls.push({ type: 'status', message, isError }),
+      showToast: (message, type) => toasts.push({ message, type }),
     },
   });
   controller.bind();
@@ -64,11 +66,12 @@ function loadFeature() {
     assetListElement,
     imageInput,
     calls,
+    toasts,
   };
 }
 
-test('uploads assets through the existing request builder and owns the uploaded lists', async () => {
-  const { controller, imageInput, calls } = loadFeature();
+test('uploads assets through the existing request builder and reports success', async () => {
+  const { controller, imageInput, calls, toasts } = loadFeature();
 
   await controller.upload([{ name: 'cover.png' }], 'images');
 
@@ -78,6 +81,7 @@ test('uploads assets through the existing request builder and owns the uploaded 
     options: { method: 'POST', body: { name: 'cover.png' } },
   });
   assert.equal(imageInput.value, '');
+  assert.deepEqual(toasts, [{ message: 'Uploaded 1 image.', type: 'success' }]);
 });
 
 test('removes an asset through delegated clicks and rerenders the remaining lists', async () => {

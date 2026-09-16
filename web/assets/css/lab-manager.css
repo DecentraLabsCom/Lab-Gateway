@@ -364,17 +364,20 @@ body {
     font-family: inherit;
 }
 .field input[type="date"],
-.field input[type="time"] {
+.field input[type="time"],
+.field input[type="datetime-local"] {
     color-scheme: light;
 }
 .field input[type="date"]::-webkit-calendar-picker-indicator,
-.field input[type="time"]::-webkit-calendar-picker-indicator {
+.field input[type="time"]::-webkit-calendar-picker-indicator,
+.field input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     cursor: pointer;
     filter: invert(1) brightness(1.8) contrast(1.05);
     opacity: 0.9;
 }
 .field input[type="date"]::-webkit-calendar-picker-indicator:hover,
-.field input[type="time"]::-webkit-calendar-picker-indicator:hover {
+.field input[type="time"]::-webkit-calendar-picker-indicator:hover,
+.field input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
     opacity: 1;
 }
 .field textarea { resize: vertical; min-height: 96px; }

@@ -112,6 +112,23 @@ test('loads host inventory, closes stale streams, and starts only ready hosts', 
   }]);
 });
 
+test('reports an explicit inventory refresh failure instead of continuing as if it succeeded', async () => {
+  const module = loadHostsModule();
+  const state = createState();
+  const events = [];
+  const controller = module.createController({
+    fetchImpl: async () => { throw new Error('inventory unavailable'); },
+    state,
+    callbacks: {
+      showToast: (...args) => events.push(args),
+    },
+  });
+
+  await controller.refreshAllHosts();
+
+  assert.deepEqual(events, [['Hosts refresh failed: inventory unavailable', 'error']]);
+});
+
 test('polls heartbeat with the existing endpoint and updates the shared host state', async () => {
   const module = loadHostsModule();
   const state = createState();

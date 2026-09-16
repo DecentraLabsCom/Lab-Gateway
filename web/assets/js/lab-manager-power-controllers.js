@@ -390,6 +390,7 @@
                 const body = await response.json().catch(() => ({}));
                 if (response.status === 403) {
                     showOpsWarning();
+                    showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                     return;
                 }
                 if (response.status === 401) throw new Error('Lab Manager session required');
@@ -437,6 +438,7 @@
                 const body = await response.json().catch(() => ({}));
                 if (response.status === 403) {
                     showOpsWarning();
+                    showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                     return;
                 }
                 if (response.status === 401) throw new Error('Lab Manager session required');
@@ -456,7 +458,12 @@
         }
 
         async function load(options = {}) {
-            const { forceStatusRefresh = false, ...fetchOptions } = options;
+            const {
+                forceStatusRefresh = false,
+                notifySuccess = false,
+                notifyError = false,
+                ...fetchOptions
+            } = options;
             fetchOptions.cache = 'no-store';
             powerControllerStatusRequestId += 1;
             if (fields.status) {
@@ -467,6 +474,7 @@
                 const response = await fetchImpl('/ops/api/power/controllers', fetchOptions);
                 if (response.status === 403) {
                     showOpsWarning();
+                    if (notifyError) showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                     return false;
                 }
                 if (response.status === 401) {
@@ -490,10 +498,12 @@
                         ? 'Protected outlets require an explicit maintenance mode toggle. Physical activation remains subject to provider hardware validation.'
                         : 'No controller is configured. Add one to the provider-local power catalog before using this panel.';
                 }
+                if (notifySuccess) showToast('Power controllers refreshed', 'success');
                 if (powerControllers.length) {
                     void loadStatuses({
                         forceRefresh: forceStatusRefresh,
                         skipAuthPrompt: options.skipAuthPrompt,
+                        notifyError,
                     });
                 }
                 return true;
@@ -510,12 +520,13 @@
                     fields.status.className = 'pill bad';
                 }
                 if (fields.hint) fields.hint.textContent = 'Power controllers could not be loaded.';
+                if (notifyError) showToast(`Power controllers refresh failed: ${error.message}`, 'error');
                 return false;
             }
         }
 
         async function loadStatuses(options = {}) {
-            const { forceRefresh = false, ...fetchOptions } = options;
+            const { forceRefresh = false, notifyError = false, ...fetchOptions } = options;
             fetchOptions.cache = 'no-store';
             const requestId = ++powerControllerStatusRequestId;
             if (!powerControllers.length) {
@@ -550,6 +561,7 @@
                 if (requestId !== powerControllerStatusRequestId) return;
                 logger.warn('Unable to load power controller status', error);
                 powerControllerStatusError = true;
+                if (notifyError) showToast(`Power controller status refresh failed: ${error.message}`, 'error');
             } finally {
                 if (requestId === powerControllerStatusRequestId) {
                     powerControllerStatusLoading = false;
@@ -560,7 +572,11 @@
 
         function initialize() {
             fields.list?.addEventListener('click', handleActions);
-            fields.refresh?.addEventListener('click', () => load({ forceStatusRefresh: true }));
+            fields.refresh?.addEventListener('click', () => load({
+                forceStatusRefresh: true,
+                notifySuccess: true,
+                notifyError: true,
+            }));
             fields.select?.addEventListener('change', loadSelected);
             fields.driver?.addEventListener('change', updateDriverFields);
             fields.driver?.addEventListener('change', suggestId);

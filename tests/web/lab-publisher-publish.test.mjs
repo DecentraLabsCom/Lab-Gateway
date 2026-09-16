@@ -13,3 +13,10 @@ test('new lab publication sends a unique idempotency key', () => {
     assert.match(publishLabSource[0], /if \(!editing\)[\s\S]*?Idempotency-Key/);
     assert.match(publisherSource, /createIdempotencyKey[\s\S]*?randomUUID/);
 });
+
+test('publisher actions use the shared Lab Manager toast service', () => {
+    assert.match(publisherSource, /const toastModule = window\.LabManagerToast;/);
+    assert.match(publisherSource, /if \(!toastModule\) \{[\s\S]*LabManagerToast must load before lab-publisher\.js/);
+    assert.match(publisherSource, /LabManagerToast[\s\S]*getDefaultController/);
+    assert.match(publisherSource, /showToast\(\`\$\{editing \? 'Laboratory updated' : 'Laboratory published'/);
+});

@@ -117,6 +117,19 @@ test('keeps access failures visible and avoids rendering an unauthorized timelin
   ]]);
 });
 
+test('reports missing reservation ids before requesting a timeline', async () => {
+  const module = loadModule();
+  const deps = dependencies({
+    timelineInput: element({ value: '   ' }),
+  });
+  const controller = module.createController(deps);
+
+  await controller.fetchTimeline();
+
+  assert.equal(deps.timelineResult.textContent, 'Provide a reservation id.');
+  assert.deepEqual(deps.events, [['Provide a reservation id.', 'error']]);
+});
+
 test('loads more timeline operations through the next pagination offset', async () => {
   const module = loadModule();
   const requests = [];

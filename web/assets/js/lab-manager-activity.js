@@ -7,6 +7,7 @@
         requestJson = null,
         escapeHtml,
         normalizePagination,
+        showToast = () => {},
         logger = root.console || { error() {} },
     }) {
         if (!document || typeof fetchImpl !== 'function' || typeof escapeHtml !== 'function') {
@@ -39,6 +40,7 @@
         }
 
         async function loadActivityFeed(append = false, options = {}) {
+            const { notify = false, ...requestOptions } = options;
             const activityFeed = getActivityFeed();
             if (!activityFeed) return;
             if (!append) {
@@ -55,7 +57,7 @@
                 });
                 const body = await loadJson(`/ops/api/operations/recent?${params.toString()}`, {
                     credentials: 'include',
-                    ...options,
+                    ...requestOptions,
                 });
                 const entries = Array.isArray(body.operations) ? body.operations : [];
                 state.operations = append
@@ -69,9 +71,11 @@
                 );
                 state.offset = state.pagination.nextOffset;
                 renderActivityFeed();
+                if (notify) showToast(append ? 'More activity loaded' : 'Activity loaded', 'success');
             } catch (error) {
                 logger.error(error);
                 activityFeed.innerHTML = `<div class="empty">Unable to load activity: ${escapeHtml(error.message)}</div>`;
+                if (notify) showToast(`Activity load failed: ${error.message}`, 'error');
             } finally {
                 state.loading = false;
             }
@@ -114,7 +118,7 @@
                 button.disabled = state.loading;
                 button.addEventListener('click', () => {
                     if (!state.loading) {
-                        loadActivityFeed(true);
+                        loadActivityFeed(true, { notify: true });
                     }
                 });
                 footer.appendChild(button);

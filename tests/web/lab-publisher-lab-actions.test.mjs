@@ -13,7 +13,7 @@ const metadataScriptPath = new URL('web/assets/js/lab-publisher-metadata.js', re
 const stylesheetPath = new URL('web/assets/css/lab-manager.css', repoRoot);
 const indexPath = new URL('web/lab-manager/index.html', repoRoot);
 
-function loadPublisherHooks() {
+function loadPublisherHooks({ fetchJson = async () => ({ transactionHash: '0xtest' }) } = {}) {
   const valuesSource = fs.readFileSync(valuesScriptPath, 'utf8');
   const renderersSource = fs.readFileSync(renderersScriptPath, 'utf8');
   const actionsSource = fs.readFileSync(actionsScriptPath, 'utf8');
@@ -27,6 +27,13 @@ function loadPublisherHooks() {
     },
     innerHTML: '',
     textContent: '',
+    listeners: new Map(),
+    addEventListener(type, listener) {
+      this.listeners.set(type, listener);
+    },
+    dispatchClick(event) {
+      return this.listeners.get('click')?.(event);
+    },
   };
   const document = {
     addEventListener() {},
@@ -44,16 +51,35 @@ function loadPublisherHooks() {
   vm.runInContext(actionsSource, context, { filename: 'lab-publisher-lab-actions.js' });
   const values = context.window.LabPublisherValues;
   const renderers = context.window.LabPublisherRenderers;
+  const events = [];
+  let currentLabs = [];
   const controller = context.window.LabPublisherLabActions.createController({
     listElement: labList,
+    getLabs: () => currentLabs,
+    fetchJson,
+    assertLabMutationSuccess: result => result,
     renderLabActionIcon: renderers.renderLabActionIcon,
     escapeHtml: values.escapeHtml,
     escapeAttr: values.escapeAttr,
     formatRawPriceForUnit: values.formatRawPriceForUnit,
     resolveLabPriceUnit: values.resolveLabPriceUnit,
     resolveLabDisplayName: values.resolveLabDisplayName,
+    confirmImpl: () => true,
+    callbacks: {
+      showToast: (message, type) => events.push({ message, type }),
+    },
   });
-  return { labList, hooks: { renderLabs: labs => controller.render(labs) } };
+  controller.bind();
+  return {
+    labList,
+    events,
+    hooks: {
+      renderLabs: labs => {
+        currentLabs = labs;
+        controller.render(labs);
+      },
+    },
+  };
 }
 
 test('renders self-contained lab action icons for edit, list/unlist and delete', () => {
@@ -110,13 +136,29 @@ test('prefers the metadata lab name and falls back to the lab id', () => {
   assert.match(labList.innerHTML, /<div class="item-title">Lab #2 Remote /);
 });
 
+test('reports provider lab mutations through the shared toast boundary', async () => {
+  const { labList, events, hooks } = loadPublisherHooks();
+  hooks.renderLabs([{ labId: '42', listed: false, name: 'Remote Lab', price: '1' }]);
+
+  await labList.dispatchClick({
+    target: {
+      closest: () => ({
+        dataset: { labAction: 'list', labId: '42' },
+        disabled: false,
+      }),
+    },
+  });
+
+  assert.deepEqual(events, [{ message: 'Listed Remote Lab', type: 'success' }]);
+});
+
 test('cache-busts the lab manager assets after lab display updates', () => {
   const index = fs.readFileSync(indexPath, 'utf8');
 
-  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v23/);
-  assert.match(index, /lab-manager\.js\?v=workflow-tabs-v18/);
-  assert.match(index, /lab-publisher-values\.js\?v=publisher-values-v1[\s\S]*lab-publisher-renderers\.js\?v=publisher-renderers-v1[\s\S]*lab-publisher-resources\.js\?v=publisher-resources-v1[\s\S]*lab-publisher-assets\.js\?v=publisher-assets-v1[\s\S]*lab-publisher-metadata\.js\?v=publisher-metadata-v1[\s\S]*lab-publisher-lab-actions\.js\?v=publisher-lab-actions-v1[\s\S]*lab-publisher-assets-feature\.js\?v=publisher-assets-feature-v1[\s\S]*lab-publisher-resource-feature\.js\?v=publisher-resource-feature-v1[\s\S]*lab-publisher-availability-feature\.js\?v=publisher-availability-feature-v1[\s\S]*lab-publisher-scheduling-feature\.js\?v=publisher-scheduling-feature-v1[\s\S]*lab-publisher-terms-feature\.js\?v=publisher-terms-feature-v1[\s\S]*lab-publisher-fmu-metadata-feature\.js\?v=publisher-fmu-metadata-feature-v1[\s\S]*lab-publisher-metadata-feature\.js\?v=publisher-metadata-feature-v1[\s\S]*lab-publisher-pricing-feature\.js\?v=publisher-pricing-feature-v1[\s\S]*lab-publisher-media-feature\.js\?v=publisher-media-feature-v1[\s\S]*lab-publisher-validation-feature\.js\?v=publisher-validation-feature-v1[\s\S]*lab-publisher-payload-feature\.js\?v=publisher-payload-feature-v1[\s\S]*lab-publisher\.js\?v=workflow-tabs-v2/);
-  assert.match(index, /lab-publisher-lab-actions\.js\?v=publisher-lab-actions-v1[\s\S]*lab-publisher-assets-feature\.js\?v=publisher-assets-feature-v1[\s\S]*lab-publisher-resource-feature\.js\?v=publisher-resource-feature-v1[\s\S]*lab-publisher-availability-feature\.js\?v=publisher-availability-feature-v1[\s\S]*lab-publisher-scheduling-feature\.js\?v=publisher-scheduling-feature-v1[\s\S]*lab-publisher-terms-feature\.js\?v=publisher-terms-feature-v1[\s\S]*lab-publisher-fmu-metadata-feature\.js\?v=publisher-fmu-metadata-feature-v1[\s\S]*lab-publisher-metadata-feature\.js\?v=publisher-metadata-feature-v1[\s\S]*lab-publisher-pricing-feature\.js\?v=publisher-pricing-feature-v1[\s\S]*lab-publisher-media-feature\.js\?v=publisher-media-feature-v1[\s\S]*lab-publisher-validation-feature\.js\?v=publisher-validation-feature-v1[\s\S]*lab-publisher-payload-feature\.js\?v=publisher-payload-feature-v1[\s\S]*lab-publisher\.js\?v=workflow-tabs-v2/);
+  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v24/);
+  assert.match(index, /lab-manager\.js\?v=workflow-tabs-v19/);
+  assert.match(index, /lab-publisher-values\.js\?v=publisher-values-v1[\s\S]*lab-publisher-renderers\.js\?v=publisher-renderers-v1[\s\S]*lab-publisher-resources\.js\?v=publisher-resources-v1[\s\S]*lab-publisher-assets\.js\?v=publisher-assets-v1[\s\S]*lab-publisher-metadata\.js\?v=publisher-metadata-v1[\s\S]*lab-publisher-lab-actions\.js\?v=publisher-lab-actions-v2[\s\S]*lab-publisher-assets-feature\.js\?v=publisher-assets-feature-v2[\s\S]*lab-publisher-resource-feature\.js\?v=publisher-resource-feature-v1[\s\S]*lab-publisher-availability-feature\.js\?v=publisher-availability-feature-v1[\s\S]*lab-publisher-scheduling-feature\.js\?v=publisher-scheduling-feature-v1[\s\S]*lab-publisher-terms-feature\.js\?v=publisher-terms-feature-v2[\s\S]*lab-publisher-fmu-metadata-feature\.js\?v=publisher-fmu-metadata-feature-v2[\s\S]*lab-publisher-metadata-feature\.js\?v=publisher-metadata-feature-v1[\s\S]*lab-publisher-pricing-feature\.js\?v=publisher-pricing-feature-v1[\s\S]*lab-publisher-media-feature\.js\?v=publisher-media-feature-v1[\s\S]*lab-publisher-validation-feature\.js\?v=publisher-validation-feature-v1[\s\S]*lab-publisher-payload-feature\.js\?v=publisher-payload-feature-v1[\s\S]*lab-publisher\.js\?v=workflow-tabs-v3/);
+  assert.match(index, /lab-publisher-lab-actions\.js\?v=publisher-lab-actions-v2[\s\S]*lab-publisher-assets-feature\.js\?v=publisher-assets-feature-v2[\s\S]*lab-publisher-resource-feature\.js\?v=publisher-resource-feature-v1[\s\S]*lab-publisher-availability-feature\.js\?v=publisher-availability-feature-v1[\s\S]*lab-publisher-scheduling-feature\.js\?v=publisher-scheduling-feature-v1[\s\S]*lab-publisher-terms-feature\.js\?v=publisher-terms-feature-v2[\s\S]*lab-publisher-fmu-metadata-feature\.js\?v=publisher-fmu-metadata-feature-v2[\s\S]*lab-publisher-metadata-feature\.js\?v=publisher-metadata-feature-v1[\s\S]*lab-publisher-pricing-feature\.js\?v=publisher-pricing-feature-v1[\s\S]*lab-publisher-media-feature\.js\?v=publisher-media-feature-v1[\s\S]*lab-publisher-validation-feature\.js\?v=publisher-validation-feature-v1[\s\S]*lab-publisher-payload-feature\.js\?v=publisher-payload-feature-v1[\s\S]*lab-publisher\.js\?v=workflow-tabs-v3/);
 });
 
 test('labels pending station candidates and does not expose a manual lab selector', () => {

@@ -184,19 +184,21 @@
         }
 
         async function load(options = {}) {
+            const { notifySuccess = false, notifyError = false, ...requestOptions } = options;
             if (fields.status) {
                 fields.status.textContent = 'Loading...';
                 fields.status.className = 'pill soft';
             }
             try {
-                const response = await fetchImpl('/ops/api/power/credentials', options);
+                const response = await fetchImpl('/ops/api/power/credentials', requestOptions);
                 if (response.status === 403) {
                     showOpsWarning();
-                    return;
+                    if (notifyError) showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
+                    return false;
                 }
                 if (response.status === 401) {
-                    if (!options.skipAuthPrompt) showToast('Lab Manager session required to load energy credentials', 'error');
-                    return;
+                    if (!requestOptions.skipAuthPrompt) showToast('Lab Manager session required to load energy credentials', 'error');
+                    return false;
                 }
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -211,6 +213,8 @@
                 if (fields.hint) fields.hint.textContent = powerCredentials.length
                     ? 'Secret values are write-only. Select a reference to rotate it.'
                     : 'No energy credentials are configured.';
+                if (notifySuccess) showToast('Energy credentials refreshed', 'success');
+                return true;
             } catch (error) {
                 console.warn('Unable to load power credentials', error);
                 powerCredentials = [];
@@ -222,6 +226,8 @@
                     fields.status.className = 'pill bad';
                 }
                 if (fields.hint) fields.hint.textContent = 'Energy credentials could not be loaded.';
+                if (notifyError) showToast(`Energy credentials refresh failed: ${error.message}`, 'error');
+                return false;
             }
         }
 
@@ -243,6 +249,7 @@
                 const body = await response.json().catch(() => ({}));
                 if (response.status === 403) {
                     showOpsWarning();
+                    showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                     return;
                 }
                 if (response.status === 401) throw new Error('Lab Manager session required');

@@ -17,6 +17,7 @@
         let uploadedDocs = [];
         let bound = false;
         const setStatus = callbacks.setStatus || (() => {});
+        const showToast = callbacks.showToast || (() => {});
 
         function getUploadedImages() {
             return [...uploadedImages];
@@ -59,8 +60,13 @@
                     if (kind === 'images') uploadedImages.push(result.url);
                     else uploadedDocs.push(result.url);
                 }
+                const label = kind === 'images' ? 'image' : 'document';
+                const count = list.length;
+                showToast(`Uploaded ${count} ${label}${count === 1 ? '' : 's'}.`, 'success');
             } catch (err) {
-                setStatus(err.message || 'Upload failed', true);
+                const message = err.message || 'Upload failed';
+                setStatus(message, true);
+                showToast(message, 'error');
             } finally {
                 const input = inputs[kind];
                 if (input) input.value = '';
@@ -80,8 +86,11 @@
                 if (kind === 'images') uploadedImages = uploadedImages.filter(item => item !== url);
                 else uploadedDocs = uploadedDocs.filter(item => item !== url);
                 setStatus('Asset deleted.', false);
+                showToast('Asset deleted.', 'success');
             } catch (err) {
-                setStatus(err.message || 'Delete failed', true);
+                const message = err.message || 'Delete failed';
+                setStatus(message, true);
+                showToast(message, 'error');
             } finally {
                 render();
             }

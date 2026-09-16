@@ -68,7 +68,7 @@
             listEl.innerHTML = renderMarkup(state.reservations, state.hasMore);
         }
 
-        async function load({ append = false, skipAuthPrompt = false } = {}) {
+        async function load({ append = false, skipAuthPrompt = false, notify = false } = {}) {
             if (!listEl || state.loading) return;
             if (!append) {
                 state.reservations = [];
@@ -96,11 +96,13 @@
                 if (res.status === 401) {
                     renderMessage('Unauthorized: check LAB_MANAGER_TOKEN.');
                     setStatus('Unauthorized', 'bad');
+                    if (notify) showToast('Unauthorized: check LAB_MANAGER_TOKEN.', 'error');
                     return;
                 }
                 if (res.status === 403) {
                     renderMessage('Access denied: provider reservation administration is not available.');
                     setStatus('Access denied', 'bad');
+                    if (notify) showToast('Access denied: provider reservation administration is not available.', 'error');
                     return;
                 }
                 const body = await res.json().catch(() => ({}));
@@ -152,10 +154,12 @@
                         : `${loadedCount}+ actionable`
                     : `${totalCount} actionable`;
                 setStatus(status, 'soft');
+                if (notify) showToast(append ? 'More reservations loaded' : 'Reservations loaded', 'success');
             } catch (err) {
                 logger.error(err);
                 if (!append) renderMessage('Unable to load actionable reservations.');
                 setStatus('Unavailable', 'bad');
+                if (notify) showToast(`Reservations load failed: ${err.message}`, 'error');
             } finally {
                 state.loading = false;
             }
@@ -174,7 +178,7 @@
         async function handleActions(event) {
             const loadMoreButton = event.target.closest('[data-action="load-more-actionable"]');
             if (loadMoreButton && listEl.contains(loadMoreButton)) {
-                await load({ append: true });
+                await load({ append: true, notify: true });
                 return;
             }
             const button = event.target.closest('[data-action="cancel-reservation"]');

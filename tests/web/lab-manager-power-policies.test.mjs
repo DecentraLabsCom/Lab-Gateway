@@ -92,11 +92,12 @@ function loadPolicies(overrides = {}) {
     status: createField(),
     editorHint: createField(),
   };
+  const toasts = [];
   const controller = context.window.LabManagerPowerPolicies.createController({
     fields,
     fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ policies: [] }) }),
-    showToast() {},
-    showOpsWarning() {},
+    showToast: (message, type) => toasts.push({ message, type }),
+    showOpsWarning: () => toasts.push({ message: 'ops-warning', type: 'warning' }),
     getControllers: () => [{ id: 'pdu-1', outlets: [{ outlet: '1' }] }],
     getManagedLabs: () => [{ labId: 'lab-1', name: 'Lab One' }],
     resolveLabDisplayName: lab => lab.name || `Lab #${lab.labId}`,
@@ -106,7 +107,7 @@ function loadPolicies(overrides = {}) {
     documentImpl: { createElement: () => createField() },
     ...overrides,
   });
-  return { controller, fields };
+  return { controller, fields, toasts };
 }
 
 test('preserves policy form payload normalization and validation messages', () => {
@@ -262,6 +263,20 @@ test('preserves policy PUT endpoint, body and status lifecycle', async () => {
     labId: 'lab-1',
   });
   assert.equal(fields.saveButton.disabled, false);
+});
+
+test('reports access denial when saving a power policy', async () => {
+  const { controller, toasts } = loadPolicies({
+    fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}) }),
+  });
+  controller.populateForm({ policyName: 'Policy 1', steps: [] });
+
+  await controller.save();
+
+  assert.deepEqual(toasts, [
+    { message: 'ops-warning', type: 'warning' },
+    { message: 'Access denied: /ops blocked by Lab Manager access policy', type: 'error' },
+  ]);
 });
 
 test('uses managed laboratory names in existing policy options', async () => {

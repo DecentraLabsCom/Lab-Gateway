@@ -261,7 +261,10 @@
             powerControllersController.initialize();
             powerPoliciesController.initialize();
             digitalTwinsController.initialize();
-            fields.refreshPowerCredentials?.addEventListener('click', loadPowerCredentials);
+            fields.refreshPowerCredentials?.addEventListener('click', () => loadPowerCredentials({
+                notifySuccess: true,
+                notifyError: true,
+            }));
         }
 
         function loadPowerPoliciesAfterManagedLabs(options = {}) {

@@ -313,6 +313,7 @@
                 const body = await response.json().catch(() => ({}));
                 if (response.status === 403) {
                     showOpsWarning();
+                    showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
                     return;
                 }
                 if (response.status === 401) throw new Error('Lab Manager session required');

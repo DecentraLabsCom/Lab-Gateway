@@ -107,13 +107,14 @@
                 const res = await fetchImpl('/ops/api/hosts', options);
                 if (res.status === 403) {
                     showOpsWarning();
-                    return;
+                    if (!options.skipAuthPrompt) showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
+                    return false;
                 }
                 if (res.status === 401) {
                     if (!options.skipAuthPrompt) {
                         showToast('Lab Manager session required to load Lab Station hosts', 'error');
                     }
-                    return;
+                    return false;
                 }
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
@@ -146,14 +147,18 @@
                 renderGuacamoleCandidates(groupGuacamoleCandidates(candidates));
                 state.getHostNames().forEach(startHeartbeatStream);
                 updateOpsHint(data);
+                return true;
             } catch (err) {
                 logger.warn('Unable to load ops host inventory', err);
                 updateOpsHint(null);
+                if (!options.skipAuthPrompt) showToast(`Hosts refresh failed: ${err.message}`, 'error');
+                return false;
             }
         }
 
         async function refreshAllHosts() {
-            await loadInventory();
+            const loaded = await loadInventory();
+            if (!loaded) return false;
             const EventSourceCtor = getEventSource();
             const hostNames = state.getHostNames();
             if (EventSourceCtor) {
@@ -168,9 +173,11 @@
                         : 'Heartbeat streaming unavailable: configure WinRM credentials and TLS trust',
                     streamableHosts.length ? 'success' : 'error',
                 );
-                return;
+                return true;
             }
             hostNames.forEach(pollHeartbeat);
+            if (!hostNames.length) showToast('Hosts inventory refreshed; no hosts configured', 'success');
+            return true;
         }
 
         async function pollHeartbeat(host) {
