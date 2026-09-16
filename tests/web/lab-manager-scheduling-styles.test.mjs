@@ -16,3 +16,13 @@ test('uses the same calendar icon color for date, time and unavailable-window co
   assert.match(indicatorRule[0], /\.field input\[type="datetime-local"\]::-webkit-calendar-picker-indicator/);
   assert.match(indicatorRule[1], /filter:\s*invert\(1\) brightness\(1\.8\) contrast\(1\.05\)/);
 });
+
+test('centers the unavailable-window remove action with the form controls', () => {
+  const stylesheet = fs.readFileSync(stylesheetPath, 'utf8');
+  const actionRule = stylesheet.match(
+    /\.unavailable-window \.action-field\s*\{([\s\S]*?)\}/,
+  );
+
+  assert.ok(actionRule, 'unavailable-window action alignment rule should exist');
+  assert.match(actionRule[1], /justify-content:\s*center/);
+});
