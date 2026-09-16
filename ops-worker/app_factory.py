@@ -382,10 +382,11 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
             )
             if get("DB_ENGINE")
             else None,
-            sync_lab=lambda lab_id, host, heartbeat: get("aas_generator").sync_lab_to_basyx(
+            sync_lab=lambda lab_id, host, heartbeat, metadata: get("aas_generator").sync_lab_to_basyx(
                 lab_id,
                 host,
                 heartbeat,
+                metadata,
             ),
             log_warning=lambda *args, **kwargs: get("logging").warning(*args, **kwargs),
         )

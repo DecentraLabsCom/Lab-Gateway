@@ -651,6 +651,7 @@ async def sync_fmu_to_basyx(
     extra_info: Optional[dict] = None,
     fmu_path: Optional[Path] = None,
     unit_definitions: list = (),
+    required_aas_id: Optional[str] = None,
 ) -> dict:
     """
     Create or update the AAS shell and SimulationModels submodel in BaSyx.
@@ -691,6 +692,14 @@ async def sync_fmu_to_basyx(
 
                 if not all_shells and not all_submodels:
                     result["error"] = "AASX parse produced no shells or submodels"
+                    return result
+
+                required_shell_id = str(required_aas_id or "").strip()
+                if required_shell_id and not any(
+                    isinstance(shell, dict) and shell.get("id") == required_shell_id
+                    for shell in all_shells
+                ):
+                    result["error"] = f"AASX must contain shell {required_shell_id}"
                     return result
 
                 uploaded_aas_ids: list = []

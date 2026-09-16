@@ -100,40 +100,48 @@
             selectEl.disabled = validLabs.length === 0;
         }
 
-        function renderFmuLaboratoryOptions(selectEl, labs, preferredAccessKey = '') {
+        function formatDigitalTwinLabLabel(lab) {
+            const resourceType = Number(lab?.resourceType) === 1
+                ? 'FMU'
+                : 'Physical laboratory';
+            const status = lab?.listed ? 'Listed' : 'Draft';
+            return `${resolveLabDisplayName(lab)} · ${resourceType} · ${status}`;
+        }
+
+        function renderDigitalTwinLaboratoryOptions(selectEl, labs, preferredLabId = '') {
             if (!selectEl) return;
             const current = selectEl.value;
-            const accessKeys = (Array.isArray(labs) ? labs : [])
-                .filter(lab => Number(lab?.resourceType) === 1)
+            const validLabs = (Array.isArray(labs) ? labs : [])
                 .filter(lab => String(lab?.labId || '').trim())
-                .filter(lab => String(lab?.accessKey || '').trim())
-                .filter((lab, index, items) => items.findIndex(item => String(item.accessKey) === String(lab.accessKey)) === index);
-            selectEl.innerHTML = accessKeys.length
-                ? '<option value="">Select an FMU laboratory</option>'
-                : '<option value="">No FMU laboratories available</option>';
-            accessKeys.forEach(lab => {
-                const accessKey = String(lab.accessKey).trim();
+                .filter((lab, index, items) => items.findIndex(item => String(item.labId) === String(lab.labId)) === index);
+            selectEl.innerHTML = validLabs.length
+                ? '<option value="">Select a laboratory</option>'
+                : '<option value="">No laboratories available</option>';
+            validLabs.forEach(lab => {
+                const labId = String(lab.labId).trim();
                 const option = documentImpl.createElement('option');
-                option.value = accessKey;
-                option.dataset.labId = String(lab.labId).trim();
+                option.value = labId;
+                option.dataset.labId = labId;
+                option.dataset.accessKey = String(lab.accessKey || '').trim();
+                option.dataset.resourceType = Number(lab.resourceType) === 1 ? '1' : '0';
                 option.dataset.labDescription = resolveLabDescription(lab);
                 option.dataset.labDocumentation = JSON.stringify(resolveLabDocumentation(lab));
                 option.dataset.labLicense = resolveLabLicense(lab);
-                option.textContent = formatPowerPolicyLabLabel(lab);
+                option.textContent = formatDigitalTwinLabLabel(lab);
                 selectEl.appendChild(option);
             });
-            const selected = preferredAccessKey || current || '';
-            selectEl.value = accessKeys.some(lab => String(lab.accessKey) === selected)
+            const selected = preferredLabId || current || '';
+            selectEl.value = validLabs.some(lab => String(lab.labId) === selected)
                 ? selected
                 : '';
-            selectEl.disabled = accessKeys.length === 0;
+            selectEl.disabled = validLabs.length === 0;
         }
 
         function clearManagedLabs() {
             managedLabs = [];
             renderPowerPolicyLabOptions([]);
-            renderFmuLaboratoryOptions(fields.fmuSyncKey, []);
-            renderFmuLaboratoryOptions(fields.aasLinkKey, []);
+            renderDigitalTwinLaboratoryOptions(fields.fmuSyncKey, []);
+            renderDigitalTwinLaboratoryOptions(fields.aasLinkKey, []);
         }
 
         async function loadManagedLabs(options = {}) {
@@ -143,8 +151,8 @@
                 && !fields.aasLinkKey
             ) return;
             const selectedPowerPolicyLabId = fields.powerPolicyLabSelect?.value || '';
-            const selectedFmuAccessKey = fields.fmuSyncKey?.value || '';
-            const selectedAasLinkAccessKey = fields.aasLinkKey?.value || '';
+            const selectedFmuLabId = fields.fmuSyncKey?.value || '';
+            const selectedAasLinkLabId = fields.aasLinkKey?.value || '';
             try {
                 const res = await fetchImpl('/lab-admin/labs', options);
                 if (res.status === 403) {
@@ -161,8 +169,8 @@
                 if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
                 managedLabs = Array.isArray(body.labs) ? body.labs : [];
                 renderPowerPolicyLabOptions(managedLabs, selectedPowerPolicyLabId);
-                renderFmuLaboratoryOptions(fields.fmuSyncKey, managedLabs, selectedFmuAccessKey);
-                renderFmuLaboratoryOptions(fields.aasLinkKey, managedLabs, selectedAasLinkAccessKey);
+                renderDigitalTwinLaboratoryOptions(fields.fmuSyncKey, managedLabs, selectedFmuLabId);
+                renderDigitalTwinLaboratoryOptions(fields.aasLinkKey, managedLabs, selectedAasLinkLabId);
             } catch (error) {
                 logger.warn('Unable to load provider laboratories', error);
                 clearManagedLabs();
@@ -203,7 +211,8 @@
             initialize,
             loadManagedLabs,
             loadManagedLabsOnce,
-            renderFmuLaboratoryOptions,
+            formatDigitalTwinLabLabel,
+            renderDigitalTwinLaboratoryOptions,
             renderPowerPolicyLabOptions,
             resolveLabDisplayName,
             resolveLabDocumentation,

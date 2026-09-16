@@ -156,6 +156,24 @@ runner.describe("Lab manager strict admin guard", function()
         runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit)
     end)
 
+    runner.it("does not require the Ops credential for generic AAS links", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            headers = { ["X-Lab-Manager-Token"] = "browser-token" },
+            var = {
+                remote_addr = "172.17.0.2",
+                uri = "/aas-admin/lab/lab-1/aas-link"
+            }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals("browser-token", ngx.req.headers["X-Lab-Manager-Token"])
+    end)
+
     runner.it("blocks lab admin in Lite mode without explicit remote backend", function()
         local ngx = run_guard({
             env = {

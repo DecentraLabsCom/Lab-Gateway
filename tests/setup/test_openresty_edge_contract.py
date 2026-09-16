@@ -87,6 +87,8 @@ EXPECTED_LOCATION_MATRIX = (
     "/aas/",
     "/gateway-provisioner/guacamole/",
     "/aas-admin/fmu/",
+    "/aas-admin/aas/",
+    "~ ^/aas-admin/lab/[^/]+/aas-link$",
     "/aas-admin/lab/",
     "= /internal/aas-resolve",
     "/fmu/",
@@ -149,7 +151,12 @@ EXPECTED_PROVISIONER_LOCATIONS = ("/gateway-provisioner/guacamole/",)
 
 EXPECTED_AAS_PUBLIC_LOCATIONS = ("/aas/",)
 
-EXPECTED_AAS_ADMIN_LOCATIONS = ("/aas-admin/fmu/", "/aas-admin/lab/")
+EXPECTED_AAS_ADMIN_LOCATIONS = (
+    "/aas-admin/fmu/",
+    "/aas-admin/aas/",
+    "~ ^/aas-admin/lab/[^/]+/aas-link$",
+    "/aas-admin/lab/",
+)
 
 EXPECTED_AAS_RESOLVE_LOCATIONS = ("= /internal/aas-resolve",)
 
@@ -1082,6 +1089,31 @@ def test_aas_admin_routes_keep_full_lite_guards_auth_and_destinations():
         "rewrite_by_lua_block",
         "access_by_lua_file /etc/openresty/lua/lab_manager_admin_access.lua;",
     )
+
+    aasx_block = _location_block(include, "/aas-admin/aas/")
+    assert "Service unavailable: AAS package import is disabled on this gateway." in aasx_block
+    for directive in (
+        "client_max_body_size 50M;",
+        'proxy_set_header Authorization "";',
+        'proxy_set_header Cookie "";',
+        'proxy_set_header X-Lab-Manager-Token "";',
+        'proxy_set_header X-Ops-Internal-Token "";',
+        "set $fmu_runner_upstream http://fmu-runner:8090;",
+        "proxy_pass $fmu_runner_upstream;",
+    ):
+        assert directive in aasx_block
+
+    link_block = _location_block(include, "~ ^/aas-admin/lab/[^/]+/aas-link$")
+    assert "access_by_lua_file /etc/openresty/lua/lab_manager_admin_access.lua;" in link_block
+    for directive in (
+        'proxy_set_header Authorization "";',
+        'proxy_set_header Cookie "";',
+        'proxy_set_header X-Lab-Manager-Token "";',
+        'proxy_set_header X-Ops-Internal-Token "";',
+        "set $fmu_runner_upstream http://fmu-runner:8090;",
+        "proxy_pass $fmu_runner_upstream;",
+    ):
+        assert directive in link_block
 
     lab_block = _location_block(include, "/aas-admin/lab/")
     assert "rewrite_by_lua_block" in lab_block

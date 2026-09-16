@@ -15,7 +15,10 @@ def create_aas_lab_sync_blueprint(
     load_persisted_heartbeat: Optional[
         Callable[[str, Dict[str, Any]], Optional[Dict[str, Any]]]
     ],
-    sync_lab: Callable[[str, Dict[str, Any], Optional[Dict[str, Any]]], Dict[str, Any]],
+    sync_lab: Callable[
+        [str, Dict[str, Any], Optional[Dict[str, Any]], Dict[str, Any]],
+        Dict[str, Any],
+    ],
     log_warning: Callable[..., Any],
 ) -> Blueprint:
     """Create the per-lab AAS sync Blueprint with explicit providers."""

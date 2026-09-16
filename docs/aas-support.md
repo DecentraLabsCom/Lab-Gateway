@@ -21,10 +21,11 @@ AAS gives a resource a stable digital identity and a structured place for techni
 | Controls external AAS links and synchronization timing. | Does not need to configure AAS to reserve or use a resource. |
 | Keeps AAS data at the provider Gateway or configured external server. | Treats AAS as descriptive information, not as an authorization grant. |
 
-The Full Gateway exposes FMU/AAS synchronization from the `Digital Twins` tab
-in Lab Manager. The laboratory selector is populated from the published FMU
-inventory and automatically supplies both the operational `accessKey` and the
-stable `labId` used for the shell identity.
+The Full Gateway exposes FMU and physical-laboratory AAS synchronization from
+the `Digital Twins` tab in Lab Manager. The selector is populated from the
+provider's laboratory inventory and uses the stable `labId` as its value. For
+an FMU, the corresponding operational `accessKey` is resolved automatically;
+operators do not select or type it separately.
 
 ![Lab Manager Digital Twins tab](images/lab-manager-digital-twins.png)
 
@@ -97,13 +98,14 @@ The endpoint is protected by the existing `lab_manager_access.lua` mechanism (ad
 
 The optional `labId` parameter lets the provider keep a stable AAS identity anchored to a resource ID rather than to an operational FMU `accessKey`. The endpoint returns a disabled result when AAS is intentionally not configured and an upstream error when the configured AAS server cannot be reached.
 
-The lab-manager FMU panel supports generated shell synchronization and explicit
-`.aasx` upload. The selected laboratory automatically supplies the FMU
-`accessKey` and stable `labId`; the description is taken from the FMU model
-description when available and otherwise from the laboratory metadata. The
-laboratory's registered documentation links are all copied into the AAS, while
-its single Terms of Use URL is used for the AAS `License` property. No separate
-Documentation or License fields are needed in this panel.
+The lab-manager Digital Twins panel supports generated shell synchronization
+and explicit `.aasx` upload. For an FMU, the selected laboratory automatically
+supplies the operational `accessKey` and stable `labId`; the description is
+taken from the FMU model description when available and otherwise from the
+laboratory metadata. For a physical laboratory, the Gateway uses the host and
+Lab Station heartbeat, while the registered description, documentation links,
+and Terms of Use URL are reused automatically. No separate Documentation or
+License fields are needed in this panel.
 
 The same FMU synchronization endpoint works with the local development runner
 when the bundled `aas` profile is active. Without that profile, the local
@@ -119,20 +121,41 @@ POST /aas-admin/lab/{labId}/sync
 POST /api/aas-sync
 ~~~
 
-Heartbeat persistence best-effort synchronizes the TechnicalData submodel. The lab-manager **Sync AAS** action can synchronize all labs associated with a host. This path does not depend on `fmu-runner`.
+Heartbeat persistence best-effort synchronizes the TechnicalData submodel. The
+Digital Twins **Sync AAS** action synchronizes the selected physical lab and
+uses its registered metadata. The Operations tab's host-level AAS action can
+still synchronize every lab associated with a host. Neither generated physical
+path depends on `fmu-runner`.
+
+For a provider-prepared package, use:
+
+~~~text
+POST /aas-admin/aas/{labId}/sync
+~~~
+
+The package must contain the stable shell ID `urn:decentralabs:lab:{labId}`;
+otherwise it is rejected because Marketplace would not be able to discover
+the imported shell for that laboratory. This endpoint is also available when
+the local development FMU runner is selected, provided the `aas` profile is
+running.
 
 ### 4. Link an existing external AAS
 
-When the provider already owns a shell elsewhere, it can link the operational FMU key to that shell instead of generating a new one:
+When the provider already owns a shell elsewhere, it can link any laboratory
+resource to that shell instead of generating a new one:
 
 ~~~text
-POST   /aas-admin/fmu/{accessKey}/aas-link
-GET    /aas-admin/fmu/{accessKey}/aas-link
-DELETE /aas-admin/fmu/{accessKey}/aas-link
+POST   /aas-admin/lab/{labId}/aas-link
+GET    /aas-admin/lab/{labId}/aas-link
+DELETE /aas-admin/lab/{labId}/aas-link
 GET    /aas-admin/resolve-aas-id?shellId=<shell-id>
 ~~~
 
-The Gateway keeps the Marketplace-facing stable shell ID and resolves it to the linked external AAS. The link is managed from the lab-manager **Link Existing AAS** panel.
+The Gateway keeps the Marketplace-facing stable shell ID and resolves it to
+the linked external AAS. The link is managed from the lab-manager **Link
+Existing AAS** panel using only the laboratory ID. The old FMU access-key
+routes remain available for existing FMU integrations, but new UI operations
+are keyed by `labId`.
 
 ### 5. Identity and versioning policy
 
@@ -195,6 +218,7 @@ OpenResty separates public read access from provider administration:
 ~~~text
 /aas/                -> BaSyx or BASYX_AAS_URL
 /aas-admin/fmu/      -> fmu-runner
+/aas-admin/aas/      -> fmu-runner (provider-prepared AASX)
 /aas-admin/lab/      -> ops-worker
 ~~~
 
@@ -217,7 +241,8 @@ Implemented in the Gateway ecosystem:
 - external AAS server selection through `BASYX_AAS_URL`;
 - FMU shell generation and `.aasx` ingestion in `fmu-runner`;
 - physical-lab Nameplate and TechnicalData generation in `ops-worker`;
-- explicit lab-manager synchronization and optional FMU metadata fields;
+- unified lab-manager synchronization for FMUs and physical laboratories;
+- provider-prepared AASX import for any laboratory resource;
 - Marketplace shell discovery, AAS panel and AASX download;
 - transparent links to existing external AAS shells; and
 - IDTA 02006 simulation-model mapping including FMI ports, units and integrity metadata.

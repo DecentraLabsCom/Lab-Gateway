@@ -70,3 +70,27 @@ def test_sync_route_accepts_multipart_aasx_without_reading_fmu_metadata():
     read_model_description.assert_not_called()
     assert sync_fmu_to_basyx.await_args.kwargs["lab_id"] == "99"
     assert sync_fmu_to_basyx.await_args.kwargs["aasx_bytes"] == b"aasx-bytes"
+
+
+def test_generic_resource_route_accepts_physical_lab_aasx_without_reading_fmu_metadata():
+    client, resolve_fmu_path, read_model_description, _, sync_fmu_to_basyx = _client()
+
+    response = client.post(
+        "/aas-admin/aas/42/sync",
+        data={"description": "Registered physical lab"},
+        files={"file": ("physical-lab.aasx", b"aasx-bytes", "application/octet-stream")},
+    )
+
+    assert response.status_code == 200
+    resolve_fmu_path.assert_not_called()
+    read_model_description.assert_not_called()
+    sync_fmu_to_basyx.assert_awaited_once_with(
+        lab_id="42",
+        access_key="42",
+        metadata={},
+        aasx_bytes=b"aasx-bytes",
+        extra_info={"description": "Registered physical lab"},
+        fmu_path=None,
+        unit_definitions=[],
+        required_aas_id="urn:decentralabs:lab:42",
+    )

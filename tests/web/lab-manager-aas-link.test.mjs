@@ -52,22 +52,22 @@ function loadController({ responses = [] } = {}) {
   return { fields, calls, toasts };
 }
 
-test('saves an AAS link with the selected lab', async () => {
+test('saves an AAS link by stable lab ID', async () => {
   const { fields, calls, toasts } = loadController({
     responses: [{ ok: true, status: 200, json: async () => ({ aasId: 'urn:linked' }) }],
   });
-  fields.keyInput.value = 'spring damper.fmu';
-  fields.keyInput.options = [{ value: 'spring damper.fmu', dataset: { labId: '7' } }];
+  fields.keyInput.value = '7';
+  fields.keyInput.options = [{ value: '7', dataset: { labId: '7', resourceType: '0' } }];
   fields.aasIdInput.value = 'urn:requested';
 
   fields.saveButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(calls[0].url, '/aas-admin/fmu/spring%20damper.fmu/aas-link');
+  assert.equal(calls[0].url, '/aas-admin/lab/7/aas-link');
   assert.equal(calls[0].options.method, 'POST');
-  assert.deepEqual(JSON.parse(calls[0].options.body), { aasId: 'urn:requested', labId: '7' });
+  assert.deepEqual(JSON.parse(calls[0].options.body), { aasId: 'urn:requested' });
   assert.equal(fields.result.textContent, 'Linked: urn:linked');
-  assert.deepEqual(toasts.at(-1), { message: 'AAS link saved for spring damper.fmu', type: 'success' });
+  assert.deepEqual(toasts.at(-1), { message: 'AAS link saved for laboratory 7', type: 'success' });
   assert.equal(fields.saveButton.disabled, false);
 });
 
@@ -78,15 +78,15 @@ test('loads an existing link and clears a missing link', async () => {
       { ok: false, status: 404, json: async () => ({}) },
     ],
   });
-  fields.keyInput.value = 'spring-damper.fmu';
+  fields.keyInput.value = '7';
   fields.aasIdInput.value = 'urn:stale';
-  fields.keyInput.options = [{ value: 'spring-damper.fmu', dataset: { labId: '7' } }];
+  fields.keyInput.options = [{ value: '7', dataset: { labId: '7' } }];
 
   fields.checkButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls[0].url, '/aas-admin/fmu/spring-damper.fmu/aas-link');
+  assert.equal(calls[0].url, '/aas-admin/lab/7/aas-link');
   assert.equal(fields.aasIdInput.value, 'urn:existing');
-  assert.equal(fields.keyInput.value, 'spring-damper.fmu');
+  assert.equal(fields.keyInput.value, '7');
   assert.equal(fields.checkButton.disabled, false);
 
   fields.checkButton.dispatchEvent({ type: 'click' });
@@ -99,7 +99,7 @@ test('deletes an AAS link and reports the result', async () => {
   const { fields, calls, toasts } = loadController({
     responses: [{ ok: true, status: 200, json: async () => ({}) }],
   });
-  fields.keyInput.value = 'spring-damper.fmu';
+  fields.keyInput.value = '7';
   fields.aasIdInput.value = 'urn:existing';
 
   fields.deleteButton.dispatchEvent({ type: 'click' });
@@ -108,6 +108,6 @@ test('deletes an AAS link and reports the result', async () => {
   assert.equal(calls[0].options.method, 'DELETE');
   assert.equal(fields.result.textContent, 'Link removed.');
   assert.equal(fields.aasIdInput.value, '');
-  assert.deepEqual(toasts.at(-1), { message: 'AAS link removed for spring-damper.fmu', type: 'success' });
+  assert.deepEqual(toasts.at(-1), { message: 'AAS link removed for laboratory 7', type: 'success' });
   assert.equal(fields.deleteButton.disabled, false);
 });

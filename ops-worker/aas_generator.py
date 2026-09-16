@@ -108,7 +108,27 @@ def _prop(id_short: str, value_type: str, value: Any) -> Dict[str, Any]:
     }
 
 
-def build_nameplate_submodel(lab_id: str, host: Dict[str, Any]) -> Dict[str, Any]:
+def _metadata_text(extra_info: Optional[Dict[str, Any]], key: str) -> str:
+    value = (extra_info or {}).get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _metadata_documentation(extra_info: Optional[Dict[str, Any]]) -> list[str]:
+    values = (extra_info or {}).get("documentationUrls", [])
+    if not isinstance(values, list):
+        return []
+    return list(dict.fromkeys(
+        value.strip()
+        for value in values
+        if isinstance(value, str) and value.strip()
+    ))
+
+
+def build_nameplate_submodel(
+    lab_id: str,
+    host: Dict[str, Any],
+    extra_info: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Build a simplified Nameplate submodel for a physical lab host.
 
@@ -131,6 +151,17 @@ def build_nameplate_submodel(lab_id: str, host: Dict[str, Any]) -> Dict[str, Any
     labs = host.get("labs", [])
     if labs:
         elements.append(_prop("MappedLabIds", "xs:string", ", ".join(str(lid) for lid in labs)))
+
+    license_url = _metadata_text(extra_info, "license")
+    if license_url:
+        elements.append(_prop("License", "xs:string", license_url))
+
+    contact_email = _metadata_text(extra_info, "contactEmail")
+    if contact_email:
+        elements.append(_prop("ContactEmail", "xs:string", contact_email))
+
+    for index, documentation_url in enumerate(_metadata_documentation(extra_info)):
+        elements.append(_prop(f"DocumentationUrl_{index}", "xs:anyURI", documentation_url))
 
     return {
         "id": _submodel_id_nameplate(lab_id),
@@ -204,12 +235,19 @@ def build_technical_data_submodel(
     }
 
 
-def build_physical_aas_shell(lab_id: str, host: Dict[str, Any]) -> Dict[str, Any]:
+def build_physical_aas_shell(
+    lab_id: str,
+    host: Dict[str, Any],
+    extra_info: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Build the AAS shell for a physical lab resource."""
     aas_id = _aas_id_for_lab(lab_id)
     nameplate_id = _submodel_id_nameplate(lab_id)
     technical_id = _submodel_id_technical(lab_id)
     host_name = host.get("name", lab_id)
+    description = _metadata_text(extra_info, "description") or (
+        f"Physical lab resource '{host_name}' (labId={lab_id})"
+    )
     return {
         "id": aas_id,
         "idShort": f"DecentraLabs_Lab_{lab_id}",
@@ -219,9 +257,7 @@ def build_physical_aas_shell(lab_id: str, host: Dict[str, Any]) -> Dict[str, Any
             "globalAssetId": aas_id,
             "assetType": "PhysicalLab",
         },
-        "description": [
-            {"language": "en", "text": f"Physical lab resource '{host_name}' (labId={lab_id})"},
-        ],
+        "description": [{"language": "en", "text": description}],
         "submodels": [
             {"type": "ModelReference", "keys": [{"type": "Submodel", "value": nameplate_id}]},
             {"type": "ModelReference", "keys": [{"type": "Submodel", "value": technical_id}]},
@@ -270,6 +306,7 @@ def sync_lab_to_basyx(
     lab_id: str,
     host: Dict[str, Any],
     heartbeat: Optional[Dict[str, Any]] = None,
+    extra_info: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Sync (create or update) the AAS shell and submodels for a physical lab resource
@@ -302,8 +339,8 @@ def sync_lab_to_basyx(
         result["disabled"] = True
         return result
 
-    shell_payload = build_physical_aas_shell(lab_id, host)
-    nameplate_payload = build_nameplate_submodel(lab_id, host)
+    shell_payload = build_physical_aas_shell(lab_id, host, extra_info)
+    nameplate_payload = build_nameplate_submodel(lab_id, host, extra_info)
     technical_payload = build_technical_data_submodel(lab_id, host, heartbeat)
 
     aas_id_enc = _encode_id(aas_id)

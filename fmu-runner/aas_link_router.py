@@ -7,6 +7,55 @@ from fastapi import APIRouter, HTTPException, Query, Request
 def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
     router = APIRouter()
 
+    async def read_link_request(request: Request) -> dict:
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        raw_aas_id = body.get("aasId")
+        aas_id = raw_aas_id.strip() if isinstance(raw_aas_id, str) else ""
+        if not aas_id or len(aas_id) > 2048:
+            raise HTTPException(status_code=400, detail="aasId is required")
+        return {"aasId": aas_id}
+
+    @router.post("/aas-admin/lab/{lab_id}/aas-link")
+    async def create_lab_aas_link(lab_id: str, request: Request):
+        """Link any laboratory resource to an externally-managed AAS shell."""
+        link = await read_link_request(request)
+        lab_key = str(lab_id or "").strip()
+        if not lab_key:
+            raise HTTPException(status_code=400, detail="labId is required")
+        link["labId"] = lab_key
+        fp = get_link_path(lab_key)
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(json.dumps(link, indent=2), encoding="utf-8")
+        return {"linked": True, **link}
+
+    @router.get("/aas-admin/lab/{lab_id}/aas-link")
+    async def get_lab_aas_link(lab_id: str):
+        """Return the AAS link for a laboratory resource, or 404."""
+        lab_key = str(lab_id or "").strip()
+        fp = get_link_path(lab_key)
+        if not fp.is_file():
+            raise HTTPException(status_code=404, detail="No AAS link configured for this laboratory")
+        try:
+            link = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            raise HTTPException(status_code=500, detail="Corrupt AAS link file")
+        return {"labId": lab_key, **link}
+
+    @router.delete("/aas-admin/lab/{lab_id}/aas-link")
+    async def delete_lab_aas_link(lab_id: str):
+        """Remove the AAS link for a laboratory resource."""
+        lab_key = str(lab_id or "").strip()
+        fp = get_link_path(lab_key)
+        if not fp.is_file():
+            raise HTTPException(status_code=404, detail="No AAS link configured for this laboratory")
+        fp.unlink()
+        return {"unlinked": True, "labId": lab_key}
+
     @router.post("/aas-admin/fmu/{access_key}/aas-link")
     async def create_aas_link(access_key: str, request: Request):
         """

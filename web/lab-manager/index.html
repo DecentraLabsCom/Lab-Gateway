@@ -706,24 +706,26 @@
                 <div class="card">
                     <div class="card-header">
                         <div>
-                            <h2>FMU Digital Twin Sync</h2>
-                            <p>Register or update the AAS shell for an FMU resource in BaSyx.</p>
+                            <h2>Digital Twin Management</h2>
+                            <p>Register or update the AAS metadata for an FMU or remote physical laboratory.</p>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="hint" id="fmuSyncHint">
-                            Select the FMU laboratory. Optionally upload a <code>.aasx</code> package
-                            to override the auto-generated metadata.
+                            Select a laboratory. FMU metadata is read from the model and physical-lab metadata
+                            is read from the Gateway and Lab Station. Optionally upload a prepared <code>.aasx</code>
+                            package to publish richer metadata. For a physical laboratory, the package must contain
+                            the shell ID <code>urn:decentralabs:lab:{labId}</code>.
                         </div>
                         <div class="form-grid mt-3">
                             <label class="field">
                                 <span>Laboratory</span>
                                 <select id="fmuSyncKey" disabled>
-                                    <option value="">Select an FMU laboratory</option>
+                                    <option value="">Select a laboratory</option>
                                 </select>
                             </label>
                             <label class="field full">
-                                <span>Upload .aasx <span class="muted-text">(optional — auto-generated from FMU if omitted)</span></span>
+                                <span>Upload .aasx <span class="muted-text">(optional — metadata is generated when omitted)</span></span>
                                 <div class="file-picker">
                                     <input class="file-picker-input" type="file" id="fmuSyncFile" accept=".aasx" aria-label="Upload AASX package">
                                     <label class="file-picker-button" for="fmuSyncFile">Choose file</label>
@@ -748,19 +750,19 @@
                     <div class="card-header">
                         <div>
                             <h2>Link Existing AAS</h2>
-                            <p>Map a published FMU laboratory to an AAS shell already managed in your BaSyx or external AAS server.</p>
+                            <p>Map any published laboratory to an AAS shell already managed in your BaSyx or external AAS server.</p>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="hint" id="aasLinkHint">
                             When a link is active, Marketplace requests for the conventional
-                            FMU labs are transparently redirected to the linked external AAS ID.
+                            laboratory shell are transparently redirected to the linked external AAS ID.
                         </div>
                         <div class="form-grid mt-3">
                             <label class="field">
                                 <span>Laboratory</span>
                                 <select id="aasLinkKey" disabled>
-                                    <option value="">Select an FMU laboratory</option>
+                                    <option value="">Select a laboratory</option>
                                 </select>
                             </label>
                             <label class="field full">
@@ -1166,9 +1168,9 @@
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v1"></script>
     <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v1"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
-    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v3"></script>
-    <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v2"></script>
-    <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v3"></script>
+    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v4"></script>
+    <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v3"></script>
+    <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v4"></script>
     <script src="../assets/js/lab-manager-power-credentials.js?v=lab-manager-power-credentials-v1"></script>
             <script src="../assets/js/lab-manager-power-renderers.js?v=lab-manager-power-renderers-v12"></script>
         <script src="../assets/js/lab-manager-power-values.js?v=lab-manager-power-values-v6"></script>

@@ -842,6 +842,35 @@ class TestSyncFmuToBasyxAasx:
         finally:
             _aas_mod.BASYX_AAS_URL = original
 
+    @pytest.mark.asyncio
+    async def test_physical_aasx_upload_requires_the_stable_lab_shell_id(self):
+        pkg = _make_aasx(
+            shells=[{"id": "urn:custom:shell:physical"}],
+            submodels=[{"id": "urn:custom:sm:physical"}],
+        )
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "https://basyx-test:8081"
+        try:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _aas_mod.sync_fmu_to_basyx(
+                    "42",
+                    "42",
+                    {},
+                    aasx_bytes=pkg,
+                    required_aas_id="urn:decentralabs:lab:42",
+                )
+
+            assert result["error"] == (
+                "AASX must contain shell urn:decentralabs:lab:42"
+            )
+            mock_client.put.assert_not_called()
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
 
 class TestAasSyncEndpointMultipart:
     """Test POST /aas-admin/fmu/{accessKey}/sync with multipart AASX upload."""
