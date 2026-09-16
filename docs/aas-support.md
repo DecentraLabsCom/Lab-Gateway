@@ -91,7 +91,8 @@ POST /aas-admin/fmu/{accessKey}/sync
 The endpoint is protected by the existing `lab_manager_access.lua` mechanism (admin header, cookie or token) and is not a public booking endpoint. It:
 
 1. calls the internal FMU `describe` operation;
-2. generates an IDTA 02006 `SimulationModels` submodel, or ingests an uploaded `.aasx` file;
+2. generates an IDTA 02006 `SimulationModels` submodel plus the common
+   operational `TechnicalData` submodel, or ingests an uploaded `.aasx` file;
 3. adds the FMU description plus the registered laboratory's Terms of Use URL
    as `License`, all registered documentation links, and optional contact metadata;
 4. creates or replaces the shell and submodels in BaSyx.
@@ -171,8 +172,8 @@ urn:decentralabs:lab:{labId}
 
 | Resource | Main submodels | Typical information |
 | --- | --- | --- |
-| FMU simulation | IDTA 02006 `SimulationModels`, Documentation, LicenseInfo | Summary, FMI ports, causality, quantities, tools, tolerances, capabilities, model-file hash and units. |
-| Physical laboratory | Nameplate, TechnicalData, Documentation, ContactInformation | Lab ID, host, type, network address, MAC, mapped lab IDs and heartbeat state. |
+| FMU simulation | IDTA 02006 `SimulationModels`, `TechnicalData`, Documentation, LicenseInfo | Summary, FMI ports, causality, quantities, tools, tolerances, capabilities, model-file hash, units and runner status. |
+| Physical laboratory | Nameplate, `TechnicalData`, Documentation, ContactInformation | Lab ID, host, type, network address, MAC, mapped lab IDs, heartbeat and station state. |
 
 The FMU `SimulationModels` submodel currently includes:
 
@@ -184,6 +185,13 @@ The FMU `SimulationModels` submodel currently includes:
 - a separate `UnitDefinitions` submodel with SI exponents and display units; and
 - the registered Terms of Use URL as `License`, all registered documentation
   links and optional contact metadata.
+
+Both generated resource types use `TechnicalData` with the same stable
+submodel identifier. For FMUs it publishes the last runner status, execution
+backend, model availability and active/max simulation counters. For physical
+laboratories it publishes the heartbeat, readiness, local-mode and recent
+power/logoff information. It is synchronized metadata, not a replacement for
+Marketplace reservation state or live booking authorization.
 
 The generator targets approximately 95% conformance with IDTA 02006 based on the currently implemented elements. Conformance is not a substitute for provider validation of the actual model and license metadata.
 
@@ -198,6 +206,8 @@ When available, the panel can show:
 - asset type and stable AAS ID;
 - host and network information for physical labs;
 - mapped laboratory IDs and last synchronization information;
+- operational status, readiness, backend/session capacity and heartbeat when
+  the provider publishes `TechnicalData`;
 - FMU description, license, documentation links and contact; and
 - a link to the raw shell or a downloadable `.aasx` package.
 
@@ -205,11 +215,11 @@ AAS metadata helps a consumer understand and compare a resource. It does not rep
 
 ### How to interpret an FMU AAS
 
-Use `SimulationModels` to inspect the model's summary, exposed ports, causality, supported tools, capabilities, units, tolerance and license. Then verify that the Marketplace listing and reservation conditions match the intended use. A shell is provider-published metadata; the consumer should not assume that an AAS property alone grants execution rights.
+Use `SimulationModels` to inspect the model's summary, exposed ports, causality, supported tools, capabilities, units, tolerance and license. Use `TechnicalData` for the last known runner status and capacity; it is not a live reservation guarantee. Then verify that the Marketplace listing and reservation conditions match the intended use. A shell is provider-published metadata; the consumer should not assume that an AAS property alone grants execution rights.
 
 ### How to interpret a physical-lab AAS
 
-Use Nameplate and TechnicalData to understand the identity and current operational description of the lab. Live availability and reservation state still come from Marketplace and the control plane, not from a cached AAS shell.
+Use Nameplate and TechnicalData to understand the identity and last known operational description of the lab. Live availability and reservation state still come from Marketplace and the control plane, not from a cached AAS shell.
 
 ## Routing and security
 

@@ -35,3 +35,13 @@ class SimulationRegistry:
     def pop(self, sim_id: str) -> Optional[SimulationEntry]:
         with self.lock:
             return self.entries.pop(sim_id, None)
+
+    def count_for_lab(self, lab_id: str) -> int:
+        """Return the number of currently tracked simulations for a lab."""
+        normalized_lab_id = str(lab_id)
+        with self.lock:
+            return sum(
+                1
+                for entry in self.entries.values()
+                if str(entry[1]) == normalized_lab_id
+            )
