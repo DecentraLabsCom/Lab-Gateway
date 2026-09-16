@@ -132,8 +132,9 @@ def build_nameplate_submodel(
     """
     Build a simplified Nameplate submodel for a physical lab host.
 
-    Covers the core identity fields: lab ID, host name, address type, and
-    the mapping from host → lab IDs served by this station.
+    Covers the core identity fields for this lab. Lab-to-host associations are
+    resolved from the provider catalog at sync time and are not copied into
+    host configuration or emitted as an aggregate list.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     elements = [
@@ -147,10 +148,6 @@ def build_nameplate_submodel(
     mac = host.get("mac")
     if mac:
         elements.append(_prop("MacAddress", "xs:string", mac))
-
-    labs = host.get("labs", [])
-    if labs:
-        elements.append(_prop("MappedLabIds", "xs:string", ", ".join(str(lid) for lid in labs)))
 
     license_url = _metadata_text(extra_info, "license")
     if license_url:

@@ -64,7 +64,9 @@ remote routes must be explicitly configured and authorized.
 3. Prepare Lab Station, Wake-on-LAN, WinRM, and heartbeat according to
    [Gateway and Lab Station operations](gateway-lab-station-operations.md).
 4. Open `Labs`, publish the laboratory, and confirm that the `labId` and
-   `accessKey` are the expected values.
+   `accessKey` are the expected values. For a physical lab, the Digital Twins
+    selector obtains calculated eligibility from Ops Worker, which resolves the
+    Guacamole connection and registered host inventory.
 5. Configure `Energy` if a smart power strip is present. Never cut power to
    the Gateway, network switch, or any control-plane equipment with that strip.
 6. Return to `Operations`, provision the host, save WinRM credentials, check
@@ -91,8 +93,10 @@ The complete energy workflow is in [Lab Manager energy operations](lab-manager-e
    laboratory. The selector includes FMUs and physical laboratories associated
    with an Ops Worker host, and uses the `labId` to associate the operation
    automatically. A physical laboratory is listed only when its `labId` is
-   present in a host's `labs` association; this is the mapping required by
-   physical AAS synchronization.
+    linked through its Guacamole `accessKey` to a connection exposed by an Ops
+    Worker host; the selector reads this projection from
+    `GET /ops/api/lab-associations`. This is the mapping required by physical
+    AAS synchronization.
 4. Click `Sync AAS` to generate metadata. FMUs use the model description when
    available, otherwise the registered laboratory description. Physical labs
    use Gateway/heartbeat data plus the registered description, documentation,
@@ -102,6 +106,12 @@ The complete energy workflow is in [Lab Manager energy operations](lab-manager-e
    through `Link Existing AAS`. Use that panel when the authoritative shell is
    already hosted elsewhere.
 6. Verify shell retrieval through the Gateway, not only directly against BaSyx.
+
+The association between a physical laboratory and an Ops Worker host is not
+stored in `hosts.json`. The worker reads the current provider catalog from
+`blockchain-services`, resolves `labId → accessKey → Guacamole hostname`, and
+then matches that hostname to exactly one registered host. This keeps labs
+published from Marketplace and Lab Manager consistent.
 
 ## Notification workflow
 
@@ -118,7 +128,7 @@ The detailed configuration, secrets, and persistence rules are in
 
 | Symptom | First check |
 | --- | --- |
-| No laboratory appears in selectors | Refresh `Labs`, verify `LAB_MANAGER_TOKEN`, check the publication backend, and for physical labs confirm that an Ops Worker host lists the lab's `labId` in `labs`. |
+| No laboratory appears in selectors | Refresh `Labs`, verify `LAB_MANAGER_TOKEN`, check the publication backend, and for physical labs confirm that the lab uses a valid `guac:id:<connection_id>` and that the matching connection appears under a registered Ops Worker host. |
 | `Operations` shows a network warning | Access from localhost or an allowed CIDR; check dashboard policy. |
 | `Digital Twins` or `Notifications` are disabled | Confirm that the Gateway is Full and is not running with an external `ISSUER`. |
 | A tab loads but its data is empty | Identify the responsible route in the opening table and inspect that service, not only the browser. |

@@ -1,13 +1,11 @@
 """Composition adapter for Lab Station host provisioning values."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from host_provisioning_context import HostProvisioningContext
 from host_provisioning_values import (
     build_provisioned_host,
-    normalize_labs,
     sanitize_host_name,
-    validate_labs_against_candidates,
 )
 
 
@@ -28,16 +26,6 @@ class HostProvisioningRuntime:
             name_pattern=self._context.get_name_pattern(),
         )
 
-    def normalize_labs(self, value: Any) -> List[str]:
-        return normalize_labs(value)
-
-    def validate_labs_against_candidates(
-        self,
-        labs: List[str],
-        candidates: Any,
-    ) -> Optional[str]:
-        return validate_labs_against_candidates(labs, candidates)
-
     def build_provisioned_host(
         self,
         payload: Dict[str, Any],
@@ -48,8 +36,6 @@ class HostProvisioningRuntime:
             payload,
             connection,
             sanitize_host_name_fn=context.get_sanitize_host_name,
-            normalize_labs_fn=context.get_normalize_labs,
-            validate_labs_fn=context.get_validate_labs_against_candidates,
             normalize_mac_fn=context.normalize_mac,
             normalize_trust_ref_fn=context.normalize_trust_ref,
             default_heartbeat_path=context.default_heartbeat_path,

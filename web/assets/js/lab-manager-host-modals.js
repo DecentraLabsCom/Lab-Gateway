@@ -33,45 +33,6 @@
             stopHeartbeatStream = () => {},
         } = callbacks;
         let provisionStationKey = '';
-        let provisionLabsLoading = false;
-
-        function normalizeMatchValue(value) {
-            return (value || '').toString().trim().toLowerCase();
-        }
-
-        function urlOrigin(value) {
-            const raw = (value || '').toString().trim();
-            if (!raw) return '';
-            try {
-                return normalizeMatchValue(new URL(raw, root.location.origin).origin);
-            } catch (_) {
-                return '';
-            }
-        }
-
-        function currentGatewayOrigin() {
-            return urlOrigin(root.location.origin);
-        }
-
-        function labMatchesConnection(lab, connection) {
-            if (Number(lab?.resourceType) !== 0) return false;
-            const expectedAccessKey = normalizeMatchValue(
-                connection?.selector || (connection?.id ? `guac:id:${connection.id}` : ''),
-            );
-            const labAccessKey = normalizeMatchValue(lab?.accessKey);
-            if (!expectedAccessKey || labAccessKey !== expectedAccessKey) return false;
-            const gatewayOrigin = currentGatewayOrigin();
-            const labOrigin = urlOrigin(lab?.accessURI);
-            return Boolean(gatewayOrigin && labOrigin && labOrigin === gatewayOrigin);
-        }
-
-        async function loadLabCandidates() {
-            const res = await fetchImpl('/lab-admin/labs');
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const body = await res.json().catch(() => ({}));
-            return Array.isArray(body.labs) ? body.labs : [];
-        }
-
         function renderProvisionNameCandidates(candidates) {
             const target = fields.provisionHostNameCandidates;
             if (!target) return;
@@ -85,37 +46,6 @@
                 option.value = value;
                 target.appendChild(option);
             });
-        }
-
-        async function populateProvisionLabCandidates(stationKey, station) {
-            provisionLabsLoading = true;
-            if (fields.provisionSaveButton) fields.provisionSaveButton.disabled = true;
-            try {
-                const labs = await loadLabCandidates();
-                const candidateLabs = labs.filter(lab => station.connections.some(connection => (
-                    labMatchesConnection(lab, connection)
-                )));
-                const labIds = candidateLabs
-                    .map(lab => String(lab?.labId || '').trim())
-                    .filter(Boolean)
-                    .filter((labId, index, values) => values.indexOf(labId) === index);
-                candidateState[stationKey] = {
-                    ...(candidateState[stationKey] || {}),
-                    labs: labIds,
-                    labCandidatesLoaded: true,
-                };
-            } catch (err) {
-                logger.warn(err);
-                candidateState[stationKey] = {
-                    ...(candidateState[stationKey] || {}),
-                    labs: [],
-                    labCandidatesLoaded: true,
-                    labCandidatesError: err.message,
-                };
-            } finally {
-                provisionLabsLoading = false;
-                if (fields.provisionSaveButton) fields.provisionSaveButton.disabled = false;
-            }
         }
 
         function openProvision(stationKey) {
@@ -143,7 +73,6 @@
             renderProvisionNameCandidates(draft.nameCandidates || station.nameCandidates);
             provision.provisionHostAddress.value = draft.address || station.address || '';
             provision.provisionHostMac.value = draft.mac || '';
-            void populateProvisionLabCandidates(stationKey, station);
             provision.provisionHeartbeatPath.value = draft.heartbeat_path
                 || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
             provision.provisionModal.classList.add('show');
@@ -165,22 +94,14 @@
                 showToast('Host provisioning modal is unavailable', 'error');
                 return;
             }
-            if (provisionLabsLoading) {
-                showToast('Lab associations are still loading', 'error');
-                return;
-            }
-            const state = candidateState[provisionStationKey] || {};
-            const labs = Array.isArray(state.labs) ? state.labs : [];
             const payload = {
                 connectionId: provision.provisionConnectionId.value,
                 name: provision.provisionHostName.value.trim(),
                 address: provision.provisionHostAddress.value.trim(),
                 mac: provision.provisionHostMac.value.trim(),
-                labs,
                 credentialRef: provision.provisionHostAddress.value.trim(),
                 heartbeatPath: provision.provisionHeartbeatPath.value.trim(),
             };
-            if (labs.length) payload.validLabIds = labs;
             await provisioningController.save(payload, provision.provisionSaveButton);
         }
 
@@ -305,7 +226,7 @@
         }
 
         function getState() {
-            return { provisionStationKey, provisionLabsLoading };
+            return { provisionStationKey };
         }
 
         return Object.freeze({

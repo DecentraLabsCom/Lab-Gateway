@@ -9,7 +9,7 @@ from aas_lab_sync_route import handle_aas_lab_sync
 
 def create_aas_lab_sync_blueprint(
     *,
-    find_host_by_lab: Callable[[str], Optional[Dict[str, Any]]],
+    resolve_host_by_lab: Callable[[str], Optional[Dict[str, Any]]],
     parse_bool: Callable[[Any, bool], bool],
     poll_heartbeat: Callable[..., Dict[str, Any]],
     load_persisted_heartbeat: Optional[
@@ -30,7 +30,7 @@ def create_aas_lab_sync_blueprint(
         return handle_aas_lab_sync(
             lab_id,
             payload,
-            find_host_by_lab=find_host_by_lab,
+            resolve_host_by_lab=resolve_host_by_lab,
             parse_bool=parse_bool,
             poll_heartbeat=poll_heartbeat,
             load_persisted_heartbeat=load_persisted_heartbeat,

@@ -26,6 +26,7 @@ def create_reservation_orchestrator_class(
                 bindparam=context.get_bindparam(),
                 dispatch_start=context.get_dispatch_start(),
                 dispatch_end=context.get_dispatch_end(),
+                resolve_host_by_lab=context.get_resolve_host_by_lab(),
                 record_operation=context.get_record_operation(),
                 logger=context.get_logger(),
                 now=context.get_now(),

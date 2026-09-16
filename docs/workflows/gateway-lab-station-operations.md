@@ -71,7 +71,7 @@ does not satisfy WinRM/OpenSSL hostname verification.
 
 ## Host inventory and telemetry
 
-An ops host records the managed address, optional MAC address, credential reference, telemetry paths, and the laboratory IDs assigned to that host. A minimal entry is:
+An ops host records the managed address, optional MAC address, credential reference, and telemetry paths. It does not contain laboratory IDs; the provider catalog and Guacamole are the source of the lab-to-host association. A minimal entry is:
 
 ```json
 {
@@ -82,8 +82,7 @@ An ops host records the managed address, optional MAC address, credential refere
   "winrm_transport": "ntlm",
   "winrm_use_ssl": true,
   "winrm_port": 5986,
-  "heartbeat_path": "C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json",
-  "labs": ["1"]
+  "heartbeat_path": "C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json"
 }
 ```
 
@@ -98,6 +97,7 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `POST /ops/api/heartbeat/poll` | Collect and persist the current heartbeat. |
 | `GET /ops/api/heartbeat/stream` | Stream heartbeats as server-sent events. |
 | `GET /ops/api/hosts` | Read configured and discovered host information. |
+| `GET /ops/api/lab-associations` | Read calculated provider-laboratory to registered-host associations used by Lab Manager. |
 | `POST /ops/api/hosts/discover` | Probe a Guacamole connection candidate for managed-host signals. |
 | `POST /ops/api/hosts/provision` | Create or update a dynamic host after successful discovery. |
 | `PATCH /ops/api/hosts/{hostName}` | Update the name, MAC, or heartbeat path of a dynamic host. |
@@ -146,7 +146,7 @@ These local labels must not be confused with the on-chain states `CONFIRMED`, `A
 
 The start path is normally:
 
-1. Resolve the host mapped to the laboratory.
+1. Resolve `labId` from the provider catalog, then follow its `accessKey` to the current Guacamole connection and unique registered host.
 2. Send Wake-on-LAN when requested and wait for reachability.
 3. Run `prepare-session` to apply the station's session guard and clean the designated lab user profile.
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.

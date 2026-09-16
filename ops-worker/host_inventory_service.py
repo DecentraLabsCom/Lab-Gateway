@@ -4,6 +4,43 @@ from collections.abc import Callable, Sequence
 from typing import Any, Dict, List, Optional
 
 
+def connection_matches_host(
+    host: Dict[str, Any],
+    connection: Optional[Dict[str, Any]],
+    *,
+    normalize_key: Callable[[Any], str],
+) -> bool:
+    """Return whether a Guacamole connection belongs to a registered host."""
+    if not isinstance(connection, dict):
+        return False
+
+    hostname_key = normalize_key(connection.get("hostname"))
+    if not hostname_key:
+        return False
+
+    match_keys = {
+        normalize_key(host.get("name")),
+        normalize_key(host.get("address")),
+    }
+    match_keys.discard("")
+    return hostname_key in match_keys
+
+
+def find_unique_host_for_connection(
+    hosts: Sequence[Dict[str, Any]],
+    connection: Optional[Dict[str, Any]],
+    *,
+    normalize_key: Callable[[Any], str],
+) -> Optional[Dict[str, Any]]:
+    """Return the only registered host matching a Guacamole connection."""
+    matches = [
+        host
+        for host in hosts
+        if connection_matches_host(host, connection, normalize_key=normalize_key)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def build_host_inventory_from_sources(
     registry: Any,
     *,
@@ -47,15 +84,10 @@ def build_host_inventory(
     host_entries: List[Dict[str, Any]] = []
 
     for host in hosts:
-        match_keys = {
-            normalize_key(host.get("name")),
-            normalize_key(host.get("address")),
-        }
-        match_keys.discard("")
         matches = [
             connection
             for connection in guacamole_connections
-            if normalize_key(connection.get("hostname")) in match_keys
+            if connection_matches_host(host, connection, normalize_key=normalize_key)
         ]
         for connection in matches:
             claimed_ids.add(connection.get("id"))

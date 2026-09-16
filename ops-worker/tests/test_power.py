@@ -956,6 +956,7 @@ def test_reservation_start_runs_pre_start_power_before_host_operations(db_engine
     runtime = build_runtime(record_operation=lambda _operation: events.append("power"))
     monkeypatch.setattr(worker, "POWER_RUNTIME", runtime)
     worker.HOSTS = worker.HostRegistry({"hosts": [{"name": "lab-ws-01", "address": "192.168.1.50"}]})
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: worker.HOSTS.get("lab-ws-01"))
     monkeypatch.setattr(
         worker,
         "perform_wake_step",
@@ -984,6 +985,7 @@ def test_required_pre_start_power_failure_prevents_host_start(db_engine, monkeyp
     mock_driver(runtime).fail_action("on", outlet="1")
     monkeypatch.setattr(worker, "POWER_RUNTIME", runtime)
     worker.HOSTS = worker.HostRegistry({"hosts": [{"name": "lab-ws-01", "address": "192.168.1.50"}]})
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: worker.HOSTS.get("lab-ws-01"))
     monkeypatch.setattr(worker, "perform_wake_step", lambda *args, **kwargs: events.append("wake"))
     monkeypatch.setattr(worker, "perform_command_step", lambda *args, **kwargs: events.append("prepare"))
 
@@ -1001,6 +1003,7 @@ def test_reservation_end_runs_post_end_power_after_release(db_engine, monkeypatc
     runtime = build_runtime(record_operation=lambda _operation: events.append("power"))
     monkeypatch.setattr(worker, "POWER_RUNTIME", runtime)
     worker.HOSTS = worker.HostRegistry({"hosts": [{"name": "lab-ws-01", "address": "192.168.1.50"}]})
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: worker.HOSTS.get("lab-ws-01"))
     monkeypatch.setattr(
         worker,
         "perform_command_step",

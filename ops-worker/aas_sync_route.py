@@ -7,11 +7,12 @@ def handle_aas_sync(
     payload: Mapping[str, Any],
     *,
     find_host: Callable[[str], Optional[Dict[str, Any]]],
+    resolve_lab_ids_for_host: Callable[[Dict[str, Any]], Any],
     sync_lab: Callable[[str, Dict[str, Any]], Dict[str, Any]],
     log_failure: Callable[..., Any],
     jsonify: Callable[[Any], Any],
 ) -> Any:
-    """Sync all labs mapped to a host while preserving per-lab error isolation."""
+    """Sync catalog labs resolved through Guacamole and the registered host."""
     host_name = payload.get("host")
     if not host_name:
         return jsonify({"error": "host is required"}), 400
@@ -19,12 +20,12 @@ def handle_aas_sync(
     if not host:
         return jsonify({"error": f"host '{host_name}' not found in config"}), 404
 
-    labs = host.get("labs", [])
+    labs = list(resolve_lab_ids_for_host(host) or [])
     if not labs:
         return jsonify({
             "host": host_name,
             "labs": [],
-            "message": "No labs mapped to this host",
+            "message": "No catalog labs resolved to this host",
         }), 200
 
     results = []

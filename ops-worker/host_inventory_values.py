@@ -39,7 +39,6 @@ def safe_host_inventory_entry(
         "mac": host.get("mac"),
         "heartbeatPath": host.get("heartbeat_path", default_heartbeat_path),
         "mode": host.get("mode"),
-        "labs": [str(lab) for lab in host.get("labs", [])],
         "editable": editable,
         "winrmConfigured": bool(host.get("winrm_user") and host.get("winrm_pass")) or winrm_credentials_configured(credential_ref),
     }

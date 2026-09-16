@@ -13,6 +13,7 @@ def _context():
         read_remote_file="read",
         get_db_engine=lambda: "db",
         sync_lab_to_basyx=lambda *args: {},
+        resolve_lab_ids_for_host=lambda _host: [],
         get_logger=lambda: "logger",
         get_host_registry=lambda: "hosts",
         get_persist_heartbeat=lambda *args, **kwargs: "persist",

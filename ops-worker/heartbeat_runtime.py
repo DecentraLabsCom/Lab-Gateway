@@ -62,6 +62,7 @@ class HeartbeatRuntime:
             persist_heartbeat=context.get_persist_heartbeat,
             db_engine=context.get_db_engine(),
             sync_lab_to_basyx=context.sync_lab_to_basyx,
+            resolve_lab_ids_for_host=context.resolve_lab_ids_for_host,
             logger=context.get_logger(),
             default_heartbeat_path=context.default_heartbeat_path,
             default_events_path=context.default_events_path,

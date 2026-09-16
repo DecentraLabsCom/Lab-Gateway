@@ -644,10 +644,10 @@ def test_provision_writes_dynamic_host_with_credential_ref_and_reloads(client):
     saved_host = saved["hosts"][0]
     assert saved_host["credential_ref"] == "lab-ws-14"
     assert saved_host["mac"] == "00:11:22:33:44:55"
-    assert saved_host["labs"] == ["14"]
+    assert "labs" not in saved_host
 
 
-def test_provision_rejects_lab_not_in_candidate_allowlist(client):
+def test_provision_ignores_legacy_lab_allowlist_fields(client):
     guacamole = [{
         "id": 18,
         "name": "Provisionable With Lab Candidates",
@@ -671,8 +671,7 @@ def test_provision_rejects_lab_not_in_candidate_allowlist(client):
             "winrmPassEnv": "WINRM_PASS_LAB_WS_18",
         })
 
-    assert response.status_code == 400
-    assert "not valid candidates" in response.get_data(as_text=True)
+    assert response.status_code == 200
 
 
 def test_provision_uses_discovered_mac_when_payload_mac_blank(client):
@@ -834,7 +833,7 @@ def test_edit_updates_dynamic_host_settings_and_preserves_operational_fields(cli
     assert saved_host["credential_ref"] == "siemens-admin"
     assert saved_host["mac"] == "00:22:33:44:55:66"
     assert saved_host["heartbeat_path"] == r"C:\Lab Station\labstation\data\telemetry\heartbeat.json"
-    assert saved_host["labs"] == ["4"]
+    assert "labs" not in saved_host
 
 
 def test_edit_rejects_invalid_mac_without_changing_dynamic_catalog(client):

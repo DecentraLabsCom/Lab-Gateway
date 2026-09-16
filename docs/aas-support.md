@@ -25,9 +25,12 @@ The Full Gateway exposes FMU and physical-laboratory AAS synchronization from
 the `Digital Twins` tab in Lab Manager. The selector is populated from the
 provider's laboratory inventory and uses the stable `labId` as its value. FMUs
 are available directly from that inventory. Physical laboratories are shown
-only when the Ops Worker host inventory contains the same `labId` in a host's
-`labs` association, because that is the mapping used by the physical AAS sync
-route. For an FMU, the corresponding operational `accessKey` is resolved
+only when the provider catalog's `accessKey` resolves through a Guacamole
+connection whose hostname matches exactly one registered host. Ops Worker's
+common resolver performs this calculation and exposes it to Lab Manager
+through `GET /ops/api/lab-associations`; the browser does not repeat the
+connection/host intersection.
+For an FMU, the corresponding operational `accessKey` is resolved
 automatically; operators do not select or type it separately.
 
 ![Lab Manager Digital Twins tab](images/lab-manager-digital-twins.png)
@@ -127,9 +130,10 @@ POST /api/aas-sync
 
 Heartbeat persistence best-effort synchronizes the TechnicalData submodel. The
 Digital Twins **Sync AAS** action synchronizes the selected physical lab and
-uses its registered metadata. The Operations tab's host-level AAS action can
-still synchronize every lab associated with a host. Neither generated physical
-path depends on `fmu-runner`.
+uses its registered metadata. For both per-lab and host-level synchronization,
+Ops Worker uses one resolver backed by the provider catalog in
+`blockchain-services`: `labId → accessKey → Guacamole connection → hostname →
+unique registered host`. Neither generated physical path depends on `fmu-runner`.
 
 For a provider-prepared package, use:
 
@@ -176,7 +180,7 @@ urn:decentralabs:lab:{labId}
 | Resource | Main submodels | Typical information |
 | --- | --- | --- |
 | FMU simulation | IDTA 02006 `SimulationModels`, `TechnicalData`, Documentation, LicenseInfo | Summary, FMI ports, causality, quantities, tools, tolerances, capabilities, model-file hash, units and runner status. |
-| Physical laboratory | Nameplate, `TechnicalData`, Documentation, ContactInformation | Lab ID, host, type, network address, MAC, mapped lab IDs, heartbeat and station state. |
+| Physical laboratory | Nameplate, `TechnicalData`, Documentation, ContactInformation | Lab ID, resolved host, type, network address, MAC, heartbeat and station state. |
 
 The FMU `SimulationModels` submodel currently includes:
 
@@ -207,8 +211,7 @@ Marketplace requests the provider shell through a server-side route with SSRF pr
 When available, the panel can show:
 
 - asset type and stable AAS ID;
-- host and network information for physical labs;
-- mapped laboratory IDs and last synchronization information;
+- resolved host and last synchronization information;
 - operational status, readiness, backend/session capacity and heartbeat when
   the provider publishes `TechnicalData`;
 - FMU description, license, documentation links and contact; and

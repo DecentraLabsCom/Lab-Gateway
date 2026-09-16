@@ -5,8 +5,7 @@ from reservation_orchestrator import ReservationOrchestrator
 
 
 class _Registry:
-    def get_by_lab(self, _lab_id):
-        return None
+    pass
 
 
 class _Response:
@@ -43,6 +42,7 @@ def _orchestrator(http_get=None, **env):
         bindparam=lambda *args, **kwargs: (args, kwargs),
         dispatch_start=Mock(),
         dispatch_end=Mock(),
+        resolve_host_by_lab=lambda _lab_id: None,
         record_operation=Mock(),
         logger=Mock(),
         now=lambda: datetime(2026, 9, 14, 12, tzinfo=timezone.utc),
@@ -110,3 +110,24 @@ def test_register_preserves_disabled_and_enabled_job_contract():
     assert len(enabled_scheduler.calls) == 1
     assert enabled_scheduler.calls[0][1]["id"] == "reservation-orchestrator"
     assert enabled_scheduler.calls[0][1]["replace_existing"] is True
+
+
+def test_dispatch_start_resolves_the_current_host_from_the_lab_id():
+    resolver = Mock(return_value={"name": "station-current"})
+    dispatch = Mock(return_value=({"success": True}, 200))
+    orchestrator = _orchestrator()
+    orchestrator.resolve_host_by_lab = resolver
+    orchestrator.dispatch_start = dispatch
+
+    orchestrator._dispatch_start({
+        "transaction_hash": "reservation-1",
+        "lab_id": "lab-1",
+        "status": None,
+    })
+
+    resolver.assert_called_once_with("lab-1")
+    dispatch.assert_called_once_with({
+        "reservationId": "reservation-1",
+        "host": "station-current",
+        "labId": "lab-1",
+    })

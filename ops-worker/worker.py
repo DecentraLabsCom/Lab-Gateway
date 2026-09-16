@@ -12,7 +12,7 @@ import os
 import socket
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Callable, Dict, List, Mapping, Optional, Pattern, Sequence, Set, Tuple, Union, cast
 
 from cryptography.fernet import Fernet, InvalidToken
 from flask import Response, jsonify, request, stream_with_context
@@ -191,6 +191,7 @@ from guacamole_connection_values import (
 from guacamole_catalog_service import (
     load_guacamole_connections as _load_guacamole_connections_impl,
 )
+from lab_resolution_composition import create_lab_resolution_composition
 from guacamole_runtime import create_guacamole_runtime
 from guacamole_context import GuacamoleContext
 from guacamole_dsn import build_guacamole_dsn as _build_guacamole_dsn_impl
@@ -347,6 +348,35 @@ from power.credentials import PowerCredentialStore
 from power.persistence import PowerOperationStore
 from power.service import PowerRuntime
 
+
+# These aliases are installed by runtime factories below their dependency
+# contexts. Keep their callable contracts explicit so static analyzers can
+# understand the composition root without evaluating runtime publication.
+_env_or_secret_file: Callable[..., str]
+_sanitize_log_value: Callable[[Any], str]
+_request_id: Callable[[], str]
+internal_error_response: Callable[..., Any]
+_requires_ops_internal_auth: Callable[[str], bool]
+_fetch_latest_heartbeat: Callable[[Any, str], Optional[Dict[str, Any]]]
+normalize_match_key: Callable[[Optional[Any]], str]
+normalize_winrm_trust_ref: Callable[[Any], str]
+handle_reservation_start: Callable[[Dict[str, Any]], Tuple[Dict[str, Any], int]]
+handle_reservation_end: Callable[[Dict[str, Any]], Tuple[Dict[str, Any], int]]
+_execute_reservation_power_phase: Callable[
+    [str, Optional[str], Mapping[str, Any], str, Dict[str, Any]],
+    Dict[str, Any],
+]
+perform_wake_step: Callable[
+    [Mapping[str, Any], str, Optional[str], Dict[str, Any]],
+    Tuple[bool, Dict[str, Any]],
+]
+normalize_mac: Callable[[Any], str]
+load_guacamole_connections: Callable[
+    [], Tuple[List[Dict[str, Any]], Optional[str]]
+]
+parse_guacamole_selector: Callable[..., Any]
+
+
 def _publish_host_registry(registry: Any) -> None:
     global HOSTS
     HOSTS = registry
@@ -417,6 +447,20 @@ _RUNTIME_PATHS = load_runtime_paths(
 # dynamic namespace publication performed by ``publish_runtime_paths``.
 CONFIG_PATH: str
 DYNAMIC_CONFIG_PATH: str
+OPS_CREDENTIALS_PATH: str
+OPS_WINRM_TRUST_PATH: str
+POWER_CONFIG_PATH: str
+POWER_STATUS_CACHE_SECONDS: float
+MYSQL_DSN: Optional[str]
+GUACAMOLE_MYSQL_DSN: Optional[str]
+OPS_MYSQL_DATABASE: Optional[str]
+GUACAMOLE_MYSQL_DATABASE: Optional[str]
+MYSQL_HOSTNAME: str
+MYSQL_PORT: int
+OPS_MYSQL_USER: str
+OPS_MYSQL_PASSWORD: str
+GUACAMOLE_MYSQL_USER: str
+GUACAMOLE_MYSQL_PASSWORD: str
 publish_runtime_paths(_RUNTIME_PATHS, globals())
 
 
@@ -441,13 +485,60 @@ _RUNTIME_POLICY = load_runtime_policy(
     is_lite=_is_lite_gateway,
     log_error=logging.error,
 )
-publish_runtime_policy(_RUNTIME_POLICY, globals())
 # ``publish_runtime_policy`` preserves the worker's historical module-level
 # names, so declare the values used by callers and tests for type checkers.
+DEMO_USER: str
+DEMO_LAB_ID: str
+DEMO_CONNECTION_ID: str
+DEMO_HEARTBEAT_MAX_AGE_SECONDS: int
+DEMO_OPERATION_ID_RE: Pattern[str]
+DEMO_EVENT_ACTIONS: Dict[str, str]
+GUACAMOLE_TEMP_USER_CLEANUP_ENABLED: bool
+GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS: int
 GUACAMOLE_PROVISIONER_TOKEN: str
+GUACAMOLE_PROVISIONER_TOKEN_HEADER: str
+WINRM_READ_TIMEOUT: int
+WINRM_OPERATION_TIMEOUT: int
+WINRM_ALLOWED_TRANSPORTS: Set[str]
 WINRM_MANAGEMENT_CIDRS: List[str]
+ALLOWED_WINRM_COMMANDS: Set[str]
+TIMELINE_MAX_LIMIT: int
+TIMELINE_DEFAULT_LIMIT: int
+TIMELINE_PHASE_LOOKBACK: int
 NOTIFICATION_SERVICE_URL: str
+NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER: str
+NOTIFICATION_SERVICE_ACCESS_TOKEN: str
+NOTIFICATION_SERVICE_ENABLED: bool
+NOTIFICATION_SERVICE_RETRY_ATTEMPTS: int
+NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS: int
 NOTIFICATION_SERVICE_RECIPIENTS: List[str]
+OPS_ALERT_FAILURE_THRESHOLD: int
+OPS_ALERT_WINDOW_SECONDS: int
+OPS_ALERT_COOLDOWN_SECONDS: int
+ACCESS_AUDIT_URL: str
+SESSION_OBSERVER_GATEWAY_ID: str
+SESSION_OBSERVER_SIGNING_SECRET: str
+SESSION_OBSERVATION_OUTBOX_ENABLED: bool
+SESSION_OBSERVATION_OUTBOX_INTERVAL_SECONDS: int
+SESSION_OBSERVATION_OUTBOX_BATCH_SIZE: int
+SESSION_OBSERVATION_OUTBOX_MAX_ATTEMPTS: int
+SESSION_OBSERVATION_OUTBOX_REQUEST_TIMEOUT_SECONDS: int
+SESSION_OBSERVATION_INGEST_TOKEN: str
+OPS_INTERNAL_AUTH_TOKEN: str
+OPS_INTERNAL_AUTH_HEADER: str
+GUAC_ADMIN_USER: str
+GUAC_ADMIN_PASS: str
+GUAC_API_URL: str
+GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS: int
+GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS: int
+GUACAMOLE_HISTORY_LOOKBACK_SECONDS: int
+GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS: int
+HEARTBEAT_SSE_INTERVAL_SECONDS: int
+DISCOVERY_TIMEOUT_SECONDS: float
+DISCOVERY_LABSTATION_PORTS: List[int]
+DISCOVERY_LABSTATION_PATHS: List[str]
+DISCOVERY_HEARTBEAT_PATHS: List[str]
+publish_runtime_policy(_RUNTIME_POLICY, globals())
 # The Ops Worker is intentionally not a public API. OpenResty authenticates
 # the operator at the edge and injects this separate, gateway-local credential.
 OPS_INTERNAL_AUTH_TOKEN = _RUNTIME_POLICY.ops_internal_auth_token
@@ -837,6 +928,7 @@ _HEARTBEAT_CONTEXT = HeartbeatContext(
         *args,
         **kwargs,
     ),
+    resolve_lab_ids_for_host=lambda host: resolve_lab_ids_for_host(host),
     get_logger=lambda: logging,
     get_host_registry=lambda: HOSTS,
     get_persist_heartbeat=lambda *args, **kwargs: persist_heartbeat(*args, **kwargs),
@@ -1011,9 +1103,6 @@ generate_heartbeat_stream = _HEARTBEAT_RUNTIME.generate_heartbeat_stream
 
 
 
-
-
-
 _DEMO_CONTEXT = DemoContext(
     get_mandatory_field_impl=lambda payload, *keys: _get_mandatory_field_impl(
         payload,
@@ -1030,7 +1119,7 @@ _DEMO_CONTEXT = DemoContext(
     get_demo_heartbeat_max_age=lambda: DEMO_HEARTBEAT_MAX_AGE_SECONDS,
     get_guacamole_db_engine=lambda: GUACAMOLE_DB_ENGINE,
     get_db_engine=lambda: DB_ENGINE,
-    get_find_host_by_lab=lambda: HOSTS.get_by_lab,
+    get_find_host_by_lab=lambda: resolve_host_by_lab,
     get_fetch_latest_heartbeat=lambda: _fetch_latest_heartbeat,
     get_to_utc=lambda: to_utc,
     get_sql_text=lambda: text,
@@ -1099,6 +1188,7 @@ _RESERVATION_LIFECYCLE_CONTEXT = ReservationLifecycleContext(
         **kwargs,
     ),
     get_hosts=lambda: HOSTS,
+    get_resolve_host_by_lab=lambda: resolve_host_by_lab,
     get_mandatory_field=lambda: _get_mandatory_field,
     get_parse_bool=lambda: parse_bool,
     get_execute_power_phase=lambda: _execute_reservation_power_phase,
@@ -1128,7 +1218,7 @@ _TIMELINE_CONTEXT = TimelineContext(
         **kwargs,
     ),
     get_db_engine=lambda: DB_ENGINE,
-    get_host_by_lab=lambda: HOSTS.get_by_lab,
+    get_host_by_lab=lambda: resolve_host_by_lab,
     get_sql_text=lambda: text,
     get_rows_to_operations=lambda: _rows_to_operations,
     get_phase_lookback=lambda: TIMELINE_PHASE_LOOKBACK,
@@ -1262,15 +1352,9 @@ _HOST_PROVISIONING_CONTEXT = HostProvisioningContext(
     normalize_mac=lambda value: normalize_mac(value),
     normalize_trust_ref=lambda value: normalize_winrm_trust_ref(value),
     get_sanitize_host_name=lambda value, fallback: sanitize_host_name(value, fallback),
-    get_normalize_labs=lambda value: normalize_labs(value),
-    get_validate_labs_against_candidates=lambda labs, candidates: validate_labs_against_candidates(
-        labs, candidates
-    ),
 )
 _HOST_PROVISIONING_RUNTIME = create_host_provisioning_runtime(_HOST_PROVISIONING_CONTEXT)
 sanitize_host_name = _HOST_PROVISIONING_RUNTIME.sanitize_host_name
-normalize_labs = _HOST_PROVISIONING_RUNTIME.normalize_labs
-validate_labs_against_candidates = _HOST_PROVISIONING_RUNTIME.validate_labs_against_candidates
 build_provisioned_host = _HOST_PROVISIONING_RUNTIME.build_provisioned_host
 
 _HOST_INVENTORY_CONTEXT = HostInventoryContext(
@@ -1319,12 +1403,28 @@ provision_guacamole_temporary_user = _GUACAMOLE_RUNTIME.provision_guacamole_temp
 delete_guacamole_temporary_user = _GUACAMOLE_RUNTIME.delete_guacamole_temporary_user
 cleanup_expired_guacamole_temp_users = _GUACAMOLE_RUNTIME.cleanup_expired_guacamole_temp_users
 
+
+_LAB_RESOLUTION_RUNTIME = create_lab_resolution_composition(
+    _RUNTIME_POLICY,
+    get_host_registry=lambda: HOSTS,
+    get_guacamole_connections=lambda: load_guacamole_connections(),
+    get_parse_selector=lambda: parse_guacamole_selector,
+    get_normalize_key=lambda: normalize_match_key,
+    get_http_get=lambda: requests.get,
+    get_logger=lambda: logging,
+    get_monotonic=lambda: time.monotonic,
+)
+resolve_lab_access_key = _LAB_RESOLUTION_RUNTIME.resolve_lab_access_key
+resolve_host_by_lab = _LAB_RESOLUTION_RUNTIME.resolve_host_by_lab
+resolve_lab_ids_for_host = _LAB_RESOLUTION_RUNTIME.resolve_lab_ids_for_host
+resolve_lab_associations = _LAB_RESOLUTION_RUNTIME.resolve_lab_associations
+refresh_lab_catalog = _LAB_RESOLUTION_RUNTIME.refresh_catalog
+
 def build_host_inventory() -> Dict[str, Any]:
     """Build inventory while preserving the live worker patch point."""
     return _HOST_INVENTORY_RUNTIME.build_host_inventory(
         safe_entry=safe_host_inventory_entry,
     )
-
 
 
 poll_all_hosts = _HEARTBEAT_RUNTIME.poll_all_hosts
@@ -1342,6 +1442,7 @@ _RESERVATION_RUNTIME_CONTEXT = ReservationRuntimeContext(
     get_bindparam=lambda: bindparam,
     get_dispatch_start=lambda: lambda payload: handle_reservation_start(payload),
     get_dispatch_end=lambda: lambda payload: handle_reservation_end(payload),
+    get_resolve_host_by_lab=lambda: resolve_host_by_lab,
     get_record_operation=lambda: lambda *args, **kwargs: record_reservation_operation(
         *args,
         **kwargs,

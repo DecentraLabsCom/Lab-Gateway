@@ -101,11 +101,10 @@ class TestBuildNameplateSubmodel:
         props = {el["idShort"]: el for el in sm["submodelElements"]}
         assert "MacAddress" not in props
 
-    def test_mapped_lab_ids_present(self):
+    def test_mapped_lab_ids_are_not_copied_from_host_configuration(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)
         props = {el["idShort"]: el for el in sm["submodelElements"]}
-        assert "MappedLabIds" in props
-        assert "42" in props["MappedLabIds"]["value"]
+        assert "MappedLabIds" not in props
 
     def test_semantic_id_present(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)

@@ -19,6 +19,7 @@ from hosts_blueprint import create_hosts_blueprint
 from hosts_discover_blueprint import create_hosts_discover_blueprint
 from hosts_reload_blueprint import create_hosts_reload_blueprint
 from internal_ingest_blueprint import create_internal_ingest_blueprint
+from lab_associations_blueprint import create_lab_associations_blueprint
 from lifecycle_blueprint import create_lifecycle_blueprint
 from local_mode_blueprint import create_local_mode_blueprint
 from operations_blueprint import create_operations_blueprint
@@ -158,6 +159,11 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
     app.register_blueprint(
         create_hosts_blueprint(
             build_inventory=lambda: get("build_host_inventory")(),
+        )
+    )
+    app.register_blueprint(
+        create_lab_associations_blueprint(
+            resolve_lab_associations=lambda: get("resolve_lab_associations")(),
         )
     )
     app.register_blueprint(
@@ -337,6 +343,7 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
     app.register_blueprint(
         create_aas_sync_blueprint(
             find_host=lambda host_name: get("HOSTS").get(host_name),
+            resolve_lab_ids_for_host=lambda host: get("resolve_lab_ids_for_host")(host),
             sync_lab=lambda lab_id, host: get("aas_generator").sync_lab_to_basyx(lab_id, host),
             log_failure=lambda *args: get("logging").exception(*args),
         )
@@ -370,7 +377,7 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
     )
     app.register_blueprint(
         create_aas_lab_sync_blueprint(
-            find_host_by_lab=lambda lab_id: get("HOSTS").get_by_lab(lab_id),
+            resolve_host_by_lab=lambda lab_id: get("resolve_host_by_lab")(lab_id),
             parse_bool=lambda value, default: get("parse_bool")(value, default),
             poll_heartbeat=lambda host, include_events: get("poll_heartbeat")(
                 host,

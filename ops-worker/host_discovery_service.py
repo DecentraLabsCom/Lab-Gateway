@@ -77,7 +77,6 @@ def discover_labstation_candidate(
         "winrm_port": draft_winrm_port,
         "heartbeat_path": heartbeat.get("path") or heartbeat_paths[0],
         "events_path": events_path,
-        "labs": [],
         "nameCandidates": name_candidates(connection),
     }
     if mac_hint:

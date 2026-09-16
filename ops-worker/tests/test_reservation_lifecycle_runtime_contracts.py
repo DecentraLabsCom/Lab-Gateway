@@ -20,6 +20,7 @@ def _context(*, hosts=None, calls=None):
             ("end", payload, kwargs)
         ) or ({"action": "end"}, 200),
         get_hosts=lambda: hosts,
+        get_resolve_host_by_lab=lambda: lambda _lab_id: {"name": "station"},
         get_mandatory_field=lambda: lambda payload, *keys: "value",
         get_parse_bool=lambda: lambda value, default=True: bool(value),
         get_execute_power_phase=lambda: lambda *args: ("power", args),

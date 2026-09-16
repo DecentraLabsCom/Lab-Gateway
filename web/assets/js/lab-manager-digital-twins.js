@@ -23,7 +23,7 @@
         let managedLabsInitialized = false;
         let managedLabsPromise = null;
         let managedLabs = [];
-        let associatedPhysicalLabIds = new Set();
+        let physicalLabIdsWithRegisteredConnection = new Set();
         let fmuSyncController = null;
         let aasLinkController = null;
 
@@ -148,45 +148,40 @@
 
         function digitalTwinLaboratories(labs) {
             return (Array.isArray(labs) ? labs : []).filter(lab => (
-                !isPhysicalLaboratory(lab) || associatedPhysicalLabIds.has(resolveLabId(lab))
+                !isPhysicalLaboratory(lab)
+                || physicalLabIdsWithRegisteredConnection.has(resolveLabId(lab))
             ));
         }
 
-        async function loadPhysicalLaboratoryAssociations(labs, options = {}) {
-            associatedPhysicalLabIds = new Set();
-            const hasPhysicalLaboratories = (Array.isArray(labs) ? labs : []).some(
-                isPhysicalLaboratory,
-            );
-            if (!hasPhysicalLaboratories) return;
+        async function loadLabAssociations(options = {}) {
+            physicalLabIdsWithRegisteredConnection = new Set();
 
             try {
-                const res = await fetchImpl('/ops/api/hosts', options);
+                const res = await fetchImpl('/ops/api/lab-associations', options);
                 if (res.status === 403) {
                     showOpsWarning();
                     return;
                 }
                 if (res.status === 401) {
                     if (!options.skipAuthPrompt) {
-                        showToast('Lab Manager session required to load Lab Station hosts', 'error');
+                        showToast('Lab Manager session required to load laboratory associations', 'error');
                     }
                     return;
                 }
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const body = await res.json().catch(() => ({}));
-                (Array.isArray(body.hosts) ? body.hosts : []).forEach(host => {
-                    (Array.isArray(host?.labs) ? host.labs : []).forEach(labId => {
-                        const normalizedLabId = String(labId || '').trim();
-                        if (normalizedLabId) associatedPhysicalLabIds.add(normalizedLabId);
-                    });
+                (Array.isArray(body.associations) ? body.associations : []).forEach(association => {
+                    const labId = String(association?.labId || '').trim();
+                    if (labId) physicalLabIdsWithRegisteredConnection.add(labId);
                 });
             } catch (error) {
-                logger.warn('Unable to load Lab Station associations for laboratories', error);
+                logger.warn('Unable to load calculated laboratory associations', error);
             }
         }
 
         function clearManagedLabs() {
             managedLabs = [];
-            associatedPhysicalLabIds = new Set();
+            physicalLabIdsWithRegisteredConnection = new Set();
             renderPowerPolicyLabOptions([]);
             renderDigitalTwinLaboratoryOptions(fields.fmuSyncKey, []);
             renderDigitalTwinLaboratoryOptions(fields.aasLinkKey, []);
@@ -216,7 +211,7 @@
                 const body = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
                 managedLabs = Array.isArray(body.labs) ? body.labs : [];
-                await loadPhysicalLaboratoryAssociations(managedLabs, options);
+                await loadLabAssociations(options);
                 const digitalTwinLabs = digitalTwinLaboratories(managedLabs);
                 renderPowerPolicyLabOptions(managedLabs, selectedPowerPolicyLabId);
                 renderDigitalTwinLaboratoryOptions(fields.fmuSyncKey, digitalTwinLabs, selectedFmuLabId);

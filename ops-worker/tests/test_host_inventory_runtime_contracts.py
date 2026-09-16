@@ -40,7 +40,6 @@ def test_host_inventory_runtime_uses_explicit_context_dependencies(monkeypatch):
         )
     ]
 
-
 def test_host_inventory_context_is_immutable():
     context = HostInventoryContext(
         get_host_registry=lambda: "registry",

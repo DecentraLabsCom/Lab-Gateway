@@ -142,6 +142,7 @@ def test_health_reports_demo_readiness_when_binding_and_station_are_ready(monkey
         "address": "192.168.1.50",
         "labs": ["42"],
     }]}))
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: worker.HOSTS.get("demo-station"))
     monkeypatch.setattr(worker, "_fetch_latest_heartbeat", lambda _conn, _name: {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "ready": True,

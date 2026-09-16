@@ -12,6 +12,7 @@ class ReservationLifecycleContext:
     handle_reservation_start_impl: Callable[..., Tuple[Dict[str, Any], int]]
     handle_reservation_end_impl: Callable[..., Tuple[Dict[str, Any], int]]
     get_hosts: Callable[[], Any]
+    get_resolve_host_by_lab: Callable[[], Callable[[str], Optional[Mapping[str, Any]]]]
     get_mandatory_field: Callable[[], Callable[..., Optional[str]]]
     get_parse_bool: Callable[[], Callable[[Any, bool], bool]]
     get_execute_power_phase: Callable[

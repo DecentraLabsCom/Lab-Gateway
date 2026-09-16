@@ -7,6 +7,7 @@ def _dependencies():
     host = {"name": "lab-ws-01"}
     return {
         "find_host": lambda name: host if name == "lab-ws-01" else None,
+        "resolve_host_by_lab": lambda lab_id: host if lab_id == "42" else None,
         "get_mandatory_field": lambda payload, *keys: next(
             (str(payload[key]).strip() for key in keys if payload.get(key) not in (None, "")),
             None,
@@ -44,6 +45,19 @@ def test_start_preserves_phase_order_and_defaults():
     )
 
 
+def test_start_uses_the_resolved_host_when_the_request_host_is_stale_or_missing():
+    deps = _dependencies()
+
+    response, status = handle_reservation_start(
+        {"reservationId": "r-1", "labId": "42", "host": "old-station"},
+        **deps,
+    )
+
+    assert status == 200
+    assert response["host"] == "lab-ws-01"
+    assert deps["perform_wake_step"].call_args.args[0] == {"name": "lab-ws-01"}
+
+
 def test_end_rejects_missing_host_without_invoking_physical_callbacks():
     deps = _dependencies()
 
@@ -53,6 +67,6 @@ def test_end_rejects_missing_host_without_invoking_physical_callbacks():
     )
 
     assert status == 400
-    assert response == {"error": "reservationId and host are required"}
+    assert response == {"error": "reservationId and either host or labId are required"}
     deps["execute_power_phase"].assert_not_called()
     deps["perform_command_step"].assert_not_called()

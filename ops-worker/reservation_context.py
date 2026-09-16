@@ -20,6 +20,7 @@ class ReservationRuntimeContext:
     get_bindparam: Callable[[], Callable[..., Any]]
     get_dispatch_start: Callable[[], Callable[..., Any]]
     get_dispatch_end: Callable[[], Callable[..., Any]]
+    get_resolve_host_by_lab: Callable[[], Callable[[str], Optional[Any]]]
     get_record_operation: Callable[[], Callable[..., Any]]
     get_logger: Callable[[], Any]
     get_now: Callable[[], Callable[[], datetime]]
