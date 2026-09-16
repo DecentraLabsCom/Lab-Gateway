@@ -274,6 +274,16 @@
             fields.refreshPowerCredentials?.addEventListener('click', loadPowerCredentials);
         }
 
+        function loadPowerPoliciesAfterManagedLabs(options = {}) {
+            const managedLabsLoad = fields.powerPolicyLabSelect
+                ? loadManagedLabsOnce()
+                : Promise.resolve();
+            void managedLabsLoad.then(
+                () => loadPowerPolicies(options),
+                () => loadPowerPolicies(options),
+            );
+        }
+
         function hasEnergyTab() {
             return Boolean(
                 fields.powerControllerList
@@ -293,8 +303,8 @@
             if (tabName === 'energy') {
                 if (fields.powerControllerList || fields.powerControllerSelect) loadPowerControllers({ skipAuthPrompt: true });
                 if (fields.powerCredentialsList || fields.powerCredentialSelect) loadPowerCredentials({ skipAuthPrompt: true });
-                if (fields.powerPolicyLabSelect) loadManagedLabsOnce();
-                if (fields.powerPolicySelect) loadPowerPolicies({ skipAuthPrompt: true });
+                if (fields.powerPolicySelect) loadPowerPoliciesAfterManagedLabs({ skipAuthPrompt: true });
+                else if (fields.powerPolicyLabSelect) loadManagedLabsOnce();
                 return;
             }
             if (tabName === 'digital-twins' && hasDigitalTwinsTab()) loadManagedLabsOnce();
