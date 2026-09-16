@@ -1304,9 +1304,9 @@ body {
 .power-controller-outlets { display: flex; flex-direction: column; gap: 12px; }
 .power-controller-outlet-config { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #0d1220; }
 .power-controller-outlet-config-header { margin-bottom: 12px; }
-.power-controller-outlet-fields { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-.power-checkbox-field { align-self: end; }
-.power-controller-outlet-protected-field { justify-self: end; }
+.power-controller-outlet-fields { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.power-checkbox-field { align-self: start; }
+.power-controller-outlet-protected-field { justify-self: stretch; }
 .power-checkbox-field .check-field { min-height: 40px; }
 .power-checkbox-field .check-field input[type="checkbox"] {
     width: auto;
@@ -1330,7 +1330,7 @@ body {
 .power-outlet-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #0d1220; }
 .power-outlet-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .power-policy-editor { margin-top: 16px; }
-.power-policy-toolbar { align-items: end; margin-top: 12px; }
+.power-policy-toolbar { align-items: start; margin-top: 12px; }
 .power-policy-steps-editor { margin-top: 16px; }
 .power-policy-steps-header,
 .power-policy-step-header,
