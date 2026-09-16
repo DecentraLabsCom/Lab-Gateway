@@ -105,18 +105,19 @@ The complete energy workflow is in [Lab Manager energy operations](lab-manager-e
    `urn:decentralabs:lab:{labId}` as a shell ID, unless the shell is associated
    through `Link Existing AAS`. Use that panel when the authoritative shell is
    already hosted elsewhere.
-6. In `AASX Associations`, verify the laboratory/package association. The
-   `View` action shows the catalog metadata and imported shell/submodel IDs;
-   `Download` generates an AASX from the current BaSyx resources. `Delete`
-   removes the package's imported shells and submodels from BaSyx, as well as
-   its catalog metadata.
+6. In `AAS Associations`, verify the laboratory association. The list includes
+   `Generated` shells created by `Sync AAS`, `Imported` shells loaded from an
+   uploaded `.aasx`, and `Linked` shells managed elsewhere. `View` shows the
+   current shell/submodel IDs; `Download` generates an AASX from the current
+   BaSyx resources. `Delete` removes generated/imported resources from BaSyx,
+   while `Unlink` only removes a linked association.
 7. Verify shell retrieval through the Gateway, not only directly against BaSyx.
 
-The package catalog is populated by AASX uploads performed after this feature
-is enabled. Existing metadata from the previous catalog format remains
-readable; old archive files are not used for downloads and can be removed
-through the association's `Delete` action after confirming the BaSyx resources
-are present.
+The association list is calculated from the current BaSyx shells plus the
+lightweight metadata retained for imported AASX files and external links. It
+therefore also shows shells generated before this feature was enabled. Old
+archive files are not used for downloads and can be removed through the
+association's `Delete` action after confirming the BaSyx resources are present.
 
 The association between a physical laboratory and an Ops Worker host is not
 stored in `hosts.json`. The worker reads the current provider catalog from

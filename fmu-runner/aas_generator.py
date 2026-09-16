@@ -16,7 +16,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
 
 import httpx
@@ -873,6 +873,108 @@ async def serialize_aasx_resources(
     except ValueError as exc:
         logger.error(
             "AAS endpoint policy rejected serialization at %s: %s",
+            str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
+        return {"error": "AAS endpoint policy rejected"}
+
+
+def _aas_collection_items(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        candidates = payload
+    elif isinstance(payload, dict):
+        candidates = []
+        for key in ("result", "shells", "items", "value"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                candidates = value
+                break
+        if not candidates and isinstance(payload.get("id"), str):
+            candidates = [payload]
+    else:
+        candidates = []
+    return [item for item in candidates if isinstance(item, dict)]
+
+
+def _shell_submodel_ids(shell: dict[str, Any]) -> list[str]:
+    result: list[str] = []
+    for reference in shell.get("submodels", []) if isinstance(shell.get("submodels"), list) else []:
+        values: list[Any] = []
+        if isinstance(reference, str):
+            values.append(reference)
+        elif isinstance(reference, dict):
+            if isinstance(reference.get("id"), str):
+                values.append(reference["id"])
+            keys = reference.get("keys")
+            if isinstance(keys, list):
+                values.extend(
+                    key.get("value")
+                    for key in keys
+                    if isinstance(key, dict) and isinstance(key.get("value"), str)
+                )
+        for value in values:
+            normalized = value.strip()
+            if normalized and normalized not in result:
+                result.append(normalized)
+    return result
+
+
+async def discover_basyx_shells() -> dict[str, Any]:
+    """Discover current provider shells for the Lab Manager association view."""
+    if not BASYX_AAS_URL:
+        return {"disabled": True, "shells": []}
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=BASYX_AAS_URL,
+            headers=_aas_request_headers(),
+            timeout=15.0,
+        ) as client:
+            response = await client.get("/shells")
+            if response.status_code != 200:
+                logger.warning("BaSyx shell discovery failed: status=%s", response.status_code)
+                return {"error": "BaSyx shell discovery failed"}
+
+            discovered: list[dict[str, Any]] = []
+            seen_ids: set[str] = set()
+            for shell in _aas_collection_items(response.json()):
+                shell_id = shell.get("id")
+                if not isinstance(shell_id, str) or not shell_id.startswith("urn:decentralabs:lab:"):
+                    continue
+                submodel_ids = [
+                    value.strip()
+                    for value in (
+                        shell.get("submodelIds")
+                        if isinstance(shell.get("submodelIds"), list)
+                        else _shell_submodel_ids(shell)
+                    )
+                    if isinstance(value, str) and value.strip()
+                ]
+                if not submodel_ids:
+                    encoded_id = _encode_id(shell_id)
+                    detail = await client.get(f"/shells/{encoded_id}")
+                    if detail.status_code == 200:
+                        detail_payload = detail.json()
+                        if isinstance(detail_payload, dict):
+                            submodel_ids = _shell_submodel_ids(detail_payload)
+                if shell_id in seen_ids:
+                    continue
+                seen_ids.add(shell_id)
+                discovered.append({
+                    "id": shell_id,
+                    "submodelIds": list(dict.fromkeys(submodel_ids)),
+                })
+            return {"shells": discovered}
+    except httpx.RequestError as exc:
+        logger.warning(
+            "BaSyx unreachable while discovering shells at %s: %s",
+            str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
+        return {"error": "BaSyx unavailable"}
+    except ValueError as exc:
+        logger.error(
+            "AAS endpoint policy rejected shell discovery at %s: %s",
             str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
             type(exc).__name__,
         )

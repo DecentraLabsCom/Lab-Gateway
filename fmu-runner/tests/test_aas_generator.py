@@ -30,6 +30,7 @@ from aas_generator import (
     build_unit_definitions_submodel,
     build_aas_shell,
     delete_aasx_resources,
+    discover_basyx_shells,
     serialize_aasx_resources,
 )
 
@@ -829,6 +830,48 @@ class TestSerializeAasxResources:
             assert result["error"] == "BaSyx resource deletion failed"
         finally:
             _aas_mod.BASYX_AAS_URL = original
+
+
+class TestDiscoverBasyxShells:
+    @pytest.mark.asyncio
+    async def test_discovers_stable_lab_shells_and_reads_submodels_when_needed(self):
+        original_url = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = _aas_mod._BUNDLED_AAS_URL
+        try:
+            list_response = MagicMock(status_code=200)
+            list_response.json.return_value = {
+                "result": [
+                    {"id": "urn:decentralabs:lab:7"},
+                    {"id": "urn:other:aas:8"},
+                ]
+            }
+            detail_response = MagicMock(status_code=200)
+            detail_response.json.return_value = {
+                "id": "urn:decentralabs:lab:7",
+                "submodels": [
+                    {"keys": [{"type": "Submodel", "value": "urn:lab:7:sm"}]},
+                ],
+            }
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(side_effect=[list_response, detail_response])
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await discover_basyx_shells()
+
+            assert result == {
+                "shells": [{
+                    "id": "urn:decentralabs:lab:7",
+                    "submodelIds": ["urn:lab:7:sm"],
+                }]
+            }
+            assert [call.args[0] for call in mock_client.get.await_args_list] == [
+                "/shells",
+                f"/shells/{_encode_id('urn:decentralabs:lab:7')}",
+            ]
+        finally:
+            _aas_mod.BASYX_AAS_URL = original_url
 
 
 class TestSyncFmuToBasyxGenerated:

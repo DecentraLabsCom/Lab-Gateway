@@ -783,8 +783,8 @@
                 <div class="card">
                     <div class="card-header">
                         <div>
-                            <h2>AASX Associations</h2>
-                            <p>See which laboratories have AASX resources managed in BaSyx.</p>
+                            <h2>AAS Associations</h2>
+                            <p>See which laboratories have generated, imported or linked AAS resources.</p>
                         </div>
                         <div class="card-header-actions">
                             <button class="ghost-btn" id="aasxRefreshBtn" type="button">
@@ -794,11 +794,11 @@
                     </div>
                     <div class="card-body">
                         <div class="hint" id="aasxPackageStatus">
-                            The Gateway keeps association metadata only. Downloads are generated from the current
-                            BaSyx shells and submodels; removing an association deletes those imported resources.
+                            Generated and imported resources are managed in BaSyx. Linked associations point to an
+                            existing AAS shell and are never deleted from the remote server.
                         </div>
                         <div class="table-wrap mt-3" id="aasxPackageList">
-                            <div class="empty">No AASX associations registered.</div>
+                            <div class="empty">No AAS associations registered.</div>
                         </div>
                     </div>
                 </div>
@@ -1160,7 +1160,7 @@
     <div class="modal" id="aasxViewModal" role="dialog" aria-modal="true" aria-labelledby="aasxViewTitle">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="aasxViewTitle">AASX package</h3>
+                <h3 id="aasxViewTitle">AAS association</h3>
                 <button class="ghost-btn icon-btn" id="aasxViewClose" type="button" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body" id="aasxViewBody"></div>
@@ -1212,7 +1212,7 @@
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
     <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v6"></script>
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v4"></script>
-    <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v1"></script>
+    <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v2"></script>
     <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v6"></script>
     <script src="../assets/js/lab-manager-power-credentials.js?v=lab-manager-power-credentials-v2"></script>
             <script src="../assets/js/lab-manager-power-renderers.js?v=lab-manager-power-renderers-v12"></script>

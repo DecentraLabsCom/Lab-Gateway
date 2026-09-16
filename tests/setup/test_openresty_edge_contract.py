@@ -1091,7 +1091,7 @@ def test_aas_admin_routes_keep_full_lite_guards_auth_and_destinations():
     )
 
     aasx_block = _location_block(include, "/aas-admin/aas/")
-    assert "Service unavailable: AAS package import is disabled on this gateway." in aasx_block
+    assert "Service unavailable: AAS administration is disabled on this gateway." in aasx_block
     for directive in (
         "client_max_body_size 50M;",
         'proxy_set_header Authorization "";',

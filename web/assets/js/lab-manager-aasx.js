@@ -22,10 +22,10 @@
     }) {
         const escape = typeof escapeHtml === 'function' ? escapeHtml : defaultEscapeHtml;
         let managedLabs = [];
-        let packages = [];
+        let associations = [];
         let bound = false;
 
-        function packageUrl(labId, action) {
+        function associationUrl(labId, action) {
             return `/aas-admin/aas/${encodeURIComponentImpl(labId)}/${action}`;
         }
 
@@ -35,6 +35,7 @@
         }
 
         function formatBytes(value) {
+            if (value == null || value === '') return 'Not applicable';
             const size = Number(value);
             if (!Number.isFinite(size) || size < 0) return 'Unknown size';
             if (size < 1024) return `${size} B`;
@@ -51,8 +52,8 @@
         function renderPackageList() {
             const target = fields.packageList;
             if (!target) return;
-            if (!packages.length) {
-                target.innerHTML = '<div class="empty">No AASX associations registered.</div>';
+            if (!associations.length) {
+                target.innerHTML = '<div class="empty">No AAS associations registered.</div>';
                 return;
             }
 
@@ -61,18 +62,32 @@
                     <thead>
                         <tr>
                             <th>Laboratory</th>
-                            <th>AASX association</th>
-                            <th>Imported resources</th>
+                            <th>AAS association</th>
+                            <th>Resources</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${packages.map(packageInfo => {
-                            const labId = String(packageInfo?.labId || '').trim();
-                            const filename = String(packageInfo?.filename || `${labId}.aasx`);
-                            const downloadUrl = packageInfo?.downloadUrl || packageUrl(labId, 'download');
-                            const shellCount = Array.isArray(packageInfo?.shellIds) ? packageInfo.shellIds.length : 0;
-                            const submodelCount = Array.isArray(packageInfo?.submodelIds) ? packageInfo.submodelIds.length : 0;
+                        ${associations.map(association => {
+                            const labId = String(association?.labId || '').trim();
+                            const source = String(association?.source || 'generated').trim().toLowerCase();
+                            const sourceLabel = source === 'linked'
+                                ? 'Linked'
+                                : source === 'imported' ? 'Imported' : 'Generated';
+                            const filename = String(association?.filename || `${labId}.aasx`);
+                            const targetAasId = String(association?.targetAasId || association?.shellIds?.[0] || '').trim();
+                            const associationLabel = source === 'linked'
+                                ? targetAasId
+                                : source === 'imported'
+                                    ? filename
+                                    : 'Generated from laboratory metadata';
+                            const sizeLabel = association?.size == null
+                                ? (source === 'generated' ? 'Current BaSyx resources' : 'External AAS shell')
+                                : formatBytes(association.size);
+                            const downloadUrl = association?.downloadUrl || associationUrl(labId, 'download');
+                            const shellCount = Array.isArray(association?.shellIds) ? association.shellIds.length : 0;
+                            const submodelCount = Array.isArray(association?.submodelIds) ? association.submodelIds.length : 0;
+                            const deleteLabel = source === 'linked' ? 'Unlink' : 'Delete';
                             return `
                                 <tr>
                                     <td>
@@ -80,8 +95,9 @@
                                         <div class="muted-text">Lab #${escape(labId)}</div>
                                     </td>
                                     <td>
-                                        <code>${escape(filename)}</code>
-                                        <div class="muted-text">${escape(formatBytes(packageInfo?.size))}</div>
+                                        <strong>${escape(sourceLabel)}</strong>
+                                        <div><code>${escape(associationLabel)}</code></div>
+                                        <div class="muted-text">${escape(sizeLabel)}</div>
                                     </td>
                                     <td>
                                         <div>${shellCount} shell${shellCount === 1 ? '' : 's'}</div>
@@ -95,7 +111,7 @@
                                             <i class="fas fa-download" aria-hidden="true"></i> Download
                                         </a>
                                         <button class="mini-btn danger" type="button" data-aasx-delete="${escape(labId)}">
-                                            <i class="fas fa-trash" aria-hidden="true"></i> Delete
+                                            <i class="fas ${source === 'linked' ? 'fa-unlink' : 'fa-trash'}" aria-hidden="true"></i> ${deleteLabel}
                                         </button>
                                     </td>
                                 </tr>
@@ -106,8 +122,8 @@
             `;
         }
 
-        function clearPackages(message = 'No AASX associations registered.') {
-            packages = [];
+        function clearPackages(message = 'No AAS associations registered.') {
+            associations = [];
             renderPackageList();
             setStatus(message);
         }
@@ -121,35 +137,41 @@
             try {
                 const response = await fetchImpl('/aas-admin/aas/catalog', options);
                 if (response.status === 401) {
-                    clearPackages('Lab Manager session required to load AASX packages.');
-                    if (!options.skipAuthPrompt) showToast('Lab Manager session required to load AASX packages', 'error');
+                    clearPackages('Lab Manager session required to load AAS associations.');
+                    if (!options.skipAuthPrompt) showToast('Lab Manager session required to load AAS associations', 'error');
                     return false;
                 }
                 if (response.status === 403) {
-                    clearPackages('AASX package administration is unavailable in Lite mode.');
+                    clearPackages('AAS administration is unavailable in Lite mode.');
                     return false;
                 }
                 if (!response.ok) throw new Error(await responseError(response));
                 const body = await response.json().catch(() => ({}));
-                packages = Array.isArray(body.packages) ? body.packages : [];
+                associations = Array.isArray(body.associations) ? body.associations : [];
                 renderPackageList();
-                setStatus(packages.length ? `${packages.length} AASX association${packages.length === 1 ? '' : 's'} registered.` : 'No AASX associations registered.');
+                setStatus(associations.length ? `${associations.length} AAS association${associations.length === 1 ? '' : 's'} registered.` : 'No AAS associations registered.');
+                if (body.warning) showToast(`AAS association list is incomplete: ${body.warning}`, 'warning');
                 return true;
             } catch (error) {
-                logger.warn('Unable to load AASX packages', error);
-                clearPackages('Unable to load AASX packages.');
-                if (options.notifyError) showToast(`AASX package load failed: ${error.message}`, 'error');
+                logger.warn('Unable to load AAS associations', error);
+                clearPackages('Unable to load AAS associations.');
+                if (options.notifyError) showToast(`AAS association load failed: ${error.message}`, 'error');
                 return false;
             }
         }
 
-        function renderView(packageInfo) {
+        function renderView(association) {
             if (!fields.viewModal) return;
-            const labId = String(packageInfo?.labId || '').trim();
-            const filename = String(packageInfo?.filename || `${labId}.aasx`);
-            const shellIds = Array.isArray(packageInfo?.shellIds) ? packageInfo.shellIds : [];
-            const submodelIds = Array.isArray(packageInfo?.submodelIds) ? packageInfo.submodelIds : [];
-            if (fields.viewTitle) fields.viewTitle.textContent = filename;
+            const labId = String(association?.labId || '').trim();
+            const source = String(association?.source || 'generated').trim().toLowerCase();
+            const sourceLabel = source === 'linked'
+                ? 'Linked'
+                : source === 'imported' ? 'Imported' : 'Generated';
+            const filename = String(association?.filename || `${labId}.aasx`);
+            const targetAasId = String(association?.targetAasId || '').trim();
+            const shellIds = Array.isArray(association?.shellIds) ? association.shellIds : [];
+            const submodelIds = Array.isArray(association?.submodelIds) ? association.submodelIds : [];
+            if (fields.viewTitle) fields.viewTitle.textContent = `${sourceLabel} AAS association`;
             if (fields.viewBody) {
                 const renderIds = (ids, emptyLabel) => ids.length
                     ? `<ul>${ids.map(id => `<li><code>${escape(id)}</code></li>`).join('')}</ul>`
@@ -157,8 +179,10 @@
                 fields.viewBody.innerHTML = `
                     <div class="aasx-view-summary">
                         <div><span class="muted-text">Laboratory</span><strong>${escape(resolveLabName(labId))}</strong></div>
-                        <div><span class="muted-text">Imported source size</span><strong>${escape(formatBytes(packageInfo?.size))}</strong></div>
-                        <div><span class="muted-text">Updated</span><strong>${escape(packageInfo?.updatedAt || 'Unknown')}</strong></div>
+                        <div><span class="muted-text">Source</span><strong>${escape(sourceLabel)}</strong></div>
+                        <div><span class="muted-text">AASX source</span><strong>${escape(source === 'imported' ? filename : source === 'linked' ? targetAasId : 'Generated from BaSyx')}</strong></div>
+                        <div><span class="muted-text">Size</span><strong>${escape(formatBytes(association?.size))}</strong></div>
+                        <div><span class="muted-text">Updated</span><strong>${escape(association?.updatedAt || 'Unknown')}</strong></div>
                     </div>
                     <h4>Asset Administration Shells</h4>
                     ${renderIds(shellIds, 'No shell IDs recorded.')}
@@ -167,7 +191,7 @@
                 `;
             }
             if (fields.viewDownload) {
-                fields.viewDownload.href = packageInfo?.downloadUrl || packageUrl(labId, 'download');
+                fields.viewDownload.href = association?.downloadUrl || associationUrl(labId, 'download');
                 fields.viewDownload.hidden = false;
             }
             fields.viewModal.classList?.add('show');
@@ -177,39 +201,44 @@
             const safeLabId = String(labId || '').trim();
             if (!safeLabId) return;
             try {
-                const response = await fetchImpl(packageUrl(safeLabId, 'view'));
+                const response = await fetchImpl(associationUrl(safeLabId, 'view'));
                 if (response.status === 404) {
-                    showToast(`No AASX package configured for laboratory ${safeLabId}`, 'info');
+                    showToast(`No AAS association configured for laboratory ${safeLabId}`, 'info');
                     return;
                 }
                 if (!response.ok) throw new Error(await responseError(response));
-                const packageInfo = await response.json();
-                renderView(packageInfo);
-                showToast(`AASX package loaded for laboratory ${safeLabId}`, 'success');
+                const association = await response.json();
+                renderView(association);
+                showToast(`AAS association loaded for laboratory ${safeLabId}`, 'success');
             } catch (error) {
                 logger.error(error);
-                showToast(`AASX package view failed: ${error.message}`, 'error');
+                showToast(`AAS association view failed: ${error.message}`, 'error');
             }
         }
 
         async function deletePackage(labId, button = null) {
             const safeLabId = String(labId || '').trim();
-            if (!safeLabId || !confirmImpl(`Remove the AASX association for laboratory ${safeLabId}? This deletes its BaSyx resources.`)) return;
+            const association = associations.find(item => String(item?.labId || '').trim() === safeLabId);
+            const isLinked = String(association?.source || '').trim().toLowerCase() === 'linked';
+            const removalEffect = isLinked
+                ? 'This removes only the link.'
+                : 'This deletes its BaSyx resources.';
+            if (!safeLabId || !confirmImpl(`Remove the AAS association for laboratory ${safeLabId}? ${removalEffect}`)) return;
             if (button) button.disabled = true;
             try {
                 const response = await fetchImpl(`/aas-admin/aas/${encodeURIComponentImpl(safeLabId)}`, { method: 'DELETE' });
                 if (response.status === 404) {
-                    showToast(`No AASX package configured for laboratory ${safeLabId}`, 'info');
+                    showToast(`No AAS association configured for laboratory ${safeLabId}`, 'info');
                     return;
                 }
                 if (!response.ok) throw new Error(await responseError(response));
-                packages = packages.filter(packageInfo => String(packageInfo?.labId || '').trim() !== safeLabId);
+                associations = associations.filter(item => String(item?.labId || '').trim() !== safeLabId);
                 renderPackageList();
-                setStatus(packages.length ? `${packages.length} AASX association${packages.length === 1 ? '' : 's'} registered.` : 'No AASX associations registered.');
-                showToast(`AASX association removed for laboratory ${safeLabId}`, 'success');
+                setStatus(associations.length ? `${associations.length} AAS association${associations.length === 1 ? '' : 's'} registered.` : 'No AAS associations registered.');
+                showToast(`${isLinked ? 'AAS link removed' : 'AAS association removed'} for laboratory ${safeLabId}`, 'success');
             } catch (error) {
                 logger.error(error);
-                showToast(`AASX package removal failed: ${error.message}`, 'error');
+                showToast(`AAS association removal failed: ${error.message}`, 'error');
             } finally {
                 if (button) button.disabled = false;
             }
@@ -248,7 +277,7 @@
             clearPackages,
             closeView,
             deletePackage,
-            getPackages: () => packages.map(packageInfo => ({ ...packageInfo })),
+            getPackages: () => associations.map(association => ({ ...association })),
             initialize,
             loadPackages,
             setManagedLabs: labs => {

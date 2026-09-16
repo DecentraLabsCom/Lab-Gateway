@@ -56,19 +56,20 @@ does not change between these topologies.
 | WS | `/api/v1/fmu/sessions` | Realtime FMU session API (`requestId`, `model.describe`, control, subscribe/unsubscribe, ping/pong) |
 | WS (internal) | `/internal/fmu/sessions` | Internal realtime channel for Lab Station integration |
 
-When the AAS admin integration is enabled, provider-uploaded AASX packages are
-registered in a lightweight catalog under `AAS_CATALOG_PATH` (default
-`/app/data/aasx`) after a successful import. BaSyx is the source of truth for
-the imported shells and submodels; the Gateway does not retain the uploaded
-archive. Downloads are generated from the current BaSyx resources.
-The Lab Manager uses these protected endpoints to manage that catalog:
+When the AAS admin integration is enabled, the Lab Manager exposes a unified
+AAS association catalog. BaSyx is the source of truth for generated and
+imported shells; the lightweight catalog under `AAS_CATALOG_PATH` (default
+`/app/data/aasx`) retains only imported-package provenance. Link files retain
+only external-shell mappings. The Gateway does not retain uploaded archives;
+downloads are generated from the current BaSyx resources.
+The Lab Manager uses these protected endpoints to manage the associations:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/aas-admin/aas/catalog` | List registered packages and their imported shell/submodel IDs |
-| GET | `/aas-admin/aas/{labId}/view` | Read the catalog metadata |
+| GET | `/aas-admin/aas/catalog` | List generated, imported and linked AAS associations |
+| GET | `/aas-admin/aas/{labId}/view` | Read the association metadata and resource IDs |
 | GET | `/aas-admin/aas/{labId}/download` | Generate an AASX from the current BaSyx resources |
-| DELETE | `/aas-admin/aas/{labId}` | Remove the imported resources from BaSyx and the catalog metadata |
+| DELETE | `/aas-admin/aas/{labId}` | Delete generated/imported BaSyx resources or unlink an external shell |
 
 Deletion is idempotent for resources already absent from BaSyx. If BaSyx is
 unavailable or a resource cannot be deleted, the local association remains in

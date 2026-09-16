@@ -64,7 +64,7 @@ function loadController({ fetchImpl, confirmImpl = () => true } = {}) {
   const toasts = [];
   const controller = context.window.LabManagerAasx.createController({
     fields,
-    fetchImpl: fetchImpl || (async () => ({ ok: true, status: 200, json: async () => ({ packages: [] }) })),
+    fetchImpl: fetchImpl || (async () => ({ ok: true, status: 200, json: async () => ({ associations: [] }) })),
     showToast: (message, type) => toasts.push({ message, type }),
     confirmImpl,
     resolveLabDisplayName: lab => lab.name || `Lab #${lab.labId}`,
@@ -82,13 +82,14 @@ function response(body, status = 200) {
   };
 }
 
-test('lists AASX packages together with their managed laboratory', async () => {
+test('lists AAS associations together with their managed laboratory', async () => {
   const { controller, fields, calls } = loadController({
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
       return response({
-        packages: [{
+        associations: [{
           labId: '42',
+          source: 'imported',
           filename: 'physical-lab.aasx',
           size: 2048,
           updatedAt: '2026-09-16T10:00:00Z',
@@ -110,12 +111,47 @@ test('lists AASX packages together with their managed laboratory', async () => {
   assert.match(fields.packageList.innerHTML, /href="\/aas-admin\/aas\/42\/download"/);
 });
 
-test('views an AASX package in the modal and exposes its download link', async () => {
+test('lists generated and linked AAS associations with their source', async () => {
   const { controller, fields } = loadController({
     fetchImpl: async url => {
-      if (url.endsWith('/catalog')) return response({ packages: [{ labId: '7', filename: 'model.aasx', size: 12 }] });
+      if (url.endsWith('/catalog')) return response({ associations: [
+        {
+          labId: '3',
+          source: 'generated',
+          shellIds: ['urn:decentralabs:lab:3'],
+          submodelIds: ['urn:decentralabs:lab:3:sm:technicalData'],
+        },
+        {
+          labId: '4',
+          source: 'linked',
+          targetAasId: 'urn:external:aas:4',
+          shellIds: ['urn:external:aas:4'],
+        },
+      ] });
+      return response({});
+    },
+  });
+
+  controller.setManagedLabs([
+    { labId: '3', name: 'Generated Lab' },
+    { labId: '4', name: 'Linked Lab' },
+  ]);
+  await controller.loadPackages();
+
+  assert.match(fields.packageList.innerHTML, /Generated Lab/);
+  assert.match(fields.packageList.innerHTML, /Generated/);
+  assert.match(fields.packageList.innerHTML, /Linked/);
+  assert.match(fields.packageList.innerHTML, /urn:external:aas:4/);
+  assert.match(fields.packageList.innerHTML, /data-aasx-delete="4"/);
+});
+
+test('views an AAS association in the modal and exposes its download link', async () => {
+  const { controller, fields } = loadController({
+    fetchImpl: async url => {
+      if (url.endsWith('/catalog')) return response({ associations: [{ labId: '7', source: 'imported', filename: 'model.aasx', size: 12 }] });
       return response({
         labId: '7',
+        source: 'imported',
         filename: 'model.aasx',
         size: 12,
         updatedAt: '2026-09-16T10:00:00Z',
@@ -133,16 +169,16 @@ test('views an AASX package in the modal and exposes its download link', async (
   await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(fields.viewModal.classList.contains('show'), true);
-  assert.equal(fields.viewTitle.textContent, 'model.aasx');
+  assert.equal(fields.viewTitle.textContent, 'Imported AAS association');
   assert.match(fields.viewBody.innerHTML, /urn:shell:7/);
   assert.equal(fields.viewDownload.href, '/aas-admin/aas/7/download');
 });
 
-test('deletes an AASX package and reports the operation through the toast', async () => {
+test('deletes an AAS association and reports the operation through the toast', async () => {
   const { controller, fields, toasts, calls } = loadController({
     fetchImpl: async (url, options = {}) => {
       calls.push({ url, options });
-      if (url.endsWith('/catalog')) return response({ packages: [{ labId: '9', filename: 'old.aasx', size: 10 }] });
+      if (url.endsWith('/catalog')) return response({ associations: [{ labId: '9', source: 'imported', filename: 'old.aasx', size: 10 }] });
       return response({ deleted: true, labId: '9' });
     },
   });
@@ -156,6 +192,6 @@ test('deletes an AASX package and reports the operation through the toast', asyn
 
   assert.equal(calls[1].url, '/aas-admin/aas/9');
   assert.equal(calls[1].options.method, 'DELETE');
-  assert.match(fields.packageList.innerHTML, /No AASX associations registered/);
-  assert.deepEqual(toasts.at(-1), { message: 'AASX association removed for laboratory 9', type: 'success' });
+  assert.match(fields.packageList.innerHTML, /No AAS associations registered/);
+  assert.deepEqual(toasts.at(-1), { message: 'AAS association removed for laboratory 9', type: 'success' });
 });
