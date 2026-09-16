@@ -675,6 +675,10 @@ body {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
+.unavailable-window .action-field {
+    justify-content: center;
+}
+
 .media-field .segmented-control {
     margin-bottom: 8px;
 }
