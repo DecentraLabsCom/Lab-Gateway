@@ -1715,9 +1715,9 @@ def test_aas_routes_are_registered_once_and_openapi_is_warning_free():
         and getattr(route, "methods", None)
     ]
     registrations = Counter(
-        (route.path, method)
+        (getattr(route, "path", ""), method)
         for route in aas_routes
-        for method in route.methods
+        for method in (getattr(route, "methods", None) or set())
     )
 
     assert registrations

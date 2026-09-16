@@ -76,5 +76,7 @@ def test_worker_heartbeat_poll_blueprint_resolves_runtime_dependencies(monkeypat
     )
 
     assert response.status_code == 200
-    assert response.json["duration_ms"] == 125
+    payload = response.json
+    assert payload is not None
+    assert payload["duration_ms"] == 125
     assert inspected == [(host, True)]

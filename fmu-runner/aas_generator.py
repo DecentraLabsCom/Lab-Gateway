@@ -16,7 +16,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 from urllib.parse import urlsplit
 
 import httpx
@@ -554,7 +554,7 @@ def build_unit_definitions_submodel(lab_id: str, unit_defs: list) -> dict:
 
 def _non_negative_int(value: object) -> str:
     try:
-        number = int(value)
+        number = int(str(value).strip())
     except (TypeError, ValueError):
         return ""
     return str(number) if number >= 0 else ""
@@ -613,7 +613,7 @@ def build_aas_shell(
     access_key: str,
     metadata: dict,
     extra_info: Optional[dict] = None,
-    extra_submodel_ids: list = (),
+    extra_submodel_ids: Sequence[str] = (),
 ) -> dict:
     """Build the AAS shell JSON for BaSyx V2.
 
@@ -711,7 +711,7 @@ async def sync_fmu_to_basyx(
     aasx_bytes: Optional[bytes] = None,
     extra_info: Optional[dict] = None,
     fmu_path: Optional[Path] = None,
-    unit_definitions: list = (),
+    unit_definitions: Sequence[dict] = (),
     required_aas_id: Optional[str] = None,
     runtime_info: Optional[dict] = None,
 ) -> dict:

@@ -1,6 +1,6 @@
 """Explicit dependencies for the Lab Station heartbeat boundary."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol, Type
 
@@ -24,7 +24,7 @@ class HeartbeatContext:
     read_remote_file: Callable[..., str]
     get_db_engine: Callable[[], Any]
     sync_lab_to_basyx: Callable[..., Dict[str, Any]]
-    resolve_lab_ids_for_host: Callable[[Dict[str, Any]], Any]
+    resolve_lab_ids_for_host: Callable[[Mapping[str, Any]], Any]
     get_logger: Callable[[], Any]
     get_host_registry: Callable[[], HostRegistryProtocol]
     get_persist_heartbeat: Callable[..., Any]

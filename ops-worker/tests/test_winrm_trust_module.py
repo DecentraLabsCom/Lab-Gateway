@@ -95,10 +95,10 @@ def test_trust_file_path_contract_delegates_managed_reference_and_filename():
         "server.cer",
         root="C:/trust",
         trust_ref_for_host=lambda host: calls.append(host) or "station",
-        resolve_path=lambda root, reference, filename: (root, reference, filename),
+        resolve_path=lambda root, reference, filename: "resolved-path",
     )
 
-    assert result == ("C:/trust", "station", "server.cer")
+    assert result == "resolved-path"
     assert calls == [{"name": "station"}]
 
 

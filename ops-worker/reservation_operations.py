@@ -26,7 +26,10 @@ def handle_reservation_start(
     if not reservation_id or (not host_name and not lab_id):
         return {"error": "reservationId and either host or labId are required"}, 400
 
-    host = resolve_host_by_lab(lab_id) if lab_id else find_host(host_name)
+    if lab_id:
+        host = resolve_host_by_lab(lab_id)
+    else:
+        host = find_host(host_name or "")
     if not host:
         if lab_id:
             return {"error": f"no registered host found for lab '{lab_id}'"}, 404
@@ -127,7 +130,10 @@ def handle_reservation_end(
     if not reservation_id or (not host_name and not lab_id):
         return {"error": "reservationId and either host or labId are required"}, 400
 
-    host = resolve_host_by_lab(lab_id) if lab_id else find_host(host_name)
+    if lab_id:
+        host = resolve_host_by_lab(lab_id)
+    else:
+        host = find_host(host_name or "")
     if not host:
         if lab_id:
             return {"error": f"no registered host found for lab '{lab_id}'"}, 404

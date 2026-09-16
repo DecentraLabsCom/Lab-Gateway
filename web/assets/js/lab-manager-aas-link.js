@@ -14,14 +14,6 @@
             return String(option?.dataset?.labId || selectedValue).trim();
         }
 
-        function showResult(message, isError) {
-            if (!fields.result) return;
-            fields.result.textContent = message;
-            fields.result.style.color = isError
-                ? 'var(--color-error, #c0392b)'
-                : 'var(--color-success, #1a7f4b)';
-        }
-
         async function saveLink() {
             const labId = selectedLabId();
             const aasId = (fields.aasIdInput && fields.aasIdInput.value || '').trim();
@@ -45,11 +37,9 @@
                     const body = await response.json().catch(() => ({}));
                     throw new Error(body.detail || `HTTP ${response.status}`);
                 }
-                const data = await response.json();
-                showResult(`Linked: ${data.aasId}`, false);
+                await response.json();
                 showToast(`AAS link saved for laboratory ${labId}`, 'success');
             } catch (error) {
-                showResult(error.message, true);
                 showToast(`AAS link failed: ${error.message}`, 'error');
             } finally {
                 fields.saveButton.disabled = false;
@@ -66,16 +56,16 @@
             try {
                 const response = await fetchImpl(`/aas-admin/lab/${encodeURIComponentImpl(labId)}/aas-link`);
                 if (response.status === 404) {
-                    showResult('No link configured for this laboratory.', false);
+                    showToast(`No AAS link configured for laboratory ${labId}`, 'info');
                     if (fields.aasIdInput) fields.aasIdInput.value = '';
                     return;
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
-                showResult(`Current link: ${data.aasId}`, false);
                 if (fields.aasIdInput) fields.aasIdInput.value = data.aasId || '';
+                showToast(`AAS link checked for laboratory ${labId}: ${data.aasId}`, 'success');
             } catch (error) {
-                showResult(error.message, true);
+                showToast(`AAS link check failed: ${error.message}`, 'error');
             } finally {
                 fields.checkButton.disabled = false;
             }
@@ -93,15 +83,13 @@
                     method: 'DELETE',
                 });
                 if (response.status === 404) {
-                    showResult('No link configured for this laboratory.', false);
+                    showToast(`No AAS link configured for laboratory ${labId}`, 'info');
                     return;
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                showResult('Link removed.', false);
                 if (fields.aasIdInput) fields.aasIdInput.value = '';
                 showToast(`AAS link removed for laboratory ${labId}`, 'success');
             } catch (error) {
-                showResult(error.message, true);
                 showToast(`Remove link failed: ${error.message}`, 'error');
             } finally {
                 fields.deleteButton.disabled = false;

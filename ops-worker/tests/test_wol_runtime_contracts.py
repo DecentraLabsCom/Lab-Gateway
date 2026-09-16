@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
+from typing import Any, Callable, cast
 
 import pytest
 
@@ -11,9 +12,9 @@ def test_wol_runtime_forwards_network_callbacks_and_optional_port():
     calls = []
     context = WolContext(
         wol_and_wait=lambda *args, **kwargs: calls.append((args, kwargs)) or (True, 2),
-        get_send_magic_packet=lambda: "magic",
-        get_sleep=lambda: "sleep",
-        get_host_is_up=lambda: "up",
+        get_send_magic_packet=lambda: cast(Callable[..., Any], "magic"),
+        get_sleep=lambda: cast(Callable[[float], Any], "sleep"),
+        get_host_is_up=lambda: cast(Callable[..., bool], "up"),
     )
     runtime = create_wol_runtime(context)
 
@@ -35,10 +36,10 @@ def test_wol_runtime_forwards_network_callbacks_and_optional_port():
 def test_wol_context_is_immutable():
     context = WolContext(
         wol_and_wait=lambda *args, **kwargs: (False, 0),
-        get_send_magic_packet=lambda: SimpleNamespace(),
-        get_sleep=lambda: SimpleNamespace(),
-        get_host_is_up=lambda: SimpleNamespace(),
+        get_send_magic_packet=lambda: cast(Callable[..., Any], SimpleNamespace()),
+        get_sleep=lambda: cast(Callable[[float], Any], SimpleNamespace()),
+        get_host_is_up=lambda: cast(Callable[..., bool], SimpleNamespace()),
     )
 
     with pytest.raises(FrozenInstanceError):
-        context.get_sleep = lambda: None
+        setattr(context, "get_sleep", lambda: None)

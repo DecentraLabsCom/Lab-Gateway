@@ -101,7 +101,6 @@
                 keyInput: $('#fmuSyncKey'),
                 fileInput: $('#fmuSyncFile'),
                 fileName: $('#fmuSyncFileName'),
-                result: $('#fmuSyncResult'),
                 contactEmail: $('#fmuSyncContactEmail'),
             },
             aasLink: {
@@ -110,7 +109,6 @@
                 saveButton: $('#aasLinkSaveBtn'),
                 checkButton: $('#aasLinkCheckBtn'),
                 deleteButton: $('#aasLinkDeleteBtn'),
-                result: $('#aasLinkResult'),
             },
         };
 

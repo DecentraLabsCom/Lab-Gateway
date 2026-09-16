@@ -18,7 +18,7 @@ def create_lifespan(
 
     @asynccontextmanager
     async def lifespan(_app):
-        manager = None
+        manager: Any = None
         manager_started = False
         try:
             if initialize_runtime is not None:
@@ -32,7 +32,7 @@ def create_lifespan(
             yield
         finally:
             try:
-                if manager_started:
+                if manager_started and manager is not None:
                     await manager.stop()
             finally:
                 try:

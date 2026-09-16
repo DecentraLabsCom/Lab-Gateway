@@ -71,6 +71,8 @@ def test_history_repository_saves_and_filters_by_authorization_scope(tmp_path):
         return rows, stored
 
     rows, stored = asyncio.run(exercise())
+    assert rows
+    assert stored is not None
     assert rows[0]["id"] == "sim-1"
     assert rows[0]["fmu_filename"] == "model.fmu"
     assert stored["result"] == '{"outputVariables": [{"name": "y", "value": 2.0}]}'

@@ -1,9 +1,16 @@
 from datetime import datetime, timezone
+from typing import Any, Dict
 
 from sqlalchemy import create_engine, text
 import pytest
 
 import worker
+
+
+def response_json(response) -> Dict[str, Any]:
+    payload = response.json
+    assert payload is not None
+    return payload
 
 
 def create_engine_with_guacamole_schema():
@@ -38,11 +45,12 @@ def test_health_confirms_the_guacamole_schema(monkeypatch):
     response = worker.APP.test_client().get("/health")
 
     assert response.status_code == 200
-    assert response.json["status"] == "ok"
-    assert response.json["db"] is True
-    assert response.json["guacamole_schema"] is True
-    assert response.json["guacamole_failed_revocations"] == 0
-    assert response.json["session_observation_failed"] == 0
+    payload = response_json(response)
+    assert payload["status"] == "ok"
+    assert payload["db"] is True
+    assert payload["guacamole_schema"] is True
+    assert payload["guacamole_failed_revocations"] == 0
+    assert payload["session_observation_failed"] == 0
 
 
 def test_health_degrades_for_terminal_revocation_failures(monkeypatch):
@@ -57,7 +65,7 @@ def test_health_degrades_for_terminal_revocation_failures(monkeypatch):
     response = worker.APP.test_client().get("/health")
 
     assert response.status_code == 503
-    assert response.json["guacamole_failed_revocations"] == 1
+    assert response_json(response)["guacamole_failed_revocations"] == 1
 
 
 def test_health_degrades_for_terminal_observation_failures(monkeypatch):
@@ -72,8 +80,9 @@ def test_health_degrades_for_terminal_observation_failures(monkeypatch):
     response = worker.APP.test_client().get("/health")
 
     assert response.status_code == 503
-    assert response.json["session_observation_failed"] == 1
-    assert response.json["session_observation_outbox"] is False
+    payload = response_json(response)
+    assert payload["session_observation_failed"] == 1
+    assert payload["session_observation_outbox"] is False
 
 
 def test_health_fails_when_the_guacamole_schema_is_unusable(monkeypatch):
@@ -85,9 +94,10 @@ def test_health_fails_when_the_guacamole_schema_is_unusable(monkeypatch):
     response = worker.APP.test_client().get("/health")
 
     assert response.status_code == 503
-    assert response.json["status"] == "degraded"
-    assert response.json["db"] is True
-    assert response.json["guacamole_schema"] is False
+    payload = response_json(response)
+    assert payload["status"] == "degraded"
+    assert payload["db"] is True
+    assert payload["guacamole_schema"] is False
 
 
 def test_health_degrades_when_the_ops_secrets_key_is_invalid(monkeypatch):
@@ -106,7 +116,7 @@ def test_health_degrades_when_the_ops_secrets_key_is_invalid(monkeypatch):
     response = worker.APP.test_client().get("/health")
 
     assert response.status_code == 503
-    assert response.json["ops_secrets_key"] is False
+    assert response_json(response)["ops_secrets_key"] is False
 
 
 def test_health_reports_demo_readiness_when_binding_and_station_are_ready(monkeypatch):
@@ -153,8 +163,9 @@ def test_health_reports_demo_readiness_when_binding_and_station_are_ready(monkey
     response = worker.APP.test_client().get("/health")
 
     assert response.status_code == 200
-    assert response.json["demo"]["status"] == "ready"
-    assert response.json["demo"]["checks"] == {
+    payload = response_json(response)
+    assert payload["demo"]["status"] == "ready"
+    assert payload["demo"]["checks"] == {
         "connection": True,
         "principal": True,
         "permission": True,
@@ -181,4 +192,4 @@ def test_health_reports_demo_misconfigured_when_connection_is_missing(monkeypatc
 
     response = worker.APP.test_client().get("/health")
 
-    assert response.json["demo"]["status"] == "misconfigured"
+    assert response_json(response)["demo"]["status"] == "misconfigured"

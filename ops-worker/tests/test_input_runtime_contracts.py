@@ -46,4 +46,4 @@ def test_input_context_is_immutable():
     context, _ = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.parse_bool = lambda value, default: default
+        setattr(context, "parse_bool", lambda value, default: default)

@@ -96,8 +96,10 @@ def test_worker_winrm_trust_preview_blueprint_resolves_runtime_dependencies(monk
     )
 
     assert response.status_code == 200
-    assert response.json["requestId"] == "trust-preview-blueprint-2"
-    assert response.json["preview"]["format"] == "DER"
+    payload = response.json
+    assert payload is not None
+    assert payload["requestId"] == "trust-preview-blueprint-2"
+    assert payload["preview"]["format"] == "DER"
     assert calls == [
         ("parse", b"der"),
         ("metadata", certificate, host, "DER"),

@@ -50,7 +50,7 @@ def test_reservation_context_is_frozen_and_runtime_has_no_provider_namespace():
     context = _context([])
 
     with pytest.raises(FrozenInstanceError):
-        context.get_env = lambda: lambda name, default=None: default
+        setattr(context, "get_env", lambda: lambda name, default=None: default)
 
     source = Path(__file__).parents[1].joinpath("reservation_runtime.py").read_text(encoding="utf-8")
     assert "Mapping" not in source

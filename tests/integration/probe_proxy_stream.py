@@ -108,7 +108,8 @@ def load_proxy_metadata(
         raise ProxyProbeError("gatewayWsUrl debe empezar por ws:// o wss://")
     session_ticket = _required_string(config, "sessionTicket")
     try:
-        ticket_expires_at = float(config.get("ticketExpiresAt"))
+        raw_ticket_expires_at = config.get("ticketExpiresAt")
+        ticket_expires_at = float(str(raw_ticket_expires_at))
     except (TypeError, ValueError) as exc:
         raise ProxyProbeError("ticketExpiresAt no es un timestamp válido") from exc
     if not math.isfinite(ticket_expires_at):

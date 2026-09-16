@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from importlib import import_module
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -38,7 +39,7 @@ def normalize_redis_value(value: Any) -> Any:
 def _redis_client():
     # Import lazily so unit tests for the protocol helpers do not need a Redis
     # client installed on the host.
-    import redis
+    redis: Any = import_module("redis")
 
     return redis.Redis.from_url(
         os.environ.get("REDIS_URL", "redis://redis:6379/0"),

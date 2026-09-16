@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from typing import cast
 
 import httpx
 import jwt
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 from jwt.algorithms import RSAAlgorithm
 
 import auth
+from starlette.requests import Request
 
 
 @pytest.fixture(autouse=True)
@@ -174,14 +176,14 @@ def test_extract_token_prefers_bearer_header():
         cookies={"token": "cookie-token"},
     )
 
-    assert auth._extract_token(request) == "header-token"
+    assert auth._extract_token(cast(Request, request)) == "header-token"
 
 
 def test_extract_token_requires_bearer_header():
     request = SimpleNamespace(headers={}, cookies={"jti": "cookie-token"})
 
     with pytest.raises(HTTPException) as exc:
-        auth._extract_token(request)
+        auth._extract_token(cast(Request, request))
 
     assert exc.value.status_code == 401
 
@@ -190,7 +192,7 @@ def test_extract_token_rejects_missing_credentials():
     request = SimpleNamespace(headers={}, cookies={})
 
     with pytest.raises(HTTPException) as exc:
-        auth._extract_token(request)
+        auth._extract_token(cast(Request, request))
 
     assert exc.value.status_code == 401
     assert exc.value.detail == "Missing authentication token"
@@ -424,6 +426,6 @@ async def test_verify_jwt_extracts_token_before_validation(monkeypatch):
 
     monkeypatch.setattr(auth, "verify_jwt_token", _fake_verify)
 
-    claims = await auth.verify_jwt(request)
+    claims = await auth.verify_jwt(cast(Request, request))
 
     assert claims == {"sub": "user-1"}

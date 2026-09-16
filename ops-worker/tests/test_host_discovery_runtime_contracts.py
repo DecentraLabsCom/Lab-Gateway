@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
+from typing import Any, Callable, cast
 
 import pytest
 
@@ -19,7 +20,7 @@ def _context(*, calls=None):
             ("up", target, timeout, probe_port, kwargs)
         ) or True,
         get_winrm_port=lambda: 5986,
-        get_create_connection=lambda: "connect",
+        get_create_connection=lambda: cast(Callable[..., Any], "connect"),
         get_logger=lambda: logger,
         normalize_match_key_impl=lambda value: calls.append(("key", value)) or "host",
         tcp_port_open_impl=lambda host, port, timeout, **kwargs: calls.append(
@@ -45,7 +46,7 @@ def _context(*, calls=None):
         ) or {"mac": "AA:BB"},
         get_discovery_ports=lambda: [8765],
         get_discovery_paths=lambda: ["/health"],
-        get_http_get=lambda: "get",
+        get_http_get=lambda: cast(Callable[..., Any], "get"),
         get_request_exception=lambda: RuntimeError,
         get_response_classifier=lambda: lambda response: (True, "LabStation"),
         get_suggest_mac=lambda: lambda heartbeat: {"mac": "AA:BB"},
@@ -55,8 +56,8 @@ def _context(*, calls=None):
         query_labstation_task_heartbeat_path_impl=lambda host, **kwargs: calls.append(
             ("task-path", host, kwargs)
         ) or r"C:\heartbeat.json",
-        get_run_remote_powershell=lambda: "powershell",
-        get_json_loads=lambda: "loads",
+        get_run_remote_powershell=lambda: cast(Callable[..., Any], "powershell"),
+        get_json_loads=lambda: cast(Callable[[str], Any], "loads"),
         build_heartbeat_path_candidates_impl=lambda host, **kwargs: calls.append(
             ("paths", host, kwargs)
         ) or [r"C:\heartbeat.json"],
@@ -67,7 +68,7 @@ def _context(*, calls=None):
         ) or {"detected": True},
         get_credentials_configured=lambda: lambda _hostname: True,
         get_path_candidates=lambda: lambda host: [r"C:\heartbeat.json"],
-        get_read_remote_file=lambda: "read",
+        get_read_remote_file=lambda: cast(Callable[..., Any], "read"),
         get_suggested_mac=lambda: lambda heartbeat: {"mac": "AA:BB"},
         guacamole_name_candidates_impl=lambda connection, **kwargs: kwargs[
             "load_connections"
@@ -139,4 +140,4 @@ def test_host_discovery_context_is_immutable():
     context, _state, _calls = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_logger = lambda: SimpleNamespace()
+        setattr(context, "get_logger", lambda: SimpleNamespace())

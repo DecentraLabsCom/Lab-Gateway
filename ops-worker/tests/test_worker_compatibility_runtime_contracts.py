@@ -98,4 +98,4 @@ def test_worker_compatibility_context_is_immutable():
     context, _registry = _context(hosts={}, calls=[], automator=SimpleNamespace())
 
     with pytest.raises(FrozenInstanceError):
-        context.get_environ = lambda: {}
+        setattr(context, "get_environ", lambda: {})

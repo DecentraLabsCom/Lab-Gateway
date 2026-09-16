@@ -151,4 +151,4 @@ def test_host_config_context_is_immutable():
     context, _state, _calls = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_logger = lambda: SimpleNamespace()
+        setattr(context, "get_logger", lambda: SimpleNamespace())

@@ -4,6 +4,7 @@ import socket
 import socketserver
 import sys
 from threading import Thread
+from typing import cast
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
@@ -15,7 +16,7 @@ from power.drivers.apc_snmp import APC_LEGACY_OIDS, ApcPowerNetSnmpDriver
 class ApcSmokeUdpHandler(socketserver.BaseRequestHandler):
     def handle(self):
         payload = json.loads(self.request[0].decode("utf-8"))
-        server = self.server
+        server = cast(ApcSmokeUdpServer, self.server)
         operation = payload.get("operation")
         oid = str(payload.get("oid") or "")
 

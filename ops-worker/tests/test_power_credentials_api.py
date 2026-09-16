@@ -10,6 +10,7 @@ if ROOT not in sys.path:
 
 import worker
 from power.credentials import PowerCredentialStore
+from power.drivers.netio_json import NetioJsonDriver
 from power.service import PowerRuntime
 
 
@@ -120,7 +121,9 @@ def test_power_credential_rotation_rebuilds_configured_netio_driver(client, tmp_
 
     assert response.status_code == 200
     assert response.json["runtimeReloaded"] is True
-    assert runtime.registry.get("netio-lab-01").driver.auth == ("new", "new-secret")
+    driver = runtime.registry.get("netio-lab-01").driver
+    assert isinstance(driver, NetioJsonDriver)
+    assert driver.auth == ("new", "new-secret")
 
 
 def test_power_credentials_api_rejects_invalid_payload_without_changing_store(client, tmp_path, monkeypatch):

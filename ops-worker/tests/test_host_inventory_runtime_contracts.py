@@ -1,13 +1,16 @@
+from contextlib import AbstractContextManager
+from typing import Any, cast
+
 import host_inventory_runtime
-from host_inventory_context import HostInventoryContext
+from host_inventory_context import HostInventoryContext, HostRegistryProtocol
 from host_inventory_runtime import HostInventoryRuntime, create_host_inventory_runtime
 
 
 def test_host_inventory_runtime_uses_explicit_context_dependencies(monkeypatch):
     calls = []
     context = HostInventoryContext(
-        get_host_registry=lambda: "registry",
-        get_hosts_lock=lambda: "lock",
+        get_host_registry=lambda: cast(HostRegistryProtocol, "registry"),
+        get_hosts_lock=lambda: cast(AbstractContextManager[Any], "lock"),
         load_dynamic_config=lambda: {"hosts": []},
         load_guacamole_connections=lambda: ([], None),
         normalize_match_key=lambda value: str(value or "").lower(),
@@ -42,8 +45,8 @@ def test_host_inventory_runtime_uses_explicit_context_dependencies(monkeypatch):
 
 def test_host_inventory_context_is_immutable():
     context = HostInventoryContext(
-        get_host_registry=lambda: "registry",
-        get_hosts_lock=lambda: "lock",
+        get_host_registry=lambda: cast(HostRegistryProtocol, "registry"),
+        get_hosts_lock=lambda: cast(AbstractContextManager[Any], "lock"),
         load_dynamic_config=lambda: {"hosts": []},
         load_guacamole_connections=lambda: ([], None),
         normalize_match_key=lambda value: str(value or "").lower(),
@@ -53,7 +56,7 @@ def test_host_inventory_context_is_immutable():
     )
 
     try:
-        context.get_host_registry = lambda: "replacement"
+        setattr(context, "get_host_registry", lambda: "replacement")
     except AttributeError:
         pass
     else:

@@ -1,5 +1,7 @@
+from typing import Any, Callable, Dict, Optional, cast
+
 import heartbeat_runtime
-from heartbeat_context import HeartbeatContext
+from heartbeat_context import HeartbeatContext, HostRegistryProtocol
 from heartbeat_runtime import HeartbeatRuntime, create_heartbeat_runtime
 
 
@@ -10,15 +12,17 @@ def _context():
         now=lambda: "now",
         sql_text=lambda value: value,
         json_dumps=lambda value: "json",
-        read_remote_file="read",
+        read_remote_file=cast(Callable[..., str], "read"),
         get_db_engine=lambda: "db",
         sync_lab_to_basyx=lambda *args: {},
         resolve_lab_ids_for_host=lambda _host: [],
         get_logger=lambda: "logger",
-        get_host_registry=lambda: "hosts",
+        get_host_registry=lambda: cast(HostRegistryProtocol, "hosts"),
         get_persist_heartbeat=lambda *args, **kwargs: "persist",
-        get_poll_heartbeat=lambda *args, **kwargs: "poll",
-        fetch_latest_heartbeat="fetch",
+        get_poll_heartbeat=cast(Callable[..., Dict[str, Any]], lambda *args, **kwargs: "poll"),
+        fetch_latest_heartbeat=cast(
+            Callable[[Any, str], Optional[Dict[str, Any]]], "fetch"
+        ),
         trust_error_type=RuntimeError,
         missing_credentials_predicate=lambda _error: False,
         trust_error_payload=lambda host, code: {"host": host, "code": code},
@@ -89,7 +93,7 @@ def test_heartbeat_context_is_immutable():
     context = _context()
 
     try:
-        context.get_db_engine = lambda: "replacement"
+        setattr(context, "get_db_engine", lambda: "replacement")
     except AttributeError:
         pass
     else:

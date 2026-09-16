@@ -49,7 +49,7 @@ EXPECTED_ROUTE_METHODS = {
 def test_route_inventory_contract_freezes_paths_and_methods():
     route_methods = {}
     for rule in worker.APP.url_map.iter_rules():
-        methods = frozenset(rule.methods - {"HEAD", "OPTIONS"})
+        methods = frozenset((rule.methods or set()) - {"HEAD", "OPTIONS"})
         route_methods.setdefault(rule.rule, set()).update(methods)
 
     assert route_methods == EXPECTED_ROUTE_METHODS

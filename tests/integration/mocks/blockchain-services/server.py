@@ -87,7 +87,7 @@ MOCK_JWKS = {
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
+    def log_message(self, format: str, *args: object) -> None:
         # Silence default logging
         pass
 

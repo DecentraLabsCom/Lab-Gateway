@@ -47,7 +47,10 @@ def test_winrm_trust_mutation_blueprint_registers_put_and_delete_without_duplica
     ]
 
     assert len(rules) == 2
-    by_method = {next(iter(rule.methods - {"OPTIONS"})): rule for rule in rules}
+    by_method = {
+        next(iter((rule.methods or set()) - {"OPTIONS"})): rule
+        for rule in rules
+    }
     assert by_method["PUT"].methods == {"PUT", "OPTIONS"}
     assert by_method["PUT"].endpoint == "winrm_trust_mutation.api_save_winrm_trust"
     assert by_method["DELETE"].methods == {"DELETE", "OPTIONS"}
@@ -145,7 +148,10 @@ def test_worker_winrm_trust_mutations_are_owned_by_the_blueprint(monkeypatch):
         rule
         for rule in worker.APP.url_map.iter_rules()
         if rule.rule == "/api/hosts/<host_name>/winrm-trust"
-        and ("PUT" in rule.methods or "DELETE" in rule.methods)
+        and (
+            "PUT" in (rule.methods or set())
+            or "DELETE" in (rule.methods or set())
+        )
     ]
     assert len(rules) == 2
     assert {rule.endpoint for rule in rules} == {

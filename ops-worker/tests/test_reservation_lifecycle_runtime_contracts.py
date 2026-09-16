@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError, replace
+from typing import Any, Dict, Mapping, Tuple
 
 import pytest
 
@@ -23,9 +24,9 @@ def _context(*, hosts=None, calls=None):
         get_resolve_host_by_lab=lambda: lambda _lab_id: {"name": "station"},
         get_mandatory_field=lambda: lambda payload, *keys: "value",
         get_parse_bool=lambda: lambda value, default=True: bool(value),
-        get_execute_power_phase=lambda: lambda *args: ("power", args),
-        get_perform_wake_step=lambda: lambda *args: ("wake", args),
-        get_perform_command_step=lambda: lambda *args: ("command", args),
+        get_execute_power_phase=lambda: lambda *args: {},
+        get_perform_wake_step=lambda: lambda *args: (True, {}),
+        get_perform_command_step=lambda: lambda *args: (True, {}),
         get_normalize_args=lambda: lambda value, default=None: list(
             value or default or []
         ),
@@ -70,4 +71,4 @@ def test_reservation_lifecycle_context_is_immutable():
     context, _hosts, _calls = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_parse_bool = lambda: bool
+        setattr(context, "get_parse_bool", lambda: bool)

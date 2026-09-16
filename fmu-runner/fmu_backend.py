@@ -256,7 +256,7 @@ class StationFmuBackend(BaseFmuBackend):
 
         try:
             async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
-                request_kwargs = {"headers": self._headers()}
+                request_kwargs: dict[str, Any] = {"headers": self._headers()}
                 if operation in {"describe", "catalog"}:
                     request_kwargs["headers"]["X-FMU-Access-Key"] = key
                 response = await client.get(path, **request_kwargs)

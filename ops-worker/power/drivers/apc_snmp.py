@@ -51,9 +51,6 @@ class SnmpClient(Protocol):
     def get(self, oid: str) -> Any:
         raise NotImplementedError
 
-    def get_many(self, oids: Iterable[str]) -> List[Any]:
-        raise NotImplementedError
-
     def set(self, oid: str, value: Any) -> Any:
         raise NotImplementedError
 

@@ -47,7 +47,7 @@ def test_worker_winrm_trust_get_route_is_owned_by_the_blueprint_without_duplicat
     rules = [
         rule for rule in worker.APP.url_map.iter_rules()
         if rule.rule == "/api/hosts/<host_name>/winrm-trust"
-        and "GET" in rule.methods
+        and "GET" in (rule.methods or set())
     ]
 
     assert len(rules) == 1
@@ -65,6 +65,8 @@ def test_worker_winrm_trust_get_blueprint_resolves_runtime_dependencies(monkeypa
     response = worker.APP.test_client().get("/api/hosts/lab-ws-01/winrm-trust")
 
     assert response.status_code == 200
-    assert response.json["requestId"] == "trust-blueprint-2"
-    assert response.json["trust"] == trust
+    payload = response.json
+    assert payload is not None
+    assert payload["requestId"] == "trust-blueprint-2"
+    assert payload["trust"] == trust
     assert inspected == [host]

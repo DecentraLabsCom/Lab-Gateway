@@ -2,6 +2,7 @@ import io
 import os
 import json
 import sys
+from typing import Any, Dict, Mapping
 
 import pytest
 from cryptography.fernet import Fernet
@@ -71,6 +72,21 @@ class UnreachablePowerDriver:
 
     def discover(self):
         return {"reachable": False, "errorCode": "TIMEOUT"}
+
+    def read_configuration(self) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def apply_configuration(self, configuration: Mapping[str, Any]) -> Dict[str, Any]:
+        raise PowerDriverError("unreachable")
+
+    def get_outlet_state(self, outlet_id: str) -> Dict[str, Any]:
+        raise PowerDriverError("unreachable")
+
+    def set_outlet_state(self, outlet_id: str, state: str, timeout_seconds: int = 20) -> Dict[str, Any]:
+        raise PowerDriverError("unreachable")
+
+    def cycle_outlet(self, outlet_id: str, off_seconds: int = 10, timeout_seconds: int = 30) -> Dict[str, Any]:
+        raise PowerDriverError("unreachable")
 
 
 def test_apc_legacy_discovers_model_firmware_and_outlet_states():
@@ -293,7 +309,7 @@ def test_apc_legacy_multioutlet_configuration_uses_table_walks():
 
 def test_apc_legacy_configuration_uses_batched_gets_when_available():
     count = 2
-    values = {APC_LEGACY_OIDS["outlet_count"]: count}
+    values: Dict[str, Any] = {APC_LEGACY_OIDS["outlet_count"]: count}
     values.update({
         f"{APC_LEGACY_OIDS['state']}.{index}": 2
         for index in range(1, count + 1)

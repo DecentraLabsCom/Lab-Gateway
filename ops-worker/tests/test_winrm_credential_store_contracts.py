@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import Dict, Optional, cast
 
 import pytest
 from cryptography.fernet import Fernet
@@ -17,7 +18,7 @@ from winrm_credential_store import (
 
 
 def test_load_fernet_contract_reuses_cache_and_requires_a_key():
-    cached = object()
+    cached = cast(Fernet, object())
     assert load_fernet(cached, read_secret=lambda _name: "unused") is cached
 
     with pytest.raises(RuntimeError, match="OPS_SECRETS_KEY is required"):
@@ -28,7 +29,9 @@ def test_fernet_key_health_probe_preserves_success_and_failure_contract():
     calls = []
     logger = type("Logger", (), {"warning": lambda self, *args: calls.append(args)})()
 
-    assert fernet_key_is_usable(load_fernet=lambda: object(), logger=logger) is True
+    assert fernet_key_is_usable(
+        load_fernet=lambda: cast(Fernet, object()), logger=logger
+    ) is True
 
     def fail():
         raise ValueError("invalid")
@@ -52,7 +55,7 @@ def test_credential_store_contract_encrypts_and_round_trips_without_plaintext(
 ):
     key = Fernet.generate_key().decode("ascii")
     path = tmp_path / "credentials.json"
-    cache = {"value": None}
+    cache: Dict[str, Optional[Fernet]] = {"value": None}
 
     def get_fernet():
         cache["value"] = load_fernet(
@@ -95,7 +98,7 @@ def test_credential_store_contract_preserves_invalid_entries_and_atomic_store_sh
             "user",
             "password",
             normalize_ref=lambda value: str(value or "").strip().lower(),
-            load_fernet=lambda: object(),
+            load_fernet=lambda: cast(Fernet, object()),
             read_store=lambda: {"credentials": {}},
             write_store=lambda _data: None,
         )

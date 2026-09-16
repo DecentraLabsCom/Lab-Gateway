@@ -46,7 +46,6 @@ function loadController({ fetchImpl = async () => ({ ok: true, status: 200, json
     keyInput: createField(),
     fileInput: createField(),
     fileName: createField(),
-    result: createField(),
     contactEmail: createField(),
   };
   const toasts = [];
@@ -105,7 +104,6 @@ test('prefers the FMU description over the registered laboratory description', a
   );
   assert.equal(requestUrl.searchParams.get('contactEmail'), 'ops@example.test');
   assert.equal(syncCall.options.method, 'POST');
-  assert.equal(fields.result.textContent, 'AAS shell synced \u2014 created');
   assert.deepEqual(toasts.at(-1), { message: 'FMU AAS sync: 7 ok', type: 'success' });
 });
 
@@ -135,7 +133,7 @@ test('falls back to the registered laboratory description when the FMU has none'
 
 test('uses multipart upload when an AASX file is selected', async () => {
   const calls = [];
-  const { fields } = loadController({
+  const { fields, toasts } = loadController({
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
       if (String(url).endsWith('/hints')) {
@@ -170,7 +168,7 @@ test('uses multipart upload when an AASX file is selected', async () => {
     ['license', 'https://example.test/terms.html'],
     ['documentationUrls', JSON.stringify(['https://example.test/manual.pdf'])],
   ]);
-  assert.equal(fields.result.textContent, 'Synced 1 shell(s) + 1 submodel(s) from AASX');
+  assert.deepEqual(toasts.at(-1), { message: 'FMU AAS sync: 7 ok', type: 'success' });
 });
 
 test('does not request FMU-supplied license metadata', async () => {
@@ -209,7 +207,6 @@ test('reports a disabled AAS deployment instead of treating it as a successful u
   fields.syncButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(fields.result.textContent, 'AAS synchronization is disabled on this gateway.');
   assert.deepEqual(toasts.at(-1), {
     message: 'FMU AAS sync disabled: 7',
     type: 'error',
@@ -254,7 +251,6 @@ test('synchronizes a physical laboratory from Gateway metadata and heartbeat', a
       contactEmail: 'lab@example.test',
     },
   });
-  assert.equal(fields.result.textContent, 'AAS shell synced — created');
   assert.deepEqual(toasts.at(-1), {
     message: 'Physical laboratory AAS sync: 42 ok',
     type: 'success',
@@ -263,7 +259,7 @@ test('synchronizes a physical laboratory from Gateway metadata and heartbeat', a
 
 test('uploads a custom AASX for a physical laboratory through the generic AAS admin route', async () => {
   const calls = [];
-  const { fields } = loadController({
+  const { fields, toasts } = loadController({
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
       return { ok: true, status: 200, json: async () => ({
@@ -290,5 +286,28 @@ test('uploads a custom AASX for a physical laboratory through the generic AAS ad
     ['file', file],
     ['labId', '42'],
   ]);
-  assert.equal(fields.result.textContent, 'Synced 1 shell(s) + 1 submodel(s) from AASX');
+  assert.deepEqual(toasts.at(-1), {
+    message: 'Physical laboratory AAS sync: 42 ok',
+    type: 'success',
+  });
+});
+
+test('reports synchronization failures through the toast', async () => {
+  const { fields, toasts } = loadController({
+    fetchImpl: async () => ({
+      ok: false,
+      status: 502,
+      json: async () => ({ detail: 'AAS service unavailable' }),
+    }),
+  });
+
+  fields.keyInput.value = '42';
+  fields.keyInput.options = [{ value: '42', dataset: { labId: '42', resourceType: '0' } }];
+  fields.syncButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(toasts.at(-1), {
+    message: 'AAS synchronization failed: AAS service unavailable',
+    type: 'error',
+  });
 });

@@ -13,10 +13,12 @@ def test_proxy_fmu_module_generates_model_description_without_main_import():
     })
 
     root = ET.fromstring(xml_bytes)
+    co_simulation = root.find("./CoSimulation")
+    assert co_simulation is not None
 
     assert root.attrib["modelName"] == "ProxyBoundary"
     assert root.attrib["fmiVersion"] == "3.0"
-    assert root.find("./CoSimulation").attrib["modelIdentifier"] == "decentralabs_proxy"
+    assert co_simulation.attrib["modelIdentifier"] == "decentralabs_proxy"
 
 
 def test_proxy_fmu_module_selects_fmi3_runtime_binary_layout(tmp_path):

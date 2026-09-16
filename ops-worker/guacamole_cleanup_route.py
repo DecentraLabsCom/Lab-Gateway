@@ -9,7 +9,7 @@ def handle_guacamole_cleanup(
     authorize: Callable[[], Optional[Tuple[Any, int]]],
     delete_temporary_user: Callable[[str], bool],
     jsonify: Callable[[Any], Any],
-    internal_error_response: Callable[[str, BaseException], Any],
+    internal_error_response: Callable[..., Any],
 ) -> Any:
     """Delete a temporary user while preserving the internal API contract."""
     auth_response = authorize()

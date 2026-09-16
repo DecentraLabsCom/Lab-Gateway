@@ -26,6 +26,7 @@ def test_host_provisioning_values_builds_secure_defaults_without_lab_bindings():
     host, error = _build({"name": "Station-A", "labs": "1,2", "mac": "AA-BB-CC-DD-EE-FF"})
 
     assert error is None
+    assert host is not None
     assert host["name"] == "Station-A"
     assert host["winrm_use_ssl"] is True
     assert host["winrm_port"] == 5986
@@ -36,8 +37,10 @@ def test_host_provisioning_values_builds_secure_defaults_without_lab_bindings():
 def test_host_provisioning_values_returns_validation_errors_without_partial_hosts():
     host, error = _build({"name": "bad name"})
     assert host is None
+    assert error is not None
     assert "name" in error
 
     host, error = _build({"name": "Station-A", "labs": ["3"], "validLabIds": ["1", "2"]})
     assert error is None
+    assert host is not None
     assert "labs" not in host

@@ -1,5 +1,4 @@
 import re
-from types import SimpleNamespace
 
 from runtime_config import (
     RuntimePaths,
@@ -134,7 +133,7 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
             "OPS_DISCOVERY_HEARTBEAT_PATHS": "C:\\heartbeat.json",
         },
         secret_loader=lambda name: secrets.get(name, ""),
-        parse_recipients=lambda value, default=None: [
+        parse_recipients=lambda value, default: [
             part.strip() for part in str(value or "").split(",") if part.strip()
         ],
         http_header_pattern=re.compile(r"^[A-Za-z0-9-]+$"),
@@ -143,6 +142,7 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
     )
 
     assert isinstance(config, RuntimePolicy)
+    assert config.lab_catalog_timeout_seconds == 30.0
     assert config.demo_user == "demo"
     assert config.demo_heartbeat_max_age_seconds == 30
     assert config.guacamole_temp_user_cleanup_enabled is False
@@ -250,11 +250,13 @@ def test_runtime_config_publication_preserves_legacy_path_and_policy_names():
         "GUACAMOLE_MYSQL_PASSWORD": "guac-pass",
     }
 
-    policy = SimpleNamespace(
-        **{
-            field: field
-            for field in RuntimePolicy.__dataclass_fields__
-        }
+    policy = load_runtime_policy(
+        environ={},
+        secret_loader=lambda _name: "",
+        parse_recipients=lambda _value, _default: [],
+        http_header_pattern=re.compile(r"^[A-Za-z0-9-]+$"),
+        is_lite=lambda: False,
+        log_error=lambda *_args: None,
     )
     publish_runtime_policy(policy, namespace)
 
@@ -312,5 +314,5 @@ def test_runtime_config_publication_preserves_legacy_path_and_policy_names():
         "DISCOVERY_HEARTBEAT_PATHS": "discovery_heartbeat_paths",
     }
     assert {name: namespace[name] for name in expected_policy_names} == {
-        name: field for name, field in expected_policy_names.items()
+        name: getattr(policy, field) for name, field in expected_policy_names.items()
     }

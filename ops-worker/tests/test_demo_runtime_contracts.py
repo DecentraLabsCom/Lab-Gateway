@@ -135,4 +135,4 @@ def test_demo_context_is_immutable():
     context, _state, _captured, _calls = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_logger = lambda: "changed"
+        setattr(context, "get_logger", lambda: "changed")

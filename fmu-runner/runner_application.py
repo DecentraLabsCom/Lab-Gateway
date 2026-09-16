@@ -359,7 +359,10 @@ def _history_claim_reservation_key(claims: dict):
 
 
 def _history_db_path():
-    return _runner_runtime.history_db_path
+    path = _runner_runtime.history_db_path
+    if not path:
+        raise RuntimeError("FMU history database path is not configured")
+    return path
 
 
 def _aas_link_path_for_router(access_key: str) -> Path:
@@ -446,12 +449,12 @@ _aas_sync_router = create_aas_sync_router(
 # ---------------------------------------------------------------------------
 
 async def _init_db():
-    return await _init_history_db(_runner_runtime.history_db_path)
+    return await _init_history_db(_history_db_path())
 
 
 async def _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type, params, options, result, elapsed):
     return await _save_history_to_db(
-        _runner_runtime.history_db_path,
+        _history_db_path(),
         sim_id=sim_id,
         lab_id=lab_id,
         claims=claims,

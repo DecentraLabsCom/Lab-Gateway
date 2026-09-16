@@ -4,7 +4,10 @@ from runtime_state import RuntimeState, create_runtime_state, replace_host_regis
 def test_replace_host_registry_contract_publishes_registry_and_updates_automator():
     calls = []
     registry = object()
-    automator = type("Automator", (), {"registry": None})()
+    class Automator:
+        registry: object | None = None
+
+    automator = Automator()
 
     replace_host_registry(
         registry,

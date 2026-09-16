@@ -137,4 +137,4 @@ def test_reservation_execution_context_is_immutable():
     context, _calls = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_logger = lambda: "changed"
+        setattr(context, "get_logger", lambda: "changed")

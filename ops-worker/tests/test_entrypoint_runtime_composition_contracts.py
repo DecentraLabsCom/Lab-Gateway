@@ -76,4 +76,4 @@ def test_entrypoint_context_is_immutable():
     context = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_app = lambda: "changed"
+        setattr(context, "get_app", lambda: "changed")

@@ -2,13 +2,14 @@ from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
 import pytest
+from typing import Any, Dict
 
 from credential_context import CredentialContext
 from credential_runtime import CredentialRuntime, create_credential_runtime
 
 
 def _context(**overrides):
-    cache = {"value": None}
+    cache: Dict[str, Any] = {"value": None}
     state = {"path": "credentials.json"}
     calls = overrides.pop("calls", [])
     values = {
@@ -86,4 +87,4 @@ def test_credential_context_is_immutable():
     context, _cache, _state, _calls = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_logger = lambda: SimpleNamespace()
+        setattr(context, "get_logger", lambda: SimpleNamespace())

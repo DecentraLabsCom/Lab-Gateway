@@ -2,6 +2,7 @@ import argparse
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 from fmpy import extract, instantiate_fmu, read_model_description
 
@@ -134,7 +135,9 @@ def main() -> int:
     current_time = start_time
     outputs = {}
     fmi_major = int(str(getattr(model_description, 'fmiVersion', '2.0')).split('.', 1)[0] or '2')
-    fmu = instantiate_fmu(str(extract_dir), model_description, fmi_type="CoSimulation")
+    # FMPy exposes different dynamic methods for FMI 2 and FMI 3 instances;
+    # its stubs cannot express that version-dependent surface.
+    fmu: Any = instantiate_fmu(str(extract_dir), model_description, fmi_type="CoSimulation")
     try:
         fmu.instantiate()
         if fmi_major < 3:

@@ -14,8 +14,8 @@ from power.drivers.netio_json import NetioJsonDriver
 class NetioSmokeHandler(BaseHTTPRequestHandler):
     state = {1: 0, 2: 1}
 
-    def log_message(self, *_args):
-        return
+    def log_message(self, format: str, *args: object) -> None:
+        return None
 
     def _payload(self):
         return {

@@ -111,7 +111,7 @@ def test_session_observation_context_resolves_mutable_dependencies_at_use_time()
     assert runtime._service() is service
 
     with pytest.raises(FrozenInstanceError):
-        context.get_service = lambda: None
+        setattr(context, "get_service", lambda: None)
 
 
 def test_session_observation_runtime_closes_injected_resources():
