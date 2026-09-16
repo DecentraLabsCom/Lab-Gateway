@@ -1115,6 +1115,45 @@ body {
     justify-content: center;
     cursor: pointer;
 }
+
+.aasx-package-table th,
+.aasx-package-table td {
+    vertical-align: middle;
+}
+
+.aasx-package-table code {
+    overflow-wrap: anywhere;
+}
+
+.aasx-view-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.aasx-view-summary > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #0d1220;
+}
+
+.aasx-view-summary strong {
+    overflow-wrap: anywhere;
+}
+
+#aasxViewBody h4 {
+    margin: 18px 0 8px;
+}
+
+#aasxViewBody ul {
+    margin: 0;
+    padding-left: 20px;
+}
 .host-edit-btn:hover,
 .host-edit-btn:focus-visible { color: var(--text); border-color: var(--primary); }
 .host-edit-icon {

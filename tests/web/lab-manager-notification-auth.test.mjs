@@ -38,6 +38,7 @@ const notificationsScriptPath = new URL('web/assets/js/lab-manager-notifications
 const notificationsFeatureScriptPath = new URL('web/assets/js/lab-manager-notifications-feature.js', repoRoot);
 const fmuSyncScriptPath = new URL('web/assets/js/lab-manager-fmu-sync.js', repoRoot);
 const aasLinkScriptPath = new URL('web/assets/js/lab-manager-aas-link.js', repoRoot);
+const aasxScriptPath = new URL('web/assets/js/lab-manager-aasx.js', repoRoot);
 const digitalTwinsScriptPath = new URL('web/assets/js/lab-manager-digital-twins.js', repoRoot);
 const powerCredentialsScriptPath = new URL('web/assets/js/lab-manager-power-credentials.js', repoRoot);
 const powerRenderersScriptPath = new URL('web/assets/js/lab-manager-power-renderers.js', repoRoot);
@@ -184,6 +185,8 @@ function loadLabManager({
     'fmuSyncFile', 'fmuSyncFileName', 'fmuSyncContactEmail',
     'aasLinkKey', 'aasLinkAasId',
     'aasLinkSaveBtn', 'aasLinkCheckBtn', 'aasLinkDeleteBtn',
+    'aasxPackageList', 'aasxPackageStatus', 'aasxRefreshBtn', 'aasxViewModal',
+    'aasxViewTitle', 'aasxViewBody', 'aasxViewDownload', 'aasxViewClose', 'aasxViewCloseFooter',
     'timelineReservationId', 'loadTimelineBtn', 'timelineResult', 'upcomingReservationsList',
     'upcomingReservationsStatus', 'smtpSection',
     'graphSection', 'toast', 'labManagerAccessBadge', 'opsHint', 'activityFeedList',
@@ -446,6 +449,9 @@ function loadLabManager({
   vm.runInContext(fs.readFileSync(aasLinkScriptPath, 'utf8'), context, {
     filename: 'lab-manager-aas-link.js',
   });
+  vm.runInContext(fs.readFileSync(aasxScriptPath, 'utf8'), context, {
+    filename: 'lab-manager-aasx.js',
+  });
   vm.runInContext(fs.readFileSync(digitalTwinsScriptPath, 'utf8'), context, {
     filename: 'lab-manager-digital-twins.js',
   });
@@ -560,8 +566,9 @@ test('loads the activity controller before the Lab Manager bootstrap', () => {
   if (html.includes('lab-manager-fmu-sync-v6')) {
     assert.match(html, /lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v6/);
     assert.match(html, /lab-manager-aas-link\.js\?v=lab-manager-aas-link-v4/);
-    assert.match(html, /lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v5/);
-    assert.match(html, /lab-manager-energy-feature\.js\?v=lab-manager-energy-feature-v4/);
+    assert.match(html, /lab-manager-aasx\.js\?v=lab-manager-aasx-v1/);
+    assert.match(html, /lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v6/);
+    assert.match(html, /lab-manager-energy-feature\.js\?v=lab-manager-energy-feature-v5/);
     assert.match(html, /lab-manager-power-policies\.js\?v=lab-manager-power-policies-v5/);
     return;
   }

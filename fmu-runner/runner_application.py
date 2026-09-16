@@ -132,6 +132,7 @@ from config import (
     _default_access_audit_url as _default_access_audit_url_value,
     _env_or_secret_file,
     _AAS_LINK_DATA_PATH,
+    _AAS_CATALOG_PATH,
     ACCESS_AUDIT_URL,
     AUTH_SESSION_TICKET_INTERNAL_TOKEN,
     AUTH_SESSION_TICKET_ISSUE_URL,
@@ -175,6 +176,8 @@ from realtime_router import create_realtime_router
 from aas_link_router import create_aas_link_router
 from aas_hints_router import create_aas_hints_router
 from aas_sync_router import create_aas_sync_router
+from aasx_router import create_aasx_router
+from aasx_catalog import AasxPackageCatalog
 from proxy_router import create_proxy_router
 
 # ---------------------------------------------------------------------------
@@ -369,6 +372,13 @@ def _aas_link_path_for_router(access_key: str) -> Path:
     return _aas_link_path(access_key)
 
 
+_aasx_catalog = AasxPackageCatalog(_AAS_CATALOG_PATH)
+
+
+def _record_aasx_association(**kwargs):
+    return _aasx_catalog.record(**kwargs)
+
+
 def _aas_hints_resolve_fmu_path(access_key: str):
     return _resolve_fmu_path(access_key)
 
@@ -393,6 +403,18 @@ async def _aas_sync_to_basyx(**kwargs):
     from aas_generator import sync_fmu_to_basyx
 
     return await sync_fmu_to_basyx(**kwargs)
+
+
+async def _aas_delete_resources(**kwargs):
+    from aas_generator import delete_aasx_resources
+
+    return await delete_aasx_resources(**kwargs)
+
+
+async def _aas_serialize_resources(**kwargs):
+    from aas_generator import serialize_aasx_resources
+
+    return await serialize_aasx_resources(**kwargs)
 
 
 async def _aas_sync_runtime_status(lab_id: str):
@@ -440,6 +462,12 @@ _aas_sync_router = create_aas_sync_router(
     sync_fmu_to_basyx=_aas_sync_to_basyx,
     get_runtime_status=_aas_sync_runtime_status,
     logger=logger,
+    record_aasx=_record_aasx_association,
+)
+_aasx_router = create_aasx_router(
+    catalog=_aasx_catalog,
+    serialize_resources=_aas_serialize_resources,
+    delete_resources=_aas_delete_resources,
 )
 
 
@@ -1316,6 +1344,7 @@ app = create_app(
         _aas_link_router,
         _aas_hints_router,
         _aas_sync_router,
+        _aasx_router,
         _realtime_router,
         _proxy_router,
         _run_router,

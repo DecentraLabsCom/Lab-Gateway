@@ -53,6 +53,7 @@ def _flag(values: Mapping[str, str], name: str, default: str = "false") -> bool:
 class FmuRunnerConfig:
     fmu_data_path: str
     aas_link_data_path: Path
+    aas_catalog_path: Path
     max_simulation_timeout: int
     max_concurrent_per_model: int
     fmu_worker_address_space_limit: int
@@ -96,6 +97,7 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
     return FmuRunnerConfig(
         fmu_data_path=values.get("FMU_DATA_PATH", "/app/fmu-data"),
         aas_link_data_path=Path(values.get("AAS_LINK_DATA_PATH", "/app/data/aas-links")),
+        aas_catalog_path=Path(values.get("AAS_CATALOG_PATH", "/app/data/aasx")),
         max_simulation_timeout=int(values.get("MAX_SIMULATION_TIMEOUT", "300")),
         max_concurrent_per_model=int(values.get("MAX_CONCURRENT_PER_MODEL", "10")),
         fmu_worker_address_space_limit=int(values.get(
@@ -149,6 +151,7 @@ CONFIG = load_config()
 
 FMU_DATA_PATH = CONFIG.fmu_data_path
 _AAS_LINK_DATA_PATH = CONFIG.aas_link_data_path
+_AAS_CATALOG_PATH = CONFIG.aas_catalog_path
 MAX_SIMULATION_TIMEOUT = CONFIG.max_simulation_timeout
 MAX_CONCURRENT_PER_MODEL = CONFIG.max_concurrent_per_model
 FMU_WORKER_ADDRESS_SPACE_LIMIT = CONFIG.fmu_worker_address_space_limit

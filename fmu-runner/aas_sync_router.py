@@ -30,13 +30,15 @@ def create_aas_sync_router(
     sync_fmu_to_basyx: Any,
     logger: Any,
     get_runtime_status: Any = None,
+    record_aasx: Any = None,
 ) -> APIRouter:
     router = APIRouter()
 
     @router.post("/aas-admin/fmu/{access_key}/sync")
     async def aas_sync_fmu(access_key: str, request: Request):
         aasx_bytes: Optional[bytes] = None
-        lab_id: str = access_key
+        lab_id: Optional[str] = None
+        aasx_filename: Optional[str] = None
 
         content_type = request.headers.get("content-type", "")
         if "multipart/form-data" in content_type:
@@ -46,6 +48,7 @@ def create_aas_sync_router(
                 lab_id = str(raw_lab_id)
             upload = form.get("file") or form.get("aasx")
             if isinstance(upload, UploadFile):
+                aasx_filename = upload.filename
                 aasx_bytes = await upload.read()
             extra_info: dict = {}
             for field in ("description", "license", "documentationUrl", "contactEmail"):
@@ -94,11 +97,11 @@ def create_aas_sync_router(
             runtime_info = None
             if get_runtime_status is not None:
                 try:
-                    runtime_info = await get_runtime_status(str(lab_id))
+                    runtime_info = await get_runtime_status(str(lab_id or access_key))
                 except Exception as exc:
                     logger.warning(
                         "AAS sync: runtime status unavailable for lab %s: %s",
-                        str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+                        str(lab_id or access_key).replace("\r", "\\r").replace("\n", "\\n"),
                         type(exc).__name__,
                     )
         else:
@@ -106,7 +109,7 @@ def create_aas_sync_router(
             runtime_info = None
 
         result = await sync_fmu_to_basyx(
-            lab_id=lab_id,
+            lab_id=lab_id or access_key,
             access_key=access_key,
             metadata=metadata,
             aasx_bytes=aasx_bytes,
@@ -117,6 +120,17 @@ def create_aas_sync_router(
         )
         if "error" in result:
             raise HTTPException(status_code=502, detail=result["error"])
+        if aasx_bytes and lab_id and record_aasx and result.get("disabled") is not True:
+            try:
+                result["aasxPackage"] = record_aasx(
+                    lab_id=lab_id,
+                    filename=aasx_filename,
+                    content=aasx_bytes,
+                    sync_result=result,
+                )
+            except Exception as exc:
+                logger.error("AASX association could not be recorded for lab %s: %s", lab_id, type(exc).__name__)
+                raise HTTPException(status_code=500, detail="AASX association could not be recorded") from exc
         return result
 
     @router.post("/aas-admin/aas/{lab_id}/sync")
@@ -155,6 +169,17 @@ def create_aas_sync_router(
         )
         if "error" in result:
             raise HTTPException(status_code=502, detail=result["error"])
+        if record_aasx and result.get("disabled") is not True:
+            try:
+                result["aasxPackage"] = record_aasx(
+                    lab_id=lab_id,
+                    filename=upload.filename,
+                    content=aasx_bytes,
+                    sync_result=result,
+                )
+            except Exception as exc:
+                logger.error("AASX association could not be recorded for lab %s: %s", lab_id, type(exc).__name__)
+                raise HTTPException(status_code=500, detail="AASX association could not be recorded") from exc
         return result
 
     return router

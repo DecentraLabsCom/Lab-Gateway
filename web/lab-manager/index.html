@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v25">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v26">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -779,6 +779,31 @@
                 </div>
             </section>
 
+            <section class="grid single-column" data-lm-tab-section="digital-twins" data-lm-order="30">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>AASX Associations</h2>
+                            <p>See which laboratories have AASX resources managed in BaSyx.</p>
+                        </div>
+                        <div class="card-header-actions">
+                            <button class="ghost-btn" id="aasxRefreshBtn" type="button">
+                                <i class="fas fa-rotate-right" aria-hidden="true"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="hint" id="aasxPackageStatus">
+                            The Gateway keeps association metadata only. Downloads are generated from the current
+                            BaSyx shells and submodels; removing an association deletes those imported resources.
+                        </div>
+                        <div class="table-wrap mt-3" id="aasxPackageList">
+                            <div class="empty">No AASX associations registered.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <section class="grid single-column" data-lm-tab-section="notifications" data-lm-order="10">
                 <div class="card">
                     <div class="card-header">
@@ -1132,6 +1157,24 @@
         </div>
     </div>
 
+    <div class="modal" id="aasxViewModal" role="dialog" aria-modal="true" aria-labelledby="aasxViewTitle">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="aasxViewTitle">AASX package</h3>
+                <button class="ghost-btn icon-btn" id="aasxViewClose" type="button" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" id="aasxViewBody"></div>
+            <div class="modal-footer">
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="aasxViewCloseFooter" type="button">Close</button>
+                    <a class="primary-btn" id="aasxViewDownload" href="#" download hidden>
+                        <i class="fas fa-download" aria-hidden="true"></i> Download AASX
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="toast" class="toast"></div>
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v2"></script>
@@ -1169,7 +1212,8 @@
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
     <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v6"></script>
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v4"></script>
-    <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v5"></script>
+    <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v1"></script>
+    <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v6"></script>
     <script src="../assets/js/lab-manager-power-credentials.js?v=lab-manager-power-credentials-v2"></script>
             <script src="../assets/js/lab-manager-power-renderers.js?v=lab-manager-power-renderers-v12"></script>
         <script src="../assets/js/lab-manager-power-values.js?v=lab-manager-power-values-v6"></script>
@@ -1177,7 +1221,7 @@
     <script src="../assets/js/lab-manager-power-status.js?v=lab-manager-power-status-v2"></script>
     <script src="../assets/js/lab-manager-power-controllers.js?v=lab-manager-power-controllers-v6"></script>
         <script src="../assets/js/lab-manager-power-policies.js?v=lab-manager-power-policies-v5"></script>
-        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v4"></script>
+        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v5"></script>
     <script src="../assets/js/lab-manager-reservations-feature.js?v=lab-manager-reservations-feature-v1"></script>
     <script src="../assets/js/lab-manager.js?v=workflow-tabs-v19"></script>
     <script src="../assets/js/lab-publisher-values.js?v=publisher-values-v1"></script>
