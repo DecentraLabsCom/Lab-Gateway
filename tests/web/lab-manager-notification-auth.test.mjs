@@ -1315,6 +1315,11 @@ test('loads laboratory options and sends the mapped lab ID automatically', async
         ],
       }),
     }),
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ hosts: [{ name: 'PC-Siemens', labs: ['42'] }] }),
+    }),
   });
 
   await new Promise((resolve) => setImmediate(resolve));

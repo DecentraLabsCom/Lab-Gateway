@@ -348,16 +348,25 @@
         }
     }
 
+    function createIdempotencyKey() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return `lab-manager-${window.crypto.randomUUID()}`;
+        }
+        return `lab-manager-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
     async function publishLab() {
         try {
             const payload = payloadController.buildLabPayload();
             const editing = !!state.editingLabId;
+            const headers = { 'Content-Type': 'application/json' };
+            if (!editing) headers['Idempotency-Key'] = createIdempotencyKey();
 
             $('labPublisherSubmitBtn').disabled = true;
             setStatus(editing ? `Updating ${resolveStateLabDisplayName(state.editingLabId)} on-chain...` : 'Publishing lab on-chain...', false);
             const result = await fetchJson(editing ? `/lab-admin/labs/${encodeURIComponent(state.editingLabId)}` : '/lab-admin/labs', {
                 method: editing ? 'PUT' : 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(payload),
             });
             assertLabMutationSuccess(result, editing ? 'Update' : 'Publish');
