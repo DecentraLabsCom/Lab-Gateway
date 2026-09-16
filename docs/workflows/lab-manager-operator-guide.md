@@ -94,10 +94,10 @@ The complete energy workflow is in [Lab Manager energy operations](lab-manager-e
    available, otherwise the registered laboratory description. Physical labs
    use Gateway/heartbeat data plus the registered description, documentation,
    and Terms of Use. No separate Documentation or License fields are required.
-5. Optionally upload a provider-prepared `.aasx`. For a physical lab, the
-   package must contain `urn:decentralabs:lab:{labId}` as a shell ID. Use
-   `Link Existing AAS` when the authoritative shell is already hosted
-   elsewhere.
+5. Optionally upload a provider-prepared `.aasx`. The package must contain
+   `urn:decentralabs:lab:{labId}` as a shell ID, unless the shell is associated
+   through `Link Existing AAS`. Use that panel when the authoritative shell is
+   already hosted elsewhere.
 6. Verify shell retrieval through the Gateway, not only directly against BaSyx.
 
 ## Notification workflow
