@@ -119,6 +119,17 @@ test('renders policy steps with controller and outlet choices', () => {
   assert.match(html, /Confirm state/);
   assert.doesNotMatch(html, /Read back state/);
   assert.doesNotMatch(html, /power-policy-step-options/);
+  for (const [label, field] of [
+    ['Delay before', 'delayBeforeSeconds'],
+    ['Delay after', 'delayAfterSeconds'],
+    ['Timeout', 'timeoutSeconds'],
+  ]) {
+    assert.match(
+      html,
+      new RegExp(`<label class="field" title="Duration in seconds">[\\s\\S]*<span>${label}<\\/span>[\\s\\S]*data-step-field="${field}"[^>]+title="Duration in seconds"`),
+    );
+  }
+  assert.doesNotMatch(html, /Delay before \(seconds\)|Delay after \(seconds\)|Timeout \(seconds\)/);
   const policyFieldsStart = html.indexOf('<div class="form-grid power-policy-step-fields">');
   const policyConditionsStart = html.indexOf('power-policy-conditions');
   for (const [label, field] of [
@@ -147,7 +158,8 @@ test('renders cycle timing only for cycle actions', () => {
     offSeconds: 15,
   }], [{ id: 'pdu-1', outlets: [{ outlet: '1' }] }]);
 
-  assert.match(html, /data-step-field="offSeconds"/);
+  assert.match(html, /<label class="field" title="Duration in seconds">[\s\S]*<span>Cycle off time<\/span>[\s\S]*data-step-field="offSeconds"[^>]+title="Duration in seconds"/);
+  assert.doesNotMatch(html, /Cycle off time \(seconds\)/);
   assert.match(html, /value="15"/);
 });
 

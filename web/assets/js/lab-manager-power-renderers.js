@@ -24,6 +24,7 @@
                 maintenance: 'Maintenance',
                 emergency_stop: 'Emergency stop',
             };
+            const secondsTooltipAttribute = ' title="Duration in seconds"';
             return steps.map((step, index) => `
             <div class="power-policy-step" data-step-index="${index}">
                 <div class="power-policy-step-header">
@@ -57,21 +58,21 @@
                         <select data-step-field="action">${powerPolicySelectOptions(['on', 'off', 'cycle'], step.action)}</select>
                     </label>
                     ${step.action === 'cycle' ? `
-                    <label class="field">
-                        <span>Cycle off time (seconds)</span>
-                        <input type="number" min="0" max="3600" data-step-field="offSeconds" value="${step.offSeconds}" inputmode="numeric">
+                    <label class="field"${secondsTooltipAttribute}>
+                        <span>Cycle off time</span>
+                        <input type="number" min="0" max="3600" data-step-field="offSeconds" value="${step.offSeconds}" inputmode="numeric"${secondsTooltipAttribute}>
                     </label>` : ''}
-                    <label class="field">
-                        <span>Delay before (seconds)</span>
-                        <input type="number" min="0" max="3600" data-step-field="delayBeforeSeconds" value="${step.delayBeforeSeconds}" inputmode="numeric">
+                    <label class="field"${secondsTooltipAttribute}>
+                        <span>Delay before</span>
+                        <input type="number" min="0" max="3600" data-step-field="delayBeforeSeconds" value="${step.delayBeforeSeconds}" inputmode="numeric"${secondsTooltipAttribute}>
                     </label>
-                    <label class="field">
-                        <span>Delay after (seconds)</span>
-                        <input type="number" min="0" max="3600" data-step-field="delayAfterSeconds" value="${step.delayAfterSeconds}" inputmode="numeric">
+                    <label class="field"${secondsTooltipAttribute}>
+                        <span>Delay after</span>
+                        <input type="number" min="0" max="3600" data-step-field="delayAfterSeconds" value="${step.delayAfterSeconds}" inputmode="numeric"${secondsTooltipAttribute}>
                     </label>
-                    <label class="field">
-                        <span>Timeout (seconds)</span>
-                        <input type="number" min="0" max="300" data-step-field="timeoutSeconds" value="${step.timeoutSeconds}" inputmode="numeric">
+                    <label class="field"${secondsTooltipAttribute}>
+                        <span>Timeout</span>
+                        <input type="number" min="0" max="300" data-step-field="timeoutSeconds" value="${step.timeoutSeconds}" inputmode="numeric"${secondsTooltipAttribute}>
                     </label>
                     <label class="field">
                         <span>Retries</span>
