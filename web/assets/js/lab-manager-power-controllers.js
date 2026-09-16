@@ -93,11 +93,6 @@
                 deviceManaged: isDeviceController(),
             });
             if (fields.addOutlet) fields.addOutlet.hidden = isDeviceController();
-            if (fields.editorHint && isDeviceController()) {
-                fields.editorHint.textContent = 'Physical output IDs and names come from the controller. APC device fields are written back on save; NETIO device fields are read-only here.';
-            } else if (fields.editorHint) {
-                fields.editorHint.textContent = '';
-            }
         }
 
         function renderCredentialOptions() {
