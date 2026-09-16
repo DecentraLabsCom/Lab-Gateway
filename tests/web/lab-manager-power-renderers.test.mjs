@@ -197,6 +197,10 @@ test('renders physical outputs from the device and hides local inventory control
 
   assert.match(html, /<span>Name<\/span>/);
   assert.match(html, /value="&lt;PLC&gt;"/);
+  assert.match(html, /<label class="field" title="Duration in seconds">[\s\S]*<span>Power-on delay<\/span>[\s\S]*data-controller-device-config-field="powerOnDelaySeconds"[^>]+title="Duration in seconds"/);
+  assert.match(html, /<label class="field" title="Duration in seconds">[\s\S]*<span>Power-off delay<\/span>[\s\S]*data-controller-device-config-field="powerOffDelaySeconds"[^>]+title="Duration in seconds"/);
+  assert.match(html, /<label class="field" title="Duration in seconds">[\s\S]*<span>Reboot duration<\/span>[\s\S]*data-controller-device-config-field="rebootDurationSeconds"[^>]+title="Duration in seconds"/);
+  assert.doesNotMatch(html, /Power-on delay \(sec\)|Power-off delay \(sec\)|Reboot duration \(sec\)/);
   assert.match(html, /data-controller-device-config-field="powerOnDelaySeconds"/);
   assert.match(html, /value="30"/);
   assert.doesNotMatch(html, /data-controller-outlet-action="remove"/);
