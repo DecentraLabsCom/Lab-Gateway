@@ -2,10 +2,16 @@
 
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.engine import Connection
+
+
+class SchedulerProtocol(Protocol):
+    """Minimal scheduler surface required by the reservation orchestrator."""
+
+    def add_job(self, *args: Any, **kwargs: Any) -> Any:
+        ...
 
 
 class ReservationOrchestrator:
@@ -58,7 +64,7 @@ class ReservationOrchestrator:
                 "remote reservation automation will remain unavailable"
             )
 
-    def register(self, scheduler: BackgroundScheduler) -> int:
+    def register(self, scheduler: SchedulerProtocol) -> int:
         if not self.enabled:
             self.logger.info("Reservation orchestrator disabled (OPS_RESERVATION_AUTOMATION=false)")
             return 0
@@ -287,8 +293,8 @@ class ReservationOrchestrator:
 
     def _dispatch_start(self, row: Mapping[str, Any]):
         reservation_id = row["transaction_hash"]
-        lab_id = row.get("lab_id")
-        host = self.resolve_host_by_lab(lab_id)
+        lab_id = str(row.get("lab_id") or "").strip()
+        host = self.resolve_host_by_lab(lab_id) if lab_id else None
         host_name = (host or {}).get("name") or "unmapped"
         if not host:
             message = f"No host mapping for lab {lab_id}"
@@ -319,8 +325,8 @@ class ReservationOrchestrator:
 
     def _dispatch_end(self, row: Mapping[str, Any]):
         reservation_id = row["transaction_hash"]
-        lab_id = row.get("lab_id")
-        host = self.resolve_host_by_lab(lab_id)
+        lab_id = str(row.get("lab_id") or "").strip()
+        host = self.resolve_host_by_lab(lab_id) if lab_id else None
         host_name = (host or {}).get("name") or "unmapped"
         if not host:
             message = f"No host mapping for lab {lab_id}"

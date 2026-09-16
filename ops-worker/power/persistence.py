@@ -164,8 +164,10 @@ class PowerOperationStore:
 
     @staticmethod
     def _row_to_operation(row: Any) -> Dict[str, Any]:
+        if row is None:
+            return {}
         payload: Dict[str, Any] = {}
-        raw_payload = row.get("payload") if row is not None else None
+        raw_payload = row.get("payload")
         if raw_payload:
             try:
                 decoded = json.loads(raw_payload)

@@ -39,4 +39,4 @@ def test_database_context_is_immutable():
     )
 
     with pytest.raises(FrozenInstanceError):
-        context.get_logger = lambda: SimpleNamespace()
+        setattr(context, "get_logger", lambda: SimpleNamespace())

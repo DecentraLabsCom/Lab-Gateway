@@ -1,5 +1,6 @@
 import re
 from dataclasses import FrozenInstanceError
+from typing import Any, Callable, Dict
 
 import pytest
 
@@ -52,17 +53,21 @@ def test_host_provisioning_runtime_uses_explicit_context_dependencies():
 
 
 def test_host_provisioning_context_is_immutable_and_can_wrap_live_callbacks():
-    callbacks = {"trust_ref": lambda value: "first"}
+    callbacks: Dict[str, Callable[[Any], str]] = {
+        "trust_ref": lambda value: "first"
+    }
     context = _context(normalize_trust_ref=lambda value: callbacks["trust_ref"](value))
     runtime = create_host_provisioning_runtime(context)
 
-    assert runtime.build_provisioned_host({}, {"hostname": "station-01"})[0][
-        "winrm_trust_ref"
-    ] == "first"
+    first_host, first_error = runtime.build_provisioned_host({}, {"hostname": "station-01"})
+    assert first_error is None
+    assert first_host is not None
+    assert first_host["winrm_trust_ref"] == "first"
     callbacks["trust_ref"] = lambda value: "second"
-    assert runtime.build_provisioned_host({}, {"hostname": "station-01"})[0][
-        "winrm_trust_ref"
-    ] == "second"
+    second_host, second_error = runtime.build_provisioned_host({}, {"hostname": "station-01"})
+    assert second_error is None
+    assert second_host is not None
+    assert second_host["winrm_trust_ref"] == "second"
 
     with pytest.raises(FrozenInstanceError):
-        context.default_heartbeat_path = r"C:\other.json"
+        setattr(context, "default_heartbeat_path", r"C:\other.json")

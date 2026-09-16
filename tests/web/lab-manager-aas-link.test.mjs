@@ -35,7 +35,6 @@ function loadController({ responses = [] } = {}) {
     saveButton: createField(),
     checkButton: createField(),
     deleteButton: createField(),
-    result: createField(),
   };
   const calls = [];
   const toasts = [];
@@ -66,13 +65,12 @@ test('saves an AAS link by stable lab ID', async () => {
   assert.equal(calls[0].url, '/aas-admin/lab/7/aas-link');
   assert.equal(calls[0].options.method, 'POST');
   assert.deepEqual(JSON.parse(calls[0].options.body), { aasId: 'urn:requested' });
-  assert.equal(fields.result.textContent, 'Linked: urn:linked');
   assert.deepEqual(toasts.at(-1), { message: 'AAS link saved for laboratory 7', type: 'success' });
   assert.equal(fields.saveButton.disabled, false);
 });
 
-test('loads an existing link and clears a missing link', async () => {
-  const { fields, calls } = loadController({
+test('loads an existing link and reports a missing link through the toast', async () => {
+  const { fields, calls, toasts } = loadController({
     responses: [
       { ok: true, status: 200, json: async () => ({ aasId: 'urn:existing', labId: '42' }) },
       { ok: false, status: 404, json: async () => ({}) },
@@ -86,16 +84,23 @@ test('loads an existing link and clears a missing link', async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls[0].url, '/aas-admin/lab/7/aas-link');
   assert.equal(fields.aasIdInput.value, 'urn:existing');
+  assert.deepEqual(toasts.at(-1), {
+    message: 'AAS link checked for laboratory 7: urn:existing',
+    type: 'success',
+  });
   assert.equal(fields.keyInput.value, '7');
   assert.equal(fields.checkButton.disabled, false);
 
   fields.checkButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(fields.result.textContent, 'No link configured for this laboratory.');
   assert.equal(fields.aasIdInput.value, '');
+  assert.deepEqual(toasts.at(-1), {
+    message: 'No AAS link configured for laboratory 7',
+    type: 'info',
+  });
 });
 
-test('deletes an AAS link and reports the result', async () => {
+test('deletes an AAS link and reports it through the toast', async () => {
   const { fields, calls, toasts } = loadController({
     responses: [{ ok: true, status: 200, json: async () => ({}) }],
   });
@@ -106,8 +111,22 @@ test('deletes an AAS link and reports the result', async () => {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(calls[0].options.method, 'DELETE');
-  assert.equal(fields.result.textContent, 'Link removed.');
   assert.equal(fields.aasIdInput.value, '');
   assert.deepEqual(toasts.at(-1), { message: 'AAS link removed for laboratory 7', type: 'success' });
   assert.equal(fields.deleteButton.disabled, false);
+});
+
+test('reports AAS link check failures through the toast', async () => {
+  const { fields, toasts } = loadController({
+    responses: [{ ok: false, status: 503, json: async () => ({}) }],
+  });
+  fields.keyInput.value = '7';
+
+  fields.checkButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(toasts.at(-1), {
+    message: 'AAS link check failed: HTTP 503',
+    type: 'error',
+  });
 });

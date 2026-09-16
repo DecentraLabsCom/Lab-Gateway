@@ -41,9 +41,13 @@ def test_heartbeat_values_extract_and_select_best_wake_adapter():
     )
 
     assert len(candidates) == 2
-    assert heartbeat_values.choose_wol_mac(candidates)["mac"] == "00:11:22:33:44:55"
-    assert heartbeat_values.suggest_mac_from_heartbeat(
+    chosen = heartbeat_values.choose_wol_mac(candidates)
+    assert chosen is not None
+    assert chosen["mac"] == "00:11:22:33:44:55"
+    suggested = heartbeat_values.suggest_mac_from_heartbeat(
         heartbeat,
         normalize_mac_fn=_normalize,
         parse_boolish_fn=heartbeat_values.parse_boolish,
-    )["source"] == "status.wake.nicPower"
+    )
+    assert suggested is not None
+    assert suggested["source"] == "status.wake.nicPower"

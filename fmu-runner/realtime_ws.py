@@ -85,9 +85,9 @@ class _RealtimeSession:
         self.exp = manager.coerce_epoch_seconds(claims.get("exp"))
         self.fmu_path = fmu_path
         self.state = "created"
-        self.current_time = 0.0
-        self.stop_time = 1.0
-        self.step_size = 0.01
+        self.current_time: float = 0.0
+        self.stop_time: float = 1.0
+        self.step_size: float = 0.01
         self.connection: Optional[_WsConnection] = None
         self.attach_deadline: Optional[float] = None
         self.subscription: Optional[_StreamSubscription] = None
@@ -98,11 +98,13 @@ class _RealtimeSession:
         self._runner_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._closed = False
-        self._model_description = None
+        # FMPy exposes different runtime/model classes for each FMI version.
+        # Keep this boundary dynamic; the selected class is validated by FMPy.
+        self._model_description: Any = None
         self._model_payload: Optional[dict] = None
         self._variables: dict[str, Any] = {}
         self._variables_by_value_reference: dict[int, Any] = {}
-        self._fmu = None
+        self._fmu: Any = None
         self._unzipdir: Optional[str] = None
         self._last_expiry_notice = 0
         self._pending_samples: list[dict[str, Any]] = []
@@ -471,16 +473,16 @@ class _RealtimeSession:
         await _cancel_task(self._runner_task)
         self._runner_task = None
 
-        self.current_time = self.manager.coerce_float(options.get("startTime"), 0.0)
-        self.stop_time = self.manager.coerce_float(options.get("stopTime"), 10.0)
-        self.step_size = self.manager.coerce_float(options.get("stepSize"), 0.01)
+        self.current_time = self.manager.coerce_float(options.get("startTime"), 0.0) or 0.0
+        self.stop_time = self.manager.coerce_float(options.get("stopTime"), 10.0) or 10.0
+        self.step_size = self.manager.coerce_float(options.get("stepSize"), 0.01) or 0.01
         if self.stop_time <= self.current_time:
             raise HTTPException(status_code=400, detail="stopTime must be greater than startTime")
         if self.step_size <= 0:
             raise HTTPException(status_code=400, detail="stepSize must be positive")
 
         self._shutdown_fmu()
-        self._unzipdir = extract(str(self.fmu_path))
+        self._unzipdir = str(extract(str(self.fmu_path)))
         self._fmu = instantiate_fmu(self._unzipdir, self._model_description, fmi_type="CoSimulation")
         self._fmu.instantiate()
         fmi_major = str(getattr(self._model_description, "fmiVersion", "")).split(".", 1)[0]
@@ -893,6 +895,9 @@ class RealtimeWsManager:
                     # FMU_SESSION), issue the reservation-scoped ticket
                     # server-side before creating the local session.
                     if not internal and not session_ticket:
+                        if create_claims is None:
+                            raise HTTPException(status_code=401, detail="Missing session claims")
+
                         claim_lab_id = self.get_claim_lab_id(create_claims)
                         if claim_lab_id and req_lab_id and claim_lab_id != req_lab_id:
                             response = self.error_payload(
@@ -1035,6 +1040,8 @@ class RealtimeWsManager:
                             await self._send_direct(connection, response)
                             local_request_cache[request_id] = response
                             continue
+                    if create_claims is None:
+                        raise HTTPException(status_code=401, detail="Missing session claims")
                     claim_lab_id = self.get_claim_lab_id(create_claims)
                     if claim_lab_id and req_lab_id and claim_lab_id != req_lab_id:
                         response = self.error_payload(

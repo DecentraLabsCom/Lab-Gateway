@@ -72,7 +72,7 @@ def json_response(handler, status, payload, headers=None):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
+    def log_message(self, format: str, *args: object) -> None:
         pass  # silent
 
     def _require_bearer(self):

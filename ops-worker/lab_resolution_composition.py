@@ -2,15 +2,42 @@
 
 from collections.abc import Callable
 from threading import RLock
-from typing import Any
+from typing import Any, Protocol
 
 from lab_resolution_context import LabResolutionContext
 from lab_resolution_runtime import LabResolutionRuntime, create_lab_resolution_runtime
-from runtime_config import RuntimePolicy
+
+
+class LabCatalogPolicy(Protocol):
+    """Catalog settings required to compose the lab resolver."""
+
+    @property
+    def lab_catalog_url(self) -> str:
+        ...
+
+    @property
+    def lab_catalog_token(self) -> str:
+        ...
+
+    @property
+    def lab_catalog_token_header(self) -> str:
+        ...
+
+    @property
+    def lab_catalog_allow_insecure(self) -> bool:
+        ...
+
+    @property
+    def lab_catalog_timeout_seconds(self) -> float:
+        ...
+
+    @property
+    def lab_catalog_cache_seconds(self) -> float:
+        ...
 
 
 def create_lab_resolution_composition(
-    policy: RuntimePolicy,
+    policy: LabCatalogPolicy,
     *,
     get_host_registry: Callable[[], Any],
     get_guacamole_connections: Callable[[], Any],
@@ -41,4 +68,4 @@ def create_lab_resolution_composition(
     return create_lab_resolution_runtime(context)
 
 
-__all__ = ["create_lab_resolution_composition"]
+__all__ = ["LabCatalogPolicy", "create_lab_resolution_composition"]

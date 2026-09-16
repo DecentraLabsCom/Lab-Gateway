@@ -257,7 +257,7 @@ Lab resolution configuration:
 - `LAB_ADMIN_BACKEND_URL` (Full default: `http://blockchain-services:8080`; Lite requires an explicit remote URL)
 - `LAB_ADMIN_BACKEND_TOKEN` and `LAB_ADMIN_BACKEND_TOKEN_HEADER` (remote backend credential)
 - `LAB_ADMIN_BACKEND_ALLOW_INSECURE` (default `false` for explicit URLs)
-- `LAB_ADMIN_BACKEND_TIMEOUT_SECONDS` (default `5`)
+- `LAB_ADMIN_BACKEND_TIMEOUT_SECONDS` (default `30` seconds)
 - `LAB_CATALOG_CACHE_SECONDS` (default `15`; set to `0` to disable caching)
 
 The default Full-mode catalog credential is `LAB_MANAGER_TOKEN`. The resolver

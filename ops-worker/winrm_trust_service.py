@@ -69,10 +69,12 @@ def inspect_winrm_trust(
     try:
         validate_certificate(certificate, host)
     except trust_error_type as exc:
+        error_code = getattr(exc, "code", None)
+        error_code = error_code if isinstance(error_code, str) else ""
         metadata["status"] = {
             "WINRM_CERTIFICATE_EXPIRED": "expired",
             "WINRM_CERTIFICATE_NOT_YET_VALID": "not-yet-valid",
-        }.get(getattr(exc, "code", None), "invalid")
+        }.get(error_code, "invalid")
         metadata["errorCode"] = getattr(exc, "code", "WINRM_TRUST_INVALID")
     metadata["host"] = host.get("name")
     metadata["address"] = host.get("address")

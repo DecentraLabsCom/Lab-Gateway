@@ -245,7 +245,8 @@ class NetioJsonDriver:
     def discover(self) -> Dict[str, Any]:
         try:
             body = self._request("GET")
-            agent = body.get("Agent") if isinstance(body.get("Agent"), Mapping) else {}
+            raw_agent = body.get("Agent")
+            agent: Mapping[str, Any] = raw_agent if isinstance(raw_agent, Mapping) else {}
             outputs = self._outputs(body)
             return {
                 "reachable": True,

@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from unittest.mock import Mock
 
 from reservation_orchestrator import ReservationOrchestrator
+from reservation_orchestrator import SchedulerProtocol
 
 
 class _Registry:
@@ -93,11 +95,11 @@ def test_remote_candidates_preserve_auth_scope_window_and_filtering():
 
 
 def test_register_preserves_disabled_and_enabled_job_contract():
-    class _Scheduler:
+    class _Scheduler(SchedulerProtocol):
         def __init__(self):
             self.calls = []
 
-        def add_job(self, *args, **kwargs):
+        def add_job(self, *args: Any, **kwargs: Any) -> None:
             self.calls.append((args, kwargs))
 
     disabled_scheduler = _Scheduler()

@@ -8,7 +8,7 @@ unchanged.
 from collections.abc import Callable
 import json
 import os
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, TypeVar
 from uuid import uuid4
 
 from cryptography import x509
@@ -16,12 +16,15 @@ from cryptography.hazmat.primitives import serialization
 from errors import WINRM_TRUST_ERROR_MESSAGES, WinRMTrustError
 
 
+CertificateType = TypeVar("CertificateType")
+
+
 def read_trust_certificate(
     path: str,
     *,
     max_bytes: int,
-    parse_certificate_bytes: Callable[[bytes], x509.Certificate],
-) -> x509.Certificate:
+    parse_certificate_bytes: Callable[[bytes], CertificateType],
+) -> CertificateType:
     """Read one bounded certificate file and delegate DER/PEM parsing."""
     try:
         size = os.path.getsize(path)

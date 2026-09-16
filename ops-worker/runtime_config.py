@@ -280,6 +280,7 @@ def load_runtime_policy(
         ),
         notification_service_recipients=parse_recipients(
             get("NOTIFICATION_SERVICE_RECIPIENTS"),
+            None,
         ),
         ops_alert_failure_threshold=max(
             1,
@@ -368,7 +369,7 @@ def load_runtime_policy(
         lab_catalog_allow_insecure=catalog_allow_insecure,
         lab_catalog_timeout_seconds=max(
             0.2,
-            float(get("LAB_ADMIN_BACKEND_TIMEOUT_SECONDS", "5")),
+            float(get("LAB_ADMIN_BACKEND_TIMEOUT_SECONDS", "30")),
         ),
         lab_catalog_cache_seconds=max(
             0.0,

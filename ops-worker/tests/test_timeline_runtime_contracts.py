@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
+from typing import Any, Callable, cast
 
 import pytest
 
@@ -29,15 +30,15 @@ def _context(*, calls=None, hosts=None):
         ) or {"reservationId": args[0]},
         get_db_engine=lambda: "db",
         get_host_by_lab=lambda: state["hosts"].get_by_lab,
-        get_sql_text=lambda: "sql",
+        get_sql_text=lambda: cast(Callable[[str], Any], "sql"),
         get_rows_to_operations=lambda: lambda rows: [{"id": 1}],
         get_phase_lookback=lambda: 30,
-        get_fetch_latest_heartbeat=lambda: "fetch",
-        get_summarize_phases=lambda: "summarize",
+        get_fetch_latest_heartbeat=lambda: cast(Callable[[Any, str], Any], "fetch"),
+        get_summarize_phases=lambda: cast(Callable[..., Any], "summarize"),
         fetch_latest_heartbeat_impl=lambda *args, **kwargs: calls.append(
             ("fetch", args, kwargs)
         ) or None,
-        get_json_loads=lambda: "loads",
+        get_json_loads=lambda: cast(Callable[[str], Any], "loads"),
         summarize_phases_impl=lambda operations: {"count": len(operations)},
     )
     return context, state
@@ -83,4 +84,4 @@ def test_timeline_context_is_immutable():
     context, _state = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_db_engine = lambda: None
+        setattr(context, "get_db_engine", lambda: None)

@@ -299,7 +299,7 @@ def test_record_browser_session_started_requires_identity_and_authorization():
 
     missing_authorization = _record_dependencies(
         claims={"labId": "42", "reservationKey": "RES-1", "pucHash": "puc-user"},
-        authorization=None,
+        authorization="",
     )
     with pytest.raises(HTTPException) as authorization_error:
         asyncio.run(record_browser_session_started(

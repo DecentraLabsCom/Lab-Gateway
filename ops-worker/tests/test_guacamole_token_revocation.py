@@ -1,5 +1,6 @@
 from cryptography.fernet import Fernet
 from sqlalchemy import create_engine, text
+from typing import Any, Mapping, cast
 
 import worker
 
@@ -215,9 +216,13 @@ def test_reconciliation_uses_guacamole_connection_history_for_short_sessions(mon
         queue_row = conn.execute(text(
             "SELECT username, created_at, expires_at FROM guacamole_token_revocation_queue"
         )).mappings().one()
-    history_start = worker._guacamole_connection_history_observed(queue_row)
+    history_start = worker._guacamole_connection_history_observed(
+        cast(Mapping[str, Any], queue_row)
+    )
     assert history_start is not None
-    assert int(history_start.timestamp()) == int(worker.to_utc(issued_at).timestamp())
+    observed_at = worker.to_utc(issued_at)
+    assert observed_at is not None
+    assert int(history_start.timestamp()) == int(observed_at.timestamp())
 
     class Response:
         status_code = 200
@@ -234,7 +239,9 @@ def test_reconciliation_uses_guacamole_connection_history_for_short_sessions(mon
 
     assert len(observed) == 1
     assert observed[0]["sessionId"].startswith("guac:")
-    assert observed[0]["observedAt"] == int(worker.to_utc(issued_at).timestamp())
+    observed_at = worker.to_utc(issued_at)
+    assert observed_at is not None
+    assert observed[0]["observedAt"] == int(observed_at.timestamp())
 
 
 def test_reconciliation_keeps_recently_expired_tokens_in_the_evidence_window(monkeypatch):
@@ -270,7 +277,9 @@ def test_reconciliation_keeps_recently_expired_tokens_in_the_evidence_window(mon
             "INSERT INTO guacamole_connection_history (history_id, username, start_date, end_date) "
             "VALUES (1, :username, datetime('now', '-60 seconds'), datetime('now', '-20 seconds'))"
         ), {"username": "dlabs-res-user"})
-    assert worker._guacamole_connection_history_observed(queue_row) is not None
+    assert worker._guacamole_connection_history_observed(
+        cast(Mapping[str, Any], queue_row)
+    ) is not None
 
     class Response:
         status_code = 200

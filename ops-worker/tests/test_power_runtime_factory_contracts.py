@@ -1,3 +1,5 @@
+from typing import Any, Callable, cast
+
 from power_runtime_factory import PowerRuntimeState, create_power_runtime
 
 
@@ -5,7 +7,11 @@ def test_create_power_runtime_contract_preserves_store_wiring_and_success_path()
     calls = []
     extensions = {}
     runtime = object()
-    credential_store = type("CredentialStore", (), {"get": lambda self, key: key})()
+    class CredentialStore:
+        def get(self, key: str) -> str:
+            return key
+
+    credential_store = CredentialStore()
 
     state = create_power_runtime(
         extensions=extensions,
@@ -16,7 +22,7 @@ def test_create_power_runtime_contract_preserves_store_wiring_and_success_path()
         credential_store_factory=lambda: calls.append("credential-store") or credential_store,
         runtime_from_path=lambda *args, **kwargs: calls.append(("from-path", args, kwargs)) or runtime,
         runtime_from_config=lambda *args, **kwargs: calls.append(("from-config", args, kwargs)) or "fallback",
-        record_operation="record",
+        record_operation=cast(Callable[..., Any], "record"),
         logger=type("Logger", (), {"error": lambda *_args, **_kwargs: calls.append("error")})(),
     )
 
@@ -43,7 +49,11 @@ def test_create_power_runtime_contract_preserves_store_wiring_and_success_path()
 def test_create_power_runtime_contract_skips_operation_store_without_db_and_falls_back_closed():
     calls = []
     extensions = {}
-    credential_store = type("CredentialStore", (), {"get": lambda self, key: key})()
+    class CredentialStore:
+        def get(self, key: str) -> str:
+            return key
+
+    credential_store = CredentialStore()
 
     def runtime_from_path(*_args, **_kwargs):
         calls.append("from-path")
@@ -58,7 +68,7 @@ def test_create_power_runtime_contract_skips_operation_store_without_db_and_fall
         credential_store_factory=lambda: credential_store,
         runtime_from_path=runtime_from_path,
         runtime_from_config=lambda *args, **kwargs: calls.append(("from-config", args, kwargs)) or "empty",
-        record_operation="record",
+        record_operation=cast(Callable[..., Any], "record"),
         logger=type("Logger", (), {"error": lambda *_args, **_kwargs: calls.append("error")})(),
     )
 

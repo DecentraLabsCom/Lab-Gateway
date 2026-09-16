@@ -53,8 +53,12 @@ def test_app_hooks_runtime_forwards_explicit_security_and_error_dependencies():
     assert isinstance(runtime, AppHooksRuntime)
     assert runtime.env_or_secret_file("NAME", "default") == "NAME:default"
     assert runtime.sanitize_log_value("value") == "safe:value"
-    assert runtime.as_utc_datetime("timestamp")[0] == "timestamp"
-    assert runtime.parse_reservation_datetime("timestamp")[0] == "timestamp"
+    utc_timestamp = runtime.as_utc_datetime("timestamp")
+    assert utc_timestamp is not None
+    assert utc_timestamp[0] == "timestamp"
+    reservation_timestamp = runtime.parse_reservation_datetime("timestamp")
+    assert reservation_timestamp is not None
+    assert reservation_timestamp[0] == "timestamp"
     assert runtime.request_id() == "request:42"
     assert runtime.internal_error_response(
         "context",
@@ -90,4 +94,4 @@ def test_app_hooks_context_is_immutable():
     context = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_jsonify = lambda: "changed"
+        setattr(context, "get_jsonify", lambda: "changed")

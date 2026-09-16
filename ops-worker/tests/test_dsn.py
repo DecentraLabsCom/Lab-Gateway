@@ -11,7 +11,9 @@ def test_build_ops_dsn_escapes_reserved_password_characters(monkeypatch):
     monkeypatch.setattr(worker, "MYSQL_PORT", 3306)
     monkeypatch.setattr(worker, "OPS_MYSQL_DATABASE", "blockchain_services")
 
-    url = make_url(worker.build_ops_dsn())
+    dsn = worker.build_ops_dsn()
+    assert dsn is not None
+    url = make_url(dsn)
 
     assert url.host == "mysql"
     assert url.username == "ops_backend"
@@ -26,7 +28,9 @@ def test_build_guacamole_dsn_uses_worker_guacamole_principal(monkeypatch):
     monkeypatch.setattr(worker, "MYSQL_DSN", None)
     monkeypatch.setattr(worker, "GUACAMOLE_MYSQL_DATABASE", "guacamole_db")
 
-    url = make_url(worker.build_guacamole_dsn())
+    dsn = worker.build_guacamole_dsn()
+    assert dsn is not None
+    url = make_url(dsn)
 
     assert url.username == "ops_guac"
     assert url.password == "Ops@guac_42"

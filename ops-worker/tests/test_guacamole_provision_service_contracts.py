@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+from typing import Optional
 
 import pytest
 
@@ -24,7 +25,7 @@ class _Result:
 
 
 class _Connection:
-    def __init__(self, dialect_name="sqlite", entity_id=7, cleanup_count=0):
+    def __init__(self, dialect_name="sqlite", entity_id: Optional[int] = 7, cleanup_count=0):
         self.dialect = _Dialect(dialect_name)
         self.entity_id = entity_id
         self.cleanup_count = cleanup_count

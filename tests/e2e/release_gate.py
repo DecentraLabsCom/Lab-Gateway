@@ -57,6 +57,13 @@ def _env_json(name: str, default: Any) -> Any:
     return default if not raw else json.loads(raw)
 
 
+def _required_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+
 def _expand_env(value: Any) -> Any:
     if isinstance(value, str):
         result = value
@@ -188,10 +195,8 @@ class ReleaseGate(unittest.TestCase):
                 self._assert_service_healthy(service)
 
     def test_redis_atomic_commands_and_durability_survive_restart(self) -> None:
-        rest_url = os.environ.get("REDIS_REST_URL")
-        token = os.environ.get("REDIS_REST_TOKEN")
-        self.assertTrue(rest_url, "REDIS_REST_URL is required")
-        self.assertTrue(token, "REDIS_REST_TOKEN is required")
+        rest_url = _required_env("REDIS_REST_URL")
+        token = _required_env("REDIS_REST_TOKEN")
         headers = {"Authorization": f"Bearer {token}"}
         key = f"release-gate:{os.getpid()}:{time.time_ns()}"
 
@@ -259,8 +264,7 @@ class ReleaseGate(unittest.TestCase):
                 pass
 
     def test_anvil_rpc_and_deployed_contract_evidence(self) -> None:
-        rpc_url = os.environ.get("ANVIL_RPC_URL")
-        self.assertTrue(rpc_url, "ANVIL_RPC_URL is required")
+        rpc_url = _required_env("ANVIL_RPC_URL")
 
         request_id = 0
 

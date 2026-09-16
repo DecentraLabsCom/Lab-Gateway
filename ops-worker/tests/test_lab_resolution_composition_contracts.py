@@ -1,11 +1,23 @@
+from dataclasses import dataclass
 from types import SimpleNamespace
 from pathlib import Path
+from typing import Any, Callable, cast
 
 import lab_resolution_composition as composition
 
 
-def _policy():
-    return SimpleNamespace(
+@dataclass(frozen=True)
+class _Policy:
+    lab_catalog_url: str = "http://blockchain-services:8080/lab-admin/labs"
+    lab_catalog_token: str = "catalog-token"
+    lab_catalog_token_header: str = "X-Lab-Manager-Token"
+    lab_catalog_allow_insecure: bool = True
+    lab_catalog_timeout_seconds: float = 4.0
+    lab_catalog_cache_seconds: float = 15.0
+
+
+def _policy() -> _Policy:
+    return _Policy(
         lab_catalog_url="http://blockchain-services:8080/lab-admin/labs",
         lab_catalog_token="catalog-token",
         lab_catalog_token_header="X-Lab-Manager-Token",
@@ -21,9 +33,9 @@ def test_composition_binds_catalog_policy_and_live_dependency_ports(monkeypatch)
     guacamole_connections = object()
     parse_selector = lambda value: int(str(value).split(":id:", 1)[1])
     normalize_key = lambda value: str(value or "").strip().lower()
-    http_get = object()
+    http_get = cast(Callable[..., Any], object())
     logger = object()
-    monotonic = object()
+    monotonic = cast(Callable[[], float], object())
 
     def capture_runtime(context):
         captured["context"] = context

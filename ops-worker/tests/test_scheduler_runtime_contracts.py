@@ -78,4 +78,4 @@ def test_scheduler_context_is_immutable():
     context = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_logger = lambda: "changed"
+        setattr(context, "get_logger", lambda: "changed")

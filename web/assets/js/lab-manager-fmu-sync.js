@@ -110,7 +110,6 @@
                 return;
             }
             if (fields.syncButton) fields.syncButton.disabled = true;
-            if (fields.result) fields.result.textContent = '';
             try {
                 const description = isFmu
                     ? await resolveDescription(accessKey, extraInfo.labDescription)
@@ -165,28 +164,12 @@
                 }
                 const data = await response.json();
                 if (data.disabled === true) {
-                    const message = 'AAS synchronization is disabled on this gateway.';
-                    if (fields.result) {
-                        fields.result.textContent = message;
-                        fields.result.style.color = 'var(--color-error, #c0392b)';
-                    }
                     showToast(`${isFmu ? 'FMU' : 'Physical laboratory'} AAS sync disabled: ${labId}`, 'error');
                     return;
-                }
-                if (fields.result) {
-                    const message = data.aasxUpload
-                        ? `Synced ${(data.uploadedAasIds || []).length} shell(s) + ${(data.uploadedSubmodelIds || []).length} submodel(s) from AASX`
-                        : `AAS shell synced \u2014 ${data.created ? 'created' : 'updated'}`;
-                    fields.result.textContent = message;
-                    fields.result.style.color = 'var(--color-success, #1a7f4b)';
                 }
                 showToast(`${isFmu ? 'FMU' : 'Physical laboratory'} AAS sync: ${labId} ok`, 'success');
             } catch (error) {
                 logger.error(error);
-                if (fields.result) {
-                    fields.result.textContent = error.message;
-                    fields.result.style.color = 'var(--color-error, #c0392b)';
-                }
                 showToast(`AAS synchronization failed: ${error.message}`, 'error');
             } finally {
                 if (fields.syncButton) fields.syncButton.disabled = false;

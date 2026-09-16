@@ -3,9 +3,11 @@ import hashlib
 import time
 import uuid
 from pathlib import Path
+from typing import cast
 
 import jwt
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,9 +26,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_private_key(path: Path):
+def load_private_key(path: Path) -> RSAPrivateKey:
     payload = path.read_bytes()
-    return serialization.load_pem_private_key(payload, password=None)
+    key = serialization.load_pem_private_key(payload, password=None)
+    if not isinstance(key, RSAPrivateKey):
+        raise ValueError("Private key must be RSA")
+    return key
 
 
 def compute_kid(private_key) -> str:

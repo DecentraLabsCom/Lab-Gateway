@@ -15,16 +15,25 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Any, cast
 from urllib.request import Request, urlopen
 
 import jwt
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from flask import Flask, jsonify, request
 
 
 KEY_PATH = Path(os.getenv("JWT_PRIVATE_KEY_PATH", "/keys/private_key.pem"))
-PRIVATE_KEY = serialization.load_pem_private_key(KEY_PATH.read_bytes(), password=None)
+PRIVATE_KEY = cast(
+    RSAPrivateKey,
+    serialization.load_pem_private_key(KEY_PATH.read_bytes(), password=None),
+)
+if not isinstance(PRIVATE_KEY, RSAPrivateKey):
+    raise RuntimeError("JWT private key must be RSA")
 PUBLIC_KEY = PRIVATE_KEY.public_key()
+if not isinstance(PUBLIC_KEY, RSAPublicKey):
+    raise RuntimeError("JWT public key must be RSA")
 PUBLIC_KEY_PEM = PUBLIC_KEY.public_bytes(
     serialization.Encoding.PEM,
     serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -298,9 +307,12 @@ def release_access_code():
 @app.post("/test/contract-state")
 def set_contract_state():
     global contract_status
-    body = request.get_json(silent=True) or {}
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    raw_status = body.get("status")
+    if raw_status is None:
+        return jsonify({"error": "status must be an integer"}), 400
     try:
-        contract_status = int(body.get("status"))
+        contract_status = int(raw_status)
     except (TypeError, ValueError):
         return jsonify({"error": "status must be an integer"}), 400
     return jsonify({"status": contract_status, "statusName": status_name(contract_status)})

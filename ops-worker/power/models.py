@@ -276,6 +276,13 @@ class PowerPolicyStep:
             if off_seconds == 0:
                 raise ValidationError("offSeconds must be greater than zero for cycle")
 
+        raw_conditions = value.get("conditions")
+        conditions: Dict[str, Any] = (
+            {str(key): condition_value for key, condition_value in raw_conditions.items()}
+            if isinstance(raw_conditions, Mapping)
+            else {}
+        )
+
         return cls(
             phase=phase,
             sequence=sequence,
@@ -321,11 +328,7 @@ class PowerPolicyStep:
                 maximum=5,
             ),
             allow_protected=_bool(value.get("allowProtected", value.get("allow_protected")), False),
-            conditions=(
-                dict(value.get("conditions"))
-                if isinstance(value.get("conditions"), Mapping)
-                else {}
-            ),
+            conditions=conditions,
         )
 
     def to_dict(self) -> Dict[str, Any]:

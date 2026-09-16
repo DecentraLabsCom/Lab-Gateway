@@ -102,8 +102,8 @@ class AuthHandler(BaseHTTPRequestHandler):
 
         write_json(self, 404, {"error": "not found"})
 
-    def log_message(self, _format: str, *_args: object) -> None:
-        return
+    def log_message(self, format: str, *args: object) -> None:
+        return None
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 import pytest
 
@@ -38,6 +38,12 @@ class CountingPowerDriver(PowerDriver):
             "profile": "test",
             "outletCount": 1,
         }
+
+    def read_configuration(self) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def apply_configuration(self, configuration: Mapping[str, Any]) -> Dict[str, Any]:
+        raise NotImplementedError
 
     def get_outlet_state(self, outlet_id: str) -> Dict[str, Any]:
         raise NotImplementedError
@@ -745,7 +751,9 @@ def test_power_operation_store_round_trips_successful_operation(db_engine):
     assert found["success"] is True
     assert found["reservationId"] == "reservation-store-1"
     assert found["observedStateAfter"] == "on"
-    assert store.list(reservation_id="reservation-store-1")[0]["action"] == "on"
+    operations = store.list(reservation_id="reservation-store-1")
+    assert operations is not None
+    assert operations[0]["action"] == "on"
 
 
 def test_durable_idempotency_skips_operation_after_runtime_rebuild(db_engine):

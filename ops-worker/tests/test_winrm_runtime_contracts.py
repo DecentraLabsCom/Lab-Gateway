@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
+from typing import Callable, Dict, Tuple
 
 import pytest
 
@@ -77,7 +78,9 @@ def test_winrm_runtime_uses_explicit_context_dependencies():
 
 
 def test_winrm_context_is_immutable_and_preserves_live_patch_points():
-    callbacks = {"policy": lambda *args: (True, 6000, "ntlm")}
+    callbacks: Dict[str, Callable[..., Tuple[bool, int, str]]] = {
+        "policy": lambda *args: (True, 6000, "ntlm")
+    }
     context = _context(get_resolve_policy=lambda: callbacks["policy"])
     runtime = create_winrm_runtime(context)
 
@@ -90,4 +93,4 @@ def test_winrm_context_is_immutable_and_preserves_live_patch_points():
     )
 
     with pytest.raises(FrozenInstanceError):
-        context.tls_error_code = "changed"
+        setattr(context, "tls_error_code", "changed")

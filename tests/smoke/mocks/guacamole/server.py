@@ -21,9 +21,9 @@ def json_response(handler, status, payload, headers=None):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
+    def log_message(self, format: str, *args: object) -> None:
         # Silence default logging to keep smoke output clean
-        return
+        return None
 
     def do_GET(self):
         parsed = urlparse(self.path)

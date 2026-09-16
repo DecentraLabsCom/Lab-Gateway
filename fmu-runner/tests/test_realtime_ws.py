@@ -2,10 +2,11 @@ import json
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, WebSocket
 from fastapi.testclient import TestClient
 
 from realtime_ws import RealtimeWsManager, _RealtimeSession, _StreamSubscription, _WsConnection
@@ -15,6 +16,10 @@ from runner_application import app, _runner_runtime
 
 
 client = TestClient(app)
+
+
+def _as_websocket(value: Any) -> WebSocket:
+    return cast(WebSocket, value)
 
 
 def _claims():
@@ -285,6 +290,7 @@ def test_ws_bearer_create_issues_ticket_and_confirms_before_session_created(_pat
 
     assert created["type"] == "session.created"
     issue_ticket.assert_awaited_once()
+    assert issue_ticket.await_args is not None
     assert issue_ticket.await_args.kwargs["authorization"] == "Bearer test-token"
     assert issue_ticket.await_args.kwargs["lab_id"] == "1"
     assert issue_ticket.await_args.kwargs["reservation_key"] == "res-1"
@@ -404,7 +410,7 @@ async def test_ws_internal_endpoint_rejects_invalid_internal_token():
 
     websocket = _WebSocket()
 
-    await manager.handle_websocket(websocket, internal=True)
+    await manager.handle_websocket(_as_websocket(websocket), internal=True)
 
     assert websocket.accepted is True
     assert websocket.sent[0]["type"] == "error"
@@ -439,7 +445,7 @@ async def test_ws_internal_endpoint_rejects_when_internal_token_is_not_configure
 
     websocket = _WebSocket()
 
-    await manager.handle_websocket(websocket, internal=True)
+    await manager.handle_websocket(_as_websocket(websocket), internal=True)
 
     assert websocket.sent[0]["code"] == "FORBIDDEN"
     assert 1008 in websocket.close_calls
@@ -645,7 +651,7 @@ def test_realtime_manager_extract_ws_token_rejects_query_and_cookie_credentials(
 
     for websocket in (from_query, from_cookie):
         with pytest.raises(HTTPException) as exc:
-            manager.extract_ws_token(websocket)
+            manager.extract_ws_token(_as_websocket(websocket))
         assert exc.value.status_code == 401
 
 
@@ -653,7 +659,7 @@ def test_realtime_manager_extract_ws_token_supports_bearer_header():
     manager = _build_manager()
     websocket = SimpleNamespace(headers={"authorization": "Bearer bearer-token"}, query_params={})
 
-    assert manager.extract_ws_token(websocket) == "bearer-token"
+    assert manager.extract_ws_token(_as_websocket(websocket)) == "bearer-token"
 
 
 def test_realtime_manager_extract_ws_token_requires_credentials():
@@ -661,7 +667,7 @@ def test_realtime_manager_extract_ws_token_requires_credentials():
     websocket = SimpleNamespace(headers={}, query_params={})
 
     with pytest.raises(HTTPException) as exc:
-        manager.extract_ws_token(websocket)
+        manager.extract_ws_token(_as_websocket(websocket))
 
     assert exc.value.status_code == 401
     assert exc.value.detail == "Missing authentication token"
@@ -783,7 +789,7 @@ def test_realtime_session_cache_evicts_old_entries():
 async def test_realtime_session_enqueue_event_replaces_oldest_when_queue_is_full():
     session = _build_session()
     websocket = SimpleNamespace(send_json=lambda payload: None)
-    connection = _WsConnection(websocket=websocket, queue_size=1)
+    connection = _WsConnection(websocket=_as_websocket(websocket), queue_size=1)
     connection.queue.put_nowait({"type": "old"})
     session.connection = connection
 
@@ -845,11 +851,11 @@ async def test_realtime_cleanup_loop_expires_detached_and_closed_sessions(monkey
     closed = _Session("sess-closed", closed=True)
     expired = _Session("sess-expired", exp=10, connection=object())
     detached = _Session("sess-detached", attach_deadline=20)
-    manager._sessions = {
+    manager._sessions = cast(dict[str, _RealtimeSession], {
         closed.session_id: closed,
         expired.session_id: expired,
         detached.session_id: detached,
-    }
+    })
 
     sleep_calls = {"count": 0}
 
@@ -1320,7 +1326,7 @@ async def test_realtime_step_once_validates_state_and_emits_progress(monkeypatch
 @pytest.mark.asyncio
 async def test_realtime_session_attach_and_detach_manage_tasks(monkeypatch):
     session = _build_session()
-    previous_connection = _WsConnection(websocket=SimpleNamespace(send_json=lambda payload: None), queue_size=1)
+    previous_connection = _WsConnection(websocket=_as_websocket(SimpleNamespace(send_json=lambda payload: None)), queue_size=1)
     previous_connection.sender_task = asyncio.create_task(asyncio.sleep(60))
     session.connection = previous_connection
     session._heartbeat_task = asyncio.create_task(asyncio.sleep(60))
@@ -1340,23 +1346,26 @@ async def test_realtime_session_attach_and_detach_manage_tasks(monkeypatch):
 
     monkeypatch.setattr("realtime_ws.asyncio.create_task", _fake_create_task)
 
-    new_connection = _WsConnection(websocket=SimpleNamespace(send_json=lambda payload: None), queue_size=1)
+    new_connection = _WsConnection(websocket=_as_websocket(SimpleNamespace(send_json=lambda payload: None)), queue_size=1)
     await session.attach(new_connection)
 
     assert session.connection is new_connection
+    new_sender_task = new_connection.sender_task
+    assert new_sender_task is not None
     assert previous_connection.sender_task.done() is True
     assert previous_connection.sender_task.cancelled() is True
-    assert sender_tasks[-1] is new_connection.sender_task
+    assert sender_tasks[-1] is new_sender_task
     assert session._heartbeat_task is heartbeat_tasks[-1]
     heartbeat_task = session._heartbeat_task
+    assert heartbeat_task is not None
 
     monkeypatch.setattr("realtime_ws.time.time", lambda: 100)
     await session.detach()
 
     assert session.connection is None
     assert session._heartbeat_task is None
-    assert new_connection.sender_task.done() is True
-    assert new_connection.sender_task.cancelled() is True
+    assert new_sender_task.done() is True
+    assert new_sender_task.cancelled() is True
     assert heartbeat_task.done() is True
     assert session.attach_deadline == 100 + session.manager.ws_attach_grace_seconds
 
@@ -1376,7 +1385,7 @@ async def test_realtime_sender_loop_sends_payload_and_stops_on_error():
             raise RuntimeError("send failed")
 
     session = _build_session()
-    connection = _WsConnection(websocket=_WebSocket(), queue_size=2)
+    connection = _WsConnection(websocket=_as_websocket(_WebSocket()), queue_size=2)
     await connection.queue.put({"type": "first"})
 
     await session._sender_loop(connection)
@@ -1600,7 +1609,7 @@ async def test_realtime_session_terminate_notifies_attached_client_on_expiry():
             sent.append(payload)
 
     session = _build_session()
-    session.connection = _WsConnection(websocket=_WebSocket(), queue_size=1)
+    session.connection = _WsConnection(websocket=_as_websocket(_WebSocket()), queue_size=1)
     session.connection.sender_task = asyncio.create_task(asyncio.sleep(60))
     session._heartbeat_task = asyncio.create_task(asyncio.sleep(60))
 
@@ -1694,7 +1703,7 @@ async def test_realtime_session_start_pause_resume_reset_run_until_and_terminate
     await session.run_until(1.0)
     assert session.current_time == 1.1
 
-    session.connection = _WsConnection(websocket=SimpleNamespace(send_json=lambda payload: None), queue_size=1)
+    session.connection = _WsConnection(websocket=_as_websocket(SimpleNamespace(send_json=lambda payload: None)), queue_size=1)
     session.connection.sender_task = asyncio.create_task(asyncio.sleep(60))
     session._heartbeat_task = asyncio.create_task(asyncio.sleep(60))
     event_payloads = []
@@ -1728,7 +1737,7 @@ async def test_realtime_manager_start_and_stop_manage_cleanup_task():
             self.terminated.append(reason)
 
     session = _Session("sess-1")
-    manager._sessions = {session.session_id: session}
+    manager._sessions = cast(dict[str, _RealtimeSession], {session.session_id: session})
 
     await manager.start()
     first_task = manager._cleanup_task

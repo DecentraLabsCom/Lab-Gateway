@@ -93,4 +93,4 @@ def test_winrm_trust_context_is_immutable():
     context = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.winrm_trust_root = lambda: "/changed"
+        setattr(context, "winrm_trust_root", lambda: "/changed")

@@ -73,7 +73,9 @@ def test_sync_route_publishes_runtime_status_for_generated_fmu():
     response = client.post("/aas-admin/fmu/demo.fmu/sync?labId=42")
 
     assert response.status_code == 200
+    assert get_runtime_status is not None
     get_runtime_status.assert_awaited_once_with("42")
+    assert sync_fmu_to_basyx.await_args is not None
     assert sync_fmu_to_basyx.await_args.kwargs["runtime_info"] == runtime_status
 
 
@@ -89,6 +91,7 @@ def test_sync_route_accepts_multipart_aasx_without_reading_fmu_metadata():
     assert response.status_code == 200
     resolve_fmu_path.assert_not_called()
     read_model_description.assert_not_called()
+    assert sync_fmu_to_basyx.await_args is not None
     assert sync_fmu_to_basyx.await_args.kwargs["lab_id"] == "99"
     assert sync_fmu_to_basyx.await_args.kwargs["aasx_bytes"] == b"aasx-bytes"
 
@@ -105,6 +108,7 @@ def test_generic_resource_route_accepts_physical_lab_aasx_without_reading_fmu_me
     assert response.status_code == 200
     resolve_fmu_path.assert_not_called()
     read_model_description.assert_not_called()
+    assert sync_fmu_to_basyx.await_args is not None
     sync_fmu_to_basyx.assert_awaited_once_with(
         lab_id="42",
         access_key="42",

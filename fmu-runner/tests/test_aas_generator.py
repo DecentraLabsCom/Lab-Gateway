@@ -7,6 +7,7 @@ endpoint with mocked BaSyx and FMU reading.
 
 import hashlib
 import sys
+from typing import Any
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
@@ -30,7 +31,7 @@ from aas_generator import (
     build_aas_shell,
 )
 
-_aas_mod = sys.modules["aas_generator"]
+_aas_mod: Any = sys.modules["aas_generator"]
 
 
 class TestAasIdGeneration:

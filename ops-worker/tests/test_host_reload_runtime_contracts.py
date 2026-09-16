@@ -55,4 +55,4 @@ def test_host_reload_context_is_immutable():
     context = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.load_config = "changed"
+        setattr(context, "load_config", "changed")

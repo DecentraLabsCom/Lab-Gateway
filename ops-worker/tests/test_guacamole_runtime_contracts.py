@@ -82,4 +82,4 @@ def test_guacamole_context_is_immutable():
     context = _context()
 
     with pytest.raises(FrozenInstanceError):
-        context.get_db_engine = lambda: "changed"
+        setattr(context, "get_db_engine", lambda: "changed")

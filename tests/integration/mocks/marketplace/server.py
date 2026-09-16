@@ -27,14 +27,17 @@ def sanitize_metadata(payload):
 
 
 def public_lab():
+    metadata = published_metadata
+    if metadata is None:
+        raise RuntimeError("lab metadata has not been published")
     return {
         "id": int(LAB_ID),
-        "name": published_metadata["name"],
-        "description": published_metadata["description"],
+        "name": metadata["name"],
+        "description": metadata["description"],
         "provider": LAB_OWNER,
         "resourceType": 0,
         "isListed": True,
-        "demoEnabled": published_metadata["demoEnabled"],
+        "demoEnabled": metadata["demoEnabled"],
         "accessURI": "https://gateway.example/guacamole",
     }
 

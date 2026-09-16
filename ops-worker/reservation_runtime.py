@@ -1,14 +1,27 @@
 """Composition adapter for the reservation orchestration runtime."""
 
-from typing import Any, Optional, Type
+from typing import Any, Optional, Protocol
 
 from reservation_context import ReservationRuntimeContext
 from reservation_orchestrator import ReservationOrchestrator as BaseReservationOrchestrator
 
 
+class ReservationOrchestratorClass(Protocol):
+    """Callable class surface exposed by the worker's composed orchestrator."""
+
+    __name__: str
+
+    def __call__(
+        self,
+        engine: Optional[Any],
+        registry: Any,
+    ) -> BaseReservationOrchestrator:
+        ...
+
+
 def create_reservation_orchestrator_class(
     context: ReservationRuntimeContext,
-) -> Type[BaseReservationOrchestrator]:
+) -> ReservationOrchestratorClass:
     """Create the two-argument worker constructor over explicit dependencies."""
 
     class WorkerReservationOrchestrator(BaseReservationOrchestrator):
@@ -36,4 +49,4 @@ def create_reservation_orchestrator_class(
     return WorkerReservationOrchestrator
 
 
-__all__ = ["create_reservation_orchestrator_class"]
+__all__ = ["ReservationOrchestratorClass", "create_reservation_orchestrator_class"]
