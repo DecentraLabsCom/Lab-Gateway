@@ -38,7 +38,7 @@ flowchart LR
     Gateway --> OpenResty["OpenResty /aas"]
     OpenResty --> BaSyx["Bundled BaSyx or external AAS server"]
     LabManager["Provider lab-manager"] -->|admin sync| Gateway
-    FmuRunner["fmu-runner"] --> BaSyx
+    FmuRunner["fmu-runner or fmu-runner-local"] --> BaSyx
     OpsWorker["ops-worker"] --> BaSyx
 ~~~
 
@@ -53,6 +53,11 @@ COMPOSE_PROFILES=aas docker compose up -d
 ~~~
 
 The bundled deployment persists AAS data through MongoDB and named volumes.
+For local FMU development, start both the `fmu-local-dev` and `aas` Compose
+profiles. The local runner joins only the internal `fmu_aas` network for the
+bundled BaSyx service; it does not receive Station or control-plane
+credentials. External AAS credentials are not exposed to that development
+runner.
 
 ### Lite Gateway
 
@@ -99,6 +104,11 @@ description when available and otherwise from the laboratory metadata. The
 laboratory's registered documentation links are all copied into the AAS, while
 its single Terms of Use URL is used for the AAS `License` property. No separate
 Documentation or License fields are needed in this panel.
+
+The same FMU synchronization endpoint works with the local development runner
+when the bundled `aas` profile is active. Without that profile, the local
+runner reports AAS as unavailable rather than silently claiming that a shell
+was updated.
 
 ### 3. Physical-lab shell synchronization
 

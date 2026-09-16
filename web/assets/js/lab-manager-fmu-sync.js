@@ -135,6 +135,15 @@
                     throw new Error(body.detail || `HTTP ${response.status}`);
                 }
                 const data = await response.json();
+                if (data.disabled === true) {
+                    const message = 'AAS synchronization is disabled on this gateway.';
+                    if (fields.result) {
+                        fields.result.textContent = message;
+                        fields.result.style.color = 'var(--color-error, #c0392b)';
+                    }
+                    showToast(`FMU AAS sync disabled: ${accessKey}`, 'error');
+                    return;
+                }
                 if (fields.result) {
                     const message = data.aasxUpload
                         ? `Synced ${(data.uploadedAasIds || []).length} shell(s) + ${(data.uploadedSubmodelIds || []).length} submodel(s) from AASX`

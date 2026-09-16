@@ -79,6 +79,10 @@ The complete energy workflow is in [Lab Manager energy operations](lab-manager-e
 
 1. Install and validate the FMU on Lab Station; see
    [FMI/FMU support](../fmi-fmu-support.md).
+   For local execution tests, start `fmu-local-dev` together with `aas`:
+   `docker compose --profile fmu-local-dev --profile aas up -d`. Do not run
+   `fmu-runner` at the same time because both profiles use the `fmu-runner`
+   proxy alias.
 2. Publish it from `Labs` as an `FMU simulation`. The `accessKey` must point
    to the FMU's operational identifier and `accessURI` must be the Gateway's
    public FMU endpoint.

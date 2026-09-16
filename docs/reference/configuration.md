@@ -171,13 +171,15 @@ application trust store, not a global container CA installation.
 | Profile | Enables | Requirements and boundary |
 | --- | --- | --- |
 | `fmu-runner` | Station-only production FMU facade | Set `FMU_RUNNER_ENABLED=true`, `FMU_JWT_AUDIENCE`, `FMU_STATION_BASE_URL`, and `FMU_STATION_INTERNAL_TOKEN`. |
-| `fmu-local-dev` | Isolated native local FMU executor | Development/test only. It is deliberately isolated from Station and control-plane credentials, but shares the dedicated internal `fmu_auth` network with `blockchain-services` for Full-mode JWKS retrieval. |
+| `fmu-local-dev` | Isolated native local FMU executor with bundled AAS sync for tests | Development/test only. It is deliberately isolated from Station and control-plane credentials, shares `fmu_auth` only for Full-mode JWKS retrieval, and uses the internal `fmu_aas` network for the optional bundled BaSyx server. |
 | `aas` | Bundled BaSyx and MongoDB | Set non-default BaSyx Mongo secrets. Omit it when using a valid configured external AAS. |
 | `certbot` | ACME certificate services | Set `CERTBOT_DOMAINS`, `CERTBOT_EMAIL`, and optionally `CERTBOT_STAGING`. The first domain must match `SERVER_NAME`; HTTP-01 requires public port 80. The deploy hook promotes the managed lineage to `certs/fullchain.pem` and `certs/privkey.pem`, and OpenResty reloads the validated pair automatically. |
 | `cloudflare` / `cloudflare-token` | Cloudflare Tunnel | Choose the profile described by the setup script; do not expose internal services through the tunnel. |
 
 The two FMU profiles use the same internal `fmu-runner` alias. Never run them
-together.
+together. To test FMU AAS synchronization locally, run `fmu-local-dev` and
+`aas` together; the local runner uses the bundled `http://basyx-aas-server:8081`
+endpoint and does not receive external AAS credentials.
 
 ## Change procedure
 

@@ -854,11 +854,11 @@ services:
       - fmu_aas
 
   # Explicit development-only local FMU execution. This service deliberately
-  # does not receive Station/control-plane/proxy-signing credentials and has
-  # no route to the control or AAS networks. It receives only the dedicated
-  # session-observer credential needed to redeem FMU tickets and record the
-  # accepted session. OpenResty reaches it through the fmu-runner network
-  # alias on the isolated internal edge.
+  # does not receive Station/control-plane/proxy-signing credentials. It
+  # receives only the dedicated session-observer credential needed to redeem
+  # FMU tickets and record the accepted session. The optional bundled BaSyx
+  # connection is limited to the internal fmu_aas network so local tests can
+  # publish AAS metadata without exposing the control plane or Lab Station.
   fmu-runner-local:
     profiles: ["fmu-local-dev"]
     build:
@@ -890,6 +890,10 @@ services:
       - MAX_CONCURRENT_PER_MODEL=${FMU_MAX_CONCURRENT_PER_MODEL:-10}
       - PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE=${FMU_PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE:-20}
       - WS_CREATE_RATE_LIMIT_PER_MINUTE=${WS_CREATE_RATE_LIMIT_PER_MINUTE:-30}
+      # Local development supports the bundled AAS profile. External AAS
+      # endpoints remain a production/ops-worker concern and fail closed here
+      # without an AAS service credential.
+      - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
     volumes:
       - ./fmu-data:/app/fmu-data:ro
       - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
@@ -935,6 +939,7 @@ services:
       # Full-mode local runners need the blockchain-services JWKS endpoint,
       # without joining the broader control-plane networks.
       fmu_auth:
+      fmu_aas:
 
   # BaSyx AAS Server - Asset Administration Shell registry & repository
   # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_admin_access.lua)
