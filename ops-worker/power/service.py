@@ -62,6 +62,14 @@ _CONTROLLER_CONFIG_FIELDS = frozenset(
 _DEVICE_CONFIGURATION_FIELDS = frozenset(
     {"powerOnDelaySeconds", "powerOffDelaySeconds", "rebootDurationSeconds"}
 )
+_LOCAL_OUTLET_FIELDS = (
+    "controllerId",
+    "outlet",
+    "displayName",
+    "logicalName",
+    "protected",
+    "defaultState",
+)
 
 
 def _controller_bool(value: Any, default: bool) -> bool:
@@ -208,7 +216,6 @@ def _controller_payload(
                 "displayName": str(raw_outlet.get("displayName") or "").strip() or None,
                 "logicalName": str(raw_outlet.get("logicalName") or "").strip() or None,
                 "protected": _controller_bool(raw_outlet.get("protected"), False),
-                "critical": _controller_bool(raw_outlet.get("critical"), False),
                 "defaultState": str(raw_outlet.get("defaultState") or "off").strip().lower(),
             }
         )
@@ -566,6 +573,19 @@ class PowerRuntime:
             raise PowerConfigError("power configuration could not be read") from exc
         if not isinstance(config, dict):
             raise PowerConfigError("power configuration must be an object")
+        raw_outlets = config.get("outlets")
+        if isinstance(raw_outlets, list):
+            config = dict(config)
+            config["outlets"] = [
+                {
+                    key: outlet[key]
+                    for key in _LOCAL_OUTLET_FIELDS
+                    if key in outlet
+                }
+                if isinstance(outlet, Mapping)
+                else outlet
+                for outlet in raw_outlets
+            ]
         return config
 
     def _write_config(self, config: Mapping[str, Any]) -> None:

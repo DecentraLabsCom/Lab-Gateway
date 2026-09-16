@@ -74,7 +74,6 @@ test('preserves controller form validation and NETIO payload shape', () => {
       displayName: '',
       logicalName: '',
       protected: false,
-      critical: false,
       defaultState: 'off',
     }),
   });
@@ -105,7 +104,6 @@ test('preserves controller form validation and NETIO payload shape', () => {
       outlet: '1',
       logicalName: '',
       protected: false,
-      critical: false,
       defaultState: 'off',
     }],
   });
@@ -163,7 +161,6 @@ test('sends physical output changes separately from Gateway-local metadata', () 
       deviceManaged: true,
       logicalName: '',
       protected: false,
-      critical: false,
       defaultState: 'off',
     }),
   });
@@ -199,7 +196,6 @@ test('sends physical output changes separately from Gateway-local metadata', () 
     outlet: '1',
     logicalName: '',
     protected: false,
-    critical: false,
     defaultState: 'off',
   }]);
 

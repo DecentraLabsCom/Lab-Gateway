@@ -37,7 +37,6 @@ test('renders power controller rows with discovery, outlet actions and escaping'
       displayName: 'PLC <main>',
       state: 'on',
       protected: true,
-      critical: true,
     }],
   }], false, false);
 
@@ -117,6 +116,23 @@ test('renders policy steps with controller and outlet choices', () => {
   assert.doesNotMatch(html, /data-step-field="offSeconds"/);
   assert.match(html, /data-step-field="allowProtected" checked/);
   assert.doesNotMatch(html, /data-step-field="readBackRequired" checked/);
+  assert.match(html, /Confirm state/);
+  assert.doesNotMatch(html, /Read back state/);
+  assert.doesNotMatch(html, /power-policy-step-options/);
+  const policyFieldsStart = html.indexOf('<div class="form-grid power-policy-step-fields">');
+  const policyConditionsStart = html.indexOf('power-policy-conditions');
+  for (const [label, field] of [
+    ['Required', 'required'],
+    ['Confirm state', 'readBackRequired'],
+    ['Allow protected outlet', 'allowProtected'],
+  ]) {
+    const labelIndex = html.indexOf(`<span>${label}</span>`);
+    const checkboxIndex = html.indexOf(`data-step-field="${field}"`, labelIndex);
+    assert.ok(
+      labelIndex > policyFieldsStart && checkboxIndex > labelIndex && checkboxIndex < policyConditionsStart,
+      `${label} should be a vertical checkbox field in the step grid`,
+    );
+  }
   assert.match(renderers.renderPowerPolicyStepsMarkup([], []), /No steps configured/);
 });
 
@@ -142,13 +158,24 @@ test('renders controller outlet drafts with escaped editable values', () => {
     logicalName: 'plc&main',
     defaultState: 'on',
     protected: true,
-    critical: false,
   }]);
 
   assert.match(html, /value="&lt;PLC&gt;"/);
   assert.match(html, /value="plc&amp;main"/);
   assert.match(html, /value="on" selected/);
   assert.match(html, /data-controller-outlet-field="protected" checked/);
+  const fieldsStart = html.indexOf('<div class="form-grid power-controller-outlet-fields">');
+  const protectedLabelIndex = html.indexOf('<span>Protected</span>');
+  const protectedIndex = html.indexOf('data-controller-outlet-field="protected" checked');
+  const fieldsEnd = html.indexOf('<div class="power-controller-outlet-options">');
+  assert.ok(
+    fieldsStart >= 0
+      && protectedLabelIndex > fieldsStart
+      && protectedIndex > protectedLabelIndex
+      && (fieldsEnd < 0 || protectedIndex < fieldsEnd),
+  );
+  assert.doesNotMatch(html, /Critical/);
+  assert.doesNotMatch(html, /power-controller-outlet-options/);
 });
 
 test('renders physical outputs from the device and hides local inventory controls', () => {
@@ -166,7 +193,6 @@ test('renders physical outputs from the device and hides local inventory control
     logicalName: 'plc',
     defaultState: 'off',
     protected: false,
-    critical: false,
   }], { deviceManaged: true });
 
   assert.match(html, /Device output name/);

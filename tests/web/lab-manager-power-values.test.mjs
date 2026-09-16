@@ -81,7 +81,6 @@ test('keeps policy and outlet defaults stable for incomplete input', () => {
     deviceManaged: false,
     logicalName: '',
     protected: true,
-    critical: false,
     defaultState: 'on',
   });
 });
