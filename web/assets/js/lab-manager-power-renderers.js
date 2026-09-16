@@ -149,7 +149,7 @@
                 </div>
                 <div class="form-grid power-controller-outlet-fields">
                     <label class="field">
-                        <span>Output ID (device)</span>
+                        <span>Output ID</span>
                         <input type="text" maxlength="64" data-controller-outlet-field="outlet" value="${escapeHtml(outlet.outlet)}" placeholder="1"${deviceManaged ? ' readonly' : ''}>
                     </label>
                     ${outputManagedByDevice ? renderDeviceConfigurationFields(outlet) : `
