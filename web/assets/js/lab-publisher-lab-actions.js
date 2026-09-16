@@ -21,6 +21,7 @@
             onClearEdit = () => {},
             onReload = async () => {},
             setStatus = () => {},
+            showToast = () => {},
         } = callbacks;
         let bound = false;
 
@@ -68,10 +69,14 @@
                     method: 'POST',
                 });
                 assertLabMutationSuccess(result, shouldList ? 'List' : 'Unlist');
-                setStatus(`${shouldList ? 'Listed' : 'Unlisted'} ${resolveLabDisplayName(lab)}. Tx: ${result.transactionHash || 'pending'}`, false);
+                const message = `${shouldList ? 'Listed' : 'Unlisted'} ${resolveLabDisplayName(lab)}`;
+                setStatus(`${message}. Tx: ${result.transactionHash || 'pending'}`, false);
+                showToast(message, 'success');
                 await onReload();
             } catch (err) {
-                setStatus(err.message || `${shouldList ? 'List' : 'Unlist'} failed`, true);
+                const message = err.message || `${shouldList ? 'List' : 'Unlist'} failed`;
+                setStatus(message, true);
+                showToast(message, 'error');
             } finally {
                 button.disabled = false;
             }
@@ -84,10 +89,14 @@
                 const result = await fetchJson(`/lab-admin/labs/${encodeURIComponent(lab.labId)}`, { method: 'DELETE' });
                 assertLabMutationSuccess(result, 'Delete');
                 if (getEditingLabId() === String(lab.labId)) onClearEdit();
-                setStatus(`Deleted ${resolveLabDisplayName(lab)} on-chain. Gateway content is hidden and retained according to its purge policy. Tx: ${result.transactionHash || 'pending'}`, false);
+                const message = `Deleted ${resolveLabDisplayName(lab)} on-chain`;
+                setStatus(`${message}. Gateway content is hidden and retained according to its purge policy. Tx: ${result.transactionHash || 'pending'}`, false);
+                showToast(message, 'success');
                 await onReload();
             } catch (err) {
-                setStatus(err.message || 'Delete failed', true);
+                const message = err.message || 'Delete failed';
+                setStatus(message, true);
+                showToast(message, 'error');
             } finally {
                 button.disabled = false;
             }

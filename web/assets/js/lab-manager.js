@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!toastModule) {
         throw new Error('LabManagerToast must load before lab-manager.js');
     }
-    const toastController = toastModule.createController({
+    const toastController = toastModule.getDefaultController({
         document,
         setTimeoutImpl: setTimeout,
     });
@@ -98,6 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
         requestJson,
         escapeHtml,
         normalizePagination,
+        showToast,
         logger: console,
     });
     const loadActivityFeed = activityFeedController.loadActivityFeed;

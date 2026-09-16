@@ -72,7 +72,9 @@
             if (!timelineResult || !timelineInput) return;
             const reservationId = (timelineInput.value || '').trim();
             if (!reservationId) {
-                setTimelineMessage('Provide a reservation id.');
+                const message = 'Provide a reservation id.';
+                setTimelineMessage(message);
+                showToast(message, 'error');
                 timelineInput.focus();
                 return;
             }
@@ -129,9 +131,7 @@
                 timelineState.limit = timelineState.pagination.limit;
                 timelineState.nextOffset = timelineState.pagination.nextOffset;
                 renderTimelineState();
-                if (!append) {
-                    showToast('Timeline loaded', 'success');
-                }
+                showToast(append ? 'More timeline operations loaded' : 'Timeline loaded', 'success');
             } catch (err) {
                 logger.error(err);
                 if (!append) {

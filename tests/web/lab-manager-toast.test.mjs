@@ -27,7 +27,7 @@ function loadToastController() {
       timeoutCallbacks.push({ callback, delay });
     },
   });
-  return { controller, toast, timeoutCallbacks };
+  return { controller, toast, timeoutCallbacks, window };
 }
 
 test('renders toast text and success styling, then clears it after the existing delay', () => {
@@ -52,4 +52,22 @@ test('keeps error styling and treats other types as informational', () => {
 
   controller.showToast('Working');
   assert.equal(toast.className, 'toast show ');
+});
+
+test('exposes one shared controller for all Lab Manager composition roots', () => {
+  const { toast, timeoutCallbacks, window } = loadToastController();
+  const first = window.LabManagerToast.getDefaultController({
+    document: {
+      querySelector: () => toast,
+    },
+    setTimeoutImpl: (callback, delay) => timeoutCallbacks.push({ callback, delay }),
+  });
+  const second = window.LabManagerToast.getDefaultController({
+    document: {
+      querySelector: () => toast,
+    },
+    setTimeoutImpl: () => {},
+  });
+
+  assert.strictEqual(first, second);
 });

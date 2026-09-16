@@ -35,20 +35,22 @@ function loadFeature({ fetchFmuMetadata = async () => ({}) } = {}) {
   const document = { getElementById: id => elements.get(id) || null };
   const context = vm.createContext({ window: {}, document, console, AbortController });
   vm.runInContext(source, context, { filename: 'lab-publisher-fmu-metadata-feature.js' });
+  const toasts = [];
   const controller = context.window.LabPublisherFmuMetadataFeature.createController({
     documentImpl: document,
     fetchFmuMetadata,
+    showToast: (message, type) => toasts.push({ message, type }),
     renderModelVariables: ({ modelVariables }) => ({
       hidden: modelVariables.length === 0,
       html: modelVariables.map(variable => `<span>${variable.name}</span>`).join(''),
     }),
   });
-  return { controller, elements };
+  return { controller, elements, toasts };
 }
 
-test('autodetects FMU metadata and owns the rendered variable state', async () => {
+test('autodetects FMU metadata, reports success and owns the rendered variable state', async () => {
   const calls = [];
-  const { controller, elements } = loadFeature({
+  const { controller, elements, toasts } = loadFeature({
     fetchFmuMetadata: async args => {
       calls.push(args);
       return {
@@ -78,10 +80,11 @@ test('autodetects FMU metadata and owns the rendered variable state', async () =
   assert.match(elements.get('labModelVariables').innerHTML, /speed/);
   assert.deepEqual(JSON.parse(JSON.stringify(controller.getModelVariables())), [{ name: 'speed', type: 'Real' }]);
   assert.equal(elements.get('labFmuDescribeStatus').textContent, 'FMU metadata loaded successfully.');
+  assert.deepEqual(toasts, [{ message: 'FMU metadata loaded', type: 'success' }]);
 });
 
-test('preserves missing-input and failure messages, then resets the FMU draft', async () => {
-  const { controller, elements } = loadFeature({
+test('reports missing input and failures, then resets the FMU draft', async () => {
+  const { controller, elements, toasts } = loadFeature({
     fetchFmuMetadata: async () => { throw new Error('describe failed'); },
   });
 
@@ -92,6 +95,10 @@ test('preserves missing-input and failure messages, then resets the FMU draft', 
   elements.get('labAccessURI').value = 'https://gateway.example/fmu';
   await controller.autoDetect();
   assert.equal(elements.get('labFmuDescribeStatus').textContent, 'Auto-detect failed: describe failed');
+  assert.deepEqual(toasts, [
+    { message: 'Set FMU File Name first.', type: 'error' },
+    { message: 'FMU metadata detection failed: describe failed', type: 'error' },
+  ]);
 
   controller.hydrate({
     fmiVersion: '3.0',

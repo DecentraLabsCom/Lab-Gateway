@@ -35,14 +35,16 @@ function loadFeature({ fetchImpl = async () => ({ ok: false, status: 500 }), dig
   };
   const context = vm.createContext({ window: {}, document, console, AbortController });
   vm.runInContext(source, context, { filename: 'lab-publisher-terms-feature.js' });
+  const toasts = [];
   const controller = context.window.LabPublisherTermsFeature.createController({
     documentImpl: document,
     fetchImpl,
+    showToast: (message, type) => toasts.push({ message, type }),
     digestImpl,
     guessVersionFromUrl: () => 'v-test',
     now,
   });
-  return { controller, elements };
+  return { controller, elements, toasts };
 }
 
 test('hydrates and resets terms metadata through the public boundary', () => {
@@ -74,7 +76,7 @@ test('hydrates and resets terms metadata through the public boundary', () => {
 
 test('fetches, hashes and reports terms metadata while preserving URL guards', async () => {
   const fetchCalls = [];
-  const { controller, elements } = loadFeature({
+  const { controller, elements, toasts } = loadFeature({
     fetchImpl: async (url, options) => {
       fetchCalls.push({ url, options });
       return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2]).buffer };
@@ -91,6 +93,7 @@ test('fetches, hashes and reports terms metadata while preserving URL guards', a
   assert.equal(elements.get('labTermsVersion').value, 'v-test');
   assert.equal(elements.get('labTermsEffectiveDate').value, '2026-09-15');
   assert.equal(elements.get('labTermsSha256').value, 'abcd');
+  assert.deepEqual(toasts, [{ message: 'Terms metadata loaded', type: 'success' }]);
   assert.equal(elements.get('labTermsStatus').textContent, 'Terms metadata auto-filled.');
 
   elements.get('labTermsUrl').value = 'ftp://example.test/terms.pdf';
@@ -98,4 +101,8 @@ test('fetches, hashes and reports terms metadata while preserving URL guards', a
   assert.equal(elements.get('labTermsStatus').textContent, 'Terms link must be an absolute HTTP(S) URL.');
   assert.equal(elements.get('labTermsVersion').value, '');
   assert.equal(elements.get('labTermsSha256').value, '');
+  assert.deepEqual(toasts, [
+    { message: 'Terms metadata loaded', type: 'success' },
+    { message: 'Terms link must be an absolute HTTP(S) URL.', type: 'error' },
+  ]);
 });

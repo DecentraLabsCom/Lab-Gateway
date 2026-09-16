@@ -50,10 +50,11 @@ function loadControllers(overrides = {}) {
     cycleSeconds: createField('10'),
     maintenanceMode: createField(),
   };
+  const toasts = [];
   const controller = context.window.LabManagerPowerControllers.createController({
     fields,
     fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({}) }),
-    showToast() {},
+    showToast: (message, type) => toasts.push({ message, type }),
     showOpsWarning() {},
     renderControllerRowsMarkup: () => [],
     renderControllerCredentialOptionsMarkup: () => '',
@@ -64,7 +65,7 @@ function loadControllers(overrides = {}) {
     documentImpl: { createElement: () => createField() },
     ...overrides,
   });
-  return { controller, fields };
+  return { controller, fields, toasts };
 }
 
 test('preserves controller form validation and NETIO payload shape', () => {
@@ -146,6 +147,27 @@ test('preserves controller load status and authorization request behavior', asyn
   assert.equal(calls[0].options.cache, 'no-store');
   assert.equal(calls[1].url, '/ops/api/power/controllers/status?refresh=true');
   assert.equal(calls[1].options.cache, 'no-store');
+});
+
+test('reports a successful explicit controller refresh', async () => {
+  const { controller, toasts } = loadControllers();
+
+  await controller.load({ notifySuccess: true });
+
+  assert.deepEqual(toasts, [{ message: 'Power controllers refreshed', type: 'success' }]);
+});
+
+test('reports access denial on an explicit controller refresh', async () => {
+  const { controller, toasts } = loadControllers({
+    fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}) }),
+  });
+
+  await controller.load({ notifyError: true });
+
+  assert.deepEqual(toasts, [{
+    message: 'Access denied: /ops blocked by Lab Manager access policy',
+    type: 'error',
+  }]);
 });
 
 test('sends the unified physical output name and keeps the local name aligned', () => {

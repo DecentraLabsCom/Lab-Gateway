@@ -7,6 +7,7 @@
         fetchImpl = global.fetch?.bind(global),
         renderModelVariables = () => ({ hidden: true, html: '' }),
         escapeHtml = value => String(value ?? ''),
+        showToast = () => {},
     } = {}) {
         const state = { modelVariables: [] };
         let activeRequest = null;
@@ -64,10 +65,12 @@
             const status = $('labFmuDescribeStatus');
             if (!fmuFileName) {
                 if (status) status.textContent = 'Set FMU File Name first.';
+                showToast('Set FMU File Name first.', 'error');
                 return;
             }
             if (!gatewayUrl) {
                 if (status) status.textContent = 'Set Access URI first.';
+                showToast('Set Access URI first.', 'error');
                 return;
             }
             activeRequest?.abort();
@@ -85,9 +88,11 @@
                 if (activeRequest !== request) return;
                 hydrate(metadata);
                 if (status) status.textContent = 'FMU metadata loaded successfully.';
+                showToast('FMU metadata loaded', 'success');
             } catch (err) {
                 if (err.name === 'AbortError') return;
                 if (status) status.textContent = `Auto-detect failed: ${err.message}`;
+                showToast(`FMU metadata detection failed: ${err.message}`, 'error');
             } finally {
                 if (activeRequest === request) activeRequest = null;
             }

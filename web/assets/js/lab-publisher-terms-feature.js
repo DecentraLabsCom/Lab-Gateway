@@ -7,6 +7,7 @@
         digestImpl = global.crypto?.subtle?.digest?.bind(global.crypto.subtle),
         guessVersionFromUrl = () => '',
         now = () => new Date(),
+        showToast = () => {},
     } = {}) {
         let bound = false;
         let activeRequest = null;
@@ -60,10 +61,12 @@
             if (!url) return;
             if (!/^https?:\/\//i.test(url)) {
                 if (status) status.textContent = 'Terms link must be an absolute HTTP(S) URL.';
+                showToast('Terms link must be an absolute HTTP(S) URL.', 'error');
                 return;
             }
             if (!fetchImpl) {
                 if (status) status.textContent = 'Unable to auto-fill version/date/hash for this link.';
+                showToast('Unable to auto-fill Terms metadata.', 'error');
                 return;
             }
 
@@ -83,9 +86,12 @@
                         ? 'Terms metadata auto-filled.'
                         : 'Terms date auto-filled; SHA-256 unavailable in this browser context.';
                 }
+                showToast('Terms metadata loaded', 'success');
             } catch (err) {
                 if (err.name === 'AbortError') return;
-                if (status) status.textContent = 'Unable to auto-fill version/date/hash for this link.';
+                const message = 'Unable to auto-fill version/date/hash for this link.';
+                if (status) status.textContent = message;
+                showToast(message, 'error');
             } finally {
                 if (activeRequest === request) activeRequest = null;
             }

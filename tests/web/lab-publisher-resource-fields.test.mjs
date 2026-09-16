@@ -4,6 +4,7 @@ import vm from 'node:vm';
 
 const repoRoot = new URL('../../', import.meta.url);
 const scriptPath = new URL('web/assets/js/lab-publisher.js', repoRoot);
+const toastScriptPath = new URL('web/assets/js/core/toast.js', repoRoot);
 const valuesScriptPath = new URL('web/assets/js/lab-publisher-values.js', repoRoot);
 const renderersScriptPath = new URL('web/assets/js/lab-publisher-renderers.js', repoRoot);
 const resourcesScriptPath = new URL('web/assets/js/lab-publisher-resources.js', repoRoot);
@@ -132,6 +133,7 @@ function createDocument() {
 
 function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected fetch call'); } } = {}) {
   const source = fs.readFileSync(scriptPath, 'utf8');
+  const toastSource = fs.readFileSync(toastScriptPath, 'utf8');
   const valuesSource = fs.readFileSync(valuesScriptPath, 'utf8');
   const renderersSource = fs.readFileSync(renderersScriptPath, 'utf8');
   const resourcesSource = fs.readFileSync(resourcesScriptPath, 'utf8');
@@ -173,7 +175,8 @@ function loadPublisherHooks({ fetch = async () => { throw new Error('Unexpected 
   );
   const document = createDocument();
   const window = { location: { origin: 'https://gateway.example' } };
-  const context = vm.createContext({ AbortController, URL, document, fetch, window, console });
+  const context = vm.createContext({ AbortController, URL, document, fetch, window, console, setTimeout });
+  vm.runInContext(toastSource, context, { filename: 'toast.js' });
   vm.runInContext(valuesSource, context, { filename: 'lab-publisher-values.js' });
   vm.runInContext(renderersSource, context, { filename: 'lab-publisher-renderers.js' });
   vm.runInContext(resourcesSource, context, { filename: 'lab-publisher-resources.js' });

@@ -52,6 +52,7 @@ function loadActivityController({ fetchImpl }) {
     filename: 'lab-manager-activity.js',
   });
 
+  const toasts = [];
   const controller = window.LabManagerActivity.createController({
     document,
     fetchImpl,
@@ -69,10 +70,11 @@ function loadActivityController({ fetchImpl }) {
       nextOffset: Number(pagination?.nextOffset) || offset + returned,
       hasMore: pagination?.hasMore === true,
     }),
+    showToast: (message, type) => toasts.push({ message, type }),
     logger: { error() {} },
   });
 
-  return { activityFeed, controller };
+  return { activityFeed, controller, toasts };
 }
 
 test('loads and appends activity pages without changing request options', async () => {
@@ -87,7 +89,7 @@ test('loads and appends activity pages without changing request options', async 
       pagination: { limit: 8, total: 2, nextOffset: 2, hasMore: false },
     },
   ];
-  const { activityFeed, controller } = loadActivityController({
+  const { activityFeed, controller, toasts } = loadActivityController({
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
       return { ok: true, status: 200, json: async () => pages.shift() };
@@ -112,6 +114,7 @@ test('loads and appends activity pages without changing request options', async 
   assert.match(activityFeed.children[1].innerHTML, /stop/);
   assert.equal(activityFeed.children[2].className, 'activity-pagination');
   assert.equal(activityFeed.children[2].children.length, 1);
+  assert.deepEqual(toasts, [{ message: 'More activity loaded', type: 'success' }]);
 });
 
 test('renders escaped activity errors without leaking server text', async () => {

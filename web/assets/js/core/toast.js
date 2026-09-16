@@ -1,6 +1,8 @@
 (function (root) {
     'use strict';
 
+    let defaultController;
+
     function createController({ document, setTimeoutImpl }) {
         function showToast(message, type = 'info') {
             const toast = document.querySelector('#toast');
@@ -12,5 +14,12 @@
         return Object.freeze({ showToast });
     }
 
-    root.LabManagerToast = Object.freeze({ createController });
+    function getDefaultController({ document = root.document, setTimeoutImpl = root.setTimeout } = {}) {
+        if (!defaultController) {
+            defaultController = createController({ document, setTimeoutImpl });
+        }
+        return defaultController;
+    }
+
+    root.LabManagerToast = Object.freeze({ createController, getDefaultController });
 })(window);

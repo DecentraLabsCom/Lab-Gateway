@@ -121,6 +121,15 @@
     const renderAssetList = publisherAssets.renderAssetList;
     const buildMetadataPayload = publisherMetadata.buildMetadata;
     const $ = (id) => document.getElementById(id);
+    const toastModule = window.LabManagerToast;
+    if (!toastModule) {
+        throw new Error('LabManagerToast must load before lab-publisher.js');
+    }
+    const toastController = toastModule.getDefaultController({
+        document,
+        setTimeoutImpl: setTimeout,
+    });
+    const showToast = toastController.showToast;
     let assetsController;
     let resourceFeatureController;
     let labActionsController;
@@ -157,7 +166,7 @@
             renderAssetList,
             escapeHtml,
             escapeAttr,
-            callbacks: { setStatus },
+            callbacks: { setStatus, showToast },
         });
         assetsController.bind();
 
@@ -200,6 +209,7 @@
             documentImpl: document,
             fetchImpl: fetch,
             guessVersionFromUrl: publisherValues.guessVersionFromUrl,
+            showToast,
         });
         termsController.bind();
 
@@ -209,6 +219,7 @@
             fetchImpl: fetch,
             renderModelVariables: renderModelVariablesTable,
             escapeHtml,
+            showToast,
         });
 
         metadataController = publisherMetadataFeature.createController({
@@ -286,12 +297,13 @@
                 onClearEdit: () => clearEditMode(false),
                 onReload: loadPublisherData,
                 setStatus,
+                showToast,
             },
         });
         labActionsController.bind();
 
         initMarketplaceFields();
-        refresh.addEventListener('click', loadPublisherData);
+        refresh.addEventListener('click', () => loadPublisherData({ notifySuccess: true }));
         submit.addEventListener('click', publishLab);
         if (cancelEdit) cancelEdit.addEventListener('click', () => clearEditMode(true));
         images.addEventListener('change', () => void assetsController.upload(images.files, 'images'));
@@ -321,13 +333,19 @@
     }
 
     async function loadPublisherData(options = {}) {
+        const { notifySuccess = false, ...requestOptions } = options;
         setStatus('Loading provider status...', false);
         try {
-            const [status, hosts, labs] = await Promise.all([
-                fetchJson('/lab-admin/status', options),
-                fetchJson('/ops/api/hosts', options).catch(() => null),
-                fetchJson('/lab-admin/labs', options).catch(() => null),
+            const optionalFetch = promise => promise
+                .then(value => ({ value }))
+                .catch(error => ({ error }));
+            const [status, hostsResult, labsResult] = await Promise.all([
+                fetchJson('/lab-admin/status', requestOptions),
+                optionalFetch(fetchJson('/ops/api/hosts', requestOptions)),
+                optionalFetch(fetchJson('/lab-admin/labs', requestOptions)),
             ]);
+            const hosts = hostsResult.value || null;
+            const labs = labsResult.value || null;
             state.status = status;
             state.hosts = hosts?.hosts || [];
             const detectedResources = collectDetectedResources({
@@ -343,8 +361,22 @@
                 ? `Provider wallet: ${status.providerAddress}`
                 : 'This Gateway wallet is not registered as provider yet.';
             setStatus(providerLabel, !status?.isProvider);
+            if (notifySuccess && (hostsResult.error || labsResult.error)) {
+                const failedParts = [
+                    hostsResult.error ? 'host inventory' : '',
+                    labsResult.error ? 'published laboratories' : '',
+                ].filter(Boolean).join(' and ');
+                showToast(`Publisher refresh incomplete: unable to load ${failedParts}`, 'error');
+            } else if (notifySuccess) {
+                showToast(
+                    status?.isProvider ? 'Lab Publisher data refreshed' : providerLabel,
+                    status?.isProvider ? 'success' : 'error',
+                );
+            }
         } catch (err) {
-            setStatus(err.message || 'Unable to load Lab Publisher data', true);
+            const message = err.message || 'Unable to load Lab Publisher data';
+            setStatus(message, true);
+            if (notifySuccess) showToast(message, 'error');
         }
     }
 
@@ -379,10 +411,13 @@
                 : action.includes('andlist') ? 'Listed' : 'Created';
             const resultLabLabel = result.labId ? ` ${resolveStateLabDisplayName(result.labId)}` : '';
             setStatus(`${editing ? 'Updated' : createLabel}.${transactionMessage}${resultLabLabel}`, false);
+            showToast(`${editing ? 'Laboratory updated' : 'Laboratory published'}${resultLabLabel}`, 'success');
             if (editing) clearEditMode(false);
             await loadPublisherData();
         } catch (err) {
-            setStatus(err.message || (state.editingLabId ? 'Update failed' : 'Publish failed'), true);
+            const message = err.message || (state.editingLabId ? 'Update failed' : 'Publish failed');
+            setStatus(message, true);
+            showToast(message, 'error');
         } finally {
             $('labPublisherSubmitBtn').disabled = false;
         }
@@ -562,7 +597,10 @@
         state.editingLabId = null;
         resetLabPublisherForm();
         updateEditControls();
-        if (resetStatus) setStatus('Edit cancelled.', false);
+        if (resetStatus) {
+            setStatus('Edit cancelled.', false);
+            showToast('Edit cancelled', 'info');
+        }
     }
 
     function resetLabPublisherForm() {
