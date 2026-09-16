@@ -65,7 +65,6 @@ _DEVICE_CONFIGURATION_FIELDS = frozenset(
 _LOCAL_OUTLET_FIELDS = (
     "controllerId",
     "outlet",
-    "displayName",
     "logicalName",
     "protected",
     "defaultState",
@@ -213,7 +212,6 @@ def _controller_payload(
             {
                 "controllerId": controller_id,
                 "outlet": outlet_id,
-                "displayName": str(raw_outlet.get("displayName") or "").strip() or None,
                 "logicalName": str(raw_outlet.get("logicalName") or "").strip() or None,
                 "protected": _controller_bool(raw_outlet.get("protected"), False),
                 "defaultState": str(raw_outlet.get("defaultState") or "off").strip().lower(),

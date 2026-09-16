@@ -329,11 +329,12 @@
                 if (!outletId) throw new Error(`Outlet ${index + 1}: ID is required`);
                 const local = {
                     outlet: outletId,
-                    logicalName: outlet.logicalName || '',
+                    logicalName: isDeviceController()
+                        ? (outlet.deviceName || outlet.logicalName || '')
+                        : (outlet.logicalName || ''),
                     protected: outlet.protected === true,
                     defaultState: outlet.defaultState === 'on' ? 'on' : 'off',
                 };
-                if (!isDeviceController()) local.displayName = outlet.displayName || '';
                 return local;
             });
             if (!isDeviceController() && !outlets.length) throw new Error('At least one outlet is required');

@@ -34,7 +34,7 @@ test('renders power controller rows with discovery, outlet actions and escaping'
     discovery: { reachable: true },
     outlets: [{
       outlet: '1<&',
-      displayName: 'PLC <main>',
+      logicalName: 'PLC <main>',
       state: 'on',
       protected: true,
     }],
@@ -154,14 +154,13 @@ test('renders cycle timing only for cycle actions', () => {
 test('renders controller outlet drafts with escaped editable values', () => {
   const html = renderer().renderPowerControllerOutletsMarkup([{
     outlet: '1',
-    displayName: '<PLC>',
-    logicalName: 'plc&main',
+    logicalName: '<PLC>',
     defaultState: 'on',
     protected: true,
   }]);
 
   assert.match(html, /value="&lt;PLC&gt;"/);
-  assert.match(html, /value="plc&amp;main"/);
+  assert.match(html, /Name/);
   assert.match(html, /value="on" selected/);
   assert.match(html, /data-controller-outlet-field="protected" checked/);
   const fieldsStart = html.indexOf('<div class="form-grid power-controller-outlet-fields">');
@@ -174,6 +173,7 @@ test('renders controller outlet drafts with escaped editable values', () => {
       && protectedIndex > protectedLabelIndex
       && (fieldsEnd < 0 || protectedIndex < fieldsEnd),
   );
+  assert.doesNotMatch(html, /Logical name/);
   assert.doesNotMatch(html, /Critical/);
   assert.doesNotMatch(html, /power-controller-outlet-options/);
 });
@@ -195,7 +195,7 @@ test('renders physical outputs from the device and hides local inventory control
     protected: false,
   }], { deviceManaged: true });
 
-  assert.match(html, /Device output name/);
+  assert.match(html, /<span>Name<\/span>/);
   assert.match(html, /value="&lt;PLC&gt;"/);
   assert.match(html, /data-controller-device-config-field="powerOnDelaySeconds"/);
   assert.match(html, /value="30"/);
@@ -212,7 +212,7 @@ test('renders NETIO physical output names as read-only', () => {
     deviceManaged: true,
   }], { deviceManaged: true });
 
-  assert.match(html, /Device output name \(read-only\)/);
+  assert.match(html, /Name \(read-only\)/);
   assert.match(html, /data-controller-outlet-field="deviceName"[^>]+readonly/);
   assert.doesNotMatch(html, /data-controller-outlet-action="remove"/);
 });

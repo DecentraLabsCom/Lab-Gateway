@@ -39,7 +39,6 @@
                 : [];
             return {
                 outlet: String(outlet.outlet || outlet.outletKey || '').trim(),
-                displayName: String(outlet.displayName || '').trim(),
                 deviceName: String(outlet.deviceName || outlet.name || '').trim(),
                 deviceConfig,
                 deviceConfigFields,

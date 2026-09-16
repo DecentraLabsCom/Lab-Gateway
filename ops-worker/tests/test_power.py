@@ -92,7 +92,7 @@ def build_counting_status_runtime(*, status_cache_ttl_seconds=60):
     controller = RegisteredController(
         PowerController("counting-1", "Counting controller", "test"),
         driver,
-        {"1": PowerOutlet("counting-1", "1", display_name="Bench outlet")},
+        {"1": PowerOutlet("counting-1", "1", logical_name="Bench outlet")},
     )
     runtime = PowerRuntime(
         PowerRegistry([controller]),
@@ -456,7 +456,6 @@ def test_registry_uses_live_outputs_without_a_duplicated_local_catalog():
 
     assert [outlet["outlet"] for outlet in description["outlets"]] == ["1", "4"]
     assert [outlet["deviceName"] for outlet in description["outlets"]] == ["PLC", "HMI"]
-    assert [outlet["displayName"] for outlet in description["outlets"]] == ["PLC", "HMI"]
     assert registry.get_outlet("live-1", "4")[1].outlet_key == "4"
 
 

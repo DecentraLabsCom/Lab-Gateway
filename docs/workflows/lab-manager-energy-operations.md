@@ -122,18 +122,19 @@ For NETIO:
 
 For a physical controller, the `Controller outputs` panel is populated after
 the live status check. Do not create a duplicate list of sockets: output IDs,
-device names, state and supported device configuration come from the
-controller. The Gateway stores only its local overlay:
+names, state and supported device configuration come from the controller. The
+editor shows one `Name` field per output:
 
-- `Logical name` for policy/operator recognition;
-- `Default state`, normally `Off`;
-- `Protected` for outlets that must not be switched accidentally.
+- for APC SNMP, it is the physical output name and saving a change writes it
+  to the APC before persisting the Gateway metadata;
+- for NETIO, it is the physical output name and is read-only because the JSON
+  API does not expose a name-write operation;
+- for a local or mock controller, it is the Gateway-local output name.
 
-For APC SNMP, the device output name and power-on delay, power-off delay and
-reboot duration fields are editable in this panel. Saving a change writes it
-to the APC first and then persists the Gateway overlay; the driver reads the
-values back. The SNMP credential must have write permission. The supported
-delay ranges are 0--7200 seconds and reboot duration is 5--60 seconds.
+The Gateway also stores `Default state`, normally `Off`, and `Protected` for
+outlets that must not be switched accidentally. The SNMP credential must have
+write permission. The supported delay ranges are 0--7200 seconds and reboot
+duration is 5--60 seconds.
 
 NETIO's `/netio.json` endpoint exposes output names and live state, but does
 not expose those device-configuration writes. NETIO names and configuration
