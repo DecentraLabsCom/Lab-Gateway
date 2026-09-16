@@ -31,6 +31,9 @@ function createFields() {
     powerPolicySelect: createElement('powerPolicySelect'),
     fmuSyncKey: createElement('fmuSyncKey'),
     aasLinkKey: createElement('aasLinkKey'),
+    aasx: {
+      packageList: createElement('aasxPackageList'),
+    },
   };
   fields.fmuSync = {};
   fields.aasLink = {};
@@ -70,10 +73,26 @@ function loadDigitalTwins({
       return { initialize: () => aasCalls.push('initialize') };
     },
   };
+  const aasxCalls = [];
+  const aasxModule = {
+    createController: (options) => {
+      aasxCalls.push(options);
+      return {
+        initialize: () => aasxCalls.push('initialize'),
+        setManagedLabs: () => {},
+        loadPackages: async () => true,
+        clearPackages: () => {},
+      };
+    },
+  };
   const fetchCalls = [];
   const context = vm.createContext({
     document,
-    window: { LabManagerFmuSync: fmuSyncModule, LabManagerAasLink: aasLinkModule },
+    window: {
+      LabManagerFmuSync: fmuSyncModule,
+      LabManagerAasLink: aasLinkModule,
+      LabManagerAasx: aasxModule,
+    },
     console,
     Intl,
     Promise,
@@ -102,8 +121,9 @@ function loadDigitalTwins({
     documentImpl: document,
     fmuSyncModule,
     aasLinkModule,
+    aasxModule,
   });
-  return { controller, fields, fetchCalls, fmuCalls, aasCalls };
+  return { controller, fields, fetchCalls, fmuCalls, aasCalls, aasxCalls };
 }
 
 test('loads managed labs once and populates both digital-twin selectors by stable lab ID', async () => {
@@ -253,8 +273,8 @@ test('hides physical laboratories when the Ops Worker associations cannot be loa
   assert.deepEqual(fields.aasLinkKey.options.map(option => option.value), ['1']);
 });
 
-test('initializes FMU sync and AAS link with the existing field boundaries', () => {
-  const { controller, fields, fmuCalls, aasCalls } = loadDigitalTwins({
+test('initializes FMU sync, AAS link and AASX catalog with their field boundaries', () => {
+  const { controller, fields, fmuCalls, aasCalls, aasxCalls } = loadDigitalTwins({
     labsResponse: { ok: true, status: 200, json: async () => ({ labs: [] }) },
   });
 
@@ -263,6 +283,8 @@ test('initializes FMU sync and AAS link with the existing field boundaries', () 
   assert.equal(aasCalls.length, 2);
   assert.equal(fmuCalls[0].fields, fields.fmuSync);
   assert.equal(aasCalls[0].fields, fields.aasLink);
+  assert.equal(aasxCalls[0].fields, fields.aasx);
+  assert.equal(aasxCalls[0].resolveLabDisplayName({ labId: '11' }), 'Lab #11');
 });
 
 test('resolves managed lab names with stable id fallbacks', () => {

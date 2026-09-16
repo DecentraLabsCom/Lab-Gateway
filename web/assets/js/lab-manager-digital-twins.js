@@ -6,8 +6,10 @@
         fetchImpl,
         showToast,
         showOpsWarning,
+        escapeHtml,
         fmuSyncModule = root.LabManagerFmuSync,
         aasLinkModule = root.LabManagerAasLink,
+        aasxModule = root.LabManagerAasx,
         formDataCtor = root.FormData,
         urlSearchParamsCtor = root.URLSearchParams,
         documentImpl = typeof document === 'undefined' ? root.document : document,
@@ -19,6 +21,9 @@
         if (!aasLinkModule) {
             throw new Error('LabManagerAasLink must load before the digital-twins controller');
         }
+        if (!aasxModule) {
+            throw new Error('LabManagerAasx must load before the digital-twins controller');
+        }
 
         let managedLabsInitialized = false;
         let managedLabsPromise = null;
@@ -26,6 +31,7 @@
         let physicalLabIdsWithRegisteredConnection = new Set();
         let fmuSyncController = null;
         let aasLinkController = null;
+        let aasxController = null;
 
         function resolveLabDisplayName(lab) {
             const candidates = [
@@ -185,6 +191,7 @@
             renderPowerPolicyLabOptions([]);
             renderDigitalTwinLaboratoryOptions(fields.fmuSyncKey, []);
             renderDigitalTwinLaboratoryOptions(fields.aasLinkKey, []);
+            aasxController?.clearPackages();
         }
 
         async function loadManagedLabs(options = {}) {
@@ -192,6 +199,7 @@
                 !fields.powerPolicyLabSelect
                 && !fields.fmuSyncKey
                 && !fields.aasLinkKey
+                && !fields.aasx?.packageList
             ) return;
             const selectedPowerPolicyLabId = fields.powerPolicyLabSelect?.value || '';
             const selectedFmuLabId = fields.fmuSyncKey?.value || '';
@@ -213,9 +221,11 @@
                 managedLabs = Array.isArray(body.labs) ? body.labs : [];
                 await loadLabAssociations(options);
                 const digitalTwinLabs = digitalTwinLaboratories(managedLabs);
+                aasxController?.setManagedLabs(managedLabs);
                 renderPowerPolicyLabOptions(managedLabs, selectedPowerPolicyLabId);
                 renderDigitalTwinLaboratoryOptions(fields.fmuSyncKey, digitalTwinLabs, selectedFmuLabId);
                 renderDigitalTwinLaboratoryOptions(fields.aasLinkKey, digitalTwinLabs, selectedAasLinkLabId);
+                if (aasxController) await aasxController.loadPackages(options);
             } catch (error) {
                 logger.warn('Unable to load provider laboratories', error);
                 clearManagedLabs();
@@ -247,6 +257,15 @@
                 showToast,
             });
             aasLinkController.initialize();
+            aasxController = aasxModule.createController({
+                fields: fields.aasx,
+                fetchImpl,
+                showToast,
+                escapeHtml,
+                resolveLabDisplayName,
+                logger,
+            });
+            aasxController.initialize();
         }
 
         return Object.freeze({

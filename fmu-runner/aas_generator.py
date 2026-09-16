@@ -50,6 +50,12 @@ FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
 _AAS_LAB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 _AAS_ENCODED_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,1024}")
 _AAS_COLLECTIONS = frozenset({"shells", "submodels"})
+_AASX_MEDIA_TYPE = "application/asset-administration-shell-package+xml"
+_AASX_MEDIA_TYPES = frozenset({
+    _AASX_MEDIA_TYPE,
+    "application/aasx+xml",
+    "application/aas+zip",
+})
 
 _SEMANTIC_ID_IDTA_02006 = "https://admin-shell.io/idta/SimulationModels/SimulationModels/1/0"
 _SEMANTIC_ID_SIMULATION_MODEL = "https://admin-shell.io/idta/SimulationModels/SimulationModel/1/0"
@@ -702,6 +708,175 @@ def _parse_aasx(aasx_bytes: bytes) -> dict:
         logger.error("AASX upload: not a valid ZIP/AASX file")
 
     return {"shells": shells, "submodels": submodels, "conceptDescriptions": concept_descs}
+
+
+async def delete_aasx_resources(
+    *,
+    shell_ids: Sequence[str],
+    submodel_ids: Sequence[str],
+) -> dict:
+    """Delete the resources imported from a provider AASX package.
+
+    BaSyx DELETE is treated as idempotent: an already missing resource (404)
+    is considered removed. Submodels are deleted before shells so the shell is
+    never left referencing resources that this package owns. The caller can
+    keep the local package catalog when the result contains ``error``.
+    """
+    result: dict = {
+        "deletedAasIds": [],
+        "deletedSubmodelIds": [],
+        "failed": [],
+    }
+    operations: list[tuple[str, str, str]] = []
+    for collection, ids in (
+        ("submodels", submodel_ids or []),
+        ("shells", shell_ids or []),
+    ):
+        for raw_id in ids:
+            resource_id = str(raw_id or "").strip()
+            try:
+                path = _aas_resource_path(collection, _encode_id(resource_id))
+            except (AttributeError, ValueError):
+                result["failed"].append({
+                    "collection": collection,
+                    "id": resource_id,
+                    "status": 400,
+                })
+                continue
+            operations.append((collection, resource_id, path))
+
+    if result["failed"]:
+        result["error"] = "BaSyx resource deletion failed"
+        return result
+    if not operations:
+        return result
+    if not BASYX_AAS_URL:
+        result["disabled"] = True
+        result["error"] = "BaSyx is not configured"
+        return result
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=BASYX_AAS_URL,
+            headers=_aas_request_headers(),
+            timeout=15.0,
+        ) as client:
+            for collection, resource_id, path in operations:
+                response = await client.delete(path)
+                if response.status_code in (200, 202, 204, 404):
+                    result[
+                        "deletedAasIds" if collection == "shells" else "deletedSubmodelIds"
+                    ].append(resource_id)
+                else:
+                    result["failed"].append({
+                        "collection": collection,
+                        "id": resource_id,
+                        "status": response.status_code,
+                    })
+    except httpx.RequestError as exc:
+        logger.warning(
+            "BaSyx unreachable while deleting AASX resources at %s: %s",
+            str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
+        result["error"] = "BaSyx unreachable"
+        return result
+    except ValueError as exc:
+        logger.error(
+            "AAS endpoint policy rejected deletion at %s: %s",
+            str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
+        result["error"] = "AAS endpoint policy rejected"
+        return result
+
+    if result["failed"]:
+        result["error"] = "BaSyx resource deletion failed"
+    return result
+
+
+async def serialize_aasx_resources(
+    *,
+    shell_ids: Sequence[str],
+    submodel_ids: Sequence[str],
+) -> dict:
+    """Generate an AASX package from the current resources in BaSyx."""
+    encoded_shell_ids: list[str] = []
+    encoded_submodel_ids: list[str] = []
+    try:
+        for raw_id in shell_ids or []:
+            resource_id = str(raw_id or "").strip()
+            encoded_id = _encode_id(resource_id)
+            if not resource_id or _AAS_ENCODED_ID_RE.fullmatch(encoded_id) is None:
+                raise ValueError("AAS shell resource ID is invalid")
+            if encoded_id not in encoded_shell_ids:
+                encoded_shell_ids.append(encoded_id)
+        for raw_id in submodel_ids or []:
+            resource_id = str(raw_id or "").strip()
+            encoded_id = _encode_id(resource_id)
+            if not resource_id or _AAS_ENCODED_ID_RE.fullmatch(encoded_id) is None:
+                raise ValueError("AAS submodel resource ID is invalid")
+            if encoded_id not in encoded_submodel_ids:
+                encoded_submodel_ids.append(encoded_id)
+    except (AttributeError, ValueError) as exc:
+        return {"error": str(exc)}
+
+    if not encoded_shell_ids and not encoded_submodel_ids:
+        return {"error": "AASX package has no BaSyx resource IDs"}
+    if not BASYX_AAS_URL:
+        result = {"disabled": True, "error": "BaSyx is not configured"}
+        return result
+
+    params: list[tuple[str, str]] = [
+        ("aasIds", encoded_id)
+        for encoded_id in encoded_shell_ids
+    ]
+    params.append(("includeConceptDescriptions", "true"))
+    params.extend(("submodelIds", encoded_id) for encoded_id in encoded_submodel_ids)
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=BASYX_AAS_URL,
+            headers=_aas_request_headers(),
+            timeout=30.0,
+        ) as client:
+            response = await client.get(
+                "/serialization",
+                params=params,
+                headers={"Accept": _AASX_MEDIA_TYPE},
+            )
+            if response.status_code != 200:
+                logger.warning("BaSyx AASX serialization failed: status=%s", response.status_code)
+                return {"error": f"BaSyx serialization failed: {response.status_code}"}
+
+            content = bytes(response.content or b"")
+            content_type = (
+                response.headers.get("content-type", "") or _AASX_MEDIA_TYPE
+            ).split(";", 1)[0].strip().lower()
+            if content_type not in _AASX_MEDIA_TYPES:
+                logger.warning("BaSyx returned a non-AASX serialization content type")
+                return {"error": "BaSyx serialization returned an invalid content type"}
+            if not content.startswith(b"PK\x03\x04"):
+                logger.warning("BaSyx returned an invalid AASX archive")
+                return {"error": "BaSyx serialization returned an invalid archive"}
+            return {
+                "content": content,
+                "mediaType": content_type or _AASX_MEDIA_TYPE,
+            }
+    except httpx.RequestError as exc:
+        logger.warning(
+            "BaSyx unreachable while serializing AASX at %s: %s",
+            str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
+        return {"error": "BaSyx unreachable"}
+    except ValueError as exc:
+        logger.error(
+            "AAS endpoint policy rejected serialization at %s: %s",
+            str(BASYX_AAS_URL).replace("\r", "\\r").replace("\n", "\\n"),
+            type(exc).__name__,
+        )
+        return {"error": "AAS endpoint policy rejected"}
 
 
 async def sync_fmu_to_basyx(

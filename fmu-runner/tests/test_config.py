@@ -5,6 +5,7 @@ def test_load_config_preserves_production_defaults_and_derived_audit_url():
     config = load_config({})
 
     assert config.fmu_data_path == "/app/fmu-data"
+    assert config.aas_catalog_path.as_posix() == "/app/data/aasx"
     assert config.max_simulation_timeout == 300
     assert config.max_concurrent_per_model == 10
     assert config.fmu_backend_mode == "station"
@@ -13,6 +14,12 @@ def test_load_config_preserves_production_defaults_and_derived_audit_url():
     assert config.access_audit_url == (
         "http://blockchain-services:8080/access-audit/internal/session-observed"
     )
+
+
+def test_load_config_accepts_the_aas_catalog_path():
+    config = load_config({"AAS_CATALOG_PATH": "/srv/lab-gateway/aas-catalog"})
+
+    assert config.aas_catalog_path.as_posix() == "/srv/lab-gateway/aas-catalog"
 
 
 def test_load_config_normalizes_flags_and_reads_secret_file(tmp_path):

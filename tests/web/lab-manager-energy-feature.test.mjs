@@ -81,6 +81,7 @@ function loadFeature({ loadManagedLabsOnceImpl = () => Promise.resolve() } = {})
   const window = {
     LabManagerFmuSync: createModule({}, 'fmu-sync'),
     LabManagerAasLink: createModule({}, 'aas-link'),
+    LabManagerAasx: createModule({}, 'aasx'),
     LabManagerDigitalTwins: createModule(digitalTwins, 'digital-twins'),
     LabManagerPowerCredentials: createModule(powerCredentials, 'power-credentials'),
     LabManagerPowerRenderers: createModule({}, 'power-renderers'),

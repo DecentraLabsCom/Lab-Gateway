@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from aas_sync_router import create_aas_sync_router
 
 
-def _client(*, metadata=None, sync_result=None, runtime_status=None):
+def _client(*, metadata=None, sync_result=None, runtime_status=None, record_aasx=None):
     resolve_fmu_path = MagicMock(return_value=Path("/trusted/demo.fmu"))
     read_model_description = MagicMock(return_value=SimpleNamespace(description="Embedded", license="MIT"))
     metadata_builder = MagicMock(return_value=metadata or {"description": "Embedded", "license": "MIT", "unitDefinitions": []})
@@ -23,6 +23,7 @@ def _client(*, metadata=None, sync_result=None, runtime_status=None):
         sync_fmu_to_basyx=sync_fmu_to_basyx,
         logger=logger,
         get_runtime_status=get_runtime_status,
+        record_aasx=record_aasx,
     ))
     return TestClient(app), resolve_fmu_path, read_model_description, metadata_builder, sync_fmu_to_basyx, get_runtime_status
 
@@ -96,6 +97,25 @@ def test_sync_route_accepts_multipart_aasx_without_reading_fmu_metadata():
     assert sync_fmu_to_basyx.await_args.kwargs["aasx_bytes"] == b"aasx-bytes"
 
 
+def test_fmu_route_records_aasx_association_when_the_lab_id_is_explicit():
+    from unittest.mock import MagicMock
+
+    record_aasx = MagicMock(return_value={"labId": "99", "filename": "demo.aasx"})
+    client, _, _, _, _, _ = _client(record_aasx=record_aasx)
+
+    response = client.post(
+        "/aas-admin/fmu/demo.fmu/sync",
+        data={"labId": "99"},
+        files={"file": ("demo.aasx", b"aasx-bytes", "application/octet-stream")},
+    )
+
+    assert response.status_code == 200
+    record_aasx.assert_called_once()
+    assert record_aasx.call_args.kwargs["lab_id"] == "99"
+    assert record_aasx.call_args.kwargs["filename"] == "demo.aasx"
+    assert record_aasx.call_args.kwargs["content"] == b"aasx-bytes"
+
+
 def test_generic_resource_route_accepts_physical_lab_aasx_without_reading_fmu_metadata():
     client, resolve_fmu_path, read_model_description, _, sync_fmu_to_basyx, _ = _client()
 
@@ -119,3 +139,21 @@ def test_generic_resource_route_accepts_physical_lab_aasx_without_reading_fmu_me
         unit_definitions=[],
         required_aas_id="urn:decentralabs:lab:42",
     )
+
+
+def test_generic_resource_route_records_aasx_after_successful_import():
+    from unittest.mock import MagicMock
+
+    record_aasx = MagicMock(return_value={"labId": "42", "filename": "physical-lab.aasx"})
+    client, _, _, _, _, _ = _client(record_aasx=record_aasx)
+
+    response = client.post(
+        "/aas-admin/aas/42/sync",
+        files={"file": ("physical-lab.aasx", b"aasx-bytes", "application/octet-stream")},
+    )
+
+    assert response.status_code == 200
+    record_aasx.assert_called_once()
+    assert record_aasx.call_args.kwargs["lab_id"] == "42"
+    assert record_aasx.call_args.kwargs["filename"] == "physical-lab.aasx"
+    assert record_aasx.call_args.kwargs["content"] == b"aasx-bytes"

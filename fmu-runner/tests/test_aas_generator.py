@@ -29,6 +29,8 @@ from aas_generator import (
     build_technical_data_submodel,
     build_unit_definitions_submodel,
     build_aas_shell,
+    delete_aasx_resources,
+    serialize_aasx_resources,
 )
 
 _aas_mod: Any = sys.modules["aas_generator"]
@@ -719,6 +721,115 @@ class TestSyncFmuToBasyxDegradation:
 
 
 # ── _parse_aasx unit tests ──────────────────────────────────────────
+
+class TestDeleteAasxResources:
+    @pytest.mark.asyncio
+    async def test_deletes_imported_submodels_and_shells_from_basyx(self):
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "https://basyx-test:8081"
+        try:
+            mock_response = MagicMock(status_code=204, text="")
+            mock_client = AsyncMock()
+            mock_client.delete = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await delete_aasx_resources(
+                    shell_ids=["urn:test:shell:1"],
+                    submodel_ids=["urn:test:sm:1", "urn:test:sm:2"],
+                )
+
+            assert result == {
+                "deletedAasIds": ["urn:test:shell:1"],
+                "deletedSubmodelIds": ["urn:test:sm:1", "urn:test:sm:2"],
+                "failed": [],
+            }
+            assert [call.args[0] for call in mock_client.delete.await_args_list] == [
+                f"/submodels/{_encode_id('urn:test:sm:1')}",
+                f"/submodels/{_encode_id('urn:test:sm:2')}",
+                f"/shells/{_encode_id('urn:test:shell:1')}",
+            ]
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+
+class TestSerializeAasxResources:
+    @pytest.mark.asyncio
+    async def test_serializes_catalog_resources_from_basyx(self):
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "https://basyx-test:8081"
+        try:
+            mock_response = MagicMock(
+                status_code=200,
+                content=b"PK\x03\x04generated-aasx",
+                headers={"content-type": "application/asset-administration-shell-package+xml"},
+            )
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await serialize_aasx_resources(
+                    shell_ids=["urn:test:shell:1"],
+                    submodel_ids=["urn:test:sm:1"],
+                )
+
+            assert result["content"] == b"PK\x03\x04generated-aasx"
+            assert result["mediaType"] == "application/asset-administration-shell-package+xml"
+            request = mock_client.get.await_args
+            assert request.args[0] == "/serialization"
+            assert request.kwargs["params"] == [
+                ("aasIds", _encode_id("urn:test:shell:1")),
+                ("includeConceptDescriptions", "true"),
+                ("submodelIds", _encode_id("urn:test:sm:1")),
+            ]
+            assert request.kwargs["headers"]["Accept"] == "application/asset-administration-shell-package+xml"
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    async def test_serialization_is_disabled_without_basyx(self):
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = ""
+        try:
+            result = await serialize_aasx_resources(
+                shell_ids=["urn:test:shell:1"],
+                submodel_ids=[],
+            )
+            assert result["disabled"] is True
+            assert result["error"] == "BaSyx is not configured"
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    async def test_reports_basyx_failure_without_claiming_the_resource_was_deleted(self):
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "https://basyx-test:8081"
+        try:
+            mock_response = MagicMock(status_code=500, text="internal error")
+            mock_client = AsyncMock()
+            mock_client.delete = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await delete_aasx_resources(
+                    shell_ids=["urn:test:shell:1"],
+                    submodel_ids=[],
+                )
+
+            assert result["deletedAasIds"] == []
+            assert result["failed"] == [{
+                "collection": "shells",
+                "id": "urn:test:shell:1",
+                "status": 500,
+            }]
+            assert result["error"] == "BaSyx resource deletion failed"
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
 
 class TestSyncFmuToBasyxGenerated:
     @pytest.mark.asyncio

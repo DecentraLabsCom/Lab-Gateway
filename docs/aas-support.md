@@ -147,6 +147,11 @@ the imported shell for that laboratory. This endpoint is also available when
 the local development FMU runner is selected, provided the `aas` profile is
 running.
 
+After a successful import, the Gateway records only the laboratory association,
+resource IDs, filename, size, checksum and timestamps in its local catalog.
+The uploaded archive is not retained. The download action serializes the
+current shell and submodels from BaSyx, so it reflects later BaSyx updates.
+
 ### 4. Link an existing external AAS
 
 When the provider already owns a shell elsewhere, it can link any laboratory

@@ -110,6 +110,17 @@
                 checkButton: $('#aasLinkCheckBtn'),
                 deleteButton: $('#aasLinkDeleteBtn'),
             },
+            aasx: {
+                packageList: $('#aasxPackageList'),
+                packageStatus: $('#aasxPackageStatus'),
+                refreshButton: $('#aasxRefreshBtn'),
+                viewModal: $('#aasxViewModal'),
+                viewTitle: $('#aasxViewTitle'),
+                viewBody: $('#aasxViewBody'),
+                viewDownload: $('#aasxViewDownload'),
+                viewClose: $('#aasxViewClose'),
+                viewCloseFooter: $('#aasxViewCloseFooter'),
+            },
         };
 
         const powerValuesController = powerValuesModule.createController();
@@ -238,12 +249,15 @@
                 aasLinkKey: fields.aasLink.keyInput,
                 fmuSync: fields.fmuSync,
                 aasLink: fields.aasLink,
+                aasx: fields.aasx,
             },
             fetchImpl,
             showToast,
             showOpsWarning,
             fmuSyncModule,
             aasLinkModule,
+            aasxModule: root.LabManagerAasx,
+            escapeHtml,
             formDataCtor,
             urlSearchParamsCtor,
             documentImpl,

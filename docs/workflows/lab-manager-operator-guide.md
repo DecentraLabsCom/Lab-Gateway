@@ -105,7 +105,18 @@ The complete energy workflow is in [Lab Manager energy operations](lab-manager-e
    `urn:decentralabs:lab:{labId}` as a shell ID, unless the shell is associated
    through `Link Existing AAS`. Use that panel when the authoritative shell is
    already hosted elsewhere.
-6. Verify shell retrieval through the Gateway, not only directly against BaSyx.
+6. In `AASX Associations`, verify the laboratory/package association. The
+   `View` action shows the catalog metadata and imported shell/submodel IDs;
+   `Download` generates an AASX from the current BaSyx resources. `Delete`
+   removes the package's imported shells and submodels from BaSyx, as well as
+   its catalog metadata.
+7. Verify shell retrieval through the Gateway, not only directly against BaSyx.
+
+The package catalog is populated by AASX uploads performed after this feature
+is enabled. Existing metadata from the previous catalog format remains
+readable; old archive files are not used for downloads and can be removed
+through the association's `Delete` action after confirming the BaSyx resources
+are present.
 
 The association between a physical laboratory and an Ops Worker host is not
 stored in `hosts.json`. The worker reads the current provider catalog from

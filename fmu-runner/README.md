@@ -56,6 +56,27 @@ does not change between these topologies.
 | WS | `/api/v1/fmu/sessions` | Realtime FMU session API (`requestId`, `model.describe`, control, subscribe/unsubscribe, ping/pong) |
 | WS (internal) | `/internal/fmu/sessions` | Internal realtime channel for Lab Station integration |
 
+When the AAS admin integration is enabled, provider-uploaded AASX packages are
+registered in a lightweight catalog under `AAS_CATALOG_PATH` (default
+`/app/data/aasx`) after a successful import. BaSyx is the source of truth for
+the imported shells and submodels; the Gateway does not retain the uploaded
+archive. Downloads are generated from the current BaSyx resources.
+The Lab Manager uses these protected endpoints to manage that catalog:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/aas-admin/aas/catalog` | List registered packages and their imported shell/submodel IDs |
+| GET | `/aas-admin/aas/{labId}/view` | Read the catalog metadata |
+| GET | `/aas-admin/aas/{labId}/download` | Generate an AASX from the current BaSyx resources |
+| DELETE | `/aas-admin/aas/{labId}` | Remove the imported resources from BaSyx and the catalog metadata |
+
+Deletion is idempotent for resources already absent from BaSyx. If BaSyx is
+unavailable or a resource cannot be deleted, the local association remains in
+the catalog so the operation can be retried. Downloads reflect the current
+BaSyx state and are not byte-for-byte copies of the uploaded archive.
+Legacy `.aasx` files from versions that retained archives are ignored by the
+new download path and are removed when their catalog association is deleted.
+
 The internal Runner WebSocket requires the non-empty `FMU_INTERNAL_WS_TOKEN`
 through `X-Internal-Session-Token`. If it is absent, the endpoint rejects every
 connection (fail-closed). The Station endpoint applies the same rule to
