@@ -29,7 +29,8 @@ def test_production_fmu_runner_is_station_only_and_keeps_control_networks_out_of
     assert "FMU_BACKEND_MODE=local" in local
     assert "FMU_LOCAL_DEV_MODE=true" in local
     assert "fmu_control" not in local
-    assert "fmu_aas" not in local
+    assert "fmu_aas" in local
+    assert "fmu_station" not in local
     assert "fmu_auth" in local
     assert "AUTH_SESSION_TICKET_INTERNAL_TOKEN" not in local
     assert "AUTH_SESSION_TICKET_ISSUE_URL=" in local

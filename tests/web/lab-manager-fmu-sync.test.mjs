@@ -187,3 +187,29 @@ test('does not request FMU-supplied license metadata', async () => {
   assert.equal(calls.length, 1);
   assert.match(calls[0], /\/hints$/);
 });
+
+test('reports a disabled AAS deployment instead of treating it as a successful update', async () => {
+  const { fields, toasts } = loadController({
+    fetchImpl: async (url) => {
+      if (String(url).endsWith('/hints')) {
+        return { ok: true, status: 200, json: async () => ({}) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ disabled: true, created: false, updated: false }),
+      };
+    },
+  });
+
+  fields.keyInput.value = 'spring-damper.fmu';
+  fields.keyInput.options = [{ value: 'spring-damper.fmu', dataset: { labId: '7' } }];
+  fields.syncButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(fields.result.textContent, 'AAS synchronization is disabled on this gateway.');
+  assert.deepEqual(toasts.at(-1), {
+    message: 'FMU AAS sync disabled: spring-damper.fmu',
+    type: 'error',
+  });
+});

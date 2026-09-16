@@ -126,13 +126,16 @@ The default stack starts `openresty`, `blockchain-services` (Full mode only),
 | Profile | Purpose | Typical command |
 | --- | --- | --- |
 | `fmu-runner` | Production FMU facade; executes through Lab Station | `FMU_RUNNER_ENABLED=true docker compose --profile fmu-runner up -d` |
-| `fmu-local-dev` | Isolated local FMU development/testing; never production | `FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true docker compose --profile fmu-local-dev up -d openresty fmu-runner-local` |
+| `fmu-local-dev` | Isolated local FMU development/testing with optional bundled AAS sync; never production | `FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true docker compose --profile fmu-local-dev --profile aas up -d` |
 | `aas` | Bundled BaSyx AAS and MongoDB | `docker compose --profile aas up -d` |
 | `certbot` | ACME certificate acquisition/renewal | `docker compose --profile certbot up -d` |
 | `cloudflare` / `cloudflare-token` | Cloudflare Tunnel variants | See the setup guide |
 
 Do not start both FMU profiles: they intentionally use the same internal
-upstream alias. For the complete configuration model, see
+upstream alias. When testing AAS with the local runner, start the `aas` profile
+alongside `fmu-local-dev`; the local runner reaches only the internal bundled
+BaSyx network and keeps the Station/control-plane isolation. For the complete
+configuration model, see
 [Configuration reference](docs/reference/configuration.md).
 
 `FMU_BACKEND_MODE` selects where the FMU executes and is independent of the
