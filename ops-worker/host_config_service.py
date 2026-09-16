@@ -37,6 +37,8 @@ def resolve_host_secret_refs(
             host["credential_ref"] = host.get("address") or host.get("name")
         host.pop("winrm_user", None)
         host.pop("winrm_pass", None)
+        host.pop("labs", None)
+        host.pop("validLabIds", None)
         if not credentials_configured(credential_ref_for_host(host)):
             warn("Missing WinRM credentials for host %s", host.get("name", "<unknown>"))
     return raw
@@ -148,6 +150,10 @@ def update_dynamic_host(
 
     updated = dict(current)
     updated["name"] = name
+    # Lab ownership is resolved from blockchain-services at runtime; never
+    # carry the former host-side association forward when editing a host.
+    updated.pop("labs", None)
+    updated.pop("validLabIds", None)
 
     if "mac" in payload:
         raw_mac = str(payload.get("mac") or "").strip()

@@ -50,7 +50,6 @@ class HostInventoryRuntime:
             ),
         )
 
-
 def create_host_inventory_runtime(context: HostInventoryContext) -> HostInventoryRuntime:
     """Create an inventory adapter bound to explicit dependencies."""
     return HostInventoryRuntime(context)

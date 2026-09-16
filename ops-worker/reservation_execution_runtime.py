@@ -1,5 +1,6 @@
 """Composition adapter for reservation execution and operational alerts."""
 
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from reservation_execution_context import ReservationExecutionContext
@@ -64,7 +65,7 @@ class ReservationExecutionRuntime:
         self,
         reservation_id: str,
         lab_id: Optional[str],
-        host: Dict[str, Any],
+        host: Mapping[str, Any],
         phase: str,
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -176,7 +177,7 @@ class ReservationExecutionRuntime:
 
     def perform_wake_step(
         self,
-        host: Dict[str, Any],
+        host: Mapping[str, Any],
         reservation_id: str,
         lab_id: Optional[str],
         options: Dict[str, Any],

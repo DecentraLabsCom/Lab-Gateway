@@ -13,6 +13,7 @@ def poll_heartbeat(
     persist_heartbeat: Callable[..., Any],
     db_engine: Any,
     sync_lab_to_basyx: Callable[..., Dict[str, Any]],
+    resolve_lab_ids_for_host: Callable[[Mapping[str, Any]], Any],
     logger: Any,
     default_heartbeat_path: str,
     default_events_path: str,
@@ -36,7 +37,7 @@ def poll_heartbeat(
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("DB persistence failed for %s: %s", host.get("name"), exc)
     # Auto-sync AAS TechnicalData on heartbeat (best-effort, never blocks the poll)
-    for lab_id in host.get("labs", []):
+    for lab_id in resolve_lab_ids_for_host(dict(host)) or []:
         try:
             sync_result = sync_lab_to_basyx(str(lab_id), host, heartbeat)
             if sync_result.get("disabled"):

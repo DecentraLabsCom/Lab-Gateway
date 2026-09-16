@@ -8,6 +8,7 @@ def handle_reservation_start(
     payload: Dict[str, Any],
     *,
     find_host: Callable[[str], Optional[Mapping[str, Any]]],
+    resolve_host_by_lab: Callable[[str], Optional[Mapping[str, Any]]],
     get_mandatory_field: Callable[..., Optional[str]],
     parse_bool: Callable[[Any, bool], bool],
     execute_power_phase: Callable[[str, Optional[str], Mapping[str, Any], str, Dict[str, Any]], Dict[str, Any]],
@@ -22,12 +23,15 @@ def handle_reservation_start(
     host_name = get_mandatory_field(payload, "host", "hostName")
     lab_id = get_mandatory_field(payload, "labId", "lab_id")
 
-    if not reservation_id or not host_name:
-        return {"error": "reservationId and host are required"}, 400
+    if not reservation_id or (not host_name and not lab_id):
+        return {"error": "reservationId and either host or labId are required"}, 400
 
-    host = find_host(host_name)
+    host = resolve_host_by_lab(lab_id) if lab_id else find_host(host_name)
     if not host:
+        if lab_id:
+            return {"error": f"no registered host found for lab '{lab_id}'"}, 404
         return {"error": f"host '{host_name}' not found"}, 404
+    host_name = str(host.get("name") or host_name or "")
 
     wake_enabled = parse_bool(payload.get("wake", True), True)
     prepare_enabled = parse_bool(payload.get("prepare", True), True)
@@ -106,6 +110,7 @@ def handle_reservation_end(
     payload: Dict[str, Any],
     *,
     find_host: Callable[[str], Optional[Mapping[str, Any]]],
+    resolve_host_by_lab: Callable[[str], Optional[Mapping[str, Any]]],
     get_mandatory_field: Callable[..., Optional[str]],
     parse_bool: Callable[[Any, bool], bool],
     execute_power_phase: Callable[[str, Optional[str], Mapping[str, Any], str, Dict[str, Any]], Dict[str, Any]],
@@ -119,12 +124,15 @@ def handle_reservation_end(
     host_name = get_mandatory_field(payload, "host", "hostName")
     lab_id = get_mandatory_field(payload, "labId", "lab_id")
 
-    if not reservation_id or not host_name:
-        return {"error": "reservationId and host are required"}, 400
+    if not reservation_id or (not host_name and not lab_id):
+        return {"error": "reservationId and either host or labId are required"}, 400
 
-    host = find_host(host_name)
+    host = resolve_host_by_lab(lab_id) if lab_id else find_host(host_name)
     if not host:
+        if lab_id:
+            return {"error": f"no registered host found for lab '{lab_id}'"}, 404
         return {"error": f"host '{host_name}' not found"}, 404
+    host_name = str(host.get("name") or host_name or "")
 
     release_enabled = parse_bool(payload.get("release", True), True)
     power_cfg = payload.get("powerAction")

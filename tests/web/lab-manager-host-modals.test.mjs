@@ -120,10 +120,8 @@ test('keeps provision, edit and credential modal payloads inside one host contro
     name: '10.0.0.8',
     address: '10.0.0.8',
     mac: '',
-    labs: ['lab-8'],
     credentialRef: '10.0.0.8',
     heartbeatPath: 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json',
-    validLabIds: ['lab-8'],
   }]);
   assert.equal(requests.find(request => request.url.includes('/ops/api/hosts/')).options.method, 'PATCH');
   assert.ok(events.some(event => event[0] === 'stop' && event[1] === 'station-7'));

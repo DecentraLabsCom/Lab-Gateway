@@ -4,7 +4,18 @@ import worker
 
 
 def _install_host(monkeypatch, host):
-    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    catalog_lab_ids = [str(lab_id) for lab_id in host.get("labs", [])]
+    host_config = {
+        key: value
+        for key, value in host.items()
+        if key not in {"labs", "validLabIds"}
+    }
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host_config]}))
+    monkeypatch.setattr(
+        worker,
+        "resolve_lab_ids_for_host",
+        lambda _host: list(catalog_lab_ids),
+    )
     return worker.HOSTS.get(host["name"])
 
 
@@ -24,7 +35,7 @@ def test_aas_sync_route_contract_returns_not_found_for_unknown_host(client, monk
     assert response.json == {"error": "host 'missing' not found in config"}
 
 
-def test_aas_sync_route_contract_reports_hosts_without_labs(client, monkeypatch):
+def test_aas_sync_route_contract_reports_hosts_without_catalog_labs(client, monkeypatch):
     host = _install_host(monkeypatch, {"name": "lab-ws-01", "address": "192.168.1.50"})
     sync = Mock()
     monkeypatch.setattr(worker.aas_generator, "sync_lab_to_basyx", sync)
@@ -35,7 +46,7 @@ def test_aas_sync_route_contract_reports_hosts_without_labs(client, monkeypatch)
     assert response.json == {
         "host": "lab-ws-01",
         "labs": [],
-        "message": "No labs mapped to this host",
+        "message": "No catalog labs resolved to this host",
     }
     sync.assert_not_called()
     assert host == {"name": "lab-ws-01", "address": "192.168.1.50"}

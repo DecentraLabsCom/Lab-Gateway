@@ -108,7 +108,7 @@
                 const data = await res.json();
                 const labs = data.labs || [];
                 if (!labs.length) {
-                    showToast(`AAS sync ${host}: no labs mapped`, 'error');
+                    showToast(`AAS sync ${host}: no catalog labs resolved`, 'error');
                     return;
                 }
                 const disabled = labs.every(l => l.disabled);

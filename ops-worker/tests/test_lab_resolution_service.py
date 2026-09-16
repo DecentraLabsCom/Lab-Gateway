@@ -1,0 +1,107 @@
+from lab_resolution_service import (
+    extract_lab_catalog,
+    resolve_lab_associations,
+    resolve_host_for_lab,
+    resolve_lab_access_key,
+    resolve_lab_ids_for_host,
+)
+
+
+LABS = [
+    {"labId": "lab-1", "accessKey": "guac:id:5", "resourceType": 0},
+    {"labId": "lab-2", "accessKey": "guac:id:6", "resourceType": 0},
+    {"labId": "fmu-1", "accessKey": "fmu:file:1", "resourceType": 1},
+]
+
+CONNECTIONS = [
+    {"id": 5, "hostname": "station-01"},
+    {"id": 6, "hostname": "192.168.1.52"},
+]
+
+HOSTS = [
+    {"name": "station-01", "address": "192.168.1.51"},
+    {"name": "station-02", "address": "192.168.1.52"},
+]
+
+
+def _parse_selector(value):
+    prefix, identifier = str(value).split(":id:", 1)
+    assert prefix == "guac"
+    return int(identifier)
+
+
+def _normalize(value):
+    return str(value or "").strip().lower()
+
+
+def test_extract_lab_catalog_accepts_backend_envelope_and_discards_invalid_rows():
+    assert extract_lab_catalog({"labs": LABS + [None, {"name": "missing-id"}]}) == LABS
+    assert extract_lab_catalog([]) == []
+
+
+def test_resolve_lab_access_key_reads_catalog_entry_without_host_config():
+    assert resolve_lab_access_key(LABS, "lab-1") == "guac:id:5"
+    assert resolve_lab_access_key(LABS, "missing") is None
+
+
+def test_resolve_host_for_lab_follows_lab_access_key_connection_and_hostname():
+    assert resolve_host_for_lab(
+        LABS,
+        "lab-1",
+        CONNECTIONS,
+        HOSTS,
+        parse_selector=_parse_selector,
+        normalize_key=_normalize,
+    ) == HOSTS[0]
+    assert resolve_host_for_lab(
+        LABS,
+        "fmu-1",
+        CONNECTIONS,
+        HOSTS,
+        parse_selector=_parse_selector,
+        normalize_key=_normalize,
+    ) is None
+
+
+def test_resolve_host_for_lab_fails_closed_for_ambiguous_hostname():
+    duplicate_hosts = HOSTS + [{"name": "station-01-copy", "address": "station-01"}]
+    assert resolve_host_for_lab(
+        LABS,
+        "lab-1",
+        CONNECTIONS,
+        duplicate_hosts,
+        parse_selector=_parse_selector,
+        normalize_key=_normalize,
+    ) is None
+
+
+def test_resolve_lab_ids_for_host_inverts_the_same_catalog_mapping():
+    assert resolve_lab_ids_for_host(
+        LABS,
+        HOSTS[0],
+        CONNECTIONS,
+        HOSTS,
+        parse_selector=_parse_selector,
+        normalize_key=_normalize,
+    ) == ["lab-1"]
+    assert resolve_lab_ids_for_host(
+        LABS,
+        HOSTS[1],
+        CONNECTIONS,
+        HOSTS,
+        parse_selector=_parse_selector,
+        normalize_key=_normalize,
+    ) == ["lab-2"]
+
+
+def test_resolve_lab_associations_projects_only_resolved_lab_and_host_ids():
+    assert resolve_lab_associations(
+        LABS,
+        CONNECTIONS,
+        HOSTS,
+        parse_selector=_parse_selector,
+        normalize_key=_normalize,
+    ) == [
+        {"labId": "lab-1", "hostName": "station-01"},
+        {"labId": "lab-2", "hostName": "station-02"},
+    ]

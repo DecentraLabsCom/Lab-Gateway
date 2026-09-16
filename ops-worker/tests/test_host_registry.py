@@ -1,16 +1,16 @@
 from host_registry import HostRegistry
 
 
-def test_host_registry_indexes_hosts_and_first_lab_mapping_case_insensitively():
+def test_host_registry_stores_station_configuration_without_lab_index():
     first = {"name": "Station-A", "address": "10.0.0.1", "labs": [42, "shared"]}
     second = {"name": "Station-B", "address": "10.0.0.2", "labs": ["shared", 43]}
 
     registry = HostRegistry({"hosts": [first, second]})
 
-    assert registry.get("station-a") == first
-    assert registry.get_by_lab("42") == first
-    assert registry.get_by_lab("SHARED") == first
-    assert registry.get_by_lab(43) == second
+    assert registry.get("station-a") == {"name": "Station-A", "address": "10.0.0.1"}
+    assert all("labs" not in host for host in registry.all_hosts())
+    assert not hasattr(registry, "lab_index")
+    assert not hasattr(registry, "get_by_lab")
     assert registry.count() == 2
 
 

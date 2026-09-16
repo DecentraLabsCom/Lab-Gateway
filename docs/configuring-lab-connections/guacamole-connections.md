@@ -91,6 +91,8 @@ configuration with the dedicated lab account, not an administrator account.
 3. In Lab Manager, select the discovered local connection or enter the recorded
    `guac:id:<connection_id>` access key.
 4. Publish the laboratory with the exact public gateway origin as `accessURI`.
+   Digital Twins derives the physical-lab/host relationship at read time from
+   this Guacamole selector and the host inventory.
 5. Complete a reservation-based access test. The expected user path is an
    opaque code whose redemption is reserved at `POST /auth/access-code/redeem`,
    validated locally by the gateway, and committed only after validation;

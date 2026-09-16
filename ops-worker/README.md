@@ -135,8 +135,7 @@ New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and 
       "winrm_use_ssl": true,
       "winrm_port": 5986,
       "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
-      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl",
-      "labs": ["1"]
+      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl"
     }
   ]
 }
@@ -157,16 +156,21 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ host, include_events? }`
 - `GET /api/hosts`
   - Returns configured ops hosts plus auto-linked Guacamole connection metadata.
+- `GET /api/lab-associations`
+  - Returns calculated `{ labId, hostName }` associations whose provider
+    catalog `accessKey` resolves through a current Guacamole connection to one
+    registered Ops host. Lab Manager uses this projection; it does not read or
+    persist laboratory IDs in the host catalog.
 - `POST /api/hosts/discover`
   - Body: `{ connectionId }`
   - Probes a Guacamole connection candidate for DNS, WinRM, and optional Lab Station HTTP health.
 - `POST /api/hosts/provision`
-  - Body: `{ connectionId, name?, address?, mac?, labs?, credentialRef?, heartbeatPath? }`
+  - Body: `{ connectionId, name?, address?, mac?, credentialRef?, heartbeatPath? }`. Legacy `labs` fields are ignored.
   - Re-runs discovery and only provisions candidates with Lab Station HTTP health or reachable WinRM.
   - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). Raw WinRM credentials are saved separately.
 - `PATCH /api/hosts/{hostName}`
   - Body: `{ name?, mac?, heartbeatPath? }`
-  - Updates only a host from the writable dynamic catalog. The address, WinRM policy, credential reference, events path, and lab associations are preserved. Static catalog hosts must be edited in `hosts.json`.
+  - Updates only a host from the writable dynamic catalog. The address, WinRM policy, credential reference and events path are preserved; lab associations are resolved from the provider catalog. Static catalog hosts must be edited in `hosts.json`.
 - `POST /api/hosts/winrm-credentials`
   - Body: `{ credentialRef, user, password }`
   - Encrypts and stores WinRM credentials for the configured host. Credentials are never accepted through `/api/winrm` or stored in the host catalog.
@@ -179,9 +183,9 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
 - `DELETE /api/hosts/{hostName}/winrm-trust`
   - Removes the public certificate, generated PEM and metadata. The operation is idempotent.
 - `POST /api/reservations/start`
-  - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
+  - Body: `{ reservationId, host?, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`. When `labId` is supplied it is resolved through the provider catalog and takes precedence over `host`.
 - `POST /api/reservations/end`
-  - Body: `{ reservationId, host, labId?, release?, releaseArgs?, powerAction? }`
+  - Body: `{ reservationId, host?, labId?, release?, releaseArgs?, powerAction? }`. When `labId` is supplied it is resolved through the provider catalog and takes precedence over `host`.
 - `POST /api/demo/start`
   - Body: `{ demoId: "demo:<jti>", labId, expiresAt?, wake?, guardGrace? }`.
     Resolves the host from the configured demo binding, performs Wake-on-LAN
@@ -247,6 +251,17 @@ Reservation automation knobs:
 - `OPS_RESERVATION_END_DELAY` (default `60`)
 - `OPS_RESERVATION_LOOKBACK` (default `21600`)
 - `OPS_RESERVATION_RETRY_COOLDOWN` (default `60`)
+
+Lab resolution configuration:
+
+- `LAB_ADMIN_BACKEND_URL` (Full default: `http://blockchain-services:8080`; Lite requires an explicit remote URL)
+- `LAB_ADMIN_BACKEND_TOKEN` and `LAB_ADMIN_BACKEND_TOKEN_HEADER` (remote backend credential)
+- `LAB_ADMIN_BACKEND_ALLOW_INSECURE` (default `false` for explicit URLs)
+- `LAB_ADMIN_BACKEND_TIMEOUT_SECONDS` (default `5`)
+- `LAB_CATALOG_CACHE_SECONDS` (default `15`; set to `0` to disable caching)
+
+The default Full-mode catalog credential is `LAB_MANAGER_TOKEN`. The resolver
+fails closed when a lab has no valid Guacamole connection or maps to zero/multiple registered hosts.
 
 Guacamole temporary-user cleanup:
 

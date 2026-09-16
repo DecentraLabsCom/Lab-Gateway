@@ -83,6 +83,12 @@ class RuntimePolicy:
     discovery_labstation_ports: List[int]
     discovery_labstation_paths: List[str]
     discovery_heartbeat_paths: List[str]
+    lab_catalog_url: str
+    lab_catalog_token: str
+    lab_catalog_token_header: str
+    lab_catalog_allow_insecure: bool
+    lab_catalog_timeout_seconds: float
+    lab_catalog_cache_seconds: float
 
 
 def load_runtime_paths(
@@ -164,6 +170,33 @@ def load_runtime_policy(
         ).split(",")
         if path.strip()
     ]
+    explicit_catalog_url = (get("LAB_ADMIN_BACKEND_URL") or "").strip().rstrip("/")
+    catalog_base_url = explicit_catalog_url
+    catalog_token = ""
+    catalog_allow_insecure = _enabled(environ, "LAB_ADMIN_BACKEND_ALLOW_INSECURE", "false")
+    if catalog_base_url:
+        catalog_token = secret_loader("LAB_ADMIN_BACKEND_TOKEN")
+    elif not is_lite():
+        # Full mode has the backend on the private Docker network.  This is
+        # the default route for providers that do not configure a remote
+        # backend explicitly.
+        catalog_base_url = "http://blockchain-services:8080"
+        catalog_token = secret_loader("LAB_MANAGER_TOKEN")
+        catalog_allow_insecure = True
+    catalog_url = (
+        f"{catalog_base_url}/lab-admin/labs"
+        if catalog_base_url and not catalog_base_url.endswith("/lab-admin/labs")
+        else catalog_base_url
+    )
+    catalog_token_header = get(
+        "LAB_ADMIN_BACKEND_TOKEN_HEADER"
+        if explicit_catalog_url
+        else "LAB_MANAGER_TOKEN_HEADER",
+        "X-Lab-Manager-Token",
+    ).strip()
+    if not http_header_pattern.fullmatch(catalog_token_header):
+        log_error("Invalid lab catalog token header; using X-Lab-Manager-Token")
+        catalog_token_header = "X-Lab-Manager-Token"
     return RuntimePolicy(
         demo_user=(get("DEMO_USER") or "demo-lab-disabled").strip(),
         demo_lab_id=(get("DEMO_LAB_ID") or "").strip(),
@@ -329,6 +362,18 @@ def load_runtime_policy(
             ).split(",")
             if path.strip()
         ],
+        lab_catalog_url=catalog_url,
+        lab_catalog_token=catalog_token,
+        lab_catalog_token_header=catalog_token_header,
+        lab_catalog_allow_insecure=catalog_allow_insecure,
+        lab_catalog_timeout_seconds=max(
+            0.2,
+            float(get("LAB_ADMIN_BACKEND_TIMEOUT_SECONDS", "5")),
+        ),
+        lab_catalog_cache_seconds=max(
+            0.0,
+            float(get("LAB_CATALOG_CACHE_SECONDS", "15")),
+        ),
     )
 
 

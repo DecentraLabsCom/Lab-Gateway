@@ -660,6 +660,13 @@ services:
       - HTTPS_PORT=${HTTPS_PORT}
       - ISSUER=${ISSUER}
       - LAB_MANAGER_TOKEN_FILE=/run/secrets/lab_manager_token
+      - LAB_MANAGER_TOKEN_HEADER=${LAB_MANAGER_TOKEN_HEADER:-X-Lab-Manager-Token}
+      - LAB_ADMIN_BACKEND_URL=${LAB_ADMIN_BACKEND_URL:-}
+      - LAB_ADMIN_BACKEND_TOKEN_FILE=/run/secrets/lab_admin_backend_token
+      - LAB_ADMIN_BACKEND_TOKEN_HEADER=${LAB_ADMIN_BACKEND_TOKEN_HEADER:-X-Lab-Manager-Token}
+      - LAB_ADMIN_BACKEND_ALLOW_INSECURE=${LAB_ADMIN_BACKEND_ALLOW_INSECURE:-false}
+      - LAB_ADMIN_BACKEND_TIMEOUT_SECONDS=${LAB_ADMIN_BACKEND_TIMEOUT_SECONDS:-5}
+      - LAB_CATALOG_CACHE_SECONDS=${LAB_CATALOG_CACHE_SECONDS:-15}
       - OPS_INTERNAL_AUTH_TOKEN_FILE=/run/secrets/ops_internal_auth_token
       - OPS_INTERNAL_AUTH_HEADER=${OPS_INTERNAL_AUTH_HEADER:-X-Ops-Internal-Token}
       - GUACAMOLE_PROVISIONER_TOKEN_FILE=/run/secrets/guacamole_provisioner_token
@@ -713,6 +720,7 @@ services:
       - lab_manager_token
       - ops_internal_auth_token
       - ops_secrets_key
+      - lab_admin_backend_token
       - session_observer_signing_secret
       - guacamole_provisioner_token
       - reservation_projection_token

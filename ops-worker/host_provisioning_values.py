@@ -1,7 +1,7 @@
-"""Pure host naming, lab validation and provisioning payload construction."""
+"""Pure host naming and provisioning payload construction."""
 
 from collections.abc import Callable
-from typing import Any, Dict, List, Optional, Pattern, Tuple
+from typing import Any, Dict, Optional, Pattern, Tuple
 
 
 def sanitize_host_name(
@@ -16,37 +16,11 @@ def sanitize_host_name(
     return name, None
 
 
-def normalize_labs(value: Any) -> List[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        parts = value.split(",")
-    elif isinstance(value, list):
-        parts = value
-    else:
-        parts = []
-    return [str(part).strip() for part in parts if str(part).strip()]
-
-
-def validate_labs_against_candidates(labs: List[str], candidates: Any) -> Optional[str]:
-    if candidates is None:
-        return None
-    valid = set(normalize_labs(candidates))
-    if not valid:
-        return "validLabIds must contain at least one lab candidate when provided"
-    invalid = [lab for lab in labs if lab not in valid]
-    if invalid:
-        return f"labs contain values that are not valid candidates: {', '.join(invalid)}"
-    return None
-
-
 def build_provisioned_host(
     payload: Dict[str, Any],
     connection: Dict[str, Any],
     *,
     sanitize_host_name_fn: Callable[[Any, Optional[Any]], Tuple[Optional[str], Optional[str]]],
-    normalize_labs_fn: Callable[[Any], List[str]],
-    validate_labs_fn: Callable[[List[str], Any], Optional[str]],
     normalize_mac_fn: Callable[[Any], str],
     normalize_trust_ref_fn: Callable[[Any], str],
     default_heartbeat_path: str,
@@ -60,10 +34,6 @@ def build_provisioned_host(
     if not address:
         return None, "address is required"
 
-    labs = normalize_labs_fn(payload.get("labs"))
-    labs_error = validate_labs_fn(labs, payload.get("validLabIds"))
-    if labs_error:
-        return None, labs_error
     credential_ref = str(payload.get("credentialRef") or address).strip()
     raw_mac = str(payload.get("mac") or "").strip()
     mac = normalize_mac_fn(raw_mac) if raw_mac else ""
@@ -80,7 +50,6 @@ def build_provisioned_host(
         "winrm_port": 5986,
         "heartbeat_path": str(payload.get("heartbeatPath") or default_heartbeat_path),
         "events_path": str(payload.get("eventsPath") or default_events_path),
-        "labs": labs,
     }
     if mac:
         host_config["mac"] = mac

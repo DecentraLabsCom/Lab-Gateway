@@ -82,7 +82,6 @@ def test_discover_labstation_candidate_contract_preserves_signal_order_and_paylo
             "winrm_port": 5986,
             "heartbeat_path": r"C:\LabStation\heartbeat.json",
             "events_path": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
-            "labs": [],
             "nameCandidates": ["Lab Candidate", "lab-candidate"],
             "mac": "AA:BB:CC:DD:EE:FF",
         },

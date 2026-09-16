@@ -134,7 +134,7 @@ test('preserves AAS sync result classification and request shape', async () => {
     assert.deepEqual(JSON.parse(options.body), { host: 'station-7' });
   });
   assert.deepEqual(events, [
-    ['AAS sync station-7: no labs mapped', 'error'],
+    ['AAS sync station-7: no catalog labs resolved', 'error'],
     ['AAS sync station-7: AAS not configured on this gateway', 'error'],
     ['AAS sync station-7: 1/2 failed', 'error'],
     ['AAS sync station-7: 2 lab(s) synced', 'success'],

@@ -24,6 +24,7 @@ class ReservationOrchestrator:
         bindparam: Callable[..., Any],
         dispatch_start: Callable[[Dict[str, Any]], Any],
         dispatch_end: Callable[[Dict[str, Any]], Any],
+        resolve_host_by_lab: Callable[[str], Optional[Mapping[str, Any]]],
         record_operation: Callable[..., Any],
         logger: Any,
         now: Callable[[], datetime],
@@ -37,6 +38,7 @@ class ReservationOrchestrator:
         self.bindparam = bindparam
         self.dispatch_start = dispatch_start
         self.dispatch_end = dispatch_end
+        self.resolve_host_by_lab = resolve_host_by_lab
         self.record_operation = record_operation
         self.logger = logger
         self.now = now
@@ -286,7 +288,7 @@ class ReservationOrchestrator:
     def _dispatch_start(self, row: Mapping[str, Any]):
         reservation_id = row["transaction_hash"]
         lab_id = row.get("lab_id")
-        host = self.registry.get_by_lab(lab_id)
+        host = self.resolve_host_by_lab(lab_id)
         host_name = (host or {}).get("name") or "unmapped"
         if not host:
             message = f"No host mapping for lab {lab_id}"
@@ -318,7 +320,7 @@ class ReservationOrchestrator:
     def _dispatch_end(self, row: Mapping[str, Any]):
         reservation_id = row["transaction_hash"]
         lab_id = row.get("lab_id")
-        host = self.registry.get_by_lab(lab_id)
+        host = self.resolve_host_by_lab(lab_id)
         host_name = (host or {}).get("name") or "unmapped"
         if not host:
             message = f"No host mapping for lab {lab_id}"

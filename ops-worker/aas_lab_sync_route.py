@@ -35,7 +35,7 @@ def handle_aas_lab_sync(
     lab_id: str,
     payload: Any,
     *,
-    find_host_by_lab: Callable[[str], Optional[Dict[str, Any]]],
+    resolve_host_by_lab: Callable[[str], Optional[Dict[str, Any]]],
     parse_bool: Callable[[Any, bool], bool],
     poll_heartbeat: Callable[..., Dict[str, Any]],
     load_persisted_heartbeat: Optional[Callable[[str, Dict[str, Any]], Optional[Dict[str, Any]]]],
@@ -44,7 +44,10 @@ def handle_aas_lab_sync(
     jsonify: Callable[[Any], Any],
 ) -> Any:
     """Synchronize one lab while preserving heartbeat and result contracts."""
-    host = find_host_by_lab(lab_id)
+    # The request may contain accessKey for older clients, but the catalog is
+    # authoritative.  Resolving it here prevents a stale client payload from
+    # selecting a different Station host.
+    host = resolve_host_by_lab(lab_id)
     if not host:
         return jsonify({"error": f"No host mapping found for labId '{lab_id}'"}), 404
 

@@ -18,6 +18,7 @@ class ReservationLifecycleRuntime:
         return self._context.handle_reservation_start_impl(
             payload,
             find_host=self._find_host,
+            resolve_host_by_lab=self._context.get_resolve_host_by_lab(),
             get_mandatory_field=self._context.get_mandatory_field(),
             parse_bool=self._context.get_parse_bool(),
             execute_power_phase=self._context.get_execute_power_phase(),
@@ -30,6 +31,7 @@ class ReservationLifecycleRuntime:
         return self._context.handle_reservation_end_impl(
             payload,
             find_host=self._find_host,
+            resolve_host_by_lab=self._context.get_resolve_host_by_lab(),
             get_mandatory_field=self._context.get_mandatory_field(),
             parse_bool=self._context.get_parse_bool(),
             execute_power_phase=self._context.get_execute_power_phase(),

@@ -26,9 +26,13 @@ def _install_host(monkeypatch, *, lab_id="lab-1"):
     host = {
         "name": "lab-ws-01",
         "address": "192.168.1.50",
-        "labs": [lab_id],
     }
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    monkeypatch.setattr(
+        worker,
+        "resolve_host_by_lab",
+        lambda received_lab_id: host if str(received_lab_id) == str(lab_id) else None,
+    )
     return host
 
 
@@ -72,6 +76,32 @@ def test_aas_lab_sync_route_contract_uses_persisted_heartbeat_by_default(client,
         (connection, "lab-ws-01"),
         ("lab-1", host, heartbeat, {}),
     ]
+
+
+def test_aas_lab_sync_route_uses_the_common_lab_host_resolver(
+    client,
+    monkeypatch,
+):
+    host = {
+        "name": "lab-ws-01",
+        "address": "192.168.1.50",
+    }
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    resolve_host = Mock(return_value=host)
+    monkeypatch.setattr(worker, "resolve_host_by_lab", resolve_host)
+    monkeypatch.setattr(worker, "DB_ENGINE", None)
+    sync = Mock(return_value={"synced": True, "labId": "lab-1"})
+    monkeypatch.setattr(worker.aas_generator, "sync_lab_to_basyx", sync)
+
+    response = client.post(
+        "/aas-admin/lab/lab-1/sync",
+        json={"accessKey": "guac:id:5"},
+    )
+
+    assert response.status_code == 200
+    assert response.json == {"synced": True, "labId": "lab-1"}
+    resolve_host.assert_called_once_with("lab-1")
+    sync.assert_called_once_with("lab-1", host, None, {})
 
 
 def test_aas_lab_sync_route_contract_polls_fresh_heartbeat_when_requested(client, monkeypatch):
@@ -137,7 +167,7 @@ def test_aas_lab_sync_route_contract_continues_without_persisted_heartbeat_on_db
 
     assert response.status_code == 200
     assert response.json == {"synced": True, "labId": "lab-1"}
-    sync.assert_called_once_with("lab-1", worker.HOSTS.get_by_lab("lab-1"), None, {})
+    sync.assert_called_once_with("lab-1", worker.HOSTS.get("lab-ws-01"), None, {})
     assert "secret database details" not in response.get_data(as_text=True)
     warning.assert_called_once()
 

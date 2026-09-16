@@ -25,7 +25,6 @@ def test_update_dynamic_host_contract_updates_fields_and_preserves_operational_d
         "name": "lab-01",
         "address": "192.168.1.50",
         "credential_ref": "lab-01",
-        "labs": ["4"],
         "mac": "00:11:22:33:44:55",
     }
     config = {"hosts": [current], "version": 2}
@@ -46,7 +45,6 @@ def test_update_dynamic_host_contract_updates_fields_and_preserves_operational_d
         "name": "lab-01",
         "address": "192.168.1.50",
         "credential_ref": "lab-01",
-        "labs": ["4"],
         "mac": "00:22:33:44:55:66",
         "heartbeat_path": r"C:\LabStation\heartbeat.json",
     }

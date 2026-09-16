@@ -25,6 +25,8 @@ def test_reservation_start_heartbeat_timeline_e2e(db_engine, client, monkeypatch
         "events_path": "events.jsonl",
     }
     worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: host)
+    monkeypatch.setattr(worker, "resolve_lab_ids_for_host", lambda _host: ["42"])
 
     reservation_id = "0xabc123"
     now = datetime.now(timezone.utc)
@@ -134,6 +136,7 @@ def test_failed_reservation_start_triggers_notification(db_engine, client, monke
         "labs": ["42"],
     }
     worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: host)
 
     reservation_id = "0xfailure123"
     now = datetime.now(timezone.utc)
@@ -217,6 +220,8 @@ def test_demo_lifecycle_prepares_connects_and_releases_without_onchain_reservati
         "labs": ["42"],
     }
     worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: host)
+    monkeypatch.setattr(worker, "resolve_lab_ids_for_host", lambda _host: ["42"])
     monkeypatch.setattr(worker, "DEMO_LAB_ID", "42")
     monkeypatch.setattr(worker, "wol_and_wait", lambda *args, **kwargs: (True, 1))
     monkeypatch.setattr(
@@ -287,6 +292,7 @@ def test_demo_start_failure_attempts_physical_cleanup(db_engine, client, monkeyp
         "labs": ["42"],
     }
     worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: host)
     monkeypatch.setattr(worker, "DEMO_LAB_ID", "42")
     monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ENABLED", False)
     monkeypatch.setattr(worker, "wol_and_wait", lambda *args, **kwargs: (False, 3))

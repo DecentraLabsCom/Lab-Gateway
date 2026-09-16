@@ -10,6 +10,7 @@ from aas_sync_route import handle_aas_sync
 def create_aas_sync_blueprint(
     *,
     find_host: Callable[[str], Optional[Dict[str, Any]]],
+    resolve_lab_ids_for_host: Callable[[Dict[str, Any]], Any],
     sync_lab: Callable[[str, Dict[str, Any]], Dict[str, Any]],
     log_failure: Callable[..., Any],
 ) -> Blueprint:
@@ -22,6 +23,7 @@ def create_aas_sync_blueprint(
         return handle_aas_sync(
             payload,
             find_host=find_host,
+            resolve_lab_ids_for_host=resolve_lab_ids_for_host,
             sync_lab=sync_lab,
             log_failure=log_failure,
             jsonify=jsonify,

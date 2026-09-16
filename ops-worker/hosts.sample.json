@@ -8,8 +8,7 @@
       "winrm_use_ssl": true,
       "winrm_port": 5986,
       "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
-      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl",
-      "labs": ["1"]
+      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl"
     }
   ]
 }

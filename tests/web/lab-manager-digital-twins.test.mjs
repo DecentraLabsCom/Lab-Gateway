@@ -39,10 +39,10 @@ function createFields() {
 
 function loadDigitalTwins({
   labsResponse,
-  hostsResponse = {
+  associationsResponse = {
     ok: true,
     status: 200,
-    json: async () => ({ hosts: [] }),
+    json: async () => ({ associations: [] }),
   },
 }) {
   const document = {
@@ -86,7 +86,9 @@ function loadDigitalTwins({
   });
   const fetchImpl = (url, options = {}) => {
     fetchCalls.push({ url: String(url), options });
-    return Promise.resolve(String(url) === '/ops/api/hosts' ? hostsResponse : labsResponse);
+    return Promise.resolve(
+      String(url) === '/ops/api/lab-associations' ? associationsResponse : labsResponse,
+    );
   };
   vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {
     filename: 'lab-manager-digital-twins.js',
@@ -124,14 +126,22 @@ test('loads managed labs once and populates both digital-twin selectors by stabl
             termsOfUse: { url: 'https://docs.example.test/terms.html' },
             listed: true,
           },
-          { labId: '8', resourceType: 0, name: 'Remote Station', listed: false },
+          {
+            labId: '8',
+            resourceType: 0,
+            accessKey: 'guac:id:8',
+            name: 'Remote Station',
+            listed: false,
+          },
         ],
       }),
     },
-    hostsResponse: {
+    associationsResponse: {
       ok: true,
       status: 200,
-      json: async () => ({ hosts: [{ name: 'PC-Siemens', labs: ['8'] }] }),
+      json: async () => ({
+        associations: [{ labId: '8', hostName: 'PC-Siemens' }],
+      }),
     },
   });
 
@@ -145,7 +155,7 @@ test('loads managed labs once and populates both digital-twin selectors by stabl
 
   assert.equal(fetchCalls.length, 2);
   assert.equal(fetchCalls[0].url, '/lab-admin/labs');
-  assert.equal(fetchCalls[1].url, '/ops/api/hosts');
+  assert.equal(fetchCalls[1].url, '/ops/api/lab-associations');
   assert.equal(fetchCalls[0].options.skipAuthPrompt, true);
   assert.equal(controller.getManagedLabs().length, 2);
   assert.equal(fields.powerPolicyLabSelect.value, '8');
@@ -179,7 +189,7 @@ test('loads managed labs once and populates both digital-twin selectors by stabl
   assert.ok(fields.powerPolicyLabSelect.options.some(option => /Spring Damper/.test(option.textContent)));
 });
 
-test('only exposes physical laboratories associated with an Ops Worker host', async () => {
+test('only exposes physical laboratories reported by the Ops Worker association projection', async () => {
   const { controller, fields } = loadDigitalTwins({
     labsResponse: {
       ok: true,
@@ -187,15 +197,27 @@ test('only exposes physical laboratories associated with an Ops Worker host', as
       json: async () => ({
         labs: [
           { labId: '1', resourceType: 1, accessKey: 'state-space.fmu', name: 'State Space' },
-          { labId: '2', resourceType: 0, name: 'Associated physical lab' },
-          { labId: '3', resourceType: 0, name: 'Unassociated physical lab' },
+          {
+            labId: '2',
+            resourceType: 0,
+            accessKey: 'guac:id:21',
+            name: 'Associated physical lab',
+          },
+          {
+            labId: '3',
+            resourceType: 0,
+            accessKey: 'guac:id:22',
+            name: 'Unassociated physical lab',
+          },
         ],
       }),
     },
-    hostsResponse: {
+    associationsResponse: {
       ok: true,
       status: 200,
-      json: async () => ({ hosts: [{ name: 'PC-Siemens', labs: ['2'] }] }),
+      json: async () => ({
+        associations: [{ labId: '2', hostName: 'PC-Siemens' }],
+      }),
     },
   });
 
@@ -206,7 +228,7 @@ test('only exposes physical laboratories associated with an Ops Worker host', as
   assert.equal(controller.getManagedLabs().length, 3);
 });
 
-test('hides physical laboratories when the Ops Worker inventory cannot be loaded', async () => {
+test('hides physical laboratories when the Ops Worker associations cannot be loaded', async () => {
   const { controller, fields } = loadDigitalTwins({
     labsResponse: {
       ok: true,
@@ -214,11 +236,11 @@ test('hides physical laboratories when the Ops Worker inventory cannot be loaded
       json: async () => ({
         labs: [
           { labId: '1', resourceType: 1, accessKey: 'state-space.fmu', name: 'State Space' },
-          { labId: '2', resourceType: 0, name: 'Physical lab' },
+          { labId: '2', resourceType: 0, accessKey: 'guac:id:2', name: 'Physical lab' },
         ],
       }),
     },
-    hostsResponse: {
+    associationsResponse: {
       ok: false,
       status: 503,
       json: async () => ({}),

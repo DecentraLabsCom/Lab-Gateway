@@ -130,10 +130,8 @@ For a Guacamole connection without an Ops host:
    - `Heartbeat path`: normally `C:\LabStation\labstation\data\telemetry\heartbeat.json`.
 4. Save the host and reload the inventory.
 
-When published labs match the discovered Guacamole connections, the gateway
-stores those lab associations during provisioning. The association is not a
-manual choice in the station form: one station can serve multiple labs, while
-other Guacamole connections on the same station can remain administrative.
+The station form stores only the host configuration. At runtime the worker reads the provider catalog, follows each physical lab's Guacamole `accessKey`, and associates the connection with exactly one registered host; one station can therefore serve
+multiple labs while other connections on the same station remain administrative.
 
 For a provisioned host, use the pencil action to change its name, MAC, or
 heartbeat path. Static entries from `ops-worker/hosts.json` must still be

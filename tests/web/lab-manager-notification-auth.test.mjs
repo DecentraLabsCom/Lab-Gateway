@@ -114,6 +114,11 @@ function loadLabManager({
     status: 200,
     json: async () => ({ hosts: [], guacamoleUnmatched: [] }),
   }),
+  associationsResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ associations: [] }),
+  }),
   discoverResponse = Promise.resolve({
     ok: true,
     status: 200,
@@ -299,6 +304,9 @@ function loadLabManager({
       }
       if (parsedUrl.pathname === '/lab-admin/labs') {
         return Promise.resolve(labsResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/lab-associations') {
+        return Promise.resolve(associationsResponse);
       }
       if (parsedUrl.pathname === '/ops/api/hosts') {
         return Promise.resolve(hostInventoryResponse);
@@ -549,10 +557,10 @@ test('reuses the existing Lab Manager session without prompting on Operations en
 
 test('loads the activity controller before the Lab Manager bootstrap', () => {
   const html = fs.readFileSync(indexPath, 'utf8');
-  if (html.includes('lab-manager-fmu-sync-v4')) {
-    assert.match(html, /lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v4/);
+  if (html.includes('lab-manager-fmu-sync-v5')) {
+    assert.match(html, /lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v5/);
     assert.match(html, /lab-manager-aas-link\.js\?v=lab-manager-aas-link-v3/);
-    assert.match(html, /lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v4/);
+    assert.match(html, /lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v5/);
     assert.match(html, /lab-manager-energy-feature\.js\?v=lab-manager-energy-feature-v3/);
     return;
   }
@@ -1303,7 +1311,7 @@ test('loads laboratory options and sends the mapped lab ID automatically', async
       status: 200,
       json: async () => ({
         labs: [
-          { labId: '42', resourceType: 0, listed: true },
+          { labId: '42', resourceType: 0, accessKey: 'guac:id:42', listed: true },
           {
             labId: '7',
             resourceType: 1,
@@ -1315,10 +1323,25 @@ test('loads laboratory options and sends the mapped lab ID automatically', async
         ],
       }),
     }),
+    associationsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        associations: [{ labId: '42', hostName: 'PC-Siemens' }],
+      }),
+    }),
     hostInventoryResponse: Promise.resolve({
       ok: true,
       status: 200,
-      json: async () => ({ hosts: [{ name: 'PC-Siemens', labs: ['42'] }] }),
+      json: async () => ({
+        hosts: [{
+          name: 'PC-Siemens',
+          labs: [],
+          guacamole: {
+            connections: [{ id: 42, selector: 'guac:id:42', hostname: 'PC-Siemens' }],
+          },
+        }],
+      }),
     }),
   });
 
@@ -1398,7 +1421,7 @@ test('prefers managed lab names in operations reservations and lab selectors', a
   assert.doesNotMatch(elements.get('upcomingReservationsList').innerHTML, /Lab #1/);
 });
 
-test('groups connections by station and automatically links its local physical labs', async () => {
+test('groups connections by station without copying lab associations into a host', async () => {
   const connection = {
     id: 42,
     name: 'Siemens Admin',
@@ -1502,8 +1525,8 @@ test('groups connections by station and automatically links its local physical l
   const provisionCall = fetchCalls.find(({ url }) => String(url) === '/ops/api/hosts/provision');
   assert.ok(provisionCall, 'Saving a station should call the provisioning endpoint');
   const provisionPayload = JSON.parse(provisionCall.options.body);
-  assert.deepEqual(provisionPayload.labs, ['7', '10']);
-  assert.deepEqual(provisionPayload.validLabIds, ['7', '10']);
+  assert.equal('labs' in provisionPayload, false);
+  assert.equal('validLabIds' in provisionPayload, false);
 });
 
 test('does not require an administrative connection to have a published lab', async () => {
@@ -1566,7 +1589,7 @@ test('does not require an administrative connection to have a published lab', as
 
   const provisionCall = fetchCalls.find(({ url }) => String(url) === '/ops/api/hosts/provision');
   const provisionPayload = JSON.parse(provisionCall.options.body);
-  assert.deepEqual(provisionPayload.labs, []);
+  assert.equal('labs' in provisionPayload, false);
   assert.equal('validLabIds' in provisionPayload, false);
 });
 

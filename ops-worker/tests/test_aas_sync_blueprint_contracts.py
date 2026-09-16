@@ -9,6 +9,7 @@ def test_aas_sync_blueprint_registers_the_expected_route():
     app.register_blueprint(
         create_aas_sync_blueprint(
             find_host=lambda _name: None,
+            resolve_lab_ids_for_host=lambda _host: [],
             sync_lab=lambda _lab_id, _host: {},
             log_failure=lambda *_args: None,
         )
@@ -32,6 +33,7 @@ def test_aas_sync_blueprint_forwards_host_and_each_lab():
     app.register_blueprint(
         create_aas_sync_blueprint(
             find_host=lambda name: calls.append(("find", name)) or host,
+            resolve_lab_ids_for_host=lambda _host: [1, "2"],
             sync_lab=lambda lab_id, host_arg: calls.append(("sync", lab_id, host_arg))
             or {"synced": True},
             log_failure=lambda *_args: None,
@@ -61,6 +63,7 @@ def test_aas_sync_blueprint_preserves_missing_host_and_lab_error_contracts():
     app.register_blueprint(
         create_aas_sync_blueprint(
             find_host=lambda name: {"name": name, "labs": [1]} if name == "known" else None,
+            resolve_lab_ids_for_host=lambda _host: [1],
             sync_lab=lambda _lab_id, _host: (_ for _ in ()).throw(
                 RuntimeError("secret BaSyx details")
             ),
@@ -88,6 +91,7 @@ def test_aas_sync_blueprint_preserves_missing_host_and_lab_error_contracts():
 def test_worker_aas_sync_route_is_owned_by_the_blueprint(monkeypatch):
     host = {"name": "lab-ws-01", "address": "192.168.1.50", "labs": [1]}
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    monkeypatch.setattr(worker, "resolve_lab_ids_for_host", lambda _host: [1])
     monkeypatch.setattr(
         worker.aas_generator,
         "sync_lab_to_basyx",

@@ -6,7 +6,7 @@ from aas_lab_sync_blueprint import create_aas_lab_sync_blueprint
 
 def _blueprint(**overrides):
     providers = {
-        "find_host_by_lab": lambda _lab_id: {"name": "lab-ws-01", "labs": ["lab-1"]},
+        "resolve_host_by_lab": lambda _lab_id: {"name": "lab-ws-01"},
         "parse_bool": lambda value, default: bool(value) if value is not None else default,
         "poll_heartbeat": lambda _host, **_kwargs: {"heartbeat": {"ready": True}},
         "load_persisted_heartbeat": lambda _lab_id, _host: None,
@@ -37,7 +37,7 @@ def test_aas_lab_sync_blueprint_forwards_persisted_heartbeat():
     calls = []
     app.register_blueprint(
         _blueprint(
-            find_host_by_lab=lambda lab_id: calls.append(("find", lab_id)) or host,
+            resolve_host_by_lab=lambda lab_id: calls.append(("find", lab_id)) or host,
             load_persisted_heartbeat=lambda lab_id, value: calls.append(
                 ("load", lab_id, value)
             )
@@ -66,7 +66,7 @@ def test_aas_lab_sync_blueprint_forwards_requested_poll_and_maps_sync_errors():
     calls = []
     app.register_blueprint(
         _blueprint(
-            find_host_by_lab=lambda _lab_id: host,
+            resolve_host_by_lab=lambda _lab_id: host,
             poll_heartbeat=lambda value, **kwargs: calls.append(("poll", value, kwargs))
             or {"heartbeat": {"ready": True, "source": "poll"}},
             sync_lab=lambda lab_id, value, heartbeat, metadata: calls.append(
@@ -95,6 +95,7 @@ def test_aas_lab_sync_blueprint_forwards_requested_poll_and_maps_sync_errors():
 def test_worker_aas_lab_sync_route_is_owned_by_the_blueprint(monkeypatch):
     host = {"name": "lab-ws-01", "address": "192.168.1.50", "labs": ["lab-1"]}
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: host)
     monkeypatch.setattr(worker, "DB_ENGINE", None)
     monkeypatch.setattr(
         worker.aas_generator,
