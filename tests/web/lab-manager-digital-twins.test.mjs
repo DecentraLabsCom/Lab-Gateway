@@ -37,7 +37,14 @@ function createFields() {
   return fields;
 }
 
-function loadDigitalTwins({ labsResponse }) {
+function loadDigitalTwins({
+  labsResponse,
+  hostsResponse = {
+    ok: true,
+    status: 200,
+    json: async () => ({ hosts: [] }),
+  },
+}) {
   const document = {
     createElement: (tagName) => {
       const element = createElement(tagName);
@@ -79,7 +86,7 @@ function loadDigitalTwins({ labsResponse }) {
   });
   const fetchImpl = (url, options = {}) => {
     fetchCalls.push({ url: String(url), options });
-    return Promise.resolve(labsResponse);
+    return Promise.resolve(String(url) === '/ops/api/hosts' ? hostsResponse : labsResponse);
   };
   vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {
     filename: 'lab-manager-digital-twins.js',
@@ -117,9 +124,14 @@ test('loads managed labs once and populates both digital-twin selectors by stabl
             termsOfUse: { url: 'https://docs.example.test/terms.html' },
             listed: true,
           },
-          { labId: '8', resourceType: 2, name: 'Remote Station', listed: false },
+          { labId: '8', resourceType: 0, name: 'Remote Station', listed: false },
         ],
       }),
+    },
+    hostsResponse: {
+      ok: true,
+      status: 200,
+      json: async () => ({ hosts: [{ name: 'PC-Siemens', labs: ['8'] }] }),
     },
   });
 
@@ -131,8 +143,9 @@ test('loads managed labs once and populates both digital-twin selectors by stabl
   assert.equal(first, second);
   await first;
 
-  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls.length, 2);
   assert.equal(fetchCalls[0].url, '/lab-admin/labs');
+  assert.equal(fetchCalls[1].url, '/ops/api/hosts');
   assert.equal(fetchCalls[0].options.skipAuthPrompt, true);
   assert.equal(controller.getManagedLabs().length, 2);
   assert.equal(fields.powerPolicyLabSelect.value, '8');
@@ -164,6 +177,58 @@ test('loads managed labs once and populates both digital-twin selectors by stabl
     '0',
   );
   assert.ok(fields.powerPolicyLabSelect.options.some(option => /Spring Damper/.test(option.textContent)));
+});
+
+test('only exposes physical laboratories associated with an Ops Worker host', async () => {
+  const { controller, fields } = loadDigitalTwins({
+    labsResponse: {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        labs: [
+          { labId: '1', resourceType: 1, accessKey: 'state-space.fmu', name: 'State Space' },
+          { labId: '2', resourceType: 0, name: 'Associated physical lab' },
+          { labId: '3', resourceType: 0, name: 'Unassociated physical lab' },
+        ],
+      }),
+    },
+    hostsResponse: {
+      ok: true,
+      status: 200,
+      json: async () => ({ hosts: [{ name: 'PC-Siemens', labs: ['2'] }] }),
+    },
+  });
+
+  await controller.loadManagedLabs({ skipAuthPrompt: true });
+
+  assert.deepEqual(fields.fmuSyncKey.options.map(option => option.value), ['1', '2']);
+  assert.deepEqual(fields.aasLinkKey.options.map(option => option.value), ['1', '2']);
+  assert.equal(controller.getManagedLabs().length, 3);
+});
+
+test('hides physical laboratories when the Ops Worker inventory cannot be loaded', async () => {
+  const { controller, fields } = loadDigitalTwins({
+    labsResponse: {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        labs: [
+          { labId: '1', resourceType: 1, accessKey: 'state-space.fmu', name: 'State Space' },
+          { labId: '2', resourceType: 0, name: 'Physical lab' },
+        ],
+      }),
+    },
+    hostsResponse: {
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    },
+  });
+
+  await controller.loadManagedLabs({ skipAuthPrompt: true });
+
+  assert.deepEqual(fields.fmuSyncKey.options.map(option => option.value), ['1']);
+  assert.deepEqual(fields.aasLinkKey.options.map(option => option.value), ['1']);
 });
 
 test('initializes FMU sync and AAS link with the existing field boundaries', () => {

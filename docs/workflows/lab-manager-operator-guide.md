@@ -88,8 +88,11 @@ The complete energy workflow is in [Lab Manager energy operations](lab-manager-e
    their operational `accessKey`; physical labs retain their Guacamole
    `accessKey`, but neither is selected manually in Digital Twins.
 3. Open `Digital Twins` → `Digital Twin Management` and select the
-   laboratory. The selector includes FMUs and physical laboratories and uses
-   the `labId` to associate the operation automatically.
+   laboratory. The selector includes FMUs and physical laboratories associated
+   with an Ops Worker host, and uses the `labId` to associate the operation
+   automatically. A physical laboratory is listed only when its `labId` is
+   present in a host's `labs` association; this is the mapping required by
+   physical AAS synchronization.
 4. Click `Sync AAS` to generate metadata. FMUs use the model description when
    available, otherwise the registered laboratory description. Physical labs
    use Gateway/heartbeat data plus the registered description, documentation,
@@ -115,7 +118,7 @@ The detailed configuration, secrets, and persistence rules are in
 
 | Symptom | First check |
 | --- | --- |
-| No laboratory appears in selectors | Refresh `Labs`, verify `LAB_MANAGER_TOKEN`, and check the publication backend. |
+| No laboratory appears in selectors | Refresh `Labs`, verify `LAB_MANAGER_TOKEN`, check the publication backend, and for physical labs confirm that an Ops Worker host lists the lab's `labId` in `labs`. |
 | `Operations` shows a network warning | Access from localhost or an allowed CIDR; check dashboard policy. |
 | `Digital Twins` or `Notifications` are disabled | Confirm that the Gateway is Full and is not running with an external `ISSUER`. |
 | A tab loads but its data is empty | Identify the responsible route in the opening table and inspect that service, not only the browser. |

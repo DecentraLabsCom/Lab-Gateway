@@ -23,9 +23,12 @@ AAS gives a resource a stable digital identity and a structured place for techni
 
 The Full Gateway exposes FMU and physical-laboratory AAS synchronization from
 the `Digital Twins` tab in Lab Manager. The selector is populated from the
-provider's laboratory inventory and uses the stable `labId` as its value. For
-an FMU, the corresponding operational `accessKey` is resolved automatically;
-operators do not select or type it separately.
+provider's laboratory inventory and uses the stable `labId` as its value. FMUs
+are available directly from that inventory. Physical laboratories are shown
+only when the Ops Worker host inventory contains the same `labId` in a host's
+`labs` association, because that is the mapping used by the physical AAS sync
+route. For an FMU, the corresponding operational `accessKey` is resolved
+automatically; operators do not select or type it separately.
 
 ![Lab Manager Digital Twins tab](images/lab-manager-digital-twins.png)
 
