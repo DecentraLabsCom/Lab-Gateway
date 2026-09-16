@@ -597,6 +597,27 @@ test('places the cancellation reason selector below the cancellation button', ()
   );
 });
 
+test('keeps power output and policy toggle fields aligned in their grids', () => {
+  const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(
+    stylesheet,
+    /\.power-controller-outlet-fields\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(150px, 1fr\)\);/,
+  );
+  assert.match(
+    stylesheet,
+    /\.power-controller-outlet-protected-field\s*\{\s*justify-self:\s*stretch;\s*\}/,
+  );
+  assert.match(
+    stylesheet,
+    /\.power-checkbox-field\s*\{\s*align-self:\s*start;\s*\}/,
+  );
+  assert.match(
+    stylesheet,
+    /\.power-policy-toolbar\s*\{\s*align-items:\s*start;/,
+  );
+});
+
 test('styles AAS link removal and uses an English custom FMU file picker', () => {
   const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
   const markup = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
