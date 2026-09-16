@@ -137,7 +137,9 @@
                     ? '<div class="empty">No outputs reported by the controller. Refresh its live status.</div>'
                     : '<div class="empty">No outlets configured. Add at least one outlet before saving.</div>';
             }
-            return outlets.map((outlet, index) => `
+            return outlets.map((outlet, index) => {
+                const outputManagedByDevice = deviceManaged && outlet.deviceManaged === true;
+                return `
             <div class="power-controller-outlet-config" data-controller-outlet-index="${index}">
                 <div class="power-controller-outlet-config-header">
                     <strong>${deviceManaged ? 'Output' : 'Outlet'} ${index + 1}</strong>
@@ -148,15 +150,11 @@
                         <span>Output ID (device)</span>
                         <input type="text" maxlength="64" data-controller-outlet-field="outlet" value="${escapeHtml(outlet.outlet)}" placeholder="1"${deviceManaged ? ' readonly' : ''}>
                     </label>
-                    ${deviceManaged ? renderDeviceConfigurationFields(outlet) : `
+                    ${outputManagedByDevice ? renderDeviceConfigurationFields(outlet) : `
                     <label class="field">
-                        <span>Display name (Gateway)</span>
-                        <input type="text" maxlength="160" data-controller-outlet-field="displayName" value="${escapeHtml(outlet.displayName)}" placeholder="PLC power">
+                        <span>Name</span>
+                        <input type="text" maxlength="160" data-controller-outlet-field="logicalName" value="${escapeHtml(outlet.logicalName)}" placeholder="PLC power">
                     </label>`}
-                    <label class="field">
-                        <span>Logical name</span>
-                        <input type="text" maxlength="160" data-controller-outlet-field="logicalName" value="${escapeHtml(outlet.logicalName)}" placeholder="plc">
-                    </label>
                     <label class="field">
                         <span>Default state</span>
                         <select data-controller-outlet-field="defaultState">
@@ -170,7 +168,8 @@
                     </label>
                 </div>
             </div>
-        `).join('');
+        `;
+            }).join('');
         }
 
         function renderDeviceConfigurationFields(outlet) {
@@ -178,7 +177,7 @@
             const config = outlet.deviceConfig && typeof outlet.deviceConfig === 'object' ? outlet.deviceConfig : {};
             const writable = outlet.deviceConfigWritable === true;
             const labels = {
-                name: 'Device output name',
+                name: 'Name',
                 powerOnDelaySeconds: 'Power-on delay (seconds)',
                 powerOffDelaySeconds: 'Power-off delay (seconds)',
                 rebootDurationSeconds: 'Reboot duration (seconds)',
@@ -251,7 +250,7 @@
             const outlets = Array.isArray(controller?.outlets) ? controller.outlets : [];
             const options = outlets.map(outlet => {
                 const outletId = String(outlet.outlet || '').trim();
-                const label = outlet.deviceName || outlet.displayName || outlet.logicalName || outletId;
+                const label = outlet.deviceName || outlet.logicalName || outletId;
                 return `<option value="${escapeHtml(outletId)}"${outletId === step.outlet ? ' selected' : ''}>${escapeHtml(label)} (${escapeHtml(outletId)})</option>`;
             }).join('');
             return `<option value="">${outlets.length ? 'Select outlet' : 'No outlets available'}</option>${options}`;
@@ -265,7 +264,7 @@
             const protectedOutlet = outlet.protected === true;
             const state = String(outlet.state || 'unknown').toLowerCase();
             const stateClass = state === 'on' ? 'good' : state === 'off' ? 'soft' : 'warn';
-            const label = outlet.deviceName || outlet.displayName || outlet.logicalName || outlet.outlet;
+            const label = outlet.deviceName || outlet.logicalName || outlet.outlet;
             return `
             <div class="power-outlet-row">
                 <div>

@@ -61,7 +61,6 @@ class PowerRegistry:
             outlet = PowerOutlet(
                 controller_id=controller_id,
                 outlet_key=outlet_key,
-                display_name=(str(raw_outlet.get("displayName") or "").strip() or None),
                 logical_name=(str(raw_outlet.get("logicalName") or "").strip() or None),
                 protected=_bool(raw_outlet.get("protected")),
                 default_state=str(raw_outlet.get("defaultState") or "off").strip().lower(),
@@ -105,7 +104,6 @@ class PowerRegistry:
                     outlet = PowerOutlet(
                         controller_id=definition.id,
                         outlet_key=outlet_key,
-                        display_name=(str(raw_outlet.get("displayName") or "").strip() or None),
                         logical_name=(str(raw_outlet.get("logicalName") or "").strip() or None),
                         protected=_bool(raw_outlet.get("protected")),
                         default_state=str(raw_outlet.get("defaultState") or "off").strip().lower(),

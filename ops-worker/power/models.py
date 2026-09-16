@@ -164,7 +164,6 @@ class PowerCapabilities:
 class PowerOutlet:
     controller_id: str
     outlet_key: str
-    display_name: Optional[str] = None
     logical_name: Optional[str] = None
     protected: bool = False
     default_state: str = "off"
@@ -182,7 +181,6 @@ class PowerOutlet:
     ) -> Dict[str, Any]:
         result = {
             "outlet": self.outlet_key,
-            "displayName": self.display_name,
             "logicalName": self.logical_name,
             "protected": self.protected,
             "defaultState": self.default_state,
@@ -192,7 +190,6 @@ class PowerOutlet:
             device_name = remote.get("name")
             if device_name is not None:
                 result["deviceName"] = str(device_name)
-                result["displayName"] = str(device_name)
             if "deviceConfig" in remote:
                 result["deviceConfig"] = dict(remote.get("deviceConfig") or {})
             if "deviceConfigWritable" in remote:

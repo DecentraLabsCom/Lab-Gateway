@@ -73,7 +73,6 @@ test('keeps policy and outlet defaults stable for incomplete input', () => {
   });
   assert.deepEqual(JSON.parse(JSON.stringify(values.createPowerControllerOutletDraft({ outletKey: '2', defaultState: 'on', protected: true }))), {
     outlet: '2',
-    displayName: '',
     deviceName: '',
     deviceConfig: {},
     deviceConfigFields: [],

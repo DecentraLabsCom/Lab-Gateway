@@ -71,7 +71,6 @@ test('preserves controller form validation and NETIO payload shape', () => {
   const { controller, fields } = loadControllers({
     createPowerControllerOutletDraft: outlet => ({
       outlet: String(outlet.outlet || ''),
-      displayName: '',
       logicalName: '',
       protected: false,
       defaultState: 'off',
@@ -149,11 +148,10 @@ test('preserves controller load status and authorization request behavior', asyn
   assert.equal(calls[1].options.cache, 'no-store');
 });
 
-test('sends physical output changes separately from Gateway-local metadata', () => {
+test('sends the unified physical output name and keeps the local name aligned', () => {
   const { controller, fields } = loadControllers({
     createPowerControllerOutletDraft: outlet => ({
       outlet: String(outlet.outlet || ''),
-      displayName: '',
       deviceName: outlet.deviceName || '',
       deviceConfig: { ...(outlet.deviceConfig || {}) },
       deviceConfigFields: outlet.deviceConfigFields || ['name', 'powerOnDelaySeconds'],
@@ -194,7 +192,7 @@ test('sends physical output changes separately from Gateway-local metadata', () 
   });
   assert.deepEqual(JSON.parse(JSON.stringify(controller.readForm().outlets)), [{
     outlet: '1',
-    logicalName: '',
+    logicalName: 'PLC updated',
     protected: false,
     defaultState: 'off',
   }]);
