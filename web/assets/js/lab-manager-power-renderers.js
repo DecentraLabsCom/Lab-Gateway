@@ -179,9 +179,14 @@
             const disabledAttribute = writable ? '' : ' disabled';
             const labels = {
                 name: 'Name',
-                powerOnDelaySeconds: 'Power-on delay (sec)',
-                powerOffDelaySeconds: 'Power-off delay (sec)',
-                rebootDurationSeconds: 'Reboot duration (sec)',
+                powerOnDelaySeconds: 'Power-on delay',
+                powerOffDelaySeconds: 'Power-off delay',
+                rebootDurationSeconds: 'Reboot duration',
+            };
+            const tooltips = {
+                powerOnDelaySeconds: 'Duration in seconds',
+                powerOffDelaySeconds: 'Duration in seconds',
+                rebootDurationSeconds: 'Duration in seconds',
             };
             return fields.map(field => {
                 if (field === 'name') {
@@ -192,9 +197,10 @@
                 }
                 if (!Object.prototype.hasOwnProperty.call(labels, field)) return '';
                 const value = config[field] ?? '';
-                return `<label class="field">
+                const tooltipAttribute = ` title="${tooltips[field]}"`;
+                return `<label class="field"${tooltipAttribute}>
                     <span>${labels[field]}${writable ? '' : ' (read-only)'}</span>
-                    <input type="number" min="${field === 'rebootDurationSeconds' ? '5' : '0'}" max="${field === 'rebootDurationSeconds' ? '60' : '7200'}" data-controller-device-config-field="${field}" value="${escapeHtml(value)}"${disabledAttribute}>
+                    <input type="number" min="${field === 'rebootDurationSeconds' ? '5' : '0'}" max="${field === 'rebootDurationSeconds' ? '60' : '7200'}" data-controller-device-config-field="${field}" value="${escapeHtml(value)}"${tooltipAttribute}${disabledAttribute}>
                 </label>`;
             }).join('');
         }
