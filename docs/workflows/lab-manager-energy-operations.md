@@ -127,7 +127,6 @@ controller. The Gateway stores only its local overlay:
 
 - `Logical name` for policy/operator recognition;
 - `Default state`, normally `Off`;
-- `Critical` for equipment required to start or close the laboratory; and
 - `Protected` for outlets that must not be switched accidentally.
 
 For APC SNMP, the device output name and power-on delay, power-off delay and
@@ -169,7 +168,7 @@ In `Energy` → `Lab Power Control` → `Lab power policy`:
    procedure explicitly requires otherwise. This prevents remote automation
    from interfering with local station operation.
 5. Use `Maintenance mode` only for a controlled maintenance policy.
-6. As a starting point, use `Fail reservation start` for critical startup
+6. As a starting point, use `Fail reservation start` for required startup
    actions and `Warn and continue` for reservation-end cleanup when a failed
    shutdown should not block the rest of the flow.
 7. Click `Add step` and define the actions.
@@ -181,7 +180,7 @@ same phase, while phases still execute according to their lifecycle order.
 Actions are `on`, `off`, and `cycle`; the action itself determines the target
 state. Use the optional `Step label` for operator recognition. `Cycle off
 time` is shown only for `cycle` and controls how long the output stays off.
-You can also set delays, timeout, retries, and `Required`, `Read back state`,
+You can also set delays, timeout, retries, and `Required`, `Confirm state`,
 and `Allow protected outlet`. `Conditions` is optional advanced JSON; it must
 contain a valid JSON object.
 
@@ -192,10 +191,10 @@ Available phases are:
 | `pre_start` | Power PLCs, HMIs, and other equipment before waking/preparing the station. |
 | `start` / `post_start` | Actions during or after preparation. |
 | `pre_end` | Prepare shutdown before releasing the reservation. |
-| `end` / `post_end` | Turn off non-critical and then critical outlets. |
+| `end` / `post_end` | Turn off the configured outlets in the policy order. |
 | `manual`, `maintenance`, `emergency_stop` | Explicit procedures outside the normal cycle. |
 
-A typical initial policy powers critical outlets on in `pre_start` and powers
+A typical initial policy powers required outlets on in `pre_start` and powers
 them off in reverse order in `post_end`. Do not include the strip itself, the
 network switch, the Gateway, the Guacamole host, or any equipment required to
 keep laboratory control and connectivity alive.
@@ -205,7 +204,7 @@ the visible laboratory name. Renaming the lab must not create a second policy.
 
 ### 4. Run a controlled test
 
-Start with a non-critical outlet and a clear `Operation reason`. Wait for the
+Start with a non-protected outlet and a clear `Operation reason`. Wait for the
 controller status to finish checking; an initial `checking` or `unknown` state
 does not by itself mean that the device is unreachable.
 
@@ -264,7 +263,7 @@ To rotate an APC, NETIO, or other compatible controller credential:
 1. Open `Energy` → `Energy Credentials`.
 2. Select the existing reference.
 3. Enter the replacement secret, keeping the correct type.
-4. Save it and perform a state read or non-critical manual test.
+4. Save it and perform a state read or manual test.
 
 There is no need to edit `power-controllers.json`: `credentialRef` does not
 change. The UI never loads the old secret into the browser and the API never

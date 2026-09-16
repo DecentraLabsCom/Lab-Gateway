@@ -167,7 +167,6 @@ class PowerOutlet:
     display_name: Optional[str] = None
     logical_name: Optional[str] = None
     protected: bool = False
-    critical: bool = False
     default_state: str = "off"
 
     def __post_init__(self) -> None:
@@ -186,7 +185,6 @@ class PowerOutlet:
             "displayName": self.display_name,
             "logicalName": self.logical_name,
             "protected": self.protected,
-            "critical": self.critical,
             "defaultState": self.default_state,
             "state": state,
         }

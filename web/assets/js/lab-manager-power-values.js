@@ -47,7 +47,6 @@
                 deviceManaged: outlet.deviceManaged === true || deviceConfigFields.length > 0,
                 logicalName: String(outlet.logicalName || '').trim(),
                 protected: outlet.protected === true,
-                critical: outlet.critical === true,
                 defaultState: outlet.defaultState === 'on' ? 'on' : 'off',
             };
         }

@@ -118,7 +118,6 @@ def build_runtime(*, record_operation=None, sleep_fn=None, operation_store=None)
                     "controllerId": "mock-lab-01",
                     "outlet": "1",
                     "logicalName": "plc",
-                    "critical": True,
                 },
                 {
                     "controllerId": "mock-lab-01",
@@ -479,7 +478,16 @@ def test_power_controller_status_api_can_bypass_status_cache(client, monkeypatch
 def test_power_controller_api_creates_and_updates_provider_catalog(client, tmp_path, monkeypatch):
     config_path = tmp_path / "power-controllers.json"
     config_path.write_text(
-        json.dumps({"controllers": [], "outlets": [], "policies": []}),
+        json.dumps({
+            "controllers": [],
+            "outlets": [{
+                "controllerId": "legacy-controller",
+                "outlet": "9",
+                "logicalName": "legacy",
+                "critical": True,
+            }],
+            "policies": [],
+        }),
         encoding="utf-8",
     )
     runtime = PowerRuntime.from_path(
@@ -497,13 +505,14 @@ def test_power_controller_api_creates_and_updates_provider_catalog(client, tmp_p
             "enabled": True,
             "config": {"timeoutSeconds": 3},
             "outlets": [
-                {"outlet": "1", "logicalName": "PLC", "critical": True},
+                {"outlet": "1", "logicalName": "PLC"},
             ],
         },
     )
     assert created.status_code == 201
     assert created.json["controller"]["id"] == "pdu-lab-01"
     assert created.json["controller"]["outlets"][0]["logicalName"] == "PLC"
+    assert "critical" not in created.json["controller"]["outlets"][0]
 
     updated = client.put(
         "/api/power/controllers/pdu-lab-01",
@@ -514,7 +523,7 @@ def test_power_controller_api_creates_and_updates_provider_catalog(client, tmp_p
             "enabled": False,
             "config": {"timeoutSeconds": 4},
             "outlets": [
-                {"outlet": "1", "logicalName": "PLC", "critical": True},
+                {"outlet": "1", "logicalName": "PLC"},
                 {"outlet": "2", "logicalName": "HMI"},
             ],
         },
@@ -523,11 +532,13 @@ def test_power_controller_api_creates_and_updates_provider_catalog(client, tmp_p
     assert updated.json["controller"]["name"] == "Bench PDU Updated"
     assert updated.json["controller"]["enabled"] is False
     assert [outlet["outlet"] for outlet in updated.json["controller"]["outlets"]] == ["1", "2"]
+    assert all("critical" not in outlet for outlet in updated.json["controller"]["outlets"])
     assert runtime.describe_controllers()[0]["name"] == "Bench PDU Updated"
 
     persisted = json.loads(config_path.read_text(encoding="utf-8"))
     assert persisted["controllers"][0]["name"] == "Bench PDU Updated"
-    assert [outlet["outlet"] for outlet in persisted["outlets"]] == ["1", "2"]
+    assert [outlet["outlet"] for outlet in persisted["outlets"]] == ["9", "1", "2"]
+    assert all("critical" not in outlet for outlet in persisted["outlets"])
 
 
 def test_power_controller_update_synchronizes_device_configuration_before_persisting(tmp_path, monkeypatch):

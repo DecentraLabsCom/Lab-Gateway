@@ -331,7 +331,6 @@
                     outlet: outletId,
                     logicalName: outlet.logicalName || '',
                     protected: outlet.protected === true,
-                    critical: outlet.critical === true,
                     defaultState: outlet.defaultState === 'on' ? 'on' : 'off',
                 };
                 if (!isDeviceController()) local.displayName = outlet.displayName || '';

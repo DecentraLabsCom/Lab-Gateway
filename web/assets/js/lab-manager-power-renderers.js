@@ -77,11 +77,18 @@
                         <span>Retries</span>
                         <input type="number" min="0" max="5" data-step-field="retryCount" value="${step.retryCount}" inputmode="numeric">
                     </label>
-                </div>
-                <div class="power-policy-step-options">
-                    <label class="check-field"><input type="checkbox" data-step-field="required"${step.required ? ' checked' : ''}> Required</label>
-                    <label class="check-field"><input type="checkbox" data-step-field="readBackRequired"${step.readBackRequired ? ' checked' : ''}> Read back state</label>
-                    <label class="check-field"><input type="checkbox" data-step-field="allowProtected"${step.allowProtected ? ' checked' : ''}> Allow protected outlet</label>
+                    <label class="field power-checkbox-field">
+                        <span>Required</span>
+                        <span class="check-field"><input type="checkbox" data-step-field="required"${step.required ? ' checked' : ''}></span>
+                    </label>
+                    <label class="field power-checkbox-field">
+                        <span>Confirm state</span>
+                        <span class="check-field"><input type="checkbox" data-step-field="readBackRequired"${step.readBackRequired ? ' checked' : ''}></span>
+                    </label>
+                    <label class="field power-checkbox-field">
+                        <span>Allow protected outlet</span>
+                        <span class="check-field"><input type="checkbox" data-step-field="allowProtected"${step.allowProtected ? ' checked' : ''}></span>
+                    </label>
                 </div>
                 <label class="field power-policy-conditions">
                     <span>Conditions (advanced JSON, optional)</span>
@@ -157,10 +164,10 @@
                             <option value="on"${outlet.defaultState === 'on' ? ' selected' : ''}>On</option>
                         </select>
                     </label>
-                </div>
-                <div class="power-controller-outlet-options">
-                    <label class="check-field"><input type="checkbox" data-controller-outlet-field="protected"${outlet.protected ? ' checked' : ''}> Protected</label>
-                    <label class="check-field"><input type="checkbox" data-controller-outlet-field="critical"${outlet.critical ? ' checked' : ''}> Critical</label>
+                    <label class="field power-checkbox-field power-controller-outlet-protected-field">
+                        <span>Protected</span>
+                        <span class="check-field"><input type="checkbox" data-controller-outlet-field="protected"${outlet.protected ? ' checked' : ''}></span>
+                    </label>
                 </div>
             </div>
         `).join('');
@@ -263,7 +270,7 @@
             <div class="power-outlet-row">
                 <div>
                     <div class="item-title">${escapeHtml(label)}</div>
-                    <div class="host-meta">Outlet ${escapeHtml(outlet.outlet)}${protectedOutlet ? ' · protected' : ''}${outlet.critical ? ' · critical' : ''}</div>
+                    <div class="host-meta">Outlet ${escapeHtml(outlet.outlet)}${protectedOutlet ? ' · protected' : ''}</div>
                 </div>
                 <div class="power-outlet-actions">
                     <span class="pill ${stateClass}">${escapeHtml(state)}</span>

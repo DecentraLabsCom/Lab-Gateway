@@ -14,8 +14,7 @@
     {
       "controllerId": "mock-lab-01",
       "outlet": "1",
-      "logicalName": "plc",
-      "critical": true
+      "logicalName": "plc"
     },
     {
       "controllerId": "mock-lab-01",

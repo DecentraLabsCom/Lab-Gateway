@@ -64,7 +64,6 @@ class PowerRegistry:
                 display_name=(str(raw_outlet.get("displayName") or "").strip() or None),
                 logical_name=(str(raw_outlet.get("logicalName") or "").strip() or None),
                 protected=_bool(raw_outlet.get("protected")),
-                critical=_bool(raw_outlet.get("critical")),
                 default_state=str(raw_outlet.get("defaultState") or "off").strip().lower(),
             )
             controller_outlets = outlets_by_controller.setdefault(controller_id, {})
@@ -109,7 +108,6 @@ class PowerRegistry:
                         display_name=(str(raw_outlet.get("displayName") or "").strip() or None),
                         logical_name=(str(raw_outlet.get("logicalName") or "").strip() or None),
                         protected=_bool(raw_outlet.get("protected")),
-                        critical=_bool(raw_outlet.get("critical")),
                         default_state=str(raw_outlet.get("defaultState") or "off").strip().lower(),
                     )
                 else:
