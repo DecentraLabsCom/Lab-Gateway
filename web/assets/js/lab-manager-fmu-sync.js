@@ -10,96 +10,115 @@
         encodeURIComponentImpl = encodeURIComponent,
         logger = console,
     }) {
-        let descriptionAutoFilled = false;
-        let licenseAutoFilled = false;
+        let fmuDescription = '';
+        let fmuDescriptionAccessKey = '';
 
-        function setFmuFieldFromHint(inputEl, hintEl, value) {
-            if (!inputEl) return;
-            inputEl.value = value;
-            inputEl.readOnly = true;
-            inputEl.style.opacity = '0.7';
-            inputEl.style.cursor = 'default';
-            if (hintEl) {
-                hintEl.textContent = '\u2139\ufe0f From FMU';
-                hintEl.hidden = false;
-            }
-        }
-
-        function clearFmuFieldHint(inputEl, hintEl) {
-            if (!inputEl) return;
-            inputEl.readOnly = false;
-            inputEl.style.opacity = '';
-            inputEl.style.cursor = '';
-            if (hintEl) {
-                hintEl.textContent = '';
-                hintEl.hidden = true;
+        function parseDatasetList(value) {
+            if (Array.isArray(value)) return value.map(item => String(item).trim()).filter(Boolean);
+            try {
+                const parsed = JSON.parse(value || '[]');
+                return Array.isArray(parsed) ? parsed.map(item => String(item).trim()).filter(Boolean) : [];
+            } catch (_error) {
+                return [];
             }
         }
 
         function clearAllFmuHints() {
-            if (descriptionAutoFilled) {
-                clearFmuFieldHint(fields.description, fields.descriptionHint);
-                if (fields.description) fields.description.value = '';
-                descriptionAutoFilled = false;
-            }
-            if (licenseAutoFilled) {
-                clearFmuFieldHint(fields.license, fields.licenseHint);
-                if (fields.license) fields.license.value = '';
-                licenseAutoFilled = false;
-            }
+            fmuDescription = '';
+            fmuDescriptionAccessKey = '';
+        }
+
+        function selectedLaboratory() {
+            const accessKey = (fields.keyInput && fields.keyInput.value || '').trim();
+            const option = Array.from(fields.keyInput?.options || [])
+                .find(candidate => String(candidate.value || '') === accessKey);
+            return {
+                accessKey,
+                labId: String(option?.dataset?.labId || '').trim(),
+                labDescription: String(option?.dataset?.labDescription || '').trim(),
+                labDocumentation: parseDatasetList(option?.dataset?.labDocumentation),
+                labLicense: String(option?.dataset?.labLicense || '').trim(),
+            };
         }
 
         async function fetchFmuHints(accessKey) {
             if (!accessKey) {
                 clearAllFmuHints();
-                return;
+                return {};
             }
             try {
                 const response = await fetchImpl(`/aas-admin/fmu/${encodeURIComponentImpl(accessKey)}/hints`);
                 if (!response.ok) {
-                    clearAllFmuHints();
-                    return;
+                    if ((fields.keyInput?.value || '').trim() === accessKey) {
+                        clearAllFmuHints();
+                    }
+                    return {};
                 }
                 const hints = await response.json();
-                if (hints.description && fields.description && !fields.description.value.trim()) {
-                    setFmuFieldFromHint(fields.description, fields.descriptionHint, hints.description);
-                    descriptionAutoFilled = true;
+                if ((fields.keyInput?.value || '').trim() !== accessKey) {
+                    return {};
                 }
-                if (hints.license && fields.license && !fields.license.value.trim()) {
-                    setFmuFieldFromHint(fields.license, fields.licenseHint, hints.license);
-                    licenseAutoFilled = true;
-                }
+                fmuDescription = String(hints.description || '').trim();
+                fmuDescriptionAccessKey = accessKey;
+                return hints;
             } catch (_error) {
                 // FMU hints are best-effort and must not block the sync form.
+                if ((fields.keyInput?.value || '').trim() === accessKey) {
+                    fmuDescription = '';
+                    fmuDescriptionAccessKey = '';
+                }
+                return {};
             }
+        }
+
+        async function resolveDescription(accessKey, laboratoryDescription) {
+            if (fmuDescriptionAccessKey !== accessKey) {
+                await fetchFmuHints(accessKey);
+            }
+            return fmuDescription || String(laboratoryDescription || '').trim();
         }
 
         async function syncAasFmu(accessKey, labId, aasxFile, extraInfo = {}) {
             if (!accessKey) {
-                showToast('Enter a FMU access key', 'error');
+                showToast('Select an FMU laboratory', 'error');
+                return;
+            }
+            if (!labId) {
+                showToast('Select an FMU laboratory', 'error');
                 return;
             }
             if (fields.syncButton) fields.syncButton.disabled = true;
             if (fields.result) fields.result.textContent = '';
             try {
+                const description = await resolveDescription(accessKey, extraInfo.labDescription);
+                const syncInfo = {
+                    description,
+                    license: String(extraInfo.labLicense || '').trim(),
+                    documentationUrls: parseDatasetList(extraInfo.labDocumentation),
+                    contactEmail: String(extraInfo.contactEmail || '').trim(),
+                };
                 let response;
                 const url = `/aas-admin/fmu/${encodeURIComponentImpl(accessKey)}/sync`;
                 if (aasxFile) {
                     const form = new formDataCtor();
                     form.append('file', aasxFile);
                     if (labId) form.append('labId', labId);
-                    if (extraInfo.description) form.append('description', extraInfo.description);
-                    if (extraInfo.license) form.append('license', extraInfo.license);
-                    if (extraInfo.docsUrl) form.append('documentationUrl', extraInfo.docsUrl);
-                    if (extraInfo.contactEmail) form.append('contactEmail', extraInfo.contactEmail);
+                    if (syncInfo.description) form.append('description', syncInfo.description);
+                    if (syncInfo.license) form.append('license', syncInfo.license);
+                    if (syncInfo.documentationUrls.length) {
+                        form.append('documentationUrls', JSON.stringify(syncInfo.documentationUrls));
+                    }
+                    if (syncInfo.contactEmail) form.append('contactEmail', syncInfo.contactEmail);
                     response = await fetchImpl(url, { method: 'POST', body: form });
                 } else {
                     const params = new urlSearchParamsCtor();
                     if (labId) params.set('labId', labId);
-                    if (extraInfo.description) params.set('description', extraInfo.description);
-                    if (extraInfo.license) params.set('license', extraInfo.license);
-                    if (extraInfo.docsUrl) params.set('documentationUrl', extraInfo.docsUrl);
-                    if (extraInfo.contactEmail) params.set('contactEmail', extraInfo.contactEmail);
+                    if (syncInfo.description) params.set('description', syncInfo.description);
+                    if (syncInfo.license) params.set('license', syncInfo.license);
+                    if (syncInfo.documentationUrls.length) {
+                        params.set('documentationUrls', JSON.stringify(syncInfo.documentationUrls));
+                    }
+                    if (syncInfo.contactEmail) params.set('contactEmail', syncInfo.contactEmail);
                     const query = params.toString() ? `?${params.toString()}` : '';
                     response = await fetchImpl(url + query, { method: 'POST' });
                 }
@@ -158,13 +177,14 @@
             }
             if (fields.syncButton) {
                 fields.syncButton.addEventListener('click', () => {
-                    const accessKey = (fields.keyInput && fields.keyInput.value || '').trim();
-                    const labId = (fields.labSelect && fields.labSelect.value || '').trim();
+                    const laboratory = selectedLaboratory();
+                    const accessKey = laboratory.accessKey;
+                    const labId = laboratory.labId;
                     const file = fields.fileInput && fields.fileInput.files && fields.fileInput.files[0];
                     const extraInfo = {
-                        description: (fields.description && fields.description.value || '').trim(),
-                        license: (fields.license && fields.license.value || '').trim(),
-                        docsUrl: (fields.docsUrl && fields.docsUrl.value || '').trim(),
+                        labDescription: laboratory.labDescription,
+                        labDocumentation: laboratory.labDocumentation,
+                        labLicense: laboratory.labLicense,
                         contactEmail: (fields.contactEmail && fields.contactEmail.value || '').trim(),
                     };
                     void syncAasFmu(accessKey, labId, file || null, extraInfo);

@@ -1,8 +1,25 @@
+import json
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.datastructures import UploadFile
+
+
+def _parse_documentation_urls(raw_value: Any) -> list[str]:
+    if raw_value is None:
+        return []
+    try:
+        parsed = json.loads(str(raw_value))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return list(dict.fromkeys(
+        str(item).strip()
+        for item in parsed
+        if str(item).strip()
+    ))
 
 
 def create_aas_sync_router(
@@ -34,6 +51,11 @@ def create_aas_sync_router(
                 value = str(form.get(field) or request.query_params.get(field, "")).strip()
                 if value:
                     extra_info[field] = value
+            documentation_urls = _parse_documentation_urls(
+                form.get("documentationUrls") or request.query_params.get("documentationUrls")
+            )
+            if documentation_urls:
+                extra_info["documentationUrls"] = documentation_urls
         else:
             raw_lab_id = request.query_params.get("labId")
             if raw_lab_id:
@@ -43,6 +65,9 @@ def create_aas_sync_router(
                 value = request.query_params.get(field, "").strip()
                 if value:
                     extra_info[field] = value
+            documentation_urls = _parse_documentation_urls(request.query_params.get("documentationUrls"))
+            if documentation_urls:
+                extra_info["documentationUrls"] = documentation_urls
 
         metadata: dict = {}
         fmu_path: Optional[Path] = None

@@ -712,20 +712,14 @@
                     </div>
                     <div class="card-body">
                         <div class="hint" id="fmuSyncHint">
-                            Enter the FMU access key. Optionally upload a <code>.aasx</code> package
+                            Select the FMU laboratory. Optionally upload a <code>.aasx</code> package
                             to override the auto-generated metadata.
                         </div>
                         <div class="form-grid mt-3">
                             <label class="field">
-                                <span>Access Key</span>
+                                <span>Laboratory</span>
                                 <select id="fmuSyncKey" disabled>
-                                    <option value="">Select an FMU access key</option>
-                                </select>
-                            </label>
-                            <label class="field">
-                                <span>Laboratory <span class="muted-text">(optional override)</span></span>
-                                <select id="fmuSyncLabSelect" disabled>
-                                    <option value="">No lab ID override</option>
+                                    <option value="">Select an FMU laboratory</option>
                                 </select>
                             </label>
                             <label class="field full">
@@ -735,18 +729,6 @@
                                     <label class="file-picker-button" for="fmuSyncFile">Choose file</label>
                                     <span class="file-picker-name" id="fmuSyncFileName" aria-live="polite">No file chosen</span>
                                 </div>
-                            </label>
-                            <label class="field full">
-                                <span>Description <span class="muted-text">(optional)</span> <span class="source-hint" id="fmuSyncDescriptionHint" hidden></span></span>
-                                <textarea id="fmuSyncDescription" rows="2" placeholder="Brief description of this FMU simulation model..."></textarea>
-                            </label>
-                            <label class="field">
-                                <span>License <span class="muted-text">(optional)</span> <span class="source-hint" id="fmuSyncLicenseHint" hidden></span></span>
-                                <input type="text" id="fmuSyncLicense" placeholder="MIT / Apache-2.0 / ...">
-                            </label>
-                            <label class="field">
-                                <span>Documentation URL <span class="muted-text">(optional)</span></span>
-                                <input type="url" id="fmuSyncDocsUrl" placeholder="https://...">
                             </label>
                             <label class="field full">
                                 <span>Contact Email <span class="muted-text">(optional)</span></span>
@@ -766,24 +748,19 @@
                     <div class="card-header">
                         <div>
                             <h2>Link Existing AAS</h2>
-                            <p>Map an FMU access key to an AAS shell already managed in your BaSyx or external AAS server.</p>
+                            <p>Map a published FMU laboratory to an AAS shell already managed in your BaSyx or external AAS server.</p>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="hint" id="aasLinkHint">
                             When a link is active, Marketplace requests for the conventional
-                            <code>urn:decentralabs:lab:{labId}</code> shell are transparently
-                            redirected to the linked external AAS ID — no Marketplace changes needed.
+                            FMU labs are transparently redirected to the linked external AAS ID.
                         </div>
                         <div class="form-grid mt-3">
                             <label class="field">
-                                <span>Access Key</span>
-                                <input type="text" id="aasLinkKey" placeholder="fmu-access-key">
-                            </label>
-                            <label class="field">
-                                <span class="inline-help-label">Laboratory <span class="muted-text">(optional on-chain ID)</span></span>
-                                <select id="aasLinkLabSelect" disabled>
-                                    <option value="">No lab ID override</option>
+                                <span>Laboratory</span>
+                                <select id="aasLinkKey" disabled>
+                                    <option value="">Select an FMU laboratory</option>
                                 </select>
                             </label>
                             <label class="field full">
@@ -1189,9 +1166,9 @@
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v1"></script>
     <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v1"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
-    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v1"></script>
-    <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v1"></script>
-    <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v1"></script>
+    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v3"></script>
+    <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v2"></script>
+    <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v3"></script>
     <script src="../assets/js/lab-manager-power-credentials.js?v=lab-manager-power-credentials-v1"></script>
             <script src="../assets/js/lab-manager-power-renderers.js?v=lab-manager-power-renderers-v12"></script>
         <script src="../assets/js/lab-manager-power-values.js?v=lab-manager-power-values-v6"></script>
@@ -1199,7 +1176,7 @@
     <script src="../assets/js/lab-manager-power-status.js?v=lab-manager-power-status-v2"></script>
     <script src="../assets/js/lab-manager-power-controllers.js?v=lab-manager-power-controllers-v5"></script>
         <script src="../assets/js/lab-manager-power-policies.js?v=lab-manager-power-policies-v4"></script>
-    <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v2"></script>
+        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v3"></script>
     <script src="../assets/js/lab-manager-reservations-feature.js?v=lab-manager-reservations-feature-v1"></script>
     <script src="../assets/js/lab-manager.js?v=workflow-tabs-v18"></script>
     <script src="../assets/js/lab-publisher-values.js?v=publisher-values-v1"></script>

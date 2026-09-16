@@ -99,20 +99,13 @@
             fmuSync: {
                 syncButton: $('#fmuSyncBtn'),
                 keyInput: $('#fmuSyncKey'),
-                labSelect: $('#fmuSyncLabSelect'),
                 fileInput: $('#fmuSyncFile'),
                 fileName: $('#fmuSyncFileName'),
                 result: $('#fmuSyncResult'),
-                description: $('#fmuSyncDescription'),
-                license: $('#fmuSyncLicense'),
-                docsUrl: $('#fmuSyncDocsUrl'),
                 contactEmail: $('#fmuSyncContactEmail'),
-                descriptionHint: $('#fmuSyncDescriptionHint'),
-                licenseHint: $('#fmuSyncLicenseHint'),
             },
             aasLink: {
                 keyInput: $('#aasLinkKey'),
-                labSelect: $('#aasLinkLabSelect'),
                 aasIdInput: $('#aasLinkAasId'),
                 saveButton: $('#aasLinkSaveBtn'),
                 checkButton: $('#aasLinkCheckBtn'),
@@ -244,8 +237,7 @@
                 powerPolicyLabSelect: fields.powerPolicyLabSelect,
                 powerPolicySelect: fields.powerPolicySelect,
                 fmuSyncKey: fields.fmuSync.keyInput,
-                fmuSyncLabSelect: fields.fmuSync.labSelect,
-                aasLinkLabSelect: fields.aasLink.labSelect,
+                aasLinkKey: fields.aasLink.keyInput,
                 fmuSync: fields.fmuSync,
                 aasLink: fields.aasLink,
             },
@@ -296,7 +288,7 @@
         }
 
         function hasDigitalTwinsTab() {
-            return Boolean(fields.fmuSync.keyInput || fields.fmuSync.labSelect || fields.aasLink.labSelect);
+            return Boolean(fields.fmuSync.keyInput || fields.aasLink.keyInput);
         }
 
         function initializeTab(tabName) {

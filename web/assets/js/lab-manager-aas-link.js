@@ -7,6 +7,13 @@
         showToast,
         encodeURIComponentImpl = encodeURIComponent,
     }) {
+        function selectedLabId() {
+            const accessKey = (fields.keyInput && fields.keyInput.value || '').trim();
+            const option = Array.from(fields.keyInput?.options || [])
+                .find(candidate => String(candidate.value || '') === accessKey);
+            return String(option?.dataset?.labId || '').trim();
+        }
+
         function showResult(message, isError) {
             if (!fields.result) return;
             fields.result.textContent = message;
@@ -17,10 +24,14 @@
 
         async function saveLink() {
             const accessKey = (fields.keyInput && fields.keyInput.value || '').trim();
-            const labId = (fields.labSelect && fields.labSelect.value || '').trim();
+            const labId = selectedLabId();
             const aasId = (fields.aasIdInput && fields.aasIdInput.value || '').trim();
             if (!accessKey) {
-                showToast('Enter an access key', 'error');
+                showToast('Select an FMU laboratory', 'error');
+                return;
+            }
+            if (!labId) {
+                showToast('Select an FMU laboratory', 'error');
                 return;
             }
             if (!aasId) {
@@ -29,8 +40,7 @@
             }
             fields.saveButton.disabled = true;
             try {
-                const payload = { aasId };
-                if (labId) payload.labId = labId;
+                const payload = { aasId, labId };
                 const response = await fetchImpl(`/aas-admin/fmu/${encodeURIComponentImpl(accessKey)}/aas-link`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -54,14 +64,14 @@
         async function checkLink() {
             const accessKey = (fields.keyInput && fields.keyInput.value || '').trim();
             if (!accessKey) {
-                showToast('Enter an access key', 'error');
+                showToast('Select an FMU laboratory', 'error');
                 return;
             }
             fields.checkButton.disabled = true;
             try {
                 const response = await fetchImpl(`/aas-admin/fmu/${encodeURIComponentImpl(accessKey)}/aas-link`);
                 if (response.status === 404) {
-                    showResult('No link configured for this access key.', false);
+                    showResult('No link configured for this laboratory.', false);
                     if (fields.aasIdInput) fields.aasIdInput.value = '';
                     return;
                 }
@@ -69,7 +79,6 @@
                 const data = await response.json();
                 showResult(`Current link: ${data.aasId}`, false);
                 if (fields.aasIdInput) fields.aasIdInput.value = data.aasId || '';
-                if (fields.labSelect) fields.labSelect.value = data.labId || '';
             } catch (error) {
                 showResult(error.message, true);
             } finally {
@@ -80,7 +89,7 @@
         async function deleteLink() {
             const accessKey = (fields.keyInput && fields.keyInput.value || '').trim();
             if (!accessKey) {
-                showToast('Enter an access key', 'error');
+                showToast('Select an FMU laboratory', 'error');
                 return;
             }
             fields.deleteButton.disabled = true;
@@ -89,7 +98,7 @@
                     method: 'DELETE',
                 });
                 if (response.status === 404) {
-                    showResult('No link configured for this access key.', false);
+                    showResult('No link configured for this laboratory.', false);
                     return;
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);

@@ -22,8 +22,9 @@ AAS gives a resource a stable digital identity and a structured place for techni
 | Keeps AAS data at the provider Gateway or configured external server. | Treats AAS as descriptive information, not as an authorization grant. |
 
 The Full Gateway exposes FMU/AAS synchronization from the `Digital Twins` tab
-in Lab Manager. The access-key selector is populated from the FMU inventory;
-an optional laboratory override anchors the shell identity to a stable `labId`.
+in Lab Manager. The laboratory selector is populated from the published FMU
+inventory and automatically supplies both the operational `accessKey` and the
+stable `labId` used for the shell identity.
 
 ![Lab Manager Digital Twins tab](images/lab-manager-digital-twins.png)
 
@@ -85,12 +86,19 @@ The endpoint is protected by the existing `lab_manager_access.lua` mechanism (ad
 
 1. calls the internal FMU `describe` operation;
 2. generates an IDTA 02006 `SimulationModels` submodel, or ingests an uploaded `.aasx` file;
-3. adds optional description, license, documentation URL and contact metadata;
+3. adds the FMU description plus the registered laboratory's Terms of Use URL
+   as `License`, all registered documentation links, and optional contact metadata;
 4. creates or replaces the shell and submodels in BaSyx.
 
 The optional `labId` parameter lets the provider keep a stable AAS identity anchored to a resource ID rather than to an operational FMU `accessKey`. The endpoint returns a disabled result when AAS is intentionally not configured and an upstream error when the configured AAS server cannot be reached.
 
-The lab-manager FMU panel supports generated shell synchronization, optional metadata, explicit `.aasx` upload and an optional `labId` override.
+The lab-manager FMU panel supports generated shell synchronization and explicit
+`.aasx` upload. The selected laboratory automatically supplies the FMU
+`accessKey` and stable `labId`; the description is taken from the FMU model
+description when available and otherwise from the laboratory metadata. The
+laboratory's registered documentation links are all copied into the AAS, while
+its single Terms of Use URL is used for the AAS `License` property. No separate
+Documentation or License fields are needed in this panel.
 
 ### 3. Physical-lab shell synchronization
 
@@ -141,7 +149,8 @@ The FMU `SimulationModels` submodel currently includes:
 - `Tolerance` and a capabilities block;
 - `ModelFile` with SHA-256 integrity data when the real FMU is available;
 - a separate `UnitDefinitions` submodel with SI exponents and display units; and
-- optional license, documentation and contact properties.
+- the registered Terms of Use URL as `License`, all registered documentation
+  links and optional contact metadata.
 
 The generator targets approximately 95% conformance with IDTA 02006 based on the currently implemented elements. Conformance is not a substitute for provider validation of the actual model and license metadata.
 
@@ -156,7 +165,7 @@ When available, the panel can show:
 - asset type and stable AAS ID;
 - host and network information for physical labs;
 - mapped laboratory IDs and last synchronization information;
-- FMU description, license, documentation URL and contact; and
+- FMU description, license, documentation links and contact; and
 - a link to the raw shell or a downloadable `.aasx` package.
 
 AAS metadata helps a consumer understand and compare a resource. It does not replace authentication, a reservation, a session ticket, a physical-lab access token or the FMI proxy authorization flow.

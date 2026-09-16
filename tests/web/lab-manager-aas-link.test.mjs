@@ -13,6 +13,7 @@ function createField(value = '') {
     style: { color: '' },
     textContent: '',
     value,
+    options: [],
     addEventListener(type, handler) {
       listeners.set(type, handler);
     },
@@ -30,7 +31,6 @@ function loadController({ responses = [] } = {}) {
 
   const fields = {
     keyInput: createField(),
-    labSelect: createField(),
     aasIdInput: createField(),
     saveButton: createField(),
     checkButton: createField(),
@@ -57,7 +57,7 @@ test('saves an AAS link with the selected lab', async () => {
     responses: [{ ok: true, status: 200, json: async () => ({ aasId: 'urn:linked' }) }],
   });
   fields.keyInput.value = 'spring damper.fmu';
-  fields.labSelect.value = '7';
+  fields.keyInput.options = [{ value: 'spring damper.fmu', dataset: { labId: '7' } }];
   fields.aasIdInput.value = 'urn:requested';
 
   fields.saveButton.dispatchEvent({ type: 'click' });
@@ -80,18 +80,18 @@ test('loads an existing link and clears a missing link', async () => {
   });
   fields.keyInput.value = 'spring-damper.fmu';
   fields.aasIdInput.value = 'urn:stale';
-  fields.labSelect.value = '7';
+  fields.keyInput.options = [{ value: 'spring-damper.fmu', dataset: { labId: '7' } }];
 
   fields.checkButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls[0].url, '/aas-admin/fmu/spring-damper.fmu/aas-link');
   assert.equal(fields.aasIdInput.value, 'urn:existing');
-  assert.equal(fields.labSelect.value, '42');
+  assert.equal(fields.keyInput.value, 'spring-damper.fmu');
   assert.equal(fields.checkButton.disabled, false);
 
   fields.checkButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(fields.result.textContent, 'No link configured for this access key.');
+  assert.equal(fields.result.textContent, 'No link configured for this laboratory.');
   assert.equal(fields.aasIdInput.value, '');
 });
 

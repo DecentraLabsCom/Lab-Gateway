@@ -82,10 +82,14 @@ The complete energy workflow is in [Lab Manager energy operations](lab-manager-e
 2. Publish it from `Labs` as an `FMU simulation`. The `accessKey` must point
    to the FMU's operational identifier and `accessURI` must be the Gateway's
    public FMU endpoint.
-3. Open `Digital Twins` → `FMU Digital Twin Sync`. The `Access Key` selector
-   is populated from published FMUs; `Laboratory` is an optional override that
-   anchors the identity to a `labId`.
+3. Open `Digital Twins` → `FMU Digital Twin Sync`. Select the published FMU
+   from the `Laboratory` selector; it automatically supplies the operational
+   `accessKey` and anchors the AAS identity to its stable `labId`.
 4. Either generate the shell automatically or upload a validated `.aasx` file.
+   The description is taken from the FMU model description when available;
+   otherwise the registered laboratory description is used. Registered
+   documentation links and the Terms of Use URL are reused automatically; no
+   extra Documentation or License fields are required.
 5. If an external shell already exists, use `Link Existing AAS` instead of
    generating another one. The difference and identity rules are described in
    [AAS support](../aas-support.md).

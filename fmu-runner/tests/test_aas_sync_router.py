@@ -29,7 +29,7 @@ def test_sync_route_builds_metadata_and_preserves_query_fields():
     client, resolve_fmu_path, read_model_description, metadata_builder, sync_fmu_to_basyx = _client()
 
     response = client.post(
-        "/aas-admin/fmu/demo.fmu/sync?labId=42&description=Override&contactEmail=lab%40example.com",
+        "/aas-admin/fmu/demo.fmu/sync?labId=42&description=Override&documentationUrls=%5B%22https%3A%2F%2Fdocs.example.com%2Fmanual.pdf%22%2C%22https%3A%2F%2Fdocs.example.com%2Fguide.html%22%5D&contactEmail=lab%40example.com",
     )
 
     assert response.status_code == 200
@@ -45,6 +45,10 @@ def test_sync_route_builds_metadata_and_preserves_query_fields():
         extra_info={
             "description": "Override",
             "license": "MIT",
+            "documentationUrls": [
+                "https://docs.example.com/manual.pdf",
+                "https://docs.example.com/guide.html",
+            ],
             "contactEmail": "lab@example.com",
         },
         fmu_path=Path("/trusted/demo.fmu"),

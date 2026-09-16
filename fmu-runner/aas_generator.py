@@ -281,7 +281,7 @@ def build_simulation_submodel(
 
     *extra_info* may contain any of the following optional provider-supplied keys:
     ``description`` (shown as ``Summary``), ``license`` (SPDX or free text),
-    ``documentationUrl``, ``contactEmail``.
+    ``documentationUrls`` (a list of links), ``contactEmail``.
 
     *fmu_path* is the filesystem path to the ``.fmu`` binary; when supplied a
     SHA-256 digest is computed and embedded in the ``ModelFile`` element.
@@ -384,11 +384,10 @@ def build_simulation_submodel(
                 "value": cap_elements,
             })
 
-    # Provider-supplied metadata (may be auto-filled from FMU or entered manually)
+    # Provider-supplied metadata (inherited from the registered laboratory)
     if extra_info:
         for idshort, key in (
             ("License", "license"),
-            ("DocumentationUrl", "documentationUrl"),
             ("ContactEmail", "contactEmail"),
         ):
             value = extra_info.get(key, "").strip()
@@ -396,6 +395,39 @@ def build_simulation_submodel(
                 sim_model_elements.append(
                     {"idShort": idshort, "modelType": "Property", "valueType": "xs:string", "value": value}
                 )
+        documentation_urls = extra_info.get("documentationUrls", [])
+        if isinstance(documentation_urls, str):
+            try:
+                documentation_urls = json.loads(documentation_urls)
+            except (TypeError, ValueError):
+                documentation_urls = []
+        if isinstance(documentation_urls, list):
+            documentation_urls = list(dict.fromkeys(
+                str(url).strip() for url in documentation_urls if str(url).strip()
+            ))
+        else:
+            documentation_urls = []
+        if documentation_urls:
+            sim_model_elements.append({
+                "idShort": "Documentation",
+                "modelType": "SubmodelElementCollection",
+                "value": [
+                    {
+                        "idShort": f"DocumentationUrl_{index}",
+                        "modelType": "Property",
+                        "valueType": "xs:anyURI",
+                        "value": url,
+                    }
+                    for index, url in enumerate(documentation_urls)
+                ],
+            })
+        elif extra_info.get("documentationUrl", "").strip():
+            sim_model_elements.append({
+                "idShort": "DocumentationUrl",
+                "modelType": "Property",
+                "valueType": "xs:string",
+                "value": extra_info["documentationUrl"].strip(),
+            })
 
     ports = build_simulation_ports(metadata.get("modelVariables", []))
     if ports:
