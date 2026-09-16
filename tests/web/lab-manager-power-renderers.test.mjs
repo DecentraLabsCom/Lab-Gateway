@@ -203,7 +203,7 @@ test('renders physical outputs from the device and hides local inventory control
   assert.match(html, /data-controller-outlet-field="outlet"[^>]+readonly/);
 });
 
-test('renders NETIO physical output names as read-only', () => {
+test('disables NETIO physical output names when the device configuration is read-only', () => {
   const html = renderer().renderPowerControllerOutletsMarkup([{
     outlet: '2',
     deviceName: 'HMI',
@@ -213,6 +213,7 @@ test('renders NETIO physical output names as read-only', () => {
   }], { deviceManaged: true });
 
   assert.match(html, /Name \(read-only\)/);
-  assert.match(html, /data-controller-outlet-field="deviceName"[^>]+readonly/);
+  assert.match(html, /data-controller-outlet-field="deviceName"[^>]+disabled/);
+  assert.doesNotMatch(html, /data-controller-outlet-field="deviceName"[^>]+readonly/);
   assert.doesNotMatch(html, /data-controller-outlet-action="remove"/);
 });

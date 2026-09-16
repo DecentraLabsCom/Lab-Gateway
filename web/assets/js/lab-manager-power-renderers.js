@@ -176,24 +176,25 @@
             const fields = Array.isArray(outlet.deviceConfigFields) ? outlet.deviceConfigFields : [];
             const config = outlet.deviceConfig && typeof outlet.deviceConfig === 'object' ? outlet.deviceConfig : {};
             const writable = outlet.deviceConfigWritable === true;
+            const disabledAttribute = writable ? '' : ' disabled';
             const labels = {
                 name: 'Name',
-                powerOnDelaySeconds: 'Power-on delay (seconds)',
-                powerOffDelaySeconds: 'Power-off delay (seconds)',
-                rebootDurationSeconds: 'Reboot duration (seconds)',
+                powerOnDelaySeconds: 'Power-on delay (sec)',
+                powerOffDelaySeconds: 'Power-off delay (sec)',
+                rebootDurationSeconds: 'Reboot duration (sec)',
             };
             return fields.map(field => {
                 if (field === 'name') {
                     return `<label class="field">
                         <span>${labels[field]}${writable ? '' : ' (read-only)'}</span>
-                        <input type="text" maxlength="20" data-controller-outlet-field="deviceName" value="${escapeHtml(outlet.deviceName)}"${writable ? '' : ' readonly'}>
+                        <input type="text" maxlength="20" data-controller-outlet-field="deviceName" value="${escapeHtml(outlet.deviceName)}"${disabledAttribute}>
                     </label>`;
                 }
                 if (!Object.prototype.hasOwnProperty.call(labels, field)) return '';
                 const value = config[field] ?? '';
                 return `<label class="field">
                     <span>${labels[field]}${writable ? '' : ' (read-only)'}</span>
-                    <input type="number" min="${field === 'rebootDurationSeconds' ? '5' : '0'}" max="${field === 'rebootDurationSeconds' ? '60' : '7200'}" data-controller-device-config-field="${field}" value="${escapeHtml(value)}"${writable ? '' : ' readonly'}>
+                    <input type="number" min="${field === 'rebootDurationSeconds' ? '5' : '0'}" max="${field === 'rebootDurationSeconds' ? '60' : '7200'}" data-controller-device-config-field="${field}" value="${escapeHtml(value)}"${disabledAttribute}>
                 </label>`;
             }).join('');
         }
