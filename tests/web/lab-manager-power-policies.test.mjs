@@ -263,3 +263,17 @@ test('preserves policy PUT endpoint, body and status lifecycle', async () => {
   });
   assert.equal(fields.saveButton.disabled, false);
 });
+
+test('uses managed laboratory names in existing policy options', async () => {
+  const { controller, fields } = loadPolicies({
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ policies: [{ labId: 'lab-1', policyName: 'Lab powering' }] }),
+    }),
+  });
+
+  await controller.load({ skipAuthPrompt: true });
+
+  assert.equal(fields.select.children[0].textContent, 'Lab One · Lab powering');
+});

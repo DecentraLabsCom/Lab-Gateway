@@ -22,7 +22,7 @@ function createElement(id) {
   };
 }
 
-function loadFeature() {
+function loadFeature({ loadManagedLabsOnceImpl = () => Promise.resolve() } = {}) {
   const elements = new Map([
     'refreshPowerCredentialsBtn',
     'powerControllerList',
@@ -61,7 +61,10 @@ function loadFeature() {
   const digitalTwins = {
     initialize: () => calls.push('digital-twins.initialize'),
     getManagedLabs: () => managedLabs,
-    loadManagedLabsOnce: (...args) => calls.push(['digital-twins.loadManagedLabsOnce', ...args]),
+    loadManagedLabsOnce: (...args) => {
+      calls.push(['digital-twins.loadManagedLabsOnce', ...args]);
+      return loadManagedLabsOnceImpl?.(...args);
+    },
     resolveLabDisplayName: (lab) => `resolved:${lab.labId}`,
   };
   const createModule = (controller, name) => ({
@@ -111,7 +114,7 @@ function loadFeature() {
   return { context, elements, calls, managedLabs, getPolicyOptions: () => policyOptions };
 }
 
-test('energy feature composes controllers and exposes tab loading boundaries', () => {
+test('energy feature composes controllers and exposes tab loading boundaries', async () => {
   const { context, elements, calls, managedLabs, getPolicyOptions } = loadFeature();
   const controller = context.window.LabManagerEnergyFeature.createController({
     documentImpl: context.document,
@@ -138,14 +141,40 @@ test('energy feature composes controllers and exposes tab loading boundaries', (
 
   controller.initializeTab('energy');
   controller.initializeTab('digital-twins');
+  await Promise.resolve();
   assert.deepEqual(JSON.parse(JSON.stringify(calls.slice(-5))), [
     ['power-controllers.load', { skipAuthPrompt: true }],
     ['power-credentials.load', { skipAuthPrompt: true }],
     ['digital-twins.loadManagedLabsOnce'],
-    ['power-policies.load', { skipAuthPrompt: true }],
     ['digital-twins.loadManagedLabsOnce'],
+    ['power-policies.load', { skipAuthPrompt: true }],
   ]);
 
   elements.get('refreshPowerCredentialsBtn').dispatchEvent({ type: 'click' });
   assert.equal(calls.at(-1)[0], 'power-credentials.load');
+});
+
+test('waits for managed laboratories before loading existing power policies', async () => {
+  let resolveLabs;
+  const labsReady = new Promise(resolve => {
+    resolveLabs = resolve;
+  });
+  const { context, calls } = loadFeature({
+    loadManagedLabsOnceImpl: () => labsReady,
+  });
+  const controller = context.window.LabManagerEnergyFeature.createController({
+    documentImpl: context.document,
+    fetchImpl: () => Promise.resolve(),
+    showToast: () => {},
+    showOpsWarning: () => {},
+    escapeHtml: value => String(value),
+  });
+
+  controller.initializeTab('energy');
+  assert.equal(calls.some(call => call[0] === 'power-policies.load'), false);
+
+  resolveLabs();
+  await labsReady;
+  assert.equal(calls.at(-1)[0], 'power-policies.load');
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)[1])), { skipAuthPrompt: true });
 });
