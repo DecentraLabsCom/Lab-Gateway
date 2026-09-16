@@ -39,6 +39,37 @@
             return name ? name.trim() : `Lab #${labId}`;
         }
 
+        function resolveLabDescription(lab) {
+            const candidates = [
+                lab?.description,
+                lab?.metadataDescription,
+                lab?.metadata?.description,
+            ];
+            const description = candidates.find(candidate => typeof candidate === 'string' && candidate.trim());
+            return description ? description.trim() : '';
+        }
+
+        function resolveLabDocumentation(lab) {
+            const candidates = [
+                lab?.documentation,
+                lab?.docs,
+                lab?.metadataDocumentation,
+                lab?.metadata?.documentation,
+                lab?.metadata?.docs,
+            ];
+            const documentation = candidates.flatMap(value => (
+                Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+            ));
+            return [...new Set(documentation.map(value => String(value).trim()).filter(Boolean))];
+        }
+
+        function resolveLabLicense(lab) {
+            const termsOfUse = lab?.termsOfUse ?? lab?.metadata?.termsOfUse;
+            if (typeof termsOfUse === 'string') return termsOfUse.trim();
+            const url = termsOfUse?.url ?? termsOfUse?.href;
+            return typeof url === 'string' ? url.trim() : '';
+        }
+
         function formatPowerPolicyLabLabel(lab) {
             const resourceType = Number(lab?.resourceType) === 1 ? 'FMU' : 'Remote';
             const status = lab?.listed ? 'Listed' : 'Draft';
@@ -69,46 +100,26 @@
             selectEl.disabled = validLabs.length === 0;
         }
 
-        function renderFmuLabOptions(selectEl, labs, preferredLabId = '') {
-            if (!selectEl) return;
-            const current = selectEl.value;
-            const fmuLabs = (Array.isArray(labs) ? labs : [])
-                .filter(lab => Number(lab?.resourceType) === 1)
-                .filter(lab => String(lab?.labId || '').trim())
-                .filter((lab, index, items) => items.findIndex(item => String(item.labId) === String(lab.labId)) === index);
-            selectEl.innerHTML = fmuLabs.length
-                ? '<option value="">No lab ID override</option>'
-                : '<option value="">No FMU laboratories available</option>';
-            fmuLabs.forEach(lab => {
-                const labId = String(lab.labId).trim();
-                const option = documentImpl.createElement('option');
-                option.value = labId;
-                option.textContent = formatPowerPolicyLabLabel(lab);
-                selectEl.appendChild(option);
-            });
-            const selected = preferredLabId || current || '';
-            selectEl.value = fmuLabs.some(lab => String(lab.labId) === selected)
-                ? selected
-                : '';
-            selectEl.disabled = fmuLabs.length === 0;
-        }
-
-        function renderFmuAccessKeyOptions(labs, preferredAccessKey = '') {
-            const selectEl = fields.fmuSyncKey;
+        function renderFmuLaboratoryOptions(selectEl, labs, preferredAccessKey = '') {
             if (!selectEl) return;
             const current = selectEl.value;
             const accessKeys = (Array.isArray(labs) ? labs : [])
                 .filter(lab => Number(lab?.resourceType) === 1)
+                .filter(lab => String(lab?.labId || '').trim())
                 .filter(lab => String(lab?.accessKey || '').trim())
                 .filter((lab, index, items) => items.findIndex(item => String(item.accessKey) === String(lab.accessKey)) === index);
             selectEl.innerHTML = accessKeys.length
-                ? '<option value="">Select an FMU access key</option>'
-                : '<option value="">No FMU access keys available</option>';
+                ? '<option value="">Select an FMU laboratory</option>'
+                : '<option value="">No FMU laboratories available</option>';
             accessKeys.forEach(lab => {
                 const accessKey = String(lab.accessKey).trim();
                 const option = documentImpl.createElement('option');
                 option.value = accessKey;
-                option.textContent = `${resolveLabDisplayName(lab)} · ${accessKey}`;
+                option.dataset.labId = String(lab.labId).trim();
+                option.dataset.labDescription = resolveLabDescription(lab);
+                option.dataset.labDocumentation = JSON.stringify(resolveLabDocumentation(lab));
+                option.dataset.labLicense = resolveLabLicense(lab);
+                option.textContent = formatPowerPolicyLabLabel(lab);
                 selectEl.appendChild(option);
             });
             const selected = preferredAccessKey || current || '';
@@ -121,22 +132,19 @@
         function clearManagedLabs() {
             managedLabs = [];
             renderPowerPolicyLabOptions([]);
-            renderFmuAccessKeyOptions([]);
-            renderFmuLabOptions(fields.fmuSyncLabSelect, []);
-            renderFmuLabOptions(fields.aasLinkLabSelect, []);
+            renderFmuLaboratoryOptions(fields.fmuSyncKey, []);
+            renderFmuLaboratoryOptions(fields.aasLinkKey, []);
         }
 
         async function loadManagedLabs(options = {}) {
             if (
                 !fields.powerPolicyLabSelect
                 && !fields.fmuSyncKey
-                && !fields.fmuSyncLabSelect
-                && !fields.aasLinkLabSelect
+                && !fields.aasLinkKey
             ) return;
             const selectedPowerPolicyLabId = fields.powerPolicyLabSelect?.value || '';
             const selectedFmuAccessKey = fields.fmuSyncKey?.value || '';
-            const selectedFmuLabId = fields.fmuSyncLabSelect?.value || '';
-            const selectedAasLinkLabId = fields.aasLinkLabSelect?.value || '';
+            const selectedAasLinkAccessKey = fields.aasLinkKey?.value || '';
             try {
                 const res = await fetchImpl('/lab-admin/labs', options);
                 if (res.status === 403) {
@@ -153,9 +161,8 @@
                 if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
                 managedLabs = Array.isArray(body.labs) ? body.labs : [];
                 renderPowerPolicyLabOptions(managedLabs, selectedPowerPolicyLabId);
-                renderFmuAccessKeyOptions(managedLabs, selectedFmuAccessKey);
-                renderFmuLabOptions(fields.fmuSyncLabSelect, managedLabs, selectedFmuLabId);
-                renderFmuLabOptions(fields.aasLinkLabSelect, managedLabs, selectedAasLinkLabId);
+                renderFmuLaboratoryOptions(fields.fmuSyncKey, managedLabs, selectedFmuAccessKey);
+                renderFmuLaboratoryOptions(fields.aasLinkKey, managedLabs, selectedAasLinkAccessKey);
             } catch (error) {
                 logger.warn('Unable to load provider laboratories', error);
                 clearManagedLabs();
@@ -196,10 +203,11 @@
             initialize,
             loadManagedLabs,
             loadManagedLabsOnce,
-            renderFmuAccessKeyOptions,
-            renderFmuLabOptions,
+            renderFmuLaboratoryOptions,
             renderPowerPolicyLabOptions,
             resolveLabDisplayName,
+            resolveLabDocumentation,
+            resolveLabLicense,
         });
     }
 

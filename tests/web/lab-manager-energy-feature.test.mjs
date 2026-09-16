@@ -32,8 +32,7 @@ function loadFeature({ loadManagedLabsOnceImpl = () => Promise.resolve() } = {})
     'powerPolicyLabSelect',
     'powerPolicySelect',
     'fmuSyncKey',
-    'fmuSyncLabSelect',
-    'aasLinkLabSelect',
+    'aasLinkKey',
   ].map((id) => [id, createElement(id)]));
   const document = {
     querySelector: (selector) => elements.get(selector.slice(1)) || null,

@@ -443,6 +443,20 @@ class TestExtraInfoFields:
         assert "DocumentationUrl" in props
         assert props["DocumentationUrl"]["value"] == "https://example.com"
 
+    def test_submodel_extra_info_documentation_urls_preserves_all_links(self):
+        sm = build_simulation_submodel(
+            "42",
+            "test.fmu",
+            SAMPLE_METADATA,
+            {"documentationUrls": ["https://example.com/manual.pdf", "https://example.com/guide.html"]},
+        )
+        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
+        assert "Documentation" in props
+        assert [item["value"] for item in props["Documentation"]["value"]] == [
+            "https://example.com/manual.pdf",
+            "https://example.com/guide.html",
+        ]
+
     def test_submodel_extra_info_contact_email(self):
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"contactEmail": "lab@example.com"})
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}

@@ -15,6 +15,7 @@ function createField(value = '') {
     style: { cursor: '', opacity: '' },
     textContent: '',
     value,
+    options: [],
     addEventListener(type, handler) {
       listeners.set(type, handler);
     },
@@ -43,16 +44,10 @@ function loadController({ fetchImpl = async () => ({ ok: true, status: 200, json
   const fields = {
     syncButton: createField(),
     keyInput: createField(),
-    labSelect: createField(),
     fileInput: createField(),
     fileName: createField(),
     result: createField(),
-    description: createField(),
-    license: createField(),
-    docsUrl: createField(),
     contactEmail: createField(),
-    descriptionHint: createField(),
-    licenseHint: createField(),
   };
   const toasts = [];
   const controller = context.window.LabManagerFmuSync.createController({
@@ -67,34 +62,73 @@ function loadController({ fetchImpl = async () => ({ ok: true, status: 200, json
   return { controller, fields, toasts };
 }
 
-test('syncs an FMU without a file using the selected lab and metadata query', async () => {
+test('prefers the FMU description over the registered laboratory description', async () => {
   const calls = [];
   const { fields, toasts } = loadController({
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
+      if (String(url).endsWith('/hints')) {
+        return { ok: true, status: 200, json: async () => ({ description: 'FMU model description' }) };
+      }
       return { ok: true, status: 200, json: async () => ({ created: true }) };
     },
   });
 
   fields.keyInput.value = 'spring-damper.fmu';
-  fields.labSelect.value = '7';
-  fields.description.value = 'A spring damper';
-  fields.license.value = 'MIT';
-  fields.docsUrl.value = 'https://example.test/docs';
+  fields.keyInput.options = [{
+    value: 'spring-damper.fmu',
+    dataset: {
+      labId: '7',
+      labDescription: 'Registered laboratory description',
+      labDocumentation: JSON.stringify([
+        'https://example.test/manual.pdf',
+        'https://example.test/guide.html',
+      ]),
+      labLicense: 'https://example.test/terms.html',
+    },
+  }];
   fields.contactEmail.value = 'ops@example.test';
   fields.syncButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
 
-  const requestUrl = new URL(calls[0].url, 'http://localhost');
+  const syncCall = calls.find(({ url }) => url.includes('/sync'));
+  const requestUrl = new URL(syncCall.url, 'http://localhost');
   assert.equal(requestUrl.pathname, '/aas-admin/fmu/spring-damper.fmu/sync');
   assert.equal(requestUrl.searchParams.get('labId'), '7');
-  assert.equal(requestUrl.searchParams.get('description'), 'A spring damper');
-  assert.equal(requestUrl.searchParams.get('license'), 'MIT');
-  assert.equal(requestUrl.searchParams.get('documentationUrl'), 'https://example.test/docs');
+  assert.equal(requestUrl.searchParams.get('description'), 'FMU model description');
+  assert.equal(requestUrl.searchParams.get('license'), 'https://example.test/terms.html');
+  assert.deepEqual(
+    JSON.parse(requestUrl.searchParams.get('documentationUrls')),
+    ['https://example.test/manual.pdf', 'https://example.test/guide.html'],
+  );
   assert.equal(requestUrl.searchParams.get('contactEmail'), 'ops@example.test');
-  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(syncCall.options.method, 'POST');
   assert.equal(fields.result.textContent, 'AAS shell synced \u2014 created');
   assert.deepEqual(toasts.at(-1), { message: 'FMU AAS sync: spring-damper.fmu ok', type: 'success' });
+});
+
+test('falls back to the registered laboratory description when the FMU has none', async () => {
+  const calls = [];
+  const { fields } = loadController({
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      if (String(url).endsWith('/hints')) {
+        return { ok: true, status: 200, json: async () => ({ license: 'MIT' }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ created: true }) };
+    },
+  });
+
+  fields.keyInput.value = 'spring-damper.fmu';
+  fields.keyInput.options = [{
+    value: 'spring-damper.fmu',
+    dataset: { labId: '7', labDescription: 'Registered laboratory description' },
+  }];
+  fields.syncButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const requestUrl = new URL(calls.find(({ url }) => url.includes('/sync')).url, 'http://localhost');
+  assert.equal(requestUrl.searchParams.get('description'), 'Registered laboratory description');
 });
 
 test('uses multipart upload when an AASX file is selected', async () => {
@@ -102,41 +136,54 @@ test('uses multipart upload when an AASX file is selected', async () => {
   const { fields } = loadController({
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
+      if (String(url).endsWith('/hints')) {
+        return { ok: true, status: 200, json: async () => ({}) };
+      }
       return { ok: true, status: 200, json: async () => ({ aasxUpload: true, uploadedAasIds: ['aas-1'], uploadedSubmodelIds: ['sub-1'] }) };
     },
   });
 
   const file = { name: 'spring-damper.aasx' };
   fields.keyInput.value = 'spring-damper.fmu';
-  fields.labSelect.value = '7';
+  fields.keyInput.options = [{
+    value: 'spring-damper.fmu',
+    dataset: {
+      labId: '7',
+      labDescription: 'Registered laboratory description',
+      labDocumentation: JSON.stringify(['https://example.test/manual.pdf']),
+      labLicense: 'https://example.test/terms.html',
+    },
+  }];
   fields.fileInput.files = [file];
   fields.syncButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(calls[0].url, '/aas-admin/fmu/spring-damper.fmu/sync');
-  assert.equal(calls[0].options.method, 'POST');
-  assert.deepEqual(calls[0].options.body.entries, [['file', file], ['labId', '7']]);
+  const syncCall = calls.find(({ url }) => url.includes('/sync'));
+  assert.equal(syncCall.url, '/aas-admin/fmu/spring-damper.fmu/sync');
+  assert.equal(syncCall.options.method, 'POST');
+  assert.deepEqual(calls.find(({ url }) => url.includes('/sync')).options.body.entries, [
+    ['file', file],
+    ['labId', '7'],
+    ['description', 'Registered laboratory description'],
+    ['license', 'https://example.test/terms.html'],
+    ['documentationUrls', JSON.stringify(['https://example.test/manual.pdf'])],
+  ]);
   assert.equal(fields.result.textContent, 'Synced 1 shell(s) + 1 submodel(s) from AASX');
 });
 
-test('hydrates FMU hints and clears them when the key is edited', async () => {
+test('does not request FMU-supplied license metadata', async () => {
+  const calls = [];
   const { fields } = loadController({
-    fetchImpl: async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ description: 'FMU description', license: 'MIT' }),
-    }),
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      return { ok: true, status: 200, json: async () => ({ license: 'MIT' }) };
+    },
   });
 
   fields.keyInput.value = 'spring-damper.fmu';
+  fields.keyInput.options = [{ value: 'spring-damper.fmu', dataset: { labId: '7' } }];
   fields.keyInput.dispatchEvent({ type: 'change' });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(fields.description.value, 'FMU description');
-  assert.equal(fields.description.readOnly, true);
-  assert.equal(fields.descriptionHint.textContent, '\u2139\ufe0f From FMU');
-
-  fields.keyInput.dispatchEvent({ type: 'input' });
-  assert.equal(fields.description.value, '');
-  assert.equal(fields.description.readOnly, false);
-  assert.equal(fields.descriptionHint.hidden, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/hints$/);
 });

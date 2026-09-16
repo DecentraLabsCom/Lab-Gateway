@@ -10,6 +10,7 @@ function createElement(id) {
   const listeners = new Map();
   const element = {
     id,
+    dataset: {},
     value: '',
     disabled: false,
     innerHTML: '',
@@ -29,8 +30,7 @@ function createFields() {
     powerPolicyLabSelect: createElement('powerPolicyLabSelect'),
     powerPolicySelect: createElement('powerPolicySelect'),
     fmuSyncKey: createElement('fmuSyncKey'),
-    fmuSyncLabSelect: createElement('fmuSyncLabSelect'),
-    aasLinkLabSelect: createElement('aasLinkLabSelect'),
+    aasLinkKey: createElement('aasLinkKey'),
   };
   fields.fmuSync = {};
   fields.aasLink = {};
@@ -97,14 +97,26 @@ function loadDigitalTwins({ labsResponse }) {
   return { controller, fields, fetchCalls, fmuCalls, aasCalls };
 }
 
-test('loads managed labs once and preserves FMU and policy selector options', async () => {
+test('loads managed labs once and populates laboratory selectors with the access key mapping', async () => {
   const { controller, fields, fetchCalls } = loadDigitalTwins({
     labsResponse: {
       ok: true,
       status: 200,
       json: async () => ({
         labs: [
-          { labId: '7', resourceType: 1, accessKey: 'spring.fmu', metadata: { name: 'Spring Damper' }, listed: true },
+          {
+            labId: '7',
+            resourceType: 1,
+            accessKey: 'spring.fmu',
+            name: 'Spring Damper',
+            description: 'Registered spring damper laboratory',
+            documentation: [
+              'https://docs.example.test/manual.pdf',
+              'https://docs.example.test/guide.html',
+            ],
+            termsOfUse: { url: 'https://docs.example.test/terms.html' },
+            listed: true,
+          },
           { labId: '8', resourceType: 2, name: 'Remote Station', listed: false },
         ],
       }),
@@ -113,8 +125,7 @@ test('loads managed labs once and preserves FMU and policy selector options', as
 
   fields.powerPolicyLabSelect.value = '8';
   fields.fmuSyncKey.value = 'spring.fmu';
-  fields.fmuSyncLabSelect.value = '7';
-  fields.aasLinkLabSelect.value = '7';
+  fields.aasLinkKey.value = 'spring.fmu';
   const first = controller.loadManagedLabsOnce({ skipAuthPrompt: true });
   const second = controller.loadManagedLabsOnce({ skipAuthPrompt: false });
   assert.equal(first, second);
@@ -126,8 +137,27 @@ test('loads managed labs once and preserves FMU and policy selector options', as
   assert.equal(controller.getManagedLabs().length, 2);
   assert.equal(fields.powerPolicyLabSelect.value, '8');
   assert.equal(fields.fmuSyncKey.value, 'spring.fmu');
-  assert.equal(fields.fmuSyncLabSelect.value, '7');
-  assert.equal(fields.aasLinkLabSelect.value, '7');
+  assert.equal(fields.aasLinkKey.value, 'spring.fmu');
+  assert.equal(
+    fields.fmuSyncKey.options.find(option => option.value === 'spring.fmu').dataset.labId,
+    '7',
+  );
+  assert.equal(
+    fields.aasLinkKey.options.find(option => option.value === 'spring.fmu').dataset.labId,
+    '7',
+  );
+  assert.equal(
+    fields.fmuSyncKey.options.find(option => option.value === 'spring.fmu').dataset.labDescription,
+    'Registered spring damper laboratory',
+  );
+  assert.deepEqual(
+    JSON.parse(fields.fmuSyncKey.options.find(option => option.value === 'spring.fmu').dataset.labDocumentation),
+    ['https://docs.example.test/manual.pdf', 'https://docs.example.test/guide.html'],
+  );
+  assert.equal(
+    fields.fmuSyncKey.options.find(option => option.value === 'spring.fmu').dataset.labLicense,
+    'https://docs.example.test/terms.html',
+  );
   assert.ok(fields.powerPolicyLabSelect.options.some(option => /Spring Damper/.test(option.textContent)));
 });
 
