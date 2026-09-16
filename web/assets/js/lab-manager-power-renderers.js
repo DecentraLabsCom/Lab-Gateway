@@ -6,6 +6,16 @@
             throw new Error('LabManagerPowerRenderers requires escapeHtml');
         }
 
+        function renderSwitchField(label, id, fieldAttribute, checked, className = 'field toggle-field power-checkbox-field') {
+            return `<div class="${className}">
+                <span>${label}</span>
+                <label class="switch" for="${id}">
+                    <input type="checkbox" id="${id}" ${fieldAttribute}${checked ? ' checked' : ''} aria-label="${label}">
+                    <span class="slider"></span>
+                </label>
+            </div>`;
+        }
+
         function renderPowerPolicyStepsMarkup(stepDrafts, powerControllers) {
             const steps = Array.isArray(stepDrafts) ? stepDrafts : [];
             if (!steps.length) {
@@ -24,7 +34,7 @@
                 maintenance: 'Maintenance',
                 emergency_stop: 'Emergency stop',
             };
-            const secondsTooltipAttribute = ' title="Duration in seconds"';
+            const secondsTooltipAttribute = tooltip => ` title="${tooltip}"`;
             return steps.map((step, index) => `
             <div class="power-policy-step" data-step-index="${index}">
                 <div class="power-policy-step-header">
@@ -58,38 +68,29 @@
                         <select data-step-field="action">${powerPolicySelectOptions(['on', 'off', 'cycle'], step.action)}</select>
                     </label>
                     ${step.action === 'cycle' ? `
-                    <label class="field"${secondsTooltipAttribute}>
+                    <label class="field"${secondsTooltipAttribute('Cycle off time in seconds')}>
                         <span>Cycle off time</span>
-                        <input type="number" min="0" max="3600" data-step-field="offSeconds" value="${step.offSeconds}" inputmode="numeric"${secondsTooltipAttribute}>
+                        <input type="number" min="0" max="3600" data-step-field="offSeconds" value="${step.offSeconds}" inputmode="numeric"${secondsTooltipAttribute('Cycle off time in seconds')}>
                     </label>` : ''}
-                    <label class="field"${secondsTooltipAttribute}>
+                    <label class="field"${secondsTooltipAttribute('Delay before in seconds')}>
                         <span>Delay before</span>
-                        <input type="number" min="0" max="3600" data-step-field="delayBeforeSeconds" value="${step.delayBeforeSeconds}" inputmode="numeric"${secondsTooltipAttribute}>
+                        <input type="number" min="0" max="3600" data-step-field="delayBeforeSeconds" value="${step.delayBeforeSeconds}" inputmode="numeric"${secondsTooltipAttribute('Delay before in seconds')}>
                     </label>
-                    <label class="field"${secondsTooltipAttribute}>
+                    <label class="field"${secondsTooltipAttribute('Delay after in seconds')}>
                         <span>Delay after</span>
-                        <input type="number" min="0" max="3600" data-step-field="delayAfterSeconds" value="${step.delayAfterSeconds}" inputmode="numeric"${secondsTooltipAttribute}>
+                        <input type="number" min="0" max="3600" data-step-field="delayAfterSeconds" value="${step.delayAfterSeconds}" inputmode="numeric"${secondsTooltipAttribute('Delay after in seconds')}>
                     </label>
-                    <label class="field"${secondsTooltipAttribute}>
+                    <label class="field"${secondsTooltipAttribute('Timeout in seconds')}>
                         <span>Timeout</span>
-                        <input type="number" min="0" max="300" data-step-field="timeoutSeconds" value="${step.timeoutSeconds}" inputmode="numeric"${secondsTooltipAttribute}>
+                        <input type="number" min="0" max="300" data-step-field="timeoutSeconds" value="${step.timeoutSeconds}" inputmode="numeric"${secondsTooltipAttribute('Timeout in seconds')}>
                     </label>
                     <label class="field">
                         <span>Retries</span>
                         <input type="number" min="0" max="5" data-step-field="retryCount" value="${step.retryCount}" inputmode="numeric">
                     </label>
-                    <label class="field power-checkbox-field">
-                        <span>Required</span>
-                        <span class="check-field"><input type="checkbox" data-step-field="required"${step.required ? ' checked' : ''}></span>
-                    </label>
-                    <label class="field power-checkbox-field">
-                        <span>Confirm state</span>
-                        <span class="check-field"><input type="checkbox" data-step-field="readBackRequired"${step.readBackRequired ? ' checked' : ''}></span>
-                    </label>
-                    <label class="field power-checkbox-field">
-                        <span>Allow protected outlet</span>
-                        <span class="check-field"><input type="checkbox" data-step-field="allowProtected"${step.allowProtected ? ' checked' : ''}></span>
-                    </label>
+                    ${renderSwitchField('Required', `powerPolicyStep${index}Required`, 'data-step-field="required"', step.required)}
+                    ${renderSwitchField('Confirm state', `powerPolicyStep${index}ConfirmState`, 'data-step-field="readBackRequired"', step.readBackRequired)}
+                    ${renderSwitchField('Allow protected outlet', `powerPolicyStep${index}AllowProtected`, 'data-step-field="allowProtected"', step.allowProtected)}
                 </div>
                 <label class="field power-policy-conditions">
                     <span>Conditions (advanced JSON, optional)</span>
@@ -163,10 +164,7 @@
                             <option value="on"${outlet.defaultState === 'on' ? ' selected' : ''}>On</option>
                         </select>
                     </label>
-                    <label class="field power-checkbox-field power-controller-outlet-protected-field">
-                        <span>Protected</span>
-                        <span class="check-field"><input type="checkbox" data-controller-outlet-field="protected"${outlet.protected ? ' checked' : ''}></span>
-                    </label>
+                    ${renderSwitchField('Protected', `powerControllerOutlet${index}Protected`, 'data-controller-outlet-field="protected"', outlet.protected, 'field toggle-field power-checkbox-field power-controller-outlet-protected-field')}
                 </div>
             </div>
         `;
@@ -185,9 +183,9 @@
                 rebootDurationSeconds: 'Reboot duration',
             };
             const tooltips = {
-                powerOnDelaySeconds: 'Duration in seconds',
-                powerOffDelaySeconds: 'Duration in seconds',
-                rebootDurationSeconds: 'Duration in seconds',
+                powerOnDelaySeconds: 'Power-on delay in seconds',
+                powerOffDelaySeconds: 'Power-off delay in seconds',
+                rebootDurationSeconds: 'Reboot duration in seconds',
             };
             return fields.map(field => {
                 if (field === 'name') {

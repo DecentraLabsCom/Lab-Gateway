@@ -119,14 +119,24 @@ test('renders policy steps with controller and outlet choices', () => {
   assert.match(html, /Confirm state/);
   assert.doesNotMatch(html, /Read back state/);
   assert.doesNotMatch(html, /power-policy-step-options/);
-  for (const [label, field] of [
-    ['Delay before', 'delayBeforeSeconds'],
-    ['Delay after', 'delayAfterSeconds'],
-    ['Timeout', 'timeoutSeconds'],
+  for (const [label, field, tooltip] of [
+    ['Delay before', 'delayBeforeSeconds', 'Delay before in seconds'],
+    ['Delay after', 'delayAfterSeconds', 'Delay after in seconds'],
+    ['Timeout', 'timeoutSeconds', 'Timeout in seconds'],
   ]) {
     assert.match(
       html,
-      new RegExp(`<label class="field" title="Duration in seconds">[\\s\\S]*<span>${label}<\\/span>[\\s\\S]*data-step-field="${field}"[^>]+title="Duration in seconds"`),
+      new RegExp(`<label class="field" title="${tooltip}">[\\s\\S]*<span>${label}<\\/span>[\\s\\S]*data-step-field="${field}"[^>]+title="${tooltip}"`),
+    );
+  }
+  for (const [label, field, id] of [
+    ['Required', 'required', 'powerPolicyStep0Required'],
+    ['Confirm state', 'readBackRequired', 'powerPolicyStep0ConfirmState'],
+    ['Allow protected outlet', 'allowProtected', 'powerPolicyStep0AllowProtected'],
+  ]) {
+    assert.match(
+      html,
+      new RegExp(`<div class="field toggle-field power-checkbox-field">[\\s\\S]*<span>${label}<\\/span>[\\s\\S]*<label class="switch" for="${id}">[\\s\\S]*<input type="checkbox" id="${id}" data-step-field="${field}"[\\s\\S]*<span class="slider"><\\/span>`),
     );
   }
   assert.doesNotMatch(html, /Delay before \(seconds\)|Delay after \(seconds\)|Timeout \(seconds\)/);
@@ -158,7 +168,7 @@ test('renders cycle timing only for cycle actions', () => {
     offSeconds: 15,
   }], [{ id: 'pdu-1', outlets: [{ outlet: '1' }] }]);
 
-  assert.match(html, /<label class="field" title="Duration in seconds">[\s\S]*<span>Cycle off time<\/span>[\s\S]*data-step-field="offSeconds"[^>]+title="Duration in seconds"/);
+  assert.match(html, /<label class="field" title="Cycle off time in seconds">[\s\S]*<span>Cycle off time<\/span>[\s\S]*data-step-field="offSeconds"[^>]+title="Cycle off time in seconds"/);
   assert.doesNotMatch(html, /Cycle off time \(seconds\)/);
   assert.match(html, /value="15"/);
 });
@@ -174,7 +184,8 @@ test('renders controller outlet drafts with escaped editable values', () => {
   assert.match(html, /value="&lt;PLC&gt;"/);
   assert.match(html, /Name/);
   assert.match(html, /value="on" selected/);
-  assert.match(html, /data-controller-outlet-field="protected" checked/);
+  assert.match(html, /<div class="field toggle-field power-checkbox-field power-controller-outlet-protected-field">[\s\S]*<span>Protected<\/span>[\s\S]*<label class="switch" for="powerControllerOutlet0Protected">[\s\S]*<input type="checkbox" id="powerControllerOutlet0Protected" data-controller-outlet-field="protected" checked[\s\S]*<span class="slider"><\/span>/);
+  assert.doesNotMatch(html, /check-field/);
   const fieldsStart = html.indexOf('<div class="form-grid power-controller-outlet-fields">');
   const protectedLabelIndex = html.indexOf('<span>Protected</span>');
   const protectedIndex = html.indexOf('data-controller-outlet-field="protected" checked');
@@ -209,9 +220,9 @@ test('renders physical outputs from the device and hides local inventory control
 
   assert.match(html, /<span>Name<\/span>/);
   assert.match(html, /value="&lt;PLC&gt;"/);
-  assert.match(html, /<label class="field" title="Duration in seconds">[\s\S]*<span>Power-on delay<\/span>[\s\S]*data-controller-device-config-field="powerOnDelaySeconds"[^>]+title="Duration in seconds"/);
-  assert.match(html, /<label class="field" title="Duration in seconds">[\s\S]*<span>Power-off delay<\/span>[\s\S]*data-controller-device-config-field="powerOffDelaySeconds"[^>]+title="Duration in seconds"/);
-  assert.match(html, /<label class="field" title="Duration in seconds">[\s\S]*<span>Reboot duration<\/span>[\s\S]*data-controller-device-config-field="rebootDurationSeconds"[^>]+title="Duration in seconds"/);
+  assert.match(html, /<label class="field" title="Power-on delay in seconds">[\s\S]*<span>Power-on delay<\/span>[\s\S]*data-controller-device-config-field="powerOnDelaySeconds"[^>]+title="Power-on delay in seconds"/);
+  assert.match(html, /<label class="field" title="Power-off delay in seconds">[\s\S]*<span>Power-off delay<\/span>[\s\S]*data-controller-device-config-field="powerOffDelaySeconds"[^>]+title="Power-off delay in seconds"/);
+  assert.match(html, /<label class="field" title="Reboot duration in seconds">[\s\S]*<span>Reboot duration<\/span>[\s\S]*data-controller-device-config-field="rebootDurationSeconds"[^>]+title="Reboot duration in seconds"/);
   assert.doesNotMatch(html, /Power-on delay \(sec\)|Power-off delay \(sec\)|Reboot duration \(sec\)/);
   assert.match(html, /data-controller-device-config-field="powerOnDelaySeconds"/);
   assert.match(html, /value="30"/);
