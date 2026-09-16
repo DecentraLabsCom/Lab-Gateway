@@ -202,6 +202,37 @@ class TestBuildAasShell:
         desc = " ".join(d["text"] for d in shell["description"])
         assert "lab-ws-01" in desc
 
+    def test_registered_description_overrides_host_fallback(self):
+        shell = _mod.build_physical_aas_shell(
+            "42",
+            SAMPLE_HOST,
+            {"description": "Registered remote laboratory"},
+        )
+        desc = " ".join(d["text"] for d in shell["description"])
+        assert desc == "Registered remote laboratory"
+
+    def test_registered_metadata_is_published_in_the_nameplate(self):
+        submodel = _mod.build_nameplate_submodel(
+            "42",
+            SAMPLE_HOST,
+            {
+                "license": "https://example.test/terms.html",
+                "documentationUrls": [
+                    "https://example.test/manual.pdf",
+                    "https://example.test/guide.html",
+                ],
+                "contactEmail": "lab@example.test",
+            },
+        )
+        values = {
+            element["idShort"]: element["value"]
+            for element in submodel["submodelElements"]
+        }
+        assert values["License"] == "https://example.test/terms.html"
+        assert values["DocumentationUrl_0"] == "https://example.test/manual.pdf"
+        assert values["DocumentationUrl_1"] == "https://example.test/guide.html"
+        assert values["ContactEmail"] == "lab@example.test"
+
 
 # ── sync_lab_to_basyx degradation ─────────────────────────────────────
 

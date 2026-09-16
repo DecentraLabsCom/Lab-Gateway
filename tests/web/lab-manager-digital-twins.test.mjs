@@ -97,7 +97,7 @@ function loadDigitalTwins({ labsResponse }) {
   return { controller, fields, fetchCalls, fmuCalls, aasCalls };
 }
 
-test('loads managed labs once and populates laboratory selectors with the access key mapping', async () => {
+test('loads managed labs once and populates both digital-twin selectors by stable lab ID', async () => {
   const { controller, fields, fetchCalls } = loadDigitalTwins({
     labsResponse: {
       ok: true,
@@ -124,8 +124,8 @@ test('loads managed labs once and populates laboratory selectors with the access
   });
 
   fields.powerPolicyLabSelect.value = '8';
-  fields.fmuSyncKey.value = 'spring.fmu';
-  fields.aasLinkKey.value = 'spring.fmu';
+  fields.fmuSyncKey.value = '7';
+  fields.aasLinkKey.value = '7';
   const first = controller.loadManagedLabsOnce({ skipAuthPrompt: true });
   const second = controller.loadManagedLabsOnce({ skipAuthPrompt: false });
   assert.equal(first, second);
@@ -136,27 +136,32 @@ test('loads managed labs once and populates laboratory selectors with the access
   assert.equal(fetchCalls[0].options.skipAuthPrompt, true);
   assert.equal(controller.getManagedLabs().length, 2);
   assert.equal(fields.powerPolicyLabSelect.value, '8');
-  assert.equal(fields.fmuSyncKey.value, 'spring.fmu');
-  assert.equal(fields.aasLinkKey.value, 'spring.fmu');
+  assert.equal(fields.fmuSyncKey.value, '7');
+  assert.equal(fields.aasLinkKey.value, '7');
+  assert.deepEqual(fields.fmuSyncKey.options.map(option => option.value), ['7', '8']);
   assert.equal(
-    fields.fmuSyncKey.options.find(option => option.value === 'spring.fmu').dataset.labId,
+    fields.fmuSyncKey.options.find(option => option.value === '7').dataset.labId,
     '7',
   );
   assert.equal(
-    fields.aasLinkKey.options.find(option => option.value === 'spring.fmu').dataset.labId,
+    fields.aasLinkKey.options.find(option => option.value === '7').dataset.labId,
     '7',
   );
   assert.equal(
-    fields.fmuSyncKey.options.find(option => option.value === 'spring.fmu').dataset.labDescription,
+    fields.fmuSyncKey.options.find(option => option.value === '7').dataset.labDescription,
     'Registered spring damper laboratory',
   );
   assert.deepEqual(
-    JSON.parse(fields.fmuSyncKey.options.find(option => option.value === 'spring.fmu').dataset.labDocumentation),
+    JSON.parse(fields.fmuSyncKey.options.find(option => option.value === '7').dataset.labDocumentation),
     ['https://docs.example.test/manual.pdf', 'https://docs.example.test/guide.html'],
   );
   assert.equal(
-    fields.fmuSyncKey.options.find(option => option.value === 'spring.fmu').dataset.labLicense,
+    fields.fmuSyncKey.options.find(option => option.value === '7').dataset.labLicense,
     'https://docs.example.test/terms.html',
+  );
+  assert.equal(
+    fields.fmuSyncKey.options.find(option => option.value === '8').dataset.resourceType,
+    '0',
   );
   assert.ok(fields.powerPolicyLabSelect.options.some(option => /Spring Damper/.test(option.textContent)));
 });

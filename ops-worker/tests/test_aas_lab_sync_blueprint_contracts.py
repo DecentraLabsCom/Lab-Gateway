@@ -10,7 +10,7 @@ def _blueprint(**overrides):
         "parse_bool": lambda value, default: bool(value) if value is not None else default,
         "poll_heartbeat": lambda _host, **_kwargs: {"heartbeat": {"ready": True}},
         "load_persisted_heartbeat": lambda _lab_id, _host: None,
-        "sync_lab": lambda lab_id, _host, _heartbeat: {"synced": True, "labId": lab_id},
+        "sync_lab": lambda lab_id, _host, _heartbeat, _metadata: {"synced": True, "labId": lab_id},
         "log_warning": lambda *_args: None,
     }
     providers.update(overrides)
@@ -42,8 +42,8 @@ def test_aas_lab_sync_blueprint_forwards_persisted_heartbeat():
                 ("load", lab_id, value)
             )
             or heartbeat,
-            sync_lab=lambda lab_id, value, received_heartbeat: calls.append(
-                ("sync", lab_id, value, received_heartbeat)
+            sync_lab=lambda lab_id, value, received_heartbeat, metadata: calls.append(
+                ("sync", lab_id, value, received_heartbeat, metadata)
             )
             or {"synced": True, "labId": lab_id},
         )
@@ -56,7 +56,7 @@ def test_aas_lab_sync_blueprint_forwards_persisted_heartbeat():
     assert calls == [
         ("find", "lab-1"),
         ("load", "lab-1", host),
-        ("sync", "lab-1", host, heartbeat),
+        ("sync", "lab-1", host, heartbeat, {}),
     ]
 
 
@@ -69,8 +69,8 @@ def test_aas_lab_sync_blueprint_forwards_requested_poll_and_maps_sync_errors():
             find_host_by_lab=lambda _lab_id: host,
             poll_heartbeat=lambda value, **kwargs: calls.append(("poll", value, kwargs))
             or {"heartbeat": {"ready": True, "source": "poll"}},
-            sync_lab=lambda lab_id, value, heartbeat: calls.append(
-                ("sync", lab_id, value, heartbeat)
+            sync_lab=lambda lab_id, value, heartbeat, metadata: calls.append(
+                ("sync", lab_id, value, heartbeat, metadata)
             )
             or {"error": "AAS synchronization failed", "labId": lab_id},
         )
@@ -88,7 +88,7 @@ def test_aas_lab_sync_blueprint_forwards_requested_poll_and_maps_sync_errors():
     }
     assert calls == [
         ("poll", host, {"include_events": False}),
-        ("sync", "lab-1", host, {"ready": True, "source": "poll"}),
+        ("sync", "lab-1", host, {"ready": True, "source": "poll"}, {}),
     ]
 
 
@@ -99,7 +99,7 @@ def test_worker_aas_lab_sync_route_is_owned_by_the_blueprint(monkeypatch):
     monkeypatch.setattr(
         worker.aas_generator,
         "sync_lab_to_basyx",
-        lambda lab_id, received_host, heartbeat: {
+        lambda lab_id, received_host, heartbeat, _metadata: {
             "synced": True,
             "labId": lab_id,
             "heartbeat": heartbeat,

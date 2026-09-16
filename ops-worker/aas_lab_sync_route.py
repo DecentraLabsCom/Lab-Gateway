@@ -1,10 +1,34 @@
 """Composition for the per-lab AAS synchronization HTTP route."""
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 
 def _safe_lab_id(lab_id: Any) -> str:
     return str(lab_id).replace("\r", "\\r").replace("\n", "\\n")
+
+
+def _metadata_from_payload(payload: Any) -> Dict[str, Any]:
+    """Keep only bounded, provider-published metadata supplied by Lab Manager."""
+    if not isinstance(payload, Mapping):
+        return {}
+
+    metadata: Dict[str, Any] = {}
+    for key in ("description", "license", "contactEmail"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            metadata[key] = value.strip()[:2048]
+
+    documentation = payload.get("documentationUrls")
+    if isinstance(documentation, list):
+        urls = []
+        for value in documentation[:32]:
+            if isinstance(value, str) and value.strip():
+                item = value.strip()[:2048]
+                if item not in urls:
+                    urls.append(item)
+        if urls:
+            metadata["documentationUrls"] = urls
+    return metadata
 
 
 def handle_aas_lab_sync(
@@ -15,7 +39,7 @@ def handle_aas_lab_sync(
     parse_bool: Callable[[Any, bool], bool],
     poll_heartbeat: Callable[..., Dict[str, Any]],
     load_persisted_heartbeat: Optional[Callable[[str, Dict[str, Any]], Optional[Dict[str, Any]]]],
-    sync_lab: Callable[[str, Dict[str, Any], Optional[Dict[str, Any]]], Dict[str, Any]],
+    sync_lab: Callable[[str, Dict[str, Any], Optional[Dict[str, Any]], Dict[str, Any]], Dict[str, Any]],
     log_warning: Callable[..., Any],
     jsonify: Callable[[Any], Any],
 ) -> Any:
@@ -46,7 +70,8 @@ def handle_aas_lab_sync(
                 type(exc).__name__,
             )
 
-    result = sync_lab(str(lab_id), host, heartbeat_data)
+    metadata = _metadata_from_payload(payload.get("metadata"))
+    result = sync_lab(str(lab_id), host, heartbeat_data, metadata)
 
     if result.get("disabled"):
         return jsonify(result), 200

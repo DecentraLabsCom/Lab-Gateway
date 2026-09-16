@@ -106,4 +106,42 @@ def create_aas_sync_router(
             raise HTTPException(status_code=502, detail=result["error"])
         return result
 
+    @router.post("/aas-admin/aas/{lab_id}/sync")
+    async def aas_sync_resource_aasx(lab_id: str, request: Request):
+        """Import a provider-prepared AASX package for any resource type."""
+        content_type = request.headers.get("content-type", "")
+        if "multipart/form-data" not in content_type:
+            raise HTTPException(status_code=400, detail="AASX upload requires multipart/form-data")
+
+        form = await request.form()
+        upload = form.get("file") or form.get("aasx")
+        if not isinstance(upload, UploadFile):
+            raise HTTPException(status_code=400, detail="AASX file is required")
+        aasx_bytes = await upload.read()
+        if not aasx_bytes:
+            raise HTTPException(status_code=400, detail="AASX file is empty")
+
+        extra_info: dict = {}
+        for field in ("description", "license", "documentationUrl", "contactEmail"):
+            value = str(form.get(field) or request.query_params.get(field, "")).strip()
+            if value:
+                extra_info[field] = value
+        documentation_urls = _parse_documentation_urls(form.get("documentationUrls"))
+        if documentation_urls:
+            extra_info["documentationUrls"] = documentation_urls
+
+        result = await sync_fmu_to_basyx(
+            lab_id=lab_id,
+            access_key=lab_id,
+            metadata={},
+            aasx_bytes=aasx_bytes,
+            extra_info=extra_info or None,
+            fmu_path=None,
+            unit_definitions=[],
+            required_aas_id=f"urn:decentralabs:lab:{lab_id}",
+        )
+        if "error" in result:
+            raise HTTPException(status_code=502, detail=result["error"])
+        return result
+
     return router

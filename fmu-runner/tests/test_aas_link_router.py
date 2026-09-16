@@ -47,3 +47,30 @@ def test_get_link_returns_not_found_without_a_configured_file(tmp_path):
     response = _client(tmp_path).get("/aas-admin/fmu/missing.fmu/aas-link")
 
     assert response.status_code == 404
+
+
+def test_generic_lab_link_supports_physical_resources(tmp_path):
+    response = _client(tmp_path).post(
+        "/aas-admin/lab/42/aas-link",
+        json={"aasId": "urn:example:physical-lab"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "linked": True,
+        "labId": "42",
+        "aasId": "urn:example:physical-lab",
+    }
+    assert json.loads((tmp_path / "42.aas-link.json").read_text()) == {
+        "labId": "42",
+        "aasId": "urn:example:physical-lab",
+    }
+
+
+def test_generic_lab_link_rejects_non_object_json(tmp_path):
+    response = _client(tmp_path).post(
+        "/aas-admin/lab/42/aas-link",
+        json=["urn:example:physical-lab"],
+    )
+
+    assert response.status_code == 400

@@ -59,8 +59,8 @@ def test_aas_lab_sync_route_contract_uses_persisted_heartbeat_by_default(client,
     monkeypatch.setattr(
         worker.aas_generator,
         "sync_lab_to_basyx",
-        lambda lab_id, received_host, received_heartbeat: calls.append(
-            (lab_id, received_host, received_heartbeat)
+        lambda lab_id, received_host, received_heartbeat, metadata: calls.append(
+            (lab_id, received_host, received_heartbeat, metadata)
         ) or {"synced": True, "labId": lab_id},
     )
 
@@ -70,7 +70,7 @@ def test_aas_lab_sync_route_contract_uses_persisted_heartbeat_by_default(client,
     assert response.json == {"synced": True, "labId": "lab-1"}
     assert calls == [
         (connection, "lab-ws-01"),
-        ("lab-1", host, heartbeat),
+        ("lab-1", host, heartbeat, {}),
     ]
 
 
@@ -91,7 +91,7 @@ def test_aas_lab_sync_route_contract_polls_fresh_heartbeat_when_requested(client
     assert response.status_code == 200
     assert response.json == {"synced": True, "labId": "lab-1"}
     poll.assert_called_once_with(host, include_events=False)
-    sync.assert_called_once_with("lab-1", host, heartbeat)
+    sync.assert_called_once_with("lab-1", host, heartbeat, {})
 
 
 def test_aas_lab_sync_route_contract_continues_without_fresh_heartbeat_on_poll_error(client, monkeypatch):
@@ -111,7 +111,7 @@ def test_aas_lab_sync_route_contract_continues_without_fresh_heartbeat_on_poll_e
 
     assert response.status_code == 200
     assert response.json == {"synced": True, "labId": "lab-1"}
-    sync.assert_called_once_with("lab-1", host, None)
+    sync.assert_called_once_with("lab-1", host, None, {})
     assert "secret heartbeat credentials" not in response.get_data(as_text=True)
     warning.assert_called_once()
     assert warning.call_args.args[:2] == (
@@ -137,7 +137,7 @@ def test_aas_lab_sync_route_contract_continues_without_persisted_heartbeat_on_db
 
     assert response.status_code == 200
     assert response.json == {"synced": True, "labId": "lab-1"}
-    sync.assert_called_once_with("lab-1", worker.HOSTS.get_by_lab("lab-1"), None)
+    sync.assert_called_once_with("lab-1", worker.HOSTS.get_by_lab("lab-1"), None, {})
     assert "secret database details" not in response.get_data(as_text=True)
     warning.assert_called_once()
 
@@ -153,7 +153,7 @@ def test_aas_lab_sync_route_contract_returns_disabled_result_unchanged(client, m
 
     assert response.status_code == 200
     assert response.json == result
-    sync.assert_called_once_with("lab-1", host, None)
+    sync.assert_called_once_with("lab-1", host, None, {})
 
 
 def test_aas_lab_sync_route_contract_maps_sync_error_to_502(client, monkeypatch):
@@ -184,4 +184,42 @@ def test_aas_lab_sync_route_contract_returns_success_result_unchanged(client, mo
 
     assert response.status_code == 200
     assert response.json == result
-    sync.assert_called_once_with("lab-1", host, None)
+    sync.assert_called_once_with("lab-1", host, None, {})
+
+
+def test_aas_lab_sync_route_forwards_registered_metadata(client, monkeypatch):
+    host = _install_host(monkeypatch)
+    monkeypatch.setattr(worker, "DB_ENGINE", None)
+    calls = []
+
+    def sync_lab(lab_id, host_arg, heartbeat, metadata):
+        calls.append((lab_id, host_arg, heartbeat, metadata))
+        return {"synced": True, "labId": lab_id}
+
+    monkeypatch.setattr(worker.aas_generator, "sync_lab_to_basyx", sync_lab)
+
+    response = client.post(
+        "/aas-admin/lab/lab-1/sync",
+        json={
+            "metadata": {
+                "description": "Registered remote laboratory",
+                "license": "https://example.test/terms.html",
+                "documentationUrls": ["https://example.test/manual.pdf"],
+                "contactEmail": "lab@example.test",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json == {"synced": True, "labId": "lab-1"}
+    assert calls == [(
+        "lab-1",
+        host,
+        None,
+        {
+            "description": "Registered remote laboratory",
+            "license": "https://example.test/terms.html",
+            "documentationUrls": ["https://example.test/manual.pdf"],
+            "contactEmail": "lab@example.test",
+        },
+    )]

@@ -228,6 +228,10 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
 - `POST /api/aas-sync`
 - `POST /aas-admin/lab/<lab_id>/sync`
 
+The per-lab route accepts registered metadata from Lab Manager and optionally
+polls the Lab Station heartbeat. Provider-prepared AASX packages are imported
+by `fmu-runner` through the Gateway route `POST /aas-admin/aas/<lab_id>/sync`.
+
 ## Scheduler
 
 Enable with:

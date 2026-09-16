@@ -549,15 +549,16 @@ test('reuses the existing Lab Manager session without prompting on Operations en
 
 test('loads the activity controller before the Lab Manager bootstrap', () => {
   const html = fs.readFileSync(indexPath, 'utf8');
-  if (html.includes('lab-manager-fmu-sync-v3')) {
-    assert.match(html, /lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v3/);
-    assert.match(html, /lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v3/);
+  if (html.includes('lab-manager-fmu-sync-v4')) {
+    assert.match(html, /lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v4/);
+    assert.match(html, /lab-manager-aas-link\.js\?v=lab-manager-aas-link-v3/);
+    assert.match(html, /lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v4/);
     assert.match(html, /lab-manager-energy-feature\.js\?v=lab-manager-energy-feature-v3/);
     return;
   }
   assert.match(
     html,
-      /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*lab-manager-hosts\.js\?v=lab-manager-hosts-v1[\s\S]*lab-manager-host-discovery\.js\?v=lab-manager-host-discovery-v1[\s\S]*lab-manager-winrm-credentials\.js\?v=lab-manager-winrm-credentials-v1[\s\S]*lab-manager-winrm-trust\.js\?v=lab-manager-winrm-trust-v1[\s\S]*lab-manager-host-provisioning\.js\?v=lab-manager-host-provisioning-v1[\s\S]*lab-manager-host-actions\.js\?v=lab-manager-host-actions-v1[\s\S]*lab-manager-host-feature\.js\?v=lab-manager-host-feature-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-reservation-values\.js\?v=lab-manager-reservation-values-v1[\s\S]*lab-manager-reservation-renderers\.js\?v=lab-manager-reservation-renderers-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-notifications\.js\?v=lab-manager-notifications-v1[\s\S]*lab-manager-notifications-feature\.js\?v=lab-manager-notifications-feature-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v2[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v2[\s\S]*lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v2[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager-power-renderers\.js\?v=lab-manager-power-renderers-v12[\s\S]*lab-manager-power-values\.js\?v=lab-manager-power-values-v6[\s\S]*lab-manager-power-operations\.js\?v=lab-manager-power-operations-v1[\s\S]*lab-manager-power-status\.js\?v=lab-manager-power-status-v2[\s\S]*lab-manager-power-controllers\.js\?v=lab-manager-power-controllers-v5[\s\S]*lab-manager-power-policies\.js\?v=lab-manager-power-policies-v4[\s\S]*lab-manager-energy-feature\.js\?v=lab-manager-energy-feature-v2[\s\S]*lab-manager-reservations-feature\.js\?v=lab-manager-reservations-feature-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
+      /lab-manager-tabs\.js\?v=workflow-tabs-v1[\s\S]*lab-manager-activity\.js\?v=lab-manager-activity-v1[\s\S]*lab-manager-access-policy\.js\?v=lab-manager-access-policy-v1[\s\S]*lab-manager-heartbeat-errors\.js\?v=lab-manager-heartbeat-errors-v1[\s\S]*lab-manager-hosts\.js\?v=lab-manager-hosts-v1[\s\S]*lab-manager-host-discovery\.js\?v=lab-manager-host-discovery-v1[\s\S]*lab-manager-winrm-credentials\.js\?v=lab-manager-winrm-credentials-v1[\s\S]*lab-manager-winrm-trust\.js\?v=lab-manager-winrm-trust-v1[\s\S]*lab-manager-host-provisioning\.js\?v=lab-manager-host-provisioning-v1[\s\S]*lab-manager-host-actions\.js\?v=lab-manager-host-actions-v1[\s\S]*lab-manager-host-feature\.js\?v=lab-manager-host-feature-v1[\s\S]*core\/toast\.js\?v=lab-manager-toast-v1[\s\S]*lab-manager-notifications-access\.js\?v=lab-manager-notifications-access-v1[\s\S]*core\/pagination\.js\?v=lab-manager-pagination-v1[\s\S]*core\/formatters\.js\?v=lab-manager-formatters-v1[\s\S]*lab-manager-reservation-values\.js\?v=lab-manager-reservation-values-v1[\s\S]*lab-manager-reservation-renderers\.js\?v=lab-manager-reservation-renderers-v1[\s\S]*lab-manager-notifications-config\.js\?v=lab-manager-notifications-config-v1[\s\S]*lab-manager-notifications\.js\?v=lab-manager-notifications-v1[\s\S]*lab-manager-notifications-feature\.js\?v=lab-manager-notifications-feature-v1[\s\S]*lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v4[\s\S]*lab-manager-aas-link\.js\?v=lab-manager-aas-link-v3[\s\S]*lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v4[\s\S]*lab-manager-power-credentials\.js\?v=lab-manager-power-credentials-v1[\s\S]*lab-manager-power-renderers\.js\?v=lab-manager-power-renderers-v12[\s\S]*lab-manager-power-values\.js\?v=lab-manager-power-values-v6[\s\S]*lab-manager-power-operations\.js\?v=lab-manager-power-operations-v1[\s\S]*lab-manager-power-status\.js\?v=lab-manager-power-status-v2[\s\S]*lab-manager-power-controllers\.js\?v=lab-manager-power-controllers-v5[\s\S]*lab-manager-power-policies\.js\?v=lab-manager-power-policies-v4[\s\S]*lab-manager-energy-feature\.js\?v=lab-manager-energy-feature-v2[\s\S]*lab-manager-reservations-feature\.js\?v=lab-manager-reservations-feature-v1[\s\S]*lab-manager\.js\?v=workflow-tabs-v18/,
   );
 });
 
@@ -1290,7 +1291,7 @@ test('loads an existing power controller and saves it through the update endpoin
   assert.equal(JSON.parse(saveCall.options.body).name, 'Bench PDU Updated');
 });
 
-test('loads FMU laboratory options and sends the mapped lab ID automatically', async () => {
+test('loads laboratory options and sends the mapped lab ID automatically', async () => {
   const { elements, fetchCalls } = loadLabManager({
     billingResponse: Promise.resolve({
       ok: true,
@@ -1320,9 +1321,9 @@ test('loads FMU laboratory options and sends the mapped lab ID automatically', a
 
   assert.deepEqual(
     elements.get('fmuSyncKey').options.map((option) => option.value),
-    ['spring-damper.fmu'],
+    ['42', '7'],
   );
-  elements.get('fmuSyncKey').value = 'spring-damper.fmu';
+  elements.get('fmuSyncKey').value = '7';
   elements.get('fmuSyncBtn').click();
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -2122,13 +2123,15 @@ test('loads AAS link laboratory options and sends the mapped lab ID automaticall
 
   await new Promise((resolve) => setImmediate(resolve));
 
-  elements.get('aasLinkKey').value = 'spring-damper.fmu';
+  elements.get('aasLinkKey').value = '7';
   elements.get('aasLinkAasId').value = 'urn:example:aas:spring-damper';
   elements.get('aasLinkSaveBtn').click();
   await new Promise((resolve) => setImmediate(resolve));
 
   const linkCall = fetchCalls.find(({ url, options }) =>
-    options.method === 'POST' && url === '/aas-admin/fmu/spring-damper.fmu/aas-link');
+    options.method === 'POST' && url === '/aas-admin/lab/7/aas-link');
   assert.ok(linkCall);
-  assert.equal(JSON.parse(linkCall.options.body).labId, '7');
+  assert.deepEqual(JSON.parse(linkCall.options.body), {
+    aasId: 'urn:example:aas:spring-damper',
+  });
 });

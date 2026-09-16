@@ -74,11 +74,13 @@ test('prefers the FMU description over the registered laboratory description', a
     },
   });
 
-  fields.keyInput.value = 'spring-damper.fmu';
+  fields.keyInput.value = '7';
   fields.keyInput.options = [{
-    value: 'spring-damper.fmu',
+    value: '7',
     dataset: {
       labId: '7',
+      accessKey: 'spring-damper.fmu',
+      resourceType: '1',
       labDescription: 'Registered laboratory description',
       labDocumentation: JSON.stringify([
         'https://example.test/manual.pdf',
@@ -104,7 +106,7 @@ test('prefers the FMU description over the registered laboratory description', a
   assert.equal(requestUrl.searchParams.get('contactEmail'), 'ops@example.test');
   assert.equal(syncCall.options.method, 'POST');
   assert.equal(fields.result.textContent, 'AAS shell synced \u2014 created');
-  assert.deepEqual(toasts.at(-1), { message: 'FMU AAS sync: spring-damper.fmu ok', type: 'success' });
+  assert.deepEqual(toasts.at(-1), { message: 'FMU AAS sync: 7 ok', type: 'success' });
 });
 
 test('falls back to the registered laboratory description when the FMU has none', async () => {
@@ -209,7 +211,84 @@ test('reports a disabled AAS deployment instead of treating it as a successful u
 
   assert.equal(fields.result.textContent, 'AAS synchronization is disabled on this gateway.');
   assert.deepEqual(toasts.at(-1), {
-    message: 'FMU AAS sync disabled: spring-damper.fmu',
+    message: 'FMU AAS sync disabled: 7',
     type: 'error',
   });
+});
+
+test('synchronizes a physical laboratory from Gateway metadata and heartbeat', async () => {
+  const calls = [];
+  const { fields, toasts } = loadController({
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      return { ok: true, status: 200, json: async () => ({ created: true }) };
+    },
+  });
+
+  fields.keyInput.value = '42';
+  fields.keyInput.options = [{
+    value: '42',
+    dataset: {
+      labId: '42',
+      resourceType: '0',
+      labDescription: 'Remote laboratory description',
+      labDocumentation: JSON.stringify(['https://example.test/manual.pdf']),
+      labLicense: 'https://example.test/terms.html',
+      accessKey: 'guac:id:42',
+    },
+  }];
+  fields.contactEmail.value = 'lab@example.test';
+  fields.syncButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/aas-admin/lab/42/sync');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(calls[0].options.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    includeHeartbeat: true,
+    metadata: {
+      description: 'Remote laboratory description',
+      license: 'https://example.test/terms.html',
+      documentationUrls: ['https://example.test/manual.pdf'],
+      contactEmail: 'lab@example.test',
+    },
+  });
+  assert.equal(fields.result.textContent, 'AAS shell synced — created');
+  assert.deepEqual(toasts.at(-1), {
+    message: 'Physical laboratory AAS sync: 42 ok',
+    type: 'success',
+  });
+});
+
+test('uploads a custom AASX for a physical laboratory through the generic AAS admin route', async () => {
+  const calls = [];
+  const { fields } = loadController({
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      return { ok: true, status: 200, json: async () => ({
+        aasxUpload: true,
+        uploadedAasIds: ['urn:decentralabs:lab:42'],
+        uploadedSubmodelIds: ['urn:example:submodel'],
+      }) };
+    },
+  });
+
+  const file = { name: 'remote-lab.aasx' };
+  fields.keyInput.value = '42';
+  fields.keyInput.options = [{
+    value: '42',
+    dataset: { labId: '42', resourceType: '0' },
+  }];
+  fields.fileInput.files = [file];
+  fields.syncButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(calls[0].url, '/aas-admin/aas/42/sync');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(calls[0].options.body.entries.slice(0, 2), [
+    ['file', file],
+    ['labId', '42'],
+  ]);
+  assert.equal(fields.result.textContent, 'Synced 1 shell(s) + 1 submodel(s) from AASX');
 });

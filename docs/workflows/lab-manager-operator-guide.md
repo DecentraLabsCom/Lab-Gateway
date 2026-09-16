@@ -12,7 +12,7 @@ order therefore matters.
 | 1 | `Labs` | Publish, edit, and maintain physical laboratories or FMU simulations. | `blockchain-services` through `/lab-admin/**`; local discovery through Ops Worker. |
 | 2 | `Operations` | Monitor stations, heartbeat, reservations, and timelines. | Ops Worker through `/ops/**`; cancellation through `/lab-admin/**`. |
 | 3 | `Energy` | Manage credentials, controllers, outlets, policies, and power tests. | Ops Worker through `/ops/api/power/**`. |
-| 4 | `Digital Twins` | Synchronize an FMU with AAS or link an external shell. | `fmu-runner`, Ops Worker, and BaSyx through `/aas-admin/**`. |
+| 4 | `Digital Twins` | Synchronize an FMU or physical laboratory with AAS, import a prepared AASX, or link an external shell. | `fmu-runner`, Ops Worker, and BaSyx through `/aas-admin/**`. |
 | 5 | `Notifications` | Configure and test reservation email/ICS delivery. | `blockchain-services` through `/billing/admin/notifications/**`. |
 
 The tabs are declared in [Lab Manager](../../web/lab-manager/index.html) and
@@ -49,7 +49,7 @@ remote routes must be explicitly configured and authorized.
 
 | Identifier | Meaning | Where it is used |
 | --- | --- | --- |
-| `labId` | Stable laboratory identity in the contract/provider projection. | Energy policies, AAS overrides, and reservations. |
+| `labId` | Stable laboratory identity in the contract/provider projection. | Energy policies, AAS synchronization/linking, and reservations. |
 | `accessKey` | Operational reference for the published resource. | `guac:id:<connection_id>` for physical labs; FMU filename/reference for FMUs. |
 | `reservationKey` | On-chain reservation identifier. | Cancellation, timeline, and session diagnosis. |
 | `controllerId` | Local identifier for an energy controller. | JSON catalog and policies. |
@@ -75,28 +75,29 @@ remote routes must be explicitly configured and authorized.
 The details for steps 3, 4, and 6 are in [Labs and Operations](lab-manager-labs-and-operations.md).
 The complete energy workflow is in [Lab Manager energy operations](lab-manager-energy-operations.md).
 
-## Recommended order for an FMU and its digital twin
+## Recommended order for an FMU or physical laboratory digital twin
 
-1. Install and validate the FMU on Lab Station; see
-   [FMI/FMU support](../fmi-fmu-support.md).
-   For local execution tests, start `fmu-local-dev` together with `aas`:
+1. For an FMU, install and validate the model on Lab Station; see
+   [FMI/FMU support](../fmi-fmu-support.md). For local execution tests, start
+   `fmu-local-dev` together with `aas`:
    `docker compose --profile fmu-local-dev --profile aas up -d`. Do not run
    `fmu-runner` at the same time because both profiles use the `fmu-runner`
-   proxy alias.
-2. Publish it from `Labs` as an `FMU simulation`. The `accessKey` must point
-   to the FMU's operational identifier and `accessURI` must be the Gateway's
-   public FMU endpoint.
-3. Open `Digital Twins` → `FMU Digital Twin Sync`. Select the published FMU
-   from the `Laboratory` selector; it automatically supplies the operational
-   `accessKey` and anchors the AAS identity to its stable `labId`.
-4. Either generate the shell automatically or upload a validated `.aasx` file.
-   The description is taken from the FMU model description when available;
-   otherwise the registered laboratory description is used. Registered
-   documentation links and the Terms of Use URL are reused automatically; no
-   extra Documentation or License fields are required.
-5. If an external shell already exists, use `Link Existing AAS` instead of
-   generating another one. The difference and identity rules are described in
-   [AAS support](../aas-support.md).
+   proxy alias. For a physical lab, first complete the normal `Labs`,
+   `Operations`, and Lab Station setup.
+2. Publish the resource from `Labs` and confirm its stable `labId`. FMUs retain
+   their operational `accessKey`; physical labs retain their Guacamole
+   `accessKey`, but neither is selected manually in Digital Twins.
+3. Open `Digital Twins` → `Digital Twin Management` and select the
+   laboratory. The selector includes FMUs and physical laboratories and uses
+   the `labId` to associate the operation automatically.
+4. Click `Sync AAS` to generate metadata. FMUs use the model description when
+   available, otherwise the registered laboratory description. Physical labs
+   use Gateway/heartbeat data plus the registered description, documentation,
+   and Terms of Use. No separate Documentation or License fields are required.
+5. Optionally upload a provider-prepared `.aasx`. For a physical lab, the
+   package must contain `urn:decentralabs:lab:{labId}` as a shell ID. Use
+   `Link Existing AAS` when the authoritative shell is already hosted
+   elsewhere.
 6. Verify shell retrieval through the Gateway, not only directly against BaSyx.
 
 ## Notification workflow

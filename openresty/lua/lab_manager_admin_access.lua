@@ -269,11 +269,11 @@ if backend_header_name ~= header_name then
 end
 ngx.req.set_header(backend_header_name, backend_token)
 
--- `/aas-admin/lab/*` is served by ops-worker.  Use the dedicated service
--- credential only for that route; `/lab-admin/*` and `/aas-admin/fmu/*` are
--- served by the blockchain/FMU backends and must retain their own contract.
+-- `/aas-admin/lab/<labId>/sync` is served by ops-worker.  Use the dedicated
+-- service credential only for that route; generic AAS-link routes under the
+-- same prefix are served by fmu-runner and must retain the FMU-side contract.
 local uri = ngx.var.uri or ""
-if uri:sub(1, 15) == "/aas-admin/lab/" then
+if uri:match("^/aas%-admin/lab/[^/]+/sync$") then
     local ops_internal_token = os.getenv("OPS_INTERNAL_AUTH_TOKEN") or ""
     local ops_internal_header = os.getenv("OPS_INTERNAL_AUTH_HEADER") or "X-Ops-Internal-Token"
     if ops_internal_token == "" then
