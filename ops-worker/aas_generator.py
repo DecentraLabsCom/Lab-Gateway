@@ -205,12 +205,16 @@ def build_technical_data_submodel(
     last_logoff_ts = last_logoff.get("timestamp", "")
     last_logoff_user = last_logoff.get("user", "")
 
+    resource_status = "Ready" if ready else ("NotReady" if ready is False else "Unknown")
+
     def bool_str(val: Any) -> str:
         if val is None:
             return ""
         return "true" if val else "false"
 
     elements = [
+        _prop("ResourceType", "xs:string", "PhysicalLab"),
+        _prop("ResourceStatus", "xs:string", resource_status),
         _prop("LabStatus", "xs:string", "Ready" if ready else ("NotReady" if ready is False else "")),
         _prop("ReadyFlag", "xs:boolean", bool_str(ready)),
         _prop("LocalModeEnabled", "xs:boolean", bool_str(local_mode)),
@@ -220,6 +224,7 @@ def build_technical_data_submodel(
         _prop("LastPowerActionMode", "xs:string", last_power_mode),
         _prop("LastForcedLogoffTimestamp", "xs:string", last_logoff_ts),
         _prop("LastForcedLogoffUser", "xs:string", last_logoff_user),
+        _prop("LastSyncTimestamp", "xs:string", now_iso),
         _prop("SyncTimestamp", "xs:string", now_iso),
     ]
 

@@ -8,11 +8,12 @@ from fastapi.testclient import TestClient
 from aas_sync_router import create_aas_sync_router
 
 
-def _client(*, metadata=None, sync_result=None):
+def _client(*, metadata=None, sync_result=None, runtime_status=None):
     resolve_fmu_path = MagicMock(return_value=Path("/trusted/demo.fmu"))
     read_model_description = MagicMock(return_value=SimpleNamespace(description="Embedded", license="MIT"))
     metadata_builder = MagicMock(return_value=metadata or {"description": "Embedded", "license": "MIT", "unitDefinitions": []})
     sync_fmu_to_basyx = AsyncMock(return_value=sync_result or {"synced": True})
+    get_runtime_status = AsyncMock(return_value=runtime_status) if runtime_status is not None else None
     logger = MagicMock()
     app = FastAPI()
     app.include_router(create_aas_sync_router(
@@ -21,12 +22,13 @@ def _client(*, metadata=None, sync_result=None):
         metadata_builder=metadata_builder,
         sync_fmu_to_basyx=sync_fmu_to_basyx,
         logger=logger,
+        get_runtime_status=get_runtime_status,
     ))
-    return TestClient(app), resolve_fmu_path, read_model_description, metadata_builder, sync_fmu_to_basyx
+    return TestClient(app), resolve_fmu_path, read_model_description, metadata_builder, sync_fmu_to_basyx, get_runtime_status
 
 
 def test_sync_route_builds_metadata_and_preserves_query_fields():
-    client, resolve_fmu_path, read_model_description, metadata_builder, sync_fmu_to_basyx = _client()
+    client, resolve_fmu_path, read_model_description, metadata_builder, sync_fmu_to_basyx, _ = _client()
 
     response = client.post(
         "/aas-admin/fmu/demo.fmu/sync?labId=42&description=Override&documentationUrls=%5B%22https%3A%2F%2Fdocs.example.com%2Fmanual.pdf%22%2C%22https%3A%2F%2Fdocs.example.com%2Fguide.html%22%5D&contactEmail=lab%40example.com",
@@ -53,11 +55,30 @@ def test_sync_route_builds_metadata_and_preserves_query_fields():
         },
         fmu_path=Path("/trusted/demo.fmu"),
         unit_definitions=[],
+        runtime_info=None,
     )
 
 
+def test_sync_route_publishes_runtime_status_for_generated_fmu():
+    runtime_status = {
+        "status": "UP",
+        "backendMode": "local",
+        "activeSimulationCount": 1,
+        "maxConcurrentSimulations": 4,
+    }
+    client, _, _, _, sync_fmu_to_basyx, get_runtime_status = _client(
+        runtime_status=runtime_status,
+    )
+
+    response = client.post("/aas-admin/fmu/demo.fmu/sync?labId=42")
+
+    assert response.status_code == 200
+    get_runtime_status.assert_awaited_once_with("42")
+    assert sync_fmu_to_basyx.await_args.kwargs["runtime_info"] == runtime_status
+
+
 def test_sync_route_accepts_multipart_aasx_without_reading_fmu_metadata():
-    client, resolve_fmu_path, read_model_description, _, sync_fmu_to_basyx = _client()
+    client, resolve_fmu_path, read_model_description, _, sync_fmu_to_basyx, _ = _client()
 
     response = client.post(
         "/aas-admin/fmu/demo.fmu/sync",
@@ -73,7 +94,7 @@ def test_sync_route_accepts_multipart_aasx_without_reading_fmu_metadata():
 
 
 def test_generic_resource_route_accepts_physical_lab_aasx_without_reading_fmu_metadata():
-    client, resolve_fmu_path, read_model_description, _, sync_fmu_to_basyx = _client()
+    client, resolve_fmu_path, read_model_description, _, sync_fmu_to_basyx, _ = _client()
 
     response = client.post(
         "/aas-admin/aas/42/sync",

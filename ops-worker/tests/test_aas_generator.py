@@ -129,6 +129,13 @@ class TestBuildTechnicalDataSubmodel:
         assert props["LabStatus"]["value"] == "Ready"
         assert props["ReadyFlag"]["value"] == "true"
 
+    def test_common_operational_fields_are_present(self):
+        sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT)
+        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        assert props["ResourceType"]["value"] == "PhysicalLab"
+        assert props["ResourceStatus"]["value"] == "Ready"
+        assert props["LastSyncTimestamp"]["value"]
+
     def test_not_ready_maps_to_status(self):
         hb = {**SAMPLE_HEARTBEAT, "summary": {"ready": False}}
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, hb)

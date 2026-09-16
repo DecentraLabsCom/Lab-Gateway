@@ -392,6 +392,14 @@ async def _aas_sync_to_basyx(**kwargs):
     return await sync_fmu_to_basyx(**kwargs)
 
 
+async def _aas_sync_runtime_status(lab_id: str):
+    """Return bounded runner status to publish in the generated AAS."""
+    health = dict(await _runner_runtime.backend.health())
+    health["activeSimulationCount"] = _runner_runtime.registry.count_for_lab(lab_id)
+    health["maxConcurrentSimulations"] = MAX_CONCURRENT_PER_MODEL
+    return health
+
+
 _health_router = create_health_router(
     backend_health=_health_backend_payload,
     refresh_jwks=_refresh_health_jwks,
@@ -427,6 +435,7 @@ _aas_sync_router = create_aas_sync_router(
     read_model_description=_aas_sync_read_model_description,
     metadata_builder=_aas_sync_metadata_builder,
     sync_fmu_to_basyx=_aas_sync_to_basyx,
+    get_runtime_status=_aas_sync_runtime_status,
     logger=logger,
 )
 

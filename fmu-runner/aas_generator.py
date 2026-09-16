@@ -54,6 +54,7 @@ _AAS_COLLECTIONS = frozenset({"shells", "submodels"})
 _SEMANTIC_ID_IDTA_02006 = "https://admin-shell.io/idta/SimulationModels/SimulationModels/1/0"
 _SEMANTIC_ID_SIMULATION_MODEL = "https://admin-shell.io/idta/SimulationModels/SimulationModel/1/0"
 _SEMANTIC_ID_SIMULATION_MODEL_PORT = "https://admin-shell.io/idta/SimulationModels/PortsInformation/Port/1/0"
+_SEMANTIC_ID_TECHNICAL_DATA = "https://admin-shell.io/ZVEI/TechnicalData/Submodel/1/2"
 
 
 def _aas_request_headers() -> dict[str, str]:
@@ -115,6 +116,10 @@ def _aas_id_for_lab(lab_id: str) -> str:
 
 def _submodel_id_for_fmu(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:simulationModels"
+
+
+def _submodel_id_for_technical(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:technicalData"
 
 
 def _unit_submodel_id_for_lab(lab_id: str) -> str:
@@ -547,6 +552,62 @@ def build_unit_definitions_submodel(lab_id: str, unit_defs: list) -> dict:
     }
 
 
+def _non_negative_int(value: object) -> str:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return ""
+    return str(number) if number >= 0 else ""
+
+
+def build_technical_data_submodel(
+    lab_id: str,
+    metadata: dict,
+    runtime_info: Optional[dict] = None,
+) -> dict:
+    """Build the common operational submodel for a generated FMU shell.
+
+    The FMU runner health is a point-in-time publication.  Missing or unknown
+    health data is deliberately represented as ``Unknown`` rather than as a
+    false claim that the model is ready.
+    """
+    runtime = runtime_info or {}
+    raw_status = str(runtime.get("status") or "").strip().upper()
+    status_map = {
+        "UP": "Ready",
+        "DEGRADED": "Degraded",
+        "DOWN": "Unavailable",
+    }
+    resource_status = status_map.get(raw_status, "Unknown")
+    ready_flag = "true" if raw_status == "UP" else ("false" if raw_status in {"DEGRADED", "DOWN"} else "")
+    metadata_available = bool(metadata)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    elements = [
+        {"idShort": "ResourceType", "modelType": "Property", "valueType": "xs:string", "value": "FMU"},
+        {"idShort": "ResourceStatus", "modelType": "Property", "valueType": "xs:string", "value": resource_status},
+        {"idShort": "ReadyFlag", "modelType": "Property", "valueType": "xs:boolean", "value": ready_flag},
+        {"idShort": "ModelAvailable", "modelType": "Property", "valueType": "xs:boolean", "value": str(metadata_available).lower()},
+        {"idShort": "ExecutionBackend", "modelType": "Property", "valueType": "xs:string", "value": str(runtime.get("backendMode") or "")},
+        {"idShort": "RunnerStatus", "modelType": "Property", "valueType": "xs:string", "value": str(runtime.get("status") or "")},
+        {"idShort": "FmiVersion", "modelType": "Property", "valueType": "xs:string", "value": str(metadata.get("fmiVersion") or "")},
+        {"idShort": "ActiveSimulationCount", "modelType": "Property", "valueType": "xs:nonNegativeInteger", "value": _non_negative_int(runtime.get("activeSimulationCount"))},
+        {"idShort": "MaxConcurrentSimulations", "modelType": "Property", "valueType": "xs:nonNegativeInteger", "value": _non_negative_int(runtime.get("maxConcurrentSimulations"))},
+        {"idShort": "LastSyncTimestamp", "modelType": "Property", "valueType": "xs:dateTime", "value": now_iso},
+    ]
+
+    return {
+        "id": _submodel_id_for_technical(lab_id),
+        "idShort": "TechnicalData",
+        "modelType": "Submodel",
+        "semanticId": {
+            "type": "ExternalReference",
+            "keys": [{"type": "GlobalReference", "value": _SEMANTIC_ID_TECHNICAL_DATA}],
+        },
+        "submodelElements": elements,
+    }
+
+
 def build_aas_shell(
     lab_id: str,
     access_key: str,
@@ -562,7 +623,7 @@ def build_aas_shell(
     UnitDefinitions) that should appear in the shell's submodel references.
     """
     aas_id = _aas_id_for_lab(lab_id)
-    all_sm_ids = [_submodel_id_for_fmu(lab_id), *extra_submodel_ids]
+    all_sm_ids = [_submodel_id_for_fmu(lab_id), _submodel_id_for_technical(lab_id), *extra_submodel_ids]
 
     shell = {
         "id": aas_id,
@@ -652,9 +713,10 @@ async def sync_fmu_to_basyx(
     fmu_path: Optional[Path] = None,
     unit_definitions: list = (),
     required_aas_id: Optional[str] = None,
+    runtime_info: Optional[dict] = None,
 ) -> dict:
     """
-    Create or update the AAS shell and SimulationModels submodel in BaSyx.
+    Create or update the AAS shell and generated FMU submodels in BaSyx.
 
     If *aasx_bytes* is provided the package is parsed and every shell /
     submodel it contains is uploaded to BaSyx via the standard JSON REST
@@ -670,8 +732,15 @@ async def sync_fmu_to_basyx(
 
     aas_id = _aas_id_for_lab(lab_id)
     submodel_id = _submodel_id_for_fmu(lab_id)
+    technical_data_id = _submodel_id_for_technical(lab_id)
 
-    result: dict = {"aasId": aas_id, "submodelId": submodel_id, "created": False, "updated": False}
+    result: dict = {
+        "aasId": aas_id,
+        "submodelId": submodel_id,
+        "technicalDataSubmodelId": technical_data_id,
+        "created": False,
+        "updated": False,
+    }
 
     if not BASYX_AAS_URL:
         logger.info("BASYX_AAS_URL not configured — AAS sync disabled (Lite or non-AAS gateway).")
@@ -761,6 +830,7 @@ async def sync_fmu_to_basyx(
                 # ── Metadata path: auto-generate shell + submodel from FMU ──
                 aas_id_encoded = _encode_id(aas_id)
                 submodel_id_encoded = _encode_id(submodel_id)
+                technical_data_id_encoded = _encode_id(technical_data_id)
 
                 # Build unit definitions submodel first (its ID is needed for the shell)
                 _unit_sm_id: Optional[str] = None
@@ -772,6 +842,7 @@ async def sync_fmu_to_basyx(
 
                 shell_payload = build_aas_shell(lab_id, access_key, metadata, extra_info, extra_submodel_ids=_extra_sm_ids)
                 submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info, fmu_path=fmu_path)
+                technical_data_payload = build_technical_data_submodel(lab_id, metadata, runtime_info)
 
                 # --- Submodel: PUT (create or replace) ---
                 if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", submodel_id_encoded):
@@ -806,6 +877,38 @@ async def sync_fmu_to_basyx(
                         logger.error("Failed to update simulation submodel: status=%s", sm_resp.status_code)
                         result["error"] = f"submodel sync failed: {sm_resp.status_code}"
                         return result
+
+                # --- Common TechnicalData submodel ---
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", technical_data_id_encoded):
+                    raise ValueError("AAS technical data resource ID is invalid")
+                td_resp = await client.put(
+                    f"/submodels/{technical_data_id_encoded}",
+                    json=technical_data_payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                if td_resp.status_code == 201:
+                    result["created"] = True
+                    logger.info("Created TechnicalData submodel")
+                elif td_resp.status_code in (200, 204):
+                    result["updated"] = True
+                    logger.info("Updated TechnicalData submodel")
+                elif td_resp.status_code == 404:
+                    td_post = await client.post(
+                        "/submodels",
+                        json=technical_data_payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    if td_post.status_code in (200, 201):
+                        result["created"] = True
+                        logger.info("Created TechnicalData submodel via POST")
+                    else:
+                        logger.error("Failed to create TechnicalData submodel: status=%s", td_post.status_code)
+                        result["error"] = f"technical data creation failed: {td_post.status_code}"
+                        return result
+                else:
+                    logger.error("Failed to update TechnicalData submodel: status=%s", td_resp.status_code)
+                    result["error"] = f"technical data sync failed: {td_resp.status_code}"
+                    return result
 
                 # --- UnitDefinitions submodel: PUT when FMU declares physical units ---
                 if _unit_sm_payload and _unit_sm_id:

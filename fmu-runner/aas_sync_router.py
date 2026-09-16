@@ -29,6 +29,7 @@ def create_aas_sync_router(
     metadata_builder: Any,
     sync_fmu_to_basyx: Any,
     logger: Any,
+    get_runtime_status: Any = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -90,8 +91,19 @@ def create_aas_sync_router(
             }
             merged_extra_info = {**auto_fallback, **(extra_info or {})}
             merged_extra_info = {key: value for key, value in merged_extra_info.items() if value}
+            runtime_info = None
+            if get_runtime_status is not None:
+                try:
+                    runtime_info = await get_runtime_status(str(lab_id))
+                except Exception as exc:
+                    logger.warning(
+                        "AAS sync: runtime status unavailable for lab %s: %s",
+                        str(lab_id).replace("\r", "\\r").replace("\n", "\\n"),
+                        type(exc).__name__,
+                    )
         else:
             merged_extra_info = {key: value for key, value in (extra_info or {}).items() if value}
+            runtime_info = None
 
         result = await sync_fmu_to_basyx(
             lab_id=lab_id,
@@ -101,6 +113,7 @@ def create_aas_sync_router(
             extra_info=merged_extra_info or None,
             fmu_path=fmu_path,
             unit_definitions=metadata.get("unitDefinitions", []),
+            runtime_info=runtime_info,
         )
         if "error" in result:
             raise HTTPException(status_code=502, detail=result["error"])

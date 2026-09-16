@@ -16,6 +16,7 @@ import pytest
 from aas_generator import (
     _aas_id_for_lab,
     _submodel_id_for_fmu,
+    _submodel_id_for_technical,
     _unit_submodel_id_for_lab,
     _encode_id,
     _aas_resource_path,
@@ -24,6 +25,7 @@ from aas_generator import (
     _sanitize_idshort,
     build_simulation_ports,
     build_simulation_submodel,
+    build_technical_data_submodel,
     build_unit_definitions_submodel,
     build_aas_shell,
 )
@@ -40,6 +42,9 @@ class TestAasIdGeneration:
 
     def test_unit_submodel_id_format(self):
         assert _unit_submodel_id_for_lab("42") == "urn:decentralabs:lab:42:sm:unitDefinitions"
+
+    def test_technical_submodel_id_format(self):
+        assert _submodel_id_for_technical("42") == "urn:decentralabs:lab:42:sm:technicalData"
 
     def test_encode_id_roundtrip(self):
         raw = "urn:decentralabs:lab:42"
@@ -406,8 +411,9 @@ class TestBuildAasShell:
     def test_shell_references_submodel(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
         refs = shell["submodels"]
-        assert len(refs) == 1
+        assert len(refs) == 2
         assert refs[0]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:simulationModels"
+        assert refs[1]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:technicalData"
 
     def test_shell_extra_submodel_ids(self):
         extra = ["urn:decentralabs:lab:42:sm:unitDefinitions"]
@@ -415,11 +421,12 @@ class TestBuildAasShell:
         ref_values = [r["keys"][0]["value"] for r in shell["submodels"]]
         assert "urn:decentralabs:lab:42:sm:simulationModels" in ref_values
         assert "urn:decentralabs:lab:42:sm:unitDefinitions" in ref_values
-        assert len(shell["submodels"]) == 2
+        assert "urn:decentralabs:lab:42:sm:technicalData" in ref_values
+        assert len(shell["submodels"]) == 3
 
     def test_shell_no_extra_submodels_by_default(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
-        assert len(shell["submodels"]) == 1
+        assert len(shell["submodels"]) == 2
 
     def test_shell_idshort_format(self):
         shell = build_aas_shell("7", "motor.fmu", SAMPLE_METADATA)
@@ -492,6 +499,37 @@ class TestExtraInfoFields:
     def test_shell_extra_info_none_no_description(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA, None)
         assert "description" not in shell
+
+
+class TestBuildTechnicalDataSubmodel:
+    def test_exposes_common_fmu_operational_fields(self):
+        submodel = build_technical_data_submodel(
+            "42",
+            SAMPLE_METADATA,
+            {
+                "status": "UP",
+                "backendMode": "station",
+                "activeSimulationCount": 2,
+                "maxConcurrentSimulations": 10,
+            },
+        )
+        assert submodel["id"] == "urn:decentralabs:lab:42:sm:technicalData"
+        assert submodel["idShort"] == "TechnicalData"
+        props = {element["idShort"]: element for element in submodel["submodelElements"]}
+        assert props["ResourceType"]["value"] == "FMU"
+        assert props["ResourceStatus"]["value"] == "Ready"
+        assert props["ReadyFlag"]["value"] == "true"
+        assert props["ModelAvailable"]["value"] == "true"
+        assert props["ExecutionBackend"]["value"] == "station"
+        assert props["ActiveSimulationCount"]["value"] == "2"
+        assert props["MaxConcurrentSimulations"]["value"] == "10"
+
+    def test_unknown_runtime_status_does_not_claim_fmu_is_ready(self):
+        submodel = build_technical_data_submodel("42", SAMPLE_METADATA)
+        props = {element["idShort"]: element for element in submodel["submodelElements"]}
+        assert props["ResourceStatus"]["value"] == "Unknown"
+        assert props["ReadyFlag"]["value"] == ""
+        assert props["ModelAvailable"]["value"] == "true"
 
 
 # ── Endpoint integration tests ───────────────────────────────────────
@@ -680,6 +718,44 @@ class TestSyncFmuToBasyxDegradation:
 
 
 # ── _parse_aasx unit tests ──────────────────────────────────────────
+
+class TestSyncFmuToBasyxGenerated:
+    @pytest.mark.asyncio
+    async def test_generated_sync_publishes_common_technical_data(self):
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "http://basyx-aas-server:8081"
+        try:
+            mock_response = MagicMock(status_code=201)
+            mock_client = AsyncMock()
+            mock_client.put = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _aas_mod.sync_fmu_to_basyx(
+                    "42",
+                    "motor.fmu",
+                    SAMPLE_METADATA,
+                    runtime_info={"status": "UP", "backendMode": "local"},
+                )
+
+            assert result["synced"] is True
+            put_paths = [call.args[0] for call in mock_client.put.await_args_list]
+            assert f"/submodels/{_encode_id(_submodel_id_for_fmu('42'))}" in put_paths
+            assert f"/submodels/{_encode_id(_submodel_id_for_technical('42'))}" in put_paths
+            assert f"/shells/{_encode_id(_aas_id_for_lab('42'))}" in put_paths
+
+            technical_call = next(
+                call for call in mock_client.put.await_args_list
+                if call.args[0] == f"/submodels/{_encode_id(_submodel_id_for_technical('42'))}"
+            )
+            payload = technical_call.kwargs["json"]
+            props = {element["idShort"]: element for element in payload["submodelElements"]}
+            assert props["ResourceStatus"]["value"] == "Ready"
+            assert props["ExecutionBackend"]["value"] == "local"
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
 
 import io
 import json
