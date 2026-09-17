@@ -26,6 +26,7 @@ def test_update_dynamic_host_contract_updates_fields_and_preserves_operational_d
         "address": "192.168.1.50",
         "credential_ref": "lab-01",
         "mac": "00:11:22:33:44:55",
+        "broadcast": "192.168.1.255",
     }
     config = {"hosts": [current], "version": 2}
     writes = []
@@ -36,6 +37,7 @@ def test_update_dynamic_host_contract_updates_fields_and_preserves_operational_d
         {
             "name": "lab-01",
             "mac": "00-22-33-44-55-66",
+            "broadcast": "192.168.1.254",
             "heartbeatPath": r"C:\LabStation\heartbeat.json",
         },
     )
@@ -46,6 +48,7 @@ def test_update_dynamic_host_contract_updates_fields_and_preserves_operational_d
         "address": "192.168.1.50",
         "credential_ref": "lab-01",
         "mac": "00:22:33:44:55:66",
+        "broadcast": "192.168.1.254",
         "heartbeat_path": r"C:\LabStation\heartbeat.json",
     }
     assert config["version"] == 2

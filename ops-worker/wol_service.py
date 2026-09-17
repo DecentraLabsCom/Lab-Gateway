@@ -20,7 +20,7 @@ def wol_and_wait(
     for attempt in range(1, attempts + 1):
         send_magic_packet(
             mac,
-            ip_address=broadcast or "255.255.255.255",
+            host=broadcast or "255.255.255.255",
             port=port,
         )
         sleep(wait_seconds)

@@ -124,6 +124,7 @@ JWT `iss`/`sub` must use that same canonical value.
 | Mode and trust | `ISSUER`, `JWT_ISSUER`, `BLOCKCHAIN_SERVICES_ENABLED` | `ISSUER` must exactly match JWT `iss`. An external issuer selects Lite mode. |
 | Database | `MYSQL_*`, `GUACAMOLE_MYSQL_*`, `BLOCKCHAIN_MYSQL_*`, `OPS_*_MYSQL_*` | Maintain separate MySQL principals and passwords for Guacamole, backend, and operations. |
 | Operator access | `ADMIN_ACCESS_TOKEN`, `LAB_MANAGER_TOKEN`, `ADMIN_*`, `SECURITY_ALLOW_PRIVATE_NETWORKS` | Use independent random tokens. Prefer explicit CIDRs/VPNs; never pass tokens in query strings. |
+| Physical lab LAN / WoL | `WOL_LAN_PARENT`, `WOL_LAN_SUBNET`, `WOL_LAN_GATEWAY`, `WOL_LAN_IP_RANGE`, `COMPOSE_FILE` | Linux deployments that need WoL or Guacamole to emit packets on the physical Station VLAN activate `docker-compose.wol.yml`. It adds a macvlan endpoint to `ops-worker` and `guacd` while preserving their existing Compose networks. Reserve the IP range outside DHCP and set each host's directed `broadcast` address in the catalog. |
 | Lab catalog resolution | `LAB_ADMIN_BACKEND_URL`, `LAB_ADMIN_BACKEND_TOKEN`, `LAB_ADMIN_BACKEND_TOKEN_HEADER`, `LAB_ADMIN_BACKEND_ALLOW_INSECURE`, `LAB_ADMIN_BACKEND_TIMEOUT_SECONDS`, `LAB_CATALOG_CACHE_SECONDS` | Ops Worker resolves `labId → accessKey → Guacamole hostname → registered host` from the provider catalog. Full mode defaults to `http://blockchain-services:8080/lab-admin/labs` with `LAB_MANAGER_TOKEN`; Lite or remote backends must set the URL and dedicated backend token. HTTP is allowed only for the private Compose backend or with explicit insecure opt-in. |
 | Backend and contracts | `CONTRACT_ADDRESS`, `ETHEREUM_*_RPC_URL`, `FEATURES_PROVIDERS_*`, `ALLOWED_ORIGINS` | These live in `blockchain-services/.env`. A Full provider deployment needs provider features enabled; only the current lab owner/authorized backend may automatically confirm or deny external requests. |
 | Lab metadata | `LAB_METADATA_MAX_BYTES`, `LAB_METADATA_HTTP_*`, `LAB_METADATA_MAX_CONCURRENT_FETCHES`, `LAB_METADATA_LOCAL_*` | The backend treats on-chain metadata as untrusted: only exact registered provider HTTPS origins are fetched. Keep local fixtures disabled in production. |
@@ -166,6 +167,52 @@ under `<lower-case-winrm-trust-ref>/server.cer`; the worker creates the host
 directories at startup/reload, materializes a PEM copy for Requests/OpenSSL
 and applies it as a per-host Requests/pywinrm trust path. This is an
 application trust store, not a global container CA installation.
+
+### Physical LAN WoL overlay
+
+Docker bridge networks cannot deliver a directed broadcast to the physical
+Station VLAN. On a Linux gateway whose `eno3` (or equivalent) is connected to
+that VLAN, configure the overlay in the deployment `.env`:
+
+```env
+COMPOSE_FILE=docker-compose.yml:docker-compose.wol.yml
+WOL_LAN_PARENT=eno3
+WOL_LAN_SUBNET=10.192.38.0/24
+WOL_LAN_GATEWAY=10.192.38.1
+WOL_LAN_IP_RANGE=10.192.38.240/28
+```
+
+Use an unused, DHCP-reserved range for `WOL_LAN_IP_RANGE`; the gateway value
+must be the actual router for that VLAN. Validate and apply it with:
+
+```bash
+docker compose config --quiet
+docker compose up -d --build
+docker network ls | grep wol_lan
+```
+
+The overlay attaches only `ops-worker` and `guacd` to a Linux `macvlan`
+network. Their existing private networks remain in place for database,
+OpenResty, Guacamole and internal service traffic. `network_mode: host` is not
+required and must not be used as a substitute because it removes those
+boundaries.
+
+For each Station host, persist the directed broadcast in the host catalog:
+
+```json
+{
+  "name": "lab-ws-01",
+  "address": "10.192.38.82",
+  "mac": "64:00:6A:35:28:5D",
+  "broadcast": "10.192.38.255"
+}
+```
+
+In Guacamole, enable `wol-send-packet`, set `wol-mac-addr` to the target MAC,
+set `wol-broadcast-addr` to `10.192.38.255`, and leave `wol-udp-port` at `9`
+unless the station network requires another port. The connection's normal
+hostname/address remains the Windows target; the broadcast address is only the
+destination for the magic packet.
 
 ## Optional Compose profiles
 

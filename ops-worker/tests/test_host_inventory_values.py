@@ -7,6 +7,7 @@ def test_safe_host_inventory_entry_contains_public_trust_and_operational_fields(
         "address": "192.168.1.50",
         "credential_ref": "station-01",
         "mac": "00:11:22:33:44:55",
+        "broadcast": "192.168.1.255",
         "labs": [1, "2"],
         "mode": "pure",
     }
@@ -32,6 +33,7 @@ def test_safe_host_inventory_entry_contains_public_trust_and_operational_fields(
     assert result["winrmTrustStatus"] == "ready"
     assert result["winrmTrustFingerprintSha256"] == "abc"
     assert result["heartbeatPath"] == r"C:\LabStation\heartbeat.json"
+    assert result["broadcast"] == "192.168.1.255"
     assert "labs" not in result
     assert result["editable"] is True
     assert result["winrmConfigured"] is True

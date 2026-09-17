@@ -76,11 +76,13 @@
         const provisionHostNameCandidates = $('#provisionHostNameCandidates');
         const provisionHostAddress = $('#provisionHostAddress');
         const provisionHostMac = $('#provisionHostMac');
+        const provisionHostBroadcast = $('#provisionHostBroadcast');
         const provisionHeartbeatPath = $('#provisionHeartbeatPath');
         const editHostOriginalName = $('#editHostOriginalName');
         const editHostName = $('#editHostName');
         const editHostAddress = $('#editHostAddress');
         const editHostMac = $('#editHostMac');
+        const editHostBroadcast = $('#editHostBroadcast');
         const editHeartbeatPath = $('#editHeartbeatPath');
 
         const hostState = {};
@@ -322,12 +324,14 @@
                 provisionHostNameCandidates,
                 provisionHostAddress,
                 provisionHostMac,
+                provisionHostBroadcast,
                 provisionHeartbeatPath,
                 editModal: editHostModal,
                 editOriginalName: editHostOriginalName,
                 editName: editHostName,
                 editAddress: editHostAddress,
                 editMac: editHostMac,
+                editBroadcast: editHostBroadcast,
                 editHeartbeatPath,
                 editSaveButton: saveEditHostButton,
                 credentialsModal: winrmCredentialsModal,

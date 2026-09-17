@@ -69,6 +69,13 @@ Only Marketplace and the selected gateway access URI are normally public. The ba
 | FMU runner | Lab Station FMU executor | Internal HTTP/WSS | FMI/FMU execution when station mode is enabled. |
 | Backend | Smart contracts | JSON-RPC / Web3 | Reservation, authorization, and settlement state. |
 
+For a Linux gateway, the physical Station VLAN is exposed to `ops-worker` and
+`guacd` through the optional `docker-compose.wol.yml` macvlan overlay. The
+overlay is required when Docker bridge traffic is not forwarded to the LAN;
+it leaves the existing private Compose networks in place. Configure the
+Station subnet, parent NIC, reserved container range, and directed broadcast
+per host as described in the [Gateway configuration reference](../reference/configuration.md#physical-lan-wol-overlay).
+
 ## Interactive laboratory access
 
 For a Guacamole laboratory, `accessURI` identifies the gateway that owns the local Guacamole connection catalog. The provider backend selects a provisioning route from that URI and creates a reservation-scoped temporary user on that access gateway. The browser receives an opaque access code; the gateway reserves a short-lived redemption handle, validates the JWT, destination and local state, and commits only after those checks succeed. It then redirects to a clean Guacamole URL with a Secure, HttpOnly session cookie; failed local validation releases the handle.

@@ -71,13 +71,17 @@ does not satisfy WinRM/OpenSSL hostname verification.
 
 ## Host inventory and telemetry
 
-An ops host records the managed address, optional MAC address, credential reference, and telemetry paths. It does not contain laboratory IDs; the provider catalog and Guacamole are the source of the lab-to-host association. A minimal entry is:
+An ops host records the managed address, optional MAC address, optional
+directed WoL broadcast, credential reference, and telemetry paths. It does not
+contain laboratory IDs; the provider catalog and Guacamole are the source of
+the lab-to-host association. A minimal entry is:
 
 ```json
 {
   "name": "lab-ws-01",
-  "address": "lab-ws-01",
+  "address": "10.192.38.82",
   "mac": "00:11:22:33:44:55",
+  "broadcast": "10.192.38.255",
   "credential_ref": "lab-ws-01",
   "winrm_transport": "ntlm",
   "winrm_use_ssl": true,
@@ -100,7 +104,7 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `GET /ops/api/lab-associations` | Read calculated provider-laboratory to registered-host associations used by Lab Manager. |
 | `POST /ops/api/hosts/discover` | Probe a Guacamole connection candidate for managed-host signals. |
 | `POST /ops/api/hosts/provision` | Create or update a dynamic host after successful discovery. |
-| `PATCH /ops/api/hosts/{hostName}` | Update the name, MAC, or heartbeat path of a dynamic host. |
+| `PATCH /ops/api/hosts/{hostName}` | Update the name, MAC, WoL broadcast, or heartbeat path of a dynamic host. |
 | `POST /ops/api/hosts/winrm-credentials` | Store encrypted credentials for a host reference. |
 | `POST /ops/api/hosts/{hostName}/winrm-trust/preview` | Validate and preview a public CER/DER/PEM certificate without persisting it. |
 | `GET /ops/api/hosts/{hostName}/winrm-trust` | Read per-host trust metadata and classified status. |
@@ -170,7 +174,7 @@ Exit code `0` means success, `1` means completed with warnings, and values of `2
 
 ## Connectivity requirements
 
-- **Wake-on-LAN:** the gateway can send UDP magic packets to the lab broadcast domain and the Windows firmware/NIC is configured for magic-packet wake.
+- **Wake-on-LAN:** on Linux, activate `docker-compose.wol.yml` so `ops-worker` and `guacd` have a macvlan endpoint on the Station VLAN. Persist the directed broadcast (for example `10.192.38.255`) in the host entry and as Guacamole's `wol-broadcast-addr`, alongside `wol-send-packet=true` and `wol-mac-addr`. The Windows firmware/NIC must be configured for magic-packet wake.
 - **WinRM:** the gateway reaches the Station only through its configured management VLAN, using HTTPS/TLS on port 5986. `WINRM_MANAGEMENT_CIDRS` is mandatory when hosts are configured; startup rejects any Station address outside those networks or any non-HTTPS/non-5986 catalog entry.
 - **Guacamole:** `guacd` can reach the station's configured RDP, VNC, or SSH service over the lab network.
 - **FMU station mode:** when `FMU_BACKEND_MODE=station`, `fmu-runner` can reach `FMU_STATION_BASE_URL` and authenticate with `FMU_STATION_INTERNAL_TOKEN`.

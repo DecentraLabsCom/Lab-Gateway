@@ -4,6 +4,7 @@
       "name": "lab-ws-01",
       "address": "lab-ws-01",
       "mac": "00:11:22:33:44:55",
+      "broadcast": "192.168.1.255",
       "winrm_transport": "ntlm",
       "winrm_use_ssl": true,
       "winrm_port": 5986,

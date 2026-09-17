@@ -1029,6 +1029,10 @@
                                 <span>MAC <small>(optional; required for WoL)</small></span>
                                 <input type="text" id="provisionHostMac" placeholder="00:11:22:33:44:55">
                             </label>
+                            <label class="field">
+                                <span>WoL broadcast <small>(optional)</small></span>
+                                <input type="text" id="provisionHostBroadcast" placeholder="10.192.38.255">
+                            </label>
                         </div>
                         <label class="field full">
                             <span>Heartbeat path</span>
@@ -1141,6 +1145,10 @@
                     <label class="field">
                         <span>MAC <small>(optional; required for WoL)</small></span>
                         <input type="text" id="editHostMac" placeholder="00:11:22:33:44:55" autocomplete="off">
+                    </label>
+                    <label class="field">
+                        <span>WoL broadcast <small>(optional)</small></span>
+                        <input type="text" id="editHostBroadcast" placeholder="10.192.38.255" autocomplete="off">
                     </label>
                     <label class="field full">
                         <span>Heartbeat path</span>

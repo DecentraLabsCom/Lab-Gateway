@@ -165,6 +165,15 @@ def update_dynamic_host(
         else:
             updated.pop("mac", None)
 
+    if "broadcast" in payload:
+        broadcast = str(payload.get("broadcast") or "").strip()
+        if broadcast and (len(broadcast) > 64 or any(ord(char) < 32 for char in broadcast)):
+            return None, "broadcast must be a valid network address"
+        if broadcast:
+            updated["broadcast"] = broadcast
+        else:
+            updated.pop("broadcast", None)
+
     if "heartbeatPath" in payload:
         heartbeat_path = str(payload.get("heartbeatPath") or "").strip()
         if not heartbeat_path:

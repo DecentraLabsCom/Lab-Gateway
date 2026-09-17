@@ -23,7 +23,12 @@ def _build(payload, connection=None):
 
 
 def test_host_provisioning_values_builds_secure_defaults_without_lab_bindings():
-    host, error = _build({"name": "Station-A", "labs": "1,2", "mac": "AA-BB-CC-DD-EE-FF"})
+    host, error = _build({
+        "name": "Station-A",
+        "labs": "1,2",
+        "mac": "AA-BB-CC-DD-EE-FF",
+        "broadcast": "192.168.1.255",
+    })
 
     assert error is None
     assert host is not None
@@ -32,6 +37,7 @@ def test_host_provisioning_values_builds_secure_defaults_without_lab_bindings():
     assert host["winrm_port"] == 5986
     assert "labs" not in host
     assert host["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert host["broadcast"] == "192.168.1.255"
 
 
 def test_host_provisioning_values_returns_validation_errors_without_partial_hosts():

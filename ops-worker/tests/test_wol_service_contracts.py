@@ -21,8 +21,8 @@ def test_wol_and_wait_contract_preserves_retry_order_and_arguments():
 
     assert result == (True, 2)
     assert packets == [
-        (("00:11:22:33:44:55",), {"ip_address": "255.255.255.255", "port": 9}),
-        (("00:11:22:33:44:55",), {"ip_address": "255.255.255.255", "port": 9}),
+        (("00:11:22:33:44:55",), {"host": "255.255.255.255", "port": 9}),
+        (("00:11:22:33:44:55",), {"host": "255.255.255.255", "port": 9}),
     ]
     assert sleeps == [0.5, 0.5]
 

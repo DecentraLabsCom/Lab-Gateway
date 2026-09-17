@@ -39,6 +39,9 @@ def build_provisioned_host(
     mac = normalize_mac_fn(raw_mac) if raw_mac else ""
     if raw_mac and not mac:
         return None, "mac must use format 00:11:22:33:44:55 or 00-11-22-33-44-55"
+    broadcast = str(payload.get("broadcast") or "").strip()
+    if broadcast and (len(broadcast) > 64 or any(ord(char) < 32 for char in broadcast)):
+        return None, "broadcast must be a valid network address"
 
     host_config = {
         "name": name,
@@ -53,4 +56,6 @@ def build_provisioned_host(
     }
     if mac:
         host_config["mac"] = mac
+    if broadcast:
+        host_config["broadcast"] = broadcast
     return host_config, None

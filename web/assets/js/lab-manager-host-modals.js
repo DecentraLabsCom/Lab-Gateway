@@ -58,6 +58,7 @@
                 !provision.provisionHostName ||
                 !provision.provisionHostAddress ||
                 !provision.provisionHostMac ||
+                !provision.provisionHostBroadcast ||
                 !provision.provisionHeartbeatPath
             ) {
                 showToast('Host provisioning modal is unavailable', 'error');
@@ -73,6 +74,7 @@
             renderProvisionNameCandidates(draft.nameCandidates || station.nameCandidates);
             provision.provisionHostAddress.value = draft.address || station.address || '';
             provision.provisionHostMac.value = draft.mac || '';
+            provision.provisionHostBroadcast.value = draft.broadcast || '';
             provision.provisionHeartbeatPath.value = draft.heartbeat_path
                 || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
             provision.provisionModal.classList.add('show');
@@ -89,6 +91,7 @@
                 !provision.provisionHostName ||
                 !provision.provisionHostAddress ||
                 !provision.provisionHostMac ||
+                !provision.provisionHostBroadcast ||
                 !provision.provisionHeartbeatPath
             ) {
                 showToast('Host provisioning modal is unavailable', 'error');
@@ -99,6 +102,7 @@
                 name: provision.provisionHostName.value.trim(),
                 address: provision.provisionHostAddress.value.trim(),
                 mac: provision.provisionHostMac.value.trim(),
+                broadcast: provision.provisionHostBroadcast.value.trim(),
                 credentialRef: provision.provisionHostAddress.value.trim(),
                 heartbeatPath: provision.provisionHeartbeatPath.value.trim(),
             };
@@ -115,6 +119,7 @@
                 !edit.editName ||
                 !edit.editAddress ||
                 !edit.editMac ||
+                !edit.editBroadcast ||
                 !edit.editHeartbeatPath
             ) {
                 showToast('Only dynamically configured hosts can be edited', 'error');
@@ -124,6 +129,7 @@
             edit.editName.value = meta.name || host;
             edit.editAddress.value = meta.address || host;
             edit.editMac.value = meta.mac || '';
+            edit.editBroadcast.value = meta.broadcast || '';
             edit.editHeartbeatPath.value = meta.heartbeatPath
                 || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
             edit.editModal.classList.add('show');
@@ -135,7 +141,7 @@
 
         async function saveEdit() {
             const edit = fields;
-            if (!edit.editOriginalName || !edit.editName || !edit.editMac || !edit.editHeartbeatPath) {
+            if (!edit.editOriginalName || !edit.editName || !edit.editMac || !edit.editBroadcast || !edit.editHeartbeatPath) {
                 showToast('Host edit modal is unavailable', 'error');
                 return;
             }
@@ -143,6 +149,7 @@
             const payload = {
                 name: edit.editName.value.trim(),
                 mac: edit.editMac.value.trim(),
+                broadcast: edit.editBroadcast.value.trim(),
                 heartbeatPath: edit.editHeartbeatPath.value.trim(),
             };
             if (!originalName || !payload.name) {
