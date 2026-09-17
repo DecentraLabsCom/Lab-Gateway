@@ -70,11 +70,12 @@ Only Marketplace and the selected gateway access URI are normally public. The ba
 | Backend | Smart contracts | JSON-RPC / Web3 | Reservation, authorization, and settlement state. |
 
 For a Linux gateway, the physical Station VLAN is exposed to `ops-worker` and
-`guacd` through the optional `docker-compose.wol.yml` macvlan overlay. The
-overlay is required when Docker bridge traffic is not forwarded to the LAN;
-it leaves the existing private Compose networks in place. Configure the
-Station subnet, parent NIC, reserved container range, and directed broadcast
-per host as described in the [Gateway configuration reference](../reference/configuration.md#physical-lan-wol-overlay).
+`guacd` through the optional `docker-compose.wol.yml` gateway-less macvlan
+overlay. The overlay is required when Docker bridge traffic is not forwarded
+to the LAN; it leaves the existing private Compose networks in place. Configure
+the directly connected Station subnet, parent NIC, reserved container range,
+and directed broadcast per host as described in the [Gateway configuration
+reference](../reference/configuration.md#physical-lan-wol-overlay).
 
 ## Interactive laboratory access
 

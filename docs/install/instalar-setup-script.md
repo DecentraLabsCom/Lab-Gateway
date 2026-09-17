@@ -101,9 +101,15 @@ El script te guía automáticamente por los siguientes pasos:
    emitido por el plano de control Full remoto.
 5. **Configura las operaciones de Lab Station y capacidades opcionales**: pide
    la lista privada `WINRM_MANAGEMENT_CIDRS` usada por las estaciones locales
-   y después configura FMU y, únicamente en Full, AAS integrado, externo o
-   deshabilitado. Déjala vacía solo si todavía no se van a configurar hosts de
-   Ops.
+   y, en Linux, si se debe activar el overlay macvlan de la LAN física de las
+   estaciones. Si se activa, pide la interfaz física, la subred de Stations y
+   el rango macvlan reservado, y escribe `COMPOSE_FILE`, `WOL_LAN_PARENT`,
+   `WOL_LAN_SUBNET` y `WOL_LAN_IP_RANGE` en `.env`. El overlay no tiene gateway
+   por defecto y está pensado para Stations de esa subred directamente
+   conectada. En Windows, `setup.bat` deja desactivado este overlay exclusivo
+   de Linux. Después configura FMU y, únicamente en Full, AAS integrado,
+   externo o deshabilitado. Déjala vacía solo si todavía no se van a
+   configurar hosts de Ops.
 6. **Ofrece Cloudflare Tunnel** y arranca los servicios de Compose elegidos.
 
 El script es interactivo deliberadamente. Para un cambio repetible y no
