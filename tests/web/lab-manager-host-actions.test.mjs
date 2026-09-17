@@ -71,6 +71,22 @@ test('preserves WoL requests and access/error messages', async () => {
   ]);
 });
 
+test('shows the backend WoL validation reason instead of only the HTTP status', async () => {
+  const module = loadModule();
+  const events = [];
+  const controller = module.createController({
+    fetchImpl: async () => response({ error: 'mac is required' }, 400),
+    callbacks: { showToast: (...args) => events.push(args) },
+    logger: { error() {} },
+  });
+
+  await controller.triggerWol('PC-Siemens');
+
+  assert.deepEqual(events, [
+    ['WoL failed for PC-Siemens: mac is required', 'error'],
+  ]);
+});
+
 test('preserves WinRM command arguments, exit status and HTTP failures', async () => {
   const module = loadModule();
   const events = [];

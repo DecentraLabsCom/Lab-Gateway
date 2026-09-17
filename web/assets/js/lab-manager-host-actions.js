@@ -55,8 +55,19 @@
                     showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
                     return;
                 }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
+                let data;
+                try {
+                    data = await res.json();
+                } catch (err) {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    throw err;
+                }
+                if (!res.ok) {
+                    const reason = data && typeof data.error === 'string' && data.error.trim()
+                        ? data.error
+                        : `HTTP ${res.status}`;
+                    throw new Error(reason);
+                }
                 showToast(`WoL ${host}: ${data.success ? 'sent' : 'failed'}`, data.success ? 'success' : 'error');
             } catch (err) {
                 logger.error(err);
