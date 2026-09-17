@@ -103,14 +103,14 @@ The script guides you through the following steps automatically:
 5. **Configures Lab Station operations and optional capabilities** — it asks for
    the private `WINRM_MANAGEMENT_CIDRS` allowlist used by local Stations and,
    on Linux, whether to activate the direct physical Station LAN WoL overlay.
-   When enabled, it asks for the parent NIC, Station subnet, and reserved
-   macvlan range, then writes `COMPOSE_FILE`, `WOL_LAN_PARENT`,
-   `WOL_LAN_SUBNET`, and `WOL_LAN_IP_RANGE` to `.env`. The overlay is
-   gateway-less and is intended for Stations in that directly connected subnet.
-   On Windows, `setup.bat` leaves this Linux-only overlay disabled. The script
-   then configures FMU access and, for Full Gateways, bundled, external, or
-   disabled AAS support. Leave the CIDR empty only when no Ops hosts are
-   configured yet.
+   When enabled, it asks for the parent NIC, Station subnet, whether the VLAN
+   has a router, the optional gateway address, and the reserved macvlan range.
+   It writes `COMPOSE_FILE`, `WOL_LAN_PARENT`, `WOL_LAN_SUBNET`, and
+   `WOL_LAN_IP_RANGE` to `.env`, plus `WOL_LAN_GATEWAY` when routed mode is
+   selected. Leave the gateway empty for an isolated VLAN. On Windows,
+   `setup.bat` leaves this Linux-only overlay disabled. The script then
+   configures FMU access and, for Full Gateways, bundled, external, or disabled
+   AAS support. Leave the CIDR empty only when no Ops hosts are configured yet.
 6. **Offers a Cloudflare Tunnel** and starts the selected Compose services.
 
 The script is interactive by design. For a repeatable non-interactive change,

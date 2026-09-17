@@ -1194,7 +1194,7 @@ exit /b
 echo Physical Station LAN / Wake-on-LAN overlay
 echo =============================================
 echo The macvlan Station LAN overlay is Linux-only; setup.bat leaves it disabled.
-echo Run setup.sh on the Linux Gateway host to configure direct Station LAN WoL.
+echo Run setup.sh on the Linux Gateway host to configure direct or routed Station LAN WoL.
 call :RemoveWolOverlayFromComposeFile
 call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_PARENT"
 call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_SUBNET"
