@@ -246,6 +246,182 @@ remove_gateway_managed_backend_env() {
     remove_env_var "$BLOCKCHAIN_ENV_FILE" "RESERVATION_PROJECTION_CREDENTIALS_JSON"
 }
 
+compose_file_contains_wol_overlay() {
+    local compose_file_value="$1"
+    case ":${compose_file_value}:" in
+        *":docker-compose.wol.yml:"*|*":./docker-compose.wol.yml:"*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+add_wol_overlay_to_compose_file() {
+    local compose_file_value
+    compose_file_value="$(get_env_default "COMPOSE_FILE" "$ROOT_ENV_FILE")"
+    if [ -z "$compose_file_value" ]; then
+        update_env_var "$ROOT_ENV_FILE" "COMPOSE_FILE" "docker-compose.yml:docker-compose.wol.yml"
+    elif ! compose_file_contains_wol_overlay "$compose_file_value"; then
+        update_env_var "$ROOT_ENV_FILE" "COMPOSE_FILE" "${compose_file_value}:docker-compose.wol.yml"
+    fi
+}
+
+remove_wol_overlay_from_compose_file() {
+    local compose_file_value
+    local compose_file_result=""
+    local compose_entry
+    compose_file_value="$(get_env_default "COMPOSE_FILE" "$ROOT_ENV_FILE")"
+    if [ -z "$compose_file_value" ]; then
+        return
+    fi
+
+    local compose_entries=()
+    IFS=':' read -r -a compose_entries <<< "$compose_file_value"
+    for compose_entry in "${compose_entries[@]}"; do
+        case "$compose_entry" in
+            docker-compose.wol.yml|./docker-compose.wol.yml)
+                continue
+                ;;
+        esac
+        if [ -n "$compose_file_result" ]; then
+            compose_file_result="${compose_file_result}:${compose_entry}"
+        else
+            compose_file_result="$compose_entry"
+        fi
+    done
+
+    if [ -n "$compose_file_result" ]; then
+        update_env_var "$ROOT_ENV_FILE" "COMPOSE_FILE" "$compose_file_result"
+    else
+        remove_env_var "$ROOT_ENV_FILE" "COMPOSE_FILE"
+    fi
+}
+
+configure_station_lan_overlay() {
+    local system_name
+    local station_lan_overlay
+    local current_compose_file
+    local current_parent
+    local current_subnet
+    local current_ip_range
+    local station_parent
+    local station_subnet
+    local station_ip_range
+
+    system_name="$(uname -s 2>/dev/null || true)"
+    if [ "$system_name" != "Linux" ]; then
+        echo "Physical Station LAN / Wake-on-LAN overlay"
+        echo "============================================="
+        echo "The macvlan Station LAN overlay is Linux-only; leaving it disabled."
+        remove_wol_overlay_from_compose_file
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_PARENT"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+        echo
+        return
+    fi
+
+    current_compose_file="$(get_env_default "COMPOSE_FILE" "$ROOT_ENV_FILE")"
+    current_parent="$(get_env_default "WOL_LAN_PARENT" "$ROOT_ENV_FILE")"
+    current_subnet="$(get_env_default "WOL_LAN_SUBNET" "$ROOT_ENV_FILE")"
+    current_ip_range="$(get_env_default "WOL_LAN_IP_RANGE" "$ROOT_ENV_FILE")"
+    station_lan_overlay="N"
+    if compose_file_contains_wol_overlay "$current_compose_file"; then
+        station_lan_overlay="Y"
+    fi
+
+    echo "Physical Station LAN / Wake-on-LAN overlay"
+    echo "============================================="
+    echo "Enable the direct macvlan overlay for WoL, WinRM and RDP on the Station LAN?"
+    echo "It is intended for Stations in one directly connected subnet and uses no default gateway."
+    if [ "$station_lan_overlay" = "Y" ]; then
+        read -p "Enable direct physical Station LAN WoL overlay? (Y/n): " station_lan_overlay_answer
+        station_lan_overlay_answer=$(echo "$station_lan_overlay_answer" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+        if [ "$station_lan_overlay_answer" = "n" ] || [ "$station_lan_overlay_answer" = "no" ]; then
+            station_lan_overlay="N"
+        else
+            station_lan_overlay="Y"
+        fi
+    else
+        read -p "Enable direct physical Station LAN WoL overlay? (y/N): " station_lan_overlay_answer
+        station_lan_overlay_answer=$(echo "$station_lan_overlay_answer" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+        if [ "$station_lan_overlay_answer" = "y" ] || [ "$station_lan_overlay_answer" = "yes" ]; then
+            station_lan_overlay="Y"
+        else
+            station_lan_overlay="N"
+        fi
+    fi
+
+    if [ "$station_lan_overlay" != "Y" ]; then
+        remove_wol_overlay_from_compose_file
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_PARENT"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+        echo "   * Physical Station LAN overlay disabled."
+        echo
+        return
+    fi
+
+    if ! command -v ip >/dev/null 2>&1; then
+        echo "The ip command is required to configure the Linux Station LAN overlay." >&2
+        exit 1
+    fi
+
+    echo "Available network interfaces:"
+    ip -br link
+    read -p "Physical parent interface [${current_parent:-required}]: " station_parent
+    station_parent="${station_parent:-$current_parent}"
+    if [ -z "$station_parent" ] || ! ip link show dev "$station_parent" >/dev/null 2>&1; then
+        echo "The selected physical interface does not exist: ${station_parent:-<empty>}." >&2
+        exit 1
+    fi
+
+    read -p "Station LAN subnet [${current_subnet:-required, e.g. 10.192.38.0/24}]: " station_subnet
+    station_subnet="${station_subnet:-$current_subnet}"
+    read -p "Reserved Docker macvlan range [${current_ip_range:-required, e.g. 10.192.38.240/28}]: " station_ip_range
+    station_ip_range="${station_ip_range:-$current_ip_range}"
+    if [ -z "$station_subnet" ] || [ -z "$station_ip_range" ]; then
+        echo "The Station subnet and reserved Docker range are required when the overlay is enabled." >&2
+        exit 1
+    fi
+
+    if ! "$setup_python_cmd" - "$station_subnet" "$station_ip_range" <<'PY'
+import ipaddress
+import sys
+
+try:
+    subnet = ipaddress.ip_network(sys.argv[1], strict=True)
+    ip_range = ipaddress.ip_network(sys.argv[2], strict=True)
+except ValueError as exc:
+    print(f"Invalid Station subnet or Docker range: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if subnet.version != 4 or ip_range.version != 4:
+    print("The Station subnet and Docker range must be IPv4 networks.", file=sys.stderr)
+    raise SystemExit(1)
+if not ip_range.subnet_of(subnet):
+    print("The Docker macvlan range must be contained in the Station subnet.", file=sys.stderr)
+    raise SystemExit(1)
+PY
+    then
+        exit 1
+    fi
+
+    add_wol_overlay_to_compose_file
+    update_env_var "$ROOT_ENV_FILE" "WOL_LAN_PARENT" "$station_parent"
+    update_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET" "$station_subnet"
+    update_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE" "$station_ip_range"
+    remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+    echo "   * Physical Station LAN overlay enabled."
+    echo "   * COMPOSE_FILE includes docker-compose.wol.yml."
+    echo "   * No default gateway is configured; targets must be in WOL_LAN_SUBNET."
+    echo
+}
+
 # Check prerequisites
 echo "Checking prerequisites..."
 if command -v python3 >/dev/null 2>&1; then
@@ -611,6 +787,8 @@ else
     echo "   * WINRM_MANAGEMENT_CIDRS set to: $winrm_management_cidrs"
 fi
 echo
+
+configure_station_lan_overlay
 
 echo "Demo Lab Access"
 echo "================"

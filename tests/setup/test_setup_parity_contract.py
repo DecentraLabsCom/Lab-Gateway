@@ -158,7 +158,14 @@ def test_setup_scripts_keep_the_environment_key_contract():
     assert REQUIRED_ENV_KEYS <= windows.env_keys
     # Linux additionally persists the UID/GID used for bind-mounted secrets;
     # Windows applies ACLs instead and intentionally has no equivalent update.
-    assert shell.env_keys - windows.env_keys == {"HOST_UID", "HOST_GID"}
+    assert shell.env_keys - windows.env_keys == {
+        "HOST_UID",
+        "HOST_GID",
+        "COMPOSE_FILE",
+        "WOL_LAN_PARENT",
+        "WOL_LAN_SUBNET",
+        "WOL_LAN_IP_RANGE",
+    }
     assert windows.env_keys - shell.env_keys == set()
 
 
@@ -460,6 +467,36 @@ def test_setup_scripts_preserve_failure_contracts():
     assert 'exit /b 1' in windows_text
     assert 'exit 0' in shell_text
     assert 'goto skip_start' in windows_text
+
+
+def test_linux_setup_configures_the_gatewayless_station_lan_overlay():
+    shell_text = SETUP_SH.read_text(encoding="utf-8")
+    windows_text = SETUP_BAT.read_text(encoding="utf-8")
+
+    for marker in (
+        "configure_station_lan_overlay()",
+        'read -p "Enable direct physical Station LAN WoL overlay? (y/N): "',
+        'update_env_var "$ROOT_ENV_FILE" "COMPOSE_FILE"',
+        'update_env_var "$ROOT_ENV_FILE" "WOL_LAN_PARENT"',
+        'update_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET"',
+        'update_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE"',
+        'remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"',
+    ):
+        assert marker in shell_text, f"Missing Linux Station LAN setup marker: {marker}"
+
+    assert "The macvlan Station LAN overlay is Linux-only; setup.bat leaves it disabled." in windows_text
+    assert ":DisableLinuxStationLanOverlay" in windows_text
+
+
+def test_setup_documentation_describes_the_station_lan_prompt_boundary():
+    english = (ROOT / "docs" / "install" / "install-setup-script.md").read_text(encoding="utf-8")
+    spanish = (ROOT / "docs" / "install" / "instalar-setup-script.md").read_text(encoding="utf-8")
+
+    assert "Station LAN" in english
+    assert "Linux-only" in english
+    assert "LAN física" in spanish
+    assert "overlay exclusivo" in spanish
+    assert "de Linux" in spanish
 
 
 def _assert_order(text: str, name: str, markers: tuple[str, ...]) -> None:

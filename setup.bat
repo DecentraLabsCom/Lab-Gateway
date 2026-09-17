@@ -116,6 +116,7 @@ if errorlevel 1 (
     exit /b 1
 )
 call :RemoveGatewayManagedBackendEnv
+call :DisableLinuxStationLanOverlay
 echo.
 
 REM Intent Payload Encryption Key
@@ -1187,6 +1188,23 @@ call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_BACKEND_MYSQL_PASSWORD"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_USER"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "OPS_GUACAMOLE_MYSQL_PASSWORD"
 call :RemoveEnv "%BLOCKCHAIN_ENV_FILE%" "RESERVATION_PROJECTION_CREDENTIALS_JSON"
+exit /b
+
+:DisableLinuxStationLanOverlay
+echo Physical Station LAN / Wake-on-LAN overlay
+echo =============================================
+echo The macvlan Station LAN overlay is Linux-only; setup.bat leaves it disabled.
+echo Run setup.sh on the Linux Gateway host to configure direct Station LAN WoL.
+call :RemoveWolOverlayFromComposeFile
+call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_PARENT"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_SUBNET"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_IP_RANGE"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_GATEWAY"
+exit /b
+
+:RemoveWolOverlayFromComposeFile
+if not exist "%ROOT_ENV_FILE%" exit /b
+powershell -NoLogo -NoProfile -Command "& { param($file); if (-not (Test-Path -LiteralPath $file)) { return }; $content = @(Get-Content -LiteralPath $file); for ($i = 0; $i -lt $content.Count; $i++) { if ($content[$i] -match '^COMPOSE_FILE=(.*)$') { $value = $Matches[1]; $value = $value -replace '(?i)(^|[:;])(?:\./)?docker-compose\.wol\.yml(?=[:;]|$)', '$1'; $value = $value -replace ':{2,}', ':'; $value = $value -replace ';{2,}', ';'; $value = $value.Trim(':',';'); $content[$i] = 'COMPOSE_FILE=' + $value } }; Set-Content -LiteralPath $file -Value $content -Encoding Ascii }" "%ROOT_ENV_FILE%"
 exit /b
 
 :MigrateSamlEnv
