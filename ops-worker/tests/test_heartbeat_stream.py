@@ -1,6 +1,7 @@
 import json
 
 import pytest
+import requests
 
 import heartbeat_stream
 
@@ -48,7 +49,11 @@ def _stream(**overrides):
     }
     dependencies.update(overrides)
     return heartbeat_stream.generate_heartbeat_stream(
-        {"name": "lab-ws-01"},
+        {
+            "name": "lab-ws-01",
+            "address": "192.168.1.50",
+            "winrm_port": 5986,
+        },
         include_events=False,
         **dependencies,
     ), dependencies
@@ -77,3 +82,24 @@ def test_heartbeat_stream_emits_trust_error_and_stops():
     with pytest.raises(StopIteration):
         next(stream)
     assert dependencies["logger"].info_calls
+
+
+def test_heartbeat_stream_emits_actionable_unavailable_error_for_network_failure():
+    stream, dependencies = _stream(
+        poll_heartbeat=lambda _host, include_events=False: (_ for _ in ()).throw(
+            requests.exceptions.ConnectTimeout("station is off")
+        ),
+    )
+
+    chunk = next(stream)
+    payload = json.loads(chunk.split(":", 1)[1])
+
+    assert payload == {
+        "error": "Lab Station is unreachable over WinRM",
+        "code": "WINRM_UNREACHABLE",
+        "host": "lab-ws-01",
+        "address": "192.168.1.50",
+        "port": 5986,
+    }
+    assert not payload.get("requestId")
+    assert dependencies["logger"].exception_calls == []

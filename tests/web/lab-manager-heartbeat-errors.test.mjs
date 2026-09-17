@@ -29,7 +29,7 @@ test('formats public heartbeat errors and restricts request IDs to generic failu
   const errors = loadHeartbeatErrors();
 
   assert.equal(
-    errors.formatStreamError('PC-Siemens', {
+    errors.formatHeartbeatError('PC-Siemens', {
       code: 'WINRM_TRUST_REQUIRED',
       requestId: 'trust-request-1',
       error: 'private server detail',
@@ -37,17 +37,34 @@ test('formats public heartbeat errors and restricts request IDs to generic failu
     'Heartbeat unavailable for PC-Siemens: WinRM certificate trust is required',
   );
   assert.equal(
-    errors.formatStreamError('PC-Siemens', {
+    errors.formatHeartbeatError('PC-Siemens', {
       code: 'INTERNAL_ERROR',
       requestId: 'f33bb129cf1e475f8bc3db34ce2fe5dc',
     }),
     'Heartbeat unavailable for PC-Siemens: temporary Ops Worker error (request ID f33bb129cf1e475f8bc3db34ce2fe5dc)',
   );
   assert.equal(
-    errors.formatStreamError('PC-Siemens', {
+    errors.formatHeartbeatError('PC-Siemens', {
       code: 'INTERNAL_ERROR',
       requestId: '{"error":"secret"}',
     }),
     'Heartbeat unavailable for PC-Siemens: temporary Ops Worker error',
+  );
+  assert.equal(
+    errors.formatHeartbeatError('PC-Siemens', {
+      code: 'WINRM_UNREACHABLE',
+      address: '10.192.38.82',
+      port: 5986,
+    }),
+    'Heartbeat unavailable for PC-Siemens: Lab Station is unreachable at 10.192.38.82:5986 (it may be powered off or WinRM may be unavailable)',
+  );
+  assert.equal(
+    errors.formatHeartbeatError('PC-Siemens', {
+      code: 'WINRM_UNREACHABLE',
+      address: '10.192.38.82',
+      port: 5986,
+      requestId: 'should-not-be-shown',
+    }),
+    'Heartbeat unavailable for PC-Siemens: Lab Station is unreachable at 10.192.38.82:5986 (it may be powered off or WinRM may be unavailable)',
   );
 });

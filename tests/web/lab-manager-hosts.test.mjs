@@ -164,6 +164,29 @@ test('polls heartbeat with the existing endpoint and updates the shared host sta
   ]);
 });
 
+test('formats structured heartbeat failures consistently for manual polling', async () => {
+  const module = loadHostsModule();
+  const state = createState();
+  const events = [];
+  const controller = module.createController({
+    fetchImpl: async () => response({
+      error: 'Lab Station is unreachable over WinRM',
+      code: 'WINRM_UNREACHABLE',
+      address: '10.192.38.82',
+      port: 5986,
+    }, 503),
+    state,
+    callbacks: {
+      formatHeartbeatError: (host, payload) => `${host}:${payload.code}`,
+      showToast: (...args) => events.push(args),
+    },
+  });
+
+  await controller.pollHeartbeat('PC-Siemens');
+
+  assert.deepEqual(events, [['PC-Siemens:WINRM_UNREACHABLE', 'error']]);
+});
+
 test('keeps the heartbeat stream URL and classifies configuration errors', () => {
   const module = loadHostsModule();
   const state = createState();
@@ -194,7 +217,7 @@ test('keeps the heartbeat stream URL and classifies configuration errors', () =>
       renderHosts: () => events.push('render'),
       loadActivityFeed: () => events.push('activity'),
       isHeartbeatConfigurationError: code => code === 'WINRM_TRUST_REQUIRED',
-      formatHeartbeatStreamError: (host, payload) => `${host}:${payload.code}`,
+      formatHeartbeatError: (host, payload) => `${host}:${payload.code}`,
       showToast: (...args) => events.push(args),
     },
   });

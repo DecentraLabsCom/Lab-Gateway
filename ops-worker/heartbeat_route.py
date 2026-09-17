@@ -2,6 +2,11 @@
 
 from typing import Any, Callable, Dict, Mapping, Optional, Type
 
+from errors import (
+    build_winrm_unreachable_payload,
+    is_winrm_unreachable_error,
+)
+
 
 def handle_heartbeat_poll(
     payload: Mapping[str, Any],
@@ -42,6 +47,8 @@ def handle_heartbeat_poll(
             }), 409
         return internal_error_response("Heartbeat poll failed", exc)
     except Exception as exc:
+        if is_winrm_unreachable_error(exc):
+            return jsonify(build_winrm_unreachable_payload(host_name, host)), 503
         return internal_error_response("Heartbeat poll failed", exc)
 
 

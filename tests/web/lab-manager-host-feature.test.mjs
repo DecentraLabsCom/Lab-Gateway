@@ -130,7 +130,7 @@ test('host feature composes host controllers and preserves the final binding bou
     formatDate: value => String(value),
     formatBool: value => String(value),
     escapeHtml: value => String(value),
-    formatHeartbeatStreamError: () => 'heartbeat-error',
+    formatHeartbeatError: () => 'heartbeat-error',
     isHeartbeatConfigurationError: () => false,
     loadActivityFeed: () => {},
     updateOpsHint: () => {},

@@ -62,6 +62,8 @@ from errors import (
     WINRM_TRUST_REF_MISMATCH_MESSAGE,
     WINRM_TRUST_REQUIRED_CODE,
     WINRM_TRUST_REQUIRED_MESSAGE,
+    WINRM_UNREACHABLE_CODE,
+    WINRM_UNREACHABLE_MESSAGE,
     WinRMTrustError,
     build_winrm_trust_error_payload as _build_winrm_trust_error_payload_impl,
     is_missing_winrm_credentials_error,

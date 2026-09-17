@@ -82,3 +82,24 @@ def test_heartbeat_poll_route_contract_maps_missing_credentials_to_conflict(clie
         "code": "WINRM_CREDENTIALS_REQUIRED",
         "host": "lab-ws-01",
     }
+
+
+def test_heartbeat_poll_route_maps_winrm_network_failure_to_actionable_unavailable(client, monkeypatch):
+    host = {"name": "lab-ws-01", "address": "192.168.1.50", "winrm_port": 5986}
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    monkeypatch.setattr(
+        worker,
+        "poll_heartbeat",
+        Mock(side_effect=worker.requests.exceptions.ConnectTimeout("station is off")),
+    )
+
+    response = client.post("/api/heartbeat/poll", json={"host": "lab-ws-01"})
+
+    assert response.status_code == 503
+    assert response.json == {
+        "error": worker.WINRM_UNREACHABLE_MESSAGE,
+        "code": worker.WINRM_UNREACHABLE_CODE,
+        "host": "lab-ws-01",
+        "address": "192.168.1.50",
+        "port": 5986,
+    }

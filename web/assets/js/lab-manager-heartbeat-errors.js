@@ -11,6 +11,7 @@
         WINRM_CERTIFICATE_NOT_YET_VALID: 'WinRM certificate is not yet valid',
         WINRM_TLS_FAILED: 'WinRM TLS validation failed',
         WINRM_TRUST_STORAGE_UNAVAILABLE: 'WinRM certificate trust storage is unavailable',
+        WINRM_UNREACHABLE: 'Lab Station is unreachable',
         INTERNAL_ERROR: 'temporary Ops Worker error',
     });
     const configurationErrorCodes = new Set([
@@ -33,9 +34,17 @@
         return configurationErrorCodes.has(normalizeCode(value));
     }
 
-    function formatStreamError(host, payload) {
+    function formatHeartbeatError(host, payload) {
         const code = normalizeCode(payload?.code);
-        const message = streamErrorMessages[code] || 'connection error';
+        let message = streamErrorMessages[code] || 'connection error';
+        if (code === 'WINRM_UNREACHABLE') {
+            const address = String(payload?.address || '').trim();
+            const port = String(payload?.port || '').trim();
+            const endpoint = address && port ? `${address}:${port}` : address;
+            message = endpoint
+                ? `Lab Station is unreachable at ${endpoint} (it may be powered off or WinRM may be unavailable)`
+                : 'Lab Station is unreachable (it may be powered off or WinRM may be unavailable)';
+        }
         const requestId = String(payload?.requestId || '').trim();
         const safeRequestId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? requestId : '';
         const requestSuffix = code === 'INTERNAL_ERROR' && safeRequestId
@@ -46,6 +55,6 @@
 
     root.LabManagerHeartbeatErrors = Object.freeze({
         isConfigurationError,
-        formatStreamError,
+        formatHeartbeatError,
     });
 })(window);
