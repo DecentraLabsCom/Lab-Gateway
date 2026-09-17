@@ -1,3 +1,5 @@
+import requests
+
 import errors
 
 
@@ -37,3 +39,29 @@ def test_missing_credentials_predicate_preserves_the_existing_error_message():
     assert errors.is_missing_winrm_credentials_error(missing) is True
     assert errors.is_missing_winrm_credentials_error(ValueError("other")) is False
     assert errors.is_missing_winrm_credentials_error(RuntimeError(str(missing))) is False
+
+
+def test_winrm_unreachable_error_contract_classifies_network_failures_only():
+    assert errors.is_winrm_unreachable_error(
+        requests.exceptions.ConnectTimeout("station is off")
+    ) is True
+    assert errors.is_winrm_unreachable_error(
+        requests.exceptions.ConnectionError("connection refused")
+    ) is True
+    assert errors.is_winrm_unreachable_error(
+        requests.exceptions.SSLError("certificate verify failed")
+    ) is False
+    assert errors.is_winrm_unreachable_error(ValueError("invalid heartbeat JSON")) is False
+
+
+def test_winrm_unreachable_payload_contains_safe_station_endpoint_details():
+    assert errors.build_winrm_unreachable_payload(
+        "lab-ws-01",
+        {"address": "192.168.1.50", "winrm_port": 5986},
+    ) == {
+        "error": errors.WINRM_UNREACHABLE_MESSAGE,
+        "code": errors.WINRM_UNREACHABLE_CODE,
+        "host": "lab-ws-01",
+        "address": "192.168.1.50",
+        "port": 5986,
+    }

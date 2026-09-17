@@ -145,6 +145,10 @@ New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and 
 
 Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
 `requestId`; stack traces and dependency messages remain in worker logs only.
+When a heartbeat WinRM connection or timeout failure reaches the Station
+boundary, the poll and stream return `code=WINRM_UNREACHABLE` instead, with the
+configured host address and port. This lets Lab Manager distinguish a powered
+off or unavailable Station from an internal worker failure.
 
 - `GET /health`
 - `POST /api/wol`

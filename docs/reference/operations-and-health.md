@@ -121,7 +121,8 @@ flowchart TD
 | Guacamole connection fails | `guacd` and the private RDP/VNC/SSH route | Test only from the controlled lab network and verify the selected local connection ID. |
 | Ops action fails | `/ops/health/details`, host catalog, WinRM TLS and CIDR policy | Confirm host address is allowed by `WINRM_MANAGEMENT_CIDRS`; verify the encrypted credential reference. |
 | Power controller is `checking`, `unknown`, or `unreachable` | Lab Manager `Energy` status, controller host/port, private route, credentials and Ops Worker logs | Wait for the background status check, then use `Refresh`; for APC verify UDP `161`, the source-IP authorization and the credential's SNMP version. |
-| Heartbeat stream fails for an incomplete Station | Host-card `WinRM credentials` and `WinRM TLS trust` statuses, then `/ops/health/details` and Ops Worker logs | Save the WinRM credential and install the Station certificate before retrying heartbeat; retain any `requestId` for log correlation. |
+| Heartbeat reports `WINRM_UNREACHABLE` | Station power state, WinRM listener/firewall, host address/port and the private management route | The Station may be powered off or WinRM may be unavailable; restore reachability and retry. |
+| Heartbeat stream fails for an incomplete Station | Host-card `WinRM credentials` and `WinRM TLS trust` statuses, then `/ops/health/details` and Ops Worker logs | Save the WinRM credential and install the Station certificate before retrying heartbeat; retain any `requestId` for generic internal failures. |
 | FMU route returns `503` | `FMU_RUNNER_ENABLED` and active profile | Start exactly one FMU profile and verify the public audience and, for production, Station connectivity. |
 
 ## Useful Compose commands

@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!heartbeatErrors) {
         throw new Error('LabManagerHeartbeatErrors must load before lab-manager.js');
     }
-    const formatHeartbeatStreamError = heartbeatErrors.formatStreamError;
+    const formatHeartbeatError = heartbeatErrors.formatHeartbeatError;
     const isHeartbeatConfigurationError = heartbeatErrors.isConfigurationError;
     const hostFeatureModule = window.LabManagerHostFeature;
     if (!hostFeatureModule) {
@@ -114,7 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
         formatDate,
         formatBool,
         escapeHtml,
-        formatHeartbeatStreamError,
+        formatHeartbeatError,
         isHeartbeatConfigurationError,
         loadActivityFeed,
         updateOpsHint,

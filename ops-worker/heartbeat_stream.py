@@ -4,6 +4,11 @@ import json
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Dict, Type
 
+from errors import (
+    build_winrm_unreachable_payload,
+    is_winrm_unreachable_error,
+)
+
 
 def format_sse_event(event: str, data: str) -> str:
     """Serialize one event using the gateway's stable SSE framing."""
@@ -26,7 +31,7 @@ def generate_heartbeat_stream(
     heartbeat_interval_seconds: float,
     sleep: Callable[[float], None],
 ) -> Iterator[str]:
-    """Yield heartbeat events until trust or credential configuration stops it."""
+    """Yield heartbeat events until a trust, credential or reachability error stops it."""
     while True:
         try:
             data = poll_heartbeat(host, include_events=include_events)
@@ -73,7 +78,17 @@ def generate_heartbeat_stream(
                     "host": host.get("name"),
                 }),
             )
-        except Exception:
+        except Exception as exc:
+            if is_winrm_unreachable_error(exc):
+                logger.info(
+                    "Heartbeat stream unavailable for %s: WinRM unreachable",
+                    sanitize_log_value(host.get("name")),
+                )
+                yield format_sse_event(
+                    "error",
+                    json.dumps(build_winrm_unreachable_payload(host.get("name"), host)),
+                )
+                return
             request_id_value = request_id()
             logger.exception(
                 "Heartbeat stream failed request_id=%s",

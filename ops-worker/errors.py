@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Dict
 
+import requests
+
 
 class WinRMTrustError(ValueError):
     """Operational error raised when a Station certificate cannot be trusted."""
@@ -40,6 +42,49 @@ WINRM_TRUST_ERROR_MESSAGES = {
 }
 
 WINRM_CREDENTIALS_REQUIRED_MESSAGE = "WinRM credentials are required"
+WINRM_UNREACHABLE_CODE = "WINRM_UNREACHABLE"
+WINRM_UNREACHABLE_MESSAGE = "Lab Station is unreachable over WinRM"
+
+
+def is_winrm_unreachable_error(exc: BaseException) -> bool:
+    """Return whether an exception indicates that the Station cannot be reached."""
+    network_error_types = (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        ConnectionError,
+        TimeoutError,
+    )
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        # TLS failures are translated to the stable WinRM trust contract by
+        # the command layer and must not be presented as a powered-off host.
+        if isinstance(current, requests.exceptions.SSLError):
+            return False
+        if isinstance(current, network_error_types):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def build_winrm_unreachable_payload(
+    host_name: Any,
+    host: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Build the safe public payload for a Station connection failure."""
+    payload: Dict[str, Any] = {
+        "error": WINRM_UNREACHABLE_MESSAGE,
+        "code": WINRM_UNREACHABLE_CODE,
+        "host": host_name,
+    }
+    address = host.get("address")
+    if address not in (None, ""):
+        payload["address"] = address
+    port = host.get("winrm_port")
+    if port not in (None, ""):
+        payload["port"] = port
+    return payload
 
 
 def is_missing_winrm_credentials_error(exc: BaseException) -> bool:

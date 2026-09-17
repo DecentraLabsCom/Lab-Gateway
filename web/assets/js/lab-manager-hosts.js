@@ -29,7 +29,7 @@
             updateOpsHint = () => {},
             showOpsWarning = () => {},
             showToast = () => {},
-            formatHeartbeatStreamError = (host) => `Heartbeat unavailable for ${host}`,
+            formatHeartbeatError = (host) => `Heartbeat unavailable for ${host}`,
             isHeartbeatConfigurationError = () => false,
         } = callbacks;
 
@@ -89,7 +89,7 @@
                 }
                 if (isHeartbeatConfigurationError(errorPayload?.code)) {
                     stopHeartbeatStream(host);
-                    showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
+                    showToast(formatHeartbeatError(host, errorPayload), 'error');
                     return;
                 }
                 if (source.readyState === EventSourceCtor.CLOSED) {
@@ -97,7 +97,7 @@
                 }
                 if (!heartbeatStreamErrorShown[host]) {
                     heartbeatStreamErrorShown[host] = true;
-                    showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
+                    showToast(formatHeartbeatError(host, errorPayload), 'error');
                 }
             });
         }
@@ -196,7 +196,10 @@
                     return;
                 }
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                if (!res.ok) {
+                    showToast(formatHeartbeatError(host, data), 'error');
+                    return;
+                }
                 hostState[host] = data;
                 renderHosts();
                 loadActivityFeed();
