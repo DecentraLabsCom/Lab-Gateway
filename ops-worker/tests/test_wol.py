@@ -1,6 +1,6 @@
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -24,7 +24,7 @@ def host_registry():
 
 
 def test_wol_and_wait_retries():
-    with patch("worker.send_magic_packet") as mock_packet, patch(
+    with patch("worker.wake") as mock_packet, patch(
         "worker.host_is_up", side_effect=[False, True]
     ) as mock_up:
         result, attempts = worker.wol_and_wait(
@@ -40,6 +40,29 @@ def test_wol_and_wait_retries():
     assert attempts == 2
     assert mock_packet.call_count == 2
     assert mock_up.call_count == 2
+
+
+def test_wake_uses_current_wakeonlan_api(monkeypatch):
+    sender = Mock()
+    monkeypatch.setattr(worker._wakeonlan, "wake", sender, raising=False)
+
+    worker.wake("00:11:22:33:44:55", host="192.168.1.255", port=9)
+
+    sender.assert_called_once_with("00:11:22:33:44:55", host="192.168.1.255", port=9)
+
+
+def test_wake_supports_older_local_wakeonlan_api(monkeypatch):
+    sender = Mock()
+    monkeypatch.delattr(worker._wakeonlan, "wake", raising=False)
+    monkeypatch.setattr(worker._wakeonlan, "send_magic_packet", sender)
+
+    worker.wake("00:11:22:33:44:55", host="192.168.1.255", port=9)
+
+    sender.assert_called_once_with(
+        "00:11:22:33:44:55",
+        ip_address="192.168.1.255",
+        port=9,
+    )
 
 
 def test_host_is_up_does_not_open_socket_for_invalid_target():

@@ -19,6 +19,7 @@ def test_wol_route_contract_forwards_host_defaults_and_returns_result(client, mo
         "name": "lab-ws-01",
         "address": "192.168.1.50",
         "mac": "00:11:22:33:44:55",
+        "broadcast": "192.168.1.255",
         "winrm_port": 5986,
     }
     monkeypatch.setattr(worker.HOSTS, "get", Mock(return_value=host))
@@ -33,7 +34,7 @@ def test_wol_route_contract_forwards_host_defaults_and_returns_result(client, mo
     assert response.json["ping_target"] == "192.168.1.50"
     wol_and_wait.assert_called_once_with(
         "00:11:22:33:44:55",
-        None,
+        "192.168.1.255",
         9,
         "192.168.1.50",
         3,

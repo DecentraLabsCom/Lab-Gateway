@@ -33,7 +33,10 @@ def handle_wol(
 
     attempts = int(payload.get("attempts", 3))
     wait_seconds = float(payload.get("ping_timeout", 10))
-    broadcast = payload.get("broadcast")
+    # Prefer the request override, then the host's persisted LAN broadcast.
+    # The latter is required for directed broadcasts when the worker runs in
+    # a container with more than one network interface.
+    broadcast = payload.get("broadcast") or (host or {}).get("broadcast")
     port = int(payload.get("port", 9))
     configured_probe_port = (host or {}).get("winrm_port")
     try:

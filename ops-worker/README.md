@@ -165,11 +165,11 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ connectionId }`
   - Probes a Guacamole connection candidate for DNS, WinRM, and optional Lab Station HTTP health.
 - `POST /api/hosts/provision`
-  - Body: `{ connectionId, name?, address?, mac?, credentialRef?, heartbeatPath? }`. Legacy `labs` fields are ignored.
+  - Body: `{ connectionId, name?, address?, mac?, broadcast?, credentialRef?, heartbeatPath? }`. Legacy `labs` fields are ignored.
   - Re-runs discovery and only provisions candidates with Lab Station HTTP health or reachable WinRM.
   - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). Raw WinRM credentials are saved separately.
 - `PATCH /api/hosts/{hostName}`
-  - Body: `{ name?, mac?, heartbeatPath? }`
+  - Body: `{ name?, mac?, broadcast?, heartbeatPath? }`
   - Updates only a host from the writable dynamic catalog. The address, WinRM policy, credential reference and events path are preserved; lab associations are resolved from the provider catalog. Static catalog hosts must be edited in `hosts.json`.
 - `POST /api/hosts/winrm-credentials`
   - Body: `{ credentialRef, user, password }`

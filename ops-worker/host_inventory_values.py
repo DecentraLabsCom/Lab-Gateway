@@ -37,6 +37,7 @@ def safe_host_inventory_entry(
         "winrmTrustSource": trust.get("source"),
         "winrmTrustLastValidatedAt": trust.get("lastValidatedAt"),
         "mac": host.get("mac"),
+        "broadcast": host.get("broadcast"),
         "heartbeatPath": host.get("heartbeat_path", default_heartbeat_path),
         "mode": host.get("mode"),
         "editable": editable,

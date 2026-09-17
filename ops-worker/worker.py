@@ -21,7 +21,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
-from wakeonlan import send_magic_packet
+import wakeonlan as _wakeonlan
 import requests
 import winrm
 from app_factory import create_app, register_blueprints
@@ -347,6 +347,15 @@ from power.models import ValidationError as PowerValidationError
 from power.credentials import PowerCredentialStore
 from power.persistence import PowerOperationStore
 from power.service import PowerRuntime
+
+
+def wake(mac: str, *, host: str, port: int) -> None:
+    """Send a WoL packet across wakeonlan package API versions."""
+    sender = getattr(_wakeonlan, "wake", None)
+    if callable(sender):
+        sender(mac, host=host, port=port)
+        return
+    _wakeonlan.send_magic_packet(mac, ip_address=host, port=port)
 
 
 # These aliases are installed by runtime factories below their dependency
@@ -1339,7 +1348,7 @@ discover_labstation_candidate = _HOST_DISCOVERY_RUNTIME.discover_labstation_cand
 
 _WOL_CONTEXT = WolContext(
     wol_and_wait=lambda *args, **kwargs: _wol_and_wait_impl(*args, **kwargs),
-    get_send_magic_packet=lambda: send_magic_packet,
+    get_send_magic_packet=lambda: wake,
     get_sleep=lambda: time.sleep,
     get_host_is_up=lambda: host_is_up,
 )

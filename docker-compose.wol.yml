@@ -1,0 +1,22 @@
+# Linux-only overlay for Wake-on-LAN and Guacamole targets on the physical
+# laboratory LAN. Keep the base Compose file portable; activate this overlay
+# on gateways whose parent interface reaches the station VLAN.
+services:
+  guacd:
+    networks:
+      - wol_lan
+
+  ops-worker:
+    networks:
+      - wol_lan
+
+networks:
+  wol_lan:
+    driver: macvlan
+    driver_opts:
+      parent: ${WOL_LAN_PARENT:?WOL_LAN_PARENT must be configured}
+    ipam:
+      config:
+        - subnet: ${WOL_LAN_SUBNET:?WOL_LAN_SUBNET must be configured}
+          gateway: ${WOL_LAN_GATEWAY:?WOL_LAN_GATEWAY must be configured}
+          ip_range: ${WOL_LAN_IP_RANGE:?WOL_LAN_IP_RANGE must be configured}
