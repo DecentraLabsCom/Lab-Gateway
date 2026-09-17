@@ -37,6 +37,39 @@ def test_wake_rejects_missing_mac_without_network_side_effects():
     )
 
 
+def test_wake_uses_thirty_second_default_wait():
+    wol_and_wait = Mock(return_value=(True, 1))
+    record_operation = _record_operation()
+
+    success, step = perform_wake_step(
+        {
+            "name": "lab-ws-01",
+            "address": "192.168.1.50",
+            "mac": "00:11:22:33:44:55",
+        },
+        "reservation-1",
+        "42",
+        {},
+        wol_and_wait=wol_and_wait,
+        record_operation=record_operation,
+        notify_failure=Mock(),
+        current_epoch=lambda: 100.0,
+        logger=Mock(),
+    )
+
+    assert success is True
+    assert step["details"]["waitSeconds"] == 30.0
+    wol_and_wait.assert_called_once_with(
+        "00:11:22:33:44:55",
+        None,
+        9,
+        "192.168.1.50",
+        3,
+        30.0,
+        probe_port=None,
+    )
+
+
 def test_command_preserves_result_summary_and_failure_notification():
     record_operation = _record_operation()
     notify_failure = Mock()

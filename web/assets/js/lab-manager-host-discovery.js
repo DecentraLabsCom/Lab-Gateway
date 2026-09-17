@@ -17,6 +17,7 @@
         const {
             renderCandidates = () => {},
             loadHostInventory = () => {},
+            showLoadingToast = () => {},
             showToast = () => {},
         } = callbacks;
 
@@ -30,6 +31,7 @@
             };
             if (button) button.disabled = true;
             renderCandidates();
+            showLoadingToast('Checking Lab Station…');
             try {
                 const res = await fetchImpl('/ops/api/hosts/discover', {
                     method: 'POST',

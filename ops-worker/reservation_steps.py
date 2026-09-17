@@ -3,6 +3,8 @@
 from collections.abc import Callable, Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
+from wol_defaults import DEFAULT_WOL_ATTEMPTS, DEFAULT_WOL_PING_TIMEOUT_SECONDS
+
 
 def perform_wake_step(
     host: Mapping[str, Any],
@@ -56,8 +58,12 @@ def perform_wake_step(
             "details": {},
         }
 
-    attempts = int(options.get("attempts", host.get("wake_attempts", 3)))
-    wait_seconds = float(options.get("ping_timeout", 10))
+    attempts = int(
+        options.get("attempts", host.get("wake_attempts", DEFAULT_WOL_ATTEMPTS))
+    )
+    wait_seconds = float(
+        options.get("ping_timeout", DEFAULT_WOL_PING_TIMEOUT_SECONDS)
+    )
     broadcast = options.get("broadcast") or host.get("broadcast")
     port = int(options.get("port", host.get("wol_port", 9)))
     configured_probe_port = host.get("winrm_port")

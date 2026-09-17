@@ -218,6 +218,11 @@ unless the station network requires another port. The connection's normal
 hostname/address remains the Windows target; the broadcast address is only the
 destination for the magic packet.
 
+Lab Manager and reservation startup use three WoL attempts by default, with a
+30-second wait/probe window for each attempt. If the station remains offline,
+the complete operation can take approximately 180 seconds before it is marked
+failed.
+
 ## Optional Compose profiles
 
 | Profile | Enables | Requirements and boundary |

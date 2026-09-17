@@ -13,6 +13,7 @@
         const {
             closeModal = () => {},
             loadHostInventory = () => {},
+            showLoadingToast = () => {},
             showToast = () => {},
         } = callbacks;
 
@@ -22,6 +23,7 @@
                 return false;
             }
             if (submitButton) submitButton.disabled = true;
+            showLoadingToast(`Configuring Lab Station ${payload.name}…`);
             try {
                 const res = await fetchImpl('/ops/api/hosts/provision', {
                     method: 'POST',

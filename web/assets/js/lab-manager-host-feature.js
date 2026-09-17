@@ -19,6 +19,7 @@
         loadActivityFeed,
         updateOpsHint,
         showOpsWarning,
+        showLoadingToast = () => {},
         showToast,
         confirmImpl = message => windowImpl.confirm?.(message),
         logger = console,
@@ -212,6 +213,7 @@
                 groupGuacamoleCandidates: candidates => hostViewController?.groupCandidates(candidates) || [],
                 updateOpsHint,
                 showOpsWarning,
+                showLoadingToast,
                 showToast,
                 formatHeartbeatError,
                 isHeartbeatConfigurationError,
@@ -227,6 +229,7 @@
             fetchImpl,
             callbacks: {
                 pollHeartbeat,
+                showLoadingToast,
                 showToast,
             },
             logger,
@@ -251,6 +254,7 @@
             callbacks: {
                 renderCandidates: () => hostViewController?.renderCandidates(),
                 loadHostInventory,
+                showLoadingToast,
                 showToast,
             },
             logger,
@@ -260,6 +264,7 @@
             callbacks: {
                 closeModal: closeWinrmCredentialsModal,
                 loadHostInventory,
+                showLoadingToast,
                 showToast,
             },
             logger,
@@ -311,6 +316,7 @@
             callbacks: {
                 closeModal: closeProvisionHostModal,
                 loadHostInventory,
+                showLoadingToast,
                 showToast,
             },
             logger,

@@ -21,6 +21,7 @@ function response(body, status = 200) {
 test('preserves the host provisioning request, success message and inventory reload', async () => {
   const module = loadModule();
   const events = [];
+  const loadingEvents = [];
   let request;
   const button = { disabled: false };
   const controller = module.createController({
@@ -31,6 +32,7 @@ test('preserves the host provisioning request, success message and inventory rel
     callbacks: {
       closeModal: () => events.push('close'),
       loadHostInventory: () => events.push('reload'),
+      showLoadingToast: message => loadingEvents.push(message),
       showToast: (...args) => events.push(args),
     },
   });
@@ -64,6 +66,7 @@ test('preserves the host provisioning request, success message and inventory rel
     ['Ops host station-7 configured', 'success'],
     'reload',
   ]);
+  assert.deepEqual(loadingEvents, ['Configuring Lab Station station-7…']);
   assert.equal(button.disabled, false);
 });
 

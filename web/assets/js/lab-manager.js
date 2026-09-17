@@ -58,8 +58,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const toastController = toastModule.getDefaultController({
         document,
         setTimeoutImpl: setTimeout,
+        clearTimeoutImpl: clearTimeout,
     });
     const showToast = toastController.showToast;
+    const showLoadingToast = message => showToast(message, 'loading');
     const notificationsFeatureModule = window.LabManagerNotificationsFeature;
     if (!notificationsFeatureModule) {
         throw new Error('LabManagerNotificationsFeature must load before lab-manager.js');
@@ -119,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadActivityFeed,
         updateOpsHint,
         showOpsWarning,
+        showLoadingToast,
         showToast,
         confirmImpl: message => window.confirm(message),
         logger: console,
