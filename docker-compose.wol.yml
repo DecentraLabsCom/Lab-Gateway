@@ -1,10 +1,10 @@
 # Linux-only overlay for Wake-on-LAN and Guacamole targets on the physical
 # laboratory LAN. Keep the base Compose file portable; activate this overlay
 # on gateways whose parent interface reaches the station VLAN.
-# The Station VLAN is directly attached to the parent interface. The overlay
-# intentionally has no default gateway: WoL broadcasts and WinRM/RDP targets
-# in the configured subnet use the connected route, while the existing bridge
-# networks continue to provide the services' other routes.
+# The Station VLAN is directly attached to the parent interface. The optional
+# gateway is left empty for an isolated VLAN; when configured, it provides the
+# route for targets outside the directly connected subnet. WoL broadcasts and
+# same-subnet WinRM/RDP targets always use the connected route.
 services:
   guacd:
     networks:
@@ -23,3 +23,4 @@ networks:
       config:
         - subnet: ${WOL_LAN_SUBNET:?WOL_LAN_SUBNET must be configured}
           ip_range: ${WOL_LAN_IP_RANGE:?WOL_LAN_IP_RANGE must be configured}
+          gateway: ${WOL_LAN_GATEWAY:-}

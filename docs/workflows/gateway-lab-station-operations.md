@@ -174,7 +174,7 @@ Exit code `0` means success, `1` means completed with warnings, and values of `2
 
 ## Connectivity requirements
 
-- **Wake-on-LAN:** on Linux, activate `docker-compose.wol.yml` so `ops-worker` and `guacd` have a gateway-less macvlan endpoint on the directly connected Station VLAN. Persist the directed broadcast (for example `10.192.38.255`) in the host entry and as Guacamole's `wol-broadcast-addr`, alongside `wol-send-packet=true` and `wol-mac-addr`. The Windows firmware/NIC must be configured for magic-packet wake.
+- **Wake-on-LAN:** on Linux, activate `docker-compose.wol.yml` so `ops-worker` and `guacd` have a macvlan endpoint on the Station VLAN. Leave `WOL_LAN_GATEWAY` empty for an isolated VLAN, or set the actual VLAN router when targets exist outside the configured subnet. Persist the directed broadcast (for example `10.192.38.255`) in the host entry and as Guacamole's `wol-broadcast-addr`, alongside `wol-send-packet=true` and `wol-mac-addr`. The Windows firmware/NIC must be configured for magic-packet wake.
 - **WinRM:** the gateway reaches the Station only through its configured management VLAN, using HTTPS/TLS on port 5986. `WINRM_MANAGEMENT_CIDRS` is mandatory when hosts are configured; startup rejects any Station address outside those networks or any non-HTTPS/non-5986 catalog entry.
 - **Guacamole:** `guacd` can reach the station's configured RDP, VNC, or SSH service over the lab network.
 - **FMU station mode:** when `FMU_BACKEND_MODE=station`, `fmu-runner` can reach `FMU_STATION_BASE_URL` and authenticate with `FMU_STATION_INTERNAL_TOKEN`.

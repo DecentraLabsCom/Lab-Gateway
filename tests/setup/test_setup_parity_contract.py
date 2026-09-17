@@ -165,6 +165,7 @@ def test_setup_scripts_keep_the_environment_key_contract():
         "WOL_LAN_PARENT",
         "WOL_LAN_SUBNET",
         "WOL_LAN_IP_RANGE",
+        "WOL_LAN_GATEWAY",
     }
     assert windows.env_keys - shell.env_keys == set()
 
@@ -469,7 +470,7 @@ def test_setup_scripts_preserve_failure_contracts():
     assert 'goto skip_start' in windows_text
 
 
-def test_linux_setup_configures_the_gatewayless_station_lan_overlay():
+def test_linux_setup_configures_both_station_lan_gateway_modes():
     shell_text = SETUP_SH.read_text(encoding="utf-8")
     windows_text = SETUP_BAT.read_text(encoding="utf-8")
 
@@ -480,11 +481,14 @@ def test_linux_setup_configures_the_gatewayless_station_lan_overlay():
         'update_env_var "$ROOT_ENV_FILE" "WOL_LAN_PARENT"',
         'update_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET"',
         'update_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE"',
+        'update_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"',
         'remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"',
+        'Does the Station VLAN have a gateway for off-subnet traffic?',
     ):
         assert marker in shell_text, f"Missing Linux Station LAN setup marker: {marker}"
 
     assert "The macvlan Station LAN overlay is Linux-only; setup.bat leaves it disabled." in windows_text
+    assert "direct or routed Station LAN WoL" in windows_text
     assert ":DisableLinuxStationLanOverlay" in windows_text
 
 

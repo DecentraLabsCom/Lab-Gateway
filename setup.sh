@@ -306,9 +306,12 @@ configure_station_lan_overlay() {
     local current_parent
     local current_subnet
     local current_ip_range
+    local current_gateway
     local station_parent
     local station_subnet
     local station_ip_range
+    local station_gateway_answer
+    local station_gateway
 
     system_name="$(uname -s 2>/dev/null || true)"
     if [ "$system_name" != "Linux" ]; then
@@ -328,6 +331,7 @@ configure_station_lan_overlay() {
     current_parent="$(get_env_default "WOL_LAN_PARENT" "$ROOT_ENV_FILE")"
     current_subnet="$(get_env_default "WOL_LAN_SUBNET" "$ROOT_ENV_FILE")"
     current_ip_range="$(get_env_default "WOL_LAN_IP_RANGE" "$ROOT_ENV_FILE")"
+    current_gateway="$(get_env_default "WOL_LAN_GATEWAY" "$ROOT_ENV_FILE")"
     station_lan_overlay="N"
     if compose_file_contains_wol_overlay "$current_compose_file"; then
         station_lan_overlay="Y"
@@ -336,7 +340,7 @@ configure_station_lan_overlay() {
     echo "Physical Station LAN / Wake-on-LAN overlay"
     echo "============================================="
     echo "Enable the direct macvlan overlay for WoL, WinRM and RDP on the Station LAN?"
-    echo "It is intended for Stations in one directly connected subnet and uses no default gateway."
+    echo "It supports an isolated VLAN or an optional router for off-subnet targets."
     if [ "$station_lan_overlay" = "Y" ]; then
         read -p "Enable direct physical Station LAN WoL overlay? (Y/n): " station_lan_overlay_answer
         station_lan_overlay_answer=$(echo "$station_lan_overlay_answer" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
@@ -382,6 +386,21 @@ configure_station_lan_overlay() {
 
     read -p "Station LAN subnet [${current_subnet:-required, e.g. 10.192.38.0/24}]: " station_subnet
     station_subnet="${station_subnet:-$current_subnet}"
+    if [ -n "$current_gateway" ]; then
+        read -p "Does the Station VLAN have a gateway for off-subnet traffic? (Y/n): " station_gateway_answer
+    else
+        read -p "Does the Station VLAN have a gateway for off-subnet traffic? (y/N): " station_gateway_answer
+    fi
+    station_gateway_answer=$(echo "$station_gateway_answer" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+    station_gateway=""
+    if [ "$station_gateway_answer" = "y" ] || [ "$station_gateway_answer" = "yes" ] || { [ -n "$current_gateway" ] && [ -z "$station_gateway_answer" ]; }; then
+        read -p "Station LAN gateway [${current_gateway:-required, e.g. 10.192.38.1}]: " station_gateway
+        station_gateway="${station_gateway:-$current_gateway}"
+        if [ -z "$station_gateway" ]; then
+            echo "A gateway address is required when routed Station LAN mode is selected." >&2
+            exit 1
+        fi
+    fi
     read -p "Reserved Docker macvlan range [${current_ip_range:-required, e.g. 10.192.38.240/28}]: " station_ip_range
     station_ip_range="${station_ip_range:-$current_ip_range}"
     if [ -z "$station_subnet" ] || [ -z "$station_ip_range" ]; then
@@ -389,15 +408,16 @@ configure_station_lan_overlay() {
         exit 1
     fi
 
-    if ! "$setup_python_cmd" - "$station_subnet" "$station_ip_range" <<'PY'
+    if ! "$setup_python_cmd" - "$station_subnet" "$station_ip_range" "$station_gateway" <<'PY'
 import ipaddress
 import sys
 
 try:
     subnet = ipaddress.ip_network(sys.argv[1], strict=True)
     ip_range = ipaddress.ip_network(sys.argv[2], strict=True)
+    gateway = ipaddress.ip_address(sys.argv[3]) if sys.argv[3] else None
 except ValueError as exc:
-    print(f"Invalid Station subnet or Docker range: {exc}", file=sys.stderr)
+    print(f"Invalid Station subnet, Docker range or gateway: {exc}", file=sys.stderr)
     raise SystemExit(1)
 
 if subnet.version != 4 or ip_range.version != 4:
@@ -406,6 +426,19 @@ if subnet.version != 4 or ip_range.version != 4:
 if not ip_range.subnet_of(subnet):
     print("The Docker macvlan range must be contained in the Station subnet.", file=sys.stderr)
     raise SystemExit(1)
+if gateway is not None:
+    if gateway.version != 4:
+        print("The Station gateway must be an IPv4 address.", file=sys.stderr)
+        raise SystemExit(1)
+    if gateway not in subnet:
+        print("The Station gateway must belong to the Station subnet.", file=sys.stderr)
+        raise SystemExit(1)
+    if gateway in (subnet.network_address, subnet.broadcast_address):
+        print("The Station gateway cannot be the subnet or broadcast address.", file=sys.stderr)
+        raise SystemExit(1)
+    if gateway in ip_range:
+        print("The Station gateway cannot be inside the reserved Docker range.", file=sys.stderr)
+        raise SystemExit(1)
 PY
     then
         exit 1
@@ -415,10 +448,18 @@ PY
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_PARENT" "$station_parent"
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET" "$station_subnet"
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE" "$station_ip_range"
-    remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+    if [ -n "$station_gateway" ]; then
+        update_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY" "$station_gateway"
+    else
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+    fi
     echo "   * Physical Station LAN overlay enabled."
     echo "   * COMPOSE_FILE includes docker-compose.wol.yml."
-    echo "   * No default gateway is configured; targets must be in WOL_LAN_SUBNET."
+    if [ -n "$station_gateway" ]; then
+        echo "   * Station LAN gateway configured: $station_gateway."
+    else
+        echo "   * No Station LAN gateway configured; targets outside WOL_LAN_SUBNET are unavailable."
+    fi
     echo
 }
 
