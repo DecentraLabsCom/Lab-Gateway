@@ -2,6 +2,8 @@
 
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from wol_defaults import DEFAULT_WOL_ATTEMPTS, DEFAULT_WOL_PING_TIMEOUT_SECONDS
+
 
 def handle_wol(
     payload: Any,
@@ -31,8 +33,10 @@ def handle_wol(
     if not is_valid_ping_target(ping_target):
         return jsonify({"error": "ping_target is invalid"}), 400
 
-    attempts = int(payload.get("attempts", 3))
-    wait_seconds = float(payload.get("ping_timeout", 10))
+    attempts = int(payload.get("attempts", DEFAULT_WOL_ATTEMPTS))
+    wait_seconds = float(
+        payload.get("ping_timeout", DEFAULT_WOL_PING_TIMEOUT_SECONDS)
+    )
     # Prefer the request override, then the host's persisted LAN broadcast.
     # The latter is required for directed broadcasts when the worker runs in
     # a container with more than one network interface.

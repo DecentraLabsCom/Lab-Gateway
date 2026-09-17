@@ -38,7 +38,7 @@ def test_wol_route_contract_forwards_host_defaults_and_returns_result(client, mo
         9,
         "192.168.1.50",
         3,
-        10.0,
+        30.0,
         probe_port=5986,
     )
 

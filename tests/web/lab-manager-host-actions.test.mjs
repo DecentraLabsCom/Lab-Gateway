@@ -87,6 +87,22 @@ test('shows the backend WoL validation reason instead of only the HTTP status', 
   ]);
 });
 
+test('shows persistent progress feedback while WoL is pending', async () => {
+  const module = loadModule();
+  const loadingEvents = [];
+  const controller = module.createController({
+    fetchImpl: async () => response({ success: true }),
+    callbacks: {
+      showLoadingToast: message => loadingEvents.push(message),
+      showToast: () => {},
+    },
+  });
+
+  await controller.triggerWol('PC-Siemens');
+
+  assert.deepEqual(loadingEvents, ['Waking PC-Siemens…']);
+});
+
 test('preserves WinRM command arguments, exit status and HTTP failures', async () => {
   const module = loadModule();
   const events = [];

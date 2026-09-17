@@ -153,6 +153,9 @@ off or unavailable Station from an internal worker failure.
 - `GET /health`
 - `POST /api/wol`
   - Body: `{ host, mac?, broadcast?, port?, ping_target?, ping_timeout?, attempts? }`
+  - Defaults: 3 attempts and 30 seconds per wait/probe window. The request can
+    therefore take up to approximately 180 seconds when the Station remains
+    unreachable.
 - `POST /api/winrm`
   - Body: `{ host, command, args?, transport?, use_ssl?, port? }`
   - Runs `C:\LabStation\LabStation.exe <command> <args>` via WinRM. Transport, TLS and port are constrained by the host catalog and gateway policy; HTTPS on port 5986 is the default and request values cannot downgrade or override that policy.

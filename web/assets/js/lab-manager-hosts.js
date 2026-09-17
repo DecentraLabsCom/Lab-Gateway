@@ -28,6 +28,7 @@
             groupGuacamoleCandidates = candidates => candidates,
             updateOpsHint = () => {},
             showOpsWarning = () => {},
+            showLoadingToast = () => {},
             showToast = () => {},
             formatHeartbeatError = (host) => `Heartbeat unavailable for ${host}`,
             isHeartbeatConfigurationError = () => false,
@@ -157,6 +158,7 @@
         }
 
         async function refreshAllHosts() {
+            showLoadingToast('Refreshing Lab Station hosts…');
             const loaded = await loadInventory();
             if (!loaded) return false;
             const EventSourceCtor = getEventSource();
@@ -181,6 +183,7 @@
         }
 
         async function pollHeartbeat(host) {
+            showLoadingToast(`Checking heartbeat for ${host}…`);
             try {
                 const res = await fetchImpl('/ops/api/heartbeat/poll', {
                     method: 'POST',

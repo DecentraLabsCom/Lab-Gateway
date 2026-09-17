@@ -54,6 +54,16 @@ test('keeps error styling and treats other types as informational', () => {
   assert.equal(toast.className, 'toast show ');
 });
 
+test('keeps a loading toast visible without scheduling auto-dismissal', () => {
+  const { controller, toast, timeoutCallbacks } = loadToastController();
+
+  controller.showToast('Waking PC-Siemens…', 'loading');
+
+  assert.equal(toast.textContent, 'Waking PC-Siemens…');
+  assert.equal(toast.className, 'toast show loading');
+  assert.equal(timeoutCallbacks.length, 0);
+});
+
 test('exposes one shared controller for all Lab Manager composition roots', () => {
   const { toast, timeoutCallbacks, window } = loadToastController();
   const first = window.LabManagerToast.getDefaultController({

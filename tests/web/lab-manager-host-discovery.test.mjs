@@ -26,6 +26,7 @@ test('probes a Guacamole candidate with the existing request and stores the disc
   const module = loadDiscoveryModule();
   const candidateState = {};
   const events = [];
+  const loadingEvents = [];
   let request;
   const station = {
     address: '192.0.2.18',
@@ -46,6 +47,7 @@ test('probes a Guacamole candidate with the existing request and stores the disc
     callbacks: {
       renderCandidates: () => events.push('render'),
       loadHostInventory: () => events.push('reload'),
+      showLoadingToast: message => loadingEvents.push(message),
       showToast: (...args) => events.push(args),
     },
   });
@@ -69,6 +71,7 @@ test('probes a Guacamole candidate with the existing request and stores the disc
     ['Discovery finished for station-7', 'success'],
     'reload',
   ]);
+  assert.deepEqual(loadingEvents, ['Checking Lab Station…']);
 });
 
 test('keeps the candidate in an error state and reloads inventory after a failed probe', async () => {

@@ -12,10 +12,12 @@
 
         const {
             pollHeartbeat = () => {},
+            showLoadingToast = () => {},
             showToast = () => {},
         } = callbacks;
 
         async function toggleLocalMode(host, enabled) {
+            showLoadingToast(`${enabled ? 'Enabling' : 'Disabling'} local mode for ${host}…`);
             try {
                 const res = await fetchImpl('/ops/api/hosts/local-mode', {
                     method: 'POST',
@@ -41,6 +43,7 @@
         }
 
         async function triggerWol(host) {
+            showLoadingToast(`Waking ${host}…`);
             try {
                 const res = await fetchImpl('/ops/api/wol', {
                     method: 'POST',
@@ -76,6 +79,7 @@
         }
 
         async function triggerWinrm(host, command, args = []) {
+            showLoadingToast(`${command} on ${host}…`);
             try {
                 const res = await fetchImpl('/ops/api/winrm', {
                     method: 'POST',
@@ -101,6 +105,7 @@
         }
 
         async function syncAasHost(host) {
+            showLoadingToast(`Syncing AAS for ${host}…`);
             try {
                 const res = await fetchImpl('/ops/api/aas-sync', {
                     method: 'POST',

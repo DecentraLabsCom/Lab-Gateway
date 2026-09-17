@@ -133,6 +133,7 @@ test('polls heartbeat with the existing endpoint and updates the shared host sta
   const module = loadHostsModule();
   const state = createState();
   const events = [];
+  const loadingEvents = [];
   let request;
   const controller = module.createController({
     fetchImpl: async (url, options) => {
@@ -143,6 +144,7 @@ test('polls heartbeat with the existing endpoint and updates the shared host sta
     callbacks: {
       renderHosts: () => events.push('render'),
       loadActivityFeed: () => events.push('activity'),
+      showLoadingToast: message => loadingEvents.push(message),
       showToast: (...args) => events.push(args),
     },
   });
@@ -162,6 +164,7 @@ test('polls heartbeat with the existing endpoint and updates the shared host sta
     'activity',
     ['Heartbeat station-1 ok', 'success'],
   ]);
+  assert.deepEqual(loadingEvents, ['Checking heartbeat for station-1…']);
 });
 
 test('formats structured heartbeat failures consistently for manual polling', async () => {

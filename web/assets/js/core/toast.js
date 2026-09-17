@@ -3,12 +3,39 @@
 
     let defaultController;
 
-    function createController({ document, setTimeoutImpl }) {
+    function createController({ document, setTimeoutImpl, clearTimeoutImpl = () => {} }) {
+        let hideTimer;
+
+        function clearHideTimer() {
+            if (hideTimer !== undefined) {
+                clearTimeoutImpl(hideTimer);
+                hideTimer = undefined;
+            }
+        }
+
+        function clearAccessibilityState(toast) {
+            toast.removeAttribute?.('role');
+            toast.removeAttribute?.('aria-live');
+            toast.removeAttribute?.('aria-busy');
+        }
+
         function showToast(message, type = 'info') {
             const toast = document.querySelector('#toast');
+            clearHideTimer();
             toast.textContent = message;
-            toast.className = `toast show ${type === 'error' ? 'error' : type === 'success' ? 'success' : ''}`;
-            setTimeoutImpl(() => { toast.className = 'toast'; }, 2500);
+            const isLoading = type === 'loading';
+            toast.className = `toast show ${isLoading ? 'loading' : type === 'error' ? 'error' : type === 'success' ? 'success' : ''}`;
+            if (isLoading) {
+                toast.setAttribute?.('role', 'status');
+                toast.setAttribute?.('aria-live', 'polite');
+                toast.setAttribute?.('aria-busy', 'true');
+                return;
+            }
+            clearAccessibilityState(toast);
+            hideTimer = setTimeoutImpl(() => {
+                toast.className = 'toast';
+                hideTimer = undefined;
+            }, 2500);
         }
 
         return Object.freeze({ showToast });
