@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Tuple
 
+from errors import WinRMRemoteFileNotFoundError
+
 
 def run_labstation_command(
     host: Dict[str, Any],
@@ -96,11 +98,28 @@ def _decode_output(value: Any) -> str:
     return (value or b"").decode("utf-8", errors="ignore")
 
 
-def _run_powershell_result(result: Any, *, operation: str) -> str:
+def _is_remote_file_not_found(stderr: str) -> bool:
+    """Recognize the stable PowerShell shape for a missing remote file."""
+    normalized = str(stderr or "").casefold()
+    return (
+        ("cannot find" in normalized and "path" in normalized)
+        or "does not exist" in normalized
+    )
+
+
+def _run_powershell_result(
+    result: Any,
+    *,
+    operation: str,
+    remote_path: Optional[str] = None,
+) -> str:
     if result.status_code != 0:
+        stderr = _decode_output(result.std_err)
+        if operation == "read" and _is_remote_file_not_found(stderr):
+            raise WinRMRemoteFileNotFoundError(str(remote_path or ""))
         raise RuntimeError(
             f"WinRM {operation} failed ({result.status_code}): "
-            f"{_decode_output(result.std_err)}"
+            f"{stderr}"
         )
     return _decode_output(result.std_out)
 
@@ -196,7 +215,7 @@ def read_remote_file(
         operation_timeout_sec=operation_timeout_sec,
     )
     result = run_method(session, "run_ps", script)
-    return _run_powershell_result(result, operation="read")
+    return _run_powershell_result(result, operation="read", remote_path=path)
 
 
 def write_remote_file(

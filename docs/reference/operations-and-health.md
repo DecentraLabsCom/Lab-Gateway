@@ -122,7 +122,10 @@ flowchart TD
 | Ops action fails | `/ops/health/details`, host catalog, WinRM TLS and CIDR policy | Confirm host address is allowed by `WINRM_MANAGEMENT_CIDRS`; verify the encrypted credential reference. |
 | Power controller is `checking`, `unknown`, or `unreachable` | Lab Manager `Energy` status, controller host/port, private route, credentials and Ops Worker logs | Wait for the background status check, then use `Refresh`; for APC verify UDP `161`, the source-IP authorization and the credential's SNMP version. |
 | Heartbeat reports `WINRM_UNREACHABLE` | Station power state, WinRM listener/firewall, host address/port and the private management route | The Station may be powered off or WinRM may be unavailable; restore reachability and retry. |
-| Heartbeat stream fails for an incomplete Station | Host-card `WinRM credentials` and `WinRM TLS trust` statuses, then `/ops/health/details` and Ops Worker logs | Save the WinRM credential and install the Station certificate before retrying heartbeat; retain any `requestId` for generic internal failures. |
+| Heartbeat reports `WINRM_AUTH_FAILED` | Host-card WinRM credentials, account permissions and the Ops Worker request ID | Recheck or replace the stored Station credential, then retry the heartbeat. |
+| Heartbeat reports `WINRM_HEARTBEAT_NOT_FOUND` | Station heartbeat path, `heartbeat_path` and the remote file-read log | Restore the configured heartbeat file or correct the host path, then retry. |
+| Heartbeat reports `WINRM_HEARTBEAT_INVALID` | Station heartbeat artifact and `status-json` output | Correct the malformed JSON produced by the Station, then retry; do not treat it as a TLS or authentication failure. |
+| Heartbeat stream fails for an incomplete Station | Host-card `WinRM credentials` and `WinRM TLS trust` statuses, then `/ops/health/details` and Ops Worker logs | Save the WinRM credential and save the Station certificate through the host card's `WinRM TLS trust` control (or copy it into the matching per-host `ops-data/winrm-certificates/<winrm-trust-ref>/` directory) before retrying heartbeat; retain any `requestId` for generic internal failures. |
 | FMU route returns `503` | `FMU_RUNNER_ENABLED` and active profile | Start exactly one FMU profile and verify the public audience and, for production, Station connectivity. |
 
 ## Useful Compose commands

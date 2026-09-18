@@ -150,8 +150,8 @@ not started for that host.
 The host card reports credentials and certificate trust separately:
 
 - `WinRM credentials: missing` means no user/password is stored;
-- `WinRM TLS trust: missing` means credentials exist but the Station certificate
-  has not been copied to the Gateway;
+- `WinRM TLS trust: missing` means credentials exist but no valid Station
+  certificate has been saved in the Gateway's per-host trust store;
 - `WinRM TLS trust: ready` means the Gateway can parse the local certificate and
   it is currently within its validity period; and
 - `expired`, `not yet valid`, or `invalid` identify a certificate that cannot be
@@ -180,10 +180,19 @@ The panel reports `missing`, `ready`, `expired`, `not yet valid`, or `invalid`
 independently from the credential status. Error responses include a stable
 code and request ID; internal exceptions and certificate contents are not shown.
 
+Heartbeat failures use these stable codes:
+
+| Code | Meaning | Operator action |
+| --- | --- | --- |
+| `WINRM_AUTH_FAILED` | Lab Station rejected the stored WinRM credentials. | Recheck or replace the host's `WinRM credentials`, then use `Verify connection`. |
+| `WINRM_HEARTBEAT_NOT_FOUND` | The configured heartbeat file could not be read from Lab Station. | Check the station path and `heartbeat_path` for the host; keep the returned `requestId` for logs. |
+| `WINRM_HEARTBEAT_INVALID` | The heartbeat file was read but is not valid JSON. | Inspect the station's `status-json` output and file contents, then retry after correcting the station-side artifact. |
+
 These two prerequisites are independent. Until WinRM credentials are saved,
 the Lab Manager does not open a heartbeat stream for the host. If credentials
 exist but certificate trust is missing or invalid, the host remains unable to
-produce a heartbeat until the certificate is installed or corrected. Use the
+produce a heartbeat until the certificate is saved or corrected through the
+trust panel or the recovery procedure. Use the
 `WinRM credentials` and `WinRM TLS trust` statuses on the host card to decide
 which step is missing; do not treat an incomplete host as a Station or Gateway
 failure.
@@ -192,12 +201,13 @@ For technical bootstrap or recovery, the public certificate exported by Lab
 Station can also be copied directly to the Gateway host:
 
 ```text
-ops-data/winrm-certificates/<lower-case-host-name>/server.cer
+ops-data/winrm-certificates/<lower-case-winrm-trust-ref>/server.cer
 ```
 
 For example, the certificate for `PC-Siemens` is copied from
-`C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer` to
-`ops-data/winrm-certificates/pc-siemens/server.cer`. The ops worker discovers
+`C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer` to the directory
+for the host's `winrm_trust_ref` (for example,
+`ops-data/winrm-certificates/pc-siemens/server.cer`). The ops worker discovers
 the file when it starts or when the host catalog is reloaded, validates its
 format and dates, calculates the fingerprints, generates the local PEM trust
 copy when necessary and uses it only for that host's WinRM sessions. `GET /ops/api/hosts` reports the resulting

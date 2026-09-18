@@ -16,6 +16,22 @@ class WinRMTrustError(ValueError):
         self.code = code
 
 
+class WinRMHeartbeatError(ValueError):
+    """Operational error raised when a Station heartbeat cannot be consumed."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+class WinRMRemoteFileNotFoundError(FileNotFoundError):
+    """Internal marker for a remote PowerShell file-not-found result."""
+
+    def __init__(self, path: str):
+        self.path = path
+        super().__init__("WinRM remote file was not found")
+
+
 WINRM_TRUST_REQUIRED_MESSAGE = "WinRM certificate trust is required"
 WINRM_TRUST_REQUIRED_CODE = "WINRM_TRUST_REQUIRED"
 WINRM_CERTIFICATE_INVALID_MESSAGE = "WinRM certificate trust is invalid"
@@ -44,6 +60,17 @@ WINRM_TRUST_ERROR_MESSAGES = {
 WINRM_CREDENTIALS_REQUIRED_MESSAGE = "WinRM credentials are required"
 WINRM_UNREACHABLE_CODE = "WINRM_UNREACHABLE"
 WINRM_UNREACHABLE_MESSAGE = "Lab Station is unreachable over WinRM"
+WINRM_AUTH_FAILED_CODE = "WINRM_AUTH_FAILED"
+WINRM_AUTH_FAILED_MESSAGE = "WinRM credentials were rejected by Lab Station"
+WINRM_HEARTBEAT_NOT_FOUND_CODE = "WINRM_HEARTBEAT_NOT_FOUND"
+WINRM_HEARTBEAT_NOT_FOUND_MESSAGE = "Lab Station heartbeat file was not found"
+WINRM_HEARTBEAT_INVALID_CODE = "WINRM_HEARTBEAT_INVALID"
+WINRM_HEARTBEAT_INVALID_MESSAGE = "Lab Station heartbeat data is invalid"
+WINRM_HEARTBEAT_ERROR_MESSAGES = {
+    WINRM_AUTH_FAILED_CODE: WINRM_AUTH_FAILED_MESSAGE,
+    WINRM_HEARTBEAT_NOT_FOUND_CODE: WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
+    WINRM_HEARTBEAT_INVALID_CODE: WINRM_HEARTBEAT_INVALID_MESSAGE,
+}
 
 
 def is_winrm_unreachable_error(exc: BaseException) -> bool:
@@ -63,6 +90,34 @@ def is_winrm_unreachable_error(exc: BaseException) -> bool:
         if isinstance(current, requests.exceptions.SSLError):
             return False
         if isinstance(current, network_error_types):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def is_winrm_authentication_error(exc: BaseException) -> bool:
+    """Return whether a downstream WinRM request was rejected for authentication."""
+    authentication_exception_names = {
+        "AuthenticationError",
+        "BasicAuthDisabledError",
+        "InvalidCredentialsError",
+    }
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(current, requests.exceptions.SSLError):
+            return False
+        response = getattr(current, "response", None)
+        if getattr(response, "status_code", None) == 401:
+            return True
+        try:
+            status_code = getattr(current, "code", None)
+        except Exception:  # pylint: disable=broad-except
+            status_code = None
+        if status_code == 401 or str(status_code) == "401":
+            return True
+        if current.__class__.__name__ in authentication_exception_names:
             return True
         current = current.__cause__ or current.__context__
     return False
@@ -107,3 +162,31 @@ def build_winrm_trust_error_payload(
         "host": host_name,
         "requestId": request_id(),
     }
+
+
+def build_winrm_heartbeat_error_payload(
+    host_name: Any,
+    code: str,
+    *,
+    request_id: Callable[[], str],
+    heartbeat_error_messages: Mapping[str, str] = WINRM_HEARTBEAT_ERROR_MESSAGES,
+) -> Dict[str, Any]:
+    """Build the stable public payload for a heartbeat consumption failure."""
+    normalized_code = (
+        code
+        if code in heartbeat_error_messages
+        else WINRM_HEARTBEAT_INVALID_CODE
+    )
+    return {
+        "error": heartbeat_error_messages[normalized_code],
+        "code": normalized_code,
+        "host": host_name,
+        "requestId": request_id(),
+    }
+
+
+def winrm_heartbeat_error_status(code: str) -> int:
+    """Return the HTTP status for a downstream heartbeat contract error."""
+    if code == WINRM_AUTH_FAILED_CODE:
+        return 409
+    return 502

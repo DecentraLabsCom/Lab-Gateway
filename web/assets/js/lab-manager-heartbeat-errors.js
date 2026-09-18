@@ -10,6 +10,9 @@
         WINRM_CERTIFICATE_EXPIRED: 'WinRM certificate is expired',
         WINRM_CERTIFICATE_NOT_YET_VALID: 'WinRM certificate is not yet valid',
         WINRM_TLS_FAILED: 'WinRM TLS validation failed',
+        WINRM_AUTH_FAILED: 'Lab Station rejected the WinRM credentials',
+        WINRM_HEARTBEAT_NOT_FOUND: 'Lab Station heartbeat file was not found',
+        WINRM_HEARTBEAT_INVALID: 'Lab Station heartbeat data is invalid',
         WINRM_TRUST_STORAGE_UNAVAILABLE: 'WinRM certificate trust storage is unavailable',
         WINRM_UNREACHABLE: 'Lab Station is unreachable',
         INTERNAL_ERROR: 'temporary Ops Worker error',
@@ -23,6 +26,9 @@
         'WINRM_CERTIFICATE_EXPIRED',
         'WINRM_CERTIFICATE_NOT_YET_VALID',
         'WINRM_TLS_FAILED',
+        'WINRM_AUTH_FAILED',
+        'WINRM_HEARTBEAT_NOT_FOUND',
+        'WINRM_HEARTBEAT_INVALID',
         'WINRM_TRUST_STORAGE_UNAVAILABLE',
     ]);
 
