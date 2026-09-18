@@ -4,6 +4,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Optional, Pattern, Tuple
 
+from runtime_values import (
+    DEFAULT_EVENTS_PATH,
+    DEFAULT_HEARTBEAT_PATH,
+    DEFAULT_LABSTATION_EXE,
+    DEFAULT_LOCAL_MODE_FLAG_PATH,
+)
+
 
 @dataclass(frozen=True)
 class HostProvisioningContext:
@@ -15,10 +22,10 @@ class HostProvisioningContext:
     get_sanitize_host_name: Callable[
         [Any, Optional[Any]], Tuple[Optional[str], Optional[str]]
     ]
-    default_heartbeat_path: str = r"C:\LabStation\labstation\data\telemetry\heartbeat.json"
-    default_events_path: str = (
-        r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl"
-    )
+    default_heartbeat_path: str = DEFAULT_HEARTBEAT_PATH
+    default_events_path: str = DEFAULT_EVENTS_PATH
+    default_labstation_exe: str = DEFAULT_LABSTATION_EXE
+    default_local_mode_flag_path: str = DEFAULT_LOCAL_MODE_FLAG_PATH
 
 
 __all__ = ["HostProvisioningContext"]

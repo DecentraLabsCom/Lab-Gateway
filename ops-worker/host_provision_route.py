@@ -41,8 +41,20 @@ def handle_host_provision(
         }), 409
 
     provision_payload = dict(payload)
+    ops_host_draft = discovery.get("opsHostDraft")
+    if isinstance(ops_host_draft, dict):
+        discovered_path_fields = {
+            "labstation_exe": "labstationExe",
+            "local_mode_flag_path": "localModeFlagPath",
+            "heartbeat_path": "heartbeatPath",
+            "events_path": "eventsPath",
+        }
+        for source_key, payload_key in discovered_path_fields.items():
+            if not str(provision_payload.get(payload_key) or "").strip():
+                discovered_value = ops_host_draft.get(source_key)
+                if discovered_value:
+                    provision_payload[payload_key] = discovered_value
     if not str(provision_payload.get("mac") or "").strip():
-        ops_host_draft = discovery.get("opsHostDraft")
         suggested_mac = ops_host_draft.get("mac") if isinstance(ops_host_draft, dict) else None
         if suggested_mac:
             provision_payload["mac"] = suggested_mac

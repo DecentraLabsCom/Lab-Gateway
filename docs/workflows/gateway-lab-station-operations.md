@@ -90,11 +90,21 @@ the lab-to-host association. A minimal entry is:
   "winrm_transport": "ntlm",
   "winrm_use_ssl": true,
   "winrm_port": 5986,
-  "heartbeat_path": "C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json"
+  "labstation_exe": "C:\\Lab Station\\LabStation.exe",
+  "local_mode_flag_path": "C:\\Lab Station\\labstation\\data\\local-mode.flag",
+  "heartbeat_path": "C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json",
+  "events_path": "C:\\Lab Station\\labstation\\data\\telemetry\\session-guard-events.jsonl"
 }
 ```
 
 Lab Station periodically writes `heartbeat.json`. The ops worker reads it through WinRM, persists it in `lab_host_heartbeat`, and exposes it through the heartbeat and timeline APIs. Important fields include readiness, `localModeEnabled`, `localSessionActive`, recent operations, power state, and Wake-on-LAN NIC diagnostics.
+
+During host discovery, the worker derives the executable, local-mode flag,
+heartbeat, and event paths from the installed scheduled task. It keeps legacy
+`C:\LabStation` and current `C:\Lab Station` roots compatible; a mixed catalog
+is normalized to the root identified by the heartbeat or executable. The host
+inventory reports `stationPathsReady` and `stationPathIssues` when discovery
+cannot identify a coherent installation.
 
 The current operational API, exposed through the gateway as `/ops/...`, includes:
 
@@ -163,7 +173,7 @@ The end path normally runs `release-session` and can request a shutdown or hiber
 
 ## Lab Station command contract
 
-Lab Station exposes a small CLI surface at `C:\LabStation\LabStation.exe`. The operational commands used most often are:
+Lab Station exposes a small CLI surface at the host's configured `labstation_exe` path (normally `C:\Lab Station\LabStation.exe`). The operational commands used most often are:
 
 | Command | Use in the gateway lifecycle |
 | --- | --- |

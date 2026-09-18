@@ -50,6 +50,9 @@ def test_update_dynamic_host_contract_updates_fields_and_preserves_operational_d
         "mac": "00:22:33:44:55:66",
         "broadcast": "192.168.1.254",
         "heartbeat_path": r"C:\LabStation\heartbeat.json",
+        "labstation_exe": r"C:\Lab Station\LabStation.exe",
+        "local_mode_flag_path": r"C:\Lab Station\labstation\data\local-mode.flag",
+        "events_path": r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl",
     }
     assert config["version"] == 2
     assert writes == [config]
@@ -104,7 +107,13 @@ def test_update_dynamic_host_contract_removes_mac_when_empty(monkeypatch):
     updated, error = worker.update_dynamic_host("lab-01", {"mac": "  "})
 
     assert error is None
-    assert updated == {"name": "lab-01"}
+    assert updated == {
+        "name": "lab-01",
+        "labstation_exe": r"C:\Lab Station\LabStation.exe",
+        "local_mode_flag_path": r"C:\Lab Station\labstation\data\local-mode.flag",
+        "heartbeat_path": r"C:\Lab Station\labstation\data\telemetry\heartbeat.json",
+        "events_path": r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl",
+    }
     assert writes == [config]
 
 
@@ -117,6 +126,28 @@ def test_update_dynamic_host_contract_rejects_invalid_heartbeat_path_without_wri
     assert updated is None
     assert error == "heartbeatPath is required"
     assert writes == []
+
+
+def test_update_dynamic_host_contract_updates_all_station_paths_and_keeps_them_coherent(monkeypatch):
+    config = {"hosts": [{"name": "lab-01"}]}
+    writes = []
+    _configure(monkeypatch, config, write=writes.append)
+
+    updated, error = worker.update_dynamic_host(
+        "lab-01",
+        {
+            "labstationExe": r"C:\Lab Station\LabStation.exe",
+            "localModeFlagPath": r"C:\LabStation\labstation\data\local-mode.flag",
+            "heartbeatPath": r"C:\Lab Station\labstation\data\telemetry\heartbeat.json",
+            "eventsPath": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+        },
+    )
+
+    assert error is None
+    assert updated["labstation_exe"] == r"C:\Lab Station\LabStation.exe"
+    assert updated["local_mode_flag_path"] == r"C:\Lab Station\labstation\data\local-mode.flag"
+    assert updated["events_path"] == r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"
+    assert writes == [config]
 
 
 def test_update_dynamic_host_contract_propagates_write_failure(monkeypatch):

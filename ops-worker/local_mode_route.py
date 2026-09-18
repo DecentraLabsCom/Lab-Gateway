@@ -2,10 +2,12 @@
 
 from typing import Any, Callable, Dict, Optional
 
+from runtime_values import DEFAULT_LOCAL_MODE_FLAG_PATH
+
 
 def get_local_mode_flag_path(host: Dict[str, Any]) -> str:
     """Return the configured Lab Station local-mode flag path."""
-    return host.get("local_mode_flag_path", r"C:\LabStation\labstation\data\local-mode.flag")
+    return host.get("local_mode_flag_path", DEFAULT_LOCAL_MODE_FLAG_PATH)
 
 
 def handle_local_mode(

@@ -78,13 +78,19 @@
         const provisionHostAddress = $('#provisionHostAddress');
         const provisionHostMac = $('#provisionHostMac');
         const provisionHostBroadcast = $('#provisionHostBroadcast');
+        const provisionLabstationExe = $('#provisionLabstationExe');
+        const provisionLocalModeFlagPath = $('#provisionLocalModeFlagPath');
         const provisionHeartbeatPath = $('#provisionHeartbeatPath');
+        const provisionEventsPath = $('#provisionEventsPath');
         const editHostOriginalName = $('#editHostOriginalName');
         const editHostName = $('#editHostName');
         const editHostAddress = $('#editHostAddress');
         const editHostMac = $('#editHostMac');
         const editHostBroadcast = $('#editHostBroadcast');
+        const editLabstationExe = $('#editLabstationExe');
+        const editLocalModeFlagPath = $('#editLocalModeFlagPath');
         const editHeartbeatPath = $('#editHeartbeatPath');
+        const editEventsPath = $('#editEventsPath');
 
         const hostState = {};
         const hostMetadata = {};
@@ -331,14 +337,20 @@
                 provisionHostAddress,
                 provisionHostMac,
                 provisionHostBroadcast,
+                provisionLabstationExe,
+                provisionLocalModeFlagPath,
                 provisionHeartbeatPath,
+                provisionEventsPath,
                 editModal: editHostModal,
                 editOriginalName: editHostOriginalName,
                 editName: editHostName,
                 editAddress: editHostAddress,
                 editMac: editHostMac,
                 editBroadcast: editHostBroadcast,
+                editLabstationExe,
+                editLocalModeFlagPath,
                 editHeartbeatPath,
+                editEventsPath,
                 editSaveButton: saveEditHostButton,
                 credentialsModal: winrmCredentialsModal,
                 credentialRef: winrmCredentialRef,

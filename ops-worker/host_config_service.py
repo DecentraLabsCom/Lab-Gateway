@@ -5,6 +5,8 @@ import os
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
+from labstation_paths import resolve_labstation_paths
+
 
 class ConfigReader(Protocol):
     """Callable shape for readers supporting the optional-file flag."""
@@ -181,6 +183,23 @@ def update_dynamic_host(
         if len(heartbeat_path) > 1024 or any(ord(char) < 32 for char in heartbeat_path):
             return None, "heartbeatPath must be a valid Windows path"
         updated["heartbeat_path"] = heartbeat_path
+
+    path_fields = {
+        "labstationExe": "labstation_exe",
+        "localModeFlagPath": "local_mode_flag_path",
+        "eventsPath": "events_path",
+    }
+    for payload_key, host_key in path_fields.items():
+        if payload_key not in payload:
+            continue
+        value = str(payload.get(payload_key) or "").strip()
+        if not value:
+            return None, f"{payload_key} is required"
+        if len(value) > 1024 or any(ord(char) < 32 for char in value):
+            return None, f"{payload_key} must be a valid Windows path"
+        updated[host_key] = value
+
+    updated.update(resolve_labstation_paths(updated))
 
     hosts[host_index] = updated
     config["hosts"] = hosts

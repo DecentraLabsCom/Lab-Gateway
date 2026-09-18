@@ -8,8 +8,10 @@
       "winrm_transport": "ntlm",
       "winrm_use_ssl": true,
       "winrm_port": 5986,
-      "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
-      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl"
+      "labstation_exe": "C:\\\\Lab Station\\\\LabStation.exe",
+      "local_mode_flag_path": "C:\\\\Lab Station\\\\labstation\\\\data\\\\local-mode.flag",
+      "heartbeat_path": "C:\\\\Lab Station\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
+      "events_path": "C:\\\\Lab Station\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl"
     }
   ]
 }

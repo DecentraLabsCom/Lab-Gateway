@@ -4,6 +4,8 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol, Type
 
+from runtime_values import DEFAULT_EVENTS_PATH, DEFAULT_HEARTBEAT_PATH
+
 
 class HostRegistryProtocol(Protocol):
     """Minimal registry surface required by background heartbeat polling."""
@@ -38,8 +40,8 @@ class HeartbeatContext:
     credentials_required_message: str
     heartbeat_interval_seconds: float
     sleep: Callable[[float], None]
-    default_heartbeat_path: str = r"C:\LabStation\labstation\data\telemetry\heartbeat.json"
-    default_events_path: str = r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl"
+    default_heartbeat_path: str = DEFAULT_HEARTBEAT_PATH
+    default_events_path: str = DEFAULT_EVENTS_PATH
 
 
 __all__ = ["HeartbeatContext", "HostRegistryProtocol"]

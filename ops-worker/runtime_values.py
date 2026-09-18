@@ -2,8 +2,13 @@
 
 import re
 
+from labstation_paths import paths_for_root
 
-DEFAULT_LABSTATION_EXE = r"C:\LabStation\LabStation.exe"
+_DEFAULT_LABSTATION_PATHS = paths_for_root(None)
+DEFAULT_LABSTATION_EXE = _DEFAULT_LABSTATION_PATHS["labstation_exe"]
+DEFAULT_LOCAL_MODE_FLAG_PATH = _DEFAULT_LABSTATION_PATHS["local_mode_flag_path"]
+DEFAULT_HEARTBEAT_PATH = _DEFAULT_LABSTATION_PATHS["heartbeat_path"]
+DEFAULT_EVENTS_PATH = _DEFAULT_LABSTATION_PATHS["events_path"]
 WINRM_PORT = 5986
 
 HTTP_HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
@@ -22,6 +27,9 @@ WINRM_CERTIFICATE_EXTENSIONS = {".cer", ".crt", ".der", ".pem"}
 
 RUNTIME_VALUE_NAMES = (
     "DEFAULT_LABSTATION_EXE",
+    "DEFAULT_LOCAL_MODE_FLAG_PATH",
+    "DEFAULT_HEARTBEAT_PATH",
+    "DEFAULT_EVENTS_PATH",
     "WINRM_PORT",
     "HTTP_HEADER_NAME_RE",
     "HOST_NAME_RE",

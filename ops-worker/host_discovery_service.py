@@ -3,6 +3,8 @@
 from collections.abc import Callable, Sequence
 from typing import Any, Dict, Optional
 
+from labstation_paths import resolve_labstation_paths
+
 
 def discover_labstation_candidate(
     connection: Dict[str, Any],
@@ -69,13 +71,18 @@ def discover_labstation_candidate(
     else:
         status = "no-response"
 
+    heartbeat_path = heartbeat.get("path") or heartbeat_paths[0]
+    station_paths = resolve_labstation_paths({"heartbeat_path": heartbeat_path})
+    events_path = station_paths["events_path"] if heartbeat.get("path") else events_path
     ops_host_draft = {
         "name": connection.get("hostname"),
         "address": connection.get("hostname"),
         "winrm_transport": "ntlm",
         "winrm_use_ssl": True,
         "winrm_port": draft_winrm_port,
-        "heartbeat_path": heartbeat.get("path") or heartbeat_paths[0],
+        "labstation_exe": station_paths["labstation_exe"],
+        "local_mode_flag_path": station_paths["local_mode_flag_path"],
+        "heartbeat_path": station_paths["heartbeat_path"],
         "events_path": events_path,
         "nameCandidates": name_candidates(connection),
     }

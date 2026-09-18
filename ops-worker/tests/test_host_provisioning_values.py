@@ -50,3 +50,17 @@ def test_host_provisioning_values_returns_validation_errors_without_partial_host
     assert error is None
     assert host is not None
     assert "labs" not in host
+
+
+def test_host_provisioning_values_derives_coherent_paths_from_discovered_heartbeat():
+    host, error = _build({
+        "name": "Station-A",
+        "heartbeatPath": r"C:\Lab Station\labstation\data\telemetry\heartbeat.json",
+        "eventsPath": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+    })
+
+    assert error is None
+    assert host["labstation_exe"] == r"C:\Lab Station\LabStation.exe"
+    assert host["local_mode_flag_path"] == r"C:\Lab Station\labstation\data\local-mode.flag"
+    assert host["heartbeat_path"] == r"C:\Lab Station\labstation\data\telemetry\heartbeat.json"
+    assert host["events_path"] == r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"
