@@ -109,6 +109,7 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
                 host_name,
                 code,
             ),
+            request_id=lambda: get("_request_id")(),
             missing_credentials_predicate=lambda error: get(
                 "is_missing_winrm_credentials_error"
             )(error),

@@ -1,4 +1,5 @@
 import requests
+from winrm.exceptions import InvalidCredentialsError
 
 import errors
 
@@ -65,3 +66,32 @@ def test_winrm_unreachable_payload_contains_safe_station_endpoint_details():
         "address": "192.168.1.50",
         "port": 5986,
     }
+
+def test_winrm_authentication_error_classifier_handles_pywinrm_and_http_401():
+    class AuthenticationError(Exception):
+        code = 401
+
+    response = requests.Response()
+    response.status_code = 401
+    http_error = requests.exceptions.HTTPError(response=response)
+
+    assert errors.is_winrm_authentication_error(AuthenticationError()) is True
+    assert errors.is_winrm_authentication_error(InvalidCredentialsError("rejected")) is True
+    assert errors.is_winrm_authentication_error(http_error) is True
+    assert errors.is_winrm_authentication_error(requests.exceptions.Timeout()) is False
+    assert errors.is_winrm_authentication_error(requests.exceptions.SSLError()) is False
+
+
+def test_winrm_heartbeat_error_payload_is_safe_and_correlated():
+    assert errors.build_winrm_heartbeat_error_payload(
+        "lab-ws-01",
+        "WINRM_HEARTBEAT_NOT_FOUND",
+        request_id=lambda: "heartbeat-1",
+    ) == {
+        "error": errors.WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
+        "code": "WINRM_HEARTBEAT_NOT_FOUND",
+        "host": "lab-ws-01",
+        "requestId": "heartbeat-1",
+    }
+    assert errors.winrm_heartbeat_error_status("WINRM_AUTH_FAILED") == 409
+    assert errors.winrm_heartbeat_error_status("WINRM_HEARTBEAT_INVALID") == 502

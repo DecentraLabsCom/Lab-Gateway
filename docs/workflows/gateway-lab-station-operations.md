@@ -30,9 +30,11 @@ each Lite owns the complete local management path.
 
 WinRM credentials are deliberately separate from `hosts.json`. A host refers to a `credential_ref`; the ops worker encrypts the corresponding credentials using the required `OPS_SECRETS_KEY`.
 
-WinRM certificate trust is also separate from the credentials. The first
-implementation uses the persistent `ops-data` bind mount. For a host whose
-name is `PC-Siemens`, copy the public certificate exported by Lab Station to:
+WinRM certificate trust is also separate from the credentials. The preferred
+operator path is to upload the public certificate from the host card's
+`WinRM TLS trust` control in Lab Manager. The persistent `ops-data` bind
+mount remains the storage boundary for that per-host trust. For a host whose
+name is `PC-Siemens`, the resulting directory is:
 
 ```text
 ops-data/winrm-certificates/pc-siemens/server.cer
@@ -48,8 +50,10 @@ per-host `ca_trust_path` while keeping TLS validation enabled. A certificate
 is never installed as a global trust override and is never trusted for another
 host.
 
-The manual bootstrap procedure, which remains useful for recovery and local
-deployments, is:
+The managed handoff previews the certificate, validates its SAN/CN identity
+and validity dates, requires an explicit SHA-256 confirmation, and then uses
+the certificate only for that host. The manual bootstrap procedure, which
+remains useful for recovery and local deployments, is:
 
 1. Run `LabStation.exe winrm configure` on the Windows station.
 2. Copy `C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer` to the

@@ -15,11 +15,14 @@ function loadHeartbeatErrors() {
   return window.LabManagerHeartbeatErrors;
 }
 
-test('classifies only the existing WinRM configuration heartbeat errors', () => {
+test('classifies WinRM configuration heartbeat errors', () => {
   const errors = loadHeartbeatErrors();
 
   assert.equal(errors.isConfigurationError(' WINRM_TRUST_REQUIRED '), true);
   assert.equal(errors.isConfigurationError('WINRM_CERTIFICATE_EXPIRED'), true);
+  assert.equal(errors.isConfigurationError('WINRM_AUTH_FAILED'), true);
+  assert.equal(errors.isConfigurationError('WINRM_HEARTBEAT_NOT_FOUND'), true);
+  assert.equal(errors.isConfigurationError('WINRM_HEARTBEAT_INVALID'), true);
   assert.equal(errors.isConfigurationError('INTERNAL_ERROR'), false);
   assert.equal(errors.isConfigurationError('UNKNOWN_ERROR'), false);
   assert.equal(errors.isConfigurationError(null), false);
@@ -57,6 +60,24 @@ test('formats public heartbeat errors and restricts request IDs to generic failu
       port: 5986,
     }),
     'Heartbeat unavailable for PC-Siemens: Lab Station is unreachable at 10.192.38.82:5986 (it may be powered off or WinRM may be unavailable)',
+  );
+  assert.equal(
+    errors.formatHeartbeatError('PC-Siemens', {
+      code: 'WINRM_AUTH_FAILED',
+    }),
+    'Heartbeat unavailable for PC-Siemens: Lab Station rejected the WinRM credentials',
+  );
+  assert.equal(
+    errors.formatHeartbeatError('PC-Siemens', {
+      code: 'WINRM_HEARTBEAT_NOT_FOUND',
+    }),
+    'Heartbeat unavailable for PC-Siemens: Lab Station heartbeat file was not found',
+  );
+  assert.equal(
+    errors.formatHeartbeatError('PC-Siemens', {
+      code: 'WINRM_HEARTBEAT_INVALID',
+    }),
+    'Heartbeat unavailable for PC-Siemens: Lab Station heartbeat data is invalid',
   );
   assert.equal(
     errors.formatHeartbeatError('PC-Siemens', {

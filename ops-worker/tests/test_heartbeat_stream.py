@@ -2,6 +2,7 @@ import json
 
 import pytest
 import requests
+import errors
 
 import heartbeat_stream
 
@@ -102,4 +103,52 @@ def test_heartbeat_stream_emits_actionable_unavailable_error_for_network_failure
         "port": 5986,
     }
     assert not payload.get("requestId")
+    assert dependencies["logger"].exception_calls == []
+
+
+def test_heartbeat_stream_emits_auth_error_for_pywinrm_401():
+    response_obj = requests.Response()
+    response_obj.status_code = 401
+    failure = requests.exceptions.HTTPError(response=response_obj)
+    stream, dependencies = _stream(
+        poll_heartbeat=lambda _host, include_events=False: (_ for _ in ()).throw(failure),
+    )
+
+    chunk = next(stream)
+    payload = json.loads(chunk.split(":", 1)[1])
+
+    assert payload["code"] == errors.WINRM_AUTH_FAILED_CODE
+    assert payload["error"] == errors.WINRM_AUTH_FAILED_MESSAGE
+    assert payload["requestId"] == "request-1"
+    with pytest.raises(StopIteration):
+        next(stream)
+    assert dependencies["logger"].exception_calls == []
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        (errors.WINRM_AUTH_FAILED_CODE, errors.WINRM_AUTH_FAILED_MESSAGE),
+        (errors.WINRM_HEARTBEAT_NOT_FOUND_CODE, errors.WINRM_HEARTBEAT_NOT_FOUND_MESSAGE),
+        (errors.WINRM_HEARTBEAT_INVALID_CODE, errors.WINRM_HEARTBEAT_INVALID_MESSAGE),
+    ],
+)
+def test_heartbeat_stream_emits_classified_heartbeat_errors_and_stops(code, message):
+    stream, dependencies = _stream(
+        poll_heartbeat=lambda _host, include_events=False: (_ for _ in ()).throw(
+            errors.WinRMHeartbeatError(code, "private detail"),
+        ),
+    )
+
+    chunk = next(stream)
+    payload = json.loads(chunk.split(":", 1)[1])
+
+    assert payload == {
+        "error": message,
+        "code": code,
+        "host": "lab-ws-01",
+        "requestId": "request-1",
+    }
+    with pytest.raises(StopIteration):
+        next(stream)
     assert dependencies["logger"].exception_calls == []

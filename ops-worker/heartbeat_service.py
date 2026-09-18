@@ -4,6 +4,15 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any, Dict, Optional
 
+from errors import (
+    WINRM_HEARTBEAT_INVALID_CODE,
+    WINRM_HEARTBEAT_INVALID_MESSAGE,
+    WINRM_HEARTBEAT_NOT_FOUND_CODE,
+    WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
+    WinRMHeartbeatError,
+    WinRMRemoteFileNotFoundError,
+)
+
 
 def poll_heartbeat(
     host: Mapping[str, Any],
@@ -21,8 +30,20 @@ def poll_heartbeat(
     """Read a Station heartbeat and perform best-effort side effects."""
     hb_path = host.get("heartbeat_path", default_heartbeat_path)
     events_path = host.get("events_path", default_events_path)
-    content = read_remote_file(host, hb_path, None, None, None, None, None)
-    heartbeat = json.loads(content)
+    try:
+        content = read_remote_file(host, hb_path, None, None, None, None, None)
+    except WinRMRemoteFileNotFoundError as exc:
+        raise WinRMHeartbeatError(
+            WINRM_HEARTBEAT_NOT_FOUND_CODE,
+            WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
+        ) from exc
+    try:
+        heartbeat = json.loads(content)
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as exc:
+        raise WinRMHeartbeatError(
+            WINRM_HEARTBEAT_INVALID_CODE,
+            WINRM_HEARTBEAT_INVALID_MESSAGE,
+        ) from exc
     last_event: Optional[Dict[str, Any]] = None
     if include_events:
         try:

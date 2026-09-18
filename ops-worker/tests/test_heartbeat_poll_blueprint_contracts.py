@@ -21,6 +21,7 @@ def test_heartbeat_poll_blueprint_preserves_payload_and_error_provider_contract(
                 "host": host_name,
                 "code": code,
             },
+            request_id=lambda: "request-id",
             missing_credentials_predicate=lambda _error: False,
             credentials_required_message=lambda: "credentials required",
             internal_error_response=lambda _message, _exc: ({"error": "internal"}, 500),

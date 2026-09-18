@@ -3,8 +3,13 @@
 from typing import Any, Callable, Dict, Mapping, Optional, Type
 
 from errors import (
+    WINRM_AUTH_FAILED_CODE,
     build_winrm_unreachable_payload,
+    build_winrm_heartbeat_error_payload,
+    is_winrm_authentication_error,
     is_winrm_unreachable_error,
+    WinRMHeartbeatError,
+    winrm_heartbeat_error_status,
 )
 
 
@@ -17,6 +22,7 @@ def handle_heartbeat_poll(
     jsonify: Callable[[Any], Any],
     trust_error_type: Type[BaseException],
     trust_error_payload: Callable[[Any, str], Dict[str, Any]],
+    request_id: Callable[[], str],
     missing_credentials_predicate: Callable[[ValueError], bool],
     credentials_required_message: str,
     internal_error_response: Callable[[str, BaseException], Any],
@@ -38,6 +44,18 @@ def handle_heartbeat_poll(
     except trust_error_type as exc:
         error_code = str(getattr(exc, "code", ""))
         return jsonify(trust_error_payload(host_name, error_code)), 409
+    except WinRMHeartbeatError as exc:
+        error_code = str(getattr(exc, "code", ""))
+        return (
+            jsonify(
+                build_winrm_heartbeat_error_payload(
+                    host_name,
+                    error_code,
+                    request_id=request_id,
+                )
+            ),
+            winrm_heartbeat_error_status(error_code),
+        )
     except ValueError as exc:
         if missing_credentials_predicate(exc):
             return jsonify({
@@ -47,6 +65,17 @@ def handle_heartbeat_poll(
             }), 409
         return internal_error_response("Heartbeat poll failed", exc)
     except Exception as exc:
+        if is_winrm_authentication_error(exc):
+            return (
+                jsonify(
+                    build_winrm_heartbeat_error_payload(
+                        host_name,
+                        WINRM_AUTH_FAILED_CODE,
+                        request_id=request_id,
+                    )
+                ),
+                winrm_heartbeat_error_status(WINRM_AUTH_FAILED_CODE),
+            )
         if is_winrm_unreachable_error(exc):
             return jsonify(build_winrm_unreachable_payload(host_name, host)), 503
         return internal_error_response("Heartbeat poll failed", exc)

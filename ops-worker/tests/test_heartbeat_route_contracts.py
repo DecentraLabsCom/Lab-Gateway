@@ -103,3 +103,73 @@ def test_heartbeat_poll_route_maps_winrm_network_failure_to_actionable_unavailab
         "address": "192.168.1.50",
         "port": 5986,
     }
+
+
+def test_heartbeat_poll_route_maps_rejected_credentials_to_actionable_error(client, monkeypatch):
+    host = {"name": "lab-ws-01", "address": "192.168.1.50"}
+    response_obj = worker.requests.Response()
+    response_obj.status_code = 401
+    failure = worker.requests.exceptions.HTTPError(response=response_obj)
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    monkeypatch.setattr(worker, "_request_id", lambda: "heartbeat-auth-1")
+    monkeypatch.setattr(worker, "poll_heartbeat", Mock(side_effect=failure))
+
+    response = client.post("/api/heartbeat/poll", json={"host": "lab-ws-01"})
+
+    assert response.status_code == 409
+    assert response.json == {
+        "error": worker.WINRM_AUTH_FAILED_MESSAGE,
+        "code": worker.WINRM_AUTH_FAILED_CODE,
+        "host": "lab-ws-01",
+        "requestId": "heartbeat-auth-1",
+    }
+
+
+def test_heartbeat_poll_route_maps_missing_remote_file_to_actionable_error(client, monkeypatch):
+    host = {"name": "lab-ws-01", "address": "192.168.1.50"}
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    monkeypatch.setattr(worker, "_request_id", lambda: "heartbeat-file-1")
+    monkeypatch.setattr(
+        worker,
+        "poll_heartbeat",
+        Mock(side_effect=worker.WinRMHeartbeatError(
+            worker.WINRM_HEARTBEAT_NOT_FOUND_CODE,
+            "remote path details",
+        )),
+    )
+
+    response = client.post("/api/heartbeat/poll", json={"host": "lab-ws-01"})
+
+    assert response.status_code == 502
+    assert response.json == {
+        "error": worker.WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
+        "code": worker.WINRM_HEARTBEAT_NOT_FOUND_CODE,
+        "host": "lab-ws-01",
+        "requestId": "heartbeat-file-1",
+    }
+    assert "remote path details" not in response.get_data(as_text=True)
+
+
+def test_heartbeat_poll_route_maps_invalid_heartbeat_to_actionable_error(client, monkeypatch):
+    host = {"name": "lab-ws-01", "address": "192.168.1.50"}
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    monkeypatch.setattr(worker, "_request_id", lambda: "heartbeat-json-1")
+    monkeypatch.setattr(
+        worker,
+        "poll_heartbeat",
+        Mock(side_effect=worker.WinRMHeartbeatError(
+            worker.WINRM_HEARTBEAT_INVALID_CODE,
+            "invalid JSON details",
+        )),
+    )
+
+    response = client.post("/api/heartbeat/poll", json={"host": "lab-ws-01"})
+
+    assert response.status_code == 502
+    assert response.json == {
+        "error": worker.WINRM_HEARTBEAT_INVALID_MESSAGE,
+        "code": worker.WINRM_HEARTBEAT_INVALID_CODE,
+        "host": "lab-ws-01",
+        "requestId": "heartbeat-json-1",
+    }
+    assert "invalid JSON details" not in response.get_data(as_text=True)

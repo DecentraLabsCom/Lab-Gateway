@@ -219,3 +219,19 @@ def test_remote_file_contract_preserves_failure_messages(
         calls[operation]()
 
     assert str(exc_info.value) == expected_message
+
+
+def test_read_remote_file_classifies_power_shell_missing_path(monkeypatch):
+    import errors
+
+    result = SimpleNamespace(
+        status_code=1,
+        std_out=b"",
+        std_err=b"Get-Content : Cannot find path because it does not exist.",
+    )
+    host, _, _ = _patch_remote_command_dependencies(monkeypatch, result=result)
+
+    with pytest.raises(errors.WinRMRemoteFileNotFoundError):
+        worker.read_remote_file(
+            host, r"C:\Lab\heartbeat.json", None, None, "ntlm", True, 5986
+        )

@@ -1,4 +1,6 @@
 import json
+import pytest
+import errors
 
 import heartbeat_service
 
@@ -96,3 +98,46 @@ def test_poll_heartbeat_keeps_best_effort_failures_out_of_the_main_result():
     assert result == {"heartbeat": heartbeat, "last_event": None}
     assert len(logger.warning_calls) == 2
     assert len(logger.error_calls) == 1
+
+
+def test_poll_heartbeat_classifies_missing_remote_heartbeat_file():
+    host = {"name": "lab-ws-01"}
+
+    def read_remote_file(*_args):
+        raise errors.WinRMRemoteFileNotFoundError(r'C:\LabStation\heartbeat.json')
+
+    with pytest.raises(errors.WinRMHeartbeatError) as exc_info:
+        heartbeat_service.poll_heartbeat(
+            host,
+            read_remote_file=read_remote_file,
+            persist_heartbeat=lambda *_args: None,
+            db_engine=None,
+            sync_lab_to_basyx=lambda *_args: {},
+            resolve_lab_ids_for_host=lambda _host: [],
+            logger=Logger(),
+            default_heartbeat_path="heartbeat-default",
+            default_events_path="events-default",
+        )
+
+    assert exc_info.value.code == errors.WINRM_HEARTBEAT_NOT_FOUND_CODE
+    assert str(exc_info.value) == errors.WINRM_HEARTBEAT_NOT_FOUND_MESSAGE
+
+
+def test_poll_heartbeat_classifies_invalid_remote_heartbeat_json():
+    host = {"name": "lab-ws-01"}
+
+    with pytest.raises(errors.WinRMHeartbeatError) as exc_info:
+        heartbeat_service.poll_heartbeat(
+            host,
+            read_remote_file=lambda *_args: "not-json",
+            persist_heartbeat=lambda *_args: None,
+            db_engine=None,
+            sync_lab_to_basyx=lambda *_args: {},
+            resolve_lab_ids_for_host=lambda _host: [],
+            logger=Logger(),
+            default_heartbeat_path="heartbeat-default",
+            default_events_path="events-default",
+        )
+
+    assert exc_info.value.code == errors.WINRM_HEARTBEAT_INVALID_CODE
+    assert str(exc_info.value) == errors.WINRM_HEARTBEAT_INVALID_MESSAGE

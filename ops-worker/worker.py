@@ -50,6 +50,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from waitress import serve
 import aas_generator
 from errors import (
+    WINRM_AUTH_FAILED_CODE,
+    WINRM_AUTH_FAILED_MESSAGE,
     WINRM_CERTIFICATE_EXPIRED_MESSAGE,
     WINRM_CERTIFICATE_INVALID_MESSAGE,
     WINRM_CERTIFICATE_NOT_YET_VALID_MESSAGE,
@@ -57,6 +59,10 @@ from errors import (
     WINRM_CREDENTIALS_REQUIRED_MESSAGE,
     WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE,
     WINRM_FINGERPRINT_MISMATCH_MESSAGE,
+    WINRM_HEARTBEAT_INVALID_CODE,
+    WINRM_HEARTBEAT_INVALID_MESSAGE,
+    WINRM_HEARTBEAT_NOT_FOUND_CODE,
+    WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
     WINRM_TLS_FAILED_MESSAGE,
     WINRM_TRUST_ERROR_MESSAGES,
     WINRM_TRUST_REF_MISMATCH_MESSAGE,
@@ -64,6 +70,8 @@ from errors import (
     WINRM_TRUST_REQUIRED_MESSAGE,
     WINRM_UNREACHABLE_CODE,
     WINRM_UNREACHABLE_MESSAGE,
+    WinRMHeartbeatError,
+    WinRMRemoteFileNotFoundError,
     WinRMTrustError,
     build_winrm_trust_error_payload as _build_winrm_trust_error_payload_impl,
     is_missing_winrm_credentials_error,

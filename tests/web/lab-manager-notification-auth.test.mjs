@@ -176,9 +176,11 @@ function loadLabManager({
     'winrmCredentialRef', 'winrmCredentialAddress', 'winrmCredentialUser',
     'winrmCredentialPassword', 'provisionConnectionId', 'provisionHostName',
     'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac',
+    'provisionHostBroadcast',
     'provisionHeartbeatPath',
     'editHostModal', 'closeEditHostModal', 'cancelEditHost', 'saveEditHost',
     'editHostOriginalName', 'editHostName', 'editHostAddress', 'editHostMac',
+    'editHostBroadcast',
     'editHeartbeatPath',
     'btnTestLoad', 'saveConfigBtn', 'btnTestEmail', 'refreshHostsBtn', 'hostList',
     'guacamoleCandidateList', 'fmuSyncBtn', 'fmuSyncKey',
@@ -1729,6 +1731,7 @@ test('edits a dynamic ops host from the pencil action', async () => {
   assert.deepEqual(JSON.parse(editCall.options.body), {
     name: 'siemens-admin',
     mac: '00-22-33-44-55-66',
+    broadcast: '',
     heartbeatPath: 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json',
   });
   assert.equal(elements.get('editHostModal').classList.contains('show'), false);

@@ -5,8 +5,12 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Dict, Type
 
 from errors import (
+    WINRM_AUTH_FAILED_CODE,
+    build_winrm_heartbeat_error_payload,
     build_winrm_unreachable_payload,
+    is_winrm_authentication_error,
     is_winrm_unreachable_error,
+    WinRMHeartbeatError,
 )
 
 
@@ -49,6 +53,24 @@ def generate_heartbeat_stream(
                 json.dumps(trust_error_payload(host.get("name"), error_code)),
             )
             return
+        except WinRMHeartbeatError as exc:
+            error_code = str(getattr(exc, "code", ""))
+            logger.info(
+                "Heartbeat stream paused for %s: %s",
+                sanitize_log_value(host.get("name")),
+                error_code,
+            )
+            yield format_sse_event(
+                "error",
+                json.dumps(
+                    build_winrm_heartbeat_error_payload(
+                        host.get("name"),
+                        error_code,
+                        request_id=request_id,
+                    )
+                ),
+            )
+            return
         except ValueError as exc:
             if missing_credentials_predicate(exc):
                 logger.info(
@@ -79,6 +101,23 @@ def generate_heartbeat_stream(
                 }),
             )
         except Exception as exc:
+            if is_winrm_authentication_error(exc):
+                logger.info(
+                    "Heartbeat stream paused for %s: %s",
+                    sanitize_log_value(host.get("name")),
+                    WINRM_AUTH_FAILED_CODE,
+                )
+                yield format_sse_event(
+                    "error",
+                    json.dumps(
+                        build_winrm_heartbeat_error_payload(
+                            host.get("name"),
+                            WINRM_AUTH_FAILED_CODE,
+                            request_id=request_id,
+                        )
+                    ),
+                )
+                return
             if is_winrm_unreachable_error(exc):
                 logger.info(
                     "Heartbeat stream unavailable for %s: WinRM unreachable",

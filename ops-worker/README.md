@@ -60,8 +60,11 @@ python worker.py
 ## Per-host WinRM certificate trust
 
 Lab Station exports its public WinRM certificate as
-`C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer`. Copy that file
-to the matching directory in the Gateway's persistent `ops-data` mount:
+`C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer`. The recommended
+path is to upload it from the host card's `WinRM TLS trust` control in Lab
+Manager, which validates the certificate and stores it for that host. For
+bootstrap or recovery, copy the file to the matching directory in the
+Gateway's persistent `ops-data` mount:
 
 ```text
 ops-data/winrm-certificates/<lower-case-winrm-trust-ref>/server.cer
@@ -73,15 +76,29 @@ and when `POST /api/hosts/reload` runs. It validates the CER as DER or PEM,
 generates a local `server.pem` for Requests/OpenSSL when necessary, and uses
 that PEM only for the corresponding host's WinRM sessions. The host's
 `winrm_trust_ref` controls the directory; if omitted, the host name is used.
-Uploaded certificates are stored canonically as `server.cer` plus
-`metadata.json`; the metadata records the fingerprint and operational dates,
-never private key material.
+Uploaded certificates are stored canonically as `server.cer`, `server.pem`,
+and `metadata.json`; the metadata records the fingerprint and operational
+dates, never private key material. The PEM is materialized for the validated
+host session and is not a global process trust bundle.
 
 After copying a certificate, restart the worker or call the protected reload
 endpoint. `GET /api/hosts` exposes `winrmTrustStatus`, fingerprints, SANs and
 validity dates. Missing, invalid or expired trust returns a classified WinRM
 error. TLS verification remains enabled; do not use `TrustedHosts` or disable
 certificate validation.
+
+Heartbeat polling and streaming expose these additional stable downstream
+errors instead of `INTERNAL_ERROR`:
+
+- `WINRM_AUTH_FAILED`: Lab Station rejected the stored WinRM credentials
+  (HTTP 409).
+- `WINRM_HEARTBEAT_NOT_FOUND`: the configured remote heartbeat file could not
+  be read (HTTP 502).
+- `WINRM_HEARTBEAT_INVALID`: the remote heartbeat was not valid JSON
+  (HTTP 502).
+
+Each classified heartbeat error includes the host and a request ID, while the
+public message omits credentials, remote paths and PowerShell details.
 
 ### Local power-driver smoke tests
 
