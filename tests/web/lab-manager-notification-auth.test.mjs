@@ -177,11 +177,11 @@ function loadLabManager({
     'winrmCredentialPassword', 'provisionConnectionId', 'provisionHostName',
     'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac',
     'provisionHostBroadcast',
-    'provisionHeartbeatPath',
+    'provisionLabstationPath',
     'editHostModal', 'closeEditHostModal', 'cancelEditHost', 'saveEditHost',
     'editHostOriginalName', 'editHostName', 'editHostAddress', 'editHostMac',
     'editHostBroadcast',
-    'editHeartbeatPath',
+    'editLabstationPath',
     'btnTestLoad', 'saveConfigBtn', 'btnTestEmail', 'refreshHostsBtn', 'hostList',
     'guacamoleCandidateList', 'fmuSyncBtn', 'fmuSyncKey',
     'fmuSyncFile', 'fmuSyncFileName', 'fmuSyncContactEmail',
@@ -1684,7 +1684,7 @@ test('edits a dynamic ops host from the pencil action', async () => {
           name: '10.192.38.82',
           address: '10.192.38.82',
           mac: '00:11:22:33:44:55',
-          heartbeatPath: 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json',
+          labstationPath: 'C:\\LabStation',
           editable: true,
           winrmConfigured: false,
           guacamole: { status: 'none', connections: [] },
@@ -1713,14 +1713,11 @@ test('edits a dynamic ops host from the pencil action', async () => {
   assert.equal(elements.get('editHostName').value, '10.192.38.82');
   assert.equal(elements.get('editHostAddress').value, '10.192.38.82');
   assert.equal(elements.get('editHostMac').value, '00:11:22:33:44:55');
-  assert.equal(
-    elements.get('editHeartbeatPath').value,
-    'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json',
-  );
+  assert.equal(elements.get('editLabstationPath').value, 'C:\\LabStation');
 
   elements.get('editHostName').value = 'siemens-admin';
   elements.get('editHostMac').value = '00-22-33-44-55-66';
-  elements.get('editHeartbeatPath').value = 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json';
+  elements.get('editLabstationPath').value = 'C:\\Program Files\\Lab Station';
   elements.get('saveEditHost').click();
   await flush();
   await flush();
@@ -1732,7 +1729,7 @@ test('edits a dynamic ops host from the pencil action', async () => {
     name: 'siemens-admin',
     mac: '00-22-33-44-55-66',
     broadcast: '',
-    heartbeatPath: 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json',
+    labstationPath: 'C:\\Program Files\\Lab Station',
   });
   assert.equal(elements.get('editHostModal').classList.contains('show'), false);
 });
@@ -1750,6 +1747,7 @@ test('uses a self-contained visible pencil icon for editable ops hosts', () => {
 
 test('renders station identity, connection counts, operation history and WinRM trust states', () => {
   const script = fs.readFileSync(hostRenderersScriptPath, 'utf8');
+  const index = fs.readFileSync(indexPath, 'utf8');
   const hostView = fs.readFileSync(hostViewScriptPath, 'utf8');
   const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
 
@@ -1766,6 +1764,9 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(script, /formatBool\(localMode\)/);
   assert.match(script, /host-state-column/);
   assert.match(script, /host-status-action/);
+  assert.doesNotMatch(script, /stationPathsReady|stationPathIssues|Lab Station paths:/);
+  assert.match(index, /id="editLabstationPath"/);
+  assert.doesNotMatch(index, /id="editLabstationExe"|id="editLocalModeFlagPath"|id="editHeartbeatPath"|id="editEventsPath"/);
   assert.doesNotMatch(script, /<button class="mini-btn" data-action="set-winrm-credentials">WinRM Credentials<\/button>/);
   assert.doesNotMatch(script, /Guacamole: \$\{guacamoleStatusMarkup\}/);
   assert.doesNotMatch(script, /ambiguous - \$\{connections\.length\} matches/);

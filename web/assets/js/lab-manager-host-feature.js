@@ -78,19 +78,13 @@
         const provisionHostAddress = $('#provisionHostAddress');
         const provisionHostMac = $('#provisionHostMac');
         const provisionHostBroadcast = $('#provisionHostBroadcast');
-        const provisionLabstationExe = $('#provisionLabstationExe');
-        const provisionLocalModeFlagPath = $('#provisionLocalModeFlagPath');
-        const provisionHeartbeatPath = $('#provisionHeartbeatPath');
-        const provisionEventsPath = $('#provisionEventsPath');
+        const provisionLabstationPath = $('#provisionLabstationPath');
         const editHostOriginalName = $('#editHostOriginalName');
         const editHostName = $('#editHostName');
         const editHostAddress = $('#editHostAddress');
         const editHostMac = $('#editHostMac');
         const editHostBroadcast = $('#editHostBroadcast');
-        const editLabstationExe = $('#editLabstationExe');
-        const editLocalModeFlagPath = $('#editLocalModeFlagPath');
-        const editHeartbeatPath = $('#editHeartbeatPath');
-        const editEventsPath = $('#editEventsPath');
+        const editLabstationPath = $('#editLabstationPath');
 
         const hostState = {};
         const hostMetadata = {};
@@ -231,10 +225,12 @@
         const stopHeartbeatStream = hostsController.stopHeartbeatStream;
         const refreshAllHosts = hostsController.refreshAllHosts;
         const pollHeartbeat = hostsController.pollHeartbeat;
+        const updateLocalModeState = hostsController.updateLocalModeState;
         const hostActionsController = hostActionsModule.createController({
             fetchImpl,
             callbacks: {
                 pollHeartbeat,
+                updateLocalModeState,
                 showLoadingToast,
                 showToast,
             },
@@ -337,20 +333,14 @@
                 provisionHostAddress,
                 provisionHostMac,
                 provisionHostBroadcast,
-                provisionLabstationExe,
-                provisionLocalModeFlagPath,
-                provisionHeartbeatPath,
-                provisionEventsPath,
+                provisionLabstationPath,
                 editModal: editHostModal,
                 editOriginalName: editHostOriginalName,
                 editName: editHostName,
                 editAddress: editHostAddress,
                 editMac: editHostMac,
                 editBroadcast: editHostBroadcast,
-                editLabstationExe,
-                editLocalModeFlagPath,
-                editHeartbeatPath,
-                editEventsPath,
+                editLabstationPath,
                 editSaveButton: saveEditHostButton,
                 credentialsModal: winrmCredentialsModal,
                 credentialRef: winrmCredentialRef,

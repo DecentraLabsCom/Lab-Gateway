@@ -12,6 +12,7 @@
 
         const {
             pollHeartbeat = () => {},
+            updateLocalModeState = () => {},
             showLoadingToast = () => {},
             showToast = () => {},
         } = callbacks;
@@ -35,7 +36,11 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 await pollHeartbeat(host);
-                showToast(`Local mode ${data.localModeEnabled ? 'enabled' : 'disabled'} for ${host}`, 'success');
+                const localModeEnabled = typeof data.localModeEnabled === 'boolean'
+                    ? data.localModeEnabled
+                    : enabled;
+                updateLocalModeState(host, localModeEnabled);
+                showToast(`Local mode ${localModeEnabled ? 'enabled' : 'disabled'} for ${host}`, 'success');
             } catch (err) {
                 logger.error(err);
                 showToast(`Local mode toggle failed for ${host}: ${err.message}`, 'error');

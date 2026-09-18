@@ -1,6 +1,23 @@
 (function (root) {
     'use strict';
 
+    const DEFAULT_LABSTATION_PATH = 'C:\\Lab Station';
+
+    function deriveLabstationPath(source = {}) {
+        const direct = source.labstationPath || source.labstation_path;
+        if (direct) return String(direct).trim();
+
+        const executable = source.labstationExe || source.labstation_exe;
+        const executableMatch = String(executable || '').trim().match(/^(.*?)[\\/]LabStation\.exe$/i);
+        if (executableMatch) return executableMatch[1];
+
+        const heartbeat = source.heartbeatPath || source.heartbeat_path;
+        const heartbeatMatch = String(heartbeat || '').trim().match(
+            /^(.*?)[\\/]labstation[\\/]data[\\/]telemetry[\\/]heartbeat\.json$/i,
+        );
+        return heartbeatMatch ? heartbeatMatch[1] : DEFAULT_LABSTATION_PATH;
+    }
+
     function createController({
         fields = {},
         hostMetadata = {},
@@ -59,7 +76,7 @@
                 !provision.provisionHostAddress ||
                 !provision.provisionHostMac ||
                 !provision.provisionHostBroadcast ||
-                !provision.provisionHeartbeatPath
+                !provision.provisionLabstationPath
             ) {
                 showToast('Host provisioning modal is unavailable', 'error');
                 return;
@@ -75,20 +92,7 @@
             provision.provisionHostAddress.value = draft.address || station.address || '';
             provision.provisionHostMac.value = draft.mac || '';
             provision.provisionHostBroadcast.value = draft.broadcast || '';
-            if (provision.provisionLabstationExe) {
-                provision.provisionLabstationExe.value = draft.labstation_exe
-                    || 'C:\\Lab Station\\LabStation.exe';
-            }
-            if (provision.provisionLocalModeFlagPath) {
-                provision.provisionLocalModeFlagPath.value = draft.local_mode_flag_path
-                    || 'C:\\Lab Station\\labstation\\data\\local-mode.flag';
-            }
-            provision.provisionHeartbeatPath.value = draft.heartbeat_path
-                || 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json';
-            if (provision.provisionEventsPath) {
-                provision.provisionEventsPath.value = draft.events_path
-                    || 'C:\\Lab Station\\labstation\\data\\telemetry\\session-guard-events.jsonl';
-            }
+            provision.provisionLabstationPath.value = deriveLabstationPath(draft);
             provision.provisionModal.classList.add('show');
         }
 
@@ -104,7 +108,7 @@
                 !provision.provisionHostAddress ||
                 !provision.provisionHostMac ||
                 !provision.provisionHostBroadcast ||
-                !provision.provisionHeartbeatPath
+                !provision.provisionLabstationPath
             ) {
                 showToast('Host provisioning modal is unavailable', 'error');
                 return;
@@ -116,16 +120,11 @@
                 mac: provision.provisionHostMac.value.trim(),
                 broadcast: provision.provisionHostBroadcast.value.trim(),
                 credentialRef: provision.provisionHostAddress.value.trim(),
-                heartbeatPath: provision.provisionHeartbeatPath.value.trim(),
+                labstationPath: provision.provisionLabstationPath.value.trim(),
             };
-            if (provision.provisionLabstationExe) {
-                payload.labstationExe = provision.provisionLabstationExe.value.trim();
-            }
-            if (provision.provisionLocalModeFlagPath) {
-                payload.localModeFlagPath = provision.provisionLocalModeFlagPath.value.trim();
-            }
-            if (provision.provisionEventsPath) {
-                payload.eventsPath = provision.provisionEventsPath.value.trim();
+            if (!payload.labstationPath) {
+                showToast('Lab Station path is required', 'error');
+                return;
             }
             await provisioningController.save(payload, provision.provisionSaveButton);
         }
@@ -141,7 +140,7 @@
                 !edit.editAddress ||
                 !edit.editMac ||
                 !edit.editBroadcast ||
-                !edit.editHeartbeatPath
+                !edit.editLabstationPath
             ) {
                 showToast('Only dynamically configured hosts can be edited', 'error');
                 return;
@@ -151,20 +150,7 @@
             edit.editAddress.value = meta.address || host;
             edit.editMac.value = meta.mac || '';
             edit.editBroadcast.value = meta.broadcast || '';
-            if (edit.editLabstationExe) {
-                edit.editLabstationExe.value = meta.labstationExe
-                    || 'C:\\Lab Station\\LabStation.exe';
-            }
-            if (edit.editLocalModeFlagPath) {
-                edit.editLocalModeFlagPath.value = meta.localModeFlagPath
-                    || 'C:\\Lab Station\\labstation\\data\\local-mode.flag';
-            }
-            edit.editHeartbeatPath.value = meta.heartbeatPath
-                || 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json';
-            if (edit.editEventsPath) {
-                edit.editEventsPath.value = meta.eventsPath
-                    || 'C:\\Lab Station\\labstation\\data\\telemetry\\session-guard-events.jsonl';
-            }
+            edit.editLabstationPath.value = deriveLabstationPath(meta);
             edit.editModal.classList.add('show');
         }
 
@@ -175,7 +161,7 @@
         async function saveEdit() {
             const edit = fields;
             if (!edit.editOriginalName || !edit.editName || !edit.editMac || !edit.editBroadcast
-                || !edit.editHeartbeatPath) {
+                || !edit.editLabstationPath) {
                 showToast('Host edit modal is unavailable', 'error');
                 return;
             }
@@ -184,17 +170,8 @@
                 name: edit.editName.value.trim(),
                 mac: edit.editMac.value.trim(),
                 broadcast: edit.editBroadcast.value.trim(),
-                heartbeatPath: edit.editHeartbeatPath.value.trim(),
+                labstationPath: edit.editLabstationPath.value.trim(),
             };
-            if (edit.editLabstationExe) {
-                payload.labstationExe = edit.editLabstationExe.value.trim();
-            }
-            if (edit.editLocalModeFlagPath) {
-                payload.localModeFlagPath = edit.editLocalModeFlagPath.value.trim();
-            }
-            if (edit.editEventsPath) {
-                payload.eventsPath = edit.editEventsPath.value.trim();
-            }
             if (!originalName || !payload.name) {
                 showToast('Name is required', 'error');
                 return;
@@ -207,8 +184,8 @@
                 showToast('MAC must use format 00:11:22:33:44:55 or 00-11-22-33-44-55', 'error');
                 return;
             }
-            if (!payload.heartbeatPath) {
-                showToast('Heartbeat path is required', 'error');
+            if (!payload.labstationPath) {
+                showToast('Lab Station path is required', 'error');
                 return;
             }
             if (edit.editSaveButton) edit.editSaveButton.disabled = true;

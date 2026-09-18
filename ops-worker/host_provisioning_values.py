@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from typing import Any, Dict, Optional, Pattern, Tuple
 
-from labstation_paths import resolve_labstation_paths
+from labstation_paths import paths_for_root, resolve_labstation_paths
 from runtime_values import (
     DEFAULT_EVENTS_PATH,
     DEFAULT_HEARTBEAT_PATH,
@@ -53,13 +53,19 @@ def build_provisioned_host(
     if broadcast and (len(broadcast) > 64 or any(ord(char) < 32 for char in broadcast)):
         return None, "broadcast must be a valid network address"
 
+    labstation_path = str(payload.get("labstationPath") or "").strip()
+    if labstation_path and (len(labstation_path) > 1024 or any(ord(char) < 32 for char in labstation_path)):
+        return None, "labstationPath must be a valid Windows path"
+
     path_config = {
         "labstation_exe": payload.get("labstationExe"),
         "local_mode_flag_path": payload.get("localModeFlagPath"),
         "heartbeat_path": payload.get("heartbeatPath"),
         "events_path": payload.get("eventsPath"),
     }
-    if any(path_config.values()):
+    if labstation_path:
+        station_paths = paths_for_root(labstation_path)
+    elif any(path_config.values()):
         station_paths = resolve_labstation_paths(path_config)
     else:
         station_paths = {

@@ -144,8 +144,8 @@ The four Lab Station artifact paths are kept under one installation root. Host
 discovery derives them from the scheduled task/heartbeat path, and the worker
 also repairs legacy catalogs that mix `C:\LabStation` and `C:\Lab Station`.
 Both roots remain supported, while new installations use `C:\Lab Station` by
-default. The inventory exposes `stationPathsReady` and `stationPathIssues` so a
-host missing enough information is visible before an operation is attempted.
+default. The inventory resolves the operational paths from the configured host
+data or discovery results before an operation is attempted.
 
 ```json
 {
@@ -198,11 +198,11 @@ off or unavailable Station from an internal worker failure.
   - Body: `{ connectionId }`
   - Probes a Guacamole connection candidate for DNS, WinRM, and optional Lab Station HTTP health.
 - `POST /api/hosts/provision`
-  - Body: `{ connectionId, name?, address?, mac?, broadcast?, credentialRef?, labstationExe?, localModeFlagPath?, heartbeatPath?, eventsPath? }`. Discovery fills the four Lab Station paths automatically when omitted; legacy `labs` fields are ignored.
+  - Body: `{ connectionId, name?, address?, mac?, broadcast?, credentialRef?, labstationPath? }`. The worker derives the executable, local-mode flag, heartbeat, and event paths from the installation root; discovery fills them automatically when omitted. Legacy `labs` fields are ignored.
   - Re-runs discovery and only provisions candidates with Lab Station HTTP health or reachable WinRM.
   - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). Raw WinRM credentials are saved separately.
 - `PATCH /api/hosts/{hostName}`
-  - Body: `{ name?, mac?, broadcast?, labstationExe?, localModeFlagPath?, heartbeatPath?, eventsPath? }`
+  - Body: `{ name?, mac?, broadcast?, labstationPath? }`
   - Updates only a host from the writable dynamic catalog. The worker keeps the four Lab Station paths coherent when one installation root is detected; lab associations are resolved from the provider catalog. Static catalog hosts must be edited in `hosts.json`.
 - `POST /api/hosts/winrm-credentials`
   - Body: `{ credentialRef, user, password }`

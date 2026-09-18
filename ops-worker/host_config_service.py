@@ -5,7 +5,7 @@ import os
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
-from labstation_paths import resolve_labstation_paths
+from labstation_paths import paths_for_root, resolve_labstation_paths
 
 
 class ConfigReader(Protocol):
@@ -198,6 +198,14 @@ def update_dynamic_host(
         if len(value) > 1024 or any(ord(char) < 32 for char in value):
             return None, f"{payload_key} must be a valid Windows path"
         updated[host_key] = value
+
+    if "labstationPath" in payload:
+        labstation_path = str(payload.get("labstationPath") or "").strip()
+        if not labstation_path:
+            return None, "labstationPath is required"
+        if len(labstation_path) > 1024 or any(ord(char) < 32 for char in labstation_path):
+            return None, "labstationPath must be a valid Windows path"
+        updated.update(paths_for_root(labstation_path))
 
     updated.update(resolve_labstation_paths(updated))
 

@@ -38,6 +38,7 @@
         const hostMetadata = state.hostMetadata;
         const heartbeatSources = state.heartbeatSources;
         const heartbeatStreamErrorShown = state.heartbeatStreamErrorShown;
+        const localModeOverrides = {};
 
         function stopHeartbeatStream(host) {
             const source = heartbeatSources[host];
@@ -72,7 +73,7 @@
             source.addEventListener('heartbeat', evt => {
                 try {
                     const data = JSON.parse(evt.data || '{}');
-                    hostState[host] = data;
+                    applyHeartbeatData(host, data);
                     delete heartbeatStreamErrorShown[host];
                     renderHosts();
                     loadActivityFeed();
@@ -101,6 +102,36 @@
                     showToast(formatHeartbeatError(host, errorPayload), 'error');
                 }
             });
+        }
+
+        function applyHeartbeatData(host, data) {
+            const override = localModeOverrides[host];
+            const reported = data?.heartbeat?.status?.localModeEnabled;
+            if (typeof override !== 'boolean') {
+                hostState[host] = data;
+                return;
+            }
+            if (reported === override) {
+                delete localModeOverrides[host];
+                hostState[host] = data;
+                return;
+            }
+            const heartbeat = data?.heartbeat && typeof data.heartbeat === 'object'
+                ? data.heartbeat
+                : {};
+            const status = heartbeat.status && typeof heartbeat.status === 'object'
+                ? heartbeat.status
+                : {};
+            hostState[host] = {
+                ...data,
+                heartbeat: {
+                    ...heartbeat,
+                    status: {
+                        ...status,
+                        localModeEnabled: override,
+                    },
+                },
+            };
         }
 
         async function loadInventory(options = {}) {
@@ -203,7 +234,7 @@
                     showToast(formatHeartbeatError(host, data), 'error');
                     return;
                 }
-                hostState[host] = data;
+                applyHeartbeatData(host, data);
                 renderHosts();
                 loadActivityFeed();
                 showToast(`Heartbeat ${host} ok`, 'success');
@@ -213,12 +244,33 @@
             }
         }
 
+        function updateLocalModeState(host, enabled) {
+            if (!host) return;
+            const localModeEnabled = enabled === true;
+            localModeOverrides[host] = localModeEnabled;
+            const current = hostState[host] || {};
+            const heartbeat = current.heartbeat || {};
+            const status = heartbeat.status || {};
+            hostState[host] = {
+                ...current,
+                heartbeat: {
+                    ...heartbeat,
+                    status: {
+                        ...status,
+                        localModeEnabled,
+                    },
+                },
+            };
+            renderHosts();
+        }
+
         return Object.freeze({
             loadInventory,
             startHeartbeatStream,
             stopHeartbeatStream,
             refreshAllHosts,
             pollHeartbeat,
+            updateLocalModeState,
         });
     }
 

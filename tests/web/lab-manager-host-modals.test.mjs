@@ -40,20 +40,14 @@ function modalFields() {
     provisionHostAddress: element(),
     provisionHostMac: element(),
     provisionHostBroadcast: element(),
-    provisionLabstationExe: element(),
-    provisionLocalModeFlagPath: element(),
-    provisionHeartbeatPath: element(),
-    provisionEventsPath: element(),
+    provisionLabstationPath: element(),
     editModal: element(),
     editOriginalName: element(),
     editName: element(),
     editAddress: element(),
     editMac: element(),
     editBroadcast: element(),
-    editLabstationExe: element(),
-    editLocalModeFlagPath: element(),
-    editHeartbeatPath: element(),
-    editEventsPath: element(),
+    editLabstationPath: element(),
     editSaveButton: element(),
     credentialsModal: element(),
     credentialRef: element(),
@@ -86,6 +80,7 @@ test('keeps provision, edit and credential modal payloads inside one host contro
         name: 'station-7',
         address: '10.0.0.7',
         mac: '00:11:22:33:44:55',
+        labstationPath: 'C:\\Program Files\\Lab Station',
         heartbeatPath: 'C:\\old\\heartbeat.json',
         credentialRef: 'station-7-credential',
       },
@@ -130,14 +125,12 @@ test('keeps provision, edit and credential modal payloads inside one host contro
     mac: '',
     broadcast: '',
     credentialRef: '10.0.0.8',
-    labstationExe: 'C:\\Lab Station\\LabStation.exe',
-    localModeFlagPath: 'C:\\Lab Station\\labstation\\data\\local-mode.flag',
-    heartbeatPath: 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json',
-    eventsPath: 'C:\\Lab Station\\labstation\\data\\telemetry\\session-guard-events.jsonl',
+    labstationPath: 'C:\\Lab Station',
   }]);
   assert.equal(requests.find(request => request.url.includes('/ops/api/hosts/')).options.method, 'PATCH');
   assert.ok(events.some(event => event[0] === 'stop' && event[1] === 'station-7'));
   assert.ok(events.some(event => event[0] === 'credentials'));
+  assert.equal(fields.editLabstationPath.value, 'C:\\Program Files\\Lab Station');
 });
 
 test('rejects editing a host that is not dynamically configured', () => {
