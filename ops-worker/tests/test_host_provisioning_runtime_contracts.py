@@ -43,6 +43,8 @@ def test_host_provisioning_runtime_uses_explicit_context_dependencies():
             "winrm_transport": "ntlm",
             "winrm_use_ssl": True,
             "winrm_port": 5986,
+            "labstation_exe": r"C:\Lab Station\LabStation.exe",
+            "local_mode_flag_path": r"C:\Lab Station\labstation\data\local-mode.flag",
             "heartbeat_path": r"C:\LabStation\heartbeat.json",
             "events_path": r"C:\LabStation\events.jsonl",
             "mac": "AA:BB:CC:DD:EE:FF",

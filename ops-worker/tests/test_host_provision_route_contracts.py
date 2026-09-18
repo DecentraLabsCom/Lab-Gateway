@@ -137,6 +137,31 @@ def test_host_provision_route_contract_uses_discovered_mac_without_mutating_payl
     }
 
 
+def test_host_provision_route_carries_discovered_station_paths_into_catalog_builder(client, monkeypatch):
+    discovery = {
+        "status": "winrm-reachable",
+        "checks": {},
+        "opsHostDraft": {
+            "labstation_exe": r"C:\Lab Station\LabStation.exe",
+            "local_mode_flag_path": r"C:\Lab Station\labstation\data\local-mode.flag",
+            "heartbeat_path": r"C:\Lab Station\labstation\data\telemetry\heartbeat.json",
+            "events_path": r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl",
+        },
+    }
+    _connection_value, calls = _configure_success(monkeypatch, discovery=discovery)
+
+    response = client.post("/api/hosts/provision", json={"connectionId": 42})
+
+    assert response.status_code == 200
+    assert calls[0][1] == {
+        "connectionId": 42,
+        "labstationExe": r"C:\Lab Station\LabStation.exe",
+        "localModeFlagPath": r"C:\Lab Station\labstation\data\local-mode.flag",
+        "heartbeatPath": r"C:\Lab Station\labstation\data\telemetry\heartbeat.json",
+        "eventsPath": r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl",
+    }
+
+
 def test_host_provision_route_contract_maps_build_error_to_400(client, monkeypatch):
     _configure_success(monkeypatch)
     monkeypatch.setattr(worker, "build_provisioned_host", Mock(return_value=(None, "labs are invalid")))

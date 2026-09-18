@@ -140,6 +140,13 @@ python -m pytest tests `
 
 New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and password are saved separately from the host catalog.
 
+The four Lab Station artifact paths are kept under one installation root. Host
+discovery derives them from the scheduled task/heartbeat path, and the worker
+also repairs legacy catalogs that mix `C:\LabStation` and `C:\Lab Station`.
+Both roots remain supported, while new installations use `C:\Lab Station` by
+default. The inventory exposes `stationPathsReady` and `stationPathIssues` so a
+host missing enough information is visible before an operation is attempted.
+
 ```json
 {
   "hosts": [
@@ -151,8 +158,10 @@ New hosts provisioned from Lab Manager use `credential_ref`; the WinRM user and 
       "winrm_transport": "ntlm",
       "winrm_use_ssl": true,
       "winrm_port": 5986,
-      "heartbeat_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
-      "events_path": "C:\\\\LabStation\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl"
+      "labstation_exe": "C:\\\\Lab Station\\\\LabStation.exe",
+      "local_mode_flag_path": "C:\\\\Lab Station\\\\labstation\\\\data\\\\local-mode.flag",
+      "heartbeat_path": "C:\\\\Lab Station\\\\labstation\\\\data\\\\telemetry\\\\heartbeat.json",
+      "events_path": "C:\\\\Lab Station\\\\labstation\\\\data\\\\telemetry\\\\session-guard-events.jsonl"
     }
   ]
 }
@@ -175,7 +184,7 @@ off or unavailable Station from an internal worker failure.
     unreachable.
 - `POST /api/winrm`
   - Body: `{ host, command, args?, transport?, use_ssl?, port? }`
-  - Runs `C:\LabStation\LabStation.exe <command> <args>` via WinRM. Transport, TLS and port are constrained by the host catalog and gateway policy; HTTPS on port 5986 is the default and request values cannot downgrade or override that policy.
+  - Runs the host's configured `labstation_exe` (normally `C:\Lab Station\LabStation.exe`) with `<command> <args>` via WinRM. Transport, TLS and port are constrained by the host catalog and gateway policy; HTTPS on port 5986 is the default and request values cannot downgrade or override that policy.
 - `POST /api/heartbeat/poll`
   - Body: `{ host, include_events? }`
 - `GET /api/hosts`
@@ -189,12 +198,12 @@ off or unavailable Station from an internal worker failure.
   - Body: `{ connectionId }`
   - Probes a Guacamole connection candidate for DNS, WinRM, and optional Lab Station HTTP health.
 - `POST /api/hosts/provision`
-  - Body: `{ connectionId, name?, address?, mac?, broadcast?, credentialRef?, heartbeatPath? }`. Legacy `labs` fields are ignored.
+  - Body: `{ connectionId, name?, address?, mac?, broadcast?, credentialRef?, labstationExe?, localModeFlagPath?, heartbeatPath?, eventsPath? }`. Discovery fills the four Lab Station paths automatically when omitted; legacy `labs` fields are ignored.
   - Re-runs discovery and only provisions candidates with Lab Station HTTP health or reachable WinRM.
   - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). Raw WinRM credentials are saved separately.
 - `PATCH /api/hosts/{hostName}`
-  - Body: `{ name?, mac?, broadcast?, heartbeatPath? }`
-  - Updates only a host from the writable dynamic catalog. The address, WinRM policy, credential reference and events path are preserved; lab associations are resolved from the provider catalog. Static catalog hosts must be edited in `hosts.json`.
+  - Body: `{ name?, mac?, broadcast?, labstationExe?, localModeFlagPath?, heartbeatPath?, eventsPath? }`
+  - Updates only a host from the writable dynamic catalog. The worker keeps the four Lab Station paths coherent when one installation root is detected; lab associations are resolved from the provider catalog. Static catalog hosts must be edited in `hosts.json`.
 - `POST /api/hosts/winrm-credentials`
   - Body: `{ credentialRef, user, password }`
   - Encrypts and stores WinRM credentials for the configured host. Credentials are never accepted through `/api/winrm` or stored in the host catalog.

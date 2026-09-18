@@ -2,6 +2,8 @@
 
 from typing import Any, Dict, List, Optional
 
+from labstation_paths import resolve_labstation_paths, root_from_executable, root_from_heartbeat
+
 
 class HostRegistry:
     def __init__(self, cfg: Dict[str, Any]):
@@ -17,6 +19,17 @@ class HostRegistry:
             # data cannot become an accidental source of truth again.
             host.pop("labs", None)
             host.pop("validLabIds", None)
+            if (
+                root_from_executable(host.get("labstation_exe"))
+                or root_from_heartbeat(host.get("heartbeat_path"))
+                or all(host.get(key) for key in (
+                    "labstation_exe",
+                    "local_mode_flag_path",
+                    "heartbeat_path",
+                    "events_path",
+                ))
+            ):
+                host.update(resolve_labstation_paths(host))
             key = host["name"].lower()
             self.hosts[key] = host
 

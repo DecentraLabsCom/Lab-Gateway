@@ -6,13 +6,13 @@ from local_mode_route import get_local_mode_flag_path
 
 def test_local_mode_flag_path_contract_preserves_host_override_and_default():
     assert get_local_mode_flag_path({"local_mode_flag_path": r"C:\flags\local-mode.flag"}) == r"C:\flags\local-mode.flag"
-    assert get_local_mode_flag_path({}) == r"C:\LabStation\labstation\data\local-mode.flag"
+    assert get_local_mode_flag_path({}) == r"C:\Lab Station\labstation\data\local-mode.flag"
 
 
 def test_worker_reexports_local_mode_flag_path_without_changing_contract():
     import worker
 
-    assert worker.get_local_mode_flag_path({}) == r"C:\LabStation\labstation\data\local-mode.flag"
+    assert worker.get_local_mode_flag_path({}) == r"C:\Lab Station\labstation\data\local-mode.flag"
 
 
 def test_local_mode_route_contract_requires_host_and_enabled(client):
@@ -89,7 +89,7 @@ def test_local_mode_route_contract_disables_flag_with_legacy_arguments(client, m
     assert response.json == {"host": "lab-ws-01", "localModeEnabled": False}
     remove_remote_file.assert_called_once_with(
         host,
-        r"C:\LabStation\labstation\data\local-mode.flag",
+        r"C:\Lab Station\labstation\data\local-mode.flag",
         None,
         None,
         None,

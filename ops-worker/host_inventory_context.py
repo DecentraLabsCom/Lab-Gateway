@@ -5,6 +5,8 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol
 
+from runtime_values import DEFAULT_HEARTBEAT_PATH
+
 
 class HostRegistryProtocol(Protocol):
     """Minimal host registry surface required by the inventory projection."""
@@ -27,7 +29,7 @@ class HostInventoryContext:
     credential_ref_for_host: Callable[[Dict[str, Any]], str]
     inspect_winrm_trust: Callable[[Dict[str, Any]], Dict[str, Any]]
     winrm_credentials_configured: Callable[[str], bool]
-    default_heartbeat_path: str = r"C:\LabStation\labstation\data\telemetry\heartbeat.json"
+    default_heartbeat_path: str = DEFAULT_HEARTBEAT_PATH
 
 
 __all__ = ["HostInventoryContext", "HostRegistryProtocol"]

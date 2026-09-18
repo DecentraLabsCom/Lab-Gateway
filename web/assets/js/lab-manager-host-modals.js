@@ -75,8 +75,20 @@
             provision.provisionHostAddress.value = draft.address || station.address || '';
             provision.provisionHostMac.value = draft.mac || '';
             provision.provisionHostBroadcast.value = draft.broadcast || '';
+            if (provision.provisionLabstationExe) {
+                provision.provisionLabstationExe.value = draft.labstation_exe
+                    || 'C:\\Lab Station\\LabStation.exe';
+            }
+            if (provision.provisionLocalModeFlagPath) {
+                provision.provisionLocalModeFlagPath.value = draft.local_mode_flag_path
+                    || 'C:\\Lab Station\\labstation\\data\\local-mode.flag';
+            }
             provision.provisionHeartbeatPath.value = draft.heartbeat_path
-                || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
+                || 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json';
+            if (provision.provisionEventsPath) {
+                provision.provisionEventsPath.value = draft.events_path
+                    || 'C:\\Lab Station\\labstation\\data\\telemetry\\session-guard-events.jsonl';
+            }
             provision.provisionModal.classList.add('show');
         }
 
@@ -106,6 +118,15 @@
                 credentialRef: provision.provisionHostAddress.value.trim(),
                 heartbeatPath: provision.provisionHeartbeatPath.value.trim(),
             };
+            if (provision.provisionLabstationExe) {
+                payload.labstationExe = provision.provisionLabstationExe.value.trim();
+            }
+            if (provision.provisionLocalModeFlagPath) {
+                payload.localModeFlagPath = provision.provisionLocalModeFlagPath.value.trim();
+            }
+            if (provision.provisionEventsPath) {
+                payload.eventsPath = provision.provisionEventsPath.value.trim();
+            }
             await provisioningController.save(payload, provision.provisionSaveButton);
         }
 
@@ -130,8 +151,20 @@
             edit.editAddress.value = meta.address || host;
             edit.editMac.value = meta.mac || '';
             edit.editBroadcast.value = meta.broadcast || '';
+            if (edit.editLabstationExe) {
+                edit.editLabstationExe.value = meta.labstationExe
+                    || 'C:\\Lab Station\\LabStation.exe';
+            }
+            if (edit.editLocalModeFlagPath) {
+                edit.editLocalModeFlagPath.value = meta.localModeFlagPath
+                    || 'C:\\Lab Station\\labstation\\data\\local-mode.flag';
+            }
             edit.editHeartbeatPath.value = meta.heartbeatPath
-                || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
+                || 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json';
+            if (edit.editEventsPath) {
+                edit.editEventsPath.value = meta.eventsPath
+                    || 'C:\\Lab Station\\labstation\\data\\telemetry\\session-guard-events.jsonl';
+            }
             edit.editModal.classList.add('show');
         }
 
@@ -141,7 +174,8 @@
 
         async function saveEdit() {
             const edit = fields;
-            if (!edit.editOriginalName || !edit.editName || !edit.editMac || !edit.editBroadcast || !edit.editHeartbeatPath) {
+            if (!edit.editOriginalName || !edit.editName || !edit.editMac || !edit.editBroadcast
+                || !edit.editHeartbeatPath) {
                 showToast('Host edit modal is unavailable', 'error');
                 return;
             }
@@ -152,6 +186,15 @@
                 broadcast: edit.editBroadcast.value.trim(),
                 heartbeatPath: edit.editHeartbeatPath.value.trim(),
             };
+            if (edit.editLabstationExe) {
+                payload.labstationExe = edit.editLabstationExe.value.trim();
+            }
+            if (edit.editLocalModeFlagPath) {
+                payload.localModeFlagPath = edit.editLocalModeFlagPath.value.trim();
+            }
+            if (edit.editEventsPath) {
+                payload.eventsPath = edit.editEventsPath.value.trim();
+            }
             if (!originalName || !payload.name) {
                 showToast('Name is required', 'error');
                 return;

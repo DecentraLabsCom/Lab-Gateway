@@ -28,3 +28,19 @@ def test_host_registry_drops_inline_credentials_and_invalid_entries():
     })
 
     assert registry.all_hosts() == [{"name": "Station-A", "address": "10.0.0.1"}]
+
+
+def test_host_registry_repairs_mixed_installation_roots_from_heartbeat():
+    registry = HostRegistry({
+        "hosts": [{
+            "name": "PC-Siemens",
+            "address": "10.192.38.82",
+            "heartbeat_path": r"C:\Lab Station\labstation\data\telemetry\heartbeat.json",
+            "events_path": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+        }]
+    })
+
+    host = registry.get("PC-Siemens")
+    assert host["labstation_exe"] == r"C:\Lab Station\LabStation.exe"
+    assert host["local_mode_flag_path"] == r"C:\Lab Station\labstation\data\local-mode.flag"
+    assert host["events_path"] == r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"

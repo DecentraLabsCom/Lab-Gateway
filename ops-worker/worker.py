@@ -303,7 +303,10 @@ from operation_values import rows_to_operations as _rows_to_operations_impl
 from host_provisioning_context import HostProvisioningContext
 from host_provisioning_runtime import create_host_provisioning_runtime
 from runtime_values import (
+    DEFAULT_EVENTS_PATH,
+    DEFAULT_HEARTBEAT_PATH,
     DEFAULT_LABSTATION_EXE,
+    DEFAULT_LOCAL_MODE_FLAG_PATH,
     ENOUGH_DISCOVERY_SIGNALS,
     GUAC_SELECTOR_RE,
     HOST_NAME_RE,
@@ -1335,7 +1338,7 @@ _HOST_DISCOVERY_CONTEXT = HostDiscoveryContext(
     get_http_probe=lambda: probe_labstation_http,
     get_heartbeat_hint=lambda: discover_heartbeat_hint,
     get_name_candidates=lambda: guacamole_name_candidates,
-    get_events_path=lambda: r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+    get_events_path=lambda: DEFAULT_EVENTS_PATH,
 )
 _HOST_DISCOVERY_RUNTIME = create_host_discovery_runtime(_HOST_DISCOVERY_CONTEXT)
 _is_valid_ping_target = _HOST_DISCOVERY_RUNTIME.is_valid_ping_target
@@ -1371,6 +1374,10 @@ _HOST_PROVISIONING_CONTEXT = HostProvisioningContext(
     normalize_mac=lambda value: normalize_mac(value),
     normalize_trust_ref=lambda value: normalize_winrm_trust_ref(value),
     get_sanitize_host_name=lambda value, fallback: sanitize_host_name(value, fallback),
+    default_heartbeat_path=DEFAULT_HEARTBEAT_PATH,
+    default_events_path=DEFAULT_EVENTS_PATH,
+    default_labstation_exe=DEFAULT_LABSTATION_EXE,
+    default_local_mode_flag_path=DEFAULT_LOCAL_MODE_FLAG_PATH,
 )
 _HOST_PROVISIONING_RUNTIME = create_host_provisioning_runtime(_HOST_PROVISIONING_CONTEXT)
 sanitize_host_name = _HOST_PROVISIONING_RUNTIME.sanitize_host_name

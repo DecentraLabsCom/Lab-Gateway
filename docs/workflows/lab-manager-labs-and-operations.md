@@ -127,7 +127,7 @@ For a Guacamole connection without an Ops host:
    - `Name`: stable host identifier;
    - `Address`: detected private address (read-only);
    - `MAC`: required for WoL;
-   - `Heartbeat path`: normally `C:\LabStation\labstation\data\telemetry\heartbeat.json`.
+   - `Heartbeat path`: discovered automatically; for current Lab Station releases it is normally `C:\Lab Station\labstation\data\telemetry\heartbeat.json`.
 4. Save the host and reload the inventory.
 
 The station form stores only the host configuration. At runtime the worker reads the provider catalog, follows each physical lab's Guacamole `accessKey`, and associates the connection with exactly one registered host; one station can therefore serve

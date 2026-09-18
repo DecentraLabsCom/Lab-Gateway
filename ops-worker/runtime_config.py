@@ -5,6 +5,8 @@ from collections.abc import Callable, Mapping, MutableMapping
 import re
 from typing import Any, Dict, List, Optional, Pattern, Set
 
+from runtime_values import DEFAULT_HEARTBEAT_PATH
+
 
 @dataclass(frozen=True)
 class RuntimePaths:
@@ -358,7 +360,7 @@ def load_runtime_policy(
             for path in (
                 get(
                     "OPS_DISCOVERY_HEARTBEAT_PATHS",
-                    r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
+                    DEFAULT_HEARTBEAT_PATH,
                 )
             ).split(",")
             if path.strip()

@@ -40,6 +40,8 @@ class HostProvisioningRuntime:
             normalize_trust_ref_fn=context.normalize_trust_ref,
             default_heartbeat_path=context.default_heartbeat_path,
             default_events_path=context.default_events_path,
+            default_labstation_exe=context.default_labstation_exe,
+            default_local_mode_flag_path=context.default_local_mode_flag_path,
         )
 
 
