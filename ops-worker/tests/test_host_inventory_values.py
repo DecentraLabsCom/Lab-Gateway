@@ -33,7 +33,10 @@ def test_safe_host_inventory_entry_contains_public_trust_and_operational_fields(
     assert result["winrmTrustStatus"] == "ready"
     assert result["winrmTrustFingerprintSha256"] == "abc"
     assert result["heartbeatPath"] == r"C:\LabStation\heartbeat.json"
+    assert result["labstationPath"] == r"C:\Lab Station"
     assert result["broadcast"] == "192.168.1.255"
+    assert "stationPathsReady" not in result
+    assert "stationPathIssues" not in result
     assert "labs" not in result
     assert result["editable"] is True
     assert result["winrmConfigured"] is True

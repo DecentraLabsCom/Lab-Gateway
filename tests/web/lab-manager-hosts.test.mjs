@@ -167,6 +167,30 @@ test('polls heartbeat with the existing endpoint and updates the shared host sta
   assert.deepEqual(loadingEvents, ['Checking heartbeat for station-1…']);
 });
 
+test('updates local mode immediately without discarding the latest local-session state', () => {
+  const module = loadHostsModule();
+  const state = createState(['station-1']);
+  state.hostState['station-1'] = {
+    host: 'station-1',
+    heartbeat: {
+      timestamp: '2026-09-13T10:00:00Z',
+      status: { localSessionActive: true, localModeEnabled: false },
+    },
+  };
+  let renders = 0;
+  const controller = module.createController({
+    fetchImpl: async () => response({}),
+    state,
+    callbacks: { renderHosts: () => { renders += 1; } },
+  });
+
+  controller.updateLocalModeState('station-1', true);
+
+  assert.equal(renders, 1);
+  assert.equal(state.hostState['station-1'].heartbeat.status.localSessionActive, true);
+  assert.equal(state.hostState['station-1'].heartbeat.status.localModeEnabled, true);
+});
+
 test('formats structured heartbeat failures consistently for manual polling', async () => {
   const module = loadHostsModule();
   const state = createState();
@@ -188,6 +212,46 @@ test('formats structured heartbeat failures consistently for manual polling', as
   await controller.pollHeartbeat('PC-Siemens');
 
   assert.deepEqual(events, [['PC-Siemens:WINRM_UNREACHABLE', 'error']]);
+});
+
+test('keeps an acknowledged local-mode state while SSE still reports an older heartbeat', () => {
+  const module = loadHostsModule();
+  const state = createState();
+  state.hostMetadata['station-1'] = {
+    winrmConfigured: true,
+    winrmTrustStatus: 'ready',
+  };
+  class FakeEventSource {
+    static CLOSED = 2;
+
+    constructor() {
+      this.readyState = 1;
+      this.listeners = new Map();
+    }
+
+    addEventListener(type, handler) { this.listeners.set(type, handler); }
+    emit(type, event) { this.listeners.get(type)?.(event); }
+    close() { this.readyState = FakeEventSource.CLOSED; }
+  }
+  const controller = module.createController({
+    fetchImpl: async () => response({}),
+    getEventSource: () => FakeEventSource,
+    state,
+    callbacks: { renderHosts: () => {} },
+  });
+
+  controller.startHeartbeatStream('station-1');
+  const source = state.heartbeatSources['station-1'];
+  controller.updateLocalModeState('station-1', true);
+  source.emit('heartbeat', {
+    data: JSON.stringify({
+      host: 'station-1',
+      heartbeat: { status: { localSessionActive: true, localModeEnabled: false } },
+    }),
+  });
+
+  assert.equal(state.hostState['station-1'].heartbeat.status.localSessionActive, true);
+  assert.equal(state.hostState['station-1'].heartbeat.status.localModeEnabled, true);
 });
 
 test('keeps the heartbeat stream URL and classifies configuration errors', () => {

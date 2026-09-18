@@ -45,6 +45,42 @@ test('preserves the local-mode request, heartbeat refresh and success message', 
   ]);
 });
 
+test('applies the local-mode response after a stale heartbeat refresh', async () => {
+  const module = loadModule();
+  const events = [];
+  const controller = module.createController({
+    fetchImpl: async () => response({ localModeEnabled: true }),
+    callbacks: {
+      pollHeartbeat: async host => events.push(['poll', host]),
+      updateLocalModeState: (host, enabled) => events.push(['state', host, enabled]),
+      showToast: (...args) => events.push(args),
+    },
+  });
+
+  await controller.toggleLocalMode('station-7', true);
+
+  assert.deepEqual(events, [
+    ['poll', 'station-7'],
+    ['state', 'station-7', true],
+    ['Local mode enabled for station-7', 'success'],
+  ]);
+});
+
+test('uses the requested local-mode value when an older backend omits it from the response', async () => {
+  const module = loadModule();
+  const states = [];
+  const controller = module.createController({
+    fetchImpl: async () => response({}),
+    callbacks: {
+      updateLocalModeState: (host, enabled) => states.push([host, enabled]),
+    },
+  });
+
+  await controller.toggleLocalMode('station-7', false);
+
+  assert.deepEqual(states, [['station-7', false]]);
+});
+
 test('preserves WoL requests and access/error messages', async () => {
   const module = loadModule();
   const events = [];

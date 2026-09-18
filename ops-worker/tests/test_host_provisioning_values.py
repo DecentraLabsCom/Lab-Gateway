@@ -64,3 +64,16 @@ def test_host_provisioning_values_derives_coherent_paths_from_discovered_heartbe
     assert host["local_mode_flag_path"] == r"C:\Lab Station\labstation\data\local-mode.flag"
     assert host["heartbeat_path"] == r"C:\Lab Station\labstation\data\telemetry\heartbeat.json"
     assert host["events_path"] == r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"
+
+
+def test_host_provisioning_values_derives_all_paths_from_installation_root():
+    host, error = _build({
+        "name": "Station-A",
+        "labstationPath": r"C:\Program Files\Lab Station",
+    })
+
+    assert error is None
+    assert host["labstation_exe"] == r"C:\Program Files\Lab Station\LabStation.exe"
+    assert host["local_mode_flag_path"] == r"C:\Program Files\Lab Station\labstation\data\local-mode.flag"
+    assert host["heartbeat_path"] == r"C:\Program Files\Lab Station\labstation\data\telemetry\heartbeat.json"
+    assert host["events_path"] == r"C:\Program Files\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"

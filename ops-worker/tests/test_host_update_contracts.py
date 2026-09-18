@@ -150,6 +150,24 @@ def test_update_dynamic_host_contract_updates_all_station_paths_and_keeps_them_c
     assert writes == [config]
 
 
+def test_update_dynamic_host_contract_derives_all_station_paths_from_installation_root(monkeypatch):
+    config = {"hosts": [{"name": "lab-01"}]}
+    writes = []
+    _configure(monkeypatch, config, write=writes.append)
+
+    updated, error = worker.update_dynamic_host(
+        "lab-01",
+        {"labstationPath": r"C:\Program Files\Lab Station"},
+    )
+
+    assert error is None
+    assert updated["labstation_exe"] == r"C:\Program Files\Lab Station\LabStation.exe"
+    assert updated["local_mode_flag_path"] == r"C:\Program Files\Lab Station\labstation\data\local-mode.flag"
+    assert updated["heartbeat_path"] == r"C:\Program Files\Lab Station\labstation\data\telemetry\heartbeat.json"
+    assert updated["events_path"] == r"C:\Program Files\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"
+    assert writes == [config]
+
+
 def test_update_dynamic_host_contract_propagates_write_failure(monkeypatch):
     failure = PermissionError("catalog is read-only")
     _configure(

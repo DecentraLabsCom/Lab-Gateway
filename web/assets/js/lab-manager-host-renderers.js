@@ -95,10 +95,6 @@
             const safeConnections = escapeHtml(formatConnectionsStatus(guacamoleConnections));
             const connectionsClass = connectionsStatusClass(guacamole);
             const hasGuacamoleMatchDetails = guacamoleConnections.length > 1;
-            const stationPathsReady = meta.stationPathsReady !== false;
-            const stationPathIssues = Array.isArray(meta.stationPathIssues)
-                ? meta.stationPathIssues
-                : [];
             const guacamoleDetailsId = 'guacamole-matches-'
                 + String(host).replace(/[^A-Za-z0-9_-]/g, '-');
             const guacamoleMatchMarkup = hasGuacamoleMatchDetails
@@ -135,7 +131,6 @@
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
                 <div class="host-meta">WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update WinRM credentials" aria-label="Set or update WinRM credentials"><span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></button></div>
                 <div class="host-meta">WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage WinRM TLS trust" aria-label="Manage WinRM TLS trust"><span class="host-status-text ${winrmTrust.className}">${winrmTrust.label}</span></button></div>
-                <div class="host-meta" title="${escapeHtml(stationPathIssues.join('; '))}">Lab Station paths: <span class="host-status-text ${stationPathsReady ? 'good' : 'warn'}">${stationPathsReady ? 'ready' : 'needs configuration'}</span></div>
             </div>
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">

@@ -102,9 +102,7 @@ Lab Station periodically writes `heartbeat.json`. The ops worker reads it throug
 During host discovery, the worker derives the executable, local-mode flag,
 heartbeat, and event paths from the installed scheduled task. It keeps legacy
 `C:\LabStation` and current `C:\Lab Station` roots compatible; a mixed catalog
-is normalized to the root identified by the heartbeat or executable. The host
-inventory reports `stationPathsReady` and `stationPathIssues` when discovery
-cannot identify a coherent installation.
+is normalized to the root identified by the heartbeat or executable.
 
 The current operational API, exposed through the gateway as `/ops/...`, includes:
 

@@ -26,8 +26,8 @@ function loadFeature() {
     'winrmTrustPreviewDetails', 'winrmTrustFingerprintConfirmed', 'editHostModal', 'closeEditHostModal',
     'cancelEditHost', 'saveEditHost', 'winrmCredentialRef', 'winrmCredentialAddress',
     'winrmCredentialUser', 'winrmCredentialPassword', 'provisionConnectionId', 'provisionHostName',
-    'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac', 'provisionHeartbeatPath',
-    'editHostOriginalName', 'editHostName', 'editHostAddress', 'editHostMac', 'editHeartbeatPath',
+    'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac', 'provisionLabstationPath',
+    'editHostOriginalName', 'editHostName', 'editHostAddress', 'editHostMac', 'editLabstationPath',
   ];
   const elements = new Map(ids.map((id) => [id, createElement(id)]));
   const document = {
@@ -42,6 +42,7 @@ function loadFeature() {
       stopHeartbeatStream: (...args) => calls.push(['hosts.stopHeartbeatStream', ...args]),
       refreshAllHosts: (...args) => calls.push(['hosts.refreshAllHosts', ...args]),
       pollHeartbeat: (...args) => calls.push(['hosts.pollHeartbeat', ...args]),
+      updateLocalModeState: (...args) => calls.push(['hosts.updateLocalModeState', ...args]),
     },
     hostActions: {
       triggerWol: () => {},
@@ -89,9 +90,11 @@ function loadFeature() {
     actionBindings: { bind: () => calls.push('action-bindings.bind') },
     modalBindings: { bind: () => calls.push('modal-bindings.bind') },
   };
+  let hostActionsOptions;
   const createModule = (name, controller) => ({
     createController: (options) => {
       calls.push(`${name}.create`);
+      if (name === 'host-actions') hostActionsOptions = options;
       if (name === 'host-view') {
         assert.equal(options.hostListEl, elements.get('hostList'));
         assert.deepEqual(options.callbacks.onProbeCandidate('station-1'), undefined);
@@ -117,11 +120,11 @@ function loadFeature() {
   vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {
     filename: 'lab-manager-host-feature.js',
   });
-  return { context, elements, calls };
+  return { context, elements, calls, getHostActionsOptions: () => hostActionsOptions };
 }
 
 test('host feature composes host controllers and preserves the final binding boundary', () => {
-  const { context, elements, calls } = loadFeature();
+  const { context, elements, calls, getHostActionsOptions } = loadFeature();
   const controller = context.window.LabManagerHostFeature.createController({
     documentImpl: context.document,
     windowImpl: context.window,
@@ -144,6 +147,7 @@ test('host feature composes host controllers and preserves the final binding bou
   assert.equal(controller.hostListElement, elements.get('hostList'));
   assert.equal(controller.refreshHostsButton, elements.get('refreshHostsBtn'));
   assert.equal(controller.hasHostList(), true);
+  assert.equal(typeof getHostActionsOptions().callbacks.updateLocalModeState, 'function');
   assert.deepEqual(controller.groupCandidates(['candidate']), ['candidate']);
 
   controller.bind();

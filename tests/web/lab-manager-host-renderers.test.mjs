@@ -49,6 +49,8 @@ test('host row renderer preserves status markup and escapes host data', () => {
       editable: true,
       winrmConfigured: true,
       winrmTrustStatus: 'ready',
+      stationPathsReady: false,
+      stationPathIssues: ['should not be displayed'],
       guacamole: {
         status: 'multiple',
         connections: [
@@ -68,6 +70,7 @@ test('host row renderer preserves status markup and escapes host data', () => {
   assert.match(html, /date:2026-09-13T09:00:00Z - operator&lt;&amp;/);
   assert.match(html, /Ready: yes/);
   assert.match(html, />Disable Local<\/button>/);
+  assert.doesNotMatch(html, /Lab Station paths/);
   assert.doesNotMatch(html, /<station>/);
 });
 
