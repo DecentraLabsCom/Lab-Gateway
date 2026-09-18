@@ -139,7 +139,7 @@ test('shows persistent progress feedback while WoL is pending', async () => {
   assert.deepEqual(loadingEvents, ['Waking PC-Siemens…']);
 });
 
-test('preserves WinRM command arguments, exit status and HTTP failures', async () => {
+test('refreshes heartbeat after successful Prepare without doing so for failed Release', async () => {
   const module = loadModule();
   const events = [];
   const requests = [];
@@ -148,7 +148,10 @@ test('preserves WinRM command arguments, exit status and HTTP failures', async (
       requests.push({ url, options });
       return requests.length === 1 ? response({ exit_code: 0 }) : response({}, 500);
     },
-    callbacks: { showToast: (...args) => events.push(args) },
+    callbacks: {
+      pollHeartbeat: async host => events.push(['poll', host]),
+      showToast: (...args) => events.push(args),
+    },
     logger: { error() {} },
   });
 
@@ -166,6 +169,7 @@ test('preserves WinRM command arguments, exit status and HTTP failures', async (
     args: ['--reboot'],
   });
   assert.deepEqual(events, [
+    ['poll', 'station-7'],
     ['prepare-session on station-7: ok', 'success'],
     ['release-session failed on station-7: HTTP 500', 'error'],
   ]);
