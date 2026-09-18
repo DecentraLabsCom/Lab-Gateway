@@ -102,6 +102,9 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const ok = data.exit_code === 0;
+                if (ok && command === 'prepare-session') {
+                    await pollHeartbeat(host);
+                }
                 showToast(`${command} on ${host}: ${ok ? 'ok' : 'err'}`, ok ? 'success' : 'error');
             } catch (err) {
                 logger.error(err);
