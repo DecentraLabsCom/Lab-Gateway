@@ -42,7 +42,7 @@ typing_extensions==4.16.0
 greenlet==3.5.6
 
 # MySQL driver
-PyMySQL==1.2.0
+PyMySQL==1.2.3
 
 # APC PowerNet SNMP driver
 pysnmp==7.1.29
