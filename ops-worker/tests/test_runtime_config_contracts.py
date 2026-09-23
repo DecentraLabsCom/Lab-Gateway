@@ -96,6 +96,7 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
             "DEMO_LAB_ID": "42",
             "DEMO_CONNECTION_ID": "7",
             "DEMO_HEARTBEAT_MAX_AGE_SECONDS": "20",
+            "LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS": "45",
             "GUACAMOLE_TEMP_USER_CLEANUP_ENABLED": "off",
             "GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS": "30",
             "GUACAMOLE_PROVISIONER_TOKEN_HEADER": "X-Provisioner",
@@ -145,6 +146,7 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
     assert config.lab_catalog_timeout_seconds == 30.0
     assert config.demo_user == "demo"
     assert config.demo_heartbeat_max_age_seconds == 30
+    assert config.lab_status_heartbeat_max_age_seconds == 45
     assert config.guacamole_temp_user_cleanup_enabled is False
     assert config.guacamole_temp_user_cleanup_interval_seconds == 60
     assert config.guacamole_provisioner_token == "provisioner-secret"
@@ -265,6 +267,7 @@ def test_runtime_config_publication_preserves_legacy_path_and_policy_names():
         "DEMO_LAB_ID": "demo_lab_id",
         "DEMO_CONNECTION_ID": "demo_connection_id",
         "DEMO_HEARTBEAT_MAX_AGE_SECONDS": "demo_heartbeat_max_age_seconds",
+        "LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS": "lab_status_heartbeat_max_age_seconds",
         "DEMO_OPERATION_ID_RE": "demo_operation_id_re",
         "DEMO_EVENT_ACTIONS": "demo_event_actions",
         "GUACAMOLE_TEMP_USER_CLEANUP_ENABLED": "guacamole_temp_user_cleanup_enabled",

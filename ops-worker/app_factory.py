@@ -23,6 +23,7 @@ from lab_associations_blueprint import create_lab_associations_blueprint
 from lifecycle_blueprint import create_lifecycle_blueprint
 from local_mode_blueprint import create_local_mode_blueprint
 from operations_blueprint import create_operations_blueprint
+from public_lab_status_blueprint import create_public_lab_status_blueprint
 from physical_operations_blueprint import create_physical_operations_blueprint
 from timeline_blueprint import create_timeline_blueprint
 from winrm_credentials_blueprint import create_winrm_credentials_blueprint
@@ -165,6 +166,17 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
     app.register_blueprint(
         create_lab_associations_blueprint(
             resolve_lab_associations=lambda: get("resolve_lab_associations")(),
+        )
+    )
+    app.register_blueprint(
+        create_public_lab_status_blueprint(
+            get_db_engine=lambda: get("DB_ENGINE"),
+            resolve_lab_associations=lambda: get("resolve_lab_associations")(),
+            fetch_latest_heartbeat=lambda connection, host_name: get(
+                "_fetch_latest_heartbeat"
+            )(connection, host_name),
+            now=lambda: get("datetime").now(get("timezone").utc),
+            max_age_seconds=lambda: get("LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS"),
         )
     )
     app.register_blueprint(

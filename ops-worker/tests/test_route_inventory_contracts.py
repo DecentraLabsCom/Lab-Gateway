@@ -19,6 +19,7 @@ EXPECTED_ROUTE_METHODS = {
     "/api/hosts/reload": {"POST"},
     "/api/hosts/winrm-credentials": {"POST"},
     "/api/lab-associations": {"GET"},
+    "/public/labs/status": {"GET"},
     "/api/labs/<lab_id>/power/end": {"POST"},
     "/api/labs/<lab_id>/power/start": {"POST"},
     "/api/operations/recent": {"GET"},

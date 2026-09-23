@@ -177,6 +177,11 @@ configured host address and port. This lets Lab Manager distinguish a powered
 off or unavailable Station from an internal worker failure.
 
 - `GET /health`
+- `GET /public/labs/status?labIds=1,2,3`
+  - Public, bounded projection of the latest persisted Lab Station heartbeat.
+    It returns only `ready`, `busy`, `not_ready` or `unknown`, the signal age,
+    and a stable reason. Host names, addresses, raw telemetry and session
+    identities are never returned.
 - `POST /api/wol`
   - Body: `{ host, mac?, broadcast?, port?, ping_target?, ping_timeout?, attempts? }`
   - Defaults: 3 attempts and 30 seconds per wait/probe window. The request can

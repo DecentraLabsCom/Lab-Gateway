@@ -38,6 +38,7 @@ class RuntimePolicy:
     demo_lab_id: str
     demo_connection_id: str
     demo_heartbeat_max_age_seconds: int
+    lab_status_heartbeat_max_age_seconds: int
     demo_operation_id_re: Pattern[str]
     demo_event_actions: Dict[str, str]
     guacamole_temp_user_cleanup_enabled: bool
@@ -206,6 +207,10 @@ def load_runtime_policy(
         demo_heartbeat_max_age_seconds=max(
             30,
             int(get("DEMO_HEARTBEAT_MAX_AGE_SECONDS", "180")),
+        ),
+        lab_status_heartbeat_max_age_seconds=max(
+            30,
+            int(get("LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS", "180")),
         ),
         demo_operation_id_re=re.compile(r"^demo:[A-Za-z0-9_.-]{1,128}$"),
         demo_event_actions={
@@ -431,6 +436,7 @@ def publish_runtime_policy(
             ("DEMO_LAB_ID", "demo_lab_id"),
             ("DEMO_CONNECTION_ID", "demo_connection_id"),
             ("DEMO_HEARTBEAT_MAX_AGE_SECONDS", "demo_heartbeat_max_age_seconds"),
+            ("LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS", "lab_status_heartbeat_max_age_seconds"),
             ("DEMO_OPERATION_ID_RE", "demo_operation_id_re"),
             ("DEMO_EVENT_ACTIONS", "demo_event_actions"),
             ("GUACAMOLE_TEMP_USER_CLEANUP_ENABLED", "guacamole_temp_user_cleanup_enabled"),
