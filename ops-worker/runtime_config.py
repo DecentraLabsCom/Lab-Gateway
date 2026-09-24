@@ -41,6 +41,12 @@ class RuntimePolicy:
     lab_status_heartbeat_max_age_seconds: int
     lab_status_target_probe_timeout_seconds: float
     lab_status_target_probe_cache_seconds: float
+    fmu_status_url: str
+    fmu_status_timeout_seconds: float
+    fmu_status_cache_seconds: float
+    fmu_status_backend: str
+    fmu_status_station_host: str
+    fmu_status_station_base_url: str
     demo_operation_id_re: Pattern[str]
     demo_event_actions: Dict[str, str]
     guacamole_temp_user_cleanup_enabled: bool
@@ -222,6 +228,27 @@ def load_runtime_policy(
             0.0,
             float(get("LAB_STATUS_TARGET_PROBE_CACHE_SECONDS", "30")),
         ),
+        fmu_status_url=(
+            get("FMU_STATUS_URL", "http://fmu-runner:8090/health")
+            or ""
+        ).strip(),
+        fmu_status_timeout_seconds=max(
+            0.2,
+            float(get("FMU_STATUS_TIMEOUT_SECONDS", "1.5")),
+        ),
+        fmu_status_cache_seconds=max(
+            0.0,
+            float(get("FMU_STATUS_CACHE_SECONDS", "15")),
+        ),
+        fmu_status_backend=(
+            get("FMU_STATUS_BACKEND", get("FMU_BACKEND_MODE", "station"))
+            or "station"
+        ).strip().lower(),
+        fmu_status_station_host=(get("FMU_STATUS_STATION_HOST") or "").strip(),
+        fmu_status_station_base_url=(
+            get("FMU_STATUS_STATION_BASE_URL", get("FMU_STATION_BASE_URL", ""))
+            or ""
+        ).strip(),
         demo_operation_id_re=re.compile(r"^demo:[A-Za-z0-9_.-]{1,128}$"),
         demo_event_actions={
             "start": "demo_start",
@@ -455,6 +482,12 @@ def publish_runtime_policy(
                 "LAB_STATUS_TARGET_PROBE_CACHE_SECONDS",
                 "lab_status_target_probe_cache_seconds",
             ),
+            ("FMU_STATUS_URL", "fmu_status_url"),
+            ("FMU_STATUS_TIMEOUT_SECONDS", "fmu_status_timeout_seconds"),
+            ("FMU_STATUS_CACHE_SECONDS", "fmu_status_cache_seconds"),
+            ("FMU_STATUS_BACKEND", "fmu_status_backend"),
+            ("FMU_STATUS_STATION_HOST", "fmu_status_station_host"),
+            ("FMU_STATUS_STATION_BASE_URL", "fmu_status_station_base_url"),
             ("DEMO_OPERATION_ID_RE", "demo_operation_id_re"),
             ("DEMO_EVENT_ACTIONS", "demo_event_actions"),
             ("GUACAMOLE_TEMP_USER_CLEANUP_ENABLED", "guacamole_temp_user_cleanup_enabled"),

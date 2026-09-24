@@ -701,6 +701,12 @@ services:
       - LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS=${LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS:-180}
       - LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS=${LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS:-1.5}
       - LAB_STATUS_TARGET_PROBE_CACHE_SECONDS=${LAB_STATUS_TARGET_PROBE_CACHE_SECONDS:-30}
+      - FMU_STATUS_URL=${FMU_STATUS_URL:-http://fmu-runner:8090/health}
+      - FMU_STATUS_TIMEOUT_SECONDS=${FMU_STATUS_TIMEOUT_SECONDS:-1.5}
+      - FMU_STATUS_CACHE_SECONDS=${FMU_STATUS_CACHE_SECONDS:-15}
+      - FMU_STATUS_BACKEND=${FMU_BACKEND_MODE:-station}
+      - FMU_STATUS_STATION_HOST=${FMU_STATUS_STATION_HOST:-}
+      - FMU_STATUS_STATION_BASE_URL=${FMU_STATUS_STATION_BASE_URL:-${FMU_STATION_BASE_URL:-}}
       - GUAC_API_URL=${GUAC_API_URL:-http://guacamole:8080/guacamole/api}
       - GUACAMOLE_HISTORY_LOOKBACK_SECONDS=${GUACAMOLE_HISTORY_LOOKBACK_SECONDS:-30}
       - GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS=${GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS:-300}
@@ -770,6 +776,7 @@ services:
       - database_ops
       - ops_guacamole
       - fmu_aas_ops
+      - fmu_status
 
   # FMU Runner - FMI Co-Simulation execution service
   fmu-runner:
@@ -864,6 +871,7 @@ services:
       - fmu_edge
       - fmu_control
       - fmu_aas
+      - fmu_status
 
   # Explicit development-only local FMU execution. This service deliberately
   # does not receive Station/control-plane/proxy-signing credentials. It
@@ -947,6 +955,9 @@ services:
     restart: unless-stopped
     networks:
       fmu_local_edge:
+        aliases:
+          - fmu-runner
+      fmu_status:
         aliases:
           - fmu-runner
       # Full-mode local runners need the blockchain-services JWKS endpoint,
@@ -1120,6 +1131,11 @@ networks:
     driver: bridge
     internal: true
   fmu_local_edge:
+    driver: bridge
+    internal: true
+  # Narrow internal path used by Ops Worker to read the runner health signal.
+  # The active FMU profile attaches its runner with the stable alias below.
+  fmu_status:
     driver: bridge
     internal: true
   # Narrow internal path used only for JWT public-key retrieval by the local

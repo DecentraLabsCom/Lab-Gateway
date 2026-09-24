@@ -99,6 +99,12 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
             "LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS": "45",
             "LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS": "2.5",
             "LAB_STATUS_TARGET_PROBE_CACHE_SECONDS": "12",
+            "FMU_STATUS_URL": "http://fmu-runner:8090/health",
+            "FMU_STATUS_TIMEOUT_SECONDS": "2.25",
+            "FMU_STATUS_CACHE_SECONDS": "9",
+            "FMU_STATUS_BACKEND": "local",
+            "FMU_STATUS_STATION_HOST": "station-01",
+            "FMU_STATUS_STATION_BASE_URL": "https://station-01:8765",
             "GUACAMOLE_TEMP_USER_CLEANUP_ENABLED": "off",
             "GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS": "30",
             "GUACAMOLE_PROVISIONER_TOKEN_HEADER": "X-Provisioner",
@@ -151,6 +157,12 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
     assert config.lab_status_heartbeat_max_age_seconds == 45
     assert config.lab_status_target_probe_timeout_seconds == 2.5
     assert config.lab_status_target_probe_cache_seconds == 12.0
+    assert config.fmu_status_url == "http://fmu-runner:8090/health"
+    assert config.fmu_status_timeout_seconds == 2.25
+    assert config.fmu_status_cache_seconds == 9.0
+    assert config.fmu_status_backend == "local"
+    assert config.fmu_status_station_host == "station-01"
+    assert config.fmu_status_station_base_url == "https://station-01:8765"
     assert config.guacamole_temp_user_cleanup_enabled is False
     assert config.guacamole_temp_user_cleanup_interval_seconds == 60
     assert config.guacamole_provisioner_token == "provisioner-secret"

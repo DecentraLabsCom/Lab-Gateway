@@ -182,7 +182,12 @@ off or unavailable Station from an internal worker failure.
     It returns only `ready`, `busy`, `not_ready` or `unknown`, the signal age,
     and a stable reason. When available, `capabilities.physicalLab` and
     `capabilities.fmu` expose the same bounded status shape so consumers can
-    choose readiness for the resource type they represent. Host names,
+    choose readiness for the resource type they represent. FMU entries use
+    the Lab Station heartbeat's FMU capability in production `station` mode;
+    local FMU entries use the private Gateway FMU runner health signal. When
+    a station heartbeat host cannot be resolved, station mode falls back to
+    the runner's own Station health check.
+    Host names,
     addresses, raw telemetry and session identities are never returned.
 - `POST /api/wol`
   - Body: `{ host, mac?, broadcast?, port?, ping_target?, ping_timeout?, attempts? }`

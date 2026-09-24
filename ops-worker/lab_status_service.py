@@ -134,6 +134,46 @@ def _project_target_probe(
     return result
 
 
+def _project_fmu_runner_status(
+    lab_id: Any,
+    runner_status: Optional[Mapping[str, Any]],
+    current: datetime,
+) -> Dict[str, Any]:
+    """Project local FMU runner health without exposing runner diagnostics."""
+    status: Mapping[str, Any] = runner_status or {}
+    signal = str(status.get("signal") or "unknown").strip().lower()
+    if signal == "ready":
+        state = "ready"
+        severity = "positive"
+    elif signal == "not_ready":
+        state = "not_ready"
+        severity = "critical"
+    else:
+        state = "unknown"
+        severity = "neutral"
+    reason = str(status.get("reason") or "fmu_runner_unavailable").strip()
+    if reason not in {"fmu_ready", "fmu_not_ready", "fmu_runner_unavailable"}:
+        reason = "fmu_runner_unavailable"
+    result = {
+        **_base_status(
+            lab_id,
+            current,
+            state=state,
+            reason=reason,
+            source="fmu_runner_health",
+        ),
+        "severity": severity,
+    }
+    observed = _as_utc(status.get("observedAt"))
+    if observed is not None:
+        result.update({
+            "observedAt": _iso(observed),
+            "ageSeconds": max(0, int((current - observed).total_seconds())),
+        })
+    result["capabilities"] = {"fmu": result.copy()}
+    return result
+
+
 def _capability_ready(
     heartbeat: Mapping[str, Any],
     capability: str,
@@ -185,6 +225,12 @@ def project_lab_status(
     """
     heartbeat = _merge_persisted_heartbeat(heartbeat)
     current = _as_utc(now) or datetime.now(timezone.utc)
+    if heartbeat is None:
+        if target_probe is not None:
+            return _project_target_probe(lab_id, target_probe, current)
+        if not host_mapped:
+            return _base_status(lab_id, current, state="unknown", reason="lab_not_mapped")
+        return _base_status(lab_id, current, state="unknown", reason="heartbeat_missing")
     observed = _as_utc(heartbeat.get("timestamp")) if heartbeat else None
     age_seconds = (
         max(0, int((current - observed).total_seconds()))
@@ -211,6 +257,8 @@ def project_lab_status(
             "ageSeconds": age_seconds,
         }
 
+    assert observed is not None
+    assert age_seconds is not None
     local_mode = heartbeat.get("localMode") is True
     local_session = heartbeat.get("localSession") is True
     if local_mode or local_session:
@@ -257,4 +305,45 @@ def project_lab_status(
     return physical
 
 
-__all__ = ["heartbeat_is_fresh", "project_lab_status"]
+def project_fmu_runner_status(
+    lab_id: Any,
+    runner_status: Optional[Mapping[str, Any]],
+    *,
+    now: datetime,
+) -> Dict[str, Any]:
+    """Project a local FMU resource from the runner health signal."""
+    current = _as_utc(now) or datetime.now(timezone.utc)
+    return _project_fmu_runner_status(lab_id, runner_status, current)
+
+
+def project_station_fmu_status(
+    lab_id: Any,
+    heartbeat: Optional[Mapping[str, Any]],
+    *,
+    now: datetime,
+    max_age_seconds: int,
+    host_mapped: bool = True,
+) -> Dict[str, Any]:
+    """Project the FMU capability from a Lab Station heartbeat."""
+    station_status = project_lab_status(
+        lab_id,
+        heartbeat,
+        now=now,
+        max_age_seconds=max_age_seconds,
+        host_mapped=host_mapped,
+    )
+    capabilities = station_status.get("capabilities")
+    fmu_status = capabilities.get("fmu") if isinstance(capabilities, Mapping) else None
+    if not isinstance(fmu_status, Mapping):
+        fmu_status = station_status
+    result = dict(fmu_status)
+    result["capabilities"] = {"fmu": dict(fmu_status)}
+    return result
+
+
+__all__ = [
+    "heartbeat_is_fresh",
+    "project_fmu_runner_status",
+    "project_lab_status",
+    "project_station_fmu_status",
+]

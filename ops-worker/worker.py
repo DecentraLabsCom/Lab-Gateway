@@ -13,6 +13,7 @@ import socket
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Mapping, Optional, Pattern, Sequence, Set, Tuple, Union, cast
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 from flask import Response, jsonify, request, stream_with_context
@@ -250,6 +251,7 @@ from network_probe import (
     tcp_port_open as _tcp_port_open_impl,
 )
 from lab_status_probe import CachedLabTargetProber
+from fmu_runner_status import CachedFmuRunnerStatus
 from operation_persistence import (
     record_reservation_operation as _record_reservation_operation_impl,
 )
@@ -517,6 +519,12 @@ DEMO_HEARTBEAT_MAX_AGE_SECONDS: int
 LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS: int
 LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS: float
 LAB_STATUS_TARGET_PROBE_CACHE_SECONDS: float
+FMU_STATUS_URL: str
+FMU_STATUS_TIMEOUT_SECONDS: float
+FMU_STATUS_CACHE_SECONDS: float
+FMU_STATUS_BACKEND: str
+FMU_STATUS_STATION_HOST: str
+FMU_STATUS_STATION_BASE_URL: str
 DEMO_OPERATION_ID_RE: Pattern[str]
 DEMO_EVENT_ACTIONS: Dict[str, str]
 GUACAMOLE_TEMP_USER_CLEANUP_ENABLED: bool
@@ -565,6 +573,16 @@ DISCOVERY_LABSTATION_PORTS: List[int]
 DISCOVERY_LABSTATION_PATHS: List[str]
 DISCOVERY_HEARTBEAT_PATHS: List[str]
 publish_runtime_policy(_RUNTIME_POLICY, globals())
+# Keep the dynamically published values explicit for static analyzers.  The
+# module-level names remain part of the worker's existing test/runtime seam.
+LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS = _RUNTIME_POLICY.lab_status_target_probe_timeout_seconds
+LAB_STATUS_TARGET_PROBE_CACHE_SECONDS = _RUNTIME_POLICY.lab_status_target_probe_cache_seconds
+FMU_STATUS_URL = _RUNTIME_POLICY.fmu_status_url
+FMU_STATUS_TIMEOUT_SECONDS = _RUNTIME_POLICY.fmu_status_timeout_seconds
+FMU_STATUS_CACHE_SECONDS = _RUNTIME_POLICY.fmu_status_cache_seconds
+FMU_STATUS_BACKEND = _RUNTIME_POLICY.fmu_status_backend
+FMU_STATUS_STATION_HOST = _RUNTIME_POLICY.fmu_status_station_host
+FMU_STATUS_STATION_BASE_URL = _RUNTIME_POLICY.fmu_status_station_base_url
 # The Ops Worker is intentionally not a public API. OpenResty authenticates
 # the operator at the edge and injects this separate, gateway-local credential.
 OPS_INTERNAL_AUTH_TOKEN = _RUNTIME_POLICY.ops_internal_auth_token
@@ -1451,6 +1469,32 @@ resolve_lab_associations = _LAB_RESOLUTION_RUNTIME.resolve_lab_associations
 resolve_lab_status_targets = _LAB_RESOLUTION_RUNTIME.resolve_lab_status_targets
 refresh_lab_catalog = _LAB_RESOLUTION_RUNTIME.refresh_catalog
 
+
+def resolve_lab_resources() -> List[Dict[str, str]]:
+    """Resolve catalog resources using this Gateway's active FMU backend."""
+    return _LAB_RESOLUTION_RUNTIME.resolve_lab_resources(
+        default_fmu_backend=FMU_STATUS_BACKEND,
+    )
+
+
+def resolve_fmu_station_host() -> str:
+    """Resolve the configured FMU Station to one registered Ops host."""
+    target = (FMU_STATUS_STATION_HOST or "").strip()
+    if not target and FMU_STATUS_STATION_BASE_URL:
+        target = (urlparse(FMU_STATUS_STATION_BASE_URL).hostname or "").strip()
+    if not target:
+        return ""
+    normalized = normalize_match_key(target)
+    with HOSTS_LOCK:
+        matches = [
+            host for host in HOSTS.all_hosts()
+            if normalized in {
+                normalize_match_key(host.get("name")),
+                normalize_match_key(host.get("address")),
+            }
+        ]
+    return str(matches[0].get("name") or "").strip() if len(matches) == 1 else ""
+
 _LAB_STATUS_PROBER = CachedLabTargetProber(
     tcp_port_open=tcp_port_open,
     timeout_seconds=LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS,
@@ -1459,6 +1503,16 @@ _LAB_STATUS_PROBER = CachedLabTargetProber(
     monotonic=time.monotonic,
 )
 probe_lab_targets = _LAB_STATUS_PROBER.probe_targets
+
+_FMU_STATUS_PROBER = CachedFmuRunnerStatus(
+    http_get=requests.get,
+    url=FMU_STATUS_URL,
+    timeout_seconds=FMU_STATUS_TIMEOUT_SECONDS,
+    cache_seconds=FMU_STATUS_CACHE_SECONDS,
+    now=lambda: datetime.now(timezone.utc),
+    monotonic=time.monotonic,
+)
+fetch_fmu_runner_status = _FMU_STATUS_PROBER.get_status
 
 def build_host_inventory() -> Dict[str, Any]:
     """Build inventory while preserving the live worker patch point."""

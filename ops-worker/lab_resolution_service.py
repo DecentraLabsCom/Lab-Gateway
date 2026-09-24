@@ -11,6 +11,31 @@ from typing import Any, Dict, List, Optional
 from host_inventory_service import find_unique_host_for_connection
 
 
+def normalize_lab_resource_type(value: Any) -> str:
+    """Normalize the provider catalog's physical/FMU resource discriminator."""
+    normalized = str(value or "").strip().lower()
+    return "fmu" if normalized in {"1", "fmu"} else "lab"
+
+
+def normalize_fmu_execution_backend(value: Any, default: str = "station") -> str:
+    """Normalize the execution location used for FMU operational status."""
+    normalized = str(value or "").strip().lower()
+    if normalized in {"local", "gateway", "gateway-local", "gateway_local"}:
+        return "local"
+    if normalized in {"station", "labstation", "lab-station", "remote-station"}:
+        return "station"
+    fallback = str(default or "station").strip().lower()
+    return "local" if fallback in {"local", "gateway", "gateway-local", "gateway_local"} else "station"
+
+
+def _catalog_value(lab: Mapping[str, Any], keys: Sequence[str]) -> Any:
+    for key in keys:
+        value = lab.get(key)
+        if value is not None and str(value).strip():
+            return value
+    return None
+
+
 def extract_lab_catalog(payload: Any) -> List[Dict[str, Any]]:
     """Normalize a backend catalog envelope into valid lab dictionaries."""
     rows = payload
@@ -57,6 +82,48 @@ def resolve_lab_access_key(
         return None
     access_key = str(lab.get("accessKey") or "").strip()
     return access_key or None
+
+
+def resolve_lab_resources(
+    labs: Sequence[Mapping[str, Any]],
+    *,
+    default_fmu_backend: str = "station",
+) -> List[Dict[str, str]]:
+    """Project resource type and FMU execution location for status probes.
+
+    The current provider catalog normally supplies the default backend through
+    the Gateway deployment configuration.  The optional catalog fields are
+    accepted for future per-resource routing and for installations that expose
+    both kinds of FMU explicitly.
+    """
+    resources: List[Dict[str, str]] = []
+    for lab in _lab_index(labs).values():
+        lab_id = str(lab.get("labId") or "").strip()
+        if lab_id:
+            resource = {
+                "labId": lab_id,
+                "resourceType": normalize_lab_resource_type(lab.get("resourceType")),
+            }
+            if resource["resourceType"] == "fmu":
+                resource["executionBackend"] = normalize_fmu_execution_backend(
+                    _catalog_value(lab, (
+                        "executionBackend",
+                        "fmuBackend",
+                        "backendMode",
+                        "executionLocation",
+                        "hostedOn",
+                    )),
+                    default_fmu_backend,
+                )
+                station_host = _catalog_value(lab, (
+                    "stationHostName",
+                    "stationHost",
+                    "executionHost",
+                ))
+                if station_host is not None:
+                    resource["stationHostName"] = str(station_host).strip()
+            resources.append(resource)
+    return resources
 
 
 def _connection_for_access_key(
@@ -216,9 +283,12 @@ def resolve_lab_status_targets(
 
 __all__ = [
     "extract_lab_catalog",
+    "normalize_fmu_execution_backend",
+    "normalize_lab_resource_type",
     "resolve_lab_associations",
     "resolve_host_for_lab",
     "resolve_lab_access_key",
     "resolve_lab_ids_for_host",
+    "resolve_lab_resources",
     "resolve_lab_status_targets",
 ]

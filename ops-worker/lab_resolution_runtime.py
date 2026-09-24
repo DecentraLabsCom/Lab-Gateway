@@ -11,6 +11,7 @@ from lab_resolution_service import (
     resolve_host_for_lab,
     resolve_lab_access_key,
     resolve_lab_ids_for_host,
+    resolve_lab_resources,
     resolve_lab_status_targets,
 )
 
@@ -129,6 +130,13 @@ class LabResolutionRuntime:
             hosts,
             parse_selector=context.get_parse_selector(),
             normalize_key=context.get_normalize_key(),
+        )
+
+    def resolve_lab_resources(self, *, default_fmu_backend: str = "station") -> List[Dict[str, str]]:
+        """Return the catalog resource type for every known laboratory."""
+        return resolve_lab_resources(
+            self._load_catalog(),
+            default_fmu_backend=default_fmu_backend,
         )
 
 

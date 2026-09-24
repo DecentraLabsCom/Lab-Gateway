@@ -4,6 +4,7 @@ from lab_resolution_service import (
     resolve_host_for_lab,
     resolve_lab_access_key,
     resolve_lab_ids_for_host,
+    resolve_lab_resources,
     resolve_lab_status_targets,
 )
 
@@ -44,6 +45,45 @@ def test_extract_lab_catalog_accepts_backend_envelope_and_discards_invalid_rows(
 def test_resolve_lab_access_key_reads_catalog_entry_without_host_config():
     assert resolve_lab_access_key(LABS, "lab-1") == "guac:id:5"
     assert resolve_lab_access_key(LABS, "missing") is None
+
+
+def test_resolve_lab_resources_preserves_fmu_type_without_guacamole_mapping():
+    assert resolve_lab_resources(LABS) == [
+        {"labId": "lab-1", "resourceType": "lab"},
+        {"labId": "lab-2", "resourceType": "lab"},
+        {
+            "labId": "fmu-1",
+            "resourceType": "fmu",
+            "executionBackend": "station",
+        },
+    ]
+
+
+def test_resolve_lab_resources_allows_explicit_local_fmu_execution_and_station_host():
+    labs = [{
+        "labId": "fmu-local",
+        "resourceType": 1,
+        "executionBackend": "local",
+    }, {
+        "labId": "fmu-station",
+        "resourceType": 1,
+        "executionBackend": "station",
+        "stationHostName": "station-01",
+    }]
+
+    assert resolve_lab_resources(labs) == [
+        {
+            "labId": "fmu-local",
+            "resourceType": "fmu",
+            "executionBackend": "local",
+        },
+        {
+            "labId": "fmu-station",
+            "resourceType": "fmu",
+            "executionBackend": "station",
+            "stationHostName": "station-01",
+        },
+    ]
 
 
 def test_resolve_host_for_lab_follows_lab_access_key_connection_and_hostname():

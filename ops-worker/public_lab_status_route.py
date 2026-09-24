@@ -1,9 +1,14 @@
 """Request parsing and response handling for the public lab-status projection."""
 
 from datetime import datetime
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from lab_status_service import heartbeat_is_fresh, project_lab_status
+from lab_status_service import (
+    heartbeat_is_fresh,
+    project_fmu_runner_status,
+    project_lab_status,
+    project_station_fmu_status,
+)
 
 
 MAX_PUBLIC_STATUS_LABS = 50
@@ -42,6 +47,9 @@ def build_public_lab_status_response(
     probe_lab_targets: Callable[[Sequence[dict]], Dict[str, Dict[str, Any]]],
     now: Callable[[], datetime],
     max_age_seconds: int,
+    resolve_lab_resources: Optional[Callable[[], Sequence[dict]]] = None,
+    resolve_fmu_station_host: Optional[Callable[[], str]] = None,
+    fetch_fmu_runner_status: Optional[Callable[[], Optional[Mapping[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     current = now()
     statuses = []
@@ -60,9 +68,40 @@ def build_public_lab_status_response(
             for entry in (resolve_lab_status_targets() or [])
             if isinstance(entry, dict) and str(entry.get("labId") or "").strip()
         }
+        resources_by_lab = {
+            str(entry.get("labId")): dict(entry)
+            for entry in (resolve_lab_resources() if resolve_lab_resources else []) or []
+            if isinstance(entry, dict) and str(entry.get("labId") or "").strip()
+        }
+        fmu_station_host = ""
+        if resolve_fmu_station_host:
+            fmu_station_host = str(resolve_fmu_station_host() or "").strip()
+
+        def resource_type(lab_id: str) -> str:
+            return str(resources_by_lab.get(lab_id, {}).get("resourceType") or "").strip().lower()
+
+        def fmu_backend(lab_id: str) -> str:
+            backend = str(
+                resources_by_lab.get(lab_id, {}).get("executionBackend") or "station"
+            ).strip().lower()
+            return "local" if backend in {"local", "gateway", "gateway-local", "gateway_local"} else "station"
+
+        def fmu_host(lab_id: str) -> str:
+            return str(
+                resources_by_lab.get(lab_id, {}).get("stationHostName") or fmu_station_host
+            ).strip()
+
         heartbeats = {}
         for lab_id in lab_ids:
-            host_name = host_by_lab.get(str(lab_id), "")
+            lab_key = str(lab_id)
+            if resource_type(lab_key) == "fmu" and fmu_backend(lab_key) == "local":
+                heartbeats[str(lab_id)] = None
+                continue
+            host_name = (
+                fmu_host(lab_key)
+                if resource_type(lab_key) == "fmu"
+                else host_by_lab.get(lab_key, "")
+            )
             heartbeat = None
             if host_name and connection is not None:
                 heartbeat = fetch_latest_heartbeat(connection, host_name)
@@ -72,6 +111,7 @@ def build_public_lab_status_response(
             targets_by_lab[str(lab_id)]
             for lab_id in lab_ids
             if str(lab_id) in targets_by_lab
+            and resource_type(str(lab_id)) != "fmu"
             and not heartbeat_is_fresh(
                 heartbeats[str(lab_id)],
                 now=current,
@@ -79,8 +119,38 @@ def build_public_lab_status_response(
             )
         ]
         probes = probe_lab_targets(targets_to_probe) if targets_to_probe else {}
+        fmu_runner_status = None
+        if (
+            fetch_fmu_runner_status
+            and any(
+                resource_type(str(lab_id)) == "fmu"
+                and (
+                    fmu_backend(str(lab_id)) == "local"
+                    or not fmu_host(str(lab_id))
+                )
+                for lab_id in lab_ids
+            )
+        ):
+            fmu_runner_status = fetch_fmu_runner_status()
 
         for lab_id in lab_ids:
+            lab_key = str(lab_id)
+            if resource_type(lab_key) == "fmu":
+                if fmu_backend(lab_key) == "local" or not fmu_host(lab_key):
+                    statuses.append(project_fmu_runner_status(
+                        lab_id,
+                        fmu_runner_status,
+                        now=current,
+                    ))
+                else:
+                    statuses.append(project_station_fmu_status(
+                        lab_id,
+                        heartbeats[lab_key],
+                        now=current,
+                        max_age_seconds=max_age_seconds,
+                        host_mapped=True,
+                    ))
+                continue
             host_name = host_by_lab.get(str(lab_id), "")
             statuses.append(project_lab_status(
                 lab_id,
