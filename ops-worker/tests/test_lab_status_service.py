@@ -80,3 +80,43 @@ def test_missing_mapping_is_unknown_without_exposing_host_details():
         "labId", "state", "reason", "source", "observedAt", "ageSeconds",
         "severity", "generatedAt",
     }
+
+
+def test_guacamole_probe_is_used_when_station_heartbeat_is_not_fresh():
+    result = project_lab_status(
+        7,
+        None,
+        now=NOW,
+        max_age_seconds=180,
+        host_mapped=False,
+        target_probe={
+            "signal": "reachable",
+            "reason": "target_reachable",
+            "source": "guacamole_tcp_probe",
+            "observedAt": (NOW - timedelta(seconds=8)).isoformat(),
+        },
+    )
+
+    assert result["state"] == "reachable"
+    assert result["severity"] == "positive"
+    assert result["source"] == "guacamole_tcp_probe"
+    assert result["reason"] == "target_reachable"
+    assert result["ageSeconds"] == 8
+
+
+def test_fresh_station_heartbeat_takes_precedence_over_guacamole_probe():
+    result = project_lab_status(
+        7,
+        heartbeat(),
+        now=NOW,
+        max_age_seconds=180,
+        target_probe={
+            "signal": "unreachable",
+            "reason": "target_unreachable",
+            "source": "guacamole_tcp_probe",
+            "observedAt": NOW.isoformat(),
+        },
+    )
+
+    assert result["state"] == "ready"
+    assert result["source"] == "lab_station_heartbeat"

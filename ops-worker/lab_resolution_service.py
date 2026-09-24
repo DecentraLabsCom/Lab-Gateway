@@ -163,10 +163,62 @@ def resolve_lab_associations(
     return associations
 
 
+def resolve_lab_status_targets(
+    labs: Sequence[Mapping[str, Any]],
+    connections: Sequence[Mapping[str, Any]],
+    hosts: Sequence[Dict[str, Any]],
+    *,
+    parse_selector: Callable[[Any], int],
+    normalize_key: Callable[[Any], str],
+) -> List[Dict[str, Any]]:
+    """Resolve Guacamole targets, including labs without a Station host.
+
+    The returned records are an internal probe plan.  They deliberately retain
+    the connection target only inside the Gateway; the public status projection
+    never serializes these records.
+    """
+    targets: List[Dict[str, Any]] = []
+    indexed_labs = _lab_index(labs)
+    for lab in indexed_labs.values():
+        lab_id = str(lab.get("labId") or "").strip()
+        access_key = str(lab.get("accessKey") or "").strip()
+        if not lab_id or not access_key:
+            continue
+        connection = _connection_for_access_key(
+            access_key,
+            connections,
+            parse_selector=parse_selector,
+        )
+        if not connection:
+            continue
+
+        hostname = str(connection.get("hostname") or "").strip()
+        if not hostname:
+            continue
+        target: Dict[str, Any] = {
+            "labId": lab_id,
+            "connectionId": str(connection.get("id")),
+            "hostname": hostname,
+            "protocol": str(connection.get("protocol") or "").strip().lower(),
+            "port": connection.get("port"),
+        }
+        host = find_unique_host_for_connection(
+            list(hosts),
+            connection,
+            normalize_key=normalize_key,
+        )
+        host_name = str(host.get("name") or "").strip() if host else ""
+        if host_name:
+            target["hostName"] = host_name
+        targets.append(target)
+    return targets
+
+
 __all__ = [
     "extract_lab_catalog",
     "resolve_lab_associations",
     "resolve_host_for_lab",
     "resolve_lab_access_key",
     "resolve_lab_ids_for_host",
+    "resolve_lab_status_targets",
 ]

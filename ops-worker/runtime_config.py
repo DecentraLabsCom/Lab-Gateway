@@ -39,6 +39,8 @@ class RuntimePolicy:
     demo_connection_id: str
     demo_heartbeat_max_age_seconds: int
     lab_status_heartbeat_max_age_seconds: int
+    lab_status_target_probe_timeout_seconds: float
+    lab_status_target_probe_cache_seconds: float
     demo_operation_id_re: Pattern[str]
     demo_event_actions: Dict[str, str]
     guacamole_temp_user_cleanup_enabled: bool
@@ -211,6 +213,14 @@ def load_runtime_policy(
         lab_status_heartbeat_max_age_seconds=max(
             30,
             int(get("LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS", "180")),
+        ),
+        lab_status_target_probe_timeout_seconds=max(
+            0.2,
+            float(get("LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS", "1.5")),
+        ),
+        lab_status_target_probe_cache_seconds=max(
+            0.0,
+            float(get("LAB_STATUS_TARGET_PROBE_CACHE_SECONDS", "30")),
         ),
         demo_operation_id_re=re.compile(r"^demo:[A-Za-z0-9_.-]{1,128}$"),
         demo_event_actions={
@@ -437,6 +447,14 @@ def publish_runtime_policy(
             ("DEMO_CONNECTION_ID", "demo_connection_id"),
             ("DEMO_HEARTBEAT_MAX_AGE_SECONDS", "demo_heartbeat_max_age_seconds"),
             ("LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS", "lab_status_heartbeat_max_age_seconds"),
+            (
+                "LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS",
+                "lab_status_target_probe_timeout_seconds",
+            ),
+            (
+                "LAB_STATUS_TARGET_PROBE_CACHE_SECONDS",
+                "lab_status_target_probe_cache_seconds",
+            ),
             ("DEMO_OPERATION_ID_RE", "demo_operation_id_re"),
             ("DEMO_EVENT_ACTIONS", "demo_event_actions"),
             ("GUACAMOLE_TEMP_USER_CLEANUP_ENABLED", "guacamole_temp_user_cleanup_enabled"),

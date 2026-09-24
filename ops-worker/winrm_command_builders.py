@@ -3,13 +3,30 @@
 from typing import Any, List, Tuple
 
 
+def _quote_winrm_token(value: Any) -> str:
+    """Quote one token for pywinrm's cmd-backed argument string."""
+    text = str(value)
+    if text == "":
+        return '""'
+    if not any(char.isspace() or char in '"&|<>()^' for char in text):
+        return text
+    return '"' + text.replace('"', '\\"') + '"'
+
+
 def build_labstation_command(
     executable: Any,
     command: str,
     args: List[Any],
 ) -> Tuple[Any, List[Any]]:
-    """Return the executable and ordered arguments used by ``run_cmd``."""
-    return executable, [command] + args
+    """Return a cmd-safe executable and ordered arguments for ``run_cmd``.
+
+    pywinrm sends the executable and arguments to the Windows command shell.
+    Paths such as ``C:\\Lab Station\\LabStation.exe`` and arguments containing
+    spaces must therefore remain single command-line tokens.
+    """
+    quoted_executable = _quote_winrm_token(executable)
+    quoted_args = [_quote_winrm_token(arg) for arg in args]
+    return quoted_executable, [command] + quoted_args
 
 
 def build_read_remote_file_command(path: Any) -> str:

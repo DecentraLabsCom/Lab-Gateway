@@ -172,9 +172,11 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
         create_public_lab_status_blueprint(
             get_db_engine=lambda: get("DB_ENGINE"),
             resolve_lab_associations=lambda: get("resolve_lab_associations")(),
+            resolve_lab_status_targets=lambda: get("resolve_lab_status_targets")(),
             fetch_latest_heartbeat=lambda connection, host_name: get(
                 "_fetch_latest_heartbeat"
             )(connection, host_name),
+            probe_lab_targets=lambda targets: get("probe_lab_targets")(targets),
             now=lambda: get("datetime").now(get("timezone").utc),
             max_age_seconds=lambda: get("LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS"),
         )

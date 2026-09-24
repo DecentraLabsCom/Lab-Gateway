@@ -249,6 +249,7 @@ from network_probe import (
     is_valid_ping_target as _is_valid_ping_target_impl,
     tcp_port_open as _tcp_port_open_impl,
 )
+from lab_status_probe import CachedLabTargetProber
 from operation_persistence import (
     record_reservation_operation as _record_reservation_operation_impl,
 )
@@ -514,6 +515,8 @@ DEMO_LAB_ID: str
 DEMO_CONNECTION_ID: str
 DEMO_HEARTBEAT_MAX_AGE_SECONDS: int
 LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS: int
+LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS: float
+LAB_STATUS_TARGET_PROBE_CACHE_SECONDS: float
 DEMO_OPERATION_ID_RE: Pattern[str]
 DEMO_EVENT_ACTIONS: Dict[str, str]
 GUACAMOLE_TEMP_USER_CLEANUP_ENABLED: bool
@@ -1445,7 +1448,17 @@ resolve_lab_access_key = _LAB_RESOLUTION_RUNTIME.resolve_lab_access_key
 resolve_host_by_lab = _LAB_RESOLUTION_RUNTIME.resolve_host_by_lab
 resolve_lab_ids_for_host = _LAB_RESOLUTION_RUNTIME.resolve_lab_ids_for_host
 resolve_lab_associations = _LAB_RESOLUTION_RUNTIME.resolve_lab_associations
+resolve_lab_status_targets = _LAB_RESOLUTION_RUNTIME.resolve_lab_status_targets
 refresh_lab_catalog = _LAB_RESOLUTION_RUNTIME.refresh_catalog
+
+_LAB_STATUS_PROBER = CachedLabTargetProber(
+    tcp_port_open=tcp_port_open,
+    timeout_seconds=LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS,
+    cache_seconds=LAB_STATUS_TARGET_PROBE_CACHE_SECONDS,
+    now=lambda: datetime.now(timezone.utc),
+    monotonic=time.monotonic,
+)
+probe_lab_targets = _LAB_STATUS_PROBER.probe_targets
 
 def build_host_inventory() -> Dict[str, Any]:
     """Build inventory while preserving the live worker patch point."""

@@ -43,4 +43,12 @@ def test_runtime_fetches_catalog_once_within_cache_window_and_resolves_both_dire
     assert runtime.resolve_lab_associations() == [
         {"labId": "lab-1", "hostName": "station-01"},
     ]
+    assert runtime.resolve_lab_status_targets() == [{
+        "labId": "lab-1",
+        "connectionId": "5",
+        "hostname": "station-01",
+        "protocol": "",
+        "port": None,
+        "hostName": "station-01",
+    }]
     assert calls == ["fetch"]

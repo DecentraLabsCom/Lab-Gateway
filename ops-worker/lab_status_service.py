@@ -24,17 +24,91 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _base_status(lab_id: Any, now: datetime, *, state: str, reason: str) -> Dict[str, Any]:
+def _base_status(
+    lab_id: Any,
+    now: datetime,
+    *,
+    state: str,
+    reason: str,
+    source: str = "lab_station_heartbeat",
+) -> Dict[str, Any]:
     return {
         "labId": str(lab_id),
         "state": state,
         "reason": reason,
-        "source": "lab_station_heartbeat",
+        "source": source,
         "observedAt": None,
         "ageSeconds": None,
-        "severity": "neutral" if state == "unknown" else "critical" if state == "not_ready" else "warning",
+        "severity": (
+            "neutral"
+            if state == "unknown"
+            else "critical"
+            if state == "not_ready"
+            else "positive"
+            if state == "reachable"
+            else "warning"
+        ),
         "generatedAt": _iso(now),
     }
+
+
+def heartbeat_is_fresh(
+    heartbeat: Optional[Mapping[str, Any]],
+    *,
+    now: datetime,
+    max_age_seconds: int,
+) -> bool:
+    """Return whether a persisted heartbeat is valid and within its freshness window."""
+    if not heartbeat:
+        return False
+    observed = _as_utc(heartbeat.get("timestamp"))
+    if observed is None:
+        return False
+    current = _as_utc(now) or datetime.now(timezone.utc)
+    age_seconds = max(0, int((current - observed).total_seconds()))
+    return age_seconds <= max(30, int(max_age_seconds))
+
+
+def _project_target_probe(
+    lab_id: Any,
+    probe: Mapping[str, Any],
+    current: datetime,
+) -> Dict[str, Any]:
+    signal = str(probe.get("signal") or "").strip().lower()
+    reason = str(probe.get("reason") or "target_probe_error").strip()
+    if reason not in {
+        "target_reachable",
+        "target_unreachable",
+        "target_invalid",
+        "target_probe_error",
+    }:
+        reason = "target_probe_error"
+    observed = _as_utc(probe.get("observedAt"))
+    if signal == "reachable":
+        state = "reachable"
+        severity = "positive"
+    elif signal == "unreachable":
+        state = "not_ready"
+        severity = "critical"
+    else:
+        state = "unknown"
+        severity = "neutral"
+    result = {
+        **_base_status(
+            lab_id,
+            current,
+            state=state,
+            reason=reason,
+            source="guacamole_tcp_probe",
+        ),
+        "severity": severity,
+    }
+    if observed is not None:
+        result.update({
+            "observedAt": _iso(observed),
+            "ageSeconds": max(0, int((current - observed).total_seconds())),
+        })
+    return result
 
 
 def project_lab_status(
@@ -44,6 +118,7 @@ def project_lab_status(
     now: datetime,
     max_age_seconds: int,
     host_mapped: bool = True,
+    target_probe: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Return a bounded, user-facing status from one persisted heartbeat.
 
@@ -52,23 +127,37 @@ def project_lab_status(
     the remote access lane is currently occupied or deliberately blocked.
     """
     current = _as_utc(now) or datetime.now(timezone.utc)
-    if not host_mapped:
-        return _base_status(lab_id, current, state="unknown", reason="lab_not_mapped")
-    if not heartbeat:
-        return _base_status(lab_id, current, state="unknown", reason="heartbeat_missing")
+    observed = _as_utc(heartbeat.get("timestamp")) if heartbeat else None
+    age_seconds = (
+        max(0, int((current - observed).total_seconds()))
+        if observed is not None
+        else None
+    )
+    heartbeat_fresh = (
+        observed is not None
+        and age_seconds is not None
+        and age_seconds <= max(30, int(max_age_seconds))
+    )
+    if not heartbeat_fresh:
+        if target_probe is not None:
+            return _project_target_probe(lab_id, target_probe, current)
+        if not host_mapped:
+            return _base_status(lab_id, current, state="unknown", reason="lab_not_mapped")
+        if not heartbeat:
+            return _base_status(lab_id, current, state="unknown", reason="heartbeat_missing")
+        if observed is None:
+            return _base_status(lab_id, current, state="unknown", reason="heartbeat_invalid")
+        return {
+            **_base_status(lab_id, current, state="unknown", reason="heartbeat_stale"),
+            "observedAt": _iso(observed),
+            "ageSeconds": age_seconds,
+        }
 
-    observed = _as_utc(heartbeat.get("timestamp"))
-    if observed is None:
-        return _base_status(lab_id, current, state="unknown", reason="heartbeat_invalid")
-
-    age_seconds = max(0, int((current - observed).total_seconds()))
     result = {
         **_base_status(lab_id, current, state="unknown", reason="heartbeat_stale"),
         "observedAt": _iso(observed),
         "ageSeconds": age_seconds,
     }
-    if age_seconds > max(30, int(max_age_seconds)):
-        return result
 
     local_mode = heartbeat.get("localMode") is True
     local_session = heartbeat.get("localSession") is True
@@ -87,4 +176,4 @@ def project_lab_status(
     return result
 
 
-__all__ = ["project_lab_status"]
+__all__ = ["heartbeat_is_fresh", "project_lab_status"]

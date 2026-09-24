@@ -12,7 +12,9 @@ def create_public_lab_status_blueprint(
     *,
     get_db_engine: Callable[[], Any],
     resolve_lab_associations: Callable[[], Any],
+    resolve_lab_status_targets: Callable[[], Any],
     fetch_latest_heartbeat: Callable[[Any, str], Any],
+    probe_lab_targets: Callable[[Any], Any],
     now: Callable[[], Any],
     max_age_seconds: Callable[[], int],
 ) -> Blueprint:
@@ -31,7 +33,9 @@ def create_public_lab_status_blueprint(
                 lab_ids,
                 engine=get_db_engine(),
                 resolve_lab_associations=resolve_lab_associations,
+                resolve_lab_status_targets=resolve_lab_status_targets,
                 fetch_latest_heartbeat=fetch_latest_heartbeat,
+                probe_lab_targets=probe_lab_targets,
                 now=now,
                 max_age_seconds=max_age_seconds(),
             )

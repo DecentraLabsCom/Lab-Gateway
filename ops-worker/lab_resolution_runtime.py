@@ -11,6 +11,7 @@ from lab_resolution_service import (
     resolve_host_for_lab,
     resolve_lab_access_key,
     resolve_lab_ids_for_host,
+    resolve_lab_status_targets,
 )
 
 
@@ -106,6 +107,23 @@ class LabResolutionRuntime:
         with context.get_cache_lock():
             hosts = context.get_host_registry().all_hosts()
         return resolve_lab_associations(
+            labs,
+            connections,
+            hosts,
+            parse_selector=context.get_parse_selector(),
+            normalize_key=context.get_normalize_key(),
+        )
+
+    def resolve_lab_status_targets(self) -> List[Dict[str, Any]]:
+        """Return trusted Guacamole probe targets for every catalog lab."""
+        context = self._context
+        labs = self._load_catalog()
+        if not labs:
+            return []
+        connections, _error = context.get_guacamole_connections()
+        with context.get_cache_lock():
+            hosts = context.get_host_registry().all_hosts()
+        return resolve_lab_status_targets(
             labs,
             connections,
             hosts,

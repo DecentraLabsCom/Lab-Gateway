@@ -21,10 +21,12 @@ or dependency diagnostics.
 | `GET /gateway/mode` | Public | Reports the selected edge mode without dependency details. Use it to confirm Full versus Lite after a configuration change. |
 
 Marketplace also uses `GET /public/labs/status?labIds=1,2` as a bounded
-per-lab projection. It returns only the state, heartbeat age and stable reason
-for each requested lab. The source is the latest heartbeat persisted by the
-Ops Worker; a missing or stale heartbeat is `unknown`, never `not_ready`.
-Host names, addresses and raw Station telemetry remain operator-only.
+per-lab projection. It returns only the state, signal age and stable reason for
+each requested lab. A fresh Lab Station heartbeat is authoritative; when no
+fresh heartbeat exists, the Ops Worker may probe the configured Guacamole RDP,
+VNC or SSH port. That fallback is reported as `reachable` or `not_ready`, and
+never as Lab Station `ready`; an absent fallback target remains `unknown`.
+Host names, addresses, ports and raw Station telemetry remain operator-only.
 
 The public response has the stable shape below. `status` is `UP`, `PARTIAL`, or
 `DOWN`. `PARTIAL` means that the gateway is reachable but not all local

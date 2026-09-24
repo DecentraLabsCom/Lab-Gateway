@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
-from lab_status_service import project_lab_status
+from lab_status_service import heartbeat_is_fresh, project_lab_status
 
 
 MAX_PUBLIC_STATUS_LABS = 50
@@ -37,7 +37,9 @@ def build_public_lab_status_response(
     *,
     engine: Any,
     resolve_lab_associations: Callable[[], Sequence[dict]],
+    resolve_lab_status_targets: Callable[[], Sequence[dict]],
     fetch_latest_heartbeat: Callable[[Any, str], Optional[Dict[str, Any]]],
+    probe_lab_targets: Callable[[Sequence[dict]], Dict[str, Dict[str, Any]]],
     now: Callable[[], datetime],
     max_age_seconds: int,
 ) -> Dict[str, Any]:
@@ -53,17 +55,40 @@ def build_public_lab_status_response(
             for entry in associations
             if isinstance(entry, dict)
         }
+        targets_by_lab = {
+            str(entry.get("labId")): entry
+            for entry in (resolve_lab_status_targets() or [])
+            if isinstance(entry, dict) and str(entry.get("labId") or "").strip()
+        }
+        heartbeats = {}
         for lab_id in lab_ids:
             host_name = host_by_lab.get(str(lab_id), "")
             heartbeat = None
             if host_name and connection is not None:
                 heartbeat = fetch_latest_heartbeat(connection, host_name)
+            heartbeats[str(lab_id)] = heartbeat
+
+        targets_to_probe = [
+            targets_by_lab[str(lab_id)]
+            for lab_id in lab_ids
+            if str(lab_id) in targets_by_lab
+            and not heartbeat_is_fresh(
+                heartbeats[str(lab_id)],
+                now=current,
+                max_age_seconds=max_age_seconds,
+            )
+        ]
+        probes = probe_lab_targets(targets_to_probe) if targets_to_probe else {}
+
+        for lab_id in lab_ids:
+            host_name = host_by_lab.get(str(lab_id), "")
             statuses.append(project_lab_status(
                 lab_id,
-                heartbeat,
+                heartbeats[str(lab_id)],
                 now=current,
                 max_age_seconds=max_age_seconds,
                 host_mapped=bool(host_name),
+                target_probe=probes.get(str(lab_id)),
             ))
     finally:
         if connection is not None:

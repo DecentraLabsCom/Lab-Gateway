@@ -4,6 +4,7 @@ from lab_resolution_service import (
     resolve_host_for_lab,
     resolve_lab_access_key,
     resolve_lab_ids_for_host,
+    resolve_lab_status_targets,
 )
 
 
@@ -14,8 +15,9 @@ LABS = [
 ]
 
 CONNECTIONS = [
-    {"id": 5, "hostname": "station-01"},
-    {"id": 6, "hostname": "192.168.1.52"},
+    {"id": 5, "hostname": "station-01", "protocol": "rdp", "port": "3389"},
+    {"id": 6, "hostname": "192.168.1.52", "protocol": "ssh", "port": "22"},
+    {"id": 9, "hostname": "linux-only", "protocol": "ssh", "port": "22"},
 ]
 
 HOSTS = [
@@ -104,4 +106,40 @@ def test_resolve_lab_associations_projects_only_resolved_lab_and_host_ids():
     ) == [
         {"labId": "lab-1", "hostName": "station-01"},
         {"labId": "lab-2", "hostName": "station-02"},
+    ]
+
+
+def test_resolve_lab_status_targets_keeps_guacamole_only_connections():
+    labs = LABS + [{"labId": "linux-only-lab", "accessKey": "guac:id:9"}]
+
+    assert resolve_lab_status_targets(
+        labs,
+        CONNECTIONS,
+        HOSTS,
+        parse_selector=_parse_selector,
+        normalize_key=_normalize,
+    ) == [
+        {
+            "labId": "lab-1",
+            "connectionId": "5",
+            "hostname": "station-01",
+            "protocol": "rdp",
+            "port": "3389",
+            "hostName": "station-01",
+        },
+        {
+            "labId": "lab-2",
+            "connectionId": "6",
+            "hostname": "192.168.1.52",
+            "protocol": "ssh",
+            "port": "22",
+            "hostName": "station-02",
+        },
+        {
+            "labId": "linux-only-lab",
+            "connectionId": "9",
+            "hostname": "linux-only",
+            "protocol": "ssh",
+            "port": "22",
+        },
     ]
