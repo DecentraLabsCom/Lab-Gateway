@@ -26,6 +26,7 @@ AAS_ADMIN_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_aas_admin.conf"
 AAS_RESOLVE_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_aas_resolve.conf"
 GATEWAY_MODE_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_gateway_mode.conf"
 FMU_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_fmu.conf"
+LAB_STATUS_INCLUDE = OPENRESTY_ROOT / "conf.d" / "gateway_lab_status.conf"
 INIT_SSL = OPENRESTY_ROOT / "init-ssl.sh"
 INIT_SSL_SECRETS = OPENRESTY_ROOT / "init-ssl-secrets.sh"
 INIT_SSL_TLS = OPENRESTY_ROOT / "init-ssl-tls.sh"
@@ -2005,3 +2006,11 @@ def test_openresty_atomic_helpers_remove_temporary_files_when_move_fails():
     assert 'if ! mv -f "$target_tmp" "$target_path"; then' in tls
     assert 'if ! mv "$tmp_key" "$JWT_PUBLIC_KEY"; then' in jwt_sync
     assert 'rm -f "$tmp_key"' in jwt_sync
+
+
+def test_public_lab_status_allows_catalog_refresh_to_complete():
+    block = _read(LAB_STATUS_INCLUDE)
+
+    assert "proxy_read_timeout 35s;" in block
+    assert "proxy_connect_timeout 3s;" in block
+    assert "proxy_send_timeout 5s;" in block

@@ -211,6 +211,39 @@ def test_build_response_uses_local_fmu_runner_for_fmu_without_station_mapping():
     assert calls == ["health"]
 
 
+def test_build_response_does_not_load_station_dependencies_for_local_fmu():
+    calls = []
+
+    result = build_public_lab_status_response(
+        ["12"],
+        engine=Engine(),
+        resolve_lab_associations=lambda: calls.append("associations") or [],
+        resolve_lab_status_targets=lambda: calls.append("targets") or [],
+        resolve_lab_resources=lambda: calls.append("resources") or [{
+            "labId": "12",
+            "resourceType": "fmu",
+            "executionBackend": "local",
+        }],
+        fetch_latest_heartbeat=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("a local FMU must not load a Station heartbeat")
+        ),
+        probe_lab_targets=lambda _targets: (_ for _ in ()).throw(
+            AssertionError("a local FMU must not probe Guacamole")
+        ),
+        fetch_fmu_runner_status=lambda: calls.append("health") or {
+            "signal": "ready",
+            "reason": "fmu_ready",
+            "source": "fmu_runner_health",
+            "observedAt": "2026-09-23T10:00:29Z",
+        },
+        now=lambda: datetime(2026, 9, 23, 10, 0, 30, tzinfo=timezone.utc),
+        max_age_seconds=180,
+    )
+
+    assert result["statuses"][0]["state"] == "ready"
+    assert calls == ["resources", "health"]
+
+
 def test_build_response_keeps_local_fmu_unknown_when_runner_health_is_unavailable():
     result = build_public_lab_status_response(
         ["9"],

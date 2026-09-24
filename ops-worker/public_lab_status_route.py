@@ -55,27 +55,11 @@ def build_public_lab_status_response(
     statuses = []
     connection = None
     try:
-        if engine:
-            connection = engine.connect()
-        associations = resolve_lab_associations() or []
-        host_by_lab = {
-            str(entry.get("labId")): str(entry.get("hostName") or "").strip()
-            for entry in associations
-            if isinstance(entry, dict)
-        }
-        targets_by_lab = {
-            str(entry.get("labId")): entry
-            for entry in (resolve_lab_status_targets() or [])
-            if isinstance(entry, dict) and str(entry.get("labId") or "").strip()
-        }
         resources_by_lab = {
             str(entry.get("labId")): dict(entry)
             for entry in (resolve_lab_resources() if resolve_lab_resources else []) or []
             if isinstance(entry, dict) and str(entry.get("labId") or "").strip()
         }
-        fmu_station_host = ""
-        if resolve_fmu_station_host:
-            fmu_station_host = str(resolve_fmu_station_host() or "").strip()
 
         def resource_type(lab_id: str) -> str:
             return str(resources_by_lab.get(lab_id, {}).get("resourceType") or "").strip().lower()
@@ -85,6 +69,39 @@ def build_public_lab_status_response(
                 resources_by_lab.get(lab_id, {}).get("executionBackend") or "station"
             ).strip().lower()
             return "local" if backend in {"local", "gateway", "gateway-local", "gateway_local"} else "station"
+
+        def requires_station_data(lab_id: str) -> bool:
+            return not (
+                resource_type(lab_id) == "fmu"
+                and fmu_backend(lab_id) == "local"
+            )
+
+        needs_station_data = any(requires_station_data(str(lab_id)) for lab_id in lab_ids)
+        if needs_station_data:
+            if engine:
+                connection = engine.connect()
+            associations = resolve_lab_associations() or []
+            host_by_lab = {
+                str(entry.get("labId")): str(entry.get("hostName") or "").strip()
+                for entry in associations
+                if isinstance(entry, dict)
+            }
+            targets_by_lab = {
+                str(entry.get("labId")): entry
+                for entry in (resolve_lab_status_targets() or [])
+                if isinstance(entry, dict) and str(entry.get("labId") or "").strip()
+            }
+        else:
+            host_by_lab = {}
+            targets_by_lab = {}
+
+        fmu_station_host = ""
+        if resolve_fmu_station_host and any(
+            resource_type(str(lab_id)) == "fmu"
+            and fmu_backend(str(lab_id)) == "station"
+            for lab_id in lab_ids
+        ):
+            fmu_station_host = str(resolve_fmu_station_host() or "").strip()
 
         def fmu_host(lab_id: str) -> str:
             return str(
