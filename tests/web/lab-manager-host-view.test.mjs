@@ -70,6 +70,56 @@ function createController(overrides = {}) {
   return { candidateState, candidateListEl, controller, hostListEl };
 }
 
+function popoverElement({ rect = {}, width = 160, height = 56 } = {}) {
+  const listeners = new Map();
+  const classes = new Set();
+  const element = {
+    children: [],
+    classList: {
+      add: className => classes.add(className),
+      remove: className => classes.delete(className),
+      contains: className => classes.has(className),
+    },
+    offsetWidth: width,
+    offsetHeight: height,
+    parentElement: null,
+    style: {},
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+    appendChild(child) {
+      child.parentElement = this;
+      this.children.push(child);
+      return child;
+    },
+    getBoundingClientRect() {
+      return {
+        left: rect.left ?? 0,
+        top: rect.top ?? 0,
+        right: rect.right ?? 0,
+        bottom: rect.bottom ?? 0,
+        width: rect.width ?? 0,
+        height: rect.height ?? 0,
+      };
+    },
+    listener(type) {
+      return listeners.get(type);
+    },
+    matches() {
+      return false;
+    },
+    remove() {
+      if (!this.parentElement) return;
+      this.parentElement.children = this.parentElement.children.filter(child => child !== this);
+      this.parentElement = null;
+    },
+    querySelector(selector) {
+      return this.children.find(child => child.selector === selector) || null;
+    },
+  };
+  return element;
+}
+
 test('groups Lab Station candidates and remembers the first discovery draft', () => {
   const { candidateState, controller } = createController();
   const candidates = [
@@ -140,4 +190,47 @@ test('renders hosts and delegates candidate actions through the view controller'
   assert.equal(events[1][0], 'probe');
   assert.equal(events[1][1], station.key);
   assert.equal(events[1][2], station);
+});
+
+test('renders the readiness tooltip outside the scrolling host list and below a top-edge trigger', () => {
+  const trigger = popoverElement({
+    rect: { left: 240, top: 4, bottom: 28, width: 72, height: 24 },
+  });
+  trigger.selector = '.ready-indicator';
+  const tooltip = popoverElement({ width: 220, height: 64 });
+  tooltip.selector = '.ready-indicator-tooltip';
+  const row = popoverElement();
+  row.children = [trigger, tooltip];
+  const hostListEl = popoverElement();
+  const candidateListEl = popoverElement();
+  const body = popoverElement();
+  const hostRenderersController = {
+    buildHostRow: () => row,
+    buildGuacamoleCandidateRow: () => popoverElement(),
+  };
+  const controller = loadModule().createController({
+    hostListEl,
+    candidateListEl,
+    getHostNames: () => ['station-top-edge'],
+    hostState: {},
+    hostMetadata: {},
+    candidateState: {},
+    hostRenderersController,
+    documentImpl: { body, documentElement: { clientWidth: 1024, clientHeight: 768 } },
+    windowImpl: {
+      innerWidth: 1024,
+      innerHeight: 768,
+      addEventListener() {},
+      removeEventListener() {},
+      clearTimeout() {},
+      setTimeout: callback => { callback(); return 1; },
+    },
+  });
+
+  controller.renderHosts();
+  trigger.listener('mouseenter')();
+
+  assert.equal(tooltip.parentElement, body);
+  assert.equal(tooltip.classList.contains('is-visible'), true);
+  assert.equal(tooltip.style.top, '36px');
 });

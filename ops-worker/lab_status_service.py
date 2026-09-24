@@ -27,6 +27,26 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _merge_persisted_heartbeat(heartbeat: Optional[Mapping[str, Any]]) -> Optional[Mapping[str, Any]]:
+    """Restore capability fields from the database heartbeat projection.
+
+    The timeline/database boundary wraps the original Station heartbeat in
+    ``raw`` while also exposing a few indexed fields at the top level.  Public
+    status projection needs both: the indexed fields for legacy snapshots and
+    the raw capability-specific readiness published by current Stations.
+    """
+    if not isinstance(heartbeat, Mapping):
+        return heartbeat
+    raw = heartbeat.get("raw")
+    if not isinstance(raw, Mapping):
+        return heartbeat
+
+    merged = dict(heartbeat)
+    merged.pop("raw", None)
+    merged.update(raw)
+    return merged
+
+
 def _base_status(
     lab_id: Any,
     now: datetime,
@@ -163,6 +183,7 @@ def project_lab_status(
     take precedence over readiness because they mean the station is alive but
     the remote access lane is currently occupied or deliberately blocked.
     """
+    heartbeat = _merge_persisted_heartbeat(heartbeat)
     current = _as_utc(now) or datetime.now(timezone.utc)
     observed = _as_utc(heartbeat.get("timestamp")) if heartbeat else None
     age_seconds = (

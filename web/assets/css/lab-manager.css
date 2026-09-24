@@ -1299,11 +1299,8 @@ body {
     cursor: help;
 }
 .ready-indicator-tooltip {
-    position: absolute;
-    left: 50%;
-    bottom: calc(100% + 8px);
-    transform: translateX(-50%);
-    z-index: 20;
+    position: fixed;
+    z-index: 1000;
     display: none;
     width: max-content;
     max-width: min(360px, calc(100vw - 32px));
@@ -1319,10 +1316,16 @@ body {
     text-align: left;
     white-space: normal;
     pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
 }
-.ready-indicator:hover .ready-indicator-tooltip,
-.ready-indicator:focus-visible .ready-indicator-tooltip {
+.ready-indicator-tooltip.is-visible {
     display: block;
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
 }
 .host-history {
     display: flex;

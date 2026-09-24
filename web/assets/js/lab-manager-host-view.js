@@ -26,7 +26,7 @@
             onConfigureCandidate = () => {},
             onProbeCandidate = async () => {},
         } = callbacks;
-        const guacamolePopoverClosers = new Set();
+        const popoverClosers = new Set();
         let rawCandidates = [];
         let stationCandidates = [];
 
@@ -34,13 +34,13 @@
             return (value || '').toString().trim().toLowerCase();
         }
 
-        function closeAllGuacamoleMatchPopovers() {
-            Array.from(guacamolePopoverClosers).forEach(closePopover => closePopover());
+        function closeAllPopovers() {
+            Array.from(popoverClosers).forEach(closePopover => closePopover());
         }
 
-        function setupGuacamoleMatchPopover(row) {
-            const trigger = row.querySelector?.('.guacamole-match-trigger');
-            const popover = row.querySelector?.('.guacamole-match-popover');
+        function setupFixedPopover(row, triggerSelector, popoverSelector) {
+            const trigger = row.querySelector?.(triggerSelector);
+            const popover = row.querySelector?.(popoverSelector);
             if (!trigger || !popover || !documentImpl.body) return;
 
             let hideTimer = null;
@@ -59,20 +59,25 @@
                 const viewportWidth = windowImpl.innerWidth || documentImpl.documentElement.clientWidth;
                 const viewportHeight = windowImpl.innerHeight || documentImpl.documentElement.clientHeight;
                 const viewportMargin = 12;
+                const gap = 8;
                 const popoverWidth = popover.offsetWidth;
                 const popoverHeight = popover.offsetHeight;
-                let left = triggerRect.left;
-                let top = triggerRect.bottom + 8;
+                let left = triggerRect.left + (triggerRect.width - popoverWidth) / 2;
+                let top = triggerRect.bottom + gap;
 
                 if (
                     top + popoverHeight > viewportHeight - viewportMargin
-                    && triggerRect.top - popoverHeight - 8 >= viewportMargin
+                    && triggerRect.top - popoverHeight - gap >= viewportMargin
                 ) {
-                    top = triggerRect.top - popoverHeight - 8;
+                    top = triggerRect.top - popoverHeight - gap;
                 }
                 left = Math.min(
                     Math.max(viewportMargin, left),
                     Math.max(viewportMargin, viewportWidth - popoverWidth - viewportMargin),
+                );
+                top = Math.min(
+                    Math.max(viewportMargin, top),
+                    Math.max(viewportMargin, viewportHeight - popoverHeight - viewportMargin),
                 );
                 popover.style.left = Math.round(left) + 'px';
                 popover.style.top = Math.round(top) + 'px';
@@ -87,14 +92,14 @@
                 if (popover.parentElement === documentImpl.body) popover.remove();
                 windowImpl.removeEventListener('resize', positionPopover);
                 windowImpl.removeEventListener('scroll', positionPopover, true);
-                guacamolePopoverClosers.delete(closePopover);
+                popoverClosers.delete(closePopover);
             }
 
             function showPopover() {
                 clearHideTimer();
                 if (popover.parentElement !== documentImpl.body) documentImpl.body.appendChild(popover);
                 isShown = true;
-                guacamolePopoverClosers.add(closePopover);
+                popoverClosers.add(closePopover);
                 popover.classList.add('is-visible');
                 positionPopover();
                 windowImpl.addEventListener('resize', positionPopover);
@@ -123,6 +128,18 @@
             popover.addEventListener('mouseleave', scheduleClosePopover);
         }
 
+        function closeAllGuacamoleMatchPopovers() {
+            closeAllPopovers();
+        }
+
+        function setupGuacamoleMatchPopover(row) {
+            setupFixedPopover(row, '.guacamole-match-trigger', '.guacamole-match-popover');
+        }
+
+        function setupReadinessTooltip(row) {
+            setupFixedPopover(row, '.ready-indicator', '.ready-indicator-tooltip');
+        }
+
         function buildHostRow(host) {
             const row = hostRenderersController.buildHostRow(
                 host,
@@ -130,6 +147,7 @@
                 hostMetadata[host] || {},
             );
             setupGuacamoleMatchPopover(row);
+            setupReadinessTooltip(row);
             return row;
         }
 
