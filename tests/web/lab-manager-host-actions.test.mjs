@@ -148,8 +148,9 @@ test('refreshes heartbeat after successful Prepare without doing so for failed R
       requests.push({ url, options });
       return requests.length === 1 ? response({ exit_code: 0 }) : response({}, 500);
     },
+    waitImpl: async delay => events.push(['wait', delay]),
     callbacks: {
-      pollHeartbeat: async host => events.push(['poll', host]),
+      pollHeartbeat: async (host, options) => events.push(['poll', host, options]),
       showToast: (...args) => events.push(args),
     },
     logger: { error() {} },
@@ -168,10 +169,36 @@ test('refreshes heartbeat after successful Prepare without doing so for failed R
     command: 'release-session',
     args: ['--reboot'],
   });
-  assert.deepEqual(events, [
-    ['poll', 'station-7'],
+  assert.deepEqual(JSON.parse(JSON.stringify(events)), [
+    ['wait', 2000],
+    ['poll', 'station-7', { silent: true }],
+    ['wait', 3000],
+    ['poll', 'station-7', { silent: true }],
     ['prepare-session on station-7: ok', 'success'],
     ['release-session failed on station-7: HTTP 500', 'error'],
+  ]);
+});
+
+test('refreshes heartbeat after Prepare returns warnings', async () => {
+  const module = loadModule();
+  const events = [];
+  const controller = module.createController({
+    fetchImpl: async () => response({ exit_code: 1, stderr: 'LABUSER profile warning' }),
+    waitImpl: async delay => events.push(['wait', delay]),
+    callbacks: {
+      pollHeartbeat: async (host, options) => events.push(['poll', host, options]),
+      showToast: (...args) => events.push(args),
+    },
+  });
+
+  await controller.triggerWinrm('station-7', 'prepare-session', ['--guard-grace=90']);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(events)), [
+    ['wait', 2000],
+    ['poll', 'station-7', { silent: true }],
+    ['wait', 3000],
+    ['poll', 'station-7', { silent: true }],
+    ['prepare-session on station-7: err', 'error'],
   ]);
 });
 

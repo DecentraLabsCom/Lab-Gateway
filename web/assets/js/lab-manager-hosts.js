@@ -213,8 +213,8 @@
             return true;
         }
 
-        async function pollHeartbeat(host) {
-            showLoadingToast(`Checking heartbeat for ${host}…`);
+        async function pollHeartbeat(host, { silent = false } = {}) {
+            if (!silent) showLoadingToast(`Checking heartbeat for ${host}…`);
             try {
                 const res = await fetchImpl('/ops/api/heartbeat/poll', {
                     method: 'POST',
@@ -237,7 +237,8 @@
                 applyHeartbeatData(host, data);
                 renderHosts();
                 loadActivityFeed();
-                showToast(`Heartbeat ${host} ok`, 'success');
+                if (!silent) showToast(`Heartbeat ${host} ok`, 'success');
+                return data;
             } catch (err) {
                 logger.error(err);
                 showToast(`Heartbeat failed for ${host}: ${err.message}`, 'error');

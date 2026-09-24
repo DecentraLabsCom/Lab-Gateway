@@ -5,6 +5,7 @@
         fetchImpl,
         callbacks = {},
         logger = console,
+        waitImpl = delayMs => new Promise(resolve => root.setTimeout(resolve, delayMs)),
     } = {}) {
         if (typeof fetchImpl !== 'function') {
             throw new Error('LabManagerHostActions requires fetchImpl');
@@ -102,8 +103,16 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const ok = data.exit_code === 0;
-                if (ok && command === 'prepare-session') {
-                    await pollHeartbeat(host);
+                // Lab Station can finish the session guard just before its
+                // telemetry writer publishes the new heartbeat. Give that
+                // writer a short settling window, then retry once. This also
+                // applies to exit_code 1 because the session guard may still
+                // have completed successfully with a warning.
+                if (command === 'prepare-session') {
+                    await waitImpl(2000);
+                    await pollHeartbeat(host, { silent: true });
+                    await waitImpl(3000);
+                    await pollHeartbeat(host, { silent: true });
                 }
                 showToast(`${command} on ${host}: ${ok ? 'ok' : 'err'}`, ok ? 'success' : 'error');
             } catch (err) {

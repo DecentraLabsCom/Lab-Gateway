@@ -167,6 +167,29 @@ test('polls heartbeat with the existing endpoint and updates the shared host sta
   assert.deepEqual(loadingEvents, ['Checking heartbeat for station-1…']);
 });
 
+test('supports silent heartbeat polling for operation follow-up refreshes', async () => {
+  const module = loadHostsModule();
+  const state = createState();
+  const loadingEvents = [];
+  const toastEvents = [];
+  const controller = module.createController({
+    fetchImpl: async () => response({ host: 'station-1', heartbeat: { timestamp: '2026-09-13T10:00:01Z' } }),
+    state,
+    callbacks: {
+      renderHosts: () => {},
+      loadActivityFeed: () => {},
+      showLoadingToast: message => loadingEvents.push(message),
+      showToast: (...args) => toastEvents.push(args),
+    },
+  });
+
+  await controller.pollHeartbeat('station-1', { silent: true });
+
+  assert.deepEqual(loadingEvents, []);
+  assert.deepEqual(toastEvents, []);
+  assert.equal(state.hostState['station-1'].heartbeat.timestamp, '2026-09-13T10:00:01Z');
+});
+
 test('updates local mode immediately without discarding the latest local-session state', () => {
   const module = loadHostsModule();
   const state = createState(['station-1']);
