@@ -40,7 +40,7 @@
                 return;
             }
             if (action === 'release') {
-                onWinrm(host, 'release-session', ['--reboot']);
+                onWinrm(host, 'release-session', []);
                 return;
             }
             if (action === 'shutdown') {

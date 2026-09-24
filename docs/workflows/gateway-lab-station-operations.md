@@ -97,7 +97,7 @@ the lab-to-host association. A minimal entry is:
 }
 ```
 
-Lab Station periodically writes `heartbeat.json`. The ops worker reads it through WinRM, persists it in `lab_host_heartbeat`, and exposes it through the heartbeat and timeline APIs. Important fields include readiness, `localModeEnabled`, `localSessionActive`, recent operations, power state, and Wake-on-LAN NIC diagnostics.
+Lab Station periodically writes `heartbeat.json`. The ops worker reads it through WinRM, persists it in `lab_host_heartbeat`, and exposes it through the heartbeat and timeline APIs. Important fields include capability-specific readiness (`physicalLab` and `fmu`), `localModeEnabled`, `localSessionActive`, recent operations, power state, and Wake-on-LAN NIC diagnostics. FMU Executor health is therefore relevant to FMU resources, but does not by itself make a physical lab unavailable.
 
 During host discovery, the worker derives the executable, local-mode flag,
 heartbeat, and event paths from the installed scheduled task. It keeps legacy
@@ -167,7 +167,7 @@ The start path is normally:
 3. Run `prepare-session` to apply the station's session guard and clean the designated lab user profile.
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.
 
-The end path normally runs `release-session` and can request a shutdown or hibernation action. It records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
+The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
 
 ## Lab Station command contract
 
@@ -176,7 +176,7 @@ Lab Station exposes a small CLI surface at the host's configured `labstation_exe
 | Command | Use in the gateway lifecycle |
 | --- | --- |
 | `prepare-session` | Evicts or guards local use as configured, closes the controller, and prepares the lab user before a reservation. |
-| `release-session` | Cleans up the lab user after the reservation; it can include a controlled reboot. |
+| `release-session` | Cleans up the lab user after the reservation without rebooting by default; an explicit request can include a controlled reboot. |
 | `status-json <path>` | Writes a fresh status report for inspection or heartbeat collection. |
 | `power shutdown` / `power hibernate` | Performs a controlled power action while checking Wake-on-LAN readiness. |
 | `recovery reboot-if-needed` | Performs a safeguard reboot only when station diagnostics justify it, unless explicitly forced. |

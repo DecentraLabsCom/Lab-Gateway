@@ -4,6 +4,8 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from heartbeat_readiness import capability_ready
+
 
 DemoContext = Dict[str, Any]
 
@@ -117,7 +119,7 @@ def host_is_ready(
     if not heartbeat_ts:
         return False
     age = (now() - heartbeat_ts).total_seconds()
-    return heartbeat.get("ready") is True and 0 <= age <= max_age_seconds
+    return capability_ready(heartbeat, "physicalLab") is True and 0 <= age <= max_age_seconds
 
 
 def handle_demo_start(
@@ -273,7 +275,7 @@ def handle_demo_end(
             "host": context["host"].get("name"),
             "labId": context["lab_id"],
             "release": True,
-            "releaseArgs": ["--reboot"],
+            "releaseArgs": [],
             "power": payload.get("power", True),
             "actor": "demo-lifecycle",
         }

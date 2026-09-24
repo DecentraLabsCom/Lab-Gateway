@@ -1,7 +1,10 @@
 """Pure projection of the last Lab Station heartbeat into a public status."""
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Optional
+
+from heartbeat_readiness import capability_ready
 
 
 def _as_utc(value: Any) -> Optional[datetime]:
@@ -111,6 +114,40 @@ def _project_target_probe(
     return result
 
 
+def _capability_ready(
+    heartbeat: Mapping[str, Any],
+    capability: str,
+    fallback: bool,
+) -> bool:
+    """Read capability readiness while accepting pre-capability heartbeats."""
+    ready = capability_ready(heartbeat, capability)
+    return fallback if ready is None else ready
+
+
+def _fresh_status(
+    lab_id: Any,
+    observed: Optional[datetime],
+    age_seconds: int,
+    current: datetime,
+    *,
+    ready: bool,
+    reason_ready: str = "station_ready",
+    reason_not_ready: str = "station_not_ready",
+) -> Dict[str, Any]:
+    result = {
+        **_base_status(
+            lab_id,
+            current,
+            state="ready" if ready else "not_ready",
+            reason=reason_ready if ready else reason_not_ready,
+        ),
+        "severity": "positive" if ready else "critical",
+        "observedAt": _iso(observed) if observed is not None else None,
+        "ageSeconds": age_seconds,
+    }
+    return result
+
+
 def project_lab_status(
     lab_id: Any,
     heartbeat: Optional[Mapping[str, Any]],
@@ -153,27 +190,50 @@ def project_lab_status(
             "ageSeconds": age_seconds,
         }
 
-    result = {
-        **_base_status(lab_id, current, state="unknown", reason="heartbeat_stale"),
-        "observedAt": _iso(observed),
-        "ageSeconds": age_seconds,
-    }
-
     local_mode = heartbeat.get("localMode") is True
     local_session = heartbeat.get("localSession") is True
     if local_mode or local_session:
-        result.update({
-            "state": "busy",
-            "reason": "local_mode_enabled" if local_mode else "local_session_active",
+        result = {
+            **_base_status(
+                lab_id,
+                current,
+                state="busy",
+                reason="local_mode_enabled" if local_mode else "local_session_active",
+            ),
             "severity": "critical" if local_mode else "warning",
+            "observedAt": _iso(observed),
+            "ageSeconds": age_seconds,
+        }
+        result.update({
+            "capabilities": {
+                "physicalLab": dict(result),
+                "fmu": dict(result),
+            },
         })
         return result
 
-    if heartbeat.get("ready") is True:
-        result.update({"state": "ready", "reason": "station_ready", "severity": "positive"})
-    else:
-        result.update({"state": "not_ready", "reason": "station_not_ready", "severity": "critical"})
-    return result
+    fallback_ready = heartbeat.get("ready") is True
+    physical = _fresh_status(
+        lab_id,
+        observed,
+        age_seconds,
+        current,
+        ready=_capability_ready(heartbeat, "physicalLab", fallback_ready),
+    )
+    fmu = _fresh_status(
+        lab_id,
+        observed,
+        age_seconds,
+        current,
+        ready=_capability_ready(heartbeat, "fmu", fallback_ready),
+        reason_ready="fmu_ready",
+        reason_not_ready="fmu_not_ready",
+    )
+    physical["capabilities"] = {
+        "physicalLab": physical.copy(),
+        "fmu": fmu,
+    }
+    return physical
 
 
 __all__ = ["heartbeat_is_fresh", "project_lab_status"]

@@ -807,23 +807,13 @@ body {
     min-height: 0;
 }
 .reservation-card .reservation-list {
-    flex: 0 0 auto;
-    min-height: 540px;
-    height: 540px;
+    flex: 0 1 auto;
     max-height: 540px;
     overflow-y: auto;
 }
 .reservation-list {
     padding-right: 4px;
     overscroll-behavior: contain;
-}
-@media (min-width: 701px) {
-    .reservation-card .reservation-list {
-        flex: 0 0 auto;
-        min-height: 540px;
-        height: 540px;
-        max-height: 540px;
-    }
 }
 .reservation-list::-webkit-scrollbar { width: 10px; }
 .reservation-list::-webkit-scrollbar-track { background: #0d1220; border-radius: 999px; }
@@ -1304,6 +1294,36 @@ body {
     align-items: center;
     gap: 6px;
 }
+.ready-indicator {
+    position: relative;
+    cursor: help;
+}
+.ready-indicator-tooltip {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%);
+    z-index: 20;
+    display: none;
+    width: max-content;
+    max-width: min(360px, calc(100vw - 32px));
+    padding: 8px 10px;
+    border: 1px solid var(--warning);
+    border-radius: 8px;
+    background: #0d1220;
+    color: var(--text);
+    box-shadow: var(--shadow);
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: left;
+    white-space: normal;
+    pointer-events: none;
+}
+.ready-indicator:hover .ready-indicator-tooltip,
+.ready-indicator:focus-visible .ready-indicator-tooltip {
+    display: block;
+}
 .host-history {
     display: flex;
     flex-direction: column;
@@ -1335,7 +1355,7 @@ body {
     margin-top: 2px;
     line-height: 1.35;
 }
-.host-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
+.host-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .power-controls { margin-bottom: 14px; }
 .power-maintenance-field { align-items: center; }
 .power-maintenance-field > span { margin-bottom: 0; }

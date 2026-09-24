@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 
-from demo_operations import handle_demo_event, handle_demo_start
+from demo_operations import handle_demo_end, handle_demo_event, handle_demo_start
 
 
 def _context():
@@ -47,3 +47,21 @@ def test_demo_event_requires_completed_physical_start():
         "error": "demo physical preparation has not completed",
     }
     record_event.assert_not_called()
+
+
+def test_demo_end_releases_without_reboot_by_default():
+    reservation_end = Mock(return_value=({"success": True, "steps": []}, 200))
+    record_event = Mock()
+
+    response, status = handle_demo_end(
+        {"demoId": "demo:jti-1", "labId": "42", "reason": "expired"},
+        get_context=lambda _payload: (_context(), None),
+        operation_completed=lambda *_args: False,
+        reservation_end=reservation_end,
+        record_event=record_event,
+    )
+
+    assert status == 200
+    assert response["success"] is True
+    release_payload = reservation_end.call_args.args[0]
+    assert release_payload["releaseArgs"] == []

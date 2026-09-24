@@ -27,6 +27,11 @@ fresh heartbeat exists, the Ops Worker may probe the configured Guacamole RDP,
 VNC or SSH port. That fallback is reported as `reachable` or `not_ready`, and
 never as Lab Station `ready`; an absent fallback target remains `unknown`.
 Host names, addresses, ports and raw Station telemetry remain operator-only.
+When the Station publishes capability readiness, the projection also includes
+bounded `capabilities.physicalLab` and `capabilities.fmu` states. Marketplace
+selects the physical-lab capability for physical labs and the FMU capability
+for FMU resources. Older heartbeats without that block continue to use the
+legacy station-wide readiness field.
 
 The public response has the stable shape below. `status` is `UP`, `PARTIAL`, or
 `DOWN`. `PARTIAL` means that the gateway is reachable but not all local
@@ -78,7 +83,7 @@ demo status is `ready`.
 The demo hand-off also has a synchronous physical lifecycle. It calls the
 internal Ops Worker with `demo:<jti>`, which resolves the bound Station,
 performs Wake-on-LAN when needed, runs `prepare-session` before the Guacamole
-token is exposed, and runs `release-session --reboot` on expiry, failure or
+token is exposed, and runs `release-session` without rebooting on expiry, failure or
 tunnel closure. The worker records `demo_start`, `demo_connection`,
 `demo_expiry`/`demo_failure`/`demo_disconnect`, and `demo_cleanup` alongside
 the low-level Station steps. OpenResty keeps the gateway slot in `pending` for

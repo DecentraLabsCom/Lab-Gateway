@@ -26,6 +26,27 @@ def test_fresh_ready_heartbeat_is_positive():
     assert result["reason"] == "station_ready"
 
 
+def test_fmu_only_issue_keeps_physical_lab_ready_but_marks_fmu_not_ready():
+    result = project_lab_status(
+        "7",
+        heartbeat(
+            ready=False,
+            readiness={
+                "physicalLab": {"ready": True},
+                "fmu": {"ready": False},
+            },
+        ),
+        now=NOW,
+        max_age_seconds=180,
+    )
+
+    assert result["state"] == "ready"
+    assert result["reason"] == "station_ready"
+    assert result["capabilities"]["physicalLab"]["state"] == "ready"
+    assert result["capabilities"]["fmu"]["state"] == "not_ready"
+    assert result["capabilities"]["fmu"]["reason"] == "fmu_not_ready"
+
+
 def test_local_session_is_busy_with_warning_severity():
     result = project_lab_status(
         7,

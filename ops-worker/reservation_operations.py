@@ -160,7 +160,7 @@ def handle_reservation_end(
             status_code = 502
 
     if success and release_enabled:
-        release_args = normalize_args(payload.get("releaseArgs"), ["--reboot"])
+        release_args = normalize_args(payload.get("releaseArgs"), [])
         ok, step = perform_command_step(
             host,
             reservation_id,

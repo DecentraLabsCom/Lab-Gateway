@@ -281,7 +281,7 @@ configured lab binding, performs Wake-on-LAN when the persisted heartbeat is
 not ready, runs `prepare-session`, and records the operation under
 `demo:<jti>`. Guacamole token issuance records the connection event. Expiry,
 failed preparation, or tunnel closure calls the matching `/api/demo/end`
-operation, which runs `release-session --reboot`. These operations are local
+operation, which runs `release-session` without rebooting. These operations are local
 audit records only; they never create an on-chain reservation or consume
 service credits.
 

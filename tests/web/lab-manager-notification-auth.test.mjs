@@ -594,17 +594,16 @@ test('places Lab Station Ops before Actionable Reservations', () => {
   assert.ok(sectionOrderFor('Lab Station Ops') < sectionOrderFor('Actionable Reservations'));
 });
 
-test('reserves a tall, explicit scroll area for actionable reservation details', () => {
+test('keeps actionable reservation details content-sized with a scroll cap', () => {
   const stylesheet = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+  const reservationRule = stylesheet.match(/\.reservation-card \.reservation-list\s*\{([^}]*)\}/)?.[1] || '';
 
   assert.match(
     stylesheet,
-    /\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*540px;[\s\S]*height:\s*540px;[\s\S]*overflow-y:\s*auto;/,
+    /\.reservation-card \.reservation-list\s*\{[\s\S]*max-height:\s*540px;[\s\S]*overflow-y:\s*auto;/,
   );
-  assert.match(
-    stylesheet,
-    /@media \(min-width: 701px\)[\s\S]*\.reservation-card \.reservation-list\s*\{[\s\S]*min-height:\s*540px;[\s\S]*height:\s*540px;[\s\S]*max-height:\s*540px;/,
-  );
+  assert.doesNotMatch(reservationRule, /min-height:\s*540px;/);
+  assert.doesNotMatch(reservationRule, /(?:^|[;\r\n])\s*height:\s*540px;/);
 });
 
 test('places the cancellation reason selector below the cancellation button', () => {
@@ -1764,6 +1763,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(script, /formatBool\(localMode\)/);
   assert.match(script, /host-state-column/);
   assert.match(script, /host-status-action/);
+  assert.match(script, /ready-indicator-tooltip/);
   assert.doesNotMatch(script, /stationPathsReady|stationPathIssues|Lab Station paths:/);
   assert.match(index, /id="editLabstationPath"/);
   assert.doesNotMatch(index, /id="editLabstationExe"|id="editLocalModeFlagPath"|id="editHeartbeatPath"|id="editEventsPath"/);
@@ -1778,6 +1778,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(styles, /\.host-status-action[\s\S]*display: inline/);
   assert.match(styles, /\.host-state-column[\s\S]*display: flex/);
   assert.match(styles, /\.host-history[\s\S]*display: flex/);
+  assert.match(styles, /\.ready-indicator-tooltip[\s\S]*position: absolute/);
   assert.match(hostView, /setupGuacamoleMatchPopover/);
   assert.match(hostView, /addEventListener\('mouseenter'/);
   assert.match(hostView, /addEventListener\('focusin'/);

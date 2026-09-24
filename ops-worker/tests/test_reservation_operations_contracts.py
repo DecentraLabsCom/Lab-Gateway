@@ -70,3 +70,43 @@ def test_end_rejects_missing_host_without_invoking_physical_callbacks():
     assert response == {"error": "reservationId and either host or labId are required"}
     deps["execute_power_phase"].assert_not_called()
     deps["perform_command_step"].assert_not_called()
+
+
+def test_end_uses_release_without_reboot_by_default():
+    deps = _dependencies()
+    deps.pop("perform_wake_step")
+
+    response, status = handle_reservation_end(
+        {"reservationId": "r-1", "host": "lab-ws-01", "labId": "42"},
+        **deps,
+    )
+
+    assert status == 200
+    assert response["success"] is True
+    deps["perform_command_step"].assert_called_once_with(
+        {"name": "lab-ws-01"},
+        "r-1",
+        "42",
+        "release",
+        "release-session",
+        [],
+    )
+
+
+def test_end_preserves_an_explicit_release_reboot_request():
+    deps = _dependencies()
+    deps.pop("perform_wake_step")
+
+    response, status = handle_reservation_end(
+        {
+            "reservationId": "r-1",
+            "host": "lab-ws-01",
+            "labId": "42",
+            "releaseArgs": ["--reboot"],
+        },
+        **deps,
+    )
+
+    assert status == 200
+    assert response["success"] is True
+    assert deps["perform_command_step"].call_args.args[-1] == ["--reboot"]

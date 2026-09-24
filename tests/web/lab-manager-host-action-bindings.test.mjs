@@ -58,7 +58,7 @@ test('routes host operation actions without embedding service logic', () => {
     ['poll', 'station-a'],
     ['wol', 'station-a'],
     ['winrm', 'station-a', 'prepare-session', ['--guard-grace=90']],
-    ['winrm', 'station-a', 'release-session', ['--reboot']],
+    ['winrm', 'station-a', 'release-session', []],
     ['winrm', 'station-a', 'power', ['shutdown', '--delay=60', '--reason=Remote order']],
     ['local', 'station-a', false],
     ['credentials', 'station-a'],

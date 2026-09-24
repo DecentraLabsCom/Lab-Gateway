@@ -69,6 +69,54 @@
             return parts.join(' - ');
         }
 
+        function getReadinessDisplay(heartbeat, summary) {
+            const readiness = heartbeat.readiness && typeof heartbeat.readiness === 'object'
+                ? heartbeat.readiness
+                : heartbeat.status?.readiness && typeof heartbeat.status.readiness === 'object'
+                    ? heartbeat.status.readiness
+                    : null;
+            const capabilities = [
+                { key: 'physicalLab', label: 'Physical lab' },
+                { key: 'fmu', label: 'FMU executor' },
+            ].map(capability => ({
+                ...capability,
+                value: readiness?.[capability.key],
+            }));
+            const hasCapabilityReadiness = capabilities.every(capability => (
+                capability.value && typeof capability.value.ready === 'boolean'
+            ));
+
+            if (!hasCapabilityReadiness) {
+                const ready = summary.ready;
+                return {
+                    label: formatBool(ready),
+                    className: ready === true ? 'good' : ready === false ? 'bad' : 'soft',
+                    tooltip: '',
+                };
+            }
+
+            const readyCount = capabilities.filter(capability => capability.value.ready).length;
+            const state = readyCount === capabilities.length
+                ? 'yes'
+                : readyCount === 0
+                    ? 'no'
+                    : 'partial';
+            const missing = capabilities
+                .filter(capability => !capability.value.ready)
+                .map(capability => {
+                    const issues = Array.isArray(capability.value.issues)
+                        ? capability.value.issues.filter(issue => typeof issue === 'string' && issue.trim())
+                        : [];
+                    return `${capability.label}: ${issues.length ? issues.join('; ') : 'not ready'}`;
+                });
+
+            return {
+                label: state,
+                className: state === 'yes' ? 'good' : state === 'no' ? 'bad' : 'warn',
+                tooltip: state === 'partial' ? `Not ready: ${missing.join(' | ')}` : '',
+            };
+        }
+
         function renderHostRowMarkup(host, data = {}, meta = {}) {
             const guacamole = meta.guacamole || {};
             const heartbeat = data.heartbeat || {};
@@ -76,7 +124,7 @@
             const status = heartbeat.status || {};
             const operations = heartbeat.operations || {};
             const winrmConfigured = Boolean(meta.winrmConfigured);
-            const ready = summary.ready;
+            const readiness = getReadinessDisplay(heartbeat, summary);
             const localSession = status.localSessionActive;
             const localMode = status.localModeEnabled;
             const lastForced = operations.lastForcedLogoff;
@@ -91,6 +139,15 @@
             const safeUpdated = escapeHtml(formatHostDate(updated, hasHeartbeat));
             const safeLastForced = escapeHtml(formatLastForcedLogoff(lastForced, hasHeartbeat));
             const safeLastPower = escapeHtml(formatLastPowerAction(lastPower, hasHeartbeat));
+            const safeReadinessTooltip = escapeHtml(readiness.tooltip);
+            const readinessTooltipId = 'readiness-tooltip-'
+                + String(host).replace(/[^A-Za-z0-9_-]/g, '-');
+            const readinessTooltipMarkup = readiness.tooltip
+                ? ` title="${safeReadinessTooltip}" tabindex="0" aria-describedby="${readinessTooltipId}" aria-label="Ready: partial. ${safeReadinessTooltip}"`
+                : '';
+            const readinessExplanationMarkup = readiness.tooltip
+                ? `<span class="ready-indicator-tooltip" id="${readinessTooltipId}" role="tooltip">${safeReadinessTooltip}</span>`
+                : '';
             const guacamoleConnections = Array.isArray(guacamole.connections) ? guacamole.connections : [];
             const safeConnections = escapeHtml(formatConnectionsStatus(guacamoleConnections));
             const connectionsClass = connectionsStatusClass(guacamole);
@@ -134,7 +191,7 @@
             </div>
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">
-                    <span class="pill ${ready === true ? 'good' : ready === false ? 'bad' : 'soft'}">Ready: ${formatBool(ready)}</span>
+                    <span class="pill ${readiness.className}${readiness.tooltip ? ' ready-indicator' : ''}"${readinessTooltipMarkup}>Ready: ${readiness.label}${readinessExplanationMarkup}</span>
                     <span class="pill ${localSession === true ? 'warn' : 'soft'}">Local session: ${formatBool(localSession)}</span>
                     <span class="pill ${localMode === true ? 'warn' : 'soft'}">Local mode: ${formatBool(localMode)}</span>
                 </div>

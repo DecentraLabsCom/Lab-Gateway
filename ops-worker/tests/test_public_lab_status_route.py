@@ -67,6 +67,38 @@ def test_build_response_reads_only_mapped_hosts_and_closes_connection():
     assert "private-host" not in str(result)
 
 
+def test_build_response_publishes_capability_statuses_without_raw_diagnostics():
+    engine = Engine()
+    heartbeat = {
+        "timestamp": "2026-09-23T10:00:00+00:00",
+        "ready": False,
+        "localMode": False,
+        "localSession": False,
+        "readiness": {
+            "physicalLab": {"ready": True, "issues": []},
+            "fmu": {"ready": False, "issues": ["secret must not be public"]},
+        },
+    }
+    now = lambda: datetime(2026, 9, 23, 10, 0, 30, tzinfo=timezone.utc)
+
+    result = build_public_lab_status_response(
+        ["7"],
+        engine=engine,
+        resolve_lab_associations=lambda: [{"labId": "7", "hostName": "private-host"}],
+        resolve_lab_status_targets=lambda: [],
+        fetch_latest_heartbeat=lambda *_args: heartbeat,
+        probe_lab_targets=lambda targets: {},
+        now=now,
+        max_age_seconds=180,
+    )
+
+    status = result["statuses"][0]
+    assert status["state"] == "ready"
+    assert status["capabilities"]["physicalLab"]["state"] == "ready"
+    assert status["capabilities"]["fmu"]["state"] == "not_ready"
+    assert "secret must not be public" not in str(result)
+
+
 def test_build_response_uses_guacamole_probe_for_lab_without_station_mapping():
     engine = Engine()
     now = lambda: datetime(2026, 9, 23, 10, 0, 30, tzinfo=timezone.utc)

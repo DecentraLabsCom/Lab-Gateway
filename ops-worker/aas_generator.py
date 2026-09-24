@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 import requests
 from secret_values import env_or_secret_file as _env_or_secret_file_impl
+from heartbeat_readiness import capability_ready
 
 logger = logging.getLogger("ops-worker.aas")
 
@@ -185,11 +186,10 @@ def build_technical_data_submodel(
     now_iso = datetime.now(timezone.utc).isoformat()
     hb = heartbeat or {}
 
-    summary = hb.get("summary", {})
     status = hb.get("status", {})
     operations = hb.get("operations", {})
 
-    ready = summary.get("ready")
+    ready = capability_ready(hb, "physicalLab")
     local_mode = status.get("localModeEnabled")
     local_session = status.get("localSessionActive")
     hb_timestamp = hb.get("timestamp", "")

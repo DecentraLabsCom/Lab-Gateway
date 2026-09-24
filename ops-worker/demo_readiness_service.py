@@ -3,6 +3,8 @@
 import re
 from typing import Any, Callable, Dict, Optional
 
+from heartbeat_readiness import capability_ready
+
 
 _DEMO_USER_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 
@@ -127,7 +129,7 @@ def build_demo_readiness(
         if heartbeat_ts else None
     )
     result["checks"]["physical_host"] = (
-        heartbeat.get("ready") is True
+        capability_ready(heartbeat, "physicalLab") is True
         and heartbeat_age is not None
         and 0 <= heartbeat_age <= max_age_seconds
     )

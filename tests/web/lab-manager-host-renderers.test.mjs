@@ -74,6 +74,54 @@ test('host row renderer preserves status markup and escapes host data', () => {
   assert.doesNotMatch(html, /<station>/);
 });
 
+test('host row renderer distinguishes complete, partial and unavailable capability readiness', () => {
+  const module = loadRenderers();
+  const renderer = module.createController(dependencies());
+  const base = {
+    timestamp: '2026-09-13T10:00:00Z',
+    summary: { ready: false },
+    status: { localSessionActive: false, localModeEnabled: false },
+    operations: {},
+  };
+
+  const partialHtml = renderer.renderHostRowMarkup('station-partial', {
+    heartbeat: {
+      ...base,
+      readiness: {
+        physicalLab: { ready: true, issues: [] },
+        fmu: { ready: false, issues: ['FMU executor is not running'] },
+      },
+    },
+  }, {});
+  assert.match(partialHtml, /class="pill warn ready-indicator"[^>]*>Ready: partial/);
+  assert.match(partialHtml, /FMU executor is not running/);
+  assert.match(partialHtml, /role="tooltip"/);
+
+  const unavailableHtml = renderer.renderHostRowMarkup('station-unavailable', {
+    heartbeat: {
+      ...base,
+      readiness: {
+        physicalLab: { ready: false, issues: ['WinRM not ready'] },
+        fmu: { ready: false, issues: ['FMU executor is not running'] },
+      },
+    },
+  }, {});
+  assert.match(unavailableHtml, /class="pill bad">Ready: no/);
+
+  const completeHtml = renderer.renderHostRowMarkup('station-ready', {
+    heartbeat: {
+      ...base,
+      summary: { ready: true },
+      readiness: {
+        physicalLab: { ready: true, issues: [] },
+        fmu: { ready: true, issues: [] },
+      },
+    },
+  }, {});
+  assert.match(completeHtml, /class="pill good">Ready: yes/);
+  assert.doesNotMatch(completeHtml, /ready-indicator-tooltip/);
+});
+
 test('host row renderer keeps missing heartbeat and trust states public', () => {
   const module = loadRenderers();
   const renderer = module.createController(dependencies());
