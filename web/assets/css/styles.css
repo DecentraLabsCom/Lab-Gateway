@@ -482,7 +482,7 @@ body {
 /* Opciones de acceso */
 .access-options {
     display: flex;
-    gap: 20px;
+    gap: 35px;
     justify-content: center;
     flex-wrap: wrap;
 }
