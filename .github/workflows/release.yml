@@ -32,9 +32,13 @@ jobs:
             decentralabs-proxy-builder:ci \
             bash -lc 'ctest --test-dir /workspace/build-ci --output-on-failure'
           test -f fmu-proxy-runtime-src/build-ci/libdecentralabs_proxy.so
-          cmp --silent \
+          if cmp --silent \
             fmu-proxy-runtime-src/build-ci/libdecentralabs_proxy.so \
-            fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so
+            fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so; then
+            echo "Promoted linux64 runtime matches the source build"
+          else
+            echo "::warning::Promoted linux64 runtime differs from the source build; the source-built artifact will be released"
+          fi
           sha256sum fmu-proxy-runtime-src/build-ci/libdecentralabs_proxy.so \
             fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so
 
