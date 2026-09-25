@@ -2,6 +2,8 @@
 
 This document is the operational guide for DecentraLabs' Asset Administration Shell support. AAS is an optional semantic and discovery layer around provider resources. It complements the FMI/FMU execution layer; it does not execute models, control equipment or replace reservations.
 
+Generated payloads use the published [IDTA submodel templates](https://github.com/admin-shell-io/submodel-templates): [02005 Provision of Simulation Models](https://industrialdigitaltwin.org/wp-content/uploads/2026/03/IDTA-02005_Template_ProvisionOfSimulationModel.pdf), [02006 Digital Nameplate](https://industrialdigitaltwin.org/en/wp-content/uploads/sites/2/2024/11/IDTA-02006-3-0_Submodel_Digital-Nameplate.pdf), [02003 Generic Technical Data](https://industrialdigitaltwin.org/en/wp-content/uploads/sites/2/2025/03/IDTA-02003_Generic-Frame-for-Technical-Data.pdf), [02017 Asset Interfaces Description](https://github.com/admin-shell-io/submodel-templates), [02020 Capability Description](https://github.com/admin-shell-io/submodel-templates), [02002 Contact Information](https://industrialdigitaltwin.org/wp-content/uploads/2022/10/IDTA-02002-1-0_Submodel_ContactInformation.pdf) and [02004 Handover Documentation](https://github.com/admin-shell-io/submodel-templates). No `decentralabs.io/aas/...` semantic IDs are generated.
+
 ## What AAS adds
 
 AAS gives a resource a stable digital identity and a structured place for technical, commercial and operational metadata:
@@ -10,6 +12,30 @@ AAS gives a resource a stable digital identity and a structured place for techni
 - Physical labs use nameplate, technical-data, documentation and contact information.
 - Marketplace discovery is provider-hosted: Marketplace reads the AAS shell from the Gateway that publishes the resource.
 - AAS is optional. If a provider has no AAS data, the resource page and its reservation/access flow continue to work unchanged.
+
+### Execution capabilities: useful, but not the execution engine
+
+Generated shells now use the standard IDTA `Capability Description` and
+`Asset Interfaces Description` submodels. The first describes what a resource
+can do; the second describes its HTTP/WebSocket affordances using the W3C WoT
+vocabulary. This gives clients an interoperable discovery contract without
+turning the AAS server into the execution engine.
+
+The actual invocation remains behind the existing Marketplace, Gateway and
+Station authorization paths. FMU execution still uses the protected
+`/fmu/api/v1/simulations/*` and `/fmu/api/v1/fmu/sessions` routes, and
+physical-lab access still uses the Gateway/Station and Guacamole flow. No
+reservation token, session ticket, password or access code is stored in the
+shell.
+
+FMU shells describe `RunSimulation`, `CancelSimulation` and, when
+Co-Simulation is available, `CreateRealtimeSession` plus the real-time
+vocabulary (`Initialize`, `Start`, `Pause`, `Resume`, `Reset`, `Step`,
+`RunUntil`, `SetInputs`, `GetOutputs` and `TerminateSession`). Physical-lab
+shells describe `PrepareAccessSession`, `StartInteractiveSession`,
+`EndInteractiveSession` and `ReadOperationalStatus`. These names are useful
+for clients and adapters without pretending that every laboratory exposes the
+same physical commands.
 
 ## Two perspectives at a glance
 
@@ -97,10 +123,11 @@ POST /aas-admin/fmu/{accessKey}/sync
 The endpoint is protected by the existing `lab_manager_access.lua` mechanism (admin header, cookie or token) and is not a public booking endpoint. It:
 
 1. calls the internal FMU `describe` operation;
-2. generates an IDTA 02006 `SimulationModels` submodel plus the common
-   operational `TechnicalData` submodel, or ingests an uploaded `.aasx` file;
-3. adds the FMU description plus the registered laboratory's Terms of Use URL
-   as `License`, all registered documentation links, and optional contact metadata;
+2. generates IDTA 02005 `SimulationModels` v1.1 plus IDTA 02003 `TechnicalData`
+   v2.0.1 and the standard capability/interface/contact/documentation submodels,
+   or ingests an uploaded `.aasx` file;
+3. maps Terms of Use and documentation to IDTA 02004 `HandoverDocumentation`
+   and contact email to IDTA 02002 `ContactInformations`;
 4. creates or replaces the shell and submodels in BaSyx.
 
 The optional `labId` parameter lets the provider keep a stable AAS identity anchored to a resource ID rather than to an operational FMU `accessKey`. The endpoint returns a disabled result when AAS is intentionally not configured and an upstream error when the configured AAS server cannot be reached.
@@ -191,28 +218,49 @@ urn:decentralabs:lab:{labId}
 
 | Resource | Main submodels | Typical information |
 | --- | --- | --- |
-| FMU simulation | IDTA 02006 `SimulationModels`, `TechnicalData`, Documentation, LicenseInfo | Summary, FMI ports, causality, quantities, tools, tolerances, capabilities, model-file hash, units and runner status. |
-| Physical laboratory | Nameplate, `TechnicalData`, Documentation, ContactInformation | Lab ID, resolved host, type, network address, MAC, heartbeat and station state. |
+| FMU simulation | IDTA 02005 `SimulationModels`, IDTA 02020 `CapabilityDescription`, IDTA 02017 `AssetInterfacesDescription`, IDTA 02003 `TechnicalData`, IDTA 02002/02004 | Summary, FMI file type/version, ports, tools, solver values, model-file hash, runner status and discoverable execution affordances. |
+| Physical laboratory | IDTA 02006 `Nameplate`, IDTA 02020 `CapabilityDescription`, IDTA 02017 `AssetInterfacesDescription`, IDTA 02003 `TechnicalData`, IDTA 02002/02004 | Standard identity, host/network details as permitted arbitrary nameplate properties, heartbeat, station state and discoverable access/status affordances. |
 
 The FMU `SimulationModels` submodel currently includes:
 
-- `Ports` mapped from FMI variables;
-- `PortCausality`, `QuantityKind` and port descriptions;
-- `SimulationToolSupport` with tool, dependency and version information;
-- `Tolerance` and a capabilities block;
-- `ModelFile` with SHA-256 integrity data when the real FMU is available;
-- a separate `UnitDefinitions` submodel with SI exponents and display units; and
-- the registered Terms of Use URL as `License`, all registered documentation
-  links and optional contact metadata.
+- standard `Ports` / `PortsConnector` / `Variable` elements mapped from FMI variables;
+- `ModelFileType`, `ModelFileVersion` and the nested standard `DigitalFile` with SHA-256 integrity data;
+- standard simulation-tool, solver/tolerance and `DefaultSimTime` elements;
+- standard `LicenseModel`, manufacturer information, FMI capability properties and model display name; and
+- units in the standard simulation-variable fields. The former custom
+  `UnitDefinitions` submodel is no longer emitted.
 
-Both generated resource types use `TechnicalData` with the same stable
-submodel identifier. For FMUs it publishes the last runner status, execution
-backend, model availability and active/max simulation counters. For physical
-laboratories it publishes the heartbeat, readiness, local-mode and recent
-power/logoff information. It is synchronized metadata, not a replacement for
+The generated `CapabilityDescription` and `AssetInterfacesDescription`
+submodels are intentionally separate from `SimulationModels` and
+`TechnicalData`. They describe capabilities and affordances, not live status
+and not authorization grants.
+
+### Automatic versus manual data
+
+| Resource | Filled automatically during generated sync | Still manual or provider-specific |
+| --- | --- | --- |
+| FMU | FMI model description, file type/version, ports, solver/tool metadata, model hash, capability names and endpoint affordance paths; contact/documentation submodels are generated from registered metadata. | Absolute deployment base URL, reservation policy, session-ticket issuance and any capability/operation semantics not covered by IDTA/WoT. |
+| Physical laboratory | Resolved host, standard Digital Nameplate identity, heartbeat projection, standard capability names, interface affordances, contact and documentation links. | Instrument/actuator semantics, detailed station protocol, absolute deployment base URL and provider procedures. |
+
+An imported provider-prepared `.aasx` package is not rewritten with this
+submodel. If an imported shell should expose the same contract, the provider
+must include an equivalent submodel in the package (or use generated sync).
+
+Both generated resource types use IDTA 02003 `TechnicalData` with the same
+stable submodel identifier. Runtime status/capacity is placed in the template's
+official `TechnicalPropertyAreas` arbitrary-property extension because IDTA
+02003 does not define a universal vocabulary for Gateway-specific health and
+reservation projections. It is synchronized metadata, not a replacement for
 Marketplace reservation state or live booking authorization.
 
-The generator targets approximately 95% conformance with IDTA 02006 based on the currently implemented elements. Conformance is not a substitute for provider validation of the actual model and license metadata.
+The SHA-256 value is retained as a generic AAS metamodel `Extension` on the
+standard FMU `File`, because IDTA 02005 has no checksum element. It is the only
+generated integrity extension; it is not a DecentraLabs semantic vocabulary.
+
+The generators target the published IDTA templates as far as the available
+metadata allows. Provider-specific runtime and session details remain clearly
+isolated in the standard arbitrary-extension slots. Conformance is not a
+substitute for provider validation of the actual model and license metadata.
 
 ## Consumer guide
 
@@ -227,6 +275,8 @@ When available, the panel can show:
 - operational status, readiness, backend/session capacity and heartbeat when
   the provider publishes `TechnicalData`;
 - FMU description, license, documentation links and contact; and
+- the capability names and interface affordances when the provider publishes
+  `CapabilityDescription` and `AssetInterfacesDescription`; and
 - a link to the raw shell or a downloadable `.aasx` package.
 
 AAS metadata helps a consumer understand and compare a resource. It does not replace authentication, a reservation, a session ticket, a physical-lab access token or the FMI proxy authorization flow.
@@ -274,7 +324,9 @@ Implemented in the Gateway ecosystem:
 - Marketplace shell discovery, AAS panel and AASX download from current BaSyx resources;
 - unified Lab Manager associations for generated, imported and externally linked AAS shells;
 - transparent links to existing external AAS shells; and
-- IDTA 02006 simulation-model mapping including FMI ports, units and integrity metadata.
+- IDTA 02005 simulation-model mapping including FMI ports, units and integrity metadata;
+- IDTA 02003/02006 technical-data and nameplate mapping;
+- IDTA 02020 capability and IDTA 02017 interface descriptions for generated FMUs and physical laboratories, without embedding credentials or changing the protected runtime paths;
 
 The following remain future work:
 
@@ -300,6 +352,7 @@ These items are not prerequisites for the current AAS MVP. Shell generation, pub
 
 - [ ] Treat AAS as descriptive metadata, not an access credential.
 - [ ] Check the model's ports, capabilities, tools, units and license.
+- [ ] Treat described execution/access operations as an interoperability contract, not as directly invokable AAS commands.
 - [ ] Check physical-lab technical data separately from live availability.
 - [ ] Follow the normal Marketplace reservation and access flow.
 - [ ] Use raw JSON/AASX only as an additional integration artifact and validate it against the provider's published terms.

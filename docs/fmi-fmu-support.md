@@ -260,7 +260,7 @@ Useful validation scripts are under `Lab Gateway/tests/integration/`, including 
 FMI/FMU is the protected execution and interoperability layer. It is not a complete digital-twin information model. The natural complementary layers are:
 
 - **SSP** for composed systems and systems-of-systems;
-- **AAS** for stable identity, semantic metadata, packaging, discovery and marketplace-facing digital-twin information;
+- **AAS** for stable identity, standard semantic metadata, packaging and discovery. DecentraLabs uses IDTA 02005 for simulation-model metadata, IDTA 02020 for capabilities and IDTA 02017 for interface affordances; reservation-scoped invocation remains outside the AAS server;
 - **OPC UA** for live industrial equipment, telemetry, commands and OT/IT integration; and
 - **DCP** only for premium hard-real-time, HIL/SIL or demanding distributed co-simulation scenarios.
 

@@ -18,7 +18,10 @@ from aas_generator import (
     _aas_id_for_lab,
     _submodel_id_for_fmu,
     _submodel_id_for_technical,
-    _unit_submodel_id_for_lab,
+    _submodel_id_for_execution,
+    _submodel_id_for_interfaces,
+    _submodel_id_for_contact,
+    _submodel_id_for_handover,
     _encode_id,
     _aas_resource_path,
     _fmi_type_to_idta,
@@ -27,7 +30,10 @@ from aas_generator import (
     build_simulation_ports,
     build_simulation_submodel,
     build_technical_data_submodel,
-    build_unit_definitions_submodel,
+    build_execution_capabilities_submodel,
+    build_asset_interfaces_description_submodel,
+    build_contact_information_submodel,
+    build_handover_documentation_submodel,
     build_aas_shell,
     delete_aasx_resources,
     discover_basyx_shells,
@@ -44,8 +50,10 @@ class TestAasIdGeneration:
     def test_submodel_id_format(self):
         assert _submodel_id_for_fmu("42") == "urn:decentralabs:lab:42:sm:simulationModels"
 
-    def test_unit_submodel_id_format(self):
-        assert _unit_submodel_id_for_lab("42") == "urn:decentralabs:lab:42:sm:unitDefinitions"
+    def test_standard_support_submodel_ids(self):
+        assert _submodel_id_for_interfaces("42") == "urn:decentralabs:lab:42:sm:assetInterfaces"
+        assert _submodel_id_for_contact("42") == "urn:decentralabs:lab:42:sm:contactInformation"
+        assert _submodel_id_for_handover("42") == "urn:decentralabs:lab:42:sm:handoverDocumentation"
 
     def test_technical_submodel_id_format(self):
         assert _submodel_id_for_technical("42") == "urn:decentralabs:lab:42:sm:technicalData"
@@ -108,47 +116,47 @@ class TestBuildSimulationPorts:
         ]
         ports = build_simulation_ports(variables)
         assert len(ports) == 1
-        port = ports[0]
-        assert port["idShort"] == "force"
-        assert port["modelType"] == "SubmodelElementCollection"
-        values = {el["idShort"]: el for el in port["value"]}
-        assert values["PortCausality"]["value"] == "Input"
-        assert values["PortDataType"]["value"] == "Real"
-        assert "Unit" in values
-        assert values["Unit"]["value"] == "N"
-        assert "DefaultValue" in values
+        connector = ports[0]
+        assert connector["idShort"] == "Input"
+        assert connector["semanticId"]["keys"][0]["value"].endswith("/PortsConnector/1/0")
+        variable = connector["value"][1]
+        values = {el["idShort"]: el for el in variable["value"]}
+        assert values["VariableName"]["value"] == "force"
+        assert values["VariableType"]["value"] == "Real"
+        assert values["VariableCausality"]["value"] == "input"
+        assert values["UnitList"]["value"] == "N"
+        assert "DefaultValue" not in values
 
     def test_output_port_without_optional_fields(self):
         variables = [
             {"name": "velocity", "causality": "output", "type": "Float64", "variability": "continuous"},
         ]
         ports = build_simulation_ports(variables)
-        port = ports[0]
-        values = {el["idShort"]: el for el in port["value"]}
-        assert values["PortCausality"]["value"] == "Output"
-        assert values["PortDataType"]["value"] == "Real"
-        assert "Unit" not in values
-        assert "DefaultValue" not in values
+        connector = ports[0]
+        variable = connector["value"][1]
+        values = {el["idShort"]: el for el in variable["value"]}
+        assert values["VariableName"]["value"] == "velocity"
+        assert values["VariableType"]["value"] == "Real"
+        assert values["VariableCausality"]["value"] == "output"
+        assert values["UnitList"]["value"] == "others"
 
     def test_port_description_field(self):
         variables = [
             {"name": "force", "causality": "input", "type": "Real", "description": "Applied force"},
         ]
         ports = build_simulation_ports(variables)
-        values = {el["idShort"]: el for el in ports[0]["value"]}
-        assert "PortDescription" in values
-        assert values["PortDescription"]["value"] == "Applied force"
-        assert "Description" not in values  # old non-conformant idShort must not exist
+        values = {el["idShort"]: el for el in ports[0]["value"][1]["value"]}
+        assert "VariableDescription" in values
+        assert values["VariableDescription"]["value"][0]["text"] == "Applied force"
 
     def test_quantity_kind_field(self):
         variables = [
             {"name": "mass", "causality": "input", "type": "Real", "quantity": "Mass"},
         ]
         ports = build_simulation_ports(variables)
-        values = {el["idShort"]: el for el in ports[0]["value"]}
-        assert "QuantityKind" in values
-        assert values["QuantityKind"]["value"] == "Mass"
-        assert "Quantity" not in values  # old non-conformant idShort must not exist
+        values = {el["idShort"]: el for el in ports[0]["value"][1]["value"]}
+        assert "UnitDescription" in values
+        assert values["UnitDescription"]["value"][0]["text"] == "Mass"
 
 
 SAMPLE_METADATA = {
@@ -174,7 +182,7 @@ class TestBuildSimulationSubmodel:
         assert sm["id"] == "urn:decentralabs:lab:42:sm:simulationModels"
         assert sm["idShort"] == "SimulationModels"
         assert sm["modelType"] == "Submodel"
-        assert "semanticId" in sm
+        assert sm["semanticId"]["keys"][0]["value"] == "https://admin-shell.io/idta/SubmodelTemplate/SimulationModels/1/1"
 
     def test_submodel_has_simulation_model_collection(self):
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
@@ -188,16 +196,13 @@ class TestBuildSimulationSubmodel:
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
         sim_model = sm["submodelElements"][0]
         props = {el["idShort"]: el for el in sim_model["value"]}
-        assert props["ModelName"]["value"] == "TestModel"
-        assert props["FmiVersion"]["value"] == "3.0"
-        assert props["SimulationType"]["value"] == "CoSimulation"
-        assert props["SupportsCoSimulation"]["value"] == "true"
-        assert props["SupportsModelExchange"]["value"] == "false"
-        assert props["DefaultStartTime"]["value"] == "0.0"
-        assert props["DefaultStopTime"]["value"] == "10.0"
-        assert props["DefaultStepSize"]["value"] == "0.001"
-        assert props["AccessKey"]["value"] == "test.fmu"
-        assert "SyncTimestamp" in props
+        assert sim_model["displayName"][0]["text"] == "TestModel"
+        assert props["TypeOfModel"]["value"] == "CoSimulation"
+        assert props["DefaultSimTime"]["value"] == "10.0"
+        model_file = {el["idShort"]: el for el in props["ModelFile"]["value"]}
+        assert model_file["ModelFileType"]["value"] == "FMI 3.0, Co-Simulation"
+        assert "AccessKey" not in props
+        assert "SyncTimestamp" not in props
 
     def test_ports_included_for_io_variables(self):
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
@@ -205,10 +210,10 @@ class TestBuildSimulationSubmodel:
         props = {el["idShort"]: el for el in sim_model["value"]}
         assert "Ports" in props
         ports_coll = props["Ports"]
-        # Only input + output, not local
+        # One standard connector per FMI causality, local variables omitted.
         assert len(ports_coll["value"]) == 2
-        port_names = {p["idShort"] for p in ports_coll["value"]}
-        assert port_names == {"force", "velocity"}
+        connector_names = {p["idShort"] for p in ports_coll["value"]}
+        assert connector_names == {"Input", "Output"}
 
     def test_no_ports_when_only_locals(self):
         metadata = {**SAMPLE_METADATA, "modelVariables": [
@@ -249,10 +254,12 @@ class TestBuildSimulationSubmodel:
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
         assert "ModelFile" in props
-        assert props["ModelFile"]["modelType"] == "File"
-        assert props["ModelFile"]["contentType"] == "application/octet-stream"
-        assert props["ModelFile"]["value"] == "/fmu-data/test.fmu"
-        assert "extensions" not in props["ModelFile"]  # no hash without fmu_path
+        assert props["ModelFile"]["modelType"] == "SubmodelElementCollection"
+        model_file = {el["idShort"]: el for el in props["ModelFile"]["value"]}
+        model_version = {el["idShort"]: el for el in model_file["ModelFileVersion"]["value"]}
+        assert model_version["DigitalFile"]["contentType"] == "application/zip"
+        assert model_version["DigitalFile"]["value"] == "/fmu-data/test.fmu"
+        assert "extensions" not in model_version["DigitalFile"]
 
     def test_model_file_with_sha256(self, tmp_path, monkeypatch):
         import hashlib
@@ -263,7 +270,9 @@ class TestBuildSimulationSubmodel:
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, fmu_path=fmu)
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
         assert "ModelFile" in props
-        sha_ext = next((e for e in props["ModelFile"].get("extensions", []) if e["name"] == "sha256"), None)
+        model_file = {el["idShort"]: el for el in props["ModelFile"]["value"]}
+        model_version = {el["idShort"]: el for el in model_file["ModelFileVersion"]["value"]}
+        sha_ext = next((e for e in model_version["DigitalFile"].get("extensions", []) if e["name"] == "sha256"), None)
         assert sha_ext is not None
         assert sha_ext["value"] == expected_sha
 
@@ -278,7 +287,9 @@ class TestBuildSimulationSubmodel:
 
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, fmu_path=outside)
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        sha_ext = next((e for e in props["ModelFile"].get("extensions", []) if e["name"] == "sha256"), None)
+        model_file = {el["idShort"]: el for el in props["ModelFile"]["value"]}
+        model_version = {el["idShort"]: el for el in model_file["ModelFileVersion"]["value"]}
+        sha_ext = next((e for e in model_version["DigitalFile"].get("extensions", []) if e["name"] == "sha256"), None)
 
         assert sha_ext is not None
         assert sha_ext["value"] == hashlib.sha256(b"inside-fmu-content").hexdigest()
@@ -288,27 +299,72 @@ class TestBuildSimulationSubmodel:
         sm = build_simulation_submodel("42", "test.fmu", metadata)
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
         assert "GenerationTool" not in props  # flat property must not exist
-        assert "SimulationToolSupport" in props
-        sts = props["SimulationToolSupport"]
-        assert sts["modelType"] == "SubmodelElementCollection"
-        tool_0 = {el["idShort"]: el for el in sts["value"]}["SimulationTool_0"]
-        tool_props = {el["idShort"]: el for el in tool_0["value"]}
-        assert tool_props["SimulationToolName"]["value"] == "Modelica v4.1"
-        assert tool_props["SupportedFMIVersion"]["value"] == "3.0"
+        assert "Environment" in props
+        environment = {el["idShort"]: el for el in props["Environment"]["value"]}
+        tool_props = {el["idShort"]: el for el in environment["SimulationTool"]["value"]}
+        assert tool_props["SimToolName"]["value"] == "Modelica v4.1"
 
     def test_no_simulation_tool_support_when_no_gen_tool(self):
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "SimulationToolSupport" not in props
+        assert "Environment" in props  # default solver metadata is still standard
         assert "GenerationTool" not in props
 
     def test_tolerance_idshort(self):
         metadata = {**SAMPLE_METADATA, "defaultTolerance": 1e-4}
         sm = build_simulation_submodel("42", "test.fmu", metadata)
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "Tolerance" in props
-        assert props["Tolerance"]["value"] == "0.0001"
+        environment = {el["idShort"]: el for el in props["Environment"]["value"]}
+        solver = {el["idShort"]: el for el in environment["SimulationTool"]["value"]}["SolverAndTolerances"]
+        solver_props = {el["idShort"]: el for el in solver["value"]}
+        assert solver_props["Tolerance"]["value"] == "0.0001"
         assert "DefaultTolerance" not in props  # old non-conformant idShort must not exist
+
+
+class TestBuildExecutionCapabilitiesSubmodel:
+    def test_submodel_describes_reservation_scoped_fmu_execution(self):
+        sm = build_execution_capabilities_submodel("42", SAMPLE_METADATA, {
+            "status": "UP",
+            "backendMode": "station",
+        })
+
+        assert sm["id"] == "urn:decentralabs:lab:42:sm:executionCapabilities"
+        assert sm["idShort"] == "CapabilityDescription"
+        capabilities = []
+        for container in sm["submodelElements"][0]["value"]:
+            capabilities.extend(container["value"])
+        operation_names = {capability["idShort"] for capability in capabilities}
+        assert {"RunSimulation", "CancelSimulation", "CreateRealtimeSession", "Reset", "Step", "GetOutputs"}.issubset(operation_names)
+
+        payload_text = str(sm).lower()
+        assert "st_secret" not in payload_text
+        assert "capabilitydescription" in payload_text
+
+    def test_realtime_capabilities_are_omitted_without_co_simulation(self):
+        metadata = {**SAMPLE_METADATA, "supportsCoSimulation": False, "supportsModelExchange": True}
+        sm = build_execution_capabilities_submodel("42", metadata)
+        operation_names = {
+            capability["idShort"]
+            for container in sm["submodelElements"][0]["value"]
+            for capability in container["value"]
+        }
+        assert "RunSimulation" in operation_names
+        assert "CreateRealtimeSession" not in operation_names
+
+
+class TestStandardSupportSubmodels:
+    def test_asset_interfaces_describe_actions(self):
+        sm = build_asset_interfaces_description_submodel("42", [("Reset", "/fmu/api/v1/fmu/sessions", "GET", "websocket")])
+        assert sm["semanticId"]["keys"][0]["value"].endswith("AssetInterfacesDescription/1/1/Submodel")
+        actions = sm["submodelElements"][0]["value"][2]["value"][0]["value"]
+        assert actions[0]["idShort"] == "Reset"
+        assert actions[0]["semanticId"]["keys"][0]["value"].endswith("ActionAffordance")
+
+    def test_contact_and_handover_use_standard_templates(self):
+        contact = build_contact_information_submodel("42", {"contactEmail": "lab@example.com"})
+        assert contact["semanticId"]["keys"][0]["value"].endswith("ContactInformations")
+        handover = build_handover_documentation_submodel("42", {"documentationUrls": ["https://example.com/doc"]})
+        assert handover["semanticId"]["keys"][0]["value"] == "0173-1#01-AHF578#003"
 
 
 SAMPLE_UNIT_DEFS = [
@@ -334,6 +390,7 @@ class TestSanitizeIdShort:
         assert _sanitize_idshort(name) == expected
 
 
+@pytest.mark.skip(reason="UnitDefinitions custom submodel was replaced by standard IDTA 02005 unit fields")
 class TestBuildUnitDefinitionsSubmodel:
     def test_submodel_structure(self):
         sm = build_unit_definitions_submodel("42", SAMPLE_UNIT_DEFS)
@@ -410,27 +467,27 @@ class TestBuildAasShell:
         assert shell["modelType"] == "AssetAdministrationShell"
         assert shell["assetInformation"]["assetKind"] == "Instance"
         assert shell["assetInformation"]["globalAssetId"] == "urn:decentralabs:lab:42"
-        assert shell["assetInformation"]["assetType"] == "FMU"
+        assert "assetType" not in shell["assetInformation"]
 
     def test_shell_references_submodel(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
         refs = shell["submodels"]
-        assert len(refs) == 2
+        assert len(refs) == 6
         assert refs[0]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:simulationModels"
         assert refs[1]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:technicalData"
 
     def test_shell_extra_submodel_ids(self):
-        extra = ["urn:decentralabs:lab:42:sm:unitDefinitions"]
+        extra = ["urn:decentralabs:lab:42:sm:providerExtension"]
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA, extra_submodel_ids=extra)
         ref_values = [r["keys"][0]["value"] for r in shell["submodels"]]
         assert "urn:decentralabs:lab:42:sm:simulationModels" in ref_values
-        assert "urn:decentralabs:lab:42:sm:unitDefinitions" in ref_values
+        assert "urn:decentralabs:lab:42:sm:providerExtension" in ref_values
         assert "urn:decentralabs:lab:42:sm:technicalData" in ref_values
-        assert len(shell["submodels"]) == 3
+        assert len(shell["submodels"]) == 7
 
     def test_shell_no_extra_submodels_by_default(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
-        assert len(shell["submodels"]) == 2
+        assert len(shell["submodels"]) == 6
 
     def test_shell_idshort_format(self):
         shell = build_aas_shell("7", "motor.fmu", SAMPLE_METADATA)
@@ -445,48 +502,38 @@ class TestExtraInfoFields:
     def test_submodel_extra_info_license(self):
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"license": "MIT"})
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "License" in props
-        assert props["License"]["value"] == "MIT"
+        assert props["LicenseModel"]["value"] == "MIT"
 
     def test_submodel_extra_info_documentation_url(self):
-        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"documentationUrl": "https://example.com"})
-        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "DocumentationUrl" in props
-        assert props["DocumentationUrl"]["value"] == "https://example.com"
+        sm = build_handover_documentation_submodel("42", {"documentationUrl": "https://example.com"})
+        assert sm["submodelElements"][0]["value"][0]["value"][1]["value"][0]["value"][3]["value"][0]["value"] == "https://example.com"
 
     def test_submodel_extra_info_documentation_urls_preserves_all_links(self):
-        sm = build_simulation_submodel(
-            "42",
-            "test.fmu",
-            SAMPLE_METADATA,
-            {"documentationUrls": ["https://example.com/manual.pdf", "https://example.com/guide.html"]},
+        sm = build_handover_documentation_submodel(
+            "42", {"documentationUrls": ["https://example.com/manual.pdf", "https://example.com/guide.html"]}
         )
-        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "Documentation" in props
-        assert [item["value"] for item in props["Documentation"]["value"]] == [
-            "https://example.com/manual.pdf",
-            "https://example.com/guide.html",
+        files = [
+            document["value"][1]["value"][0]["value"][3]["value"][0]["value"]
+            for document in sm["submodelElements"][0]["value"]
         ]
+        assert files == ["https://example.com/manual.pdf", "https://example.com/guide.html"]
 
     def test_submodel_extra_info_contact_email(self):
-        sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"contactEmail": "lab@example.com"})
-        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "ContactEmail" in props
-        assert props["ContactEmail"]["value"] == "lab@example.com"
+        sm = build_contact_information_submodel("42", {"contactEmail": "lab@example.com"})
+        email = sm["submodelElements"][0]["value"][0]["value"][0]
+        assert email["idShort"] == "EmailAddress"
+        assert email["value"] == "lab@example.com"
 
     def test_submodel_extra_info_empty_fields_not_included(self):
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, {"license": "", "documentationUrl": "  "})
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "License" not in props
-        assert "DocumentationUrl" not in props
+        assert "LicenseModel" not in props
 
     def test_submodel_extra_info_none_is_noop(self):
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA, None)
         # No extra properties should be present
         props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "License" not in props
-        assert "DocumentationUrl" not in props
-        assert "ContactEmail" not in props
+        assert "LicenseModel" not in props
 
     # -- build_aas_shell extra_info --
 
@@ -519,7 +566,8 @@ class TestBuildTechnicalDataSubmodel:
         )
         assert submodel["id"] == "urn:decentralabs:lab:42:sm:technicalData"
         assert submodel["idShort"] == "TechnicalData"
-        props = {element["idShort"]: element for element in submodel["submodelElements"]}
+        areas = submodel["submodelElements"][1]["value"][0]["value"]
+        props = {element["idShort"]: element for element in areas}
         assert props["ResourceType"]["value"] == "FMU"
         assert props["ResourceStatus"]["value"] == "Ready"
         assert props["ReadyFlag"]["value"] == "true"
@@ -530,7 +578,7 @@ class TestBuildTechnicalDataSubmodel:
 
     def test_unknown_runtime_status_does_not_claim_fmu_is_ready(self):
         submodel = build_technical_data_submodel("42", SAMPLE_METADATA)
-        props = {element["idShort"]: element for element in submodel["submodelElements"]}
+        props = {element["idShort"]: element for element in submodel["submodelElements"][1]["value"][0]["value"]}
         assert props["ResourceStatus"]["value"] == "Unknown"
         assert props["ReadyFlag"]["value"] == ""
         assert props["ModelAvailable"]["value"] == "true"
@@ -905,7 +953,8 @@ class TestSyncFmuToBasyxGenerated:
                 if call.args[0] == f"/submodels/{_encode_id(_submodel_id_for_technical('42'))}"
             )
             payload = technical_call.kwargs["json"]
-            props = {element["idShort"]: element for element in payload["submodelElements"]}
+            areas = {element["idShort"]: element for element in payload["submodelElements"]}["TechnicalPropertyAreas"]
+            props = {element["idShort"]: element for element in areas["value"][0]["value"]}
             assert props["ResourceStatus"]["value"] == "Ready"
             assert props["ExecutionBackend"]["value"] == "local"
         finally:

@@ -38,6 +38,16 @@ SAMPLE_HEARTBEAT = {
 }
 
 
+def _nameplate_props(submodel):
+    specific = next(element for element in submodel["submodelElements"] if element["idShort"] == "AssetSpecificProperties")
+    return {element["idShort"]: element for element in specific["value"]}
+
+
+def _technical_props(submodel):
+    area = submodel["submodelElements"][1]["value"][0]["value"]
+    return {element["idShort"]: element for element in area}
+
+
 # ── ID / encode helpers ───────────────────────────────────────────────
 
 class TestIdHelpers:
@@ -68,29 +78,29 @@ class TestBuildNameplateSubmodel:
         assert sm["id"] == "urn:decentralabs:lab:42:sm:nameplate"
         assert sm["idShort"] == "Nameplate"
 
-    def test_contains_lab_id_prop(self):
+    def test_contains_standard_product_uri(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)
         props = {el["idShort"]: el for el in sm["submodelElements"]}
-        assert props["LabId"]["value"] == "42"
+        assert props["URIOfTheProduct"]["value"] == "urn:decentralabs:lab:42"
 
     def test_contains_host_name(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _nameplate_props(sm)
         assert props["HostName"]["value"] == "lab-ws-01"
 
     def test_lab_type_is_physical(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
-        assert props["LabType"]["value"] == "PhysicalLab"
+        props = _nameplate_props(sm)
+        assert props["LabType"]["value"] == "PhysicalLaboratory"
 
     def test_contains_address(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _nameplate_props(sm)
         assert props["NetworkAddress"]["value"] == "192.168.1.100"
 
     def test_contains_mac(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _nameplate_props(sm)
         assert "MacAddress" in props
         assert props["MacAddress"]["value"] == "00:11:22:33:44:55"
 
@@ -98,7 +108,7 @@ class TestBuildNameplateSubmodel:
         host = {**SAMPLE_HOST}
         del host["mac"]
         sm = _mod.build_nameplate_submodel("42", host)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _nameplate_props(sm)
         assert "MacAddress" not in props
 
     def test_mapped_lab_ids_are_not_copied_from_host_configuration(self):
@@ -109,7 +119,7 @@ class TestBuildNameplateSubmodel:
     def test_semantic_id_present(self):
         sm = _mod.build_nameplate_submodel("42", SAMPLE_HOST)
         assert sm["semanticId"]["keys"][0]["value"] == (
-            "https://admin-shell.io/zvei/nameplate/2/0/Nameplate"
+            "https://admin-shell.io/idta/nameplate/3/0/Nameplate"
         )
 
 
@@ -124,50 +134,50 @@ class TestBuildTechnicalDataSubmodel:
 
     def test_ready_maps_to_status(self):
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _technical_props(sm)
         assert props["LabStatus"]["value"] == "Ready"
         assert props["ReadyFlag"]["value"] == "true"
 
     def test_common_operational_fields_are_present(self):
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
-        assert props["ResourceType"]["value"] == "PhysicalLab"
+        props = _technical_props(sm)
+        assert props["ResourceType"]["value"] == "PhysicalLaboratory"
         assert props["ResourceStatus"]["value"] == "Ready"
         assert props["LastSyncTimestamp"]["value"]
 
     def test_not_ready_maps_to_status(self):
         hb = {**SAMPLE_HEARTBEAT, "summary": {"ready": False}}
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, hb)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _technical_props(sm)
         assert props["LabStatus"]["value"] == "NotReady"
         assert props["ReadyFlag"]["value"] == "false"
 
     def test_unknown_ready_is_empty(self):
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, None)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _technical_props(sm)
         assert props["LabStatus"]["value"] == ""
         assert props["ReadyFlag"]["value"] == ""
 
     def test_local_mode_flag(self):
         hb = {**SAMPLE_HEARTBEAT, "status": {"localModeEnabled": True, "localSessionActive": False}}
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, hb)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _technical_props(sm)
         assert props["LocalModeEnabled"]["value"] == "true"
 
     def test_heartbeat_timestamp_present(self):
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _technical_props(sm)
         assert props["LastHeartbeatTimestamp"]["value"] == "2026-01-01T12:00:00.000Z"
 
     def test_power_action_fields(self):
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _technical_props(sm)
         assert props["LastPowerActionMode"]["value"] == "powerOn"
         assert "2026-01-01" in props["LastPowerActionTimestamp"]["value"]
 
     def test_forced_logoff_fields(self):
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT)
-        props = {el["idShort"]: el for el in sm["submodelElements"]}
+        props = _technical_props(sm)
         assert props["LastForcedLogoffUser"]["value"] == "student1"
 
     def test_empty_heartbeat_safe(self):
@@ -178,8 +188,30 @@ class TestBuildTechnicalDataSubmodel:
     def test_semantic_id_present(self):
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, None)
         assert sm["semanticId"]["keys"][0]["value"] == (
-            "https://admin-shell.io/ZVEI/TechnicalData/Submodel/1/2"
+            "0173-1#01-AHX837#002"
         )
+
+
+class TestBuildExecutionCapabilitiesSubmodel:
+    def test_physical_lab_access_capabilities_are_described(self):
+        sm = _mod.build_execution_capabilities_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT)
+
+        assert sm["id"] == "urn:decentralabs:lab:42:sm:executionCapabilities"
+        assert sm["idShort"] == "CapabilityDescription"
+        capabilities = [capability["idShort"] for container in sm["submodelElements"][0]["value"] for capability in container["value"]]
+        assert set(capabilities) == {
+            "PrepareAccessSession",
+            "StartInteractiveSession",
+            "EndInteractiveSession",
+            "ReadOperationalStatus",
+        }
+        payload_text = str(sm).lower()
+        assert "token" not in payload_text
+        assert "password" not in payload_text
+
+    def test_station_capabilities_do_not_claim_heartbeat_when_missing(self):
+        sm = _mod.build_execution_capabilities_submodel("42", SAMPLE_HOST, None)
+        assert sm["semanticId"]["keys"][0]["value"].endswith("CapabilityDescription/1/0")
 
 
 # ── AAS Shell ─────────────────────────────────────────────────────────
@@ -193,15 +225,19 @@ class TestBuildAasShell:
         shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
         assert shell["idShort"] == "DecentraLabs_Lab_42"
 
-    def test_asset_type_physical(self):
+    def test_asset_type_is_not_an_uncontrolled_free_text_value(self):
         shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
-        assert shell["assetInformation"]["assetType"] == "PhysicalLab"
+        assert "assetType" not in shell["assetInformation"]
 
     def test_references_both_submodels(self):
         shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
         refs = [r["keys"][0]["value"] for r in shell["submodels"]]
         assert "urn:decentralabs:lab:42:sm:nameplate" in refs
         assert "urn:decentralabs:lab:42:sm:technicalData" in refs
+        assert "urn:decentralabs:lab:42:sm:executionCapabilities" in refs
+        assert "urn:decentralabs:lab:42:sm:assetInterfaces" in refs
+        assert "urn:decentralabs:lab:42:sm:contactInformation" in refs
+        assert "urn:decentralabs:lab:42:sm:handoverDocumentation" in refs
 
     def test_description_contains_host_name(self):
         shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
@@ -230,14 +266,27 @@ class TestBuildAasShell:
                 "contactEmail": "lab@example.test",
             },
         )
-        values = {
-            element["idShort"]: element["value"]
-            for element in submodel["submodelElements"]
-        }
-        assert values["License"] == "https://example.test/terms.html"
-        assert values["DocumentationUrl_0"] == "https://example.test/manual.pdf"
-        assert values["DocumentationUrl_1"] == "https://example.test/guide.html"
-        assert values["ContactEmail"] == "lab@example.test"
+        contact = _mod.build_contact_information_submodel("42", {"contactEmail": "lab@example.test"})
+        assert contact["submodelElements"][0]["value"][0]["value"][0]["value"] == "lab@example.test"
+        handover = _mod.build_handover_documentation_submodel(
+            "42",
+            {
+                "license": "https://example.test/terms.html",
+                "documentationUrls": [
+                    "https://example.test/manual.pdf",
+                    "https://example.test/guide.html",
+                ],
+            },
+        )
+        files = [
+            document["value"][1]["value"][0]["value"][3]["value"][0]["value"]
+            for document in handover["submodelElements"][0]["value"]
+        ]
+        assert files == [
+            "https://example.test/terms.html",
+            "https://example.test/manual.pdf",
+            "https://example.test/guide.html",
+        ]
 
 
 # ── sync_lab_to_basyx degradation ─────────────────────────────────────

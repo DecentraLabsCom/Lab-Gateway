@@ -92,13 +92,10 @@ def test_simulation_ports_render_all_optional_metadata():
             }
         ]
     )
-    values = {element["idShort"]: element["value"] for element in ports[0]["value"]}
-    assert values["PortVariability"] == "discrete"
-    assert values["DefaultValue"] == "2.5"
-    assert values["QuantityKind"] == "Force"
-    assert values["DisplayUnit"] == "kN"
-    assert values["NominalValue"] == "10.0"
-    assert values["PortDescription"] == "Applied force"
+    values = {element["idShort"]: element["value"] for element in ports[0]["value"][1]["value"]}
+    assert values["VariableType"] == "Real"
+    assert values["UnitList"] == "N"
+    assert values["VariableDescription"][0]["text"] == "Applied force"
 
 
 def test_simulation_submodel_renders_embedded_capabilities_and_provider_metadata(tmp_path, monkeypatch):
@@ -137,17 +134,19 @@ def test_simulation_submodel_renders_embedded_capabilities_and_provider_metadata
     )
     properties = {element["idShort"]: element for element in submodel["submodelElements"][0]["value"]}
 
-    assert properties["Author"]["value"] == "Author"
-    assert properties["Version"]["value"] == "1.2.3"
-    assert properties["SimulationToolSupport"]["value"][0]["value"][0]["value"] == "Tool 1.0"
-    assert properties["Tolerance"]["value"] == "0.0001"
-    assert properties["Capabilities"]["value"][-1]["idShort"] == "FixedInternalStepSize"
-    assert properties["License"]["value"] == "MIT"
-    assert properties["DocumentationUrl"]["value"] == "https://docs.example/model"
-    assert properties["ContactEmail"]["value"] == "owner@example"
-    assert properties["ModelFile"]["extensions"][0]["value"] == hashlib.sha256(b"model").hexdigest()
+    assert properties["LicenseModel"]["value"] == "MIT"
+    environment = {element["idShort"]: element for element in properties["Environment"]["value"]}
+    tool = {element["idShort"]: element for element in environment["SimulationTool"]["value"]}
+    assert tool["SimToolName"]["value"] == "Tool 1.0"
+    solver = {element["idShort"]: element for element in tool["SolverAndTolerances"]["value"]}
+    assert solver["Tolerance"]["value"] == "0.0001"
+    model_file = {element["idShort"]: element for element in properties["ModelFile"]["value"]}
+    model_version = {element["idShort"]: element for element in model_file["ModelFileVersion"]["value"]}
+    assert model_version["ModelVersionId"]["value"] == "1.2.3"
+    assert model_version["DigitalFile"]["extensions"][0]["value"] == hashlib.sha256(b"model").hexdigest()
 
 
+@pytest.mark.skip(reason="custom UnitDefinitions submodel removed in favor of standard IDTA 02005 ports")
 def test_unit_definitions_render_offsets_and_duplicate_display_names():
     submodel = aas.build_unit_definitions_submodel(
         "lab-42",

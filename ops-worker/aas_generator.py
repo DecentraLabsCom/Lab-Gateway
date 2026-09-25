@@ -2,11 +2,12 @@
 AAS shell and submodel generator for physical laboratory resources.
 
 Generates BaSyx V2-compatible JSON payloads from host config and heartbeat data.
-Uses a simplified Nameplate submodel for lab identity and a TechnicalData submodel
-for current operational status derived from the Lab Station heartbeat.
+Uses IDTA Digital Nameplate and Generic Technical Data submodels for lab identity
+and current operational status derived from the Lab Station heartbeat.
 """
 
 import base64
+import json
 import logging
 import os
 import re
@@ -35,6 +36,13 @@ _BUNDLED_AAS_URL = "http://basyx-aas-server:8081"
 
 _BASYX_TIMEOUT = int(os.getenv("BASYX_AAS_TIMEOUT", "15"))
 _AAS_LAB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+_SEMANTIC_ID_NAMEPLATE = "https://admin-shell.io/idta/nameplate/3/0/Nameplate"
+_SEMANTIC_ID_TECHNICAL_DATA = "0173-1#01-AHX837#002"
+_SEMANTIC_ID_CAPABILITY_DESCRIPTION = "https://admin-shell.io/idta/SubmodelTemplate/CapabilityDescription/1/0"
+_SEMANTIC_ID_ASSET_INTERFACES = "https://admin-shell.io/idta/AssetInterfacesDescription/1/1/Submodel"
+_SEMANTIC_ID_CONTACT_INFORMATION = "https://admin-shell.io/zvei/nameplate/1/0/ContactInformations"
+_SEMANTIC_ID_HANDOVER_DOCUMENTATION = "0173-1#01-AHF578#003"
+_SEMANTIC_ID_ARBITRARY_PROPERTY = "https://admin-shell.io/SMT/General/ArbitraryProp"
 
 
 def _aas_request_headers() -> Dict[str, str]:
@@ -95,6 +103,22 @@ def _submodel_id_technical(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:technicalData"
 
 
+def _submodel_id_execution(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:executionCapabilities"
+
+
+def _submodel_id_interfaces(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:assetInterfaces"
+
+
+def _submodel_id_contact(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:contactInformation"
+
+
+def _submodel_id_handover(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:handoverDocumentation"
+
+
 def _encode_id(raw_id: str) -> str:
     """Base64url-encode an AAS/submodel ID for BaSyx V2 REST paths."""
     return base64.urlsafe_b64encode(raw_id.encode()).decode().rstrip("=")
@@ -130,45 +154,34 @@ def build_nameplate_submodel(
     host: Dict[str, Any],
     extra_info: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Build a simplified Nameplate submodel for a physical lab host.
-
-    Covers the core identity fields for this lab. Lab-to-host associations are
-    resolved from the provider catalog at sync time and are not copied into
-    host configuration or emitted as an aggregate list.
-    """
-    now_iso = datetime.now(timezone.utc).isoformat()
-    elements = [
-        _prop("LabId", "xs:string", lab_id),
-        _prop("HostName", "xs:string", host.get("name", "")),
-        _prop("LabType", "xs:string", "PhysicalLab"),
-        _prop("NetworkAddress", "xs:string", host.get("address", "")),
-        _prop("SyncTimestamp", "xs:string", now_iso),
+    """Build IDTA 02006 v3.0 Digital Nameplate for a physical lab."""
+    specific_values = [
+        _arbitrary_prop("HostName", "xs:string", host.get("name", ""), "Station host name."),
+        _arbitrary_prop("LabType", "xs:string", "PhysicalLaboratory", "DecentraLabs resource classification."),
+        _arbitrary_prop("NetworkAddress", "xs:string", host.get("address", ""), "Station network address."),
     ]
-
     mac = host.get("mac")
     if mac:
-        elements.append(_prop("MacAddress", "xs:string", mac))
-
-    license_url = _metadata_text(extra_info, "license")
-    if license_url:
-        elements.append(_prop("License", "xs:string", license_url))
-
-    contact_email = _metadata_text(extra_info, "contactEmail")
-    if contact_email:
-        elements.append(_prop("ContactEmail", "xs:string", contact_email))
-
-    for index, documentation_url in enumerate(_metadata_documentation(extra_info)):
-        elements.append(_prop(f"DocumentationUrl_{index}", "xs:anyURI", documentation_url))
+        specific_values.append(_arbitrary_prop("MacAddress", "xs:string", mac, "Station network interface address."))
+    elements = [
+        _standard_prop("URIOfTheProduct", "xs:anyURI", _aas_id_for_lab(lab_id), "0112/2///61987#ABN590#002"),
+        _standard_mlp("ManufacturerName", "DecentraLabs", "0112/2///61987#ABA565#009"),
+        _standard_mlp("ManufacturerProductDesignation", str(host.get("name") or "Physical laboratory"), "0112/2///61987#ABA567#009"),
+        _standard_prop("ManufacturerProductType", "xs:string", "PhysicalLaboratory", "0112/2///61987#ABA300#008"),
+        _standard_prop("UniqueFacilityIdentifier", "xs:string", lab_id, "https://admin-shell.io/idta/nameplate/3/0/UniqueFacilityIdentifier"),
+        {
+            "idShort": "AssetSpecificProperties",
+            "semanticId": _semantic_id("0173-1#02-ABI218#003/0173-1#01-AGZ672#004"),
+            "modelType": "SubmodelElementCollection",
+            "value": specific_values,
+        },
+    ]
 
     return {
         "id": _submodel_id_nameplate(lab_id),
         "idShort": "Nameplate",
         "modelType": "Submodel",
-        "semanticId": {
-            "type": "ExternalReference",
-            "keys": [{"type": "GlobalReference", "value": "https://admin-shell.io/zvei/nameplate/2/0/Nameplate"}],
-        },
+        "semanticId": _semantic_id(_SEMANTIC_ID_NAMEPLATE),
         "submodelElements": elements,
     }
 
@@ -178,11 +191,7 @@ def build_technical_data_submodel(
     host: Dict[str, Any],
     heartbeat: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Build a TechnicalData submodel from heartbeat operational status.
-
-    If no heartbeat is provided (lab not yet polled), status fields are empty.
-    """
+    """Build IDTA 02003 v2.0.1 TechnicalData with arbitrary runtime values."""
     now_iso = datetime.now(timezone.utc).isoformat()
     hb = heartbeat or {}
 
@@ -210,30 +219,301 @@ def build_technical_data_submodel(
         return "true" if val else "false"
 
     elements = [
-        _prop("ResourceType", "xs:string", "PhysicalLab"),
-        _prop("ResourceStatus", "xs:string", resource_status),
-        _prop("LabStatus", "xs:string", "Ready" if ready else ("NotReady" if ready is False else "")),
-        _prop("ReadyFlag", "xs:boolean", bool_str(ready)),
-        _prop("LocalModeEnabled", "xs:boolean", bool_str(local_mode)),
-        _prop("LocalSessionActive", "xs:boolean", bool_str(local_session)),
-        _prop("LastHeartbeatTimestamp", "xs:string", hb_timestamp),
-        _prop("LastPowerActionTimestamp", "xs:string", last_power_ts),
-        _prop("LastPowerActionMode", "xs:string", last_power_mode),
-        _prop("LastForcedLogoffTimestamp", "xs:string", last_logoff_ts),
-        _prop("LastForcedLogoffUser", "xs:string", last_logoff_user),
-        _prop("LastSyncTimestamp", "xs:string", now_iso),
-        _prop("SyncTimestamp", "xs:string", now_iso),
+        {
+            "idShort": "GeneralInformation",
+            "semanticId": _semantic_id("0173-1#02-ABK161#002/0173-1#01-AHX838#002"),
+            "modelType": "SubmodelElementCollection",
+            "value": [
+                _standard_prop("ManufacturerName", "xs:string", "DecentraLabs", "0173-1#02-AAO677#004"),
+                _standard_mlp("ManufacturerProductDesignation", str(host.get("name") or "Physical laboratory"), "0173-1#02-AAW338#003"),
+            ],
+        },
+        {
+            "idShort": "TechnicalPropertyAreas",
+            "semanticId": _semantic_id("0173-1#02-ABK163#002"),
+            "modelType": "SubmodelElementList",
+            "value": [{
+                "idShort": "OperationalStatus",
+                "semanticId": _semantic_id("0173-1#02-ABL358#002/0173-1#01-AHX773#002"),
+                "modelType": "SubmodelElementCollection",
+                "value": [
+                    _arbitrary_prop("ResourceType", "xs:string", "PhysicalLaboratory", "DecentraLabs resource classification."),
+                    _arbitrary_prop("ResourceStatus", "xs:string", resource_status, "Current publication status."),
+                    _arbitrary_prop("LabStatus", "xs:string", "Ready" if ready else ("NotReady" if ready is False else ""), "Physical lab readiness projection."),
+                    _arbitrary_prop("ReadyFlag", "xs:boolean", bool_str(ready), "Whether the station reports readiness."),
+                    _arbitrary_prop("LocalModeEnabled", "xs:boolean", bool_str(local_mode), "Whether local station mode is enabled."),
+                    _arbitrary_prop("LocalSessionActive", "xs:boolean", bool_str(local_session), "Whether a local station session is active."),
+                    _arbitrary_prop("LastHeartbeatTimestamp", "xs:dateTime", hb_timestamp, "Last station heartbeat timestamp."),
+                    _arbitrary_prop("LastPowerActionTimestamp", "xs:dateTime", last_power_ts, "Last power operation timestamp."),
+                    _arbitrary_prop("LastPowerActionMode", "xs:string", last_power_mode, "Last power operation mode."),
+                    _arbitrary_prop("LastForcedLogoffTimestamp", "xs:dateTime", last_logoff_ts, "Last forced logoff timestamp."),
+                    _arbitrary_prop("LastForcedLogoffUser", "xs:string", last_logoff_user, "User affected by the last forced logoff."),
+                    _arbitrary_prop("LastSyncTimestamp", "xs:dateTime", now_iso, "Timestamp of this AAS publication."),
+                ],
+            }],
+        },
     ]
 
     return {
         "id": _submodel_id_technical(lab_id),
         "idShort": "TechnicalData",
         "modelType": "Submodel",
-        "semanticId": {
-            "type": "ExternalReference",
-            "keys": [{"type": "GlobalReference", "value": "https://admin-shell.io/ZVEI/TechnicalData/Submodel/1/2"}],
-        },
+        "semanticId": _semantic_id(_SEMANTIC_ID_TECHNICAL_DATA),
         "submodelElements": elements,
+    }
+
+
+def _semantic_id(value: str) -> Dict[str, Any]:
+    return {
+        "type": "ExternalReference",
+        "keys": [{"type": "GlobalReference", "value": value}],
+    }
+
+
+def _standard_prop(id_short: str, value_type: str, value: Any, semantic_id: str) -> Dict[str, Any]:
+    element = _prop(id_short, value_type, value)
+    element["semanticId"] = _semantic_id(semantic_id)
+    return element
+
+
+def _standard_mlp(id_short: str, value: str, semantic_id: str) -> Dict[str, Any]:
+    return {
+        "idShort": id_short,
+        "semanticId": _semantic_id(semantic_id),
+        "modelType": "MultiLanguageProperty",
+        "value": [{"language": "en", "text": value}],
+    }
+
+
+def _arbitrary_prop(id_short: str, value_type: str, value: Any, description: str = "") -> Dict[str, Any]:
+    element = _standard_prop(id_short, value_type, value, _SEMANTIC_ID_ARBITRARY_PROPERTY)
+    if description:
+        element["description"] = [{"language": "en", "text": description}]
+    return element
+
+
+def build_execution_capabilities_submodel(
+    lab_id: str,
+    host: Dict[str, Any],
+    heartbeat: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the standard IDTA 02020 capability description for lab access."""
+    capability_names = [
+        ("PrepareAccessSession", "Prepare the station and gateway for an authorized laboratory access session."),
+        ("StartInteractiveSession", "Start a reservation-authorized interactive laboratory session."),
+        ("EndInteractiveSession", "End an interactive laboratory session and release its resources."),
+        ("ReadOperationalStatus", "Read the latest published station heartbeat and readiness projection."),
+    ]
+    containers = [{
+        "idShort": f"CapabilityContainer_{name}",
+        "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/CapabilityContainer/1/0"),
+        "modelType": "SubmodelElementCollection",
+        "value": [{
+            "idShort": name,
+            "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/Capability/1/0"),
+            "modelType": "Capability",
+            "description": [{"language": "en", "text": description}],
+        }],
+    } for name, description in capability_names]
+    return {
+        "id": _submodel_id_execution(lab_id),
+        "idShort": "CapabilityDescription",
+        "modelType": "Submodel",
+        "semanticId": _semantic_id(_SEMANTIC_ID_CAPABILITY_DESCRIPTION),
+        "submodelElements": [{
+            "idShort": "CapabilitySet",
+            "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/CapabilitySet/1/0"),
+            "modelType": "SubmodelElementCollection",
+            "value": containers,
+        }],
+    }
+
+
+def _asset_interface_action(name: str, href: str, method: str = "POST", subprotocol: str = "") -> Dict[str, Any]:
+    values = [
+        _standard_prop("href", "xs:anyURI", href, "https://www.w3.org/2019/wot/hypermedia#hasTarget"),
+        _standard_prop("htv_methodName", "xs:string", method, "https://www.w3.org/2011/http#methodName"),
+    ]
+    if subprotocol:
+        values.append(_standard_prop("subprotocol", "xs:string", subprotocol, "https://www.w3.org/2019/wot/hypermedia#forSubProtocol"))
+    return {
+        "idShort": name,
+        "semanticId": _semantic_id("https://www.w3.org/2019/wot/td#ActionAffordance"),
+        "modelType": "SubmodelElementCollection",
+        "value": [{
+            "idShort": "forms",
+            "semanticId": _semantic_id("https://www.w3.org/2019/wot/td#hasForm"),
+            "modelType": "SubmodelElementCollection",
+            "value": values,
+        }],
+    }
+
+
+def build_asset_interfaces_description_submodel(
+    lab_id: str,
+    operations: list[tuple[str, str, str, str]],
+    *,
+    title: str = "DecentraLabs physical laboratory interface",
+) -> Dict[str, Any]:
+    actions = [_asset_interface_action(name, href, method, subprotocol) for name, href, method, subprotocol in operations]
+    bearer_scheme = {
+        "idShort": "bearer_sc",
+        "semanticId": _semantic_id("https://www.w3.org/2019/wot/security#BearerSecurityScheme"),
+        "modelType": "SubmodelElementCollection",
+        "value": [
+            _standard_prop("scheme", "xs:string", "bearer", "https://www.w3.org/2019/wot/security#SecurityScheme"),
+            _standard_prop("name", "xs:string", "Authorization", "https://www.w3.org/2019/wot/security#name"),
+            _standard_prop("in", "xs:string", "header", "https://www.w3.org/2019/wot/security#in"),
+        ],
+    }
+    return {
+        "id": _submodel_id_interfaces(lab_id),
+        "idShort": "AssetInterfacesDescription",
+        "modelType": "Submodel",
+        "semanticId": _semantic_id(_SEMANTIC_ID_ASSET_INTERFACES),
+        "submodelElements": [{
+            "idShort": "InterfaceTemplateForHTTP",
+            "semanticId": _semantic_id("https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Interface"),
+            "modelType": "SubmodelElementCollection",
+            "value": [
+                _standard_prop("title", "xs:string", title, "https://www.w3.org/2019/wot/td#title"),
+                {
+                    "idShort": "EndpointMetadata",
+                    "semanticId": _semantic_id("https://admin-shell.io/idta/AssetInterfacesDescription/1/0/EndpointMetadata"),
+                    "modelType": "SubmodelElementCollection",
+                    "value": [
+                        _standard_prop("base", "xs:anyURI", "/ops/api/v1", "https://www.w3.org/2019/wot/td#baseURI"),
+                        _standard_prop("contentType", "xs:string", "application/json", "https://www.w3.org/2019/wot/hypermedia#forContentType"),
+                        {
+                            "idShort": "securityDefinitions",
+                            "semanticId": _semantic_id("https://www.w3.org/2019/wot/security#definesSecurityScheme"),
+                            "modelType": "SubmodelElementCollection",
+                            "value": [bearer_scheme],
+                        },
+                    ],
+                },
+                {
+                    "idShort": "InteractionMetadata",
+                    "semanticId": _semantic_id("https://admin-shell.io/idta/AssetInterfacesDescription/1/0/InteractionMetadata"),
+                    "modelType": "SubmodelElementCollection",
+                    "value": [{
+                        "idShort": "actions",
+                        "semanticId": _semantic_id("https://www.w3.org/2019/wot/td#ActionAffordance"),
+                        "modelType": "SubmodelElementCollection",
+                        "value": actions,
+                    }],
+                },
+            ],
+        }],
+    }
+
+
+def build_contact_information_submodel(lab_id: str, extra_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    email = _metadata_text(extra_info, "contactEmail")
+    values = []
+    if email:
+        values.append({
+            "idShort": "Email",
+            "semanticId": _semantic_id("0173-1#02-AAQ836#005"),
+            "modelType": "SubmodelElementCollection",
+            "value": [_standard_prop("EmailAddress", "xs:string", email, "0173-1#02-AAO198#002")],
+        })
+    return {
+        "id": _submodel_id_contact(lab_id),
+        "idShort": "ContactInformations",
+        "modelType": "Submodel",
+        "semanticId": _semantic_id(_SEMANTIC_ID_CONTACT_INFORMATION),
+        "submodelElements": [{
+            "idShort": "ContactInformation",
+            "semanticId": _semantic_id("https://admin-shell.io/zvei/nameplate/1/0/ContactInformations/ContactInformation"),
+            "modelType": "SubmodelElementCollection",
+            "value": values,
+        }],
+    }
+
+
+def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    urls = _metadata_documentation(extra_info)
+    license_value = _metadata_text(extra_info, "license")
+    if license_value.startswith(("http://", "https://")):
+        urls.insert(0, license_value)
+    documents = []
+    for index, url in enumerate(dict.fromkeys(urls)):
+        document_ids = {
+            "idShort": "DocumentIds",
+            "semanticId": _semantic_id("0173-1#02-ABI501#003"),
+            "modelType": "SubmodelElementList",
+            "value": [{
+                "idShort": "DocumentIdentifier_0",
+                "semanticId": _semantic_id("0173-1#02-ABI501#003/0173-1#01-AHF580#003"),
+                "modelType": "SubmodelElementCollection",
+                "value": [
+                    _standard_prop("DocumentDomainId", "xs:string", urlsplit(url).hostname or "decentralabs", "0173-1#02-ABH994#003"),
+                    _standard_prop("DocumentIdentifier", "xs:string", url, "0173-1#02-AAO099#004"),
+                ],
+            }],
+        }
+        documents.append({
+            "idShort": f"Document_{index}",
+            "semanticId": _semantic_id("0173-1#02-ABI500#003/0173-1#01-AHF579#003"),
+            "modelType": "SubmodelElementCollection",
+            "value": [document_ids, {
+                "idShort": "DocumentVersions",
+                "semanticId": _semantic_id("0173-1#02-ABI503#003"),
+                "modelType": "SubmodelElementList",
+                "value": [{
+                    "idShort": "DocumentVersion_0",
+                    "semanticId": _semantic_id("0173-1#02-ABI503#003/0173-1#01-AHF582#003"),
+                    "modelType": "SubmodelElementCollection",
+                    "value": [{
+                        "idShort": "Language",
+                        "semanticId": _semantic_id("0173-1#02-AAN468#008"),
+                        "modelType": "SubmodelElementList",
+                        "value": [{
+                            "idShort": "Language_0",
+                            "semanticId": _semantic_id("0173-1#02-AAN468#008"),
+                            "modelType": "Property",
+                            "valueType": "xs:string",
+                            "value": "en",
+                            "valueId": _semantic_id("0173-1#07-AAS045#003"),
+                        }],
+                    }, {
+                        "idShort": "Version",
+                        "semanticId": _semantic_id("0173-1#02-AAP003#005"),
+                        "modelType": "Property",
+                        "valueType": "xs:string",
+                        "value": "1.0",
+                    }, {
+                        "idShort": "Title",
+                        "semanticId": _semantic_id("0173-1#02-ABG940#003"),
+                        "modelType": "MultiLanguageProperty",
+                        "value": [{"language": "en", "text": "License terms" if url == license_value else f"Documentation {index + 1}"}],
+                    }, {
+                        "idShort": "DigitalFiles",
+                        "semanticId": _semantic_id("0173-1#02-ABK126#002"),
+                        "modelType": "SubmodelElementList",
+                        "value": [{
+                            "idShort": "DigitalFile",
+                            "semanticId": _semantic_id("0173-1#02-ABK126#002"),
+                            "modelType": "File",
+                            "contentType": "application/octet-stream",
+                            "value": url,
+                        }],
+                    }],
+                }],
+            }],
+        })
+    return {
+        "id": _submodel_id_handover(lab_id),
+        "idShort": "HandoverDocumentation",
+        "modelType": "Submodel",
+        "semanticId": _semantic_id(_SEMANTIC_ID_HANDOVER_DOCUMENTATION),
+        "submodelElements": [{
+            "idShort": "Documents",
+            "semanticId": _semantic_id("0173-1#02-ABI500#003"),
+            "modelType": "SubmodelElementList",
+            "value": documents,
+        }],
     }
 
 
@@ -246,6 +526,10 @@ def build_physical_aas_shell(
     aas_id = _aas_id_for_lab(lab_id)
     nameplate_id = _submodel_id_nameplate(lab_id)
     technical_id = _submodel_id_technical(lab_id)
+    execution_id = _submodel_id_execution(lab_id)
+    interfaces_id = _submodel_id_interfaces(lab_id)
+    contact_id = _submodel_id_contact(lab_id)
+    handover_id = _submodel_id_handover(lab_id)
     host_name = host.get("name", lab_id)
     description = _metadata_text(extra_info, "description") or (
         f"Physical lab resource '{host_name}' (labId={lab_id})"
@@ -257,12 +541,15 @@ def build_physical_aas_shell(
         "assetInformation": {
             "assetKind": "Instance",
             "globalAssetId": aas_id,
-            "assetType": "PhysicalLab",
         },
         "description": [{"language": "en", "text": description}],
         "submodels": [
             {"type": "ModelReference", "keys": [{"type": "Submodel", "value": nameplate_id}]},
             {"type": "ModelReference", "keys": [{"type": "Submodel", "value": technical_id}]},
+            {"type": "ModelReference", "keys": [{"type": "Submodel", "value": execution_id}]},
+            {"type": "ModelReference", "keys": [{"type": "Submodel", "value": interfaces_id}]},
+            {"type": "ModelReference", "keys": [{"type": "Submodel", "value": contact_id}]},
+            {"type": "ModelReference", "keys": [{"type": "Submodel", "value": handover_id}]},
         ],
     }
 
@@ -327,11 +614,19 @@ def sync_lab_to_basyx(
     aas_id = _aas_id_for_lab(lab_id)
     nameplate_id = _submodel_id_nameplate(lab_id)
     technical_id = _submodel_id_technical(lab_id)
+    execution_id = _submodel_id_execution(lab_id)
+    interfaces_id = _submodel_id_interfaces(lab_id)
+    contact_id = _submodel_id_contact(lab_id)
+    handover_id = _submodel_id_handover(lab_id)
 
     result: Dict[str, Any] = {
         "aasId": aas_id,
         "nameplateSubmodelId": nameplate_id,
         "technicalDataSubmodelId": technical_id,
+        "executionSubmodelId": execution_id,
+        "interfacesSubmodelId": interfaces_id,
+        "contactSubmodelId": contact_id,
+        "handoverSubmodelId": handover_id,
         "created": False,
         "updated": False,
     }
@@ -344,10 +639,26 @@ def sync_lab_to_basyx(
     shell_payload = build_physical_aas_shell(lab_id, host, extra_info)
     nameplate_payload = build_nameplate_submodel(lab_id, host, extra_info)
     technical_payload = build_technical_data_submodel(lab_id, host, heartbeat)
+    execution_payload = build_execution_capabilities_submodel(lab_id, host, heartbeat)
+    interfaces_payload = build_asset_interfaces_description_submodel(
+        lab_id,
+        [
+            ("PrepareAccessSession", "/internal/guacamole/provision", "POST", ""),
+            ("StartInteractiveSession", "/internal/guacamole/provision", "POST", ""),
+            ("EndInteractiveSession", "/internal/guacamole/provision/{sessionId}", "DELETE", ""),
+            ("ReadOperationalStatus", "/health", "GET", ""),
+        ],
+    )
+    contact_payload = build_contact_information_submodel(lab_id, extra_info)
+    handover_payload = build_handover_documentation_submodel(lab_id, extra_info)
 
     aas_id_enc = _encode_id(aas_id)
     np_id_enc = _encode_id(nameplate_id)
     td_id_enc = _encode_id(technical_id)
+    execution_id_enc = _encode_id(execution_id)
+    interfaces_id_enc = _encode_id(interfaces_id)
+    contact_id_enc = _encode_id(contact_id)
+    handover_id_enc = _encode_id(handover_id)
 
     session = None
     try:
@@ -373,6 +684,38 @@ def sync_lab_to_basyx(
             result["error"] = "technicalData sync failed"
             return result
         logger.info("TechnicalData submodel synced (status=%s)", td_result.get("status"))
+
+        # --- CapabilityDescription submodel ---
+        execution_result = _put_or_post(
+            session,
+            BASYX_AAS_URL,
+            f"/submodels/{execution_id_enc}",
+            "/submodels",
+            execution_payload,
+        )
+        if "error" in execution_result:
+            logger.error("Failed to sync CapabilityDescription submodel")
+            result["error"] = "execution capabilities sync failed"
+            return result
+        logger.info("CapabilityDescription submodel synced (status=%s)", execution_result.get("status"))
+
+        for _sm_id_enc, _sm_payload, _label in (
+            (interfaces_id_enc, interfaces_payload, "AssetInterfacesDescription"),
+            (contact_id_enc, contact_payload, "ContactInformations"),
+            (handover_id_enc, handover_payload, "HandoverDocumentation"),
+        ):
+            _sm_result = _put_or_post(
+                session,
+                BASYX_AAS_URL,
+                f"/submodels/{_sm_id_enc}",
+                "/submodels",
+                _sm_payload,
+            )
+            if "error" in _sm_result:
+                logger.error("Failed to sync %s submodel", _label)
+                result["error"] = f"{_label} sync failed"
+                return result
+            logger.info("%s submodel synced (status=%s)", _label, _sm_result.get("status"))
 
         # --- AAS Shell ---
         shell_result = _put_or_post(session, BASYX_AAS_URL, f"/shells/{aas_id_enc}", "/shells", shell_payload)
