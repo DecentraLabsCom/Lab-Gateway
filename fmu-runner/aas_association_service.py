@@ -129,7 +129,7 @@ class AasAssociationService:
             if not lab_id:
                 continue
             submodel_ids = _unique_strings(shell.get("submodelIds"))
-            result[lab_id] = {
+            association = {
                 "labId": lab_id,
                 "source": "generated",
                 "associationType": "generated",
@@ -140,6 +140,10 @@ class AasAssociationService:
                 "canDownload": True,
                 "canDelete": True,
             }
+            updated_at = shell.get("updatedAt")
+            if isinstance(updated_at, str) and updated_at.strip():
+                association["updatedAt"] = updated_at.strip()
+            result[lab_id] = association
         return result
 
     async def list_associations(self) -> dict[str, Any]:

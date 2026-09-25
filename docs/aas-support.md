@@ -262,6 +262,26 @@ metadata allows. Provider-specific runtime and session details remain clearly
 isolated in the standard arbitrary-extension slots. Conformance is not a
 substitute for provider validation of the actual model and license metadata.
 
+### AASX conformance checks
+
+The development test suites use the Eclipse BaSyx Python SDK 2.1.0 as an
+independent AAS/AASX reader. They parse generated JSON and round-trip generated
+AASX packages with `failsafe=False`, so missing mandatory metamodel fields,
+invalid typed values, malformed XML and invalid OPC/AASX relationships fail the
+tests instead of being silently skipped. The FMU suite also contains a negative
+test for the missing `typeValueListElement` error that AASX Package Explorer
+reported.
+
+To validate a downloaded package manually from `fmu-runner`:
+
+~~~bash
+python tools/validate_aasx.py path/to/lab.aasx
+~~~
+
+This checks generic AAS metamodel/AASX validity. IDTA template semantics and
+provider-specific operational meaning remain covered by the generator tests and
+semantic IDs; they cannot be inferred solely from the AASX container parser.
+
 ## Consumer guide
 
 ### Marketplace behavior

@@ -317,13 +317,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: ops-worker/requirements.txt
+          cache-dependency-path: |
+            ops-worker/requirements.txt
+            ops-worker/requirements-dev.txt
 
       - name: Install Ops Worker test dependencies
         working-directory: ops-worker
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pytest pytest-cov
+          python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run Ops Worker tests
         id: run_ops_worker_tests

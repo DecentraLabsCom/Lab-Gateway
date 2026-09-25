@@ -48,6 +48,17 @@ def _technical_props(submodel):
     return {element["idShort"]: element for element in area}
 
 
+def _assert_submodel_lists_are_typed(payload):
+    if isinstance(payload, dict):
+        if payload.get("modelType") == "SubmodelElementList":
+            assert payload.get("typeValueListElement")
+        for value in payload.values():
+            _assert_submodel_lists_are_typed(value)
+    elif isinstance(payload, list):
+        for value in payload:
+            _assert_submodel_lists_are_typed(value)
+
+
 # ── ID / encode helpers ───────────────────────────────────────────────
 
 class TestIdHelpers:
@@ -156,7 +167,10 @@ class TestBuildTechnicalDataSubmodel:
         sm = _mod.build_technical_data_submodel("42", SAMPLE_HOST, None)
         props = _technical_props(sm)
         assert props["LabStatus"]["value"] == ""
-        assert props["ReadyFlag"]["value"] == ""
+        assert "ReadyFlag" not in props
+        assert "LocalModeEnabled" not in props
+        assert "LocalSessionActive" not in props
+        assert "LastHeartbeatTimestamp" not in props
 
     def test_local_mode_flag(self):
         hb = {**SAMPLE_HEARTBEAT, "status": {"localModeEnabled": True, "localSessionActive": False}}
@@ -216,6 +230,38 @@ class TestBuildExecutionCapabilitiesSubmodel:
 
 # ── AAS Shell ─────────────────────────────────────────────────────────
 
+class TestGeneratedSubmodelListSerialization:
+    def test_all_submodel_lists_declare_their_element_type(self):
+        payloads = [
+            _mod.build_technical_data_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT),
+            _mod.build_execution_capabilities_submodel("42", SAMPLE_HOST, SAMPLE_HEARTBEAT),
+            _mod.build_asset_interfaces_description_submodel(
+                "42",
+                [("ReadOperationalStatus", "/health", "GET", "")],
+            ),
+            _mod.build_handover_documentation_submodel(
+                "42",
+                {"documentationUrls": ["https://example.com/manual.pdf"]},
+            ),
+        ]
+
+        for payload in payloads:
+            _assert_submodel_lists_are_typed(payload)
+
+    def test_optional_submodels_are_omitted_when_they_have_no_content(self):
+        assert _mod.build_contact_information_submodel("42", {}) is None
+        assert _mod.build_handover_documentation_submodel("42", {}) is None
+
+        shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
+        references = [reference["keys"][0]["value"] for reference in shell["submodels"]]
+        assert references == [
+            "urn:decentralabs:lab:42:sm:nameplate",
+            "urn:decentralabs:lab:42:sm:technicalData",
+            "urn:decentralabs:lab:42:sm:executionCapabilities",
+            "urn:decentralabs:lab:42:sm:assetInterfaces",
+        ]
+
+
 class TestBuildAasShell:
     def test_shell_id(self):
         shell = _mod.build_physical_aas_shell("42", SAMPLE_HOST)
@@ -236,6 +282,19 @@ class TestBuildAasShell:
         assert "urn:decentralabs:lab:42:sm:technicalData" in refs
         assert "urn:decentralabs:lab:42:sm:executionCapabilities" in refs
         assert "urn:decentralabs:lab:42:sm:assetInterfaces" in refs
+        assert "urn:decentralabs:lab:42:sm:contactInformation" not in refs
+        assert "urn:decentralabs:lab:42:sm:handoverDocumentation" not in refs
+
+    def test_references_optional_metadata_submodels_when_present(self):
+        shell = _mod.build_physical_aas_shell(
+            "42",
+            SAMPLE_HOST,
+            {
+                "contactEmail": "lab@example.test",
+                "documentationUrls": ["https://example.test/manual.pdf"],
+            },
+        )
+        refs = [r["keys"][0]["value"] for r in shell["submodels"]]
         assert "urn:decentralabs:lab:42:sm:contactInformation" in refs
         assert "urn:decentralabs:lab:42:sm:handoverDocumentation" in refs
 

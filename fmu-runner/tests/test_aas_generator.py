@@ -43,6 +43,17 @@ from aas_generator import (
 _aas_mod: Any = sys.modules["aas_generator"]
 
 
+def _assert_submodel_lists_are_typed(payload: Any) -> None:
+    if isinstance(payload, dict):
+        if payload.get("modelType") == "SubmodelElementList":
+            assert payload.get("typeValueListElement")
+        for value in payload.values():
+            _assert_submodel_lists_are_typed(value)
+    elif isinstance(payload, list):
+        for value in payload:
+            _assert_submodel_lists_are_typed(value)
+
+
 class TestAasIdGeneration:
     def test_aas_id_format(self):
         assert _aas_id_for_lab("42") == "urn:decentralabs:lab:42"
@@ -177,6 +188,37 @@ SAMPLE_METADATA = {
 
 
 class TestBuildSimulationSubmodel:
+    def test_all_submodel_lists_declare_their_element_type(self):
+        payloads = [
+            build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA),
+            build_technical_data_submodel("42", SAMPLE_METADATA),
+            build_execution_capabilities_submodel("42", SAMPLE_METADATA),
+            build_asset_interfaces_description_submodel(
+                "42",
+                [("RunSimulation", "/fmu/api/v1/simulations/run", "POST", "")],
+            ),
+            build_handover_documentation_submodel(
+                "42",
+                {"documentationUrls": ["https://example.com/manual.pdf"]},
+            ),
+        ]
+
+        for payload in payloads:
+            _assert_submodel_lists_are_typed(payload)
+
+    def test_optional_submodels_are_omitted_when_they_have_no_content(self):
+        assert build_execution_capabilities_submodel("42", {}) is None
+        assert build_asset_interfaces_description_submodel("42", []) is None
+        assert build_contact_information_submodel("42", {}) is None
+        assert build_handover_documentation_submodel("42", {}) is None
+
+        shell = build_aas_shell("42", "test.fmu", {})
+        references = [reference["keys"][0]["value"] for reference in shell["submodels"]]
+        assert references == [
+            "urn:decentralabs:lab:42:sm:simulationModels",
+            "urn:decentralabs:lab:42:sm:technicalData",
+        ]
+
     def test_submodel_structure(self):
         sm = build_simulation_submodel("42", "test.fmu", SAMPLE_METADATA)
         assert sm["id"] == "urn:decentralabs:lab:42:sm:simulationModels"
@@ -472,7 +514,7 @@ class TestBuildAasShell:
     def test_shell_references_submodel(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
         refs = shell["submodels"]
-        assert len(refs) == 6
+        assert len(refs) == 4
         assert refs[0]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:simulationModels"
         assert refs[1]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:technicalData"
 
@@ -483,11 +525,11 @@ class TestBuildAasShell:
         assert "urn:decentralabs:lab:42:sm:simulationModels" in ref_values
         assert "urn:decentralabs:lab:42:sm:providerExtension" in ref_values
         assert "urn:decentralabs:lab:42:sm:technicalData" in ref_values
-        assert len(shell["submodels"]) == 7
+        assert len(shell["submodels"]) == 5
 
     def test_shell_no_extra_submodels_by_default(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
-        assert len(shell["submodels"]) == 6
+        assert len(shell["submodels"]) == 4
 
     def test_shell_idshort_format(self):
         shell = build_aas_shell("7", "motor.fmu", SAMPLE_METADATA)
@@ -580,8 +622,10 @@ class TestBuildTechnicalDataSubmodel:
         submodel = build_technical_data_submodel("42", SAMPLE_METADATA)
         props = {element["idShort"]: element for element in submodel["submodelElements"][1]["value"][0]["value"]}
         assert props["ResourceStatus"]["value"] == "Unknown"
-        assert props["ReadyFlag"]["value"] == ""
+        assert "ReadyFlag" not in props
         assert props["ModelAvailable"]["value"] == "true"
+        assert "ActiveSimulationCount" not in props
+        assert "MaxConcurrentSimulations" not in props
 
 
 # ── Endpoint integration tests ───────────────────────────────────────
@@ -917,6 +961,55 @@ class TestDiscoverBasyxShells:
             assert [call.args[0] for call in mock_client.get.await_args_list] == [
                 "/shells",
                 f"/shells/{_encode_id('urn:decentralabs:lab:7')}",
+            ]
+        finally:
+            _aas_mod.BASYX_AAS_URL = original_url
+
+    @pytest.mark.asyncio
+    async def test_discovery_reads_generated_technical_data_sync_timestamp(self):
+        original_url = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = _aas_mod._BUNDLED_AAS_URL
+        technical_id = _submodel_id_for_technical("7")
+        try:
+            list_response = MagicMock(status_code=200)
+            list_response.json.return_value = {
+                "result": [{
+                    "id": "urn:decentralabs:lab:7",
+                    "submodelIds": [technical_id],
+                }]
+            }
+            technical_response = MagicMock(status_code=200)
+            technical_response.json.return_value = {
+                "submodelElements": [{
+                    "idShort": "TechnicalPropertyAreas",
+                    "value": [{
+                        "idShort": "OperationalStatus",
+                        "value": [{
+                            "idShort": "LastSyncTimestamp",
+                            "modelType": "Property",
+                            "value": "2026-09-25T12:34:56+00:00",
+                        }],
+                    }],
+                }],
+            }
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(side_effect=[list_response, technical_response])
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await discover_basyx_shells()
+
+            assert result == {
+                "shells": [{
+                    "id": "urn:decentralabs:lab:7",
+                    "submodelIds": [technical_id],
+                    "updatedAt": "2026-09-25T12:34:56+00:00",
+                }]
+            }
+            assert [call.args[0] for call in mock_client.get.await_args_list] == [
+                "/shells",
+                f"/submodels/{_encode_id(technical_id)}",
             ]
         finally:
             _aas_mod.BASYX_AAS_URL = original_url

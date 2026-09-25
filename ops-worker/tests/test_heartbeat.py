@@ -19,7 +19,7 @@ def test_api_poll_heartbeat_persists_data(db_engine, client, monkeypatch):
         "winrm_user": "user",
         "winrm_pass": "pass",
     }
-    worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
 
     heartbeat = {
         "timestamp": "2026-01-01T12:00:00.000Z",
@@ -72,7 +72,7 @@ def test_generate_heartbeat_stream_emits_heartbeat_event(db_engine, monkeypatch)
         "winrm_user": "user",
         "winrm_pass": "pass",
     }
-    worker.HOSTS = worker.HostRegistry({"hosts": [host]})
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
 
     heartbeat = {
         "timestamp": "2026-01-01T12:00:00.000Z",

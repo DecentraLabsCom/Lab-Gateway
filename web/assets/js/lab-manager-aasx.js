@@ -43,6 +43,19 @@
             return `${(size / (1024 * 1024)).toFixed(1)} MiB`;
         }
 
+        function formatAssociationSize(value, source) {
+            if (value != null && value !== '') return formatBytes(value);
+            if (source === 'generated') return 'Calculated when downloaded';
+            if (source === 'linked') return 'External AAS shell';
+            return 'Not applicable';
+        }
+
+        function formatAssociationUpdated(value, source) {
+            if (value != null && String(value).trim()) return String(value);
+            if (source === 'generated') return 'Not published; sync required';
+            return 'Unknown';
+        }
+
         function setStatus(message, isError = false) {
             if (!fields.packageStatus) return;
             fields.packageStatus.textContent = message;
@@ -181,8 +194,8 @@
                         <div><span class="muted-text">Laboratory</span><strong>${escape(resolveLabName(labId))}</strong></div>
                         <div><span class="muted-text">Source</span><strong>${escape(sourceLabel)}</strong></div>
                         <div><span class="muted-text">AASX source</span><strong>${escape(source === 'imported' ? filename : source === 'linked' ? targetAasId : 'Generated from BaSyx')}</strong></div>
-                        <div><span class="muted-text">Size</span><strong>${escape(formatBytes(association?.size))}</strong></div>
-                        <div><span class="muted-text">Updated</span><strong>${escape(association?.updatedAt || 'Unknown')}</strong></div>
+                        <div><span class="muted-text">Size</span><strong>${escape(formatAssociationSize(association?.size, source))}</strong></div>
+                        <div><span class="muted-text">Updated</span><strong>${escape(formatAssociationUpdated(association?.updatedAt, source))}</strong></div>
                     </div>
                     <h4>Asset Administration Shells</h4>
                     ${renderIds(shellIds, 'No shell IDs recorded.')}

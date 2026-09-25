@@ -14,11 +14,11 @@ import worker
 
 
 def test_build_reservation_timeline_includes_phases_and_pagination(db_engine, monkeypatch):
-    worker.HOSTS = worker.HostRegistry({"hosts": [{
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [{
         "name": "lab-ws-01",
         "address": "192.168.1.50",
         "labs": ["42"],
-    }]})
+    }]}))
     monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: worker.HOSTS.get("lab-ws-01"))
 
     now = datetime.now(timezone.utc)

@@ -596,7 +596,7 @@ def build_execution_capabilities_submodel(
     lab_id: str,
     metadata: dict,
     runtime_info: Optional[dict] = None,
-) -> dict:
+) -> Optional[dict]:
     """Build the standard IDTA 02020 capability description for an FMU."""
     metadata = metadata or {}
     supports_cosimulation = bool(metadata.get("supportsCoSimulation"))
@@ -685,6 +685,9 @@ def build_execution_capabilities_submodel(
             ],
         })
 
+    if not containers:
+        return None
+
     return {
         "id": _submodel_id_for_execution(lab_id),
         "idShort": "CapabilityDescription",
@@ -727,9 +730,11 @@ def build_asset_interfaces_description_submodel(
     operations: Sequence[tuple[str, str, str, str]],
     *,
     title: str = "DecentraLabs FMU interface",
-) -> dict:
+) -> Optional[dict]:
     """Describe gateway HTTP/WebSocket affordances using IDTA 02017 / WoT."""
     actions = [_asset_interface_action(name, href, method, subprotocol) for name, href, method, subprotocol in operations]
+    if not actions:
+        return None
     bearer_scheme = {
         "idShort": "bearer_sc",
         "semanticId": _semantic_id("https://www.w3.org/2019/wot/security#BearerSecurityScheme"),
@@ -784,16 +789,17 @@ def build_asset_interfaces_description_submodel(
     }
 
 
-def build_contact_information_submodel(lab_id: str, extra_info: Optional[dict] = None) -> dict:
+def build_contact_information_submodel(lab_id: str, extra_info: Optional[dict] = None) -> Optional[dict]:
     email = str((extra_info or {}).get("contactEmail") or "").strip()
+    if not email:
+        return None
     values = []
-    if email:
-        values.append({
-            "idShort": "Email",
-            "semanticId": _semantic_id("0173-1#02-AAQ836#005"),
-            "modelType": "SubmodelElementCollection",
-            "value": [_standard_property("EmailAddress", "xs:string", email, "0173-1#02-AAO198#002")],
-        })
+    values.append({
+        "idShort": "Email",
+        "semanticId": _semantic_id("0173-1#02-AAQ836#005"),
+        "modelType": "SubmodelElementCollection",
+        "value": [_standard_property("EmailAddress", "xs:string", email, "0173-1#02-AAO198#002")],
+    })
     return {
         "id": _submodel_id_for_contact(lab_id),
         "idShort": "ContactInformations",
@@ -823,7 +829,7 @@ def _documentation_urls(extra_info: Optional[dict]) -> list[str]:
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
 
 
-def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict] = None) -> dict:
+def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict] = None) -> Optional[dict]:
     documents = []
     urls = _documentation_urls(extra_info)
     license_value = str((extra_info or {}).get("license") or "").strip()
@@ -831,12 +837,15 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
         urls.insert(0, license_value)
     document_specs = [(url, "License terms" if url == license_value else f"Documentation {index + 1}")
                       for index, url in enumerate(dict.fromkeys(urls))]
+    if not document_specs:
+        return None
     for index, (url, title) in enumerate(document_specs):
         identifier = url or f"license:{license_value}"
         document_ids = {
             "idShort": "DocumentIds",
             "semanticId": _semantic_id("0173-1#02-ABI501#003"),
             "modelType": "SubmodelElementList",
+            "typeValueListElement": "SubmodelElementCollection",
             "value": [{
                 "idShort": "DocumentIdentifier_0",
                 "semanticId": _semantic_id("0173-1#02-ABI501#003/0173-1#01-AHF580#003"),
@@ -857,6 +866,7 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
                 "idShort": "DocumentVersions",
                 "semanticId": _semantic_id("0173-1#02-ABI503#003"),
                 "modelType": "SubmodelElementList",
+                "typeValueListElement": "SubmodelElementCollection",
                 "value": [{
                     "idShort": "DocumentVersion_0",
                     "semanticId": _semantic_id("0173-1#02-ABI503#003/0173-1#01-AHF582#003"),
@@ -866,6 +876,8 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
                             "idShort": "Language",
                             "semanticId": _semantic_id("0173-1#02-AAN468#008"),
                             "modelType": "SubmodelElementList",
+                            "typeValueListElement": "Property",
+                            "valueTypeListElement": "xs:string",
                             "value": [{
                                 "idShort": "Language_0",
                                 "semanticId": _semantic_id("0173-1#02-AAN468#008"),
@@ -881,6 +893,7 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
                             "idShort": "DigitalFiles",
                             "semanticId": _semantic_id("0173-1#02-ABK126#002"),
                             "modelType": "SubmodelElementList",
+                            "typeValueListElement": "File",
                             "value": [{
                                 "idShort": "DigitalFile",
                                 "semanticId": _semantic_id("0173-1#02-ABK126#002"),
@@ -902,6 +915,7 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
             "idShort": "Documents",
             "semanticId": _semantic_id("0173-1#02-ABI500#003"),
             "modelType": "SubmodelElementList",
+            "typeValueListElement": "SubmodelElementCollection",
             "value": documents,
         }],
     }
@@ -951,20 +965,42 @@ def build_technical_data_submodel(
     arbitrary_values = [
         _arbitrary_property("ResourceType", "xs:string", "FMU", "DecentraLabs resource classification."),
         _arbitrary_property("ResourceStatus", "xs:string", resource_status, "Current publication status."),
-        _arbitrary_property("ReadyFlag", "xs:boolean", ready_flag, "Whether the FMU runner reports readiness."),
         _arbitrary_property("ModelAvailable", "xs:boolean", str(metadata_available).lower(), "Whether FMU metadata is available."),
         _arbitrary_property("ExecutionBackend", "xs:string", str(runtime.get("backendMode") or ""), "Configured FMU execution backend."),
         _arbitrary_property("RunnerStatus", "xs:string", str(runtime.get("status") or ""), "Raw runner health status."),
-        _arbitrary_property("ActiveSimulationCount", "xs:nonNegativeInteger", _non_negative_int(runtime.get("activeSimulationCount")), "Active batch simulations."),
-        _arbitrary_property("MaxConcurrentSimulations", "xs:nonNegativeInteger", _non_negative_int(runtime.get("maxConcurrentSimulations")), "Configured simulation concurrency limit."),
         _arbitrary_property("LastSyncTimestamp", "xs:dateTime", now_iso, "Timestamp of this AAS publication."),
     ]
+    if ready_flag:
+        arbitrary_values.append(
+            _arbitrary_property("ReadyFlag", "xs:boolean", ready_flag, "Whether the FMU runner reports readiness.")
+        )
+    active_simulation_count = _non_negative_int(runtime.get("activeSimulationCount"))
+    if active_simulation_count:
+        arbitrary_values.append(
+            _arbitrary_property(
+                "ActiveSimulationCount",
+                "xs:nonNegativeInteger",
+                active_simulation_count,
+                "Active batch simulations.",
+            )
+        )
+    max_concurrent_simulations = _non_negative_int(runtime.get("maxConcurrentSimulations"))
+    if max_concurrent_simulations:
+        arbitrary_values.append(
+            _arbitrary_property(
+                "MaxConcurrentSimulations",
+                "xs:nonNegativeInteger",
+                max_concurrent_simulations,
+                "Configured simulation concurrency limit.",
+            )
+        )
     elements = [
         general_information,
         {
             "idShort": "TechnicalPropertyAreas",
             "semanticId": _semantic_id("0173-1#02-ABK163#002"),
             "modelType": "SubmodelElementList",
+            "typeValueListElement": "SubmodelElementCollection",
             "value": [{
                 "idShort": "OperationalStatus",
                 "semanticId": _semantic_id("0173-1#02-ABL358#002/0173-1#01-AHX773#002"),
@@ -1003,12 +1039,22 @@ def build_aas_shell(
     all_sm_ids = [
         _submodel_id_for_fmu(lab_id),
         _submodel_id_for_technical(lab_id),
-        _submodel_id_for_execution(lab_id),
-        _submodel_id_for_interfaces(lab_id),
-        _submodel_id_for_contact(lab_id),
-        _submodel_id_for_handover(lab_id),
-        *extra_submodel_ids,
     ]
+    metadata = metadata or {}
+    supports_execution = bool(
+        metadata.get("supportsCoSimulation")
+        or metadata.get("supportsModelExchange")
+        or metadata.get("capabilities")
+    )
+    if supports_execution:
+        all_sm_ids.append(_submodel_id_for_execution(lab_id))
+    if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
+        all_sm_ids.append(_submodel_id_for_interfaces(lab_id))
+    if str((extra_info or {}).get("contactEmail") or "").strip():
+        all_sm_ids.append(_submodel_id_for_contact(lab_id))
+    if _documentation_urls(extra_info) or str((extra_info or {}).get("license") or "").strip().startswith(("http://", "https://")):
+        all_sm_ids.append(_submodel_id_for_handover(lab_id))
+    all_sm_ids.extend(extra_submodel_ids)
 
     shell = {
         "id": aas_id,
@@ -1297,6 +1343,50 @@ def _shell_submodel_ids(shell: dict[str, Any]) -> list[str]:
     return result
 
 
+def _find_property_value(payload: Any, id_short: str) -> Optional[str]:
+    """Find a scalar Property value in a nested AAS element payload."""
+    if isinstance(payload, dict):
+        if (
+            payload.get("modelType") == "Property"
+            and payload.get("idShort") == id_short
+            and payload.get("value") is not None
+        ):
+            value = str(payload.get("value")).strip()
+            return value or None
+        for child in payload.values():
+            found = _find_property_value(child, id_short)
+            if found:
+                return found
+    elif isinstance(payload, list):
+        for child in payload:
+            found = _find_property_value(child, id_short)
+            if found:
+                return found
+    return None
+
+
+async def _generated_updated_at(
+    client: httpx.AsyncClient,
+    lab_id: str,
+    submodel_ids: list[str],
+) -> Optional[str]:
+    """Read the generated TechnicalData publication timestamp when present."""
+    technical_id = _submodel_id_for_technical(lab_id)
+    if technical_id not in submodel_ids:
+        return None
+    try:
+        response = await client.get(f"/submodels/{_encode_id(technical_id)}")
+    except httpx.RequestError:
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return None
+    return _find_property_value(payload, "LastSyncTimestamp")
+
+
 async def discover_basyx_shells() -> dict[str, Any]:
     """Discover current provider shells for the Lab Manager association view."""
     if not BASYX_AAS_URL:
@@ -1338,10 +1428,19 @@ async def discover_basyx_shells() -> dict[str, Any]:
                 if shell_id in seen_ids:
                     continue
                 seen_ids.add(shell_id)
-                discovered.append({
+                generated_shell = {
                     "id": shell_id,
                     "submodelIds": list(dict.fromkeys(submodel_ids)),
-                })
+                }
+                lab_id = shell_id[len("urn:decentralabs:lab:"):]
+                updated_at = await _generated_updated_at(
+                    client,
+                    lab_id,
+                    generated_shell["submodelIds"],
+                )
+                if updated_at:
+                    generated_shell["updatedAt"] = updated_at
+                discovered.append(generated_shell)
             return {"shells": discovered}
     except httpx.RequestError as exc:
         logger.warning(
@@ -1588,42 +1687,43 @@ async def sync_fmu_to_basyx(
                     return result
 
                 # --- CapabilityDescription submodel ---
-                if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _encode_id(execution_capabilities_id)):
-                    raise ValueError("AAS execution capabilities resource ID is invalid")
-                execution_resp = await client.put(
-                    f"/submodels/{_encode_id(execution_capabilities_id)}",
-                    json=execution_capabilities_payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                if execution_resp.status_code == 201:
-                    result["created"] = True
-                    logger.info("Created CapabilityDescription submodel")
-                elif execution_resp.status_code in (200, 204):
-                    result["updated"] = True
-                    logger.info("Updated CapabilityDescription submodel")
-                elif execution_resp.status_code == 404:
-                    execution_post = await client.post(
-                        "/submodels",
+                if execution_capabilities_payload is not None:
+                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _encode_id(execution_capabilities_id)):
+                        raise ValueError("AAS execution capabilities resource ID is invalid")
+                    execution_resp = await client.put(
+                        f"/submodels/{_encode_id(execution_capabilities_id)}",
                         json=execution_capabilities_payload,
                         headers={"Content-Type": "application/json"},
                     )
-                    if execution_post.status_code in (200, 201):
+                    if execution_resp.status_code == 201:
                         result["created"] = True
-                        logger.info("Created CapabilityDescription submodel via POST")
+                        logger.info("Created CapabilityDescription submodel")
+                    elif execution_resp.status_code in (200, 204):
+                        result["updated"] = True
+                        logger.info("Updated CapabilityDescription submodel")
+                    elif execution_resp.status_code == 404:
+                        execution_post = await client.post(
+                            "/submodels",
+                            json=execution_capabilities_payload,
+                            headers={"Content-Type": "application/json"},
+                        )
+                        if execution_post.status_code in (200, 201):
+                            result["created"] = True
+                            logger.info("Created CapabilityDescription submodel via POST")
+                        else:
+                            logger.error(
+                                "Failed to create CapabilityDescription submodel: status=%s",
+                                execution_post.status_code,
+                            )
+                            result["error"] = f"execution capabilities creation failed: {execution_post.status_code}"
+                            return result
                     else:
                         logger.error(
-                            "Failed to create CapabilityDescription submodel: status=%s",
-                            execution_post.status_code,
+                            "Failed to update CapabilityDescription submodel: status=%s",
+                            execution_resp.status_code,
                         )
-                        result["error"] = f"execution capabilities creation failed: {execution_post.status_code}"
+                        result["error"] = f"execution capabilities sync failed: {execution_resp.status_code}"
                         return result
-                else:
-                    logger.error(
-                        "Failed to update CapabilityDescription submodel: status=%s",
-                        execution_resp.status_code,
-                    )
-                    result["error"] = f"execution capabilities sync failed: {execution_resp.status_code}"
-                    return result
 
                 # --- Standard interface/contact/handover submodels ---
                 for _sm_id, _sm_payload, _label in (
@@ -1631,6 +1731,8 @@ async def sync_fmu_to_basyx(
                     (contact_id, contact_payload, "ContactInformations"),
                     (handover_id, handover_payload, "HandoverDocumentation"),
                 ):
+                    if _sm_payload is None:
+                        continue
                     _sm_enc = _encode_id(_sm_id)
                     if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _sm_enc):
                         raise ValueError(f"AAS {_label} resource ID is invalid")

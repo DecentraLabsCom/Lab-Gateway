@@ -11,11 +11,11 @@ if ROOT not in sys.path:
 import worker
 
 
-def test_api_operations_recent_pagination_and_reservation_filter(db_engine, client):
-    worker.HOSTS = worker.HostRegistry({"hosts": [{
+def test_api_operations_recent_pagination_and_reservation_filter(db_engine, client, monkeypatch):
+    monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [{
         "name": "lab-ws-01",
         "address": "192.168.1.50",
-    }]})
+    }]}))
 
     now = datetime.now(timezone.utc)
     reservation_a = "0xabc123"

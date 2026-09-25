@@ -232,6 +232,7 @@ def build_technical_data_submodel(
             "idShort": "TechnicalPropertyAreas",
             "semanticId": _semantic_id("0173-1#02-ABK163#002"),
             "modelType": "SubmodelElementList",
+            "typeValueListElement": "SubmodelElementCollection",
             "value": [{
                 "idShort": "OperationalStatus",
                 "semanticId": _semantic_id("0173-1#02-ABL358#002/0173-1#01-AHX773#002"),
@@ -240,19 +241,39 @@ def build_technical_data_submodel(
                     _arbitrary_prop("ResourceType", "xs:string", "PhysicalLaboratory", "DecentraLabs resource classification."),
                     _arbitrary_prop("ResourceStatus", "xs:string", resource_status, "Current publication status."),
                     _arbitrary_prop("LabStatus", "xs:string", "Ready" if ready else ("NotReady" if ready is False else ""), "Physical lab readiness projection."),
-                    _arbitrary_prop("ReadyFlag", "xs:boolean", bool_str(ready), "Whether the station reports readiness."),
-                    _arbitrary_prop("LocalModeEnabled", "xs:boolean", bool_str(local_mode), "Whether local station mode is enabled."),
-                    _arbitrary_prop("LocalSessionActive", "xs:boolean", bool_str(local_session), "Whether a local station session is active."),
-                    _arbitrary_prop("LastHeartbeatTimestamp", "xs:dateTime", hb_timestamp, "Last station heartbeat timestamp."),
-                    _arbitrary_prop("LastPowerActionTimestamp", "xs:dateTime", last_power_ts, "Last power operation timestamp."),
                     _arbitrary_prop("LastPowerActionMode", "xs:string", last_power_mode, "Last power operation mode."),
-                    _arbitrary_prop("LastForcedLogoffTimestamp", "xs:dateTime", last_logoff_ts, "Last forced logoff timestamp."),
                     _arbitrary_prop("LastForcedLogoffUser", "xs:string", last_logoff_user, "User affected by the last forced logoff."),
                     _arbitrary_prop("LastSyncTimestamp", "xs:dateTime", now_iso, "Timestamp of this AAS publication."),
                 ],
             }],
         },
     ]
+
+    operational_values = elements[1]["value"][0]["value"]
+    if ready is not None:
+        operational_values.append(
+            _arbitrary_prop("ReadyFlag", "xs:boolean", bool_str(ready), "Whether the station reports readiness.")
+        )
+    if local_mode is not None:
+        operational_values.append(
+            _arbitrary_prop("LocalModeEnabled", "xs:boolean", bool_str(local_mode), "Whether local station mode is enabled.")
+        )
+    if local_session is not None:
+        operational_values.append(
+            _arbitrary_prop("LocalSessionActive", "xs:boolean", bool_str(local_session), "Whether a local station session is active.")
+        )
+    if hb_timestamp:
+        operational_values.append(
+            _arbitrary_prop("LastHeartbeatTimestamp", "xs:dateTime", hb_timestamp, "Last station heartbeat timestamp.")
+        )
+    if last_power_ts:
+        operational_values.append(
+            _arbitrary_prop("LastPowerActionTimestamp", "xs:dateTime", last_power_ts, "Last power operation timestamp.")
+        )
+    if last_logoff_ts:
+        operational_values.append(
+            _arbitrary_prop("LastForcedLogoffTimestamp", "xs:dateTime", last_logoff_ts, "Last forced logoff timestamp.")
+        )
 
     return {
         "id": _submodel_id_technical(lab_id),
@@ -408,16 +429,17 @@ def build_asset_interfaces_description_submodel(
     }
 
 
-def build_contact_information_submodel(lab_id: str, extra_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_contact_information_submodel(lab_id: str, extra_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     email = _metadata_text(extra_info, "contactEmail")
+    if not email:
+        return None
     values = []
-    if email:
-        values.append({
-            "idShort": "Email",
-            "semanticId": _semantic_id("0173-1#02-AAQ836#005"),
-            "modelType": "SubmodelElementCollection",
-            "value": [_standard_prop("EmailAddress", "xs:string", email, "0173-1#02-AAO198#002")],
-        })
+    values.append({
+        "idShort": "Email",
+        "semanticId": _semantic_id("0173-1#02-AAQ836#005"),
+        "modelType": "SubmodelElementCollection",
+        "value": [_standard_prop("EmailAddress", "xs:string", email, "0173-1#02-AAO198#002")],
+    })
     return {
         "id": _submodel_id_contact(lab_id),
         "idShort": "ContactInformations",
@@ -432,17 +454,20 @@ def build_contact_information_submodel(lab_id: str, extra_info: Optional[Dict[st
     }
 
 
-def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     urls = _metadata_documentation(extra_info)
     license_value = _metadata_text(extra_info, "license")
     if license_value.startswith(("http://", "https://")):
         urls.insert(0, license_value)
     documents = []
+    if not urls:
+        return None
     for index, url in enumerate(dict.fromkeys(urls)):
         document_ids = {
             "idShort": "DocumentIds",
             "semanticId": _semantic_id("0173-1#02-ABI501#003"),
             "modelType": "SubmodelElementList",
+            "typeValueListElement": "SubmodelElementCollection",
             "value": [{
                 "idShort": "DocumentIdentifier_0",
                 "semanticId": _semantic_id("0173-1#02-ABI501#003/0173-1#01-AHF580#003"),
@@ -461,15 +486,18 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[Dict
                 "idShort": "DocumentVersions",
                 "semanticId": _semantic_id("0173-1#02-ABI503#003"),
                 "modelType": "SubmodelElementList",
+                "typeValueListElement": "SubmodelElementCollection",
                 "value": [{
                     "idShort": "DocumentVersion_0",
                     "semanticId": _semantic_id("0173-1#02-ABI503#003/0173-1#01-AHF582#003"),
                     "modelType": "SubmodelElementCollection",
                     "value": [{
-                        "idShort": "Language",
-                        "semanticId": _semantic_id("0173-1#02-AAN468#008"),
-                        "modelType": "SubmodelElementList",
-                        "value": [{
+                            "idShort": "Language",
+                            "semanticId": _semantic_id("0173-1#02-AAN468#008"),
+                            "modelType": "SubmodelElementList",
+                            "typeValueListElement": "Property",
+                            "valueTypeListElement": "xs:string",
+                            "value": [{
                             "idShort": "Language_0",
                             "semanticId": _semantic_id("0173-1#02-AAN468#008"),
                             "modelType": "Property",
@@ -489,10 +517,11 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[Dict
                         "modelType": "MultiLanguageProperty",
                         "value": [{"language": "en", "text": "License terms" if url == license_value else f"Documentation {index + 1}"}],
                     }, {
-                        "idShort": "DigitalFiles",
-                        "semanticId": _semantic_id("0173-1#02-ABK126#002"),
-                        "modelType": "SubmodelElementList",
-                        "value": [{
+                            "idShort": "DigitalFiles",
+                            "semanticId": _semantic_id("0173-1#02-ABK126#002"),
+                            "modelType": "SubmodelElementList",
+                            "typeValueListElement": "File",
+                            "value": [{
                             "idShort": "DigitalFile",
                             "semanticId": _semantic_id("0173-1#02-ABK126#002"),
                             "modelType": "File",
@@ -512,6 +541,7 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[Dict
             "idShort": "Documents",
             "semanticId": _semantic_id("0173-1#02-ABI500#003"),
             "modelType": "SubmodelElementList",
+            "typeValueListElement": "SubmodelElementCollection",
             "value": documents,
         }],
     }
@@ -548,8 +578,17 @@ def build_physical_aas_shell(
             {"type": "ModelReference", "keys": [{"type": "Submodel", "value": technical_id}]},
             {"type": "ModelReference", "keys": [{"type": "Submodel", "value": execution_id}]},
             {"type": "ModelReference", "keys": [{"type": "Submodel", "value": interfaces_id}]},
-            {"type": "ModelReference", "keys": [{"type": "Submodel", "value": contact_id}]},
-            {"type": "ModelReference", "keys": [{"type": "Submodel", "value": handover_id}]},
+            *(
+                [{"type": "ModelReference", "keys": [{"type": "Submodel", "value": contact_id}]}]
+                if _metadata_text(extra_info, "contactEmail")
+                else []
+            ),
+            *(
+                [{"type": "ModelReference", "keys": [{"type": "Submodel", "value": handover_id}]}]
+                if _metadata_documentation(extra_info)
+                or _metadata_text(extra_info, "license").startswith(("http://", "https://"))
+                else []
+            ),
         ],
     }
 
@@ -704,6 +743,8 @@ def sync_lab_to_basyx(
             (contact_id_enc, contact_payload, "ContactInformations"),
             (handover_id_enc, handover_payload, "HandoverDocumentation"),
         ):
+            if _sm_payload is None:
+                continue
             _sm_result = _put_or_post(
                 session,
                 BASYX_AAS_URL,

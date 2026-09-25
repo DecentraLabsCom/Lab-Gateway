@@ -40,6 +40,7 @@ async def test_lists_imported_generated_and_linked_associations_with_precedence(
             {
                 "id": "urn:decentralabs:lab:3",
                 "submodelIds": ["urn:decentralabs:lab:3:sm:technicalData"],
+                "updatedAt": "2026-09-25T12:34:56+00:00",
             },
         ],
     })
@@ -66,6 +67,7 @@ async def test_lists_imported_generated_and_linked_associations_with_precedence(
     assert result["associations"][0]["filename"] == "prepared.aasx"
     assert result["associations"][1]["targetAasId"] == "urn:external:aas:2"
     assert result["associations"][2]["shellIds"] == ["urn:decentralabs:lab:3"]
+    assert result["associations"][2]["updatedAt"] == "2026-09-25T12:34:56+00:00"
 
 
 @pytest.mark.asyncio
