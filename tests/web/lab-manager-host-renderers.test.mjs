@@ -69,9 +69,31 @@ test('host row renderer preserves status markup and escapes host data', () => {
   assert.match(html, /Station&lt;&amp;/);
   assert.match(html, /date:2026-09-13T09:00:00Z - operator&lt;&amp;/);
   assert.match(html, /Ready: yes/);
+  assert.match(html, /<button class="mini-btn" data-action="poll" title="Check station status">Heartbeat<\/button>/);
+  assert.match(html, /<button class="mini-btn" data-action="wol" title="Wake station">Wake<\/button>/);
+  assert.match(html, /<button class="mini-btn primary" data-action="prepare" title="Prepare station">Prepare<\/button>/);
+  assert.match(html, /<button class="mini-btn" data-action="release" title="Release station">Release<\/button>/);
+  assert.match(html, /<button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown<\/button>/);
+  assert.match(html, /<button class="mini-btn secondary" data-action="toggle-local-mode" title="Disable local mode">Disable Local<\/button>/);
+  assert.match(html, /<button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS<\/button>/);
   assert.match(html, />Disable Local<\/button>/);
   assert.doesNotMatch(html, /Lab Station paths/);
   assert.doesNotMatch(html, /<station>/);
+});
+
+test('host row renderer describes enabling local mode when it is disabled', () => {
+  const module = loadRenderers();
+  const renderer = module.createController(dependencies());
+  const html = renderer.renderHostRowMarkup('station-remote-ready', {
+    heartbeat: {
+      timestamp: '2026-09-13T10:00:00Z',
+      summary: { ready: true },
+      status: { localSessionActive: false, localModeEnabled: false },
+      operations: {},
+    },
+  }, {});
+
+  assert.match(html, /<button class="mini-btn secondary" data-action="toggle-local-mode" title="Enable local mode">Enable Local<\/button>/);
 });
 
 test('host row renderer exposes the active session kind through an accessible tooltip', () => {

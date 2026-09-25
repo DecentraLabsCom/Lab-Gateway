@@ -1754,6 +1754,7 @@ def test_ops_route_keeps_manager_guard_cors_rewrite_and_proxy_contract():
         'proxy_set_header Authorization "";',
         'proxy_set_header Cookie "";',
         'proxy_set_header X-Lab-Manager-Token "";',
+        "proxy_buffering off;",
         "proxy_read_timeout 210s;",
         "proxy_connect_timeout 10s;",
         "proxy_send_timeout 10s;",

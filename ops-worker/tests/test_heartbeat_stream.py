@@ -106,6 +106,31 @@ def test_heartbeat_stream_emits_actionable_unavailable_error_for_network_failure
     assert dependencies["logger"].exception_calls == []
 
 
+def test_heartbeat_stream_keeps_connection_open_after_transient_network_failure():
+    responses = [
+        requests.exceptions.ConnectTimeout("station is off"),
+        {
+            "heartbeat": {"summary": {"ready": True}},
+            "last_event": None,
+        },
+    ]
+
+    def poll_heartbeat(_host, include_events=False):
+        result = responses.pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    stream, _dependencies = _stream(poll_heartbeat=poll_heartbeat)
+
+    error_chunk = next(stream)
+    error_payload = json.loads(error_chunk.split(":", 1)[1])
+    heartbeat_chunk = next(stream)
+
+    assert error_payload["code"] == "WINRM_UNREACHABLE"
+    assert heartbeat_chunk.startswith("heartbeat:")
+
+
 def test_heartbeat_stream_emits_auth_error_for_pywinrm_401():
     response_obj = requests.Response()
     response_obj.status_code = 401

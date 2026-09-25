@@ -83,9 +83,9 @@
             const kindLabels = {
                 'labuser-local': 'LABUSER (local)',
                 'labuser-remote': 'LABUSER (remote)',
-                'local-user': 'local user',
-                'remote-user': 'remote user',
-                mixed: 'mixed: LABUSER and another user',
+                'local-user': 'Local user',
+                'remote-user': 'Remote user',
+                mixed: 'LABUSER and another user',
             };
             const detail = active === true
                 ? (kindLabels[sessions.kind] || (legacyLocalSession ? 'local user' : 'session type unavailable'))
@@ -261,12 +261,12 @@
                 </div>
             </div>
             <div class="host-actions">
-                <button class="mini-btn" data-action="poll">Heartbeat</button>
-                <button class="mini-btn" data-action="wol">Wake</button>
-                <button class="mini-btn primary" data-action="prepare">Prepare</button>
-                <button class="mini-btn" data-action="release">Release</button>
-                <button class="mini-btn danger" data-action="shutdown">Shutdown</button>
-                <button class="mini-btn secondary" data-action="toggle-local-mode">${localMode ? 'Disable' : 'Enable'} Local</button>
+                <button class="mini-btn" data-action="poll" title="Check station status">Heartbeat</button>
+                <button class="mini-btn" data-action="wol" title="Wake station">Wake</button>
+                <button class="mini-btn primary" data-action="prepare" title="Prepare station">Prepare</button>
+                <button class="mini-btn" data-action="release" title="Release station">Release</button>
+                <button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown</button>
+                <button class="mini-btn secondary" data-action="toggle-local-mode" title="${localMode ? 'Disable' : 'Enable'} local mode">${localMode ? 'Disable' : 'Enable'} Local</button>
                 <button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS</button>
             </div>
         `;

@@ -35,7 +35,7 @@ def generate_heartbeat_stream(
     heartbeat_interval_seconds: float,
     sleep: Callable[[float], None],
 ) -> Iterator[str]:
-    """Yield heartbeat events until a trust, credential or reachability error stops it."""
+    """Yield heartbeat events, retrying transient station reachability failures."""
     while True:
         try:
             data = poll_heartbeat(host, include_events=include_events)
@@ -127,7 +127,11 @@ def generate_heartbeat_stream(
                     "error",
                     json.dumps(build_winrm_unreachable_payload(host.get("name"), host)),
                 )
-                return
+                # Keep the SSE connection alive. EventSource would otherwise
+                # reconnect immediately after every transient WinRM failure,
+                # bypassing the configured heartbeat interval.
+                sleep(heartbeat_interval_seconds)
+                continue
             request_id_value = request_id()
             logger.exception(
                 "Heartbeat stream failed request_id=%s",
