@@ -199,10 +199,18 @@ Marketplace upload is disabled by design.
 - Internal REST targets:
   - `GET /internal/fmu/catalog` (header `X-FMU-Access-Key`)
   - `GET /internal/fmu/describe` (header `X-FMU-Access-Key`)
+  - `GET /internal/fmu/backends`
   - `POST /internal/fmu/simulations/run` (the JSON body contains `accessKey`)
   - `POST /internal/fmu/simulations/stream` (the JSON body contains `accessKey`)
 - Internal realtime target:
   - `WS /internal/fmu/sessions`
+- Lab Station's current realtime executor is the same FMPy `0.3.32` family as
+  this runner and supports FMI 2/FMI 3 Co-Simulation, including typed scalar
+  and array values. One-shot and stream work is process-isolated on Station;
+  interactive sessions remain stateful on the Station side.
+- Station exposes `GET /internal/fmu/backends` for diagnostics. OMSimulator is
+  reserved as an optional future SSP/multi-FMU backend and is not silently
+  selected for current single-FMU requests.
 - `session.create` and `session.attach` are forwarded with `gatewayContext` containing validated claims plus effective `accessKey`, `labId`, `reservationKey`, `pucHash`, and `targetGatewayId`.
 - `cancel`, `history` and `result` remain local-only endpoints for now; in `station` mode they return `501` until their internal contract exists.
 

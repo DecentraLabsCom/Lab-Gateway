@@ -974,7 +974,9 @@ async def test_initialize_fmi3_uses_enter_initialization_mode_without_setup_expe
 
     await session.initialize({"startTime": 1.25, "stopTime": 3.5, "stepSize": 0.1})
 
-    assert ("instantiate",) in mock_fmu.calls
+    # FMPy's instantiate_fmu() already instantiates the selected FMI runtime;
+    # the Gateway must not instantiate it a second time.
+    assert ("instantiate",) not in mock_fmu.calls
     assert ("exitInitializationMode",) in mock_fmu.calls
     assert ("enterInitializationMode", {"startTime": 1.25, "stopTime": 3.5}) in mock_fmu.calls
     assert not any(call[0] == "setupExperiment" for call in mock_fmu.calls)

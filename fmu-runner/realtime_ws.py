@@ -484,7 +484,6 @@ class _RealtimeSession:
         self._shutdown_fmu()
         self._unzipdir = str(extract(str(self.fmu_path)))
         self._fmu = instantiate_fmu(self._unzipdir, self._model_description, fmi_type="CoSimulation")
-        self._fmu.instantiate()
         fmi_major = str(getattr(self._model_description, "fmiVersion", "")).split(".", 1)[0]
         if fmi_major == "3":
             self._fmu.enterInitializationMode(startTime=self.current_time, stopTime=self.stop_time)
