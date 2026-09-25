@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from heartbeat_readiness import capability_ready
+from lab_status_service import session_projection
 
 
 DemoContext = Dict[str, Any]
@@ -113,7 +114,10 @@ def host_is_ready(
     except Exception as exc:  # pylint: disable=broad-except
         logger.warning("Unable to inspect demo Station heartbeat: %s", type(exc).__name__)
         return False
-    if not heartbeat or heartbeat.get("localMode") or heartbeat.get("localSession"):
+    if not heartbeat:
+        return False
+    session = session_projection(heartbeat)
+    if heartbeat.get("localMode") or session["active"] or not session["known"]:
         return False
     heartbeat_ts = to_utc(heartbeat.get("timestamp"))
     if not heartbeat_ts:

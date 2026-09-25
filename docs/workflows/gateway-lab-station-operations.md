@@ -97,7 +97,7 @@ the lab-to-host association. A minimal entry is:
 }
 ```
 
-Lab Station periodically writes `heartbeat.json`. The ops worker reads it through WinRM, persists it in `lab_host_heartbeat`, and exposes it through the heartbeat and timeline APIs. Important fields include capability-specific readiness (`physicalLab` and `fmu`), `localModeEnabled`, `localSessionActive`, recent operations, power state, and Wake-on-LAN NIC diagnostics. FMU Executor health is therefore relevant to FMU resources, but does not by itself make a physical lab unavailable.
+Lab Station periodically writes `heartbeat.json`. The ops worker reads it through WinRM, persists it in `lab_host_heartbeat`, and exposes it through the heartbeat and timeline APIs. Important fields include capability-specific readiness (`physicalLab` and `fmu`), the typed `status.sessions` active-session summary, `localModeEnabled`, the legacy `localSessionActive` signal, recent operations, power state, and Wake-on-LAN NIC diagnostics. FMU Executor health is therefore relevant to FMU resources, but does not by itself make a physical lab unavailable.
 
 During host discovery, the worker derives the executable, local-mode flag,
 heartbeat, and event paths from the installed scheduled task. It keeps legacy

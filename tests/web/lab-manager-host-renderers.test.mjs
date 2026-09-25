@@ -74,6 +74,50 @@ test('host row renderer preserves status markup and escapes host data', () => {
   assert.doesNotMatch(html, /<station>/);
 });
 
+test('host row renderer exposes the active session kind through an accessible tooltip', () => {
+  const module = loadRenderers();
+  const renderer = module.createController(dependencies());
+  const html = renderer.renderHostRowMarkup('station-remote-labuser', {
+    heartbeat: {
+      timestamp: '2026-09-13T10:00:00Z',
+      summary: { ready: true },
+      status: {
+        localSessionActive: false,
+        localModeEnabled: false,
+        sessions: {
+          active: true,
+          kind: 'labuser-remote',
+          labUserActive: true,
+          labUserRemoteActive: true,
+          remoteSessionActive: true,
+        },
+      },
+      operations: {},
+    },
+  }, {});
+
+  assert.match(html, /Active session: yes/);
+  assert.match(html, /class="[^"]*active-session-indicator/);
+  assert.match(html, /class="active-session-tooltip"[^>]*role="tooltip">LABUSER \(remote\)/);
+  assert.match(html, /aria-describedby="active-session-tooltip-station-remote-labuser"/);
+});
+
+test('host row renderer keeps legacy local-session heartbeats understandable', () => {
+  const module = loadRenderers();
+  const renderer = module.createController(dependencies());
+  const html = renderer.renderHostRowMarkup('station-legacy', {
+    heartbeat: {
+      timestamp: '2026-09-13T10:00:00Z',
+      summary: { ready: true },
+      status: { localSessionActive: true, localModeEnabled: false },
+      operations: {},
+    },
+  }, {});
+
+  assert.match(html, /Active session: yes/);
+  assert.match(html, /role="tooltip">local user<\/span>/);
+});
+
 test('host row renderer distinguishes complete, partial and unavailable capability readiness', () => {
   const module = loadRenderers();
   const renderer = module.createController(dependencies());
@@ -94,7 +138,11 @@ test('host row renderer distinguishes complete, partial and unavailable capabili
     },
   }, {});
   assert.match(partialHtml, /class="pill warn ready-indicator"[^>]*>Ready: partial/);
-  assert.match(partialHtml, /FMU executor is not running/);
+  assert.match(
+    partialHtml,
+    /OK for physical labs; FMI simulations are unavailable because FMU executor is not running\./,
+  );
+  assert.doesNotMatch(partialHtml, /Not ready:/);
   assert.match(partialHtml, /role="tooltip"/);
 
   const unavailableHtml = renderer.renderHostRowMarkup('station-unavailable', {

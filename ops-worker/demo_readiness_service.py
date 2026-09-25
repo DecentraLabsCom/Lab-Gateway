@@ -4,6 +4,7 @@ import re
 from typing import Any, Callable, Dict, Optional
 
 from heartbeat_readiness import capability_ready
+from lab_status_service import session_projection
 
 
 _DEMO_USER_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
@@ -119,8 +120,12 @@ def build_demo_readiness(
     if not heartbeat:
         result["status"] = "unready"
         return result
-    if heartbeat.get("localSession") or heartbeat.get("localMode"):
+    session = session_projection(heartbeat)
+    if heartbeat.get("localMode") or session["active"]:
         result["status"] = "busy"
+        return result
+    if not session["known"]:
+        result["status"] = "unready"
         return result
 
     heartbeat_ts = to_utc(heartbeat.get("timestamp"))

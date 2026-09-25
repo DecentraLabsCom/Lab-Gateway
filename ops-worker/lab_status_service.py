@@ -47,6 +47,56 @@ def _merge_persisted_heartbeat(heartbeat: Optional[Mapping[str, Any]]) -> Option
     return merged
 
 
+def _nested_status(heartbeat: Mapping[str, Any]) -> Mapping[str, Any]:
+    status = heartbeat.get("status")
+    return status if isinstance(status, Mapping) else {}
+
+
+def _heartbeat_flag(heartbeat: Mapping[str, Any], top_level: str, nested: str) -> bool:
+    if heartbeat.get(top_level) is True:
+        return True
+    return _nested_status(heartbeat).get(nested) is True
+
+
+def session_projection(heartbeat: Mapping[str, Any]) -> Dict[str, Any]:
+    legacy_local_session = (
+        heartbeat.get("localSession") is True
+        or _nested_status(heartbeat).get("localSessionActive") is True
+    )
+    sessions = heartbeat.get("sessions")
+    if not isinstance(sessions, Mapping):
+        sessions = _nested_status(heartbeat).get("sessions")
+    if not isinstance(sessions, Mapping):
+        return {
+            "known": True,
+            "active": legacy_local_session,
+            "labUserActive": False,
+            "remoteSessionActive": False,
+            "reason": "local_session_active",
+        }
+
+    if sessions.get("queryOk") is False:
+        return {"known": False, "active": False, "reason": "session_status_unavailable"}
+
+    has_active = "active" in sessions
+    active = sessions.get("active") is True if has_active else legacy_local_session
+    lab_user_active = sessions.get("labUserActive") is True
+    remote_active = sessions.get("remoteSessionActive") is True
+    if lab_user_active:
+        reason = "lab_user_session_active"
+    elif remote_active:
+        reason = "remote_session_active"
+    else:
+        reason = "local_session_active"
+    return {
+        "known": True,
+        "active": active,
+        "labUserActive": lab_user_active,
+        "remoteSessionActive": remote_active,
+        "reason": reason,
+    }
+
+
 def _base_status(
     lab_id: Any,
     now: datetime,
@@ -259,15 +309,32 @@ def project_lab_status(
 
     assert observed is not None
     assert age_seconds is not None
-    local_mode = heartbeat.get("localMode") is True
-    local_session = heartbeat.get("localSession") is True
-    if local_mode or local_session:
+    local_mode = _heartbeat_flag(heartbeat, "localMode", "localModeEnabled")
+    session = session_projection(heartbeat)
+    if not session["known"]:
+        result = {
+            **_base_status(
+                lab_id,
+                current,
+                state="unknown",
+                reason=session["reason"],
+            ),
+            "observedAt": _iso(observed),
+            "ageSeconds": age_seconds,
+        }
+        result["capabilities"] = {
+            "physicalLab": dict(result),
+            "fmu": dict(result),
+        }
+        return result
+
+    if local_mode or session["active"]:
         result = {
             **_base_status(
                 lab_id,
                 current,
                 state="busy",
-                reason="local_mode_enabled" if local_mode else "local_session_active",
+                reason="local_mode_enabled" if local_mode else session["reason"],
             ),
             "severity": "critical" if local_mode else "warning",
             "observedAt": _iso(observed),

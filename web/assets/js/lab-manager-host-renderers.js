@@ -69,6 +69,32 @@
             return parts.join(' - ');
         }
 
+        function getActiveSessionDisplay(status, localSession) {
+            const sessions = status.sessions && typeof status.sessions === 'object'
+                ? status.sessions
+                : {};
+            const hasSummary = Object.prototype.hasOwnProperty.call(sessions, 'active');
+            const legacyLocalSession = !hasSummary && localSession === true;
+            const active = sessions.queryOk === false
+                ? null
+                : hasSummary
+                    ? sessions.active
+                    : localSession;
+            const kindLabels = {
+                'labuser-local': 'LABUSER (local)',
+                'labuser-remote': 'LABUSER (remote)',
+                'local-user': 'local user',
+                'remote-user': 'remote user',
+                mixed: 'mixed: LABUSER and another user',
+            };
+            const detail = active === true
+                ? (kindLabels[sessions.kind] || (legacyLocalSession ? 'local user' : 'session type unavailable'))
+                : active === null
+                    ? 'session status unavailable'
+                    : '';
+            return { active, detail };
+        }
+
         function getReadinessDisplay(heartbeat, summary) {
             const readiness = heartbeat.readiness && typeof heartbeat.readiness === 'object'
                 ? heartbeat.readiness
@@ -109,11 +135,31 @@
                         : [];
                     return `${capability.label}: ${issues.length ? issues.join('; ') : 'not ready'}`;
                 });
+            const physicalLab = capabilities.find(capability => capability.key === 'physicalLab');
+            const fmu = capabilities.find(capability => capability.key === 'fmu');
+            let tooltip = '';
+            if (physicalLab.value.ready && !fmu.value.ready) {
+                const fmuIssues = Array.isArray(fmu.value.issues)
+                    ? fmu.value.issues.filter(issue => typeof issue === 'string' && issue.trim())
+                    : [];
+                const reason = fmuIssues.length ? fmuIssues.join('; ') : 'the FMU executor is not ready';
+                tooltip = `OK for physical labs; FMI simulations are unavailable because ${reason}.`;
+            } else if (!physicalLab.value.ready && fmu.value.ready) {
+                const physicalLabIssues = Array.isArray(physicalLab.value.issues)
+                    ? physicalLab.value.issues.filter(issue => typeof issue === 'string' && issue.trim())
+                    : [];
+                const reason = physicalLabIssues.length
+                    ? physicalLabIssues.join('; ')
+                    : 'the physical lab is not ready';
+                tooltip = `FMI simulations are OK; physical labs are unavailable because ${reason}.`;
+            } else {
+                tooltip = `Partial readiness: ${missing.join(' | ')}`;
+            }
 
             return {
                 label: state,
                 className: state === 'yes' ? 'good' : state === 'no' ? 'bad' : 'warn',
-                tooltip: state === 'partial' ? `Not ready: ${missing.join(' | ')}` : '',
+                tooltip: state === 'partial' ? tooltip : '',
             };
         }
 
@@ -126,6 +172,8 @@
             const winrmConfigured = Boolean(meta.winrmConfigured);
             const readiness = getReadinessDisplay(heartbeat, summary);
             const localSession = status.localSessionActive;
+            const activeSessionDisplay = getActiveSessionDisplay(status, localSession);
+            const activeSession = activeSessionDisplay.active;
             const localMode = status.localModeEnabled;
             const lastForced = operations.lastForcedLogoff;
             const lastPower = operations.lastPowerAction;
@@ -147,6 +195,15 @@
                 : '';
             const readinessExplanationMarkup = readiness.tooltip
                 ? `<span class="ready-indicator-tooltip" id="${readinessTooltipId}" role="tooltip">${safeReadinessTooltip}</span>`
+                : '';
+            const activeSessionDetail = escapeHtml(activeSessionDisplay.detail);
+            const activeSessionTooltipId = 'active-session-tooltip-'
+                + String(host).replace(/[^A-Za-z0-9_-]/g, '-');
+            const activeSessionTooltipMarkup = activeSessionDisplay.detail
+                ? ` title="${activeSessionDetail}" tabindex="0" aria-describedby="${activeSessionTooltipId}" aria-label="Active session: ${escapeHtml(formatBool(activeSession))}. ${activeSessionDetail}"`
+                : '';
+            const activeSessionExplanationMarkup = activeSessionDisplay.detail
+                ? `<span class="active-session-tooltip" id="${activeSessionTooltipId}" role="tooltip">${activeSessionDetail}</span>`
                 : '';
             const guacamoleConnections = Array.isArray(guacamole.connections) ? guacamole.connections : [];
             const safeConnections = escapeHtml(formatConnectionsStatus(guacamoleConnections));
@@ -192,7 +249,7 @@
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">
                     <span class="pill ${readiness.className}${readiness.tooltip ? ' ready-indicator' : ''}"${readinessTooltipMarkup}>Ready: ${readiness.label}${readinessExplanationMarkup}</span>
-                    <span class="pill ${localSession === true ? 'warn' : 'soft'}">Local session: ${formatBool(localSession)}</span>
+                    <span class="pill ${activeSession === true ? 'warn' : 'soft'}${activeSessionDisplay.detail ? ' active-session-indicator' : ''}"${activeSessionTooltipMarkup}>Active session: ${formatBool(activeSession)}${activeSessionExplanationMarkup}</span>
                     <span class="pill ${localMode === true ? 'warn' : 'soft'}">Local mode: ${formatBool(localMode)}</span>
                 </div>
                 <div class="host-meta host-history">

@@ -70,7 +70,7 @@ anonymous demo. Its status is one of:
   connection-group, sharing-profile permission or group membership;
 - `unready`: the gateway, Marketplace authority, or Station heartbeat cannot
   currently prove readiness;
-- `busy`: the Station has a local session/mode active or the Marketplace
+- `busy`: the Station has an active Windows session or local-only mode enabled, or the Marketplace
   authority denies the requested demo window;
 - `ready`: all local checks, the physical host and the Marketplace authority
   agree for a short probe window.

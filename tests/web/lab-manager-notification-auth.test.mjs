@@ -1759,7 +1759,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(script, /return 'No connections'/);
   assert.match(script, /\$\{connections\.length\} connections/);
   assert.match(script, /meta\.winrmTrustStatus/);
-  assert.match(script, /formatBool\(localSession\)/);
+  assert.match(script, /formatBool\(activeSession\)/);
   assert.match(script, /formatBool\(localMode\)/);
   assert.match(script, /host-state-column/);
   assert.match(script, /host-status-action/);
@@ -1779,6 +1779,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(styles, /\.host-state-column[\s\S]*display: flex/);
   assert.match(styles, /\.host-history[\s\S]*display: flex/);
   assert.match(styles, /\.ready-indicator-tooltip[\s\S]*position: fixed/);
+  assert.match(styles, /\.active-session-tooltip[\s\S]*position: fixed/);
   assert.match(hostView, /setupGuacamoleMatchPopover/);
   assert.match(hostView, /addEventListener\('mouseenter'/);
   assert.match(hostView, /addEventListener\('focusin'/);
@@ -1845,7 +1846,7 @@ test('renders the complete station status card with truthful empty and configure
   assert.match(row.rawInnerHTML, /Forced logoff: not available/);
   assert.match(row.rawInnerHTML, /Power action: not available/);
   assert.match(row.rawInnerHTML, /Ready: n\/a/);
-  assert.match(row.rawInnerHTML, /Local session: n\/a/);
+  assert.match(row.rawInnerHTML, /Active session: n\/a/);
   assert.match(row.rawInnerHTML, /Local mode: n\/a/);
 });
 

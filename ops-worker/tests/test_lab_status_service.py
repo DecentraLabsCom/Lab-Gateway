@@ -60,6 +60,93 @@ def test_local_session_is_busy_with_warning_severity():
     assert result["reason"] == "local_session_active"
 
 
+def test_lab_user_session_is_busy_with_warning_severity():
+    result = project_lab_status(
+        7,
+        heartbeat(
+            sessions={
+                "active": True,
+                "kind": "labuser-remote",
+                "labUserActive": True,
+                "labUserRemoteActive": True,
+                "remoteSessionActive": True,
+            },
+        ),
+        now=NOW,
+        max_age_seconds=180,
+    )
+
+    assert result["state"] == "busy"
+    assert result["severity"] == "warning"
+    assert result["reason"] == "lab_user_session_active"
+
+
+def test_remote_session_without_lab_user_is_also_busy():
+    result = project_lab_status(
+        7,
+        heartbeat(
+            sessions={
+                "active": True,
+                "kind": "remote-user",
+                "labUserActive": False,
+                "labUserRemoteActive": False,
+                "remoteSessionActive": True,
+            },
+        ),
+        now=NOW,
+        max_age_seconds=180,
+    )
+
+    assert result["state"] == "busy"
+    assert result["severity"] == "warning"
+    assert result["reason"] == "remote_session_active"
+
+
+def test_nested_lab_user_session_from_persisted_station_status_is_busy():
+    result = project_lab_status(
+        7,
+        {
+            **heartbeat(),
+            "raw": {
+                "status": {
+                    "localModeEnabled": False,
+                    "localSessionActive": False,
+                    "sessions": {
+                        "active": True,
+                        "kind": "labuser-local",
+                        "labUserActive": True,
+                        "labUserRemoteActive": False,
+                        "remoteSessionActive": False,
+                    },
+                },
+            },
+        },
+        now=NOW,
+        max_age_seconds=180,
+    )
+
+    assert result["state"] == "busy"
+    assert result["severity"] == "warning"
+    assert result["reason"] == "lab_user_session_active"
+
+
+def test_unavailable_session_query_is_not_projected_as_ready():
+    result = project_lab_status(
+        7,
+        heartbeat(
+            sessions={
+                "active": False,
+                "queryOk": False,
+            },
+        ),
+        now=NOW,
+        max_age_seconds=180,
+    )
+
+    assert result["state"] == "unknown"
+    assert result["reason"] == "session_status_unavailable"
+
+
 def test_local_mode_is_busy_with_critical_severity():
     result = project_lab_status(
         7,

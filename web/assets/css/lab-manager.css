@@ -1294,11 +1294,13 @@ body {
     align-items: center;
     gap: 6px;
 }
-.ready-indicator {
+.ready-indicator,
+.active-session-indicator {
     position: relative;
     cursor: help;
 }
-.ready-indicator-tooltip {
+.ready-indicator-tooltip,
+.active-session-tooltip {
     position: fixed;
     z-index: 1000;
     display: none;
@@ -1321,7 +1323,8 @@ body {
     transform: translateY(-4px);
     transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
 }
-.ready-indicator-tooltip.is-visible {
+.ready-indicator-tooltip.is-visible,
+.active-session-tooltip.is-visible {
     display: block;
     opacity: 1;
     visibility: visible;

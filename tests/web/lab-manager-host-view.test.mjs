@@ -234,3 +234,45 @@ test('renders the readiness tooltip outside the scrolling host list and below a 
   assert.equal(tooltip.classList.contains('is-visible'), true);
   assert.equal(tooltip.style.top, '36px');
 });
+
+test('wires the active-session tooltip through the same fixed popover controller', () => {
+  const trigger = popoverElement({
+    rect: { left: 240, top: 4, bottom: 28, width: 72, height: 24 },
+  });
+  trigger.selector = '.active-session-indicator';
+  const tooltip = popoverElement({ width: 220, height: 64 });
+  tooltip.selector = '.active-session-tooltip';
+  const row = popoverElement();
+  row.children = [trigger, tooltip];
+  const hostListEl = popoverElement();
+  const candidateListEl = popoverElement();
+  const body = popoverElement();
+  const hostRenderersController = {
+    buildHostRow: () => row,
+    buildGuacamoleCandidateRow: () => popoverElement(),
+  };
+  const controller = loadModule().createController({
+    hostListEl,
+    candidateListEl,
+    getHostNames: () => ['station-active-session'],
+    hostState: {},
+    hostMetadata: {},
+    candidateState: {},
+    hostRenderersController,
+    documentImpl: { body, documentElement: { clientWidth: 1024, clientHeight: 768 } },
+    windowImpl: {
+      innerWidth: 1024,
+      innerHeight: 768,
+      addEventListener() {},
+      removeEventListener() {},
+      clearTimeout() {},
+      setTimeout: callback => { callback(); return 1; },
+    },
+  });
+
+  controller.renderHosts();
+  trigger.listener('mouseenter')();
+
+  assert.equal(tooltip.parentElement, body);
+  assert.equal(tooltip.classList.contains('is-visible'), true);
+});

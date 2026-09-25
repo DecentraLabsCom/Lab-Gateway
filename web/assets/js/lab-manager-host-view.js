@@ -140,6 +140,10 @@
             setupFixedPopover(row, '.ready-indicator', '.ready-indicator-tooltip');
         }
 
+        function setupActiveSessionTooltip(row) {
+            setupFixedPopover(row, '.active-session-indicator', '.active-session-tooltip');
+        }
+
         function buildHostRow(host) {
             const row = hostRenderersController.buildHostRow(
                 host,
@@ -148,6 +152,7 @@
             );
             setupGuacamoleMatchPopover(row);
             setupReadinessTooltip(row);
+            setupActiveSessionTooltip(row);
             return row;
         }
 
