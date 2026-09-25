@@ -67,16 +67,23 @@ flowchart LR
 7. Save the connection and record the numeric connection ID from the
    connection details or the Guacamole API/UI URL.
 
-## Optional: launch through Lab Station Remote App
+## Launch through Lab Station Remote App
 
-For a Windows laboratory controlled by Lab Station, configure the RDP **Remote
-App** fields only when the Station design requires it:
+For a Windows laboratory controlled by the current Lab Station contract, the RDP
+**Remote App** fields are the application launch configuration. Lab Station
+prepares the Windows host and cleans the session, while Guacamole launches
+`AppControl.exe` with the selected laboratory application's arguments:
 
 | Field | Value |
 | --- | --- |
 | Program | The Lab Station launcher, for example `AppControl.exe`, or its full path. |
 | Working directory | The folder that contains the Lab Station executable. |
 | Parameters | Lab Station window-class and application-path arguments, followed by any lab-application-specific arguments. |
+
+Do not rely on Lab Station Windows Run entries to launch AppControl. A plain
+desktop RDP connection is suitable for station diagnostics or maintenance; an
+end-user laboratory connection must provide the Remote App parameters so the
+application starts inside the Guacamole session.
 
 Use the [Lab Station documentation](https://github.com/DecentraLabsCom/Lab-Station/blob/main/README.md)
 to determine the exact window class and supported launch parameters. Test this
