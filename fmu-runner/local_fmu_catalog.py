@@ -56,7 +56,8 @@ def _list_local_fmus_payload(
     return {
         "fmus": [{
             "filename": resolved.name,
-            "path": str(relative_path),
+            # Keep the public relative path stable across Gateway host OSes.
+            "path": str(relative_path).replace("/", "\\"),
             "sizeBytes": resolved.stat().st_size,
             "source": "provisioned",
         }]

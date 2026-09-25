@@ -1707,10 +1707,20 @@ def test_history_empty_initially(tmp_path, monkeypatch):
     assert response.json()["simulations"] == []
 
 
+def _iter_registered_routes(routes):
+    """Flatten FastAPI's route wrappers across supported FastAPI versions."""
+    for route in routes:
+        original_router = getattr(route, "original_router", None)
+        if original_router is not None:
+            yield from _iter_registered_routes(getattr(original_router, "routes", ()))
+        else:
+            yield route
+
+
 def test_aas_routes_are_registered_once_and_openapi_is_warning_free():
     aas_routes = [
         route
-        for route in app.routes
+        for route in _iter_registered_routes(app.routes)
         if getattr(route, "path", "").startswith("/aas-admin/")
         and getattr(route, "methods", None)
     ]
