@@ -1332,8 +1332,6 @@ body {
 }
 .ready-indicator-tooltip-good {
     border-color: var(--success);
-    background: var(--success);
-    color: var(--bg);
 }
 .host-history {
     display: flex;
