@@ -268,7 +268,15 @@
             const heartbeat = data.heartbeat || {};
             const summary = heartbeat.summary || {};
             const status = heartbeat.status || {};
-            const operations = heartbeat.operations || {};
+            const topLevelOperations = heartbeat.operations && typeof heartbeat.operations === 'object'
+                ? heartbeat.operations
+                : null;
+            const statusOperations = status.operations && typeof status.operations === 'object'
+                ? status.operations
+                : null;
+            const operations = topLevelOperations && Object.keys(topLevelOperations).length
+                ? topLevelOperations
+                : statusOperations || topLevelOperations || {};
             const winrmConfigured = Boolean(meta.winrmConfigured);
             const readiness = getReadinessDisplay(heartbeat, summary);
             const localSession = status.localSessionActive;
@@ -357,9 +365,9 @@
                 <div class="host-meta host-history">
                     <span class="host-history-label">Last activity:</span>
                     <span class="host-history-items">
+                        <span class="host-history-item host-history-heartbeat">Heartbeat: ${safeUpdated}</span>
                         <span class="host-history-item">Forced logoff: ${safeLastForced}</span>
                         <span class="host-history-item">Power action: ${safeLastPower}</span>
-                        <span class="host-history-item">Heartbeat: ${safeUpdated}</span>
                     </span>
                 </div>
             </div>
@@ -407,7 +415,6 @@
         function renderGuacamoleCandidateRowMarkup(station, state = {}) {
             const safeName = escapeHtml(station.address || station.nameCandidates[0] || 'Unnamed station');
             const safeConnections = escapeHtml(station.nameCandidates.join(', ') || 'Unnamed connection');
-            const safeHost = escapeHtml(station.address || 'n/a');
             const connectionSummary = station.connections
                 .map(connection => `${connection.protocol || 'unknown'}:${connection.port || 'n/a'}`)
                 .filter((value, index, values) => values.indexOf(value) === index)
@@ -418,8 +425,9 @@
 
             return `
             <div>
-                <div class="host-title">${safeName}</div>
-                <div class="host-meta">Host: ${safeHost}</div>
+                <div class="host-title-row">
+                    <div class="host-title">${safeName}</div>
+                </div>
                 <div class="host-meta">Connections: ${safeConnections}</div>
                 <div class="host-meta">Protocol / port: ${safeProtocol}</div>
             </div>

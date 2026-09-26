@@ -201,3 +201,24 @@ test('refreshes heartbeat after Prepare returns warnings', async () => {
     ['prepare-session on station-7: err', 'error'],
   ]);
 });
+
+test('refreshes heartbeat after a power action so the recorded order is visible', async () => {
+  const module = loadModule();
+  const events = [];
+  const controller = module.createController({
+    fetchImpl: async () => response({ exit_code: 0 }),
+    waitImpl: async delay => events.push(['wait', delay]),
+    callbacks: {
+      pollHeartbeat: async (host, options) => events.push(['poll', host, options]),
+      showToast: (...args) => events.push(args),
+    },
+  });
+
+  await controller.triggerWinrm('station-7', 'power', ['shutdown', '--delay=60']);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(events)), [
+    ['wait', 1000],
+    ['poll', 'station-7', { silent: true }],
+    ['power on station-7: ok', 'success'],
+  ]);
+});

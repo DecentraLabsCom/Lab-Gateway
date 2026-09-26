@@ -114,6 +114,10 @@
                     await waitImpl(3000);
                     await pollHeartbeat(host, { silent: true });
                 }
+                if (command === 'power') {
+                    await waitImpl(1000);
+                    await pollHeartbeat(host, { silent: true });
+                }
                 showToast(`${command} on ${host}: ${ok ? 'ok' : 'err'}`, ok ? 'success' : 'error');
             } catch (err) {
                 logger.error(err);

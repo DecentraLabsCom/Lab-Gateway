@@ -184,6 +184,47 @@ test('host row renderer keeps legacy local-session heartbeats understandable', (
   assert.match(html, /role="tooltip">local user<\/span>/);
 });
 
+test('host row renderer reads power history from legacy status operations', () => {
+  const module = loadRenderers();
+  const renderer = module.createController(dependencies());
+  const html = renderer.renderHostRowMarkup('station-legacy-operations', {
+    heartbeat: {
+      timestamp: '2026-09-13T10:00:00Z',
+      summary: { ready: true },
+      status: {
+        localSessionActive: false,
+        localModeEnabled: false,
+        operations: {
+          lastPowerAction: { timestamp: '2026-09-13T09:30:00Z', mode: 'shutdown' },
+        },
+      },
+    },
+  }, {});
+
+  assert.match(html, /Power action: shutdown - date:2026-09-13T09:30:00Z/);
+});
+
+test('host row renderer falls back when top-level operations are empty', () => {
+  const module = loadRenderers();
+  const renderer = module.createController(dependencies());
+  const html = renderer.renderHostRowMarkup('station-empty-operations', {
+    heartbeat: {
+      timestamp: '2026-09-13T10:00:00Z',
+      summary: { ready: true },
+      operations: {},
+      status: {
+        localSessionActive: false,
+        localModeEnabled: false,
+        operations: {
+          lastPowerAction: { timestamp: '2026-09-13T09:30:00Z', mode: 'shutdown' },
+        },
+      },
+    },
+  }, {});
+
+  assert.match(html, /Power action: shutdown - date:2026-09-13T09:30:00Z/);
+});
+
 test('host row renderer shows concrete connector states and scoped readiness reasons', () => {
   const module = loadRenderers();
   const renderer = module.createController(dependencies());
@@ -278,7 +319,7 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
   assert.match(html, /Address: <span class="mono">n\/a<\/span>/);
   assert.match(html, /Heartbeat: not available/);
   assert.doesNotMatch(html, /Last heartbeat:/);
-  assert.match(html, /Last activity:[\s\S]*Forced logoff: not available[\s\S]*Power action: not available[\s\S]*Heartbeat: not available/);
+  assert.match(html, /Last activity:[\s\S]*Heartbeat: not available[\s\S]*Forced logoff: not available[\s\S]*Power action: not available/);
   assert.doesNotMatch(html, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
   assert.match(html, /Forced logoff: not available/);
   assert.match(html, /Connections: <span class="host-status-text bad">No connections<\/span>/);
@@ -306,6 +347,8 @@ test('candidate renderer preserves discovery statuses and provisioning guard', (
     { status: 'winrm-reachable', detail: 'Open port<&' },
   );
   assert.match(readyHtml, /class="pill warn">Lab Station: WinRM reachable<\/span>/);
+  assert.match(readyHtml, /class="host-title-row"[\s\S]*class="host-title">station-3&lt;&amp;<\/div>/);
+  assert.doesNotMatch(readyHtml, /Host: station-3/);
   assert.match(readyHtml, /candidate-station-detail">Open port&lt;&amp;/);
   assert.match(readyHtml, /Protocol \/ port: rdp:3389, ssh:22/);
   assert.match(readyHtml, /data-action="configure-candidate"/);

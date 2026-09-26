@@ -1755,7 +1755,8 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(script, /Heartbeat: \$\{safeUpdated\}/);
   assert.match(script, /Last activity:/);
   assert.doesNotMatch(script, /FMU token:/);
-  assert.match(script, /Power action: \$\{safeLastPower\}<\/span>\s*<span class="host-history-item">Heartbeat: \$\{safeUpdated\}/);
+  assert.match(script, /Heartbeat: \$\{safeUpdated\}<\/span>\s*<span class="host-history-item">Forced logoff: \$\{safeLastForced\}<\/span>\s*<span class="host-history-item">Power action: \$\{safeLastPower\}/);
+  assert.match(styles, /\.host-history-heartbeat\s*\{[\s\S]*flex-basis:\s*100%/);
   assert.match(script, /WinRM TLS trust:/);
   assert.match(script, /formatConnectionsStatus/);
   assert.match(script, /return 'No connections'/);
@@ -1843,7 +1844,7 @@ test('renders the complete station status card with truthful empty and configure
   assert.doesNotMatch(row.rawInnerHTML, /FMU token:/);
   assert.match(row.rawInnerHTML, />2 connections<\/span>/);
   assert.doesNotMatch(row.rawInnerHTML, /ambiguous/);
-  assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:[\s\S]*Power action: not available[\s\S]*Heartbeat: not available/);
+  assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:[\s\S]*Heartbeat: not available[\s\S]*Forced logoff: not available[\s\S]*Power action: not available/);
   assert.doesNotMatch(row.rawInnerHTML, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
   assert.match(row.rawInnerHTML, /WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials"[^>]*>[\s\S]*<span class="host-status-text good">configured<\/span>/);
   assert.doesNotMatch(row.rawInnerHTML, /class="mini-btn" data-action="set-winrm-credentials"/);

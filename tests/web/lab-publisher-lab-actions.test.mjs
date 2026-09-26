@@ -155,7 +155,7 @@ test('reports provider lab mutations through the shared toast boundary', async (
 test('cache-busts the lab manager assets after lab display updates', () => {
   const index = fs.readFileSync(indexPath, 'utf8');
 
-  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v32/);
+  assert.match(index, /lab-manager\.css\?v=workflow-tabs-v33/);
   assert.match(index, /lab-manager\.js\?v=workflow-tabs-v23/);
   assert.doesNotMatch(index, /id="fmuStationStatus"/);
   assert.doesNotMatch(index, /<h2>FMU Station<\/h2>/);
