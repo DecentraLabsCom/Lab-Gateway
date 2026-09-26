@@ -1782,7 +1782,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(styles, /\.host-state-column[\s\S]*display: flex/);
   assert.match(styles, /\.host-history[\s\S]*display: flex/);
   assert.match(styles, /\.ready-indicator-tooltip[\s\S]*position: fixed/);
-  assert.match(styles, /\.pill\.good \.ready-indicator-tooltip\s*\{[\s\S]*border-color:\s*var\(--success\)[\s\S]*background:\s*var\(--success\)[\s\S]*color:\s*var\(--bg\)/);
+  assert.match(styles, /\.ready-indicator-tooltip-good\s*\{[\s\S]*border-color:\s*var\(--success\)[\s\S]*background:\s*var\(--success\)[\s\S]*color:\s*var\(--bg\)/);
   assert.match(styles, /\.active-session-tooltip[\s\S]*position: fixed/);
   assert.match(hostView, /setupGuacamoleMatchPopover/);
   assert.match(hostView, /addEventListener\('mouseenter'/);

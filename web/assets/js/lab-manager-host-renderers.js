@@ -298,13 +298,16 @@
             const safeLastPower = escapeHtml(formatLastPowerAction(lastPower, hasHeartbeat));
             const safeReadinessLabel = escapeHtml(readiness.label);
             const safeReadinessTooltip = escapeHtml(readiness.tooltip);
+            const readinessTooltipClass = readiness.className === 'good'
+                ? ' ready-indicator-tooltip-good'
+                : '';
             const readinessTooltipId = 'readiness-tooltip-'
                 + String(host).replace(/[^A-Za-z0-9_-]/g, '-');
             const readinessTooltipMarkup = readiness.tooltip
                 ? ` title="${safeReadinessTooltip}" tabindex="0" aria-describedby="${readinessTooltipId}" aria-label="${safeReadinessLabel}. ${safeReadinessTooltip}"`
                 : '';
             const readinessExplanationMarkup = readiness.tooltip
-                ? `<span class="ready-indicator-tooltip" id="${readinessTooltipId}" role="tooltip">${safeReadinessTooltip}</span>`
+                ? `<span class="ready-indicator-tooltip${readinessTooltipClass}" id="${readinessTooltipId}" role="tooltip">${safeReadinessTooltip}</span>`
                 : '';
             const activeSessionDetail = escapeHtml(activeSessionDisplay.detail);
             const activeSessionTooltipId = 'active-session-tooltip-'

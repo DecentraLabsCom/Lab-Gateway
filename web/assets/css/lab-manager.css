@@ -1330,7 +1330,7 @@ body {
     visibility: visible;
     transform: translateY(0);
 }
-.pill.good .ready-indicator-tooltip {
+.ready-indicator-tooltip-good {
     border-color: var(--success);
     background: var(--success);
     color: var(--bg);

@@ -252,6 +252,7 @@ test('host row renderer shows concrete connector states and scoped readiness rea
   assert.doesNotMatch(remoteAppHtml, /FMI\/FMU|FMU executor is not running/);
   assert.doesNotMatch(remoteAppHtml, /Ready:/);
   assert.match(remoteAppHtml, /role="tooltip"/);
+  assert.match(remoteAppHtml, /class="ready-indicator-tooltip ready-indicator-tooltip-good"/);
 
   const fmuHtml = renderer.renderHostRowMarkup('station-fmu', {
     heartbeat: {
@@ -266,6 +267,7 @@ test('host row renderer shows concrete connector states and scoped readiness rea
   assert.match(fmuHtml, /FMI\/FMU ready\./);
   assert.doesNotMatch(fmuHtml, /Remote app: WinRM not ready/);
   assert.doesNotMatch(fmuHtml, /Ready:/);
+  assert.match(fmuHtml, /class="ready-indicator-tooltip ready-indicator-tooltip-good"/);
 
   const allConnectorsHtml = renderer.renderHostRowMarkup('station-all-connectors', {
     heartbeat: {
@@ -304,6 +306,8 @@ test('host row renderer shows concrete connector states and scoped readiness rea
     unavailableHtml,
     /Remote app: WinRM not ready FMI\/FMU: FMU executor is not running/,
   );
+  assert.match(unavailableHtml, /class="ready-indicator-tooltip"/);
+  assert.doesNotMatch(unavailableHtml, /ready-indicator-tooltip-good/);
   assert.doesNotMatch(unavailableHtml, /Ready:/);
 });
 
@@ -319,6 +323,8 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
   assert.match(html, /Address: <span class="mono">n\/a<\/span>/);
   assert.match(html, /Heartbeat: not available/);
   assert.doesNotMatch(html, /Last heartbeat:/);
+  assert.match(html, /class="ready-indicator-tooltip"/);
+  assert.doesNotMatch(html, /ready-indicator-tooltip-good/);
   assert.match(html, /Last activity:[\s\S]*Heartbeat: not available[\s\S]*Forced logoff: not available[\s\S]*Power action: not available/);
   assert.doesNotMatch(html, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
   assert.match(html, /Forced logoff: not available/);
