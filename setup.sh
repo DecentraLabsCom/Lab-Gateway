@@ -798,6 +798,16 @@ fi
 update_env_var "$ROOT_ENV_FILE" "OPS_INTERNAL_AUTH_TOKEN" "$ops_internal_auth_token"
 update_env_var "$ROOT_ENV_FILE" "OPS_INTERNAL_AUTH_HEADER" "X-Ops-Internal-Token"
 
+# FMU Station enrollment uses one Gateway-owned internal token.  The setup
+# flow generates it once and the Compose secret sync shares it with the
+# runner, embedded backend and Ops Worker; it is never printed by setup.
+fmu_station_internal_token="$(get_env_default "FMU_STATION_INTERNAL_TOKEN" "$ROOT_ENV_FILE")"
+if [ -z "$fmu_station_internal_token" ] || is_placeholder_secret "$fmu_station_internal_token"; then
+    fmu_station_internal_token="fmu_$(openssl rand -hex 32 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated FMU Station internal token."
+fi
+update_env_var "$ROOT_ENV_FILE" "FMU_STATION_INTERNAL_TOKEN" "$fmu_station_internal_token"
+
 echo
 echo "Lab Manager Backend Allowlist"
 echo "============================="

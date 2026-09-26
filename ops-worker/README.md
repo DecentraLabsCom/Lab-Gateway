@@ -274,7 +274,6 @@ off or unavailable Station from an internal worker failure.
 - `POST /api/hosts/reload`
 - `POST /api/hosts/local-mode`
 - `GET /api/operations/recent`
-- `POST /api/aas-sync`
 - `POST /aas-admin/lab/<lab_id>/sync`
 
 The per-lab route accepts registered metadata from Lab Manager and optionally

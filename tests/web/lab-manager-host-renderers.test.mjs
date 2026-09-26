@@ -68,14 +68,15 @@ test('host row renderer preserves status markup and escapes host data', () => {
   assert.match(html, /class="host-status-text good">2 connections<\/span>/);
   assert.match(html, /Station&lt;&amp;/);
   assert.match(html, /date:2026-09-13T09:00:00Z - operator&lt;&amp;/);
-  assert.match(html, /Ready: yes/);
+  assert.match(html, /class="pill good">Remote app/);
+  assert.doesNotMatch(html, /Ready:/);
   assert.match(html, /<button class="mini-btn" data-action="poll" title="Check station status">Heartbeat<\/button>/);
   assert.match(html, /<button class="mini-btn" data-action="wol" title="Wake station">Wake<\/button>/);
   assert.match(html, /<button class="mini-btn primary" data-action="prepare" title="Prepare station">Prepare<\/button>/);
   assert.match(html, /<button class="mini-btn" data-action="release" title="Release station">Release<\/button>/);
   assert.match(html, /<button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown<\/button>/);
   assert.match(html, /<button class="mini-btn secondary" data-action="toggle-local-mode" title="Disable local mode">Disable Local<\/button>/);
-  assert.match(html, /<button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS<\/button>/);
+  assert.doesNotMatch(html, /data-action="sync-aas"/);
   assert.match(html, />Disable Local<\/button>/);
   assert.doesNotMatch(html, /Lab Station paths/);
   assert.doesNotMatch(html, /<station>/);
@@ -94,6 +95,49 @@ test('host row renderer describes enabling local mode when it is disabled', () =
   }, {});
 
   assert.match(html, /<button class="mini-btn secondary" data-action="toggle-local-mode" title="Enable local mode">Enable Local<\/button>/);
+});
+
+test('host row renderer links and releases the single FMU token target', () => {
+  const module = loadRenderers();
+  const renderer = module.createController(dependencies());
+  const baseMeta = { address: '192.168.1.50', winrmConfigured: true };
+  const fmuState = {
+    configured: true,
+    stationHost: 'station-fmu',
+    stationAddress: '192.168.1.50',
+    linked: false,
+  };
+
+  const linkHtml = renderer.renderHostRowMarkup('station-fmu', {}, baseMeta, fmuState);
+  assert.match(linkHtml, /FMU token: <span class="host-status-text warn">not linked<\/span>/);
+  assert.match(linkHtml, /data-action="link-fmu"[^>]*>Link FMU token<\/button>/);
+
+  const linkedHtml = renderer.renderHostRowMarkup(
+    'station-fmu',
+    {},
+    baseMeta,
+    { ...fmuState, linked: true, linkedHost: 'station-fmu' },
+  );
+  assert.match(linkedHtml, /FMU token: <span class="host-status-text good">linked<\/span>/);
+  assert.match(linkedHtml, /data-action="release-fmu"[^>]*>Release FMU token<\/button>/);
+
+  const otherHtml = renderer.renderHostRowMarkup(
+    'station-other',
+    {},
+    { address: '192.168.1.51' },
+    { ...fmuState, linked: true, linkedHost: 'station-fmu' },
+  );
+  assert.match(otherHtml, /linked on another station/);
+  assert.match(otherHtml, /data-action="link-fmu"[^>]* disabled>Link FMU token<\/button>/);
+
+  const unknownHtml = renderer.renderHostRowMarkup(
+    'station-fmu',
+    {},
+    baseMeta,
+    { ...fmuState, linkStatus: 'unknown' },
+  );
+  assert.match(unknownHtml, /FMU token: <span class="host-status-text warn">verification unavailable<\/span>/);
+  assert.match(unknownHtml, /data-action="link-fmu"[^>]* disabled>Link FMU token<\/button>/);
 });
 
 test('host row renderer exposes the active session kind through an accessible tooltip', () => {
@@ -140,7 +184,7 @@ test('host row renderer keeps legacy local-session heartbeats understandable', (
   assert.match(html, /role="tooltip">local user<\/span>/);
 });
 
-test('host row renderer distinguishes complete, partial and unavailable capability readiness', () => {
+test('host row renderer shows concrete ready connectors and concise unavailable reasons', () => {
   const module = loadRenderers();
   const renderer = module.createController(dependencies());
   const base = {
@@ -150,7 +194,7 @@ test('host row renderer distinguishes complete, partial and unavailable capabili
     operations: {},
   };
 
-  const partialHtml = renderer.renderHostRowMarkup('station-partial', {
+  const remoteAppHtml = renderer.renderHostRowMarkup('station-remote-app', {
     heartbeat: {
       ...base,
       readiness: {
@@ -159,13 +203,49 @@ test('host row renderer distinguishes complete, partial and unavailable capabili
       },
     },
   }, {});
-  assert.match(partialHtml, /class="pill warn ready-indicator"[^>]*>Ready: partial/);
+  assert.match(remoteAppHtml, /class="pill good ready-indicator"[^>]*>Remote app/);
   assert.match(
-    partialHtml,
-    /OK for physical labs; FMI simulations are unavailable because FMU executor is not running\./,
+    remoteAppHtml,
+    /Remote app ready\. FMI\/FMU: FMU executor is not running/,
   );
-  assert.doesNotMatch(partialHtml, /Not ready:/);
-  assert.match(partialHtml, /role="tooltip"/);
+  assert.doesNotMatch(remoteAppHtml, /Ready:/);
+  assert.match(remoteAppHtml, /role="tooltip"/);
+
+  const fmuHtml = renderer.renderHostRowMarkup('station-fmu', {
+    heartbeat: {
+      ...base,
+      readiness: {
+        physicalLab: { ready: false, issues: ['WinRM not ready'] },
+        fmu: { ready: true, issues: [] },
+      },
+    },
+  }, {});
+  assert.match(fmuHtml, /class="pill good ready-indicator"[^>]*>FMI\/FMU/);
+  assert.match(fmuHtml, /FMI\/FMU ready\. Remote app: WinRM not ready/);
+  assert.doesNotMatch(fmuHtml, /Ready:/);
+
+  const allConnectorsHtml = renderer.renderHostRowMarkup('station-all-connectors', {
+    heartbeat: {
+      ...base,
+      summary: { ready: true },
+      readiness: {
+        physicalLab: { ready: true, issues: [] },
+        fmu: { ready: true, issues: [] },
+      },
+    },
+  }, {});
+  assert.match(allConnectorsHtml, /class="pill good">Remote app · FMI\/FMU/);
+  assert.doesNotMatch(allConnectorsHtml, /ready-indicator-tooltip/);
+
+  const opcUaHtml = renderer.renderHostRowMarkup('station-opc-ua', {
+    heartbeat: {
+      ...base,
+      readiness: {
+        opcUa: { ready: true, issues: [] },
+      },
+    },
+  }, {});
+  assert.match(opcUaHtml, /class="pill good">OPC-UA/);
 
   const unavailableHtml = renderer.renderHostRowMarkup('station-unavailable', {
     heartbeat: {
@@ -176,20 +256,12 @@ test('host row renderer distinguishes complete, partial and unavailable capabili
       },
     },
   }, {});
-  assert.match(unavailableHtml, /class="pill bad">Ready: no/);
-
-  const completeHtml = renderer.renderHostRowMarkup('station-ready', {
-    heartbeat: {
-      ...base,
-      summary: { ready: true },
-      readiness: {
-        physicalLab: { ready: true, issues: [] },
-        fmu: { ready: true, issues: [] },
-      },
-    },
-  }, {});
-  assert.match(completeHtml, /class="pill good">Ready: yes/);
-  assert.doesNotMatch(completeHtml, /ready-indicator-tooltip/);
+  assert.match(unavailableHtml, /class="pill bad ready-indicator"[^>]*>Not ready/);
+  assert.match(
+    unavailableHtml,
+    /Remote app: WinRM not ready FMI\/FMU: FMU executor is not running/,
+  );
+  assert.doesNotMatch(unavailableHtml, /Ready:/);
 });
 
 test('host row renderer keeps missing heartbeat and trust states public', () => {
@@ -202,7 +274,8 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
   );
 
   assert.match(html, /Address: <span class="mono">n\/a<\/span>/);
-  assert.match(html, /Last heartbeat: not available/);
+  assert.match(html, /Heartbeat: not available/);
+  assert.doesNotMatch(html, /Last heartbeat:/);
   assert.match(html, /Forced logoff: not available/);
   assert.match(html, /Connections: <span class="host-status-text bad">No connections<\/span>/);
   assert.match(html, /WinRM credentials:[\s\S]*class="host-status-text warn">missing/);

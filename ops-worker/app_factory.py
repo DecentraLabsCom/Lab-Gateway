@@ -7,12 +7,12 @@ from flask import Flask
 
 from app_hooks import register_app_hooks
 from aas_lab_sync_blueprint import create_aas_lab_sync_blueprint
-from aas_sync_blueprint import create_aas_sync_blueprint
 from guacamole_connections_blueprint import create_guacamole_connections_blueprint
 from guacamole_provision_blueprint import create_guacamole_provision_blueprint
 from health_blueprint import create_health_blueprint
 from heartbeat_poll_blueprint import create_heartbeat_poll_blueprint
 from heartbeat_stream_blueprint import create_heartbeat_stream_blueprint
+from fmu_station_blueprint import create_fmu_station_blueprint
 from host_provision_blueprint import create_host_provision_blueprint
 from host_update_blueprint import create_host_update_blueprint
 from hosts_blueprint import create_hosts_blueprint
@@ -166,6 +166,23 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
     app.register_blueprint(
         create_lab_associations_blueprint(
             resolve_lab_associations=lambda: get("resolve_lab_associations")(),
+        )
+    )
+    app.register_blueprint(
+        create_fmu_station_blueprint(
+            get_config=lambda: get("FmuStationConfig")(
+                backend_mode=get("FMU_STATUS_BACKEND"),
+                base_url=get("FMU_STATUS_STATION_BASE_URL"),
+                configured_host=get("FMU_STATUS_STATION_HOST"),
+                internal_token=get("FMU_STATION_INTERNAL_TOKEN"),
+            ),
+            get_hosts=lambda: get("HOSTS").all_hosts(),
+            get_runner_health=lambda: get("read_fmu_runner_health")(),
+            run_remote_powershell=lambda **kwargs: get("run_remote_powershell")(**kwargs),
+            internal_error_response=lambda *args, **kwargs: get("internal_error_response")(
+                *args,
+                **kwargs,
+            ),
         )
     )
     app.register_blueprint(
@@ -356,14 +373,6 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
     app.register_blueprint(
         create_hosts_reload_blueprint(
             reload_hosts=lambda: get("reload_hosts")(),
-        )
-    )
-    app.register_blueprint(
-        create_aas_sync_blueprint(
-            find_host=lambda host_name: get("HOSTS").get(host_name),
-            resolve_lab_ids_for_host=lambda host: get("resolve_lab_ids_for_host")(host),
-            sync_lab=lambda lab_id, host: get("aas_generator").sync_lab_to_basyx(lab_id, host),
-            log_failure=lambda *args: get("logging").exception(*args),
         )
     )
     app.register_blueprint(

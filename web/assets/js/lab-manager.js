@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!hostFeatureModule) {
         throw new Error('LabManagerHostFeature must load before lab-manager.js');
     }
+    const fmuStationFeatureModule = window.LabManagerFmuStation;
     const opsAccessModule = window.LabManagerOpsAccess;
     if (!opsAccessModule) {
         throw new Error('LabManagerOpsAccess must load before lab-manager.js');
@@ -108,7 +109,21 @@ document.addEventListener('DOMContentLoaded', () => {
     notificationsFeatureController.initialize();
 
     let opsAccessController;
-    const hostFeatureController = hostFeatureModule.createController({
+    let hostFeatureController;
+    const fmuStationFeatureController = fmuStationFeatureModule
+        ? fmuStationFeatureModule.createController({
+            fetchImpl: (...args) => fetch(...args),
+            showLoadingToast,
+            showToast,
+            onStateChanged: () => hostFeatureController?.renderHosts(),
+            logger: console,
+        })
+        : {
+            getState: () => ({}),
+            handleAction: async () => false,
+            initialize: async () => false,
+        };
+    hostFeatureController = hostFeatureModule.createController({
         documentImpl: document,
         windowImpl: window,
         fetchImpl: (...args) => fetch(...args),
@@ -123,6 +138,8 @@ document.addEventListener('DOMContentLoaded', () => {
         showOpsWarning,
         showLoadingToast,
         showToast,
+        getFmuStationState: () => fmuStationFeatureController.getState(),
+        onFmuStation: (host, action) => fmuStationFeatureController.handleAction(host, action),
         confirmImpl: message => window.confirm(message),
         logger: console,
     });
@@ -175,7 +192,10 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshSession: () => opsAccessController?.refreshSession(),
         loadManagedLabs: (...args) => energyFeatureController.loadManagedLabsOnce(...args),
         checkAvailability: (...args) => checkOpsAvailability(...args),
-        loadHostInventory: (...args) => hostFeatureController.loadHostInventory(...args),
+        loadHostInventory: async (...args) => {
+            const loaded = await hostFeatureController.loadHostInventory(...args);
+            return loaded;
+        },
         loadActionableReservations: (...args) => reservationsFeatureController.loadActionableReservations(...args),
         loadActivityFeed: (...args) => loadActivityFeed(...args),
     });
@@ -193,6 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!managerState.claimTab(tabName)) return;
 
         if (tabName === 'operations') {
+            void fmuStationFeatureController.initialize();
             void operationsLifecycleController.initialize();
             return;
         }

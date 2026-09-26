@@ -707,6 +707,7 @@ services:
       - FMU_STATUS_BACKEND=${FMU_BACKEND_MODE:-station}
       - FMU_STATUS_STATION_HOST=${FMU_STATUS_STATION_HOST:-}
       - FMU_STATUS_STATION_BASE_URL=${FMU_STATUS_STATION_BASE_URL:-${FMU_STATION_BASE_URL:-}}
+      - FMU_STATION_INTERNAL_TOKEN_FILE=/run/secrets/fmu_station_internal_token
       - GUAC_API_URL=${GUAC_API_URL:-http://guacamole:8080/guacamole/api}
       - GUACAMOLE_HISTORY_LOOKBACK_SECONDS=${GUACAMOLE_HISTORY_LOOKBACK_SECONDS:-30}
       - GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS=${GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS:-300}
@@ -730,6 +731,7 @@ services:
       - ops_internal_auth_token
       - ops_secrets_key
       - lab_admin_backend_token
+      - fmu_station_internal_token
       - session_observer_signing_secret
       - guacamole_provisioner_token
       - reservation_projection_token

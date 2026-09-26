@@ -240,6 +240,8 @@ class StationFmuBackend(BaseFmuBackend):
         key = ""
         if operation == "health":
             path = "/internal/health"
+        elif operation == "capacity":
+            path = "/internal/fmu/capacity"
         elif operation in {"describe", "catalog"}:
             if access_key is None:
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
@@ -485,6 +487,7 @@ class StationFmuBackend(BaseFmuBackend):
         checks = {
             "stationConfigured": bool(self.base_url),
             "stationHealth": False,
+            "stationAuthentication": False,
         }
         fmu_count = 0
 
@@ -505,6 +508,15 @@ class StationFmuBackend(BaseFmuBackend):
                 fmu_count = 0
         except HTTPException:
             checks["stationHealth"] = False
+        else:
+            try:
+                # /internal/health is deliberately unauthenticated for local
+                # supervision.  Capacity is protected and therefore proves
+                # that the Gateway token matches the Station token.
+                await self._request_json("capacity")
+                checks["stationAuthentication"] = True
+            except HTTPException:
+                checks["stationAuthentication"] = False
 
         return {
             "status": "UP" if all(checks.values()) else "DEGRADED",

@@ -42,7 +42,7 @@ function createController(overrides = {}) {
   const candidateListEl = element();
   const candidateState = {};
   const hostRenderersController = {
-    buildHostRow: (host, state, metadata) => ({ kind: 'host', host, state, metadata }),
+    buildHostRow: (host, state, metadata, fmuState) => ({ kind: 'host', host, state, metadata, fmuState }),
     buildGuacamoleCandidateRow: (station, state) => ({ kind: 'candidate', station, state }),
   };
   const controller = loadModule().createController({
@@ -65,6 +65,7 @@ function createController(overrides = {}) {
     callbacks: {
       onConfigureCandidate: key => { overrides.events?.push(['configure', key]); },
       onProbeCandidate: async (key, station) => { overrides.events?.push(['probe', key, station]); },
+      getFmuStationState: () => overrides.fmuState || {},
     },
   });
   return { candidateState, candidateListEl, controller, hostListEl };
@@ -154,7 +155,8 @@ test('groups Lab Station candidates and remembers the first discovery draft', ()
 
 test('renders hosts and delegates candidate actions through the view controller', async () => {
   const events = [];
-  const { candidateListEl, controller, hostListEl } = createController({ events });
+  const fmuState = { configured: true, stationHost: 'host-a', linked: true };
+  const { candidateListEl, controller, hostListEl } = createController({ events, fmuState });
   const station = {
     key: 'host:station-a',
     address: 'station-a',
@@ -164,6 +166,7 @@ test('renders hosts and delegates candidate actions through the view controller'
 
   controller.renderHosts();
   assert.deepEqual(hostListEl.children.map(row => row.host), ['host-a', 'host-b']);
+  assert.deepEqual(hostListEl.children[0].fmuState, fmuState);
 
   controller.renderCandidates([station]);
   assert.equal(candidateListEl.children.length, 1);

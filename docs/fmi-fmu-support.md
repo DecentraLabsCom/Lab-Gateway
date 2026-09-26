@@ -104,6 +104,27 @@ FMU_BACKEND_MODE=station
 FMU_JWT_AUDIENCE=https://<public-gateway-origin>/fmu
 ~~~
 
+The Station channel uses one Gateway-owned internal token, not a browser
+credential or a certificate. `setup.sh`/`setup.bat` generates
+`FMU_STATION_INTERNAL_TOKEN` and synchronizes it as a Compose secret for
+`fmu-runner`, the embedded backend and `ops-worker`. Register the Station in
+the Gateway host inventory and set `FMU_STATION_BASE_URL` to its executor URL
+(`http://<station-address>:8091` by default). If the URL hostname is not the
+inventory address, set `FMU_STATUS_STATION_HOST` to the registered host name.
+
+From Lab Manager > Lab Station Ops, each configured Station row exposes a
+`Link FMU token` action for the one configured Station. Linking writes the
+token to the Windows machine-level `FMU_INTERNAL_TOKEN` variable and restarts
+`LabStation\BackgroundService` so the sidecar picks it up. Once linked, that
+row changes to `Release FMU token` and the other Station rows remain disabled.
+The token is never returned to the browser. A Gateway cannot link a second
+host: the selected host must resolve to the single Station represented by
+`FMU_STATION_BASE_URL`/`FMU_STATUS_STATION_HOST`.
+
+The panel status is authenticated end-to-end through
+`GET /internal/fmu/capacity`; the unauthenticated `/internal/health` response
+alone is not considered proof that the Gateway and Station share a token.
+
 The Station is the single operational capacity authority. Set its
 `FMU_MAX_SESSIONS` value to the effective execution limit; the provider
 backend reads `GET /internal/fmu/capacity` before FMU publication and provider

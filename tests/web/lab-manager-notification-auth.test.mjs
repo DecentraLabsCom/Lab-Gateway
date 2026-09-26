@@ -568,7 +568,7 @@ test('loads the activity controller before the Lab Manager bootstrap', () => {
   if (html.includes('lab-manager-fmu-sync-v6')) {
     assert.match(html, /lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v6/);
     assert.match(html, /lab-manager-aas-link\.js\?v=lab-manager-aas-link-v4/);
-    assert.match(html, /lab-manager-aasx\.js\?v=lab-manager-aasx-v2/);
+    assert.match(html, /lab-manager-aasx\.js\?v=lab-manager-aasx-v3/);
     assert.match(html, /lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v6/);
     assert.match(html, /lab-manager-energy-feature\.js\?v=lab-manager-energy-feature-v5/);
     assert.match(html, /lab-manager-power-policies\.js\?v=lab-manager-power-policies-v5/);
@@ -1752,7 +1752,7 @@ test('renders station identity, connection counts, operation history and WinRM t
 
   assert.match(script, /host-status-text/);
   assert.match(script, /Address: <span class="mono">\$\{safeAddress\}/);
-  assert.match(script, /Last heartbeat: \$\{safeUpdated\}/);
+  assert.match(script, /Heartbeat: \$\{safeUpdated\}/);
   assert.match(script, /Last activity:/);
   assert.match(script, /WinRM TLS trust:/);
   assert.match(script, /formatConnectionsStatus/);
@@ -1836,16 +1836,18 @@ test('renders the complete station status card with truthful empty and configure
   await new Promise((resolve) => setImmediate(resolve));
   const row = elements.get('hostList').options.at(-1);
   assert.match(row.rawInnerHTML, /Address: <span class="mono">192\.168\.1\.52<\/span>/);
-  assert.match(row.rawInnerHTML, /Last heartbeat: not available/);
+  assert.match(row.rawInnerHTML, /Heartbeat: not available/);
   assert.match(row.rawInnerHTML, />2 connections<\/span>/);
   assert.doesNotMatch(row.rawInnerHTML, /ambiguous/);
-  assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:/);
+  assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:[\s\S]*Heartbeat: not available/);
   assert.match(row.rawInnerHTML, /WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials"[^>]*>[\s\S]*<span class="host-status-text good">configured<\/span>/);
   assert.doesNotMatch(row.rawInnerHTML, /class="mini-btn" data-action="set-winrm-credentials"/);
   assert.match(row.rawInnerHTML, /WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust"[^>]*>[\s\S]*<span class="host-status-text good">ready<\/span>/);
   assert.match(row.rawInnerHTML, /Forced logoff: not available/);
   assert.match(row.rawInnerHTML, /Power action: not available/);
-  assert.match(row.rawInnerHTML, /Ready: n\/a/);
+  assert.match(row.rawInnerHTML, /class="pill bad ready-indicator"[^>]*>Not ready/);
+  assert.match(row.rawInnerHTML, /No connector readiness reported by Lab Station\./);
+  assert.doesNotMatch(row.rawInnerHTML, /Ready:/);
   assert.match(row.rawInnerHTML, /Active session: n\/a/);
   assert.match(row.rawInnerHTML, /Local mode: n\/a/);
 });

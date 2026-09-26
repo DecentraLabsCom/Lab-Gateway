@@ -95,6 +95,16 @@ The gateway exposes the public FMU facade and generated proxy artifacts. The rea
   internal FMU executor at `FMU_STATION_BASE_URL` with
   `FMU_STATION_INTERNAL_TOKEN`.
 
+The Gateway has exactly one FMU Station association. From each configured
+Station row in Lab Manager, `ops-worker` can link the Gateway-owned token onto
+that registered Windows host via WinRM; it stores the value as machine-level
+`FMU_INTERNAL_TOKEN` and restarts the Lab Station background task. The linked
+row offers `Release FMU token`, which clears the machine token and restarts the
+task again; all other Station rows remain disabled while the link exists. The
+browser receives only status and never receives the token. The runner verifies
+the protected capacity endpoint so a successful unauthenticated health probe
+cannot be mistaken for a valid token.
+
 The station executor is an internal service. Do not publish it through the
 gateway's public edge or reuse browser access tokens as its internal
 authentication token. In **Full + N Lite**, the Full backend remains the

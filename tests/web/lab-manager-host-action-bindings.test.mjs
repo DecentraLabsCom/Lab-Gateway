@@ -38,7 +38,7 @@ test('routes host operation actions without embedding service logic', () => {
       onToggleLocalMode: (...args) => events.push(['local', ...args]),
       onCredentials: host => events.push(['credentials', host]),
       onTrust: host => events.push(['trust', host]),
-      onSyncAas: host => events.push(['aas', host]),
+      onFmuStation: (...args) => events.push(['fmu', ...args]),
     },
   });
 
@@ -51,7 +51,8 @@ test('routes host operation actions without embedding service logic', () => {
   controller.handle({ target: { closest: () => createButton('toggle-local-mode') } });
   controller.handle({ target: { closest: () => createButton('set-winrm-credentials') } });
   controller.handle({ target: { closest: () => createButton('manage-winrm-trust') } });
-  controller.handle({ target: { closest: () => createButton('sync-aas') } });
+  controller.handle({ target: { closest: () => createButton('link-fmu') } });
+  controller.handle({ target: { closest: () => createButton('release-fmu') } });
 
   assert.deepEqual(JSON.parse(JSON.stringify(events)), [
     ['edit', 'station-a'],
@@ -63,8 +64,22 @@ test('routes host operation actions without embedding service logic', () => {
     ['local', 'station-a', false],
     ['credentials', 'station-a'],
     ['trust', 'station-a'],
-    ['aas', 'station-a'],
+    ['fmu', 'station-a', 'link-fmu'],
+    ['fmu', 'station-a', 'release-fmu'],
   ]);
+});
+
+test('ignores the removed host-level AAS sync action', () => {
+  const events = [];
+  const controller = loadModule().createController({
+    callbacks: {
+      onFmuStation: (...args) => events.push(['fmu', ...args]),
+    },
+  });
+
+  controller.handle({ target: { closest: () => createButton('sync-aas') } });
+
+  assert.deepEqual(events, []);
 });
 
 test('binds the delegated handler once to the host list', () => {

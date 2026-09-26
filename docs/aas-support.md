@@ -152,15 +152,16 @@ was updated.
 
 ~~~text
 POST /aas-admin/lab/{labId}/sync
-POST /api/aas-sync
 ~~~
 
 Heartbeat persistence best-effort synchronizes the TechnicalData submodel. The
 Digital Twins **Sync AAS** action synchronizes the selected physical lab and
-uses its registered metadata. For both per-lab and host-level synchronization,
-Ops Worker uses one resolver backed by the provider catalog in
+uses its registered metadata. Ops Worker uses one resolver backed by the
+provider catalog in
 `blockchain-services`: `labId → accessKey → Guacamole connection → hostname →
-unique registered host`. Neither generated physical path depends on `fmu-runner`.
+unique registered host`. The synchronization is deliberately selected by
+`labId`; a host can have multiple Guacamole connections and is not a safe AAS
+selection key. Neither generated physical path depends on `fmu-runner`.
 
 For a provider-prepared package, use:
 

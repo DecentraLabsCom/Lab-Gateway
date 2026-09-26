@@ -3,7 +3,6 @@ import worker
 
 EXPECTED_ROUTE_METHODS = {
     "/aas-admin/lab/<lab_id>/sync": {"POST"},
-    "/api/aas-sync": {"POST"},
     "/api/demo/end": {"POST"},
     "/api/demo/event": {"POST"},
     "/api/demo/start": {"POST"},
@@ -18,6 +17,9 @@ EXPECTED_ROUTE_METHODS = {
     "/api/hosts/provision": {"POST"},
     "/api/hosts/reload": {"POST"},
     "/api/hosts/winrm-credentials": {"POST"},
+    "/api/fmu/station": {"GET"},
+    "/api/fmu/station/enroll": {"POST"},
+    "/api/fmu/station/release": {"POST"},
     "/api/lab-associations": {"GET"},
     "/public/labs/status": {"GET"},
     "/api/labs/<lab_id>/power/end": {"POST"},

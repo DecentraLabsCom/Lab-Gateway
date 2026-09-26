@@ -52,6 +52,52 @@ async def test_station_health_is_degraded_when_not_configured():
 
 
 @pytest.mark.asyncio
+async def test_station_health_proves_the_internal_token_with_capacity_endpoint(monkeypatch):
+    backend = StationFmuBackend(
+        base_url="http://station.internal",
+        internal_token="fmu_" + "a" * 64,
+    )
+    calls = []
+
+    async def _fake_request(operation: str, *, access_key: str | None = None):
+        calls.append((operation, access_key))
+        if operation == "health":
+            return {"status": "UP", "fmuCount": 2}
+        if operation == "capacity":
+            return {"maxSessions": 1, "activeSessions": 0}
+        raise AssertionError(operation)
+
+    monkeypatch.setattr(backend, "_request_json", _fake_request)
+
+    payload = await backend.health()
+
+    assert payload["status"] == "UP"
+    assert payload["checks"]["stationAuthentication"] is True
+    assert calls == [("health", None), ("capacity", None)]
+
+
+@pytest.mark.asyncio
+async def test_station_health_does_not_claim_authentication_when_capacity_rejects(monkeypatch):
+    backend = StationFmuBackend(
+        base_url="http://station.internal",
+        internal_token="fmu_" + "a" * 64,
+    )
+
+    async def _fake_request(operation: str, *, access_key: str | None = None):
+        if operation == "health":
+            return {"status": "UP", "fmuCount": 2}
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    monkeypatch.setattr(backend, "_request_json", _fake_request)
+
+    payload = await backend.health()
+
+    assert payload["status"] == "DEGRADED"
+    assert payload["checks"]["stationHealth"] is True
+    assert payload["checks"]["stationAuthentication"] is False
+
+
+@pytest.mark.asyncio
 async def test_station_backend_normalizes_model_metadata(monkeypatch):
     backend = StationFmuBackend(base_url="https://station.internal")
 

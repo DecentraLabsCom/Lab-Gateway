@@ -14,7 +14,7 @@
             onToggleLocalMode = () => {},
             onCredentials = () => {},
             onTrust = () => {},
-            onSyncAas = () => {},
+            onFmuStation = () => {},
         } = callbacks;
 
         function handle(event) {
@@ -60,8 +60,8 @@
                 onTrust(host);
                 return;
             }
-            if (action === 'sync-aas') {
-                onSyncAas(host);
+            if (action === 'link-fmu' || action === 'release-fmu') {
+                onFmuStation(host, action);
             }
         }
 

@@ -29,7 +29,7 @@ def test_security_workflow_covers_actions_python_cpp_and_pip_audit():
     assert "pip-audit -r fmu-runner/requirements.txt" in security
     assert "pip-audit -r ops-worker/requirements.txt" in security
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in security
-    assert "github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938" in security
+    assert "github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63" in security
     assert "cmake --build fmu-proxy-runtime-src/build-codeql" in security
 
 

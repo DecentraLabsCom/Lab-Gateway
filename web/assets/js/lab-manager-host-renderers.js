@@ -50,6 +50,85 @@
             return states[status] || { label: 'unavailable', className: 'warn' };
         }
 
+        function normalizeFmuMatchValue(value) {
+            return String(value || '').trim().replace(/\.$/, '').toLowerCase();
+        }
+
+        function getFmuStationDisplay(host, meta, state = {}) {
+            const targetHost = normalizeFmuMatchValue(state.stationHost);
+            const targetAddress = normalizeFmuMatchValue(state.stationAddress);
+            const hostName = normalizeFmuMatchValue(host);
+            const address = normalizeFmuMatchValue(meta.address);
+            const isTarget = Boolean(targetHost && hostName === targetHost)
+                || Boolean(targetAddress && address === targetAddress);
+            const linked = state.linked === true
+                || state.runner?.stationAuthenticated === true;
+            const linkStatus = state.linkStatus
+                || (linked ? 'linked' : typeof state.linked === 'boolean' ? 'unlinked' : 'unknown');
+            const busy = Boolean(state.busyHost);
+
+            if (state.configured !== true) {
+                return {
+                    statusLabel: 'unavailable',
+                    className: 'warn',
+                    action: 'link-fmu',
+                    actionLabel: 'Link FMU token',
+                    disabled: true,
+                    title: 'Configure the Gateway FMU Station before linking a token',
+                };
+            }
+            if (linkStatus === 'unknown') {
+                return {
+                    statusLabel: 'verification unavailable',
+                    className: 'warn',
+                    action: 'link-fmu',
+                    actionLabel: 'Link FMU token',
+                    disabled: true,
+                    title: 'The Gateway cannot verify the current FMU token link',
+                };
+            }
+            if (!isTarget) {
+                return {
+                    statusLabel: linked ? 'linked on another station' : 'not this Gateway target',
+                    className: linked ? 'warn' : 'soft',
+                    action: 'link-fmu',
+                    actionLabel: 'Link FMU token',
+                    disabled: true,
+                    title: linked
+                        ? 'This Gateway already has an FMU token linked to another station'
+                        : 'This is not the FMU Station configured for this Gateway',
+                };
+            }
+            if (busy) {
+                return {
+                    statusLabel: 'updating',
+                    className: 'warn',
+                    action: linked ? 'release-fmu' : 'link-fmu',
+                    actionLabel: 'Updating FMU token...',
+                    disabled: true,
+                    title: 'FMU token operation in progress',
+                };
+            }
+            if (linked) {
+                return {
+                    statusLabel: 'linked',
+                    className: 'good',
+                    action: 'release-fmu',
+                    actionLabel: 'Release FMU token',
+                    disabled: false,
+                    title: 'Remove the FMU token from this station',
+                };
+            }
+            return {
+                statusLabel: 'not linked',
+                className: 'warn',
+                action: 'link-fmu',
+                actionLabel: 'Link FMU token',
+                disabled: false,
+                title: 'Copy the Gateway FMU token to this station',
+            };
+        }
+
         function formatHostDate(value, hasHeartbeat) {
             return value ? formatDate(value) : hasHeartbeat ? 'never' : 'not available';
         }
@@ -95,75 +174,100 @@
             return { active, detail };
         }
 
+        const readinessConnectors = [
+            { keys: ['physicalLab'], label: 'Remote app' },
+            { keys: ['fmu'], label: 'FMI/FMU' },
+            { keys: ['opcUa', 'opc-ua', 'opcua'], label: 'OPC-UA' },
+            { keys: ['tango'], label: 'TANGO' },
+            { keys: ['epics'], label: 'EPICS' },
+        ];
+
+        function getReadinessIssues(entry) {
+            return Array.isArray(entry?.issues)
+                ? entry.issues
+                    .filter(issue => typeof issue === 'string' && issue.trim())
+                    .map(issue => issue.trim())
+                : [];
+        }
+
+        function summarizeReadinessIssues(entry) {
+            const issues = getReadinessIssues(entry);
+            if (!issues.length) return 'not ready';
+            const visibleIssues = issues.slice(0, 2);
+            return visibleIssues.join('; ') + (issues.length > visibleIssues.length ? '; …' : '');
+        }
+
         function getReadinessDisplay(heartbeat, summary) {
             const readiness = heartbeat.readiness && typeof heartbeat.readiness === 'object'
                 ? heartbeat.readiness
                 : heartbeat.status?.readiness && typeof heartbeat.status.readiness === 'object'
                     ? heartbeat.status.readiness
                     : null;
-            const capabilities = [
-                { key: 'physicalLab', label: 'Physical lab' },
-                { key: 'fmu', label: 'FMU executor' },
-            ].map(capability => ({
-                ...capability,
-                value: readiness?.[capability.key],
-            }));
-            const hasCapabilityReadiness = capabilities.every(capability => (
-                capability.value && typeof capability.value.ready === 'boolean'
-            ));
+            const connectorStates = readiness
+                ? readinessConnectors
+                    .map(connector => {
+                        const key = connector.keys.find(candidate => (
+                            readiness[candidate] && typeof readiness[candidate] === 'object'
+                        ));
+                        const entry = key ? readiness[key] : null;
+                        return entry && typeof entry.ready === 'boolean'
+                            ? { ...connector, entry }
+                            : null;
+                    })
+                    .filter(Boolean)
+                : [];
 
-            if (!hasCapabilityReadiness) {
-                const ready = summary.ready;
+            const readyConnectors = connectorStates.filter(connector => connector.entry.ready);
+            if (readyConnectors.length) {
+                const unavailableConnectors = connectorStates.filter(connector => !connector.entry.ready);
+                const readyLabels = readyConnectors.map(connector => connector.label).join(' · ');
+                const unavailableDetails = unavailableConnectors.map(connector => (
+                    `${connector.label}: ${summarizeReadinessIssues(connector.entry)}`
+                ));
                 return {
-                    label: formatBool(ready),
-                    className: ready === true ? 'good' : ready === false ? 'bad' : 'soft',
-                    tooltip: '',
+                    label: readyLabels,
+                    className: 'good',
+                    tooltip: unavailableDetails.length
+                        ? `${readyLabels} ready. ${unavailableDetails.join(' ')}`
+                        : '',
                 };
             }
 
-            const readyCount = capabilities.filter(capability => capability.value.ready).length;
-            const state = readyCount === capabilities.length
-                ? 'yes'
-                : readyCount === 0
-                    ? 'no'
-                    : 'partial';
-            const missing = capabilities
-                .filter(capability => !capability.value.ready)
-                .map(capability => {
-                    const issues = Array.isArray(capability.value.issues)
-                        ? capability.value.issues.filter(issue => typeof issue === 'string' && issue.trim())
-                        : [];
-                    return `${capability.label}: ${issues.length ? issues.join('; ') : 'not ready'}`;
-                });
-            const physicalLab = capabilities.find(capability => capability.key === 'physicalLab');
-            const fmu = capabilities.find(capability => capability.key === 'fmu');
-            let tooltip = '';
-            if (physicalLab.value.ready && !fmu.value.ready) {
-                const fmuIssues = Array.isArray(fmu.value.issues)
-                    ? fmu.value.issues.filter(issue => typeof issue === 'string' && issue.trim())
-                    : [];
-                const reason = fmuIssues.length ? fmuIssues.join('; ') : 'the FMU executor is not ready';
-                tooltip = `OK for physical labs; FMI simulations are unavailable because ${reason}.`;
-            } else if (!physicalLab.value.ready && fmu.value.ready) {
-                const physicalLabIssues = Array.isArray(physicalLab.value.issues)
-                    ? physicalLab.value.issues.filter(issue => typeof issue === 'string' && issue.trim())
-                    : [];
-                const reason = physicalLabIssues.length
-                    ? physicalLabIssues.join('; ')
-                    : 'the physical lab is not ready';
-                tooltip = `FMI simulations are OK; physical labs are unavailable because ${reason}.`;
-            } else {
-                tooltip = `Partial readiness: ${missing.join(' | ')}`;
+            if (connectorStates.length) {
+                return {
+                    label: 'Not ready',
+                    className: 'bad',
+                    tooltip: connectorStates
+                        .map(connector => `${connector.label}: ${summarizeReadinessIssues(connector.entry)}`)
+                        .join(' '),
+                };
             }
 
+            // Older heartbeats only exposed summary.ready, which represented the
+            // physical/Remote App path. Keep that legacy data meaningful while
+            // using the connector vocabulary in the UI.
+            const legacyReady = typeof summary.ready === 'boolean' ? summary.ready : null;
+            if (legacyReady === true) {
+                return { label: 'Remote app', className: 'good', tooltip: '' };
+            }
+            if (legacyReady === false) {
+                const summaryIssues = getReadinessIssues(summary);
+                return {
+                    label: 'Not ready',
+                    className: 'bad',
+                    tooltip: summaryIssues.length
+                        ? `Remote app: ${summaryIssues.slice(0, 2).join('; ')}`
+                        : 'Lab Station is not ready.',
+                };
+            }
             return {
-                label: state,
-                className: state === 'yes' ? 'good' : state === 'no' ? 'bad' : 'warn',
-                tooltip: state === 'partial' ? tooltip : '',
+                label: 'Not ready',
+                className: 'bad',
+                tooltip: 'No connector readiness reported by Lab Station.',
             };
         }
 
-        function renderHostRowMarkup(host, data = {}, meta = {}) {
+        function renderHostRowMarkup(host, data = {}, meta = {}, fmuStationState = {}) {
             const guacamole = meta.guacamole || {};
             const heartbeat = data.heartbeat || {};
             const summary = heartbeat.summary || {};
@@ -180,6 +284,7 @@
             const updated = heartbeat.timestamp;
             const hasHeartbeat = Boolean(updated);
             const winrmTrust = getWinrmTrustDisplay(meta);
+            const fmuStation = getFmuStationDisplay(host, meta, fmuStationState);
 
             const safeHost = escapeHtml(host);
             const safeAddress = escapeHtml(meta.address) || 'n/a';
@@ -187,11 +292,12 @@
             const safeUpdated = escapeHtml(formatHostDate(updated, hasHeartbeat));
             const safeLastForced = escapeHtml(formatLastForcedLogoff(lastForced, hasHeartbeat));
             const safeLastPower = escapeHtml(formatLastPowerAction(lastPower, hasHeartbeat));
+            const safeReadinessLabel = escapeHtml(readiness.label);
             const safeReadinessTooltip = escapeHtml(readiness.tooltip);
             const readinessTooltipId = 'readiness-tooltip-'
                 + String(host).replace(/[^A-Za-z0-9_-]/g, '-');
             const readinessTooltipMarkup = readiness.tooltip
-                ? ` title="${safeReadinessTooltip}" tabindex="0" aria-describedby="${readinessTooltipId}" aria-label="Ready: partial. ${safeReadinessTooltip}"`
+                ? ` title="${safeReadinessTooltip}" tabindex="0" aria-describedby="${readinessTooltipId}" aria-label="${safeReadinessLabel}. ${safeReadinessTooltip}"`
                 : '';
             const readinessExplanationMarkup = readiness.tooltip
                 ? `<span class="ready-indicator-tooltip" id="${readinessTooltipId}" role="tooltip">${safeReadinessTooltip}</span>`
@@ -233,6 +339,7 @@
                     + guacamoleMatchMarkup
                     + '</span></span>'
                 : '<span class="host-status-text ' + connectionsClass + '">' + safeConnections + '</span>';
+            const fmuActionDisabled = fmuStation.disabled ? ' disabled' : '';
 
             return `
             <div>
@@ -241,14 +348,14 @@
                     ${canEdit ? '<button class="host-edit-btn" data-action="edit-host" title="Edit host" aria-label="Edit host"><svg class="host-edit-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg></button>' : ''}
                 </div>
                 <div class="host-meta host-address">Address: <span class="mono">${safeAddress}</span></div>
-                <div class="host-meta">Last heartbeat: ${safeUpdated}</div>
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
                 <div class="host-meta">WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update WinRM credentials" aria-label="Set or update WinRM credentials"><span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></button></div>
                 <div class="host-meta">WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage WinRM TLS trust" aria-label="Manage WinRM TLS trust"><span class="host-status-text ${winrmTrust.className}">${winrmTrust.label}</span></button></div>
+                <div class="host-meta">FMU token: <span class="host-status-text ${fmuStation.className}">${fmuStation.statusLabel}</span></div>
             </div>
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">
-                    <span class="pill ${readiness.className}${readiness.tooltip ? ' ready-indicator' : ''}"${readinessTooltipMarkup}>Ready: ${readiness.label}${readinessExplanationMarkup}</span>
+                    <span class="pill ${readiness.className}${readiness.tooltip ? ' ready-indicator' : ''}"${readinessTooltipMarkup}>${safeReadinessLabel}${readinessExplanationMarkup}</span>
                     <span class="pill ${activeSession === true ? 'warn' : 'soft'}${activeSessionDisplay.detail ? ' active-session-indicator' : ''}"${activeSessionTooltipMarkup}>Active session: ${formatBool(activeSession)}${activeSessionExplanationMarkup}</span>
                     <span class="pill ${localMode === true ? 'warn' : 'soft'}">Local mode: ${formatBool(localMode)}</span>
                 </div>
@@ -259,6 +366,9 @@
                         <span class="host-history-item">Power action: ${safeLastPower}</span>
                     </span>
                 </div>
+                <div class="host-meta host-history">
+                    <span class="host-history-item">Heartbeat: ${safeUpdated}</span>
+                </div>
             </div>
             <div class="host-actions">
                 <button class="mini-btn" data-action="poll" title="Check station status">Heartbeat</button>
@@ -267,7 +377,7 @@
                 <button class="mini-btn" data-action="release" title="Release station">Release</button>
                 <button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown</button>
                 <button class="mini-btn secondary" data-action="toggle-local-mode" title="${localMode ? 'Disable' : 'Enable'} local mode">${localMode ? 'Disable' : 'Enable'} Local</button>
-                <button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS</button>
+                <button class="mini-btn${fmuStation.action === 'release-fmu' ? ' danger' : ''}" data-action="${fmuStation.action}" title="${fmuStation.title}"${fmuActionDisabled}>${fmuStation.actionLabel}</button>
             </div>
         `;
         }

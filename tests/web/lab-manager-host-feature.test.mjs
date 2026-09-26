@@ -48,7 +48,6 @@ function loadFeature() {
       triggerWol: () => {},
       triggerWinrm: () => {},
       toggleLocalMode: () => {},
-      syncAasHost: () => {},
     },
     hostDiscovery: { probe: () => {} },
     winrmCredentials: {},

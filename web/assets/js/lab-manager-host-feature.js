@@ -21,6 +21,8 @@
         showOpsWarning,
         showLoadingToast = () => {},
         showToast,
+        getFmuStationState = () => ({}),
+        onFmuStation = () => {},
         confirmImpl = message => windowImpl.confirm?.(message),
         logger = console,
     }) {
@@ -247,7 +249,7 @@
                 onToggleLocalMode: (...args) => hostActionsController.toggleLocalMode(...args),
                 onCredentials: openWinrmCredentialsModal,
                 onTrust: openWinrmTrustModal,
-                onSyncAas: host => hostActionsController.syncAasHost(host),
+                onFmuStation,
             },
         });
         const hostDiscoveryController = hostDiscoveryModule.createController({
@@ -377,6 +379,7 @@
             callbacks: {
                 onConfigureCandidate: openProvisionHostModal,
                 onProbeCandidate: (...args) => hostDiscoveryController.probe(...args),
+                getFmuStationState,
             },
         });
         winrmTrustModalController = winrmTrustModalModule.createController({
@@ -465,6 +468,7 @@
             opsHintElement,
             openWinrmTrustModal,
             loadWinrmTrustState,
+            renderHosts: () => hostViewController?.renderHosts(),
         });
     }
 

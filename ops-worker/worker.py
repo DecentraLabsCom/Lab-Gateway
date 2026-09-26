@@ -159,6 +159,7 @@ from host_catalog import (
     validate_winrm_catalog as _validate_winrm_catalog_impl,
 )
 from host_registry import HostRegistry
+from fmu_station_enrollment import FmuStationConfig
 from host_config_service import (
     load_dynamic_config as _load_dynamic_config_impl,
     load_host_config as _load_host_config_impl,
@@ -583,6 +584,7 @@ FMU_STATUS_CACHE_SECONDS = _RUNTIME_POLICY.fmu_status_cache_seconds
 FMU_STATUS_BACKEND = _RUNTIME_POLICY.fmu_status_backend
 FMU_STATUS_STATION_HOST = _RUNTIME_POLICY.fmu_status_station_host
 FMU_STATUS_STATION_BASE_URL = _RUNTIME_POLICY.fmu_status_station_base_url
+FMU_STATION_INTERNAL_TOKEN = _env_or_secret_file("FMU_STATION_INTERNAL_TOKEN")
 # The Ops Worker is intentionally not a public API. OpenResty authenticates
 # the operator at the edge and injects this separate, gateway-local credential.
 OPS_INTERNAL_AUTH_TOKEN = _RUNTIME_POLICY.ops_internal_auth_token
@@ -1513,6 +1515,23 @@ _FMU_STATUS_PROBER = CachedFmuRunnerStatus(
     monotonic=time.monotonic,
 )
 fetch_fmu_runner_status = _FMU_STATUS_PROBER.get_status
+
+
+def read_fmu_runner_health() -> Dict[str, Any]:
+    """Read the detailed private runner health for Lab Manager status only."""
+    if not FMU_STATUS_URL:
+        return {}
+    try:
+        response = requests.get(
+            FMU_STATUS_URL,
+            headers={"Accept": "application/json"},
+            timeout=FMU_STATUS_TIMEOUT_SECONDS,
+            allow_redirects=False,
+        )
+        payload = response.json()
+    except Exception:  # pylint: disable=broad-except
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
 
 def build_host_inventory() -> Dict[str, Any]:
     """Build inventory while preserving the live worker patch point."""

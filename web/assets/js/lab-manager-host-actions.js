@@ -121,51 +121,10 @@
             }
         }
 
-        async function syncAasHost(host) {
-            showLoadingToast(`Syncing AAS for ${host}…`);
-            try {
-                const res = await fetchImpl('/ops/api/aas-sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ host }),
-                });
-                if (res.status === 403) {
-                    showToast('Access denied: /ops blocked by Lab Manager access policy', 'error');
-                    return;
-                }
-                if (res.status === 401) {
-                    showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
-                    return;
-                }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                const labs = data.labs || [];
-                if (!labs.length) {
-                    showToast(`AAS sync ${host}: no catalog labs resolved`, 'error');
-                    return;
-                }
-                const disabled = labs.every(l => l.disabled);
-                if (disabled) {
-                    showToast(`AAS sync ${host}: AAS not configured on this gateway`, 'error');
-                    return;
-                }
-                const errors = labs.filter(l => l.error);
-                if (errors.length) {
-                    showToast(`AAS sync ${host}: ${errors.length}/${labs.length} failed`, 'error');
-                } else {
-                    showToast(`AAS sync ${host}: ${labs.length} lab(s) synced`, 'success');
-                }
-            } catch (err) {
-                logger.error(err);
-                showToast(`AAS sync failed for ${host}: ${err.message}`, 'error');
-            }
-        }
-
         return Object.freeze({
             toggleLocalMode,
             triggerWol,
             triggerWinrm,
-            syncAasHost,
         });
     }
 

@@ -25,6 +25,7 @@
         const {
             onConfigureCandidate = () => {},
             onProbeCandidate = async () => {},
+            getFmuStationState = () => ({}),
         } = callbacks;
         const popoverClosers = new Set();
         let rawCandidates = [];
@@ -149,6 +150,7 @@
                 host,
                 hostState[host] || {},
                 hostMetadata[host] || {},
+                getFmuStationState(),
             );
             setupGuacamoleMatchPopover(row);
             setupReadinessTooltip(row);

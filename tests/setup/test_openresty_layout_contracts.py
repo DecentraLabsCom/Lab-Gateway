@@ -15,7 +15,7 @@ def test_openresty_uses_the_canonical_gateway_layout():
     nginx_config = (OPENRESTY_ROOT / "nginx.conf").read_text(encoding="utf-8")
 
     assert gateway.is_file()
-    assert len(fragments) == 22
+    assert len(fragments) == 23
     assert not legacy_files
 
     expected_names = {path.name for path in fragments}

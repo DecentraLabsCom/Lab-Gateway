@@ -361,6 +361,15 @@ if "!ops_internal_auth_token!"=="" (
 )
 call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_INTERNAL_AUTH_TOKEN" "!ops_internal_auth_token!"
 call :UpdateEnv "%ROOT_ENV_FILE%" "OPS_INTERNAL_AUTH_HEADER" "X-Ops-Internal-Token"
+call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_STATION_INTERNAL_TOKEN" fmu_station_internal_token
+if /i "!fmu_station_internal_token!"=="CHANGE_ME" set "fmu_station_internal_token="
+if "!fmu_station_internal_token!"=="" (
+    call :GenerateHex 32 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%%RANDOM%%RANDOM%%RANDOM%"
+    set "fmu_station_internal_token=fmu_!generated_hex!"
+    echo Generated FMU Station internal token.
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_STATION_INTERNAL_TOKEN" "!fmu_station_internal_token!"
 echo.
 
 echo Lab Manager Backend Allowlist

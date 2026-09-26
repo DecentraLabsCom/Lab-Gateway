@@ -103,6 +103,24 @@ runner.describe("Ops and Lab Manager access configuration", function()
         runner.assert.equals(nil, block:find("$http_x_lab_manager_token", 1, true))
     end)
 
+    runner.it("exposes the WinRM trust lifecycle methods and headers", function()
+        local conf = resolve_conf_path()
+        local block = extract_location_block(conf, "/ops/")
+
+        runner.assert.truthy(
+            block:find("Access-Control-Allow-Methods' 'GET, POST, PATCH, PUT, DELETE, OPTIONS'", 1, true),
+            "Expected /ops/ to allow the WinRM trust PUT and DELETE lifecycle"
+        )
+        runner.assert.truthy(
+            block:find("X-WinRM-Fingerprint-SHA256", 1, true),
+            "Expected /ops/ to allow the WinRM fingerprint confirmation header"
+        )
+        runner.assert.truthy(
+            block:find("X-WinRM-Trust-Ref", 1, true),
+            "Expected /ops/ to allow the host trust reference header"
+        )
+    end)
+
     runner.it("exposes Lab Manager access policy from environment", function()
         local conf = resolve_conf_path()
         local block = extract_location_block(conf, "= /lab-manager/access-policy")
