@@ -1330,6 +1330,11 @@ body {
     visibility: visible;
     transform: translateY(0);
 }
+.pill.good .ready-indicator-tooltip {
+    border-color: var(--success);
+    background: var(--success);
+    color: var(--bg);
+}
 .host-history {
     display: flex;
     flex-direction: column;

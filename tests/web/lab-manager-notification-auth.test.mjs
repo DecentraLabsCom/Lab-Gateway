@@ -1754,6 +1754,8 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(script, /Address: <span class="mono">\$\{safeAddress\}/);
   assert.match(script, /Heartbeat: \$\{safeUpdated\}/);
   assert.match(script, /Last activity:/);
+  assert.doesNotMatch(script, /FMU token:/);
+  assert.match(script, /Power action: \$\{safeLastPower\}<\/span>\s*<span class="host-history-item">Heartbeat: \$\{safeUpdated\}/);
   assert.match(script, /WinRM TLS trust:/);
   assert.match(script, /formatConnectionsStatus/);
   assert.match(script, /return 'No connections'/);
@@ -1779,6 +1781,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(styles, /\.host-state-column[\s\S]*display: flex/);
   assert.match(styles, /\.host-history[\s\S]*display: flex/);
   assert.match(styles, /\.ready-indicator-tooltip[\s\S]*position: fixed/);
+  assert.match(styles, /\.pill\.good \.ready-indicator-tooltip\s*\{[\s\S]*border-color:\s*var\(--success\)[\s\S]*background:\s*var\(--success\)[\s\S]*color:\s*var\(--bg\)/);
   assert.match(styles, /\.active-session-tooltip[\s\S]*position: fixed/);
   assert.match(hostView, /setupGuacamoleMatchPopover/);
   assert.match(hostView, /addEventListener\('mouseenter'/);
@@ -1837,9 +1840,11 @@ test('renders the complete station status card with truthful empty and configure
   const row = elements.get('hostList').options.at(-1);
   assert.match(row.rawInnerHTML, /Address: <span class="mono">192\.168\.1\.52<\/span>/);
   assert.match(row.rawInnerHTML, /Heartbeat: not available/);
+  assert.doesNotMatch(row.rawInnerHTML, /FMU token:/);
   assert.match(row.rawInnerHTML, />2 connections<\/span>/);
   assert.doesNotMatch(row.rawInnerHTML, /ambiguous/);
-  assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:[\s\S]*Heartbeat: not available/);
+  assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:[\s\S]*Power action: not available[\s\S]*Heartbeat: not available/);
+  assert.doesNotMatch(row.rawInnerHTML, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
   assert.match(row.rawInnerHTML, /WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials"[^>]*>[\s\S]*<span class="host-status-text good">configured<\/span>/);
   assert.doesNotMatch(row.rawInnerHTML, /class="mini-btn" data-action="set-winrm-credentials"/);
   assert.match(row.rawInnerHTML, /WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust"[^>]*>[\s\S]*<span class="host-status-text good">ready<\/span>/);

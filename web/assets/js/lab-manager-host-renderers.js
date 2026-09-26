@@ -219,16 +219,12 @@
 
             const readyConnectors = connectorStates.filter(connector => connector.entry.ready);
             if (readyConnectors.length) {
-                const unavailableConnectors = connectorStates.filter(connector => !connector.entry.ready);
                 const readyLabels = readyConnectors.map(connector => connector.label).join(' · ');
-                const unavailableDetails = unavailableConnectors.map(connector => (
-                    `${connector.label}: ${summarizeReadinessIssues(connector.entry)}`
-                ));
                 return {
                     label: readyLabels,
                     className: 'good',
-                    tooltip: unavailableDetails.length
-                        ? `${readyLabels} ready. ${unavailableDetails.join(' ')}`
+                    tooltip: readyConnectors.length < connectorStates.length
+                        ? `${readyLabels} ready.`
                         : '',
                 };
             }
@@ -351,7 +347,6 @@
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
                 <div class="host-meta">WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update WinRM credentials" aria-label="Set or update WinRM credentials"><span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></button></div>
                 <div class="host-meta">WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage WinRM TLS trust" aria-label="Manage WinRM TLS trust"><span class="host-status-text ${winrmTrust.className}">${winrmTrust.label}</span></button></div>
-                <div class="host-meta">FMU token: <span class="host-status-text ${fmuStation.className}">${fmuStation.statusLabel}</span></div>
             </div>
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">
@@ -364,10 +359,8 @@
                     <span class="host-history-items">
                         <span class="host-history-item">Forced logoff: ${safeLastForced}</span>
                         <span class="host-history-item">Power action: ${safeLastPower}</span>
+                        <span class="host-history-item">Heartbeat: ${safeUpdated}</span>
                     </span>
-                </div>
-                <div class="host-meta host-history">
-                    <span class="host-history-item">Heartbeat: ${safeUpdated}</span>
                 </div>
             </div>
             <div class="host-actions">

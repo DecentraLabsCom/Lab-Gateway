@@ -109,7 +109,7 @@ test('host row renderer links and releases the single FMU token target', () => {
   };
 
   const linkHtml = renderer.renderHostRowMarkup('station-fmu', {}, baseMeta, fmuState);
-  assert.match(linkHtml, /FMU token: <span class="host-status-text warn">not linked<\/span>/);
+  assert.doesNotMatch(linkHtml, /FMU token:/);
   assert.match(linkHtml, /data-action="link-fmu"[^>]*>Link FMU token<\/button>/);
 
   const linkedHtml = renderer.renderHostRowMarkup(
@@ -118,7 +118,7 @@ test('host row renderer links and releases the single FMU token target', () => {
     baseMeta,
     { ...fmuState, linked: true, linkedHost: 'station-fmu' },
   );
-  assert.match(linkedHtml, /FMU token: <span class="host-status-text good">linked<\/span>/);
+  assert.doesNotMatch(linkedHtml, /FMU token:/);
   assert.match(linkedHtml, /data-action="release-fmu"[^>]*>Release FMU token<\/button>/);
 
   const otherHtml = renderer.renderHostRowMarkup(
@@ -127,7 +127,7 @@ test('host row renderer links and releases the single FMU token target', () => {
     { address: '192.168.1.51' },
     { ...fmuState, linked: true, linkedHost: 'station-fmu' },
   );
-  assert.match(otherHtml, /linked on another station/);
+  assert.match(otherHtml, /title="This Gateway already has an FMU token linked to another station"/);
   assert.match(otherHtml, /data-action="link-fmu"[^>]* disabled>Link FMU token<\/button>/);
 
   const unknownHtml = renderer.renderHostRowMarkup(
@@ -136,7 +136,7 @@ test('host row renderer links and releases the single FMU token target', () => {
     baseMeta,
     { ...fmuState, linkStatus: 'unknown' },
   );
-  assert.match(unknownHtml, /FMU token: <span class="host-status-text warn">verification unavailable<\/span>/);
+  assert.doesNotMatch(unknownHtml, /FMU token:/);
   assert.match(unknownHtml, /data-action="link-fmu"[^>]* disabled>Link FMU token<\/button>/);
 });
 
@@ -184,7 +184,7 @@ test('host row renderer keeps legacy local-session heartbeats understandable', (
   assert.match(html, /role="tooltip">local user<\/span>/);
 });
 
-test('host row renderer shows concrete ready connectors and concise unavailable reasons', () => {
+test('host row renderer shows concrete connector states and scoped readiness reasons', () => {
   const module = loadRenderers();
   const renderer = module.createController(dependencies());
   const base = {
@@ -206,8 +206,9 @@ test('host row renderer shows concrete ready connectors and concise unavailable 
   assert.match(remoteAppHtml, /class="pill good ready-indicator"[^>]*>Remote app/);
   assert.match(
     remoteAppHtml,
-    /Remote app ready\. FMI\/FMU: FMU executor is not running/,
+    /Remote app ready\./,
   );
+  assert.doesNotMatch(remoteAppHtml, /FMI\/FMU|FMU executor is not running/);
   assert.doesNotMatch(remoteAppHtml, /Ready:/);
   assert.match(remoteAppHtml, /role="tooltip"/);
 
@@ -221,7 +222,8 @@ test('host row renderer shows concrete ready connectors and concise unavailable 
     },
   }, {});
   assert.match(fmuHtml, /class="pill good ready-indicator"[^>]*>FMI\/FMU/);
-  assert.match(fmuHtml, /FMI\/FMU ready\. Remote app: WinRM not ready/);
+  assert.match(fmuHtml, /FMI\/FMU ready\./);
+  assert.doesNotMatch(fmuHtml, /Remote app: WinRM not ready/);
   assert.doesNotMatch(fmuHtml, /Ready:/);
 
   const allConnectorsHtml = renderer.renderHostRowMarkup('station-all-connectors', {
@@ -276,6 +278,8 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
   assert.match(html, /Address: <span class="mono">n\/a<\/span>/);
   assert.match(html, /Heartbeat: not available/);
   assert.doesNotMatch(html, /Last heartbeat:/);
+  assert.match(html, /Last activity:[\s\S]*Forced logoff: not available[\s\S]*Power action: not available[\s\S]*Heartbeat: not available/);
+  assert.doesNotMatch(html, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
   assert.match(html, /Forced logoff: not available/);
   assert.match(html, /Connections: <span class="host-status-text bad">No connections<\/span>/);
   assert.match(html, /WinRM credentials:[\s\S]*class="host-status-text warn">missing/);
