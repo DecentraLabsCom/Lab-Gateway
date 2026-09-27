@@ -20,17 +20,15 @@ def build_labstation_command(
 ) -> Tuple[Any, List[Any]]:
     """Return the executable and ordered arguments for ``run_cmd``.
 
-    pywinrm sends the executable and arguments in separate WinRM fields, but
-    the default WinRM command shell still parses the resulting command line.
-    Quote the executable when its path needs one command-line token, and quote
-    arguments when they contain spaces or shell metacharacters.
+    The caller executes this through pywinrm's direct WinRS process mode, so
+    the executable must remain an unquoted path. Arguments still need Windows
+    command-line quoting when they contain spaces or shell metacharacters.
     """
     executable_text = str(executable).strip()
     if len(executable_text) >= 2 and executable_text[0] == executable_text[-1] == '"':
         executable_text = executable_text[1:-1]
-    quoted_executable = _quote_winrm_token(executable_text)
     quoted_args = [_quote_winrm_token(arg) for arg in args]
-    return quoted_executable, [command] + quoted_args
+    return executable_text, [command] + quoted_args
 
 
 def build_read_remote_file_command(path: Any) -> str:

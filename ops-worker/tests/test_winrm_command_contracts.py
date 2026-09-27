@@ -60,7 +60,7 @@ def test_run_labstation_command_contract_preserves_dependencies_payload_and_resu
     )
     assert calls["run_method"] == (
         session,
-        "run_cmd",
+        "run_cmd_direct",
         r"C:\LabStation\LabStation.exe",
         ["status-json", "--json"],
     )

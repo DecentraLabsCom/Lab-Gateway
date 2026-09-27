@@ -60,7 +60,7 @@ def run_labstation_command(
         operation_timeout_sec=operation_timeout_sec,
     )
     executable, command_args = build_command(executable, command, command_args)
-    result = run_method(session, "run_cmd", executable, command_args)
+    result = run_method(session, "run_cmd_direct", executable, command_args)
     duration_ms = int((clock() - start) * 1000)
 
     return {
