@@ -76,7 +76,7 @@
                     applyHeartbeatData(host, data);
                     delete heartbeatStreamErrorShown[host];
                     renderHosts();
-                    loadActivityFeed();
+                    loadActivityFeed(false, { preserveLoaded: true });
                 } catch (err) {
                     logger.warn('Heartbeat SSE parse failed', err);
                 }
@@ -236,7 +236,7 @@
                 }
                 applyHeartbeatData(host, data);
                 renderHosts();
-                loadActivityFeed();
+                loadActivityFeed(false, { preserveLoaded: true });
                 if (!silent) showToast(`Heartbeat ${host} ok`, 'success');
                 return data;
             } catch (err) {

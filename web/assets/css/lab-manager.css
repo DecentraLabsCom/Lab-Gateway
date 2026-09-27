@@ -856,7 +856,12 @@ body {
 }
 
 .list { display: flex; flex-direction: column; gap: 10px; }
-.fixed-height { max-height: 260px; overflow-y: auto; }
+.fixed-height {
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 4px;
+    overscroll-behavior: contain;
+}
 .reservation-card {
     display: flex;
     flex-direction: column;
@@ -871,9 +876,30 @@ body {
     padding-right: 4px;
     overscroll-behavior: contain;
 }
-.reservation-list::-webkit-scrollbar { width: 10px; }
-.reservation-list::-webkit-scrollbar-track { background: #0d1220; border-radius: 999px; }
-.reservation-list::-webkit-scrollbar-thumb {
+.fixed-height::-webkit-scrollbar,
+.multi-select-menu::-webkit-scrollbar,
+.reservation-list::-webkit-scrollbar,
+.host-list::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.table-wrap::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+.fixed-height::-webkit-scrollbar-track,
+.multi-select-menu::-webkit-scrollbar-track,
+.reservation-list::-webkit-scrollbar-track,
+.host-list::-webkit-scrollbar-track,
+.modal-body::-webkit-scrollbar-track,
+.table-wrap::-webkit-scrollbar-track {
+    background: #0d1220;
+    border-radius: 999px;
+}
+.fixed-height::-webkit-scrollbar-thumb,
+.multi-select-menu::-webkit-scrollbar-thumb,
+.reservation-list::-webkit-scrollbar-thumb,
+.host-list::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb,
+.table-wrap::-webkit-scrollbar-thumb {
     background: var(--primary-2);
     border: 2px solid #0d1220;
     border-radius: 999px;
@@ -1121,20 +1147,6 @@ body {
     padding-right: 4px;
 }
 
-.host-list::-webkit-scrollbar {
-    width: 10px;
-}
-
-.host-list::-webkit-scrollbar-track {
-    background: #0d1220;
-    border-radius: 999px;
-}
-
-.host-list::-webkit-scrollbar-thumb {
-    background: var(--primary-2);
-    border: 2px solid #0d1220;
-    border-radius: 999px;
-}
 .host-row {
     border: 1px solid var(--border);
     border-radius: 12px;

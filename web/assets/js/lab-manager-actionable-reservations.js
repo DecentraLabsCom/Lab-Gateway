@@ -59,6 +59,13 @@
             statusEl.className = `pill ${type || 'soft'}`;
         }
 
+        function setLoadMoreButtonLoading(loading) {
+            const button = listEl?.querySelector?.('[data-action="load-more-actionable"]');
+            if (!button) return;
+            button.disabled = loading;
+            button.textContent = loading ? 'Loading…' : 'Load more';
+        }
+
         function render() {
             if (!listEl) return;
             if (!state.reservations.length) {
@@ -70,6 +77,7 @@
 
         async function load({ append = false, skipAuthPrompt = false, notify = false } = {}) {
             if (!listEl || state.loading) return;
+            const previousScrollTop = append ? listEl.scrollTop : null;
             if (!append) {
                 state.reservations = [];
                 state.offset = 0;
@@ -81,6 +89,7 @@
             }
             state.loading = true;
             setStatus(append ? 'Loading more...' : 'Loading...', 'soft');
+            if (append) setLoadMoreButtonLoading(true);
             try {
                 const params = new URLSearchParams({
                     limit: String(pageSize),
@@ -146,6 +155,7 @@
                         ? body.hasMore
                         : Boolean(body.truncated);
                 render();
+                if (previousScrollTop !== null) listEl.scrollTop = previousScrollTop;
                 const loadedCount = state.reservations.length;
                 const totalCount = state.totalKnown ? state.total : loadedCount;
                 const status = state.hasMore
@@ -158,10 +168,12 @@
             } catch (err) {
                 logger.error(err);
                 if (!append) renderMessage('Unable to load actionable reservations.');
+                if (append) setLoadMoreButtonLoading(false);
                 setStatus('Unavailable', 'bad');
                 if (notify) showToast(`Reservations load failed: ${err.message}`, 'error');
             } finally {
                 state.loading = false;
+                if (append) setLoadMoreButtonLoading(false);
             }
         }
 

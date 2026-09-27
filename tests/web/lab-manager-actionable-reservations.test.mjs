@@ -15,12 +15,13 @@ function loadModule() {
 }
 
 function element(overrides = {}) {
-  return {
+  let innerHTML = '';
+  const result = {
     value: '',
     textContent: '',
-    innerHTML: '',
     className: '',
     disabled: false,
+    scrollTop: 0,
     listeners: {},
     classList: { add() {}, remove() {} },
     addEventListener(type, handler) {
@@ -29,6 +30,14 @@ function element(overrides = {}) {
     contains: () => true,
     ...overrides,
   };
+  Object.defineProperty(result, 'innerHTML', {
+    get: () => innerHTML,
+    set: value => {
+      innerHTML = String(value ?? '');
+      result.scrollTop = 0;
+    },
+  });
+  return result;
 }
 
 function response(body, status = 200) {
@@ -84,6 +93,7 @@ test('loads actionable reservations and preserves offset/cursor pagination state
   const controller = module.createController(deps);
 
   await controller.load();
+  deps.listEl.scrollTop = 120;
   await controller.load({ append: true });
 
   assert.match(requests[0], /limit=100/);
@@ -91,6 +101,7 @@ test('loads actionable reservations and preserves offset/cursor pagination state
   assert.match(requests[1], /offset=1/);
   assert.match(requests[1], /cursor=cursor-2/);
   assert.equal(deps.listEl.innerHTML, 'reservation-1,reservation-2');
+  assert.equal(deps.listEl.scrollTop, 120);
   assert.equal(controller.getState().reservations.length, 2);
   assert.equal(controller.getState().hasMore, false);
 });

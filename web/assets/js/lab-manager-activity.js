@@ -26,6 +26,7 @@
             operations: [],
             pagination: null,
             loading: false,
+            loadMoreButton: null,
         };
 
         function getActivityFeed() {
@@ -40,20 +41,36 @@
         }
 
         async function loadActivityFeed(append = false, options = {}) {
-            const { notify = false, ...requestOptions } = options;
+            const { notify = false, preserveLoaded = false, ...requestOptions } = options;
             const activityFeed = getActivityFeed();
-            if (!activityFeed) return;
-            if (!append) {
+            if (!activityFeed || state.loading) return;
+            const preserveExisting = !append && preserveLoaded && state.operations.length > 0;
+            const previousScrollTop = append || preserveExisting
+                ? activityFeed.scrollTop
+                : null;
+            const requestOffset = append ? state.offset : 0;
+            const requestLimit = preserveExisting
+                ? Math.max(state.limit, state.operations.length)
+                : state.limit;
+            if (!append && !preserveExisting) {
                 state.offset = 0;
                 state.operations = [];
                 state.pagination = null;
             }
             state.loading = true;
-            activityFeed.innerHTML = '<div class="empty">Loading recent operations...</div>';
+            if (append || preserveExisting) {
+                if (state.loadMoreButton) {
+                    state.loadMoreButton.disabled = true;
+                    state.loadMoreButton.textContent = 'Loading…';
+                }
+            } else {
+                state.loadMoreButton = null;
+                activityFeed.innerHTML = '<div class="empty">Loading recent operations...</div>';
+            }
             try {
                 const params = new URLSearchParams({
-                    limit: String(state.limit),
-                    offset: String(state.offset),
+                    limit: String(requestLimit),
+                    offset: String(requestOffset),
                 });
                 const body = await loadJson(`/ops/api/operations/recent?${params.toString()}`, {
                     credentials: 'include',
@@ -65,17 +82,24 @@
                     : entries;
                 state.pagination = normalizePagination(
                     body.pagination,
-                    state.offset,
+                    requestOffset,
                     entries.length,
-                    state.limit,
+                    requestLimit,
                 );
                 state.offset = state.pagination.nextOffset;
                 state.loading = false;
                 renderActivityFeed();
+                if (previousScrollTop !== null) activityFeed.scrollTop = previousScrollTop;
                 if (notify) showToast(append ? 'More activity loaded' : 'Activity loaded', 'success');
             } catch (error) {
                 logger.error(error);
-                activityFeed.innerHTML = `<div class="empty">Unable to load activity: ${escapeHtml(error.message)}</div>`;
+                state.loading = false;
+                if (append || preserveExisting) {
+                    renderActivityFeed();
+                    if (previousScrollTop !== null) activityFeed.scrollTop = previousScrollTop;
+                } else {
+                    activityFeed.innerHTML = `<div class="empty">Unable to load activity: ${escapeHtml(error.message)}</div>`;
+                }
                 if (notify) showToast(`Activity load failed: ${error.message}`, 'error');
             } finally {
                 state.loading = false;
@@ -85,6 +109,7 @@
         function renderActivityFeed() {
             const activityFeed = getActivityFeed();
             if (!activityFeed) return;
+            state.loadMoreButton = null;
             if (!state.operations.length) {
                 activityFeed.innerHTML = '<div class="empty">No recent activity available yet.</div>';
                 return;
@@ -105,17 +130,16 @@
             footer.className = 'activity-pagination';
             const summary = document.createElement('div');
             summary.className = 'activity-meta';
-            const start = pagination.returned ? pagination.offset + 1 : pagination.offset;
-            const end = pagination.offset + pagination.returned;
+            const loadedCount = state.operations.length;
             summary.textContent = pagination.total
-                ? `Showing ${start}-${end} of ${pagination.total}`
+                ? `Showing 1-${loadedCount} of ${pagination.total}`
                 : `Showing ${pagination.returned} entr${pagination.returned === 1 ? 'y' : 'ies'}`;
             footer.appendChild(summary);
             if (pagination.hasMore) {
                 const button = document.createElement('button');
                 button.type = 'button';
                 button.className = 'mini-btn primary';
-                button.textContent = 'Load more';
+                button.textContent = state.loading ? 'Loading…' : 'Load more';
                 button.disabled = state.loading;
                 button.addEventListener('click', () => {
                     if (!state.loading) {
@@ -123,6 +147,7 @@
                     }
                 });
                 footer.appendChild(button);
+                state.loadMoreButton = button;
             }
             return footer;
         }

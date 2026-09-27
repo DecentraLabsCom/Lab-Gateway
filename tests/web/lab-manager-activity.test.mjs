@@ -14,6 +14,7 @@ function createElement(tagName = 'div') {
     children: [],
     className: '',
     disabled: false,
+    scrollTop: 0,
     textContent: '',
     type: '',
     appendChild(child) {
@@ -32,6 +33,7 @@ function createElement(tagName = 'div') {
     set: (value) => {
       innerHTML = String(value ?? '');
       element.children = [];
+      element.scrollTop = 0;
     },
   });
   return element;
@@ -103,9 +105,11 @@ test('loads and appends activity pages without changing request options', async 
   assert.equal(calls[0].options.skipAuthPrompt, true);
   assert.equal(activityFeed.children.length, 2);
   assert.match(activityFeed.children[0].innerHTML, /&lt;unsafe&gt;/);
+  assert.equal(activityFeed.children[1].children[0].textContent, 'Showing 1-1 of 2');
 
   const loadMoreButton = activityFeed.children[1].children[1];
   assert.equal(loadMoreButton.disabled, false);
+  activityFeed.scrollTop = 120;
   loadMoreButton.click();
   await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
 
@@ -115,7 +119,58 @@ test('loads and appends activity pages without changing request options', async 
   assert.match(activityFeed.children[1].innerHTML, /stop/);
   assert.equal(activityFeed.children[2].className, 'activity-pagination');
   assert.equal(activityFeed.children[2].children.length, 1);
+  assert.equal(activityFeed.children[2].children[0].textContent, 'Showing 1-2 of 2');
+  assert.equal(activityFeed.scrollTop, 120);
   assert.deepEqual(toasts, [{ message: 'More activity loaded', type: 'success' }]);
+});
+
+test('preserves loaded activity pages and scroll position during background refresh', async () => {
+  const calls = [];
+  const firstPage = Array.from({ length: 8 }, (_, index) => ({
+    action: `operation-${index + 1}`,
+    status: 'ok',
+    host: 'host-1',
+    createdAt: '2026-09-12T10:00:00Z',
+    message: 'done',
+  }));
+  const secondPage = Array.from({ length: 5 }, (_, index) => ({
+    action: `operation-${index + 9}`,
+    status: 'ok',
+    host: 'host-1',
+    createdAt: '2026-09-12T11:00:00Z',
+    message: 'done',
+  }));
+  const refreshedOperations = [...firstPage, ...secondPage];
+  const pages = [
+    {
+      operations: firstPage,
+      pagination: { limit: 8, total: 13, nextOffset: 8, hasMore: true },
+    },
+    {
+      operations: secondPage,
+      pagination: { limit: 8, total: 13, nextOffset: 13, hasMore: false },
+    },
+    {
+      operations: refreshedOperations,
+      pagination: { limit: 13, total: 13, nextOffset: 13, hasMore: false },
+    },
+  ];
+  const { activityFeed, controller } = loadActivityController({
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      return { ok: true, status: 200, json: async () => pages.shift() };
+    },
+  });
+
+  await controller.loadActivityFeed();
+  await controller.loadActivityFeed(true);
+  activityFeed.scrollTop = 90;
+  await controller.loadActivityFeed(false, { preserveLoaded: true });
+
+  assert.equal(calls[2], '/ops/api/operations/recent?limit=13&offset=0');
+  assert.equal(activityFeed.children.length, 14);
+  assert.equal(activityFeed.children[13].children[0].textContent, 'Showing 1-13 of 13');
+  assert.equal(activityFeed.scrollTop, 90);
 });
 
 test('renders escaped activity errors without leaking server text', async () => {
