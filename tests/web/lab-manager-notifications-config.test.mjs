@@ -107,6 +107,18 @@ test('hydrates notification configuration and omits blank secrets from payloads'
   });
 });
 
+test('uses the Lab Gateway timezone when no notification timezone is configured', () => {
+  const { controller, fields } = loadController();
+
+  controller.populateTimezones();
+  controller.applyConfig({});
+
+  assert.equal(fields.timezone.options[0].value, '');
+  assert.equal(fields.timezone.options[0].label, 'Use Lab Gateway timezone');
+  assert.equal(fields.timezone.value, '');
+  assert.equal(controller.buildPayload().timezone, '');
+});
+
 test('uses Graph fields and disables notifications for the NOOP driver', () => {
   const { controller, fields } = loadController();
 

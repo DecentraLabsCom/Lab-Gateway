@@ -1,4 +1,42 @@
 (function (global) {
+    const DEFAULT_TIMEZONES = [
+        'UTC',
+        'Europe/Madrid',
+        'Europe/London',
+        'Europe/Paris',
+        'Europe/Berlin',
+        'Europe/Rome',
+        'Europe/Amsterdam',
+        'America/New_York',
+        'America/Chicago',
+        'America/Denver',
+        'America/Los_Angeles',
+        'America/Mexico_City',
+        'America/Bogota',
+        'America/Sao_Paulo',
+        'America/Argentina/Buenos_Aires',
+        'Africa/Johannesburg',
+        'Asia/Tokyo',
+        'Asia/Seoul',
+        'Asia/Shanghai',
+        'Asia/Singapore',
+        'Asia/Kolkata',
+        'Australia/Sydney',
+        'Pacific/Auckland',
+    ];
+
+    function resolveSupportedTimezones() {
+        if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+            try {
+                const values = Intl.supportedValuesOf('timeZone');
+                if (Array.isArray(values) && values.length > 0) return values;
+            } catch {
+                // Fall through to the small compatibility list.
+            }
+        }
+        return DEFAULT_TIMEZONES;
+    }
+
     function createController({
         fields,
         commonTimezones = [],
@@ -11,7 +49,7 @@
             fields.from.value = cfg.from || '';
             fields.fromName.value = cfg.fromName || '';
             fields.defaultTo.value = (cfg.defaultTo || []).join(', ');
-            setTimezone(cfg.timezone || browserTimezone);
+            setTimezone(cfg.timezone || '');
 
             const smtp = cfg.smtp || {};
             fields.smtpHost.value = smtp.host || '';
@@ -83,31 +121,36 @@
 
         function populateTimezones() {
             fields.timezone.innerHTML = '';
-            const primary = createOption(`Auto (browser: ${browserTimezone})`, browserTimezone);
+            const primary = createOption('Use Lab Gateway timezone', '');
             fields.timezone.appendChild(primary);
-            const unique = Array.from(new Set([browserTimezone, ...commonTimezones])).sort();
+            const unique = Array.from(new Set([
+                'UTC',
+                browserTimezone,
+                ...commonTimezones,
+                ...resolveSupportedTimezones(),
+            ])).sort();
             unique.forEach(timezone => {
-                if (timezone === browserTimezone) return;
                 fields.timezone.appendChild(createOption(timezone, timezone));
             });
         }
 
         function setTimezone(timezone) {
-            if (!timezone) {
-                fields.timezone.value = browserTimezone;
+            const normalizedTimezone = String(timezone || '');
+            if (!normalizedTimezone) {
+                fields.timezone.value = '';
                 return;
             }
             let found = false;
             for (const option of fields.timezone.options) {
-                if (option.value === timezone) {
+                if (option.value === normalizedTimezone) {
                     found = true;
                     break;
                 }
             }
             if (!found) {
-                fields.timezone.appendChild(createOption(`${timezone} (config)`, timezone));
+                fields.timezone.appendChild(createOption(`${normalizedTimezone} (config)`, normalizedTimezone));
             }
-            fields.timezone.value = timezone;
+            fields.timezone.value = normalizedTimezone;
         }
 
         return {

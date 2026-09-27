@@ -36,7 +36,8 @@ POST /billing/admin/notifications/send
 - `Delivery`: `NOOP`, `SMTP`, or `GRAPH`;
 - `From (email)` and `From Name`;
 - `Recipients (comma separated)` as default recipients;
-- `Timezone` used when creating messages and ICS events; and
+- `Timezone` used when creating messages and ICS events; choose `Use Lab
+  Gateway timezone` to follow the Gateway/container timezone; and
 - `Enabled`.
 
 Driver-specific credentials and parameters are opened through `Configure`.
@@ -111,7 +112,8 @@ NOTIFICATIONS_MAIL_DRIVER=noop
 NOTIFICATIONS_MAIL_FROM=
 NOTIFICATIONS_MAIL_FROM_NAME=Lab Gateway
 NOTIFICATIONS_MAIL_DEFAULT_TO=
-NOTIFICATIONS_MAIL_TIMEZONE=UTC
+# Leave blank to use the Lab Gateway/container timezone.
+NOTIFICATIONS_MAIL_TIMEZONE=
 NOTIFICATIONS_MAIL_SMTP_HOST=
 NOTIFICATIONS_MAIL_SMTP_PORT=587
 NOTIFICATIONS_MAIL_SMTP_USERNAME=

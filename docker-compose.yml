@@ -14,6 +14,9 @@ services:
       # Server name for URL resolution (WebAuthn rpId, issuer URLs, etc.)
       - SERVER_NAME=${SERVER_NAME}
       - HTTPS_PORT=${HTTPS_PORT:-443}
+      # Keep the backend's default notification timezone aligned with the Gateway.
+      - TZ=${TZ:-UTC}
+      - JAVA_TOOL_OPTIONS=-Duser.timezone=${TZ:-UTC}
       # Keep the Gateway's Full/Lite decision visible to the embedded backend
       # when BLOCKCHAIN_SERVICES_ENABLED is left at auto.
       - ISSUER=${ISSUER:-}
