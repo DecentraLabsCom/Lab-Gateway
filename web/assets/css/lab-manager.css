@@ -812,6 +812,23 @@ body {
     color: var(--muted);
     font-size: 0.9rem;
 }
+.wake-ops-spinner {
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    margin-right: 0.45em;
+    vertical-align: -0.1em;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: wake-ops-spin 0.8s linear infinite;
+}
+@keyframes wake-ops-spin {
+    to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .wake-ops-spinner { animation: none; }
+}
 
 .subcard {
     background: #0f1422;

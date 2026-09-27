@@ -59,6 +59,7 @@
         const { showToast = () => {} } = callbacks;
         let activeHost = '';
         let currentData = {};
+        let manualWakeInFlight = false;
 
         function hostUrl(host, suffix = '') {
             return `/ops/api/wake-ops/${encodeURIComponent(host)}${suffix}`;
@@ -204,14 +205,26 @@
         }
 
         async function manualWake() {
-            if (!activeHost) return false;
-            if (fields.wakeButton) fields.wakeButton.disabled = true;
-            if (fields.status) fields.status.textContent = `Sending Wake to ${activeHost}...`;
+            if (!activeHost || manualWakeInFlight) return false;
+
+            manualWakeInFlight = true;
+            const wakeButton = fields.wakeButton;
+            const previousWakeButtonMarkup = wakeButton?.innerHTML || '<i class="fas fa-bolt"></i> Wake';
+            const successMessage = `Manual Wake completed for ${activeHost}`;
+            const pendingMessage = `Sending Wake to ${activeHost}...`;
+            if (wakeButton) {
+                wakeButton.disabled = true;
+                wakeButton.innerHTML = '<span class="wake-ops-spinner" aria-hidden="true"></span><span>Sending Wake...</span>';
+                wakeButton.setAttribute?.('aria-busy', 'true');
+            }
+            if (fields.status) fields.status.textContent = pendingMessage;
+            showToast(pendingMessage, 'loading');
             try {
                 const result = await requestJson(hostUrl(activeHost, '/wake'), { method: 'POST' });
                 if (!result.success) throw new Error(result.message || 'Wake failed');
-                showToast(`Manual Wake completed for ${activeHost}`, 'success');
                 await load(activeHost);
+                if (fields.status) fields.status.textContent = successMessage;
+                showToast(successMessage, 'success');
                 return true;
             } catch (err) {
                 logger.error(err);
@@ -219,7 +232,12 @@
                 if (fields.status) fields.status.textContent = `Manual Wake not completed: ${err.message}`;
                 return false;
             } finally {
-                if (fields.wakeButton) fields.wakeButton.disabled = false;
+                if (wakeButton) {
+                    wakeButton.disabled = false;
+                    wakeButton.innerHTML = previousWakeButtonMarkup;
+                    wakeButton.removeAttribute?.('aria-busy');
+                }
+                manualWakeInFlight = false;
             }
         }
 

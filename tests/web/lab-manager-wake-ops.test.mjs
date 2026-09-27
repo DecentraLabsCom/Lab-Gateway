@@ -49,7 +49,7 @@ function fields() {
     }),
     status: field(),
     saveButton: field({ disabled: false }),
-    wakeButton: field({ disabled: false }),
+    wakeButton: field({ disabled: false, innerHTML: '<i class="fas fa-bolt"></i> Wake' }),
   };
 }
 
@@ -145,6 +145,71 @@ test('keeps manual Wake separate from weekly schedule changes and reports eviden
   assert.match(form.status.textContent, /manual Wake|evidence/i);
 });
 
+test('shows a spinner and loading toast until a manual Wake succeeds', async () => {
+  const module = loadModule();
+  const form = fields();
+  const events = [];
+  let resolveWake;
+  const wakeResponse = new Promise(resolve => { resolveWake = resolve; });
+  const controller = module.createController({
+    fields: form,
+    documentImpl: documentImpl(),
+    fetchImpl: async (url) => {
+      if (url.endsWith('/wake')) return wakeResponse;
+      return response({
+        schedule: { enabled: true, dayOfWeek: 6, hour: 8, minute: 0, timezone: 'UTC' },
+        evidence: { state: 'verified', ageSeconds: 0, validForSeconds: 604800 },
+      });
+    },
+    callbacks: { showToast: (...args) => events.push(args) },
+  });
+
+  await controller.open('station-7');
+  const wakePromise = controller.manualWake();
+
+  assert.equal(form.wakeButton.disabled, true);
+  assert.match(form.wakeButton.innerHTML, /wake-ops-spinner/);
+  assert.equal(form.status.textContent, 'Sending Wake to station-7...');
+  assert.deepEqual(events.at(-1), ['Sending Wake to station-7...', 'loading']);
+
+  resolveWake(response({ success: true }));
+  assert.equal(await wakePromise, true);
+  assert.equal(form.wakeButton.disabled, false);
+  assert.equal(form.wakeButton.innerHTML, '<i class="fas fa-bolt"></i> Wake');
+  assert.equal(form.status.textContent, 'Manual Wake completed for station-7');
+  assert.deepEqual(events.at(-1), ['Manual Wake completed for station-7', 'success']);
+});
+
+test('replaces the loading message with an error when manual Wake fails', async () => {
+  const module = loadModule();
+  const form = fields();
+  const events = [];
+  const controller = module.createController({
+    fields: form,
+    documentImpl: documentImpl(),
+    fetchImpl: async (url) => {
+      if (url.endsWith('/wake')) return response({ success: false, message: 'Station did not respond' });
+      return response({
+        schedule: { enabled: true, dayOfWeek: 6, hour: 8, minute: 0, timezone: 'UTC' },
+        evidence: { state: 'unknown', validForSeconds: 604800 },
+      });
+    },
+    callbacks: { showToast: (...args) => events.push(args) },
+    logger: { error: () => {} },
+  });
+
+  await controller.open('station-7');
+  assert.equal(await controller.manualWake(), false);
+
+  assert.equal(form.wakeButton.disabled, false);
+  assert.equal(form.wakeButton.innerHTML, '<i class="fas fa-bolt"></i> Wake');
+  assert.equal(form.status.textContent, 'Manual Wake not completed: Station did not respond');
+  assert.deepEqual(events.slice(-2), [
+    ['Sending Wake to station-7...', 'loading'],
+    ['Manual Wake failed for station-7: Station did not respond', 'error'],
+  ]);
+});
+
 test('reports Wake Ops loading errors in English', async () => {
   const module = loadModule();
   const form = fields();
@@ -172,4 +237,5 @@ test('keeps the Wake Ops dialog in English and uses the standard toggle layout',
   assert.match(html, /<select id="wakeOpsTimezone"><\/select>/);
   assert.doesNotMatch(html, /Activar verificaci|La evidencia de WoL es|Hora local|Zona horaria del Lab Gateway/);
   assert.match(css, /\.wake-ops-enabled-field\s*\{[\s\S]*?flex-direction:\s*column;/);
+  assert.match(css, /\.wake-ops-spinner\s*\{[\s\S]*?animation:\s*wake-ops-spin/);
 });

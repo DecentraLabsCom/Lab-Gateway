@@ -105,6 +105,7 @@ test('loads and appends activity pages without changing request options', async 
   assert.match(activityFeed.children[0].innerHTML, /&lt;unsafe&gt;/);
 
   const loadMoreButton = activityFeed.children[1].children[1];
+  assert.equal(loadMoreButton.disabled, false);
   loadMoreButton.click();
   await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
 

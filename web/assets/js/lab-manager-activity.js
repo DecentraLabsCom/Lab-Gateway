@@ -70,6 +70,7 @@
                     state.limit,
                 );
                 state.offset = state.pagination.nextOffset;
+                state.loading = false;
                 renderActivityFeed();
                 if (notify) showToast(append ? 'More activity loaded' : 'Activity loaded', 'success');
             } catch (error) {
