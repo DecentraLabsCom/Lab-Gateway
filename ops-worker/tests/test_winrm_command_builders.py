@@ -12,14 +12,25 @@ def test_labstation_command_builder_preserves_executable_and_argument_order():
     )
 
 
-def test_labstation_command_builder_quotes_executable_paths_with_spaces():
+def test_labstation_command_builder_preserves_executable_paths_with_spaces():
     assert winrm_command_builders.build_labstation_command(
         r"C:\Lab Station\LabStation.exe",
         "prepare-session",
         ["--guard-grace=90"],
     ) == (
-        r'"C:\Lab Station\LabStation.exe"',
+        r"C:\Lab Station\LabStation.exe",
         ["prepare-session", "--guard-grace=90"],
+    )
+
+
+def test_labstation_command_builder_removes_legacy_outer_executable_quotes():
+    assert winrm_command_builders.build_labstation_command(
+        r'"C:\Lab Station\LabStation.exe"',
+        "power",
+        ["shutdown"],
+    ) == (
+        r"C:\Lab Station\LabStation.exe",
+        ["power", "shutdown"],
     )
 
 
