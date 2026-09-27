@@ -18,7 +18,7 @@ def test_labstation_command_builder_preserves_executable_paths_with_spaces():
         "prepare-session",
         ["--guard-grace=90"],
     ) == (
-        r"C:\Lab Station\LabStation.exe",
+        r'"C:\Lab Station\LabStation.exe"',
         ["prepare-session", "--guard-grace=90"],
     )
 
@@ -29,7 +29,7 @@ def test_labstation_command_builder_removes_legacy_outer_executable_quotes():
         "power",
         ["shutdown"],
     ) == (
-        r"C:\Lab Station\LabStation.exe",
+        r'"C:\Lab Station\LabStation.exe"',
         ["power", "shutdown"],
     )
 
