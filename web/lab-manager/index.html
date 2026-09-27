@@ -1165,6 +1165,62 @@
         </div>
     </div>
 
+    <div class="modal" id="wakeOpsModal" role="dialog" aria-modal="true" aria-labelledby="wakeOpsModalTitle">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="wakeOpsModalTitle"><i class="fas fa-power-off"></i> Wake Ops</h3>
+                <button class="ghost-btn icon-btn" id="closeWakeOpsModal" type="button" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="hint" id="wakeOpsModalHost"></div>
+                <p class="hint">La evidencia de WoL es válida durante 7 días. La prueba semanal apaga el equipo si está encendido, ejecuta WoL y, si se verificó que estaba apagado, lo vuelve a apagar.</p>
+                <div class="form-grid">
+                    <label class="check-field full">
+                        <input type="checkbox" id="wakeOpsEnabled">
+                        <span>Activar verificación semanal</span>
+                    </label>
+                    <label class="field">
+                        <span>Día</span>
+                        <select id="wakeOpsDay">
+                            <option value="0">Lunes</option>
+                            <option value="1">Martes</option>
+                            <option value="2">Miércoles</option>
+                            <option value="3">Jueves</option>
+                            <option value="4">Viernes</option>
+                            <option value="5">Sábado</option>
+                            <option value="6">Domingo</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Hora local</span>
+                        <input type="time" id="wakeOpsTime" step="60" value="08:00">
+                    </label>
+                    <label class="field full">
+                        <span>Zona horaria del Lab Gateway</span>
+                        <select id="wakeOpsTimezone">
+                            <option value="">Usar la zona horaria del Lab Gateway</option>
+                            <option value="Europe/Madrid">Europe/Madrid</option>
+                            <option value="UTC">UTC</option>
+                            <option value="Europe/London">Europe/London</option>
+                            <option value="Europe/Paris">Europe/Paris</option>
+                            <option value="America/New_York">America/New_York</option>
+                            <option value="America/Los_Angeles">America/Los_Angeles</option>
+                            <option value="Asia/Tokyo">Asia/Tokyo</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="hint" id="wakeOpsStatus" role="status" aria-live="polite">Cargando configuración de Wake Ops…</div>
+            </div>
+            <div class="modal-footer">
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="cancelWakeOps" type="button">Close</button>
+                    <button class="ghost-btn" id="wakeOpsManualWake" type="button"><i class="fas fa-bolt"></i> Wake</button>
+                    <button class="primary-btn" id="saveWakeOps" type="button"><i class="fas fa-save"></i> Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal" id="aasxViewModal" role="dialog" aria-modal="true" aria-labelledby="aasxViewTitle">
         <div class="modal-content">
             <div class="modal-header">
@@ -1193,7 +1249,7 @@
     <script src="../assets/js/lab-manager-access-policy.js?v=lab-manager-access-policy-v1"></script>
     <script src="../assets/js/lab-manager-heartbeat-errors.js?v=lab-manager-heartbeat-errors-v2"></script>
     <script src="../assets/js/lab-manager-hosts.js?v=lab-manager-hosts-v8"></script>
-    <script src="../assets/js/lab-manager-host-renderers.js?v=lab-manager-host-renderers-v15"></script>
+    <script src="../assets/js/lab-manager-host-renderers.js?v=lab-manager-host-renderers-v16"></script>
     <script src="../assets/js/lab-manager-host-discovery.js?v=lab-manager-host-discovery-v2"></script>
     <script src="../assets/js/lab-manager-winrm-credentials.js?v=lab-manager-winrm-credentials-v1"></script>
     <script src="../assets/js/lab-manager-winrm-trust.js?v=lab-manager-winrm-trust-v1"></script>
@@ -1201,12 +1257,13 @@
     <script src="../assets/js/lab-manager-host-provisioning.js?v=lab-manager-host-provisioning-v2"></script>
     <script src="../assets/js/lab-manager-host-modals.js?v=lab-manager-host-modals-v2"></script>
     <script src="../assets/js/lab-manager-host-view.js?v=lab-manager-host-view-v2"></script>
-    <script src="../assets/js/lab-manager-host-action-bindings.js?v=lab-manager-host-action-bindings-v4"></script>
+    <script src="../assets/js/lab-manager-host-action-bindings.js?v=lab-manager-host-action-bindings-v5"></script>
     <script src="../assets/js/lab-manager-ops-access.js?v=lab-manager-ops-access-v1"></script>
     <script src="../assets/js/lab-manager-operations-lifecycle.js?v=lab-manager-operations-lifecycle-v1"></script>
-    <script src="../assets/js/lab-manager-modal-bindings.js?v=lab-manager-modal-bindings-v1"></script>
+    <script src="../assets/js/lab-manager-modal-bindings.js?v=lab-manager-modal-bindings-v2"></script>
     <script src="../assets/js/lab-manager-host-actions.js?v=lab-manager-host-actions-v7"></script>
-    <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v9"></script>
+    <script src="../assets/js/lab-manager-wake-ops.js?v=lab-manager-wake-ops-v1"></script>
+    <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v10"></script>
     <script src="../assets/js/lab-manager-fmu-station.js?v=lab-manager-fmu-station-v3"></script>
     <script src="../assets/js/core/toast.js?v=lab-manager-toast-v3"></script>
     <script src="../assets/js/lab-manager-notifications-access.js?v=lab-manager-notifications-access-v1"></script>

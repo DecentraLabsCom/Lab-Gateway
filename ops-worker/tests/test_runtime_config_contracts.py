@@ -8,6 +8,7 @@ from runtime_config import (
     load_runtime_policy,
     publish_runtime_paths,
     publish_runtime_policy,
+    resolve_gateway_timezone,
 )
 
 
@@ -140,6 +141,9 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
             "OPS_DISCOVERY_LABSTATION_PORTS": "8765, 8088",
             "OPS_DISCOVERY_LABSTATION_PATHS": "health,/ready",
             "OPS_DISCOVERY_HEARTBEAT_PATHS": "C:\\heartbeat.json",
+            "WAKE_OPS_ENABLED": "false",
+            "WAKE_OPS_INTERVAL_SECONDS": "45",
+            "TZ": "Europe/London",
         },
         secret_loader=lambda name: secrets.get(name, ""),
         parse_recipients=lambda value, default: [
@@ -190,7 +194,23 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
     assert config.discovery_labstation_ports == [8765, 8088]
     assert config.discovery_labstation_paths == ["/health", "/ready"]
     assert config.discovery_heartbeat_paths == ["C:\\heartbeat.json"]
+    assert config.wake_ops_enabled is False
+    assert config.wake_ops_interval_seconds == 45
+    assert config.gateway_timezone == "Europe/London"
     assert is_lite_gateway({"ISSUER": "https://other.example/auth"}) is True
+
+
+def test_resolve_gateway_timezone_uses_system_timezone_when_tz_is_not_configured():
+    assert resolve_gateway_timezone("Europe/London", local_timezone=lambda: "UTC") == "Europe/London"
+    assert resolve_gateway_timezone("", local_timezone=lambda: "Europe/London") == "Europe/London"
+
+    errors = []
+    assert resolve_gateway_timezone(
+        "Invalid/Zone",
+        local_timezone=lambda: "UTC",
+        log_error=lambda *args: errors.append(args),
+    ) == "UTC"
+    assert errors
 
 
 def test_load_runtime_policy_contract_preserves_explicit_empty_values_and_fails_closed_header():
@@ -329,6 +349,9 @@ def test_runtime_config_publication_preserves_legacy_path_and_policy_names():
         "GUACAMOLE_HISTORY_LOOKBACK_SECONDS": "guacamole_history_lookback_seconds",
         "GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS": "guacamole_history_reconciliation_retention_seconds",
         "HEARTBEAT_SSE_INTERVAL_SECONDS": "heartbeat_sse_interval_seconds",
+        "WAKE_OPS_ENABLED": "wake_ops_enabled",
+        "WAKE_OPS_INTERVAL_SECONDS": "wake_ops_interval_seconds",
+        "TZ": "gateway_timezone",
         "DISCOVERY_TIMEOUT_SECONDS": "discovery_timeout_seconds",
         "DISCOVERY_LABSTATION_PORTS": "discovery_labstation_ports",
         "DISCOVERY_LABSTATION_PATHS": "discovery_labstation_paths",

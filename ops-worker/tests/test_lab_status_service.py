@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from lab_status_service import project_lab_status
+from lab_status_service import project_fmu_runner_status, project_lab_status
 
 
 NOW = datetime(2026, 9, 23, 10, 0, tzinfo=timezone.utc)
@@ -24,6 +24,125 @@ def test_fresh_ready_heartbeat_is_positive():
     assert result["severity"] == "positive"
     assert result["ageSeconds"] == 30
     assert result["reason"] == "station_ready"
+    assert result["access"] == "ready"
+    assert result["wake"]["state"] == "unknown"
+    assert result["availability"] == "now"
+
+
+def test_recent_successful_wake_makes_stale_access_available_on_demand():
+    result = project_lab_status(
+        "7",
+        heartbeat(timestamp=(NOW - timedelta(seconds=181)).isoformat()),
+        now=NOW,
+        max_age_seconds=180,
+        wake_status={
+            "configured": True,
+            "operation": {
+                "success": True,
+                "status": "completed",
+                "created_at": NOW - timedelta(minutes=5),
+            },
+        },
+    )
+
+    assert result["state"] == "unknown"
+    assert result["access"] == "unknown"
+    assert result["wake"]["state"] == "verified"
+    assert result["availability"] == "on_demand"
+
+
+def test_configured_wake_without_recent_verification_is_recoverable():
+    result = project_lab_status(
+        "7",
+        None,
+        now=NOW,
+        max_age_seconds=180,
+        wake_status={"configured": True},
+    )
+
+    assert result["access"] == "unknown"
+    assert result["wake"]["state"] == "configured"
+    assert result["availability"] == "recoverable"
+
+
+def test_old_successful_wake_does_not_remain_verified_forever():
+    result = project_lab_status(
+        "7",
+        None,
+        now=NOW,
+        max_age_seconds=180,
+        wake_status={
+            "configured": True,
+            "operation": {
+                "success": True,
+                "status": "completed",
+                "created_at": NOW - timedelta(days=8),
+            },
+        },
+    )
+
+    assert result["wake"]["state"] == "configured"
+    assert result["availability"] == "recoverable"
+
+
+def test_successful_wake_evidence_remains_verified_for_one_week():
+    result = project_lab_status(
+        "7",
+        None,
+        now=NOW,
+        max_age_seconds=180,
+        wake_status={
+            "configured": True,
+            "operation": {
+                "success": True,
+                "status": "completed",
+                "created_at": NOW - timedelta(days=6, hours=23),
+            },
+        },
+    )
+
+    assert result["wake"]["state"] == "verified"
+    assert result["availability"] == "on_demand"
+
+
+def test_successful_wake_evidence_expires_after_one_week():
+    result = project_lab_status(
+        "7",
+        None,
+        now=NOW,
+        max_age_seconds=180,
+        wake_status={
+            "configured": True,
+            "operation": {
+                "success": True,
+                "status": "completed",
+                "created_at": NOW - timedelta(days=7, seconds=1),
+            },
+        },
+    )
+
+    assert result["wake"]["state"] == "configured"
+    assert result["availability"] == "recoverable"
+
+
+def test_recent_failed_wake_is_unavailable_but_does_not_hide_access_dimensions():
+    result = project_lab_status(
+        "7",
+        heartbeat(timestamp=(NOW - timedelta(seconds=181)).isoformat()),
+        now=NOW,
+        max_age_seconds=180,
+        wake_status={
+            "configured": True,
+            "operation": {
+                "success": False,
+                "status": "failed",
+                "created_at": NOW - timedelta(minutes=5),
+            },
+        },
+    )
+
+    assert result["wake"]["state"] == "failed"
+    assert result["availability"] == "unavailable"
 
 
 def test_fmu_only_issue_keeps_physical_lab_ready_but_marks_fmu_not_ready():
@@ -45,6 +164,33 @@ def test_fmu_only_issue_keeps_physical_lab_ready_but_marks_fmu_not_ready():
     assert result["capabilities"]["physicalLab"]["state"] == "ready"
     assert result["capabilities"]["fmu"]["state"] == "not_ready"
     assert result["capabilities"]["fmu"]["reason"] == "fmu_not_ready"
+
+
+def test_fmu_runner_capacity_is_busy_without_inheriting_physical_station_state():
+    result = project_fmu_runner_status(
+        "7",
+        {
+            "signal": "busy",
+            "reason": "fmu_capacity_exhausted",
+            "source": "fmu_runner_health",
+            "observedAt": (NOW - timedelta(seconds=4)).isoformat(),
+            "capacity": {
+                "state": "busy",
+                "active": 2,
+                "maximum": 2,
+                "available": 0,
+            },
+        },
+        now=NOW,
+    )
+
+    assert result["resourceType"] == "fmu"
+    assert result["state"] == "busy"
+    assert result["severity"] == "warning"
+    assert result["availability"] == "unavailable"
+    assert result["capacity"]["available"] == 0
+    assert "wake" not in result
+    assert result["capabilities"]["fmu"]["state"] == "busy"
 
 
 def test_local_session_is_busy_with_warning_severity():
@@ -186,7 +332,7 @@ def test_missing_mapping_is_unknown_without_exposing_host_details():
     assert result["reason"] == "lab_not_mapped"
     assert set(result) == {
         "labId", "state", "reason", "source", "observedAt", "ageSeconds",
-        "severity", "generatedAt",
+        "severity", "generatedAt", "access", "wake", "availability",
     }
 
 

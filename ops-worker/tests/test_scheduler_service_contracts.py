@@ -41,6 +41,9 @@ def test_start_scheduler_contract_preserves_job_order_and_intervals():
         observation_enabled=True,
         observation_interval_seconds=5,
         deliver_observations=lambda: calls.append("observations"),
+        wake_ops_enabled=True,
+        wake_ops_interval_seconds=60,
+        run_wake_ops=lambda: calls.append("wake-ops"),
         revocation_interval_seconds=10,
         process_revocations=lambda: calls.append("revocations"),
         now=lambda: now,
@@ -49,11 +52,12 @@ def test_start_scheduler_contract_preserves_job_order_and_intervals():
 
     assert [job[2]["id"] for job in scheduler.jobs] == [
         "heartbeat-poller",
+        "wake-ops-weekly-verification",
         "guacamole-temp-user-cleanup",
         "session-observation-outbox",
         "guacamole-token-revocation",
     ]
-    assert [job[2]["seconds"] for job in scheduler.jobs] == [60, 900, 5, 10]
+    assert [job[2]["seconds"] for job in scheduler.jobs] == [60, 60, 900, 5, 10]
     assert all(job[1] == "interval" for job in scheduler.jobs)
     assert all(job[2]["next_run_time"] == now for job in scheduler.jobs)
     assert all(job[2]["replace_existing"] is True for job in scheduler.jobs)
@@ -78,6 +82,9 @@ def test_start_scheduler_contract_always_registers_revocations_and_logs_start():
         observation_enabled=False,
         observation_interval_seconds=5,
         deliver_observations=lambda: None,
+        wake_ops_enabled=False,
+        wake_ops_interval_seconds=60,
+        run_wake_ops=lambda: None,
         revocation_interval_seconds=10,
         process_revocations=lambda: None,
         now=lambda: datetime.now(timezone.utc),

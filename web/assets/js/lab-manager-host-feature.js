@@ -37,6 +37,14 @@
         const hostViewModule = requireModule(root.LabManagerHostView, 'LabManagerHostView');
         const hostActionBindingsModule = requireModule(root.LabManagerHostActionBindings, 'LabManagerHostActionBindings');
         const hostActionsModule = requireModule(root.LabManagerHostActions, 'LabManagerHostActions');
+        const wakeOpsModule = root.LabManagerWakeOps || {
+            createController: () => Object.freeze({
+                close: () => {},
+                manualWake: () => {},
+                open: () => {},
+                save: () => {},
+            }),
+        };
         const modalBindingsModule = requireModule(root.LabManagerModalBindings, 'LabManagerModalBindings');
         const $ = selector => documentImpl?.querySelector?.(selector) || null;
 
@@ -87,6 +95,17 @@
         const editHostMac = $('#editHostMac');
         const editHostBroadcast = $('#editHostBroadcast');
         const editLabstationPath = $('#editLabstationPath');
+        const wakeOpsModal = $('#wakeOpsModal');
+        const closeWakeOpsModalButton = $('#closeWakeOpsModal');
+        const cancelWakeOpsButton = $('#cancelWakeOps');
+        const saveWakeOpsButton = $('#saveWakeOps');
+        const wakeOpsManualWakeButton = $('#wakeOpsManualWake');
+        const wakeOpsModalHost = $('#wakeOpsModalHost');
+        const wakeOpsEnabled = $('#wakeOpsEnabled');
+        const wakeOpsDay = $('#wakeOpsDay');
+        const wakeOpsTime = $('#wakeOpsTime');
+        const wakeOpsTimezone = $('#wakeOpsTimezone');
+        const wakeOpsStatus = $('#wakeOpsStatus');
 
         const hostState = {};
         const hostMetadata = {};
@@ -97,6 +116,7 @@
         let hostModalsController;
         let hostViewController;
         let winrmTrustModalController;
+        let wakeOpsController;
 
         function openProvisionHostModal(stationKey) {
             return hostModalsController?.openProvision(stationKey);
@@ -188,6 +208,22 @@
             return winrmTrustModalController?.delete();
         }
 
+        function openWakeOpsModal(host) {
+            return wakeOpsController?.open(host);
+        }
+
+        function closeWakeOpsModal() {
+            return wakeOpsController?.close();
+        }
+
+        async function saveWakeOps() {
+            return wakeOpsController?.save();
+        }
+
+        async function manualWakeOps() {
+            return wakeOpsController?.manualWake();
+        }
+
         const hostRenderersController = hostRenderersModule.createController({
             documentCtor: documentImpl,
             escapeHtml,
@@ -238,13 +274,30 @@
             },
             logger,
         });
+        wakeOpsController = wakeOpsModule.createController({
+            fields: {
+                modal: wakeOpsModal,
+                host: wakeOpsModalHost,
+                enabled: wakeOpsEnabled,
+                day: wakeOpsDay,
+                time: wakeOpsTime,
+                timezone: wakeOpsTimezone,
+                status: wakeOpsStatus,
+                saveButton: saveWakeOpsButton,
+                wakeButton: wakeOpsManualWakeButton,
+            },
+            fetchImpl,
+            callbacks: { showToast },
+            documentImpl,
+            logger,
+        });
         const hostActionBindingsController = hostActionBindingsModule.createController({
             hostListEl: hostListElement,
             hostState,
             callbacks: {
                 onEditHost: openEditHostModal,
                 onPoll: pollHeartbeat,
-                onWakeOnLan: host => hostActionsController.triggerWol(host),
+                onWakeOps: openWakeOpsModal,
                 onWinrm: (...args) => hostActionsController.triggerWinrm(...args),
                 onToggleLocalMode: (...args) => hostActionsController.toggleLocalMode(...args),
                 onCredentials: openWinrmCredentialsModal,
@@ -424,6 +477,10 @@
                 closeEdit: closeEditHostModalButton,
                 cancelEdit: cancelEditHostButton,
                 saveEdit: saveEditHostButton,
+                closeWakeOps: closeWakeOpsModalButton,
+                cancelWakeOps: cancelWakeOpsButton,
+                saveWakeOps: saveWakeOpsButton,
+                manualWakeOps: wakeOpsManualWakeButton,
             },
             callbacks: {
                 closeProvision: closeProvisionHostModal,
@@ -439,6 +496,9 @@
                 trustFingerprintChanged: updateWinrmTrustSaveState,
                 closeEdit: closeEditHostModal,
                 saveEdit: saveEditedHost,
+                closeWakeOps: closeWakeOpsModal,
+                saveWakeOps,
+                manualWakeOps,
             },
         });
 
@@ -468,6 +528,7 @@
             opsHintElement,
             openWinrmTrustModal,
             loadWinrmTrustState,
+            openWakeOpsModal,
             renderHosts: () => hostViewController?.renderHosts(),
         });
     }

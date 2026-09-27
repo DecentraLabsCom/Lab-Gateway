@@ -39,6 +39,8 @@ EXPECTED_ROUTE_METHODS = {
     "/api/reservations/timeline": {"GET"},
     "/api/winrm": {"POST"},
     "/api/wol": {"POST"},
+    "/api/wake-ops/<host_name>": {"GET", "PUT"},
+    "/api/wake-ops/<host_name>/wake": {"POST"},
     "/health": {"GET"},
     "/internal/guacamole-token-revocations": {"POST"},
     "/internal/guacamole/connections": {"GET"},

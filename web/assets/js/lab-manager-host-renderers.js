@@ -376,7 +376,7 @@
             </div>
             <div class="host-actions">
                 <button class="mini-btn" data-action="poll" title="Check station status">Heartbeat</button>
-                <button class="mini-btn" data-action="wol" title="Wake station">Wake</button>
+                <button class="mini-btn" data-action="wake-ops" title="Configure Wake Ops and wake station">Wake Ops</button>
                 <button class="mini-btn primary" data-action="prepare" title="Prepare station">Prepare</button>
                 <button class="mini-btn" data-action="release" title="Release station">Release</button>
                 <button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown</button>

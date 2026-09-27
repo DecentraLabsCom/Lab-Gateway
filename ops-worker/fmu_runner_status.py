@@ -30,27 +30,79 @@ class CachedFmuRunnerStatus:
         self._cache_seconds = max(0.0, float(cache_seconds))
         self._now = now
         self._monotonic = monotonic
-        self._cache: Optional[Tuple[float, Dict[str, str]]] = None
+        self._cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._cache_lock = Lock()
 
-    def _unknown(self) -> Dict[str, str]:
+    @staticmethod
+    def _non_negative_int(value: Any) -> Optional[int]:
+        try:
+            parsed = int(str(value))
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed >= 0 else None
+
+    def _unknown(self) -> Dict[str, Any]:
         return {
             "signal": "unknown",
             "reason": "fmu_runner_unavailable",
             "source": "fmu_runner_health",
             "observedAt": _iso(self._now()),
+            "capacity": {
+                "state": "unknown",
+                "active": None,
+                "maximum": None,
+                "available": None,
+            },
         }
 
-    def _read(self) -> Dict[str, str]:
+    def _read_capacity(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        signal_hint: str = "",
+    ) -> Dict[str, Any]:
+        nested = payload.get("capacity")
+        nested = nested if isinstance(nested, Mapping) else {}
+        active = self._non_negative_int(
+            payload.get("activeExecutions", nested.get("active"))
+        )
+        maximum = self._non_negative_int(
+            payload.get("maxConcurrentExecutions", nested.get("maximum"))
+        )
+        available = self._non_negative_int(
+            payload.get("availableCapacity", nested.get("available"))
+        )
+        if available is None and active is not None and maximum is not None:
+            available = max(0, maximum - active)
+
+        if signal_hint == "busy" or available == 0:
+            state = "busy"
+        elif available is not None and available > 0:
+            state = "available"
+        else:
+            state = "unknown"
+        return {
+            "state": state,
+            "active": active,
+            "maximum": maximum,
+            "available": available,
+        }
+
+    def _read(self, lab_id: Optional[str] = None) -> Dict[str, Any]:
         observed_at = _iso(self._now())
         if not self._url:
             return self._unknown()
         try:
+            request_kwargs = {
+                "headers": {"Accept": "application/json"},
+                "timeout": self._timeout_seconds,
+                "allow_redirects": False,
+            }
+            if lab_id:
+                request_kwargs["params"] = {"labId": str(lab_id)}
             response = self._http_get(
                 self._url,
-                headers={"Accept": "application/json"},
-                timeout=self._timeout_seconds,
-                allow_redirects=False,
+                **request_kwargs,
             )
             payload = response.json()
         except Exception:  # pylint: disable=broad-except
@@ -67,37 +119,42 @@ class CachedFmuRunnerStatus:
             fmu_count = 0
 
         if backend_mode not in {"local", "station"}:
-            return {
-                "signal": "unknown",
-                "reason": "fmu_runner_unavailable",
-                "source": "fmu_runner_health",
-                "observedAt": observed_at,
-            }
+            return self._unknown()
         if status == "UP" and fmu_count > 0:
-            signal = "ready"
-            reason = "fmu_ready"
+            capacity = self._read_capacity(payload)
+            if capacity["state"] == "busy":
+                signal = "busy"
+                reason = "fmu_capacity_exhausted"
+            else:
+                signal = "ready"
+                reason = "fmu_ready"
         elif status in {"UP", "DEGRADED", "DOWN"}:
             signal = "not_ready"
             reason = "fmu_not_ready"
+            capacity = self._read_capacity(payload)
         else:
             signal = "unknown"
             reason = "fmu_runner_unavailable"
+            capacity = self._read_capacity(payload)
         return {
             "signal": signal,
             "reason": reason,
             "source": "fmu_runner_health",
             "observedAt": observed_at,
+            "capacity": capacity,
         }
 
-    def get_status(self) -> Dict[str, str]:
+    def get_status(self, lab_id: Optional[str] = None) -> Dict[str, Any]:
+        cache_key = str(lab_id or "")
         current = self._monotonic()
         with self._cache_lock:
-            if self._cache and current - self._cache[0] < self._cache_seconds:
-                return dict(self._cache[1])
+            cached = self._cache.get(cache_key)
+            if cached and current - cached[0] < self._cache_seconds:
+                return dict(cached[1])
 
-        result = self._read()
+        result = self._read(lab_id)
         with self._cache_lock:
-            self._cache = (self._monotonic(), result)
+            self._cache[cache_key] = (self._monotonic(), result)
         return dict(result)
 
 

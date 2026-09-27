@@ -6,6 +6,8 @@ import re
 from typing import Any, Dict, List, Optional, Pattern, Set
 
 from runtime_values import DEFAULT_HEARTBEAT_PATH
+from tzlocal import get_localzone_name
+from wake_ops_service import DEFAULT_GATEWAY_TIMEZONE, WakeOpsValidationError, validate_timezone
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,9 @@ class RuntimePolicy:
     guacamole_history_lookback_seconds: int
     guacamole_history_reconciliation_retention_seconds: int
     heartbeat_sse_interval_seconds: int
+    wake_ops_enabled: bool
+    wake_ops_interval_seconds: int
+    gateway_timezone: str
     discovery_timeout_seconds: float
     discovery_labstation_ports: List[int]
     discovery_labstation_paths: List[str]
@@ -135,6 +140,27 @@ def load_runtime_paths(
 
 def _enabled(environ: Mapping[str, str], name: str, default: str = "true") -> bool:
     return (environ.get(name) or default).strip().lower() not in ("false", "0", "no", "off")
+
+
+def resolve_gateway_timezone(
+    configured_timezone: Any,
+    *,
+    local_timezone: Callable[[], str] = get_localzone_name,
+    log_error: Callable[..., Any] = lambda *_args: None,
+) -> str:
+    """Resolve the single local timezone used by the Gateway and its schedules."""
+    timezone_name = str(configured_timezone or "").strip()
+    if not timezone_name:
+        try:
+            timezone_name = str(local_timezone() or "").strip()
+        except Exception as exc:  # pragma: no cover - platform-specific fallback
+            log_error("Unable to resolve the gateway timezone: %s", exc)
+            timezone_name = ""
+    try:
+        return validate_timezone(timezone_name, default=DEFAULT_GATEWAY_TIMEZONE)
+    except WakeOpsValidationError:
+        log_error("Invalid gateway timezone; using %s", DEFAULT_GATEWAY_TIMEZONE)
+        return DEFAULT_GATEWAY_TIMEZONE
 
 
 def is_lite_gateway(environ: Mapping[str, str]) -> bool:
@@ -208,6 +234,7 @@ def load_runtime_policy(
     if not http_header_pattern.fullmatch(catalog_token_header):
         log_error("Invalid lab catalog token header; using X-Lab-Manager-Token")
         catalog_token_header = "X-Lab-Manager-Token"
+    gateway_timezone = resolve_gateway_timezone(get("TZ"), log_error=log_error)
     return RuntimePolicy(
         demo_user=(get("DEMO_USER") or "demo-lab-disabled").strip(),
         demo_lab_id=(get("DEMO_LAB_ID") or "").strip(),
@@ -387,6 +414,12 @@ def load_runtime_policy(
             1,
             int(get("OPS_HEARTBEAT_SSE_INTERVAL_SECONDS", "10")),
         ),
+        wake_ops_enabled=_enabled(environ, "WAKE_OPS_ENABLED"),
+        wake_ops_interval_seconds=max(
+            30,
+            int(get("WAKE_OPS_INTERVAL_SECONDS", "60")),
+        ),
+        gateway_timezone=gateway_timezone,
         discovery_timeout_seconds=max(
             0.2,
             float(get("OPS_DISCOVERY_TIMEOUT_SECONDS", "1.5")),
@@ -564,6 +597,9 @@ def publish_runtime_policy(
                 "guacamole_history_reconciliation_retention_seconds",
             ),
             ("HEARTBEAT_SSE_INTERVAL_SECONDS", "heartbeat_sse_interval_seconds"),
+            ("WAKE_OPS_ENABLED", "wake_ops_enabled"),
+            ("WAKE_OPS_INTERVAL_SECONDS", "wake_ops_interval_seconds"),
+            ("TZ", "gateway_timezone"),
             ("DISCOVERY_TIMEOUT_SECONDS", "discovery_timeout_seconds"),
             ("DISCOVERY_LABSTATION_PORTS", "discovery_labstation_ports"),
             ("DISCOVERY_LABSTATION_PATHS", "discovery_labstation_paths"),
@@ -575,6 +611,7 @@ def publish_runtime_policy(
 __all__ = [
     "RuntimePaths",
     "RuntimePolicy",
+    "resolve_gateway_timezone",
     "is_lite_gateway",
     "load_runtime_paths",
     "load_runtime_policy",

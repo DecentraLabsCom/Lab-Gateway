@@ -27,11 +27,22 @@ fresh heartbeat exists, the Ops Worker may probe the configured Guacamole RDP,
 VNC or SSH port. That fallback is reported as `reachable` or `not_ready`, and
 never as Lab Station `ready`; an absent fallback target remains `unknown`.
 Host names, addresses, ports and raw Station telemetry remain operator-only.
-When the Station publishes capability readiness, the projection also includes
-bounded `capabilities.physicalLab` and `capabilities.fmu` states. Marketplace
-selects the physical-lab capability for physical labs and the FMU capability
-for FMU resources. Older heartbeats without that block continue to use the
-legacy station-wide readiness field.
+The projection also separates `access` (`ready`, `busy`, `inaccessible` or
+`unknown`), `wake` (`verified`, `configured`, `failed` or `unknown`) and
+`availability` (`now`, `on_demand`, `recoverable`, `unavailable` or `unknown`).
+`wake.verified` requires a recent persisted wake operation that sent WoL and
+then observed the host answering; a configured MAC and ping target alone only
+produce `wake.configured`. Successful WoL evidence remains verified for seven
+days; a weekly Wake Ops verification can refresh that evidence automatically.
+Physical-lab entries use the persisted Station heartbeat, with the bounded
+Guacamole target probe and WoL evidence as independent fallback/enrichment
+signals. FMU entries use the private `fmu-runner` health signal in both local
+and Station mode. In Station mode the runner verifies the internal Lab Station
+FMU executor and its protected capacity endpoint, so FMU readiness does not
+depend on Guacamole, WoL or the physical-lab heartbeat. FMU responses expose
+bounded `executor` and `capacity` fields and do not expose a `wake` dimension.
+When available, `capabilities.physicalLab` and `capabilities.fmu` remain in the
+response so Marketplace can select the resource-specific projection.
 
 The public response has the stable shape below. `status` is `UP`, `PARTIAL`, or
 `DOWN`. `PARTIAL` means that the gateway is reachable but not all local

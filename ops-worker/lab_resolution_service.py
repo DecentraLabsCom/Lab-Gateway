@@ -9,6 +9,8 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Dict, List, Optional
 
 from host_inventory_service import find_unique_host_for_connection
+from heartbeat_values import normalize_mac
+from network_probe import is_valid_ping_target
 
 
 def normalize_lab_resource_type(value: Any) -> str:
@@ -210,9 +212,9 @@ def resolve_lab_associations(
     *,
     parse_selector: Callable[[Any], int],
     normalize_key: Callable[[Any], str],
-) -> List[Dict[str, str]]:
+) -> List[Dict[str, Any]]:
     """Project every currently resolvable lab-to-host association."""
-    associations: List[Dict[str, str]] = []
+    associations: List[Dict[str, Any]] = []
     indexed_labs = _lab_index(labs)
     for lab in indexed_labs.values():
         lab_id = str(lab.get("labId") or "").strip()
@@ -226,7 +228,15 @@ def resolve_lab_associations(
         )
         host_name = str(host.get("name") or "").strip() if host else ""
         if lab_id and host_name:
-            associations.append({"labId": lab_id, "hostName": host_name})
+            ping_target = host.get("ping_target") or host.get("address")
+            associations.append({
+                "labId": lab_id,
+                "hostName": host_name,
+                "wakeConfigured": bool(
+                    normalize_mac(host.get("mac"))
+                    and is_valid_ping_target(ping_target)
+                ),
+            })
     return associations
 
 

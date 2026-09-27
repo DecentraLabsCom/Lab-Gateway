@@ -53,7 +53,7 @@ class BaseFmuBackend:
         text = str(value).strip()
         return text or None
 
-    async def health(self) -> dict:
+    async def health(self, *, lab_id: Optional[str] = None) -> dict:
         raise NotImplementedError
 
     async def get_authorized_model_metadata(self, *, claims: dict, requested_fmu_filename: Optional[str] = None) -> ModelMetadata:
@@ -76,8 +76,12 @@ class LocalFmuBackend(BaseFmuBackend):
     def supports_local_execution(self) -> bool:
         return self.allow_execution
 
-    async def health(self) -> dict:
-        payload = dict(self.health_loader())
+    async def health(self, *, lab_id: Optional[str] = None) -> dict:
+        payload = dict(
+            self.health_loader()
+            if lab_id is None
+            else self.health_loader(lab_id=lab_id)
+        )
         if not self.allow_execution:
             checks = dict(payload.get("checks") or {})
             checks["localExecutionEnabled"] = False
@@ -483,13 +487,14 @@ class StationFmuBackend(BaseFmuBackend):
 
         return normalized
 
-    async def health(self) -> dict:
+    async def health(self, *, lab_id: Optional[str] = None) -> dict:
         checks = {
             "stationConfigured": bool(self.base_url),
             "stationHealth": False,
             "stationAuthentication": False,
         }
         fmu_count = 0
+        capacity_payload: dict[str, Any] = {}
 
         if not self.base_url:
             return {
@@ -513,17 +518,34 @@ class StationFmuBackend(BaseFmuBackend):
                 # /internal/health is deliberately unauthenticated for local
                 # supervision.  Capacity is protected and therefore proves
                 # that the Gateway token matches the Station token.
-                await self._request_json("capacity")
+                capacity_payload = await self._request_json("capacity")
                 checks["stationAuthentication"] = True
             except HTTPException:
                 checks["stationAuthentication"] = False
 
-        return {
+        result = {
             "status": "UP" if all(checks.values()) else "DEGRADED",
             "checks": checks,
             "fmuCount": fmu_count,
             "backendMode": self.mode,
         }
+        if isinstance(capacity_payload, dict):
+            active = capacity_payload.get("activeExecutions", capacity_payload.get("active"))
+            maximum = capacity_payload.get(
+                "maxConcurrentExecutions",
+                capacity_payload.get("capacity"),
+            )
+            available = capacity_payload.get(
+                "availableCapacity",
+                capacity_payload.get("available"),
+            )
+            if active is not None:
+                result["activeExecutions"] = active
+            if maximum is not None:
+                result["maxConcurrentExecutions"] = maximum
+            if available is not None:
+                result["availableCapacity"] = available
+        return result
 
     async def get_authorized_model_metadata(self, *, claims: dict, requested_fmu_filename: Optional[str] = None) -> ModelMetadata:
         access_key = self.ensure_requested_access_key(claims, requested_fmu_filename)

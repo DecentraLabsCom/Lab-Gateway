@@ -147,6 +147,25 @@ def db_engine():
     )
 
     Table(
+        "wake_ops_schedules",
+        metadata,
+        Column("host", String(128), primary_key=True),
+        Column("enabled", Boolean, nullable=False, default=True),
+        Column("day_of_week", Integer, nullable=False, default=6),
+        Column("hour", Integer, nullable=False, default=8),
+        Column("minute", Integer, nullable=False, default=0),
+        Column("timezone", String(64), nullable=False, default="Europe/Madrid"),
+        Column("last_scheduled_at", DateTime),
+        Column("last_started_at", DateTime),
+        Column("last_finished_at", DateTime),
+        Column("last_status", String(32)),
+        Column("last_message", Text),
+        Column("last_initial_power_state", String(16)),
+        Column("created_at", DateTime),
+        Column("updated_at", DateTime),
+    )
+
+    Table(
         "power_operations",
         metadata,
         Column("id", Integer, primary_key=True, autoincrement=True),

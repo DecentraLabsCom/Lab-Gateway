@@ -80,6 +80,7 @@ in
       wantedBy = [ "multi-user.target" ];
       wants = [ "docker.service" "network-online.target" ];
       after = [ "docker.service" "network-online.target" ];
+      environment.TZ = config.time.timeZone;
 
       path = [ pkgs.coreutils pkgs.docker cfg.package ];
 

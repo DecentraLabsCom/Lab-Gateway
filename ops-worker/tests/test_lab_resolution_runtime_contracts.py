@@ -41,7 +41,7 @@ def test_runtime_fetches_catalog_once_within_cache_window_and_resolves_both_dire
     assert runtime.resolve_host_by_lab("lab-1") == hosts[0]
     assert runtime.resolve_lab_ids_for_host(hosts[0]) == ["lab-1"]
     assert runtime.resolve_lab_associations() == [
-        {"labId": "lab-1", "hostName": "station-01"},
+        {"labId": "lab-1", "hostName": "station-01", "wakeConfigured": False},
     ]
     assert runtime.resolve_lab_resources() == [
         {"labId": "lab-1", "resourceType": "lab"},

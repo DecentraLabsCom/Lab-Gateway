@@ -1,6 +1,8 @@
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 
@@ -8,8 +10,12 @@ def create_health_router(*, backend_health: Any, refresh_jwks: Any, auth_health:
     router = APIRouter()
 
     @router.get("/health")
-    async def health():
-        payload = await backend_health()
+    async def health(lab_id: Optional[str] = Query(default=None, alias="labId")):
+        payload = (
+            await backend_health()
+            if lab_id is None
+            else await backend_health(lab_id=lab_id)
+        )
         try:
             await refresh_jwks()
         except HTTPException:

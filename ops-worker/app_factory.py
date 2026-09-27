@@ -25,6 +25,7 @@ from local_mode_blueprint import create_local_mode_blueprint
 from operations_blueprint import create_operations_blueprint
 from public_lab_status_blueprint import create_public_lab_status_blueprint
 from physical_operations_blueprint import create_physical_operations_blueprint
+from wake_ops_blueprint import create_wake_ops_blueprint
 from timeline_blueprint import create_timeline_blueprint
 from winrm_credentials_blueprint import create_winrm_credentials_blueprint
 from winrm_trust_blueprint import create_winrm_trust_blueprint
@@ -169,6 +170,23 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
         )
     )
     app.register_blueprint(
+        create_wake_ops_blueprint(
+            find_host=lambda host_name: get("HOSTS").get(host_name) if host_name else None,
+            get_schedule=lambda host_name: get("_wake_ops_get_schedule")(host_name),
+            save_schedule=lambda host_name, payload: get("_wake_ops_save_schedule")(
+                host_name,
+                payload,
+            ),
+            get_latest_wake=lambda host_name: get("_wake_ops_latest_wake")(host_name),
+            manual_wake=lambda host_name: get("_wake_ops_manual_wake")(host_name),
+            now=lambda: get("_wake_ops_now")(),
+            internal_error_response=lambda *args, **kwargs: get("internal_error_response")(
+                *args,
+                **kwargs,
+            ),
+        )
+    )
+    app.register_blueprint(
         create_fmu_station_blueprint(
             get_config=lambda: get("FmuStationConfig")(
                 backend_mode=get("FMU_STATUS_BACKEND"),
@@ -191,12 +209,14 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
             resolve_lab_associations=lambda: get("resolve_lab_associations")(),
             resolve_lab_status_targets=lambda: get("resolve_lab_status_targets")(),
             resolve_lab_resources=lambda: get("resolve_lab_resources")(),
-            resolve_fmu_station_host=lambda: get("resolve_fmu_station_host")(),
             fetch_latest_heartbeat=lambda connection, host_name: get(
                 "_fetch_latest_heartbeat"
             )(connection, host_name),
             probe_lab_targets=lambda targets: get("probe_lab_targets")(targets),
-            fetch_fmu_runner_status=lambda: get("fetch_fmu_runner_status")(),
+            fetch_fmu_runner_status=lambda lab_id: get("fetch_fmu_runner_status")(lab_id),
+            fetch_latest_wake_operations=lambda connection, lab_ids: get(
+                "fetch_latest_wake_operations"
+            )(connection, lab_ids),
             now=lambda: get("datetime").now(get("timezone").utc),
             max_age_seconds=lambda: get("LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS"),
         )

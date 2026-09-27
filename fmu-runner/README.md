@@ -47,7 +47,7 @@ does not change between these topologies.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Liveness probe |
+| GET | `/health[?labId=<labId>]` | Liveness and executor-capacity probe; `labId` adds per-lab capacity for public status |
 | GET | `/api/v1/fmu/list` | Return authorised FMU through the active backend |
 | GET | `/api/v1/fmu/proxy/{labId}?reservationKey=...` | Auto-generate reservation-scoped `proxy.fmu` |
 | GET | `/api/v1/simulations/describe?fmuFileName=<file>` | Read FMU model description through the active backend |

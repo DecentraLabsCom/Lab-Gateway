@@ -18,8 +18,8 @@ def create_public_lab_status_blueprint(
     now: Callable[[], Any],
     max_age_seconds: Callable[[], int],
     resolve_lab_resources: Callable[[], Any] = lambda: [],
-    resolve_fmu_station_host: Callable[[], Any] = lambda: "",
-    fetch_fmu_runner_status: Callable[[], Any] = lambda: None,
+    fetch_fmu_runner_status: Callable[[str], Any] = lambda _lab_id: None,
+    fetch_latest_wake_operations: Callable[[Any, Any], Any] = lambda _connection, _lab_ids: {},
 ) -> Blueprint:
     blueprint = Blueprint("public_lab_status", __name__)
 
@@ -38,10 +38,10 @@ def create_public_lab_status_blueprint(
                 resolve_lab_associations=resolve_lab_associations,
                 resolve_lab_status_targets=resolve_lab_status_targets,
                 resolve_lab_resources=resolve_lab_resources,
-                resolve_fmu_station_host=resolve_fmu_station_host,
                 fetch_latest_heartbeat=fetch_latest_heartbeat,
                 probe_lab_targets=probe_lab_targets,
                 fetch_fmu_runner_status=fetch_fmu_runner_status,
+                fetch_latest_wake_operations=fetch_latest_wake_operations,
                 now=now,
                 max_age_seconds=max_age_seconds(),
             )

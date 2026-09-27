@@ -33,7 +33,7 @@ test('routes host operation actions without embedding service logic', () => {
     callbacks: {
       onEditHost: host => events.push(['edit', host]),
       onPoll: host => events.push(['poll', host]),
-      onWakeOnLan: host => events.push(['wol', host]),
+      onWakeOps: host => events.push(['wake-ops', host]),
       onWinrm: (...args) => events.push(['winrm', ...args]),
       onToggleLocalMode: (...args) => events.push(['local', ...args]),
       onCredentials: host => events.push(['credentials', host]),
@@ -44,7 +44,7 @@ test('routes host operation actions without embedding service logic', () => {
 
   controller.handle({ target: { closest: () => createButton('edit-host') } });
   controller.handle({ target: { closest: () => createButton('poll') } });
-  controller.handle({ target: { closest: () => createButton('wol') } });
+  controller.handle({ target: { closest: () => createButton('wake-ops') } });
   controller.handle({ target: { closest: () => createButton('prepare') } });
   controller.handle({ target: { closest: () => createButton('release') } });
   controller.handle({ target: { closest: () => createButton('shutdown') } });
@@ -57,7 +57,7 @@ test('routes host operation actions without embedding service logic', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(events)), [
     ['edit', 'station-a'],
     ['poll', 'station-a'],
-    ['wol', 'station-a'],
+    ['wake-ops', 'station-a'],
     ['winrm', 'station-a', 'prepare-session', ['--guard-grace=90']],
     ['winrm', 'station-a', 'release-session', []],
     ['winrm', 'station-a', 'power', ['shutdown', '--delay=60', '--reason=Remote order']],

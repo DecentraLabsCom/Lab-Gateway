@@ -16,6 +16,9 @@
             trustFingerprintChanged = () => {},
             closeEdit = () => {},
             saveEdit = () => {},
+            closeWakeOps = () => {},
+            saveWakeOps = () => {},
+            manualWakeOps = () => {},
         } = callbacks;
 
         function addListener(fieldName, eventName, callback) {
@@ -40,6 +43,10 @@
             addListener('closeEdit', 'click', closeEdit);
             addListener('cancelEdit', 'click', closeEdit);
             addListener('saveEdit', 'click', saveEdit);
+            addListener('closeWakeOps', 'click', closeWakeOps);
+            addListener('cancelWakeOps', 'click', closeWakeOps);
+            addListener('saveWakeOps', 'click', saveWakeOps);
+            addListener('manualWakeOps', 'click', manualWakeOps);
         }
 
         return Object.freeze({ bind });

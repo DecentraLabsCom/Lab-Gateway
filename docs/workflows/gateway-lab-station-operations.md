@@ -128,6 +128,8 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `POST /ops/api/reservations/end` | Finish the operational cleanup for one reservation. |
 | `GET /ops/api/reservations/timeline` | Read operations, phases, and latest heartbeat for a reservation. |
 | `GET /ops/api/operations/recent` | Read recent operation records for diagnostics. |
+| `GET/PUT /ops/api/wake-ops/<host_name>` | Read or configure the per-host weekly Wake Ops verification. |
+| `POST /ops/api/wake-ops/<host_name>/wake` | Send a manual Wake and record successful reachability evidence. |
 
 The WinRM wrapper accepts only commands configured in `OPS_ALLOWED_COMMANDS`. The default allowlist includes `prepare-session`, `release-session`, `power`, `session`, `energy`, `status-json`, `recovery`, `account`, `service`, `wol`, and `status`.
 
@@ -168,6 +170,15 @@ The start path is normally:
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.
 
 The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
+
+Wake Ops is enabled by default for configured hosts and runs once a week on
+Sunday at 08:00 in the Gateway's `TZ` timezone. Lab Manager exposes the same
+schedule under **Operations → Wake Ops**, including the manual **Wake** action. The
+weekly cycle classifies the initial power state using the canonical WinRM TCP
+probe and recent heartbeat evidence: an online station is shut down before
+WoL; a verified-off station is woken and shut down again; an ambiguous state
+does not receive a remote shutdown. Successful WoL evidence remains valid for
+seven days and is stored in `reservation_operations`.
 
 ## Lab Station command contract
 

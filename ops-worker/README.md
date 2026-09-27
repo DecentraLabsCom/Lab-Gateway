@@ -178,15 +178,18 @@ off or unavailable Station from an internal worker failure.
 
 - `GET /health`
 - `GET /public/labs/status?labIds=1,2,3`
-  - Public, bounded projection of the latest persisted Lab Station heartbeat.
-    It returns only `ready`, `busy`, `not_ready` or `unknown`, the signal age,
-    and a stable reason. When available, `capabilities.physicalLab` and
-    `capabilities.fmu` expose the same bounded status shape so consumers can
-    choose readiness for the resource type they represent. FMU entries use
-    the Lab Station heartbeat's FMU capability in production `station` mode;
-    local FMU entries use the private Gateway FMU runner health signal. When
-    a station heartbeat host cannot be resolved, station mode falls back to
-    the runner's own Station health check.
+  - Public, bounded projection of physical-lab reachability and FMU executor
+    availability. It returns only `ready`, `busy`, `not_ready` or `unknown`,
+    the signal age, and a stable reason. Physical labs also return separate
+    `access`, `wake` and `availability` dimensions. A successful Wake operation
+    is the only source of `wake.verified`; host configuration without that
+    evidence is `wake.configured`, and the evidence expires after seven days.
+    Wake Ops refreshes that evidence weekly by default. FMU entries use the private FMU runner health and capacity signal
+    in both local and Station mode. Station mode verifies the internal Lab
+    Station executor and protected capacity endpoint; it does not use
+    Guacamole, WoL or the physical-lab heartbeat. When available,
+    `capabilities.physicalLab` and `capabilities.fmu` expose the bounded status
+    shape for consumers that need both resource types.
     Host names,
     addresses, raw telemetry and session identities are never returned.
 - `POST /api/wol`
@@ -194,6 +197,12 @@ off or unavailable Station from an internal worker failure.
   - Defaults: 3 attempts and 30 seconds per wait/probe window. The request can
     therefore take up to approximately 180 seconds when the Station remains
     unreachable.
+- `GET /api/wake-ops/<host_name>` / `PUT /api/wake-ops/<host_name>`
+  - Read or update the per-host weekly Wake Ops schedule. The default is
+    enabled, Sunday at 08:00 in the Gateway's `TZ` timezone.
+- `POST /api/wake-ops/<host_name>/wake`
+  - Send a manual Wake request and record successful reachability as WoL
+    evidence without changing the weekly schedule.
 - `POST /api/winrm`
   - Body: `{ host, command, args?, transport?, use_ssl?, port? }`
   - Runs the host's configured `labstation_exe` (normally `C:\Lab Station\LabStation.exe`) with `<command> <args>` via WinRM. Transport, TLS and port are constrained by the host catalog and gateway policy; HTTPS on port 5986 is the default and request values cannot downgrade or override that policy.
@@ -202,7 +211,7 @@ off or unavailable Station from an internal worker failure.
 - `GET /api/hosts`
   - Returns configured ops hosts plus auto-linked Guacamole connection metadata.
 - `GET /api/lab-associations`
-  - Returns calculated `{ labId, hostName }` associations whose provider
+  - Returns calculated `{ labId, hostName, wakeConfigured }` associations whose provider
     catalog `accessKey` resolves through a current Guacamole connection to one
     registered Ops host. Lab Manager uses this projection; it does not read or
     persist laboratory IDs in the host catalog.
@@ -286,6 +295,11 @@ Enable with:
 
 - `OPS_POLL_ENABLED=true`
 - `OPS_POLL_INTERVAL=60`
+- `WAKE_OPS_ENABLED=true`
+- `WAKE_OPS_INTERVAL_SECONDS=60`
+
+Wake Ops uses the Gateway `TZ` timezone by default. A per-host schedule may
+still store an explicit timezone from Lab Manager when a deployment needs one.
 
 Reservation automation knobs:
 

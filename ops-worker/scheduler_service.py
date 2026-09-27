@@ -16,6 +16,9 @@ def start_scheduler(
     observation_enabled: bool,
     observation_interval_seconds: int,
     deliver_observations: Callable[[], Any],
+    wake_ops_enabled: bool,
+    wake_ops_interval_seconds: int,
+    run_wake_ops: Callable[[], Any],
     revocation_interval_seconds: int,
     process_revocations: Callable[[], Any],
     now: Callable[[], Any],
@@ -36,6 +39,21 @@ def start_scheduler(
         )
         jobs += 1
         logger.info("Heartbeat poller enabled (interval %ss)", poll_interval_seconds)
+
+    if wake_ops_enabled:
+        scheduler.add_job(
+            run_wake_ops,
+            "interval",
+            seconds=wake_ops_interval_seconds,
+            next_run_time=now(),
+            id="wake-ops-weekly-verification",
+            replace_existing=True,
+        )
+        jobs += 1
+        logger.info(
+            "Wake Ops weekly verification enabled (interval %ss)",
+            wake_ops_interval_seconds,
+        )
 
     jobs += register_reservation_jobs(scheduler)
 

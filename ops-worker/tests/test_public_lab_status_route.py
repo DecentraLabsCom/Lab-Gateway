@@ -67,6 +67,73 @@ def test_build_response_reads_only_mapped_hosts_and_closes_connection():
     assert "private-host" not in str(result)
 
 
+def test_build_response_exposes_access_wake_and_availability_dimensions():
+    engine = Engine()
+    heartbeat = {
+        "timestamp": "2026-09-23T09:57:00+00:00",
+        "ready": False,
+        "localMode": False,
+        "localSession": False,
+    }
+    wake_operations = []
+
+    result = build_public_lab_status_response(
+        ["7"],
+        engine=engine,
+        resolve_lab_associations=lambda: [{
+            "labId": "7",
+            "hostName": "private-host",
+            "wakeConfigured": True,
+        }],
+        resolve_lab_status_targets=lambda: [],
+        fetch_latest_heartbeat=lambda *_args: heartbeat,
+        fetch_latest_wake_operations=lambda _connection, lab_ids: (
+            wake_operations.append(list(lab_ids)) or {
+                "7": {
+                    "success": True,
+                    "status": "completed",
+                    "created_at": datetime(2026, 9, 23, 9, 58, tzinfo=timezone.utc),
+                },
+            }
+        ),
+        probe_lab_targets=lambda _targets: {},
+        now=lambda: datetime(2026, 9, 23, 10, 0, 30, tzinfo=timezone.utc),
+        max_age_seconds=180,
+    )
+
+    status = result["statuses"][0]
+    assert status["access"] == "unknown"
+    assert status["wake"]["state"] == "verified"
+    assert status["availability"] == "on_demand"
+    assert wake_operations == [["7"]]
+
+
+def test_fresh_station_wake_diagnosis_can_reject_host_configuration():
+    result = build_public_lab_status_response(
+        ["7"],
+        engine=Engine(),
+        resolve_lab_associations=lambda: [{
+            "labId": "7",
+            "hostName": "private-host",
+            "wakeConfigured": True,
+        }],
+        resolve_lab_status_targets=lambda: [],
+        fetch_latest_heartbeat=lambda *_args: {
+            "timestamp": "2026-09-23T10:00:00+00:00",
+            "ready": True,
+            "readiness": {"wake": {"ready": False, "issues": ["NIC not wake-armed"]}},
+        },
+        fetch_latest_wake_operations=lambda *_args: {},
+        probe_lab_targets=lambda _targets: {},
+        now=lambda: datetime(2026, 9, 23, 10, 0, 30, tzinfo=timezone.utc),
+        max_age_seconds=180,
+    )
+
+    status = result["statuses"][0]
+    assert status["state"] == "ready"
+    assert status["wake"]["state"] == "failed"
+
+
 def test_build_response_publishes_capability_statuses_without_raw_diagnostics():
     engine = Engine()
     heartbeat = {
@@ -194,7 +261,7 @@ def test_build_response_uses_local_fmu_runner_for_fmu_without_station_mapping():
         probe_lab_targets=lambda _targets: (_ for _ in ()).throw(
             AssertionError("an FMU must not probe Guacamole")
         ),
-        fetch_fmu_runner_status=lambda: calls.append("health") or {
+        fetch_fmu_runner_status=lambda _lab_id: calls.append("health") or {
             "signal": "ready",
             "reason": "fmu_ready",
             "source": "fmu_runner_health",
@@ -230,7 +297,7 @@ def test_build_response_does_not_load_station_dependencies_for_local_fmu():
         probe_lab_targets=lambda _targets: (_ for _ in ()).throw(
             AssertionError("a local FMU must not probe Guacamole")
         ),
-        fetch_fmu_runner_status=lambda: calls.append("health") or {
+        fetch_fmu_runner_status=lambda _lab_id: calls.append("health") or {
             "signal": "ready",
             "reason": "fmu_ready",
             "source": "fmu_runner_health",
@@ -257,7 +324,7 @@ def test_build_response_keeps_local_fmu_unknown_when_runner_health_is_unavailabl
         }],
         fetch_latest_heartbeat=lambda *_args: None,
         probe_lab_targets=lambda _targets: {},
-        fetch_fmu_runner_status=lambda: {
+        fetch_fmu_runner_status=lambda _lab_id: {
             "signal": "unknown",
             "reason": "fmu_runner_unavailable",
             "source": "fmu_runner_health",
@@ -271,17 +338,7 @@ def test_build_response_keeps_local_fmu_unknown_when_runner_health_is_unavailabl
     assert result["statuses"][0]["reason"] == "fmu_runner_unavailable"
 
 
-def test_build_response_uses_station_heartbeat_for_station_fmu():
-    heartbeat = {
-        "timestamp": "2026-09-23T10:00:00+00:00",
-        "ready": False,
-        "localMode": False,
-        "localSession": False,
-        "readiness": {
-            "physicalLab": {"ready": True, "issues": []},
-            "fmu": {"ready": False, "issues": ["FMU executor is not running"]},
-        },
-    }
+def test_build_response_uses_fmu_runner_for_station_fmu_without_guacamole_or_heartbeat():
     calls = []
 
     result = build_public_lab_status_response(
@@ -295,22 +352,31 @@ def test_build_response_uses_station_heartbeat_for_station_fmu():
             "executionBackend": "station",
             "stationHostName": "station-01",
         }],
-        resolve_fmu_station_host=lambda: "",
-        fetch_latest_heartbeat=lambda _connection, host_name: calls.append(host_name) or heartbeat,
-        probe_lab_targets=lambda _targets: {},
-        fetch_fmu_runner_status=lambda: (_ for _ in ()).throw(
-            AssertionError("a Station FMU with a heartbeat must not use the local runner")
+        fetch_latest_heartbeat=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("a Station FMU must not read a physical-lab heartbeat")
         ),
+        probe_lab_targets=lambda _targets: (_ for _ in ()).throw(
+            AssertionError("a Station FMU must not probe Guacamole")
+        ),
+        fetch_fmu_runner_status=lambda lab_id: calls.append(lab_id) or {
+            "signal": "ready",
+            "reason": "fmu_ready",
+            "source": "fmu_runner_health",
+            "observedAt": "2026-09-23T10:00:29Z",
+            "capacity": {"state": "available", "active": 0, "maximum": 1, "available": 1},
+        },
         now=lambda: datetime(2026, 9, 23, 10, 0, 30, tzinfo=timezone.utc),
         max_age_seconds=180,
     )
 
     status = result["statuses"][0]
-    assert status["state"] == "not_ready"
-    assert status["reason"] == "fmu_not_ready"
-    assert status["source"] == "lab_station_heartbeat"
-    assert status["capabilities"]["fmu"]["state"] == "not_ready"
-    assert calls == ["station-01"]
+    assert status["state"] == "ready"
+    assert status["reason"] == "fmu_ready"
+    assert status["source"] == "fmu_runner_health"
+    assert status["resourceType"] == "fmu"
+    assert status["capabilities"]["fmu"]["state"] == "ready"
+    assert "wake" not in status
+    assert calls == ["10"]
 
 
 def test_build_response_falls_back_to_runner_for_station_fmu_without_station_host():
@@ -326,12 +392,11 @@ def test_build_response_falls_back_to_runner_for_station_fmu_without_station_hos
             "resourceType": "fmu",
             "executionBackend": "station",
         }],
-        resolve_fmu_station_host=lambda: "",
         fetch_latest_heartbeat=lambda *_args: (_ for _ in ()).throw(
             AssertionError("an unmapped Station FMU must not read an arbitrary heartbeat")
         ),
         probe_lab_targets=lambda _targets: {},
-        fetch_fmu_runner_status=lambda: calls.append("health") or {
+        fetch_fmu_runner_status=lambda _lab_id: calls.append("health") or {
             "signal": "ready",
             "reason": "fmu_ready",
             "source": "fmu_runner_health",

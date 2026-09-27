@@ -28,6 +28,8 @@ function loadFeature() {
     'winrmCredentialUser', 'winrmCredentialPassword', 'provisionConnectionId', 'provisionHostName',
     'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac', 'provisionLabstationPath',
     'editHostOriginalName', 'editHostName', 'editHostAddress', 'editHostMac', 'editLabstationPath',
+    'wakeOpsModal', 'closeWakeOpsModal', 'cancelWakeOps', 'saveWakeOps', 'wakeOpsManualWake',
+    'wakeOpsModalHost', 'wakeOpsEnabled', 'wakeOpsDay', 'wakeOpsTime', 'wakeOpsTimezone', 'wakeOpsStatus',
   ];
   const elements = new Map(ids.map((id) => [id, createElement(id)]));
   const document = {
@@ -49,6 +51,7 @@ function loadFeature() {
       triggerWinrm: () => {},
       toggleLocalMode: () => {},
     },
+    wakeOps: { open: () => {}, close: () => {}, save: () => {}, manualWake: () => {} },
     hostDiscovery: { probe: () => {} },
     winrmCredentials: {},
     winrmTrust: {},
@@ -113,6 +116,7 @@ function loadFeature() {
     LabManagerHostView: createModule('host-view', controllers.hostView),
     LabManagerHostActionBindings: createModule('action-bindings', controllers.actionBindings),
     LabManagerHostActions: createModule('host-actions', controllers.hostActions),
+    LabManagerWakeOps: createModule('wake-ops', controllers.wakeOps),
     LabManagerModalBindings: createModule('modal-bindings', controllers.modalBindings),
   };
   const context = vm.createContext({ document, window, console, FormData: class FormData {} });

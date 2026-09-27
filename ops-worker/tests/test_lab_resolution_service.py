@@ -144,9 +144,27 @@ def test_resolve_lab_associations_projects_only_resolved_lab_and_host_ids():
         parse_selector=_parse_selector,
         normalize_key=_normalize,
     ) == [
-        {"labId": "lab-1", "hostName": "station-01"},
-        {"labId": "lab-2", "hostName": "station-02"},
+        {"labId": "lab-1", "hostName": "station-01", "wakeConfigured": False},
+        {"labId": "lab-2", "hostName": "station-02", "wakeConfigured": False},
     ]
+
+
+def test_resolve_lab_associations_only_marks_wake_configured_with_valid_mac_and_target():
+    hosts = [
+        {"name": "station-01", "address": "192.168.1.51", "mac": "00:11:22:33:44:55"},
+    ]
+
+    assert resolve_lab_associations(
+        LABS[:1],
+        CONNECTIONS,
+        hosts,
+        parse_selector=_parse_selector,
+        normalize_key=_normalize,
+    ) == [{
+        "labId": "lab-1",
+        "hostName": "station-01",
+        "wakeConfigured": True,
+    }]
 
 
 def test_resolve_lab_status_targets_keeps_guacamole_only_connections():

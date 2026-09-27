@@ -37,6 +37,18 @@ def test_health_router_reports_up_and_refreshes_jwks():
     refresh_jwks.assert_awaited_once_with()
 
 
+def test_health_router_passes_lab_id_to_backend_health():
+    client, backend_health, _ = _client(
+        backend_payload={"status": "UP", "checks": {}, "availableCapacity": 1},
+        auth_status={"status": "UP", "stale": False, "cachedKeys": 1},
+    )
+
+    response = client.get("/health?labId=42")
+
+    assert response.status_code == 200
+    backend_health.assert_awaited_once_with(lab_id="42")
+
+
 def test_health_router_reports_degraded_when_jwks_is_degraded():
     client, _, _ = _client(
         backend_payload={"status": "UP", "checks": {}},

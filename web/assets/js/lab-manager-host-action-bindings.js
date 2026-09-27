@@ -9,7 +9,7 @@
         const {
             onEditHost = () => {},
             onPoll = () => {},
-            onWakeOnLan = () => {},
+            onWakeOps = () => {},
             onWinrm = () => {},
             onToggleLocalMode = () => {},
             onCredentials = () => {},
@@ -31,8 +31,8 @@
                 onPoll(host);
                 return;
             }
-            if (action === 'wol') {
-                onWakeOnLan(host);
+            if (action === 'wake-ops') {
+                onWakeOps(host);
                 return;
             }
             if (action === 'prepare') {

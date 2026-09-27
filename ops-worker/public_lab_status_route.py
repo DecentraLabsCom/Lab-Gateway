@@ -7,7 +7,6 @@ from lab_status_service import (
     heartbeat_is_fresh,
     project_fmu_runner_status,
     project_lab_status,
-    project_station_fmu_status,
 )
 
 
@@ -48,8 +47,8 @@ def build_public_lab_status_response(
     now: Callable[[], datetime],
     max_age_seconds: int,
     resolve_lab_resources: Optional[Callable[[], Sequence[dict]]] = None,
-    resolve_fmu_station_host: Optional[Callable[[], str]] = None,
-    fetch_fmu_runner_status: Optional[Callable[[], Optional[Mapping[str, Any]]]] = None,
+    fetch_fmu_runner_status: Optional[Callable[[str], Optional[Mapping[str, Any]]]] = None,
+    fetch_latest_wake_operations: Optional[Callable[[Any, Sequence[str]], Dict[str, Dict[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     current = now()
     statuses = []
@@ -64,17 +63,8 @@ def build_public_lab_status_response(
         def resource_type(lab_id: str) -> str:
             return str(resources_by_lab.get(lab_id, {}).get("resourceType") or "").strip().lower()
 
-        def fmu_backend(lab_id: str) -> str:
-            backend = str(
-                resources_by_lab.get(lab_id, {}).get("executionBackend") or "station"
-            ).strip().lower()
-            return "local" if backend in {"local", "gateway", "gateway-local", "gateway_local"} else "station"
-
         def requires_station_data(lab_id: str) -> bool:
-            return not (
-                resource_type(lab_id) == "fmu"
-                and fmu_backend(lab_id) == "local"
-            )
+            return resource_type(lab_id) != "fmu"
 
         needs_station_data = any(requires_station_data(str(lab_id)) for lab_id in lab_ids)
         if needs_station_data:
@@ -86,6 +76,16 @@ def build_public_lab_status_response(
                 for entry in associations
                 if isinstance(entry, dict)
             }
+            wake_configured_by_lab = {
+                str(entry.get("labId")): entry.get("wakeConfigured") is True
+                for entry in associations
+                if isinstance(entry, dict)
+            }
+            wake_configuration_known_by_lab = {
+                str(entry.get("labId")): "wakeConfigured" in entry
+                for entry in associations
+                if isinstance(entry, dict)
+            }
             targets_by_lab = {
                 str(entry.get("labId")): entry
                 for entry in (resolve_lab_status_targets() or [])
@@ -94,35 +94,53 @@ def build_public_lab_status_response(
         else:
             host_by_lab = {}
             targets_by_lab = {}
+            wake_configured_by_lab = {}
+            wake_configuration_known_by_lab = {}
 
-        fmu_station_host = ""
-        if resolve_fmu_station_host and any(
-            resource_type(str(lab_id)) == "fmu"
-            and fmu_backend(str(lab_id)) == "station"
-            for lab_id in lab_ids
+        wake_operations: Dict[str, Dict[str, Any]] = {}
+        if fetch_latest_wake_operations and connection is not None and any(
+            resource_type(str(lab_id)) != "fmu" for lab_id in lab_ids
         ):
-            fmu_station_host = str(resolve_fmu_station_host() or "").strip()
-
-        def fmu_host(lab_id: str) -> str:
-            return str(
-                resources_by_lab.get(lab_id, {}).get("stationHostName") or fmu_station_host
-            ).strip()
+            try:
+                wake_operations = fetch_latest_wake_operations(
+                    connection,
+                    [str(lab_id) for lab_id in lab_ids],
+                ) or {}
+            except Exception:  # pylint: disable=broad-except
+                # Wake evidence is an enrichment signal.  A query failure must
+                # not hide the independent access/heartbeat projection.
+                wake_operations = {}
 
         heartbeats = {}
         for lab_id in lab_ids:
             lab_key = str(lab_id)
-            if resource_type(lab_key) == "fmu" and fmu_backend(lab_key) == "local":
+            if resource_type(lab_key) == "fmu":
                 heartbeats[str(lab_id)] = None
                 continue
-            host_name = (
-                fmu_host(lab_key)
-                if resource_type(lab_key) == "fmu"
-                else host_by_lab.get(lab_key, "")
-            )
+            host_name = host_by_lab.get(lab_key, "")
             heartbeat = None
             if host_name and connection is not None:
                 heartbeat = fetch_latest_heartbeat(connection, host_name)
             heartbeats[str(lab_id)] = heartbeat
+
+        def wake_configuration(lab_id: str) -> tuple[bool, bool]:
+            """Return host WoL configuration, accounting for fresh Station diagnosis."""
+            configured = wake_configured_by_lab.get(lab_id, False)
+            configuration_known = wake_configuration_known_by_lab.get(lab_id, False)
+            heartbeat = heartbeats.get(lab_id)
+            if not heartbeat_is_fresh(
+                heartbeat,
+                now=current,
+                max_age_seconds=max_age_seconds,
+            ):
+                return configured, configuration_known
+            raw = heartbeat.get("raw") if isinstance(heartbeat, Mapping) else None
+            source = raw if isinstance(raw, Mapping) else heartbeat
+            readiness = source.get("readiness") if isinstance(source, Mapping) else None
+            wake_readiness = readiness.get("wake") if isinstance(readiness, Mapping) else None
+            if isinstance(wake_readiness, Mapping) and wake_readiness.get("ready") is False:
+                return False, True
+            return configured, configuration_known
 
         targets_to_probe = [
             targets_by_lab[str(lab_id)]
@@ -136,39 +154,24 @@ def build_public_lab_status_response(
             )
         ]
         probes = probe_lab_targets(targets_to_probe) if targets_to_probe else {}
-        fmu_runner_status = None
-        if (
-            fetch_fmu_runner_status
-            and any(
-                resource_type(str(lab_id)) == "fmu"
-                and (
-                    fmu_backend(str(lab_id)) == "local"
-                    or not fmu_host(str(lab_id))
-                )
-                for lab_id in lab_ids
-            )
-        ):
-            fmu_runner_status = fetch_fmu_runner_status()
+        fmu_runner_status_by_lab: Dict[str, Optional[Mapping[str, Any]]] = {}
+        if fetch_fmu_runner_status:
+            for lab_id in lab_ids:
+                lab_key = str(lab_id)
+                if resource_type(lab_key) == "fmu":
+                    fmu_runner_status_by_lab[lab_key] = fetch_fmu_runner_status(lab_key)
 
         for lab_id in lab_ids:
             lab_key = str(lab_id)
             if resource_type(lab_key) == "fmu":
-                if fmu_backend(lab_key) == "local" or not fmu_host(lab_key):
-                    statuses.append(project_fmu_runner_status(
-                        lab_id,
-                        fmu_runner_status,
-                        now=current,
-                    ))
-                else:
-                    statuses.append(project_station_fmu_status(
-                        lab_id,
-                        heartbeats[lab_key],
-                        now=current,
-                        max_age_seconds=max_age_seconds,
-                        host_mapped=True,
-                    ))
+                statuses.append(project_fmu_runner_status(
+                    lab_id,
+                    fmu_runner_status_by_lab.get(lab_key),
+                    now=current,
+                ))
                 continue
             host_name = host_by_lab.get(str(lab_id), "")
+            configured, configuration_known = wake_configuration(lab_key)
             statuses.append(project_lab_status(
                 lab_id,
                 heartbeats[str(lab_id)],
@@ -176,6 +179,11 @@ def build_public_lab_status_response(
                 max_age_seconds=max_age_seconds,
                 host_mapped=bool(host_name),
                 target_probe=probes.get(str(lab_id)),
+                wake_status={
+                    "configured": configured,
+                    "configurationKnown": configuration_known,
+                    "operation": wake_operations.get(str(lab_id)),
+                },
             ))
     finally:
         if connection is not None:

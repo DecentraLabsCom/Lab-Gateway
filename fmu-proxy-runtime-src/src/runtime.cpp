@@ -189,17 +189,17 @@ bool TryNormalizeIntegerValue(const VariableInfo& variable, const T raw_value, S
         }
         *output = static_cast<std::int64_t>(value);
         return true;
+    } else {
+        const auto value = static_cast<std::int64_t>(raw_value);
+        if (value < bounds.min) {
+            return false;
+        }
+        if (value >= 0 && static_cast<std::uint64_t>(value) > bounds.max) {
+            return false;
+        }
+        *output = value;
+        return true;
     }
-
-    const auto value = static_cast<std::int64_t>(raw_value);
-    if (value < bounds.min) {
-        return false;
-    }
-    if (value >= 0 && static_cast<std::uint64_t>(value) > bounds.max) {
-        return false;
-    }
-    *output = value;
-    return true;
 }
 
 template <typename T>
@@ -219,12 +219,13 @@ bool TryCastStoredInteger(const VariableInfo& variable, const ScalarValue& store
             }
             *output = static_cast<T>(*unsigned_value);
             return true;
+        } else {
+            if (*unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
+                return false;
+            }
+            *output = static_cast<T>(*unsigned_value);
+            return true;
         }
-        if (*unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
-            return false;
-        }
-        *output = static_cast<T>(*unsigned_value);
-        return true;
     }
 
     const auto* signed_value = std::get_if<std::int64_t>(&stored_value);
@@ -244,20 +245,20 @@ bool TryCastStoredInteger(const VariableInfo& variable, const ScalarValue& store
         }
         *output = static_cast<T>(value);
         return true;
+    } else {
+        if (*signed_value < bounds.min) {
+            return false;
+        }
+        if (*signed_value >= 0 && static_cast<std::uint64_t>(*signed_value) > bounds.max) {
+            return false;
+        }
+        if (*signed_value < static_cast<std::int64_t>(std::numeric_limits<T>::min()) ||
+            *signed_value > static_cast<std::int64_t>(std::numeric_limits<T>::max())) {
+            return false;
+        }
+        *output = static_cast<T>(*signed_value);
+        return true;
     }
-
-    if (*signed_value < bounds.min) {
-        return false;
-    }
-    if (*signed_value >= 0 && static_cast<std::uint64_t>(*signed_value) > bounds.max) {
-        return false;
-    }
-    if (*signed_value < static_cast<std::int64_t>(std::numeric_limits<T>::min()) ||
-        *signed_value > static_cast<std::int64_t>(std::numeric_limits<T>::max())) {
-        return false;
-    }
-    *output = static_cast<T>(*signed_value);
-    return true;
 }
 
 std::optional<ScalarValue> ConvertIntegerArrayValue(

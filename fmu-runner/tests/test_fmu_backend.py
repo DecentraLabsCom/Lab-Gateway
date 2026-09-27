@@ -25,6 +25,25 @@ async def test_local_backend_delegates_to_loaders():
     assert listing["fmus"][0]["filename"] == "demo.fmu"
 
 
+@pytest.mark.asyncio
+async def test_local_backend_passes_lab_id_to_health_loader():
+    calls = []
+
+    def _health_loader(**kwargs):
+        calls.append(kwargs)
+        return {"status": "UP", "checks": {"fmuDataPath": True}, "fmuCount": 1}
+
+    backend = LocalFmuBackend(
+        health_loader=_health_loader,
+        model_metadata_loader=lambda filename: {"modelName": filename, "modelVariables": []},
+        list_loader=lambda access_key: {"fmus": [{"filename": access_key}]},
+    )
+
+    await backend.health(lab_id="42")
+
+    assert calls == [{"lab_id": "42"}]
+
+
 @pytest.mark.parametrize(
     "access_key",
     ["../etc/passwd", "provider/../../etc/passwd", "provider\\demo.fmu", "demo.fmu?redirect=1"],
@@ -64,7 +83,7 @@ async def test_station_health_proves_the_internal_token_with_capacity_endpoint(m
         if operation == "health":
             return {"status": "UP", "fmuCount": 2}
         if operation == "capacity":
-            return {"maxSessions": 1, "activeSessions": 0}
+            return {"capacity": 1, "active": 0, "available": 1}
         raise AssertionError(operation)
 
     monkeypatch.setattr(backend, "_request_json", _fake_request)
@@ -73,6 +92,9 @@ async def test_station_health_proves_the_internal_token_with_capacity_endpoint(m
 
     assert payload["status"] == "UP"
     assert payload["checks"]["stationAuthentication"] is True
+    assert payload["activeExecutions"] == 0
+    assert payload["maxConcurrentExecutions"] == 1
+    assert payload["availableCapacity"] == 1
     assert calls == [("health", None), ("capacity", None)]
 
 

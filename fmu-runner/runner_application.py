@@ -311,8 +311,10 @@ def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = 
 # App
 # ---------------------------------------------------------------------------
 
-async def _health_backend_payload():
-    return await _runner_runtime.backend.health()
+async def _health_backend_payload(lab_id: Optional[str] = None):
+    if lab_id is None:
+        return await _runner_runtime.backend.health()
+    return await _runner_runtime.backend.health(lab_id=lab_id)
 
 
 async def _refresh_health_jwks():
@@ -678,11 +680,20 @@ def _build_proxy_session_config(
     )
 
 
-def _local_backend_health_payload() -> dict:
-    return _catalog_local_backend_health_payload(
+def _local_backend_health_payload(lab_id: Optional[str] = None) -> dict:
+    payload = _catalog_local_backend_health_payload(
         data_path=FMU_DATA_PATH,
         executor=_runner_runtime.executor,
     )
+    if lab_id is not None:
+        active = _runner_runtime.registry.count_for_lab(str(lab_id))
+        maximum = max(0, int(MAX_CONCURRENT_PER_MODEL))
+        payload.update({
+            "activeExecutions": active,
+            "maxConcurrentExecutions": maximum,
+            "availableCapacity": max(0, maximum - active),
+        })
+    return payload
 
 
 def _load_local_model_metadata(fmu_filename: str) -> dict:

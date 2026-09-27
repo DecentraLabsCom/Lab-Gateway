@@ -71,7 +71,7 @@ test('host row renderer preserves status markup and escapes host data', () => {
   assert.match(html, /class="pill good">Remote app/);
   assert.doesNotMatch(html, /Ready:/);
   assert.match(html, /<button class="mini-btn" data-action="poll" title="Check station status">Heartbeat<\/button>/);
-  assert.match(html, /<button class="mini-btn" data-action="wol" title="Wake station">Wake<\/button>/);
+  assert.match(html, /<button class="mini-btn" data-action="wake-ops" title="Configure Wake Ops and wake station">Wake Ops<\/button>/);
   assert.match(html, /<button class="mini-btn primary" data-action="prepare" title="Prepare station">Prepare<\/button>/);
   assert.match(html, /<button class="mini-btn" data-action="release" title="Release station">Release<\/button>/);
   assert.match(html, /<button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown<\/button>/);

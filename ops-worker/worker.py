@@ -11,9 +11,9 @@ import logging
 import os
 import socket
 import time
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Mapping, Optional, Pattern, Sequence, Set, Tuple, Union, cast
-from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 from flask import Response, jsonify, request, stream_with_context
@@ -26,6 +26,17 @@ import wakeonlan as _wakeonlan
 import requests
 import winrm
 from app_factory import create_app, register_blueprints
+from wake_ops_blueprint import create_wake_ops_blueprint
+from wake_ops_persistence import get_schedule as _get_wake_ops_schedule_impl
+from wake_ops_persistence import latest_wake_operation as _latest_wake_operation_impl
+from wake_ops_persistence import save_schedule as _save_wake_ops_schedule_impl
+from wake_ops_service import (
+    WAKE_EVIDENCE_MAX_AGE_SECONDS,
+    execute_wake_ops_cycle,
+    is_schedule_due,
+    normalize_schedule,
+    scheduled_occurrence,
+)
 from entrypoint import (
     configure_logging as _configure_logging_impl,
     run as _run_entrypoint_impl,
@@ -253,6 +264,7 @@ from network_probe import (
 )
 from lab_status_probe import CachedLabTargetProber
 from fmu_runner_status import CachedFmuRunnerStatus
+from lab_status_wake import fetch_latest_wake_operations as _fetch_latest_wake_operations_impl
 from operation_persistence import (
     record_reservation_operation as _record_reservation_operation_impl,
 )
@@ -373,6 +385,11 @@ def wake(mac: str, *, host: str, port: int) -> None:
         sender(mac, host=host, port=port)
         return
     _wakeonlan.send_magic_packet(mac, ip_address=host, port=port)
+
+
+def fetch_latest_wake_operations(connection: Any, lab_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+    """Load the bounded wake evidence used by the public status projection."""
+    return _fetch_latest_wake_operations_impl(connection, lab_ids, sql_text=text)
 
 
 # These aliases are installed by runtime factories below their dependency
@@ -569,6 +586,9 @@ GUAC_TOKEN_REVOCATION_MAX_ATTEMPTS: int
 GUACAMOLE_HISTORY_LOOKBACK_SECONDS: int
 GUACAMOLE_HISTORY_RECONCILIATION_RETENTION_SECONDS: int
 HEARTBEAT_SSE_INTERVAL_SECONDS: int
+WAKE_OPS_ENABLED: bool
+WAKE_OPS_INTERVAL_SECONDS: int
+GATEWAY_TIMEZONE: str
 DISCOVERY_TIMEOUT_SECONDS: float
 DISCOVERY_LABSTATION_PORTS: List[int]
 DISCOVERY_LABSTATION_PATHS: List[str]
@@ -1142,6 +1162,215 @@ perform_wake_step = _RESERVATION_EXECUTION_RUNTIME.perform_wake_step
 perform_command_step = _RESERVATION_EXECUTION_RUNTIME.perform_command_step
 poll_heartbeat = _HEARTBEAT_RUNTIME.poll_heartbeat
 
+
+def _wake_ops_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _wake_ops_schedule(host_name: str) -> Dict[str, Any]:
+    return _get_wake_ops_schedule_impl(
+        DB_ENGINE,
+        host_name,
+        default_timezone=GATEWAY_TIMEZONE,
+        sql_text=text,
+    )
+
+
+def _wake_ops_save_schedule(host_name: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    current = _wake_ops_schedule(host_name)
+    normalized = normalize_schedule(payload, default_timezone=GATEWAY_TIMEZONE)
+    return _save_wake_ops_schedule_impl(
+        DB_ENGINE,
+        host_name,
+        normalized,
+        sql_text=text,
+        now=_wake_ops_now,
+        last_scheduled_at=current.get("lastScheduledAt"),
+        last_started_at=current.get("lastStartedAt"),
+        last_finished_at=current.get("lastFinishedAt"),
+        last_status=current.get("lastStatus"),
+        last_message=current.get("lastMessage"),
+        last_initial_power_state=current.get("lastInitialPowerState"),
+    )
+
+
+def _wake_ops_latest_wake(host_name: str) -> Optional[Dict[str, Any]]:
+    return _latest_wake_operation_impl(DB_ENGINE, host_name, sql_text=text)
+
+
+def _wake_ops_probe(host: Mapping[str, Any]) -> bool:
+    address = host.get("address") or host.get("ping_target")
+    if not address:
+        return False
+    configured_port = host.get("winrm_port")
+    try:
+        probe_port = int(configured_port) if configured_port not in (None, "") else WINRM_PORT
+    except (TypeError, ValueError):
+        probe_port = WINRM_PORT
+    return host_is_up(
+        str(address),
+        max(0.2, LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS),
+        probe_port=probe_port,
+    )
+
+
+def _wake_ops_initial_power_state(host: Mapping[str, Any]) -> str:
+    if _wake_ops_probe(host):
+        return "on"
+    if not DB_ENGINE:
+        return "off"
+    try:
+        with DB_ENGINE.connect() as connection:
+            heartbeat = _fetch_latest_heartbeat(connection, host.get("name", ""))
+    except Exception:  # pylint: disable=broad-except
+        logging.exception("Unable to classify initial power state for %s", host.get("name"))
+        return "unknown"
+    if heartbeat:
+        timestamp = to_utc(heartbeat.get("timestamp"))
+        if timestamp and (_wake_ops_now() - timestamp).total_seconds() <= LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS:
+            return "unknown"
+    return "off"
+
+
+def _wake_ops_wait_until_off(host: Mapping[str, Any], timeout_seconds: int = 180) -> bool:
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    while time.monotonic() <= deadline:
+        if not _wake_ops_probe(host):
+            return True
+        time.sleep(5)
+    return False
+
+
+def _wake_ops_shutdown(
+    host: Mapping[str, Any],
+    reservation_id: str,
+    phase: str,
+    lab_id: Optional[str],
+) -> bool:
+    action = f"wake_ops_shutdown_{phase}"
+    result, _details = perform_command_step(
+        dict(host),
+        reservation_id,
+        lab_id,
+        action,
+        "power",
+        ["shutdown", "--delay=60", "--reason=Wake Ops weekly verification"],
+    )
+    return result
+
+
+def _wake_ops_manual_wake(host_name: str) -> Dict[str, Any]:
+    host = HOSTS.get(host_name)
+    if not host:
+        return {"host": host_name, "success": False, "status": "failed", "message": "Unknown host"}
+    reservation_id = f"wake-ops:manual:{uuid.uuid4().hex}"
+    lab_ids = resolve_lab_ids_for_host(dict(host))
+    lab_id = str(lab_ids[0]) if lab_ids else None
+    success, details = perform_wake_step(dict(host), reservation_id, lab_id, {})
+    return {"host": host_name, "reservationId": reservation_id, **details, "success": success}
+
+
+def _wake_ops_cycle(
+    host: Mapping[str, Any],
+    reservation_id: str,
+    lab_id: Optional[str],
+) -> Dict[str, Any]:
+    initial_state = _wake_ops_initial_power_state(host)
+    if initial_state == "unknown":
+        message = "Initial power state is not reliable; Wake Ops did not send a command"
+        record_reservation_operation(
+            reservation_id,
+            lab_id,
+            host.get("name", ""),
+            "wake_ops_cycle",
+            "failed",
+            False,
+            response_code=409,
+            message=message,
+        )
+        return {
+            "host": host.get("name", ""),
+            "reservationId": reservation_id,
+            "initialPowerState": initial_state,
+            "success": False,
+            "status": "failed",
+            "message": message,
+        }
+
+    result = execute_wake_ops_cycle(
+        host,
+        reservation_id,
+        initial_power_state=initial_state,
+        shutdown=lambda phase: _wake_ops_shutdown(host, reservation_id, phase, lab_id),
+        wait_until_off=lambda: _wake_ops_wait_until_off(host),
+        wake=lambda: perform_wake_step(dict(host), reservation_id, lab_id, {})[0],
+        now=_wake_ops_now,
+    )
+    record_reservation_operation(
+        reservation_id,
+        lab_id,
+        host.get("name", ""),
+        "wake_ops_cycle",
+        result["status"],
+        bool(result["success"]),
+        response_code=200 if result["success"] else 502,
+        payload={"initialPowerState": initial_state},
+        message=result.get("message"),
+    )
+    return result
+
+
+def run_wake_ops() -> None:
+    if not DB_ENGINE:
+        logging.warning("Wake Ops skipped because the operations database is unavailable")
+        return
+    now = _wake_ops_now()
+    for host in HOSTS.all_hosts():
+        host_name = host.get("name", "")
+        try:
+            schedule = _wake_ops_schedule(host_name)
+            if not is_schedule_due(now, schedule, last_scheduled_at=schedule.get("lastScheduledAt")):
+                continue
+            occurrence = scheduled_occurrence(now, schedule)
+            reservation_id = f"wake-ops:weekly:{host_name}:{occurrence.isoformat()}"
+            lab_ids = resolve_lab_ids_for_host(dict(host))
+            lab_id = str(lab_ids[0]) if lab_ids else None
+            started_at = _wake_ops_now()
+            _save_wake_ops_schedule_impl(
+                DB_ENGINE,
+                host_name,
+                schedule,
+                sql_text=text,
+                now=_wake_ops_now,
+                last_scheduled_at=occurrence,
+                last_started_at=started_at,
+                last_finished_at=schedule.get("lastFinishedAt"),
+                last_status="running",
+                last_message=None,
+                last_initial_power_state=None,
+            )
+            result = _wake_ops_cycle(host, reservation_id, lab_id)
+            _save_wake_ops_schedule_impl(
+                DB_ENGINE,
+                host_name,
+                schedule,
+                sql_text=text,
+                now=_wake_ops_now,
+                last_scheduled_at=occurrence,
+                last_started_at=started_at,
+                last_finished_at=_wake_ops_now(),
+                last_status=result.get("status"),
+                last_message=result.get("message"),
+                last_initial_power_state=result.get("initialPowerState"),
+            )
+            logging.info("Wake Ops weekly verification for %s: %s", host_name, result.get("status"))
+        except Exception:  # pylint: disable=broad-except
+            logging.exception("Wake Ops weekly verification failed for %s", host_name)
+
+
+def _wake_ops_get_schedule(host_name: str) -> Dict[str, Any]:
+    return _wake_ops_schedule(host_name)
+
 _format_sse_event = _HEARTBEAT_RUNTIME.format_sse_event
 
 
@@ -1479,24 +1708,6 @@ def resolve_lab_resources() -> List[Dict[str, str]]:
     )
 
 
-def resolve_fmu_station_host() -> str:
-    """Resolve the configured FMU Station to one registered Ops host."""
-    target = (FMU_STATUS_STATION_HOST or "").strip()
-    if not target and FMU_STATUS_STATION_BASE_URL:
-        target = (urlparse(FMU_STATUS_STATION_BASE_URL).hostname or "").strip()
-    if not target:
-        return ""
-    normalized = normalize_match_key(target)
-    with HOSTS_LOCK:
-        matches = [
-            host for host in HOSTS.all_hosts()
-            if normalized in {
-                normalize_match_key(host.get("name")),
-                normalize_match_key(host.get("address")),
-            }
-        ]
-    return str(matches[0].get("name") or "").strip() if len(matches) == 1 else ""
-
 _LAB_STATUS_PROBER = CachedLabTargetProber(
     tcp_port_open=tcp_port_open,
     timeout_seconds=LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS,
@@ -1706,6 +1917,9 @@ _SCHEDULER_CONTEXT = SchedulerContext(
     get_observation_enabled=lambda: SESSION_OBSERVATION_OUTBOX_ENABLED,
     get_observation_interval_seconds=lambda: SESSION_OBSERVATION_OUTBOX_INTERVAL_SECONDS,
     get_deliver_observations=lambda: deliver_session_observation_outbox,
+    get_wake_ops_enabled=lambda: WAKE_OPS_ENABLED,
+    get_wake_ops_interval_seconds=lambda: WAKE_OPS_INTERVAL_SECONDS,
+    get_run_wake_ops=lambda: run_wake_ops,
     get_revocation_interval_seconds=lambda: GUAC_TOKEN_REVOCATION_INTERVAL_SECONDS,
     get_process_revocations=lambda: process_guacamole_token_revocations,
     get_now=lambda: lambda: datetime.now(timezone.utc),
