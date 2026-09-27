@@ -25,7 +25,7 @@ def run_labstation_command(
     ],
     create_session: Callable[..., Any],
     run_method: Callable[..., Any],
-    build_command: Callable[[Any, str, List[Any]], Tuple[Any, List[Any]]],
+    build_command: Callable[[Any, str, List[Any]], str],
     default_executable: Any,
     read_timeout_sec: Optional[int],
     operation_timeout_sec: Optional[int],
@@ -59,8 +59,8 @@ def run_labstation_command(
         read_timeout_sec=read_timeout_sec,
         operation_timeout_sec=operation_timeout_sec,
     )
-    executable, command_args = build_command(executable, command, command_args)
-    result = run_method(session, "run_cmd_direct", executable, command_args)
+    script = build_command(executable, command, command_args)
+    result = run_method(session, "run_ps", script)
     duration_ms = int((clock() - start) * 1000)
 
     return {

@@ -1,37 +1,42 @@
-"""Pure builders for the PowerShell and LabStation WinRM commands."""
+"""Pure builders for PowerShell and LabStation WinRM commands."""
 
-from typing import Any, List, Tuple
-
-
-def _quote_winrm_token(value: Any) -> str:
-    """Quote one token for pywinrm's cmd-backed argument string."""
-    text = str(value)
-    if text == "":
-        return '""'
-    if not any(char.isspace() or char in '"&|<>()^' for char in text):
-        return text
-    return '"' + text.replace('"', '\\"') + '"'
+from typing import Any, List
 
 
 def build_labstation_command(
     executable: Any,
     command: str,
     args: List[Any],
-) -> Tuple[Any, List[Any]]:
-    """Return the executable and ordered arguments for direct WinRS.
+) -> str:
+    """Build a PowerShell wrapper that preserves the executable and arguments.
 
-    The caller executes this through pywinrm's direct WinRS process mode. The
-    executable is not parsed by ``cmd.exe``, but it is still a Windows command
-    line token: paths containing spaces must remain quoted. Arguments also
-    need Windows command-line quoting when they contain spaces or shell
-    metacharacters.
+    WinRS command-line argument handling is not reliable for Lab Station paths
+    containing spaces. PowerShell's call operator and argument splatting keep
+    the executable path and every argument as separate values, including
+    values such as ``--reason=Remote order``.
     """
     executable_text = str(executable).strip()
     if len(executable_text) >= 2 and executable_text[0] == executable_text[-1] == '"':
         executable_text = executable_text[1:-1]
-    quoted_executable = _quote_winrm_token(executable_text)
-    quoted_args = [_quote_winrm_token(arg) for arg in args]
-    return quoted_executable, [command] + quoted_args
+
+    values = [command, *args]
+    powershell_args = ", ".join(_powershell_literal(value) for value in values)
+    return "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            f"$labStationExe = {_powershell_literal(executable_text)}",
+            f"$labStationArgs = @({powershell_args})",
+            "& $labStationExe @labStationArgs",
+            "$exitCode = $LASTEXITCODE",
+            "if ($null -eq $exitCode) { $exitCode = 0 }",
+            "exit $exitCode",
+        ]
+    )
+
+
+def _powershell_literal(value: Any) -> str:
+    """Return a single-quoted PowerShell literal safe for command arguments."""
+    return "'" + str(value).replace("'", "''") + "'"
 
 
 def build_read_remote_file_command(path: Any) -> str:

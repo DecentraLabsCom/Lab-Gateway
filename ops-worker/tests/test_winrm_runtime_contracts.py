@@ -31,7 +31,7 @@ def _context(**overrides):
         "get_resolve_policy": lambda: lambda *args: (True, 5986, "ntlm"),
         "get_create_session": lambda: lambda *args, **kwargs: object(),
         "get_run_method": lambda: lambda *args: object(),
-        "get_build_labstation_command": lambda: lambda *args: ("command", []),
+        "get_build_labstation_command": lambda: lambda *args: "command",
         "get_build_read_remote_file_command": lambda: lambda path: "read-command",
         "get_build_write_remote_file_command": lambda: lambda path, contents: "write-command",
         "get_build_remove_remote_file_command": lambda: lambda path: "remove-command",
@@ -56,7 +56,7 @@ def test_winrm_runtime_uses_explicit_context_dependencies():
         get_run_method=lambda: lambda *args: calls.append(("method", args)) or result,
         get_build_labstation_command=lambda: lambda *args: calls.append(
             ("builder", args)
-        ) or ("LabStation.exe", ["status-json"]),
+        ) or "LabStation.ps1",
         clock=lambda: next(clock_values),
     )
     runtime = create_winrm_runtime(context)

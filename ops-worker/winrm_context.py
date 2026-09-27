@@ -33,7 +33,7 @@ class WinRMContext:
     get_create_session: Callable[[], Callable[..., Any]]
     get_run_method: Callable[[], Callable[..., Any]]
     get_build_labstation_command: Callable[
-        [], Callable[[Any, str, List[Any]], Tuple[Any, List[Any]]]
+        [], Callable[[Any, str, List[Any]], str]
     ]
     get_build_read_remote_file_command: Callable[[], Callable[[Any], str]]
     get_build_write_remote_file_command: Callable[

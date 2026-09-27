@@ -9,7 +9,7 @@ def test_run_labstation_command_contract_preserves_dependencies_payload_and_resu
     host = {
         "name": "lab-ws-01",
         "address": "192.168.1.50",
-        "labstation_exe": r"C:\LabStation\LabStation.exe",
+        "labstation_exe": r"C:\Lab Station\LabStation.exe",
     }
     calls = {}
     session = object()
@@ -60,9 +60,18 @@ def test_run_labstation_command_contract_preserves_dependencies_payload_and_resu
     )
     assert calls["run_method"] == (
         session,
-        "run_cmd_direct",
-        r"C:\LabStation\LabStation.exe",
-        ["status-json", "--json"],
+        "run_ps",
+        "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                "$labStationExe = 'C:\\Lab Station\\LabStation.exe'",
+                "$labStationArgs = @('status-json', '--json')",
+                "& $labStationExe @labStationArgs",
+                "$exitCode = $LASTEXITCODE",
+                "if ($null -eq $exitCode) { $exitCode = 0 }",
+                "exit $exitCode",
+            ]
+        ),
     )
     assert response == {
         "exit_code": 7,
