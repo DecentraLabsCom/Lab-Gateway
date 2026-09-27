@@ -619,6 +619,14 @@ class SetupEnvContractTest(unittest.TestCase):
         self.assertIn("GRANT ALL PRIVILEGES ON \\`${escaped_blockchain_db}\\`.* TO '${escaped_blockchain_mysql_user}'", mysql_script)
         self.assertIn("GRANT SELECT, INSERT, UPDATE, DELETE ON", mysql_script)
         self.assertIn("grant_guacamole_worker_tables", mysql_script)
+        self.assertIn("ensure_ops_schema", mysql_script)
+        for migration in (
+            "002-labstation-ops.sql",
+            "003-energy-policies.sql",
+            "004-wake-ops.sql",
+        ):
+            self.assertIn(migration, mysql_script)
+        self.assertIn("/docker-entrypoint-initdb.d/${migration}", mysql_script)
         self.assertIsNone(re.search(r"GRANT ALL PRIVILEGES ON .*escaped_ops_", mysql_script))
         for key in ("GUACAMOLE_MYSQL_PASSWORD", "OPS_BACKEND_MYSQL_PASSWORD", "OPS_GUACAMOLE_MYSQL_PASSWORD"):
             self.assertIn(f"{key}_FILE=", self.compose_file)

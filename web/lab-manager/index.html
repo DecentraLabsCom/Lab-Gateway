@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v34">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v36">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -1172,44 +1172,42 @@
                 <button class="ghost-btn icon-btn" id="closeWakeOpsModal" type="button" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="hint" id="wakeOpsModalHost"></div>
-                <p class="hint">La evidencia de WoL es válida durante 7 días. La prueba semanal apaga el equipo si está encendido, ejecuta WoL y, si se verificó que estaba apagado, lo vuelve a apagar.</p>
-                <div class="form-grid">
-                    <label class="check-field full">
-                        <input type="checkbox" id="wakeOpsEnabled">
-                        <span>Activar verificación semanal</span>
-                    </label>
+                <div class="wake-ops-summary">
+                    <div class="wake-ops-summary-copy">
+                        <div class="wake-ops-host" id="wakeOpsModalHost"></div>
+                        <p class="hint wake-ops-description">WoL evidence remains valid for 7 days. The weekly test shuts the station down if it is on, sends a Wake request, and shuts it down again if it was initially verified to be off.</p>
+                    </div>
+                    <div class="wake-ops-enabled-field">
+                        <span>Enable weekly verification</span>
+                        <label class="switch" for="wakeOpsEnabled">
+                            <input type="checkbox" id="wakeOpsEnabled" aria-label="Enable weekly verification">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="wake-ops-settings-grid">
                     <label class="field">
-                        <span>Día</span>
+                        <span>Day</span>
                         <select id="wakeOpsDay">
-                            <option value="0">Lunes</option>
-                            <option value="1">Martes</option>
-                            <option value="2">Miércoles</option>
-                            <option value="3">Jueves</option>
-                            <option value="4">Viernes</option>
-                            <option value="5">Sábado</option>
-                            <option value="6">Domingo</option>
+                            <option value="0">Monday</option>
+                            <option value="1">Tuesday</option>
+                            <option value="2">Wednesday</option>
+                            <option value="3">Thursday</option>
+                            <option value="4">Friday</option>
+                            <option value="5">Saturday</option>
+                            <option value="6">Sunday</option>
                         </select>
                     </label>
                     <label class="field">
-                        <span>Hora local</span>
+                        <span>Local time</span>
                         <input type="time" id="wakeOpsTime" step="60" value="08:00">
                     </label>
                     <label class="field full">
-                        <span>Zona horaria del Lab Gateway</span>
-                        <select id="wakeOpsTimezone">
-                            <option value="">Usar la zona horaria del Lab Gateway</option>
-                            <option value="Europe/Madrid">Europe/Madrid</option>
-                            <option value="UTC">UTC</option>
-                            <option value="Europe/London">Europe/London</option>
-                            <option value="Europe/Paris">Europe/Paris</option>
-                            <option value="America/New_York">America/New_York</option>
-                            <option value="America/Los_Angeles">America/Los_Angeles</option>
-                            <option value="Asia/Tokyo">Asia/Tokyo</option>
-                        </select>
+                        <span>Timezone</span>
+                        <select id="wakeOpsTimezone"></select>
                     </label>
                 </div>
-                <div class="hint" id="wakeOpsStatus" role="status" aria-live="polite">Cargando configuración de Wake Ops…</div>
+                <div class="wake-ops-status" id="wakeOpsStatus" role="status" aria-live="polite">Loading Wake Ops configuration...</div>
             </div>
             <div class="modal-footer">
                 <div class="footer-actions">
@@ -1262,7 +1260,7 @@
     <script src="../assets/js/lab-manager-operations-lifecycle.js?v=lab-manager-operations-lifecycle-v1"></script>
     <script src="../assets/js/lab-manager-modal-bindings.js?v=lab-manager-modal-bindings-v2"></script>
     <script src="../assets/js/lab-manager-host-actions.js?v=lab-manager-host-actions-v7"></script>
-    <script src="../assets/js/lab-manager-wake-ops.js?v=lab-manager-wake-ops-v1"></script>
+    <script src="../assets/js/lab-manager-wake-ops.js?v=lab-manager-wake-ops-v2"></script>
     <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v10"></script>
     <script src="../assets/js/lab-manager-fmu-station.js?v=lab-manager-fmu-station-v3"></script>
     <script src="../assets/js/core/toast.js?v=lab-manager-toast-v3"></script>

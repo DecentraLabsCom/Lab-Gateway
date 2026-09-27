@@ -129,6 +129,22 @@ grant_guacamole_worker_tables() {
     fi
 }
 
+ensure_ops_schema() {
+    local migration
+    for migration in \
+        002-labstation-ops.sql \
+        003-energy-policies.sql \
+        004-wake-ops.sql; do
+        if [ ! -r "/docker-entrypoint-initdb.d/${migration}" ]; then
+            echo "Missing Ops schema migration: ${migration}" >&2
+            return 1
+        fi
+        echo "Applying idempotent Ops schema migration: ${migration}"
+        mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${blockchain_db}" \
+            < "/docker-entrypoint-initdb.d/${migration}"
+    done
+}
+
 echo "=== Ensuring MySQL user has proper remote access ==="
 
 # Wait for MySQL to be ready
@@ -166,6 +182,12 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     GRANT SELECT, INSERT, UPDATE, DELETE ON \`${escaped_blockchain_db}\`.* TO '${escaped_ops_backend_mysql_user}'@'%';
     FLUSH PRIVILEGES;
 EOSQL
+
+# The official MySQL image only runs /docker-entrypoint-initdb.d scripts for a
+# new data directory. Reconcile the idempotent Ops tables on every startup so
+# upgrades also add tables to existing Gateway volumes without granting DDL to
+# the runtime ops-worker principal.
+ensure_ops_schema
 
 waited=0
 max_wait=60

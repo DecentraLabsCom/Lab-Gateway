@@ -25,6 +25,12 @@ function field(overrides = {}) {
   };
 }
 
+function documentImpl() {
+  return {
+    createElement: () => ({}),
+  };
+}
+
 function response(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
@@ -37,7 +43,10 @@ function fields() {
     day: field(),
     hour: field(),
     minute: field(),
-    timezone: field(),
+    timezone: field({
+      options: [],
+      appendChild(option) { this.options.push(option); },
+    }),
     status: field(),
     saveButton: field({ disabled: false }),
     wakeButton: field({ disabled: false }),
@@ -51,6 +60,7 @@ test('loads and saves a Wake Ops schedule through the dialog API', async () => {
   const events = [];
   const controller = module.createController({
     fields: form,
+    documentImpl: documentImpl(),
     fetchImpl: async (url, options) => {
       requests.push({ url, options });
       if (options?.method === 'PUT') {
@@ -85,6 +95,10 @@ test('loads and saves a Wake Ops schedule through the dialog API', async () => {
   assert.equal(form.enabled.checked, true);
   assert.equal(form.day.value, '6');
   assert.equal(form.timezone.value, 'Europe/Madrid');
+  assert.equal(form.timezone.options[0].value, '');
+  assert.equal(form.timezone.options[0].textContent, 'Use Lab Gateway timezone');
+  assert.ok(form.timezone.options.length > 400);
+  assert.ok(form.timezone.options.some(option => option.value === 'Pacific/Wallis'));
 
   form.enabled.checked = false;
   form.day.value = '2';
@@ -111,6 +125,7 @@ test('keeps manual Wake separate from weekly schedule changes and reports eviden
   const requests = [];
   const controller = module.createController({
     fields: form,
+    documentImpl: documentImpl(),
     fetchImpl: async (url, options) => {
       requests.push({ url, options });
       if (url.endsWith('/wake')) return response({ success: true, status: 'completed' });
@@ -127,5 +142,34 @@ test('keeps manual Wake separate from weekly schedule changes and reports eviden
 
   assert.equal(requests[1].url, '/ops/api/wake-ops/station-7/wake');
   assert.equal(requests[1].options.method, 'POST');
-  assert.match(form.status.textContent, /Wake manual completado|evidencia/i);
+  assert.match(form.status.textContent, /manual Wake|evidence/i);
+});
+
+test('reports Wake Ops loading errors in English', async () => {
+  const module = loadModule();
+  const form = fields();
+  const controller = module.createController({
+    fields: form,
+    documentImpl: documentImpl(),
+    fetchImpl: async () => response({ error: 'Internal server error' }, 500),
+    callbacks: { showToast: () => {} },
+    logger: { error: () => {} },
+  });
+
+  await controller.open('station-7');
+
+  assert.equal(form.status.textContent, 'Unable to load Wake Ops: Internal server error');
+});
+
+test('keeps the Wake Ops dialog in English and uses the standard toggle layout', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const css = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(html, /class="wake-ops-summary"/);
+  assert.match(html, /class="wake-ops-status"/);
+  assert.match(html, /class="switch" for="wakeOpsEnabled"/);
+  assert.match(html, /class="wake-ops-settings-grid"/);
+  assert.match(html, /<select id="wakeOpsTimezone"><\/select>/);
+  assert.doesNotMatch(html, /Activar verificaci|La evidencia de WoL es|Hora local|Zona horaria del Lab Gateway/);
+  assert.match(css, /\.wake-ops-enabled-field\s*\{[\s\S]*?flex-direction:\s*column;/);
 });

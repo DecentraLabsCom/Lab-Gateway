@@ -2,6 +2,50 @@
     'use strict';
 
     const EVIDENCE_SECONDS = 7 * 24 * 60 * 60;
+    const DEFAULT_TIMEZONES = [
+        'UTC',
+        'Europe/Madrid',
+        'Europe/London',
+        'Europe/Paris',
+        'Europe/Berlin',
+        'Europe/Rome',
+        'Europe/Amsterdam',
+        'America/New_York',
+        'America/Chicago',
+        'America/Denver',
+        'America/Los_Angeles',
+        'America/Mexico_City',
+        'America/Bogota',
+        'America/Sao_Paulo',
+        'America/Argentina/Buenos_Aires',
+        'Africa/Johannesburg',
+        'Asia/Tokyo',
+        'Asia/Seoul',
+        'Asia/Shanghai',
+        'Asia/Singapore',
+        'Asia/Kolkata',
+        'Australia/Sydney',
+        'Pacific/Auckland',
+    ];
+
+    function resolveSupportedTimezones() {
+        if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+            try {
+                const values = Intl.supportedValuesOf('timeZone');
+                if (Array.isArray(values) && values.length > 0) return values;
+            } catch {
+                // Fall through to the small compatibility list.
+            }
+        }
+        return DEFAULT_TIMEZONES;
+    }
+
+    function createTimezoneOption(documentImpl, value, label) {
+        const option = documentImpl.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        return option;
+    }
 
     function createController({
         fields = {},
@@ -26,17 +70,34 @@
             fields.modal.classList?.toggle?.('show', open);
         }
 
+        function populateTimezones() {
+            const select = fields.timezone;
+            if (!select || !documentImpl?.createElement || typeof select.appendChild !== 'function') return;
+
+            const current = String(select.value || '');
+            select.innerHTML = '';
+            select.appendChild(createTimezoneOption(documentImpl, '', 'Use Lab Gateway timezone'));
+
+            const timezones = [...new Set(['UTC', ...resolveSupportedTimezones()])]
+                .sort((left, right) => left.localeCompare(right));
+            timezones.forEach(timezone => {
+                select.appendChild(createTimezoneOption(documentImpl, timezone, timezone));
+            });
+
+            if (current) select.value = current;
+        }
+
         function formatEvidence(evidence = {}) {
             const validDays = Math.round((Number(evidence.validForSeconds || EVIDENCE_SECONDS)) / 86400);
             if (evidence.state === 'verified') {
                 const age = Number.isFinite(Number(evidence.ageSeconds))
-                    ? ` hace ${Math.max(0, Math.round(Number(evidence.ageSeconds) / 3600))} h`
+                    ? ` ${Math.max(0, Math.round(Number(evidence.ageSeconds) / 3600))} h ago`
                     : '';
-                return `WoL verificado${age}. La evidencia es válida ${validDays} días.`;
+                return `WoL verified${age}. Evidence is valid for ${validDays} days.`;
             }
-            if (evidence.state === 'expired') return 'La evidencia WoL anterior ha caducado; ejecuta Wake o espera a la próxima prueba.';
-            if (evidence.state === 'failed') return `El último intento de WoL falló${evidence.message ? `: ${evidence.message}` : '.'}`;
-            return 'No hay evidencia WoL verificada recientemente.';
+            if (evidence.state === 'expired') return 'Previous WoL evidence has expired; use Wake or wait for the next test.';
+            if (evidence.state === 'failed') return `The last WoL attempt failed${evidence.message ? `: ${evidence.message}` : '.'}`;
+            return 'No recent WoL evidence has been verified.';
         }
 
         function render(data = {}) {
@@ -64,7 +125,7 @@
             }
             if (fields.status) {
                 const lastRun = schedule.lastStatus
-                    ? ` Última prueba programada: ${schedule.lastStatus}${schedule.lastMessage ? ` (${schedule.lastMessage})` : ''}.`
+                    ? ` Last scheduled test: ${schedule.lastStatus}${schedule.lastMessage ? ` (${schedule.lastMessage})` : ''}.`
                     : '';
                 fields.status.textContent = `${formatEvidence(evidence)}${lastRun}`;
             }
@@ -90,12 +151,12 @@
             activeHost = host;
             setOpen(true);
             if (fields.host) fields.host.textContent = host;
-            if (fields.status) fields.status.textContent = 'Cargando configuración de Wake Ops…';
+            if (fields.status) fields.status.textContent = 'Loading Wake Ops configuration...';
             try {
                 return await load(host);
             } catch (err) {
                 logger.error(err);
-                if (fields.status) fields.status.textContent = `No se pudo cargar Wake Ops: ${err.message}`;
+                if (fields.status) fields.status.textContent = `Unable to load Wake Ops: ${err.message}`;
                 showToast(`Wake Ops failed for ${host}: ${err.message}`, 'error');
                 return null;
             }
@@ -145,24 +206,25 @@
         async function manualWake() {
             if (!activeHost) return false;
             if (fields.wakeButton) fields.wakeButton.disabled = true;
-            if (fields.status) fields.status.textContent = `Enviando Wake a ${activeHost}…`;
+            if (fields.status) fields.status.textContent = `Sending Wake to ${activeHost}...`;
             try {
                 const result = await requestJson(hostUrl(activeHost, '/wake'), { method: 'POST' });
                 if (!result.success) throw new Error(result.message || 'Wake failed');
-                showToast(`Wake manual completado para ${activeHost}`, 'success');
+                showToast(`Manual Wake completed for ${activeHost}`, 'success');
                 await load(activeHost);
                 return true;
             } catch (err) {
                 logger.error(err);
-                showToast(`Wake manual failed for ${activeHost}: ${err.message}`, 'error');
-                if (fields.status) fields.status.textContent = `Wake manual no completado: ${err.message}`;
+                showToast(`Manual Wake failed for ${activeHost}: ${err.message}`, 'error');
+                if (fields.status) fields.status.textContent = `Manual Wake not completed: ${err.message}`;
                 return false;
             } finally {
                 if (fields.wakeButton) fields.wakeButton.disabled = false;
             }
         }
 
-        return Object.freeze({ close, load, manualWake, open, render, save });
+        populateTimezones();
+        return Object.freeze({ close, load, manualWake, open, populateTimezones, render, save });
     }
 
     root.LabManagerWakeOps = Object.freeze({ createController });
