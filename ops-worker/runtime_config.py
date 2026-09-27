@@ -599,7 +599,7 @@ def publish_runtime_policy(
             ("HEARTBEAT_SSE_INTERVAL_SECONDS", "heartbeat_sse_interval_seconds"),
             ("WAKE_OPS_ENABLED", "wake_ops_enabled"),
             ("WAKE_OPS_INTERVAL_SECONDS", "wake_ops_interval_seconds"),
-            ("TZ", "gateway_timezone"),
+            ("GATEWAY_TIMEZONE", "gateway_timezone"),
             ("DISCOVERY_TIMEOUT_SECONDS", "discovery_timeout_seconds"),
             ("DISCOVERY_LABSTATION_PORTS", "discovery_labstation_ports"),
             ("DISCOVERY_LABSTATION_PATHS", "discovery_labstation_paths"),
