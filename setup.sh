@@ -1479,7 +1479,7 @@ if [ -n "$allowed_origins" ]; then
 fi
 
 public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$BLOCKCHAIN_ENV_FILE")
-read -p "Marketplace public key URL [${public_key_url_default:-https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem}]: " marketplace_pk
+read -p "Marketplace JWKS URL [${public_key_url_default:-https://marketplace-decentralabs.vercel.app/.well-known/jwks.json}]: " marketplace_pk
 marketplace_pk=${marketplace_pk:-$public_key_url_default}
 if [ -n "$marketplace_pk" ]; then
     update_env_var "$BLOCKCHAIN_ENV_FILE" "MARKETPLACE_PUBLIC_KEY_URL" "$marketplace_pk"

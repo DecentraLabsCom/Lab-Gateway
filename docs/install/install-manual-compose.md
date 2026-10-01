@@ -222,7 +222,7 @@ FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 
 # Origins allowed by the blockchain service
 ALLOWED_ORIGINS=https://lab.your-institution.edu,https://marketplace-decentralabs.vercel.app
-MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem
+MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/jwks.json
 ```
 
 Leave `INSTITUTIONAL_WALLET_ADDRESS` and `INSTITUTIONAL_WALLET_PASSWORD` empty — they

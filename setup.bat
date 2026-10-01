@@ -1025,8 +1025,8 @@ if not "!allowed_origins!"=="" (
 )
 
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" mpk_default
-if not defined mpk_default set "mpk_default=https://marketplace-decentralabs.vercel.app/.well-known/public-key.pem"
-set /p "marketplace_pk=Marketplace public key URL [!mpk_default!]: "
+if not defined mpk_default set "mpk_default=https://marketplace-decentralabs.vercel.app/.well-known/jwks.json"
+set /p "marketplace_pk=Marketplace JWKS URL [!mpk_default!]: "
 if "!marketplace_pk!"=="" set "marketplace_pk=!mpk_default!"
 if not "!marketplace_pk!"=="" (
     call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" "!marketplace_pk!"
