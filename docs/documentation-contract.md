@@ -1,27 +1,27 @@
 # Documentation contract
 
 This file defines which document owns each DecentraLabs concept. It prevents
-the installation guides, audience guides and the embedded backend reference
+the installation guides, audience guides and the backend reference
 from becoming competing protocol specifications.
 
-## Authority order
+## Source-of-truth order
 
 When two descriptions disagree, use this order:
 
 1. Deployed Smart-Contracts ABI, selector manifest and on-chain state.
 2. Executable configuration and migrations in
-   `Lab Gateway/blockchain-services` plus the OpenResty/Lab Gateway
+   `blockchain-services` plus the OpenResty/Lab Gateway
    implementation.
-3. The canonical workflow and service guides listed below.
+3. The owning workflow and service guides listed below.
 4. Marketplace audience guides, tutorials and translations.
 
-Audience documents explain the user journey. They must link to the canonical
+Audience documents explain the user journey. They must link to the owning
 workflow or API reference instead of redefining endpoint payloads, TTLs,
 security boundaries or state transitions.
 
 ## Ownership matrix
 
-| Subject | Canonical source | Audience/supporting sources |
+| Subject | Owning source | Audience/supporting sources |
 | --- | --- | --- |
 | Full/Lite topology, issuer and gateway trust | [Deployment architectures](deployment-architectures.md) | `Lab Gateway/README.md`, installation guides |
 | Environment names and Compose profiles | [Configuration reference](reference/configuration.md), `.env.example` | English/Spanish installation guides |
@@ -73,14 +73,13 @@ short polling/retry intervals; a request that misses the deadline expires
 without confirmation or credit capture. Do not document a late confirmation as
 an availability fallback.
 
-## Variants and translations
+## Deployment modes and translations
 
-`Lab Gateway/blockchain-services` is the canonical backend and embedded
-production target. The root `Blockchain-Services/` directory is a parallel
-standalone variant with its own implementation and documentation; it is not a
-second source for the embedded contract. Changes that intentionally target
-that variant must say so explicitly and must not be copied into the canonical
-flow by implication.
+`blockchain-services` is the backend service used with Lab Gateway Full and can
+also run as an independent deployment or in a consumer-only role. Full, Lite
+and independent deployment modes are deployment topologies of the same service;
+they are not separate documentation authorities. Keep the backend guides and
+Gateway integration guides aligned with the executable configuration.
 
 The Spanish installation and tutorial files are translations of the English
 guides. Update the English source and its Spanish counterpart in the same
@@ -91,11 +90,11 @@ numeric values exactly.
 
 When changing a cross-project flow:
 
-- update the owning canonical workflow/API document;
+- update the owning workflow/API document;
 - update the relevant index (`Lab Gateway/docs/README.md` or
   `blockchain-services/SUMMARY.md`);
 - update affected Marketplace audience text and translations;
-- search both canonical repositories for the old endpoint, state or numeric
-  value;
+- search the backend and Gateway documentation for the old endpoint, state or
+  numeric value;
 - run the narrow documentation checks plus the module tests appropriate to the
   change.

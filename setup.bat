@@ -377,6 +377,27 @@ if "!lab_manager_allowed_cidrs!"=="" (
 )
 echo.
 
+echo Lab Station WinRM Management Network
+echo ====================================
+echo This restricts Ops Worker WinRM access to the private management network used by Lab Stations.
+echo Enter comma-separated CIDRs. Leave empty only if no Ops hosts will be configured yet.
+call :ReadEnvValue "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS" winrm_management_cidrs_default
+set "winrm_management_cidrs="
+if defined winrm_management_cidrs_default (
+    set /p "winrm_management_cidrs=WINRM_MANAGEMENT_CIDRS [!winrm_management_cidrs_default!]: "
+) else (
+    set /p "winrm_management_cidrs=WINRM_MANAGEMENT_CIDRS [empty -^> configure before adding hosts]: "
+)
+if not defined winrm_management_cidrs set "winrm_management_cidrs=!winrm_management_cidrs_default!"
+if defined winrm_management_cidrs set "winrm_management_cidrs=!winrm_management_cidrs: =!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS" "!winrm_management_cidrs!"
+if "!winrm_management_cidrs!"=="" (
+    echo    * WINRM_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts.
+) else (
+    echo    * WINRM_MANAGEMENT_CIDRS set to: !winrm_management_cidrs!
+)
+echo.
+
 REM Demo Lab Access
 echo Demo Lab Access
 echo ================
@@ -890,6 +911,7 @@ if not exist fmu-proxy-runtime\binaries\win64 mkdir fmu-proxy-runtime\binaries\w
 if not exist fmu-proxy-runtime\binaries\darwin64 mkdir fmu-proxy-runtime\binaries\darwin64
 if not exist ops-data mkdir ops-data
 if not exist ops-data\guac-revocation-spool mkdir ops-data\guac-revocation-spool
+if not exist ops-data\winrm-certificates mkdir ops-data\winrm-certificates
 if not exist secrets mkdir secrets
 if not exist certs\.gitkeep type nul > certs\.gitkeep
 call :SecureEnvFile "%ROOT_ENV_FILE%"

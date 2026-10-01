@@ -83,6 +83,7 @@ local function run_exchange(opts)
 
     local cache = ngx_factory.new_shared_dict({ public_key = "public-key" })
     local original_set = cache.set
+    ---@diagnostic disable-next-line: duplicate-set-field
     function cache:set(key, value, ttl)
         events[#events + 1] = { kind = "cache", key = key, value = value, ttl = ttl }
         if opts.fail_cache_key == key then

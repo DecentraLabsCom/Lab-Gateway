@@ -51,7 +51,9 @@ runner.describe("FMU durable access store", function()
         runner.assert.equals(500, exp)
 
         local file = io.open("/tmp/fmu-access-" .. TEST_SESSION_ID .. ".state", "r")
-        runner.assert.truthy(file)
+        if not file then
+            error("Expected FMU access state file")
+        end
         local contents = file:read("*all")
         file:close()
         runner.assert.equals(false, contents:find("technical-jwt", 1, true) ~= nil)

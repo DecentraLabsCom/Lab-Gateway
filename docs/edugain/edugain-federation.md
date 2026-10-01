@@ -90,7 +90,7 @@ team. The Gateway operator does not register another SP in eduGAIN.
 ```bash
 docker compose restart blockchain-services
 docker compose logs blockchain-services | grep -Ei 'saml|assertion|metadata'
-curl -k https://gateway.example.edu/auth/.well-known/openid-configuration
+curl -k https://gateway.example.edu/.well-known/openid-configuration
 ```
 
 Use a Full/control-plane endpoint for SAML tests; Lite `/auth/**` is deliberately
@@ -98,5 +98,5 @@ blocked. Typical failures are an issuer not in the allow-list, blocked metadata
 URL, missing signing certificate, invalid XML signature or missing stable
 identity attributes.
 
-See the canonical backend guide:
+See the backend guide:
 [SAML metadata discovery](../../blockchain-services/docs/security/SAML_AUTO_DISCOVERY.md).

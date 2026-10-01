@@ -5,19 +5,23 @@ import vm from 'node:vm';
 
 const repoRoot = new URL('../../', import.meta.url);
 const scriptPath = new URL('web/assets/js/lab-manager.js', repoRoot);
+const indexPath = new URL('web/lab-manager/index.html', repoRoot);
 
 function createElement(id) {
   const listeners = new Map();
   const classes = new Set();
   const element = {
     id,
+    dataset: {},
     value: '',
     checked: false,
     disabled: false,
     hidden: false,
     textContent: '',
     innerHTML: '',
+    rawInnerHTML: '',
     style: {},
+    children: [],
     options: [],
     files: [],
     classList: {
@@ -35,6 +39,13 @@ function createElement(id) {
     appendChild: (child) => {
       if (Array.isArray(element.options)) element.options.push(child);
       return child;
+    },
+    append: (...children) => {
+      element.children.push(...children);
+    },
+    replaceChildren: (...children) => {
+      element.children = children;
+      element.options = children;
     },
     querySelectorAll: () => [],
     querySelector: () => null,
@@ -55,6 +66,18 @@ function loadLabManager({
   }),
   activeTabs = ['operations', 'energy', 'digital-twins'],
   actionableResponse = null,
+  hostInventoryResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ hosts: [], guacamoleUnmatched: [] }),
+  }),
+  discoverResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({}),
+  }),
+  provisionResponse = null,
+  editHostResponse = null,
   labsResponse = Promise.resolve({
     ok: true,
     status: 200,
@@ -70,11 +93,27 @@ function loadLabManager({
     status: 200,
     json: async () => ({ controllers: [] }),
   }),
+  powerControllerStatusResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ controllers: [] }),
+  }),
   powerCredentialsResponse = Promise.resolve({
     ok: true,
     status: 200,
     json: async () => ({ credentials: [] }),
   }),
+  winrmTrustResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ trust: { status: 'missing' } }),
+  }),
+  winrmTrustPreviewResponse = Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ preview: { status: 'ready', valid: true } }),
+  }),
+  eventSource = null,
   confirm = () => true,
 }) {
   const ids = [
@@ -88,7 +127,10 @@ function loadLabManager({
     'winrmCredentialRef', 'winrmCredentialAddress', 'winrmCredentialUser',
     'winrmCredentialPassword', 'provisionConnectionId', 'provisionHostName',
     'provisionHostNameCandidates', 'provisionHostAddress', 'provisionHostMac',
-    'provisionHostLabs', 'provisionHostLabsSummary', 'provisionHeartbeatPath',
+    'provisionHeartbeatPath',
+    'editHostModal', 'closeEditHostModal', 'cancelEditHost', 'saveEditHost',
+    'editHostOriginalName', 'editHostName', 'editHostAddress', 'editHostMac',
+    'editHeartbeatPath',
     'btnTestLoad', 'saveConfigBtn', 'btnTestEmail', 'refreshHostsBtn', 'hostList',
     'guacamoleCandidateList', 'fmuSyncBtn', 'fmuSyncKey', 'fmuSyncLabSelect',
     'fmuSyncFile', 'fmuSyncFileName', 'fmuSyncResult', 'fmuSyncDescription', 'fmuSyncLicense',
@@ -103,7 +145,7 @@ function loadLabManager({
     'powerControllerSelect', 'powerControllerId', 'powerControllerName',
     'powerControllerDriver', 'powerControllerEnabled', 'powerControllerHost',
     'powerControllerPort', 'powerControllerCredentialRef', 'powerControllerProfile',
-    'powerControllerSnmpVersion', 'powerControllerTimeoutSeconds',
+    'powerControllerTimeoutSeconds',
     'powerControllerRetries', 'powerControllerOutlets', 'addPowerControllerOutletBtn',
     'powerControllerNetioPath', 'powerControllerNetioHttps', 'powerControllerNetioVerifyTls',
     'savePowerControllerBtn', 'powerControllerEditorHint',
@@ -120,6 +162,10 @@ function loadLabManager({
     'savePowerPolicyBtn', 'powerPoliciesStatus', 'powerPolicyEditorHint',
     'notificationsAccessGate', 'notificationsConfigContent', 'unlockNotificationsBtn',
     'smtpPasswordHint', 'graphClientSecretHint',
+    'winrmTrustModal', 'closeWinrmTrustModal', 'cancelWinrmTrust', 'previewWinrmTrust',
+    'saveWinrmTrust', 'verifyWinrmTrust', 'deleteWinrmTrust', 'winrmTrustModalHost',
+    'winrmTrustCurrent', 'winrmTrustCertificate', 'winrmTrustCertificateName',
+    'winrmTrustPreview', 'winrmTrustPreviewDetails', 'winrmTrustFingerprintConfirmed',
   ];
   const elements = new Map(ids.map((id) => [id, createElement(id)]));
   const documentListeners = new Map();
@@ -145,18 +191,25 @@ function loadLabManager({
       const element = createElement(tagName);
       if (tagName === 'div') {
         let text = '';
+        let html = null;
         Object.defineProperty(element, 'textContent', {
           get: () => text,
-          set: (value) => { text = String(value ?? ''); },
+          set: (value) => {
+            text = String(value ?? '');
+            html = null;
+          },
         });
         Object.defineProperty(element, 'innerHTML', {
-          get: () => text
+          get: () => html ?? text
             .replaceAll('&', '&amp;')
             .replaceAll('<', '&lt;')
             .replaceAll('>', '&gt;')
             .replaceAll('"', '&quot;')
             .replaceAll("'", '&#39;'),
-          set: () => {},
+          set: (value) => {
+            html = String(value ?? '');
+            element.rawInnerHTML = html;
+          },
         });
       }
       return element;
@@ -164,11 +217,16 @@ function loadLabManager({
   };
   const promptCalls = [];
   const window = {
+    location: {
+      origin: 'https://sarlab.dia.uned.es',
+      href: 'https://sarlab.dia.uned.es/lab-manager/',
+    },
     confirm,
     AuthTokenHandler: {
       showTokenModal: (...args) => promptCalls.push(args),
       getTokenConfigForPath: () => ({ key: 'billing', login: '/admin/login' }),
     },
+    ...(eventSource ? { EventSource: eventSource } : {}),
   };
   const fetchCalls = [];
   const context = vm.createContext({
@@ -181,6 +239,9 @@ function loadLabManager({
     Promise,
     setTimeout,
     clearTimeout,
+    FormData: class FormData {
+      append() {}
+    },
     Option: function Option(text, value) {
       this.textContent = text;
       this.value = value;
@@ -197,14 +258,38 @@ function loadLabManager({
       if (parsedUrl.pathname === '/lab-admin/labs') {
         return Promise.resolve(labsResponse);
       }
+      if (parsedUrl.pathname === '/ops/api/hosts') {
+        return Promise.resolve(hostInventoryResponse);
+      }
+      if (parsedUrl.pathname === '/ops/api/hosts/discover') {
+        return Promise.resolve(discoverResponse);
+      }
+      if (parsedUrl.pathname.startsWith('/ops/api/hosts/') && options.method === 'PATCH' && editHostResponse) {
+        const response = typeof editHostResponse === 'function'
+          ? editHostResponse(parsedUrl, fetchCalls.length)
+          : editHostResponse;
+        return Promise.resolve(response);
+      }
+      if (parsedUrl.pathname === '/ops/api/hosts/provision' && provisionResponse) {
+        return Promise.resolve(provisionResponse);
+      }
       if (parsedUrl.pathname === '/ops/api/power/policies' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerPoliciesResponse);
       }
       if (parsedUrl.pathname === '/ops/api/power/controllers' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerControllersResponse);
       }
+      if (parsedUrl.pathname === '/ops/api/power/controllers/status' && (!options.method || options.method === 'GET')) {
+        return Promise.resolve(powerControllerStatusResponse);
+      }
       if (parsedUrl.pathname === '/ops/api/power/credentials' && (!options.method || options.method === 'GET')) {
         return Promise.resolve(powerCredentialsResponse);
+      }
+      if (parsedUrl.pathname.endsWith('/winrm-trust/preview') && options.method === 'POST') {
+        return Promise.resolve(winrmTrustPreviewResponse);
+      }
+      if (parsedUrl.pathname.endsWith('/winrm-trust') && (!options.method || options.method === 'GET')) {
+        return Promise.resolve(winrmTrustResponse);
       }
       return parsedUrl.pathname === '/billing/admin/notifications'
         ? billingResponse
@@ -289,6 +374,20 @@ test('reuses the existing Lab Manager session without prompting on Operations en
   assert.ok(actionableCall, 'Actionable Reservations should be loaded when Operations is activated');
   assert.equal(actionableCall.options.credentials, 'include');
   assert.equal(actionableCall.options.skipAuthPrompt, true);
+});
+
+test('places Lab Station Ops before Actionable Reservations', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const sectionOrderFor = (title) => {
+    const titlePosition = html.indexOf(`<h2>${title}</h2>`);
+    assert.ok(titlePosition >= 0);
+    const sectionStart = html.lastIndexOf('<section', titlePosition);
+    const sectionEnd = html.indexOf('>', sectionStart);
+    const order = html.slice(sectionStart, sectionEnd).match(/data-lm-order="(\d+)"/);
+    assert.ok(order);
+    return Number(order[1]);
+  };
+  assert.ok(sectionOrderFor('Lab Station Ops') < sectionOrderFor('Actionable Reservations'));
 });
 
 test('reserves a tall, explicit scroll area for actionable reservation details', () => {
@@ -749,7 +848,6 @@ test('creates a provider-local power controller from the controller form', async
   elements.get('powerControllerHost').value = '';
   elements.get('powerControllerPort').value = '161';
   elements.get('powerControllerProfile').value = 'auto';
-  elements.get('powerControllerSnmpVersion').value = 'v2c';
   elements.get('powerControllerTimeoutSeconds').value = '3';
   elements.get('powerControllerRetries').value = '1';
   elements.get('savePowerControllerBtn').click();
@@ -768,7 +866,6 @@ test('creates a provider-local power controller from the controller form', async
     credentialRef: '',
     config: {
       profile: 'auto',
-      snmpVersion: 'v2c',
       timeoutSeconds: 3,
       retries: 1,
     },
@@ -781,6 +878,199 @@ test('creates a provider-local power controller from the controller form', async
       defaultState: 'off',
     }],
   });
+});
+
+test('suggests a stable controller ID from the selected driver and host', async () => {
+  const { elements } = loadLabManager({
+    billingResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ config: {} }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerControllerDriver').value = 'apc-powernet-snmp';
+  elements.get('powerControllerDriver').dispatchEvent({ type: 'change' });
+  elements.get('powerControllerHost').value = '10.192.38.80';
+  elements.get('powerControllerHost').dispatchEvent({ type: 'input' });
+
+  assert.equal(elements.get('powerControllerId').value, 'apc-10-192-38-80');
+
+  elements.get('powerControllerId').value = 'lab-pdu-main';
+  elements.get('powerControllerId').dispatchEvent({ type: 'input' });
+  elements.get('powerControllerHost').value = '10.192.38.81';
+  elements.get('powerControllerHost').dispatchEvent({ type: 'input' });
+  assert.equal(elements.get('powerControllerId').value, 'lab-pdu-main');
+});
+
+test('offers compatible stored credentials in the controller reference selector', async () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  assert.match(html, /<select id="powerControllerCredentialRef">/);
+  assert.doesNotMatch(html, /<input[^>]+id="powerControllerCredentialRef"/);
+
+  const { elements } = loadLabManager({
+    powerCredentialsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ credentials: [
+        { credentialRef: 'apc-ap7920-snmp', type: 'snmpv3' },
+        { credentialRef: 'netio-lab-01-http', type: 'netio-http-basic' },
+      ] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('powerControllerDriver').value = 'apc-powernet-snmp';
+  elements.get('powerControllerDriver').dispatchEvent({ type: 'change' });
+  const credentialSelect = elements.get('powerControllerCredentialRef');
+  assert.match(credentialSelect.innerHTML, /apc-ap7920-snmp/);
+  assert.doesNotMatch(credentialSelect.innerHTML, /netio-lab-01-http/);
+
+  elements.get('powerControllerDriver').value = 'netio-json';
+  elements.get('powerControllerDriver').dispatchEvent({ type: 'change' });
+  assert.match(credentialSelect.innerHTML, /netio-lab-01-http/);
+  assert.doesNotMatch(credentialSelect.innerHTML, /apc-ap7920-snmp/);
+});
+
+test('shows only controller names in the existing controller selector', async () => {
+  const { elements } = loadLabManager({
+    powerControllersResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'apc-10-192-38-80',
+        name: 'APC AP7920',
+        driver: 'apc-powernet-snmp',
+        enabled: true,
+        host: '10.192.38.80',
+        port: 161,
+        credentialRef: 'apc-ap7920-snmp',
+        config: { profile: 'legacy', timeoutSeconds: 2, retries: 1 },
+        outlets: [{ outlet: '1' }],
+      }] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const controllerOption = elements.get('powerControllerSelect').options.find(option =>
+    option.value === 'apc-10-192-38-80');
+  assert.ok(controllerOption);
+  assert.equal(controllerOption.textContent, 'APC AP7920');
+});
+
+test('renders the controller catalog before loading live power status', async () => {
+  let resolveStatus;
+  const statusResponse = new Promise((resolve) => {
+    resolveStatus = resolve;
+  });
+  const { elements, fetchCalls } = loadLabManager({
+    powerControllersResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'pdu-lab-01',
+        name: 'Bench PDU',
+        driver: 'apc-powernet-snmp',
+        outlets: [{ outlet: '1', displayName: 'Bench outlet' }],
+      }] }),
+    }),
+    powerControllerStatusResponse: statusResponse,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const controllerOption = elements.get('powerControllerSelect').options.find(option =>
+    option.value === 'pdu-lab-01');
+  assert.ok(controllerOption, 'catalog should populate the existing controller selector');
+  assert.match(elements.get('powerControllerList').options.at(-1).rawInnerHTML, /checking/);
+  assert.equal(
+    fetchCalls.some(({ url }) => url === '/ops/api/power/controllers/status'),
+    true,
+  );
+
+  resolveStatus({
+    ok: true,
+    status: 200,
+    json: async () => ({ controllers: [{
+      id: 'pdu-lab-01',
+      discovery: { reachable: true },
+      outlets: [{ outlet: '1', state: 'off' }],
+    }] }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(elements.get('powerControllerList').options.at(-1).rawInnerHTML, /reachable/);
+  assert.match(elements.get('powerControllerList').options.at(-1).rawInnerHTML, />off</);
+});
+
+test('forces a live status refresh from the power controller refresh button', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    powerControllersResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'pdu-lab-01',
+        name: 'Bench PDU',
+        driver: 'mock',
+        outlets: [{ outlet: '1' }],
+      }] }),
+    }),
+    powerControllerStatusResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ controllers: [{
+        id: 'pdu-lab-01',
+        discovery: { reachable: true },
+        outlets: [{ outlet: '1', state: 'off' }],
+      }] }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get('refreshPowerControllersBtn').click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const statusCalls = fetchCalls.filter(({ url }) => String(url).startsWith('/ops/api/power/controllers/status'));
+  assert.ok(statusCalls.length >= 2);
+  assert.match(statusCalls.at(-1).url, /[?&]refresh=true/);
+});
+
+test('orders controller fields so host and driver precede the generated ID', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const formStart = html.indexOf('id="powerControllerSelect"');
+  const formEnd = html.indexOf('id="powerControllerNetioPathField"');
+  const form = html.slice(formStart, formEnd);
+  const orderedFields = [
+    'powerControllerSelect',
+    'powerControllerName',
+    'powerControllerDriver',
+    'powerControllerHost',
+    'powerControllerEnabled',
+    'powerControllerId',
+    'powerControllerPort',
+    'powerControllerCredentialRef',
+  ];
+  const positions = orderedFields.map(id => form.indexOf(`id="${id}"`));
+  assert.ok(positions.every(position => position >= 0));
+  assert.deepEqual(positions, [...positions].sort((left, right) => left - right));
+});
+
+test('removes the redundant controller SNMP version and default editor prompt', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  assert.doesNotMatch(html, /powerControllerSnmpVersion/);
+  assert.doesNotMatch(script, /powerControllerSnmpVersion/);
+  assert.doesNotMatch(html, /Select an existing controller or configure a new one\./);
+  assert.doesNotMatch(script, /Select an existing controller or configure a new one\./);
+});
+
+test('removes the default power policy editor prompt', () => {
+  const html = fs.readFileSync(new URL('web/lab-manager/index.html', repoRoot), 'utf8');
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  assert.doesNotMatch(html, /Select an existing policy or a laboratory defined above\./);
+  assert.doesNotMatch(script, /Select a laboratory and configure the policy fields\./);
 });
 
 test('creates a NETIO JSON power controller with its HTTP API settings', async () => {
@@ -1032,6 +1322,712 @@ test('prefers managed lab names in operations reservations and lab selectors', a
   );
   assert.match(elements.get('upcomingReservationsList').innerHTML, /State Space/);
   assert.doesNotMatch(elements.get('upcomingReservationsList').innerHTML, /Lab #1/);
+});
+
+test('groups connections by station and automatically links its local physical labs', async () => {
+  const connection = {
+    id: 42,
+    name: 'Siemens Admin',
+    protocol: 'rdp',
+    hostname: '10.192.38.82',
+    port: '3389',
+  };
+  const secondConnection = {
+    id: 43,
+    name: 'Siemens LABUSER',
+    protocol: 'rdp',
+    hostname: '10.192.38.82',
+    port: '3389',
+  };
+  const { elements, fetchCalls } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [],
+        guacamoleAvailable: true,
+        guacamoleUnmatched: [connection, secondConnection],
+      }),
+    }),
+    discoverResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'winrm-reachable',
+        connection,
+        checks: { winrm: { '5986': true } },
+        opsHostDraft: { address: connection.hostname },
+      }),
+    }),
+    labsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        labs: [{
+          labId: '7',
+          name: 'Siemens Admin',
+          resourceType: 0,
+          accessURI: 'https://sarlab.dia.uned.es/guacamole',
+          accessKey: 'guac:id:42',
+          listed: true,
+        }, {
+          labId: '10',
+          name: 'Siemens LABUSER',
+          resourceType: 0,
+          accessURI: 'https://sarlab.dia.uned.es/guacamole',
+          accessKey: 'guac:id:43',
+          listed: true,
+        }, {
+          labId: '8',
+          name: 'Siemens Admin on Lite A',
+          resourceType: 0,
+          accessURI: 'https://lite-a.example.edu/guacamole',
+          accessKey: 'guac:id:42',
+          listed: true,
+        }, {
+          labId: '9',
+          name: 'Another local lab',
+          resourceType: 0,
+          accessURI: 'https://sarlab.dia.uned.es/guacamole',
+          accessKey: 'guac:id:7',
+          listed: true,
+        }],
+      }),
+    }),
+  });
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  const candidateList = elements.get('guacamoleCandidateList');
+  assert.equal(candidateList.options.length, 1, 'Connections targeting one station should render as one candidate');
+  assert.match(elements.get('opsHint').textContent, /1 Lab Station candidate awaiting configuration\./);
+  const initialRow = candidateList.options.at(-1);
+  const checkButton = {
+    dataset: { action: 'probe-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? checkButton : initialRow,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: checkButton });
+  await flush();
+  await flush();
+
+  const configuredRow = candidateList.options.at(-1);
+  const configureButton = {
+    dataset: { action: 'configure-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? configureButton : configuredRow,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: configureButton });
+  await flush();
+
+  assert.equal(elements.get('provisionHostModal').classList.contains('show'), true);
+  assert.equal(elements.get('provisionHostLabs'), undefined, 'Lab selection should not be exposed in the station modal');
+
+  elements.get('saveProvisionHost').click();
+  await flush();
+
+  const provisionCall = fetchCalls.find(({ url }) => String(url) === '/ops/api/hosts/provision');
+  assert.ok(provisionCall, 'Saving a station should call the provisioning endpoint');
+  const provisionPayload = JSON.parse(provisionCall.options.body);
+  assert.deepEqual(provisionPayload.labs, ['7', '10']);
+  assert.deepEqual(provisionPayload.validLabIds, ['7', '10']);
+});
+
+test('does not require an administrative connection to have a published lab', async () => {
+  const connection = {
+    id: 44,
+    name: 'Siemens Administration',
+    protocol: 'rdp',
+    hostname: '10.192.38.90',
+    port: '3389',
+  };
+  const { elements, fetchCalls } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [],
+        guacamoleAvailable: true,
+        guacamoleUnmatched: [connection],
+      }),
+    }),
+    discoverResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'winrm-reachable',
+        connection,
+        checks: { winrm: { '5986': true } },
+        opsHostDraft: { address: connection.hostname },
+      }),
+    }),
+    labsResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ labs: [] }),
+    }),
+  });
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  const candidateList = elements.get('guacamoleCandidateList');
+  const row = candidateList.options.at(-1);
+  const checkButton = {
+    dataset: { action: 'probe-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? checkButton : row,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: checkButton });
+  await flush();
+  await flush();
+
+  const configuredRow = candidateList.options.at(-1);
+  const configureButton = {
+    dataset: { action: 'configure-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? configureButton : configuredRow,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: configureButton });
+  await flush();
+  elements.get('saveProvisionHost').click();
+  await flush();
+
+  const provisionCall = fetchCalls.find(({ url }) => String(url) === '/ops/api/hosts/provision');
+  const provisionPayload = JSON.parse(provisionCall.options.body);
+  assert.deepEqual(provisionPayload.labs, []);
+  assert.equal('validLabIds' in provisionPayload, false);
+});
+
+test('shows the provisioning request id when the backend reports an internal failure', async () => {
+  const connection = {
+    id: 45,
+    name: 'Station With Backend Failure',
+    protocol: 'rdp',
+    hostname: '10.192.38.91',
+    port: '3389',
+  };
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [],
+        guacamoleAvailable: true,
+        guacamoleUnmatched: [connection],
+      }),
+    }),
+    discoverResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'winrm-reachable',
+        connection,
+        checks: { winrm: { '5986': true } },
+        opsHostDraft: { address: connection.hostname },
+      }),
+    }),
+    provisionResponse: Promise.resolve({
+      ok: false,
+      status: 500,
+      json: async () => ({
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+        requestId: 'ops-request-45',
+      }),
+    }),
+  });
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  const candidateList = elements.get('guacamoleCandidateList');
+  const row = candidateList.options.at(-1);
+  const checkButton = {
+    dataset: { action: 'probe-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? checkButton : row,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: checkButton });
+  await flush();
+  await flush();
+
+  const configuredRow = candidateList.options.at(-1);
+  const configureButton = {
+    dataset: { action: 'configure-candidate' },
+    closest: (selector) => selector === 'button[data-action]' ? configureButton : configuredRow,
+  };
+  candidateList.dispatchEvent({ type: 'click', target: configureButton });
+  await flush();
+  elements.get('saveProvisionHost').click();
+  await flush();
+
+  assert.equal(
+    elements.get('toast').textContent,
+    'Configure host failed: Internal server error (request ID ops-request-45)',
+  );
+});
+
+test('edits a dynamic ops host from the pencil action', async () => {
+  const { elements, fetchCalls } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: '10.192.38.82',
+          address: '10.192.38.82',
+          mac: '00:11:22:33:44:55',
+          heartbeatPath: 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json',
+          editable: true,
+          winrmConfigured: false,
+          guacamole: { status: 'none', connections: [] },
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+    editHostResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ host: { name: 'siemens-admin' } }),
+    }),
+  });
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  await flush();
+  const hostList = elements.get('hostList');
+  const row = hostList.options.at(-1);
+  const editButton = {
+    dataset: { action: 'edit-host' },
+    closest: (selector) => selector === 'button[data-action]' ? editButton : row,
+  };
+  hostList.dispatchEvent({ type: 'click', target: editButton });
+
+  assert.equal(elements.get('editHostModal').classList.contains('show'), true);
+  assert.equal(elements.get('editHostName').value, '10.192.38.82');
+  assert.equal(elements.get('editHostAddress').value, '10.192.38.82');
+  assert.equal(elements.get('editHostMac').value, '00:11:22:33:44:55');
+  assert.equal(
+    elements.get('editHeartbeatPath').value,
+    'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json',
+  );
+
+  elements.get('editHostName').value = 'siemens-admin';
+  elements.get('editHostMac').value = '00-22-33-44-55-66';
+  elements.get('editHeartbeatPath').value = 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json';
+  elements.get('saveEditHost').click();
+  await flush();
+  await flush();
+
+  const editCall = fetchCalls.find(({ url, options }) =>
+    options.method === 'PATCH' && url === '/ops/api/hosts/10.192.38.82');
+  assert.ok(editCall, 'Editing a host should call the host update endpoint');
+  assert.deepEqual(JSON.parse(editCall.options.body), {
+    name: 'siemens-admin',
+    mac: '00-22-33-44-55-66',
+    heartbeatPath: 'C:\\Lab Station\\labstation\\data\\telemetry\\heartbeat.json',
+  });
+  assert.equal(elements.get('editHostModal').classList.contains('show'), false);
+});
+
+test('uses a self-contained visible pencil icon for editable ops hosts', () => {
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(
+    script,
+    /host-edit-btn[\s\S]*host-edit-icon[\s\S]*<path d="M3 17\.25V21h3\.75L17\.81 9\.94l-3\.75-3\.75L3 17\.25z/,
+  );
+  assert.match(styles, /\.host-edit-icon[\s\S]*width: 16px[\s\S]*height: 16px[\s\S]*fill: currentColor/);
+});
+
+test('renders station identity, connection counts, operation history and WinRM trust states', () => {
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(script, /host-status-text/);
+  assert.match(script, /Address: <span class="mono">\$\{safeAddress\}/);
+  assert.match(script, /Last heartbeat: \$\{safeUpdated\}/);
+  assert.match(script, /Last activity:/);
+  assert.match(script, /WinRM TLS trust:/);
+  assert.match(script, /formatConnectionsStatus/);
+  assert.match(script, /return 'No connections'/);
+  assert.match(script, /\$\{connections\.length\} connections/);
+  assert.match(script, /meta\.winrmTrustStatus/);
+  assert.match(script, /formatBool\(localSession\)/);
+  assert.match(script, /formatBool\(localMode\)/);
+  assert.match(script, /host-state-column/);
+  assert.match(script, /host-status-action/);
+  assert.doesNotMatch(script, /<button class="mini-btn" data-action="set-winrm-credentials">WinRM Credentials<\/button>/);
+  assert.doesNotMatch(script, /Guacamole: \$\{guacamoleStatusMarkup\}/);
+  assert.doesNotMatch(script, /ambiguous - \$\{connections\.length\} matches/);
+  assert.match(script, /guacamole-match-trigger/);
+  assert.match(script, /guacamole-match-popover/);
+  assert.match(script, /Connections for this station/);
+  assert.match(script, /connection\?\.name/);
+  assert.match(styles, /\.host-status-text\.warn[\s\S]*color: var\(--warning\)/);
+  assert.match(styles, /\.host-status-action[\s\S]*display: inline/);
+  assert.match(styles, /\.host-state-column[\s\S]*display: flex/);
+  assert.match(styles, /\.host-history[\s\S]*display: flex/);
+  assert.match(script, /setupGuacamoleMatchPopover/);
+  assert.match(script, /addEventListener\('mouseenter'/);
+  assert.match(script, /addEventListener\('focusin'/);
+  assert.match(styles, /\.guacamole-match-popover[\s\S]*position: fixed/);
+  assert.match(styles, /\.guacamole-match-popover\.is-visible[\s\S]*opacity: 1/);
+});
+
+test('adds spacing below operations and reservation timeline hints', () => {
+  const index = fs.readFileSync(indexPath, 'utf8');
+  const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(index, /<div class="hint hint-spaced" id="opsHint">/);
+  assert.match(index, /<div class="hint mt-4 hint-spaced">Lab Station candidates awaiting configuration:<\/div>/);
+  assert.match(index, /<div class="hint hint-spaced">Paste the on-chain reservation key/);
+  assert.match(styles, /\.hint-spaced\s*\{\s*margin-bottom: 0\.75rem;/);
+});
+
+test('keeps energy credential metadata separated from its rotate action', () => {
+  const script = fs.readFileSync(new URL('web/assets/js/lab-manager.js', repoRoot), 'utf8');
+  const styles = fs.readFileSync(new URL('web/assets/css/lab-manager.css', repoRoot), 'utf8');
+
+  assert.match(script, /<div class="power-controller-row power-credential-row">/);
+  assert.match(styles, /\.power-credential-row\s*\{[\s\S]*display:\s*flex;[\s\S]*gap:\s*12px;/);
+});
+
+test('renders the complete station status card with truthful empty and configured states', async () => {
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: 'PC-Siemens',
+          address: '192.168.1.52',
+          winrmConfigured: true,
+          winrmTrustConfigured: true,
+          winrmTrustStatus: 'ready',
+          guacamole: {
+            status: 'multiple',
+            connections: [
+              { name: 'Primary RDP', protocol: 'rdp', port: 3389 },
+              { name: 'Backup RDP', protocol: 'rdp', port: 3390 },
+            ],
+          },
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const row = elements.get('hostList').options.at(-1);
+  assert.match(row.rawInnerHTML, /Address: <span class="mono">192\.168\.1\.52<\/span>/);
+  assert.match(row.rawInnerHTML, /Last heartbeat: not available/);
+  assert.match(row.rawInnerHTML, />2 connections<\/span>/);
+  assert.doesNotMatch(row.rawInnerHTML, /ambiguous/);
+  assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:/);
+  assert.match(row.rawInnerHTML, /WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials"[^>]*>[\s\S]*<span class="host-status-text good">configured<\/span>/);
+  assert.doesNotMatch(row.rawInnerHTML, /class="mini-btn" data-action="set-winrm-credentials"/);
+  assert.match(row.rawInnerHTML, /WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust"[^>]*>[\s\S]*<span class="host-status-text good">ready<\/span>/);
+  assert.match(row.rawInnerHTML, /Forced logoff: not available/);
+  assert.match(row.rawInnerHTML, /Power action: not available/);
+  assert.match(row.rawInnerHTML, /Ready: n\/a/);
+  assert.match(row.rawInnerHTML, /Local session: n\/a/);
+  assert.match(row.rawInnerHTML, /Local mode: n\/a/);
+});
+
+test('enables Verify connection only for saved ready trust and configured credentials', async () => {
+  const trustStatuses = ['missing', 'invalid', 'expired', 'not-yet-valid'];
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+  const { elements: missingCredentialsElements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{ name: 'PC-Siemens', address: '192.168.1.52', winrmConfigured: false }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+    winrmTrustResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ trust: { status: 'ready' } }),
+    }),
+  });
+
+  await flush();
+  const missingCredentialsRow = missingCredentialsElements.get('hostList').options.at(-1);
+  const missingCredentialsManageButton = {
+    dataset: { action: 'manage-winrm-trust' },
+    closest: (selector) => selector === 'button[data-action]' ? missingCredentialsManageButton : missingCredentialsRow,
+  };
+  missingCredentialsElements.get('hostList').dispatchEvent({
+    type: 'click',
+    target: missingCredentialsManageButton,
+  });
+  await flush();
+  assert.equal(missingCredentialsElements.get('verifyWinrmTrust').disabled, true, 'credentials are required');
+
+  for (const status of trustStatuses) {
+    const { elements } = loadLabManager({
+      activeTabs: ['operations'],
+      hostInventoryResponse: Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          hosts: [{ name: 'PC-Siemens', address: '192.168.1.52', winrmConfigured: true }],
+          guacamoleUnmatched: [],
+        }),
+      }),
+      winrmTrustResponse: Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ trust: { status } }),
+      }),
+    });
+
+    await flush();
+    const row = elements.get('hostList').options.at(-1);
+    const manageButton = {
+      dataset: { action: 'manage-winrm-trust' },
+      closest: (selector) => selector === 'button[data-action]' ? manageButton : row,
+    };
+    elements.get('hostList').dispatchEvent({ type: 'click', target: manageButton });
+    await flush();
+
+    assert.equal(elements.get('verifyWinrmTrust').disabled, true, `status=${status}`);
+  }
+
+  const { elements, fetchCalls } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{ name: 'PC-Siemens', address: '192.168.1.52', winrmConfigured: true }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+    winrmTrustResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ trust: { status: 'ready' } }),
+    }),
+  });
+
+  await flush();
+  const row = elements.get('hostList').options.at(-1);
+  const manageButton = {
+    dataset: { action: 'manage-winrm-trust' },
+    closest: (selector) => selector === 'button[data-action]' ? manageButton : row,
+  };
+  elements.get('hostList').dispatchEvent({ type: 'click', target: manageButton });
+  await flush();
+  assert.match(elements.get('winrmTrustCurrent').children[0]?.textContent || '', /Current trust: ready/);
+  assert.equal(elements.get('verifyWinrmTrust').disabled, false);
+
+  elements.get('winrmTrustCertificate').files = [{ name: 'winrm-server.cer' }];
+  elements.get('winrmTrustCertificate').dispatchEvent({ type: 'change' });
+  elements.get('previewWinrmTrust').click();
+  await flush();
+  assert.equal(elements.get('verifyWinrmTrust').disabled, false, 'preview must not revoke an existing saved trust');
+
+  const heartbeatCallsBeforeVerify = fetchCalls.filter(({ url }) => String(url) === '/ops/api/heartbeat/poll').length;
+  elements.get('verifyWinrmTrust').click();
+  await flush();
+  assert.equal(
+    fetchCalls.filter(({ url }) => String(url) === '/ops/api/heartbeat/poll').length,
+    heartbeatCallsBeforeVerify + 1,
+  );
+});
+
+test('keeps Verify connection disabled while the saved trust state is loading', async () => {
+  let resolveTrust;
+  const pendingTrustResponse = new Promise((resolve) => {
+    resolveTrust = resolve;
+  });
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{ name: 'PC-Siemens', address: '192.168.1.52', winrmConfigured: true }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+    winrmTrustResponse: pendingTrustResponse,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const row = elements.get('hostList').options.at(-1);
+  const manageButton = {
+    dataset: { action: 'manage-winrm-trust' },
+    closest: (selector) => selector === 'button[data-action]' ? manageButton : row,
+  };
+  elements.get('hostList').dispatchEvent({ type: 'click', target: manageButton });
+  assert.equal(elements.get('verifyWinrmTrust').disabled, true);
+
+  resolveTrust({
+    ok: true,
+    status: 200,
+    json: async () => ({ trust: { status: 'ready' } }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(elements.get('verifyWinrmTrust').disabled, false);
+});
+
+test('does not open heartbeat streams for hosts without WinRM prerequisites', async () => {
+  class FakeEventSource {
+    static instances = [];
+    static CLOSED = 2;
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = 1;
+      FakeEventSource.instances.push(this);
+    }
+
+    addEventListener() {}
+    close() { this.readyState = FakeEventSource.CLOSED; }
+  }
+
+  loadLabManager({
+    activeTabs: ['operations'],
+    eventSource: FakeEventSource,
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [
+          {
+            name: '10.192.38.82',
+            address: '10.192.38.82',
+            winrmConfigured: false,
+            editable: true,
+          },
+          {
+            name: 'PC-Siemens',
+            address: '192.168.1.52',
+            winrmConfigured: true,
+            winrmTrustConfigured: false,
+            winrmTrustStatus: 'missing',
+          },
+        ],
+        guacamoleUnmatched: [],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(FakeEventSource.instances.length, 0);
+});
+
+test('renders classified heartbeat stream errors without exposing the JSON payload', async () => {
+  class FakeEventSource {
+    static instances = [];
+    static CLOSED = 2;
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = 1;
+      this.listeners = new Map();
+      FakeEventSource.instances.push(this);
+    }
+
+    addEventListener(type, handler) { this.listeners.set(type, handler); }
+    emit(type, event) { this.listeners.get(type)?.(event); }
+    close() { this.readyState = FakeEventSource.CLOSED; }
+  }
+
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    eventSource: FakeEventSource,
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: 'PC-Siemens',
+          address: '192.168.1.52',
+          winrmConfigured: true,
+          winrmTrustConfigured: true,
+          winrmTrustStatus: 'ready',
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(FakeEventSource.instances.length, 1);
+  FakeEventSource.instances[0].emit('error', {
+    data: JSON.stringify({
+      error: 'WinRM certificate trust is required',
+      code: 'WINRM_TRUST_REQUIRED',
+      requestId: 'trust-request-1',
+      host: 'PC-Siemens',
+    }),
+  });
+
+  assert.equal(
+    elements.get('toast').textContent,
+    'Heartbeat unavailable for PC-Siemens: WinRM certificate trust is required',
+  );
+  assert.doesNotMatch(elements.get('toast').textContent, /\{"error"/);
+});
+
+test('keeps the request ID only as a short reference for generic heartbeat errors', async () => {
+  class FakeEventSource {
+    static instances = [];
+    static CLOSED = 2;
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = 1;
+      this.listeners = new Map();
+      FakeEventSource.instances.push(this);
+    }
+
+    addEventListener(type, handler) { this.listeners.set(type, handler); }
+    emit(type, event) { this.listeners.get(type)?.(event); }
+    close() { this.readyState = FakeEventSource.CLOSED; }
+  }
+
+  const { elements } = loadLabManager({
+    activeTabs: ['operations'],
+    eventSource: FakeEventSource,
+    hostInventoryResponse: Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hosts: [{
+          name: 'PC-Siemens',
+          address: '192.168.1.52',
+          winrmConfigured: true,
+          winrmTrustConfigured: true,
+          winrmTrustStatus: 'ready',
+        }],
+        guacamoleUnmatched: [],
+      }),
+    }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  FakeEventSource.instances[0].emit('error', {
+    data: JSON.stringify({
+      error: 'Internal server error',
+      code: 'INTERNAL_ERROR',
+      requestId: 'f33bb129cf1e475f8bc3db34ce2fe5dc',
+      host: 'PC-Siemens',
+    }),
+  });
+
+  assert.equal(
+    elements.get('toast').textContent,
+    'Heartbeat unavailable for PC-Siemens: temporary Ops Worker error (request ID f33bb129cf1e475f8bc3db34ce2fe5dc)',
+  );
+  assert.doesNotMatch(elements.get('toast').textContent, /\{"error"/);
 });
 
 test('loads AAS link FMU options and sends the selected lab when saving a link', async () => {

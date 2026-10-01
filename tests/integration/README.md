@@ -32,7 +32,8 @@ production `.env` or `secrets/` directory.
 ## What is covered
 
 - `/health` and `/gateway/health`
-- OIDC endpoints (`/auth/jwks`, `/.well-known/openid-configuration`)
+- `/auth/jwks` and OIDC discovery (`/.well-known/openid-configuration`) through
+  the mock backend routing surface
 - Auth endpoint rate limiting behavior (mocked backend)
 - CORS behavior on auth paths
 - `/ops` token protection
@@ -41,6 +42,11 @@ production `.env` or `secrets/` directory.
 - Vertical anonymous demo flow: Marketplace publication/sanitation/catalogue,
   `/auth/demo`, `DEMO_JTI`, Guacamole token/session scoping, Ops lifecycle and
   concurrent-slot rejection
+
+The integration suite validates the Gateway routing surface with a mock backend;
+the canonical embedded backend serves both `/auth/jwks` and
+`/.well-known/openid-configuration` in provider mode. See the backend
+authentication guide for the production authentication boundary.
 
 ## Prerequisites
 

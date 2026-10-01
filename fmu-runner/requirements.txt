@@ -1,9 +1,9 @@
 fastapi==0.141.1
-uvicorn[standard]==0.52.4
-fmpy==0.3.31
-pyjwt[crypto]==2.13.0
+uvicorn[standard]==0.53.0
+fmpy==0.3.32
+pyjwt[crypto]==2.14.0
 httpx==0.28.1
 websockets==17.1
-pydantic==2.13.4
+pydantic==2.13.5
 aiosqlite==0.22.1
 python-multipart==0.0.32

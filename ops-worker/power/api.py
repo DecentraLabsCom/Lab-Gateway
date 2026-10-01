@@ -73,6 +73,18 @@ def list_power_controllers():
     return jsonify({"success": True, "controllers": runtime.describe_controllers()})
 
 
+@power_bp.get("/api/power/controllers/status")
+def list_power_controller_statuses():
+    runtime = _runtime()
+    if runtime is None:
+        return _runtime_unavailable()
+    force_refresh = _bool(request.args.get("refresh"), False)
+    return jsonify({
+        "success": True,
+        "controllers": runtime.describe_controller_statuses(force_refresh=force_refresh),
+    })
+
+
 @power_bp.get("/api/power/credentials")
 def list_power_credentials():
     store = _credential_store()

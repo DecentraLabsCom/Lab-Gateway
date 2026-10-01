@@ -29,8 +29,23 @@ def test_security_workflow_covers_actions_python_cpp_and_pip_audit():
     assert "pip-audit -r fmu-runner/requirements.txt" in security
     assert "pip-audit -r ops-worker/requirements.txt" in security
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in security
-    assert "github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd" in security
+    assert "github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938" in security
     assert "cmake --build fmu-proxy-runtime-src/build-codeql" in security
+
+
+def test_native_ci_jobs_use_the_preinstalled_runner_toolchain():
+    security = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+    gateway_tests = (ROOT / ".github" / "workflows" / "gateway-tests.yml").read_text(encoding="utf-8")
+
+    codeql_job = security.split("\n  python-audit:", 1)[0]
+    native_tests_job = gateway_tests.split("\n  native-runtime-unit-tests:", 1)[1].split(
+        "\n  ops-worker-tests:", 1
+    )[0]
+
+    for workflow, job in (("security", codeql_job), ("gateway-tests", native_tests_job)):
+        assert "runs-on: ubuntu-24.04" in job, f"{workflow} must pin the native runner image"
+        assert "sudo apt-get" not in job, f"{workflow} must not depend on APT availability"
+        assert "Verify native runtime toolchain" in job
 
 
 def test_ops_worker_summary_requires_a_completed_checkout():

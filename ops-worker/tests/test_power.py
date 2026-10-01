@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from typing import Any, Dict, List
 
 import pytest
 
@@ -8,10 +9,65 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from power.models import LabPowerPolicy, ValidationError
+from power.drivers.base import PowerDriver
+from power.drivers.mock import MockPowerDriver
+from power.models import LabPowerPolicy, PowerCapabilities, PowerController, PowerOutlet, ValidationError
 from power.persistence import PowerOperationStore
+from power.registry import PowerRegistry, RegisteredController
 from power.service import PowerRuntime
 import worker
+
+
+class CountingPowerDriver(PowerDriver):
+    capabilities = PowerCapabilities()
+
+    def __init__(self):
+        self.list_calls = 0
+        self.discover_calls = 0
+
+    def list_outlets(self) -> List[Dict[str, Any]]:
+        self.list_calls += 1
+        return [{"outlet": "1", "name": "Bench outlet", "state": "off"}]
+
+    def discover(self) -> Dict[str, Any]:
+        self.discover_calls += 1
+        return {
+            "reachable": True,
+            "driver": "test",
+            "controllerId": "counting-1",
+            "profile": "test",
+            "outletCount": 1,
+        }
+
+    def get_outlet_state(self, outlet_id: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def set_outlet_state(self, outlet_id: str, state: str, timeout_seconds: int = 20) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def cycle_outlet(self, outlet_id: str, off_seconds: int = 10, timeout_seconds: int = 30) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
+def mock_driver(runtime: PowerRuntime) -> MockPowerDriver:
+    driver = runtime.registry.get("mock-lab-01").driver
+    assert isinstance(driver, MockPowerDriver)
+    return driver
+
+
+def build_counting_status_runtime(*, status_cache_ttl_seconds=60):
+    driver = CountingPowerDriver()
+    controller = RegisteredController(
+        PowerController("counting-1", "Counting controller", "test"),
+        driver,
+        {"1": PowerOutlet("counting-1", "1", display_name="Bench outlet")},
+    )
+    runtime = PowerRuntime(
+        PowerRegistry([controller]),
+        {},
+        status_cache_ttl_seconds=status_cache_ttl_seconds,
+    )
+    return runtime, driver
 
 
 def build_runtime(*, record_operation=None, sleep_fn=None, operation_store=None):
@@ -148,13 +204,13 @@ def test_executor_runs_phases_in_order_and_is_idempotent():
         "skipped_already_completed",
         "skipped_already_completed",
     ]
-    assert runtime.registry.get("mock-lab-01").driver.states == {"1": "on", "2": "on"}
+    assert mock_driver(runtime).states == {"1": "on", "2": "on"}
     assert len(operations) == 2
 
 
 def test_required_failure_stops_phase_but_optional_failure_continues():
     runtime = build_runtime()
-    driver = runtime.registry.get("mock-lab-01").driver
+    driver = mock_driver(runtime)
     driver.fail_action("on", outlet="1")
 
     result = runtime.execute_policy("lab-1", "reservation-required", "pre_start", actor="test")
@@ -225,7 +281,12 @@ def test_power_api_lists_controllers_runs_commands_and_executes_lab_phases(clien
     controllers = client.get("/api/power/controllers")
     assert controllers.status_code == 200
     assert controllers.json["controllers"][0]["id"] == "mock-lab-01"
-    assert controllers.json["controllers"][0]["outlets"][0]["state"] == "off"
+    assert controllers.json["controllers"][0]["outlets"][0]["state"] == "unknown"
+
+    statuses = client.get("/api/power/controllers/status")
+    assert statuses.status_code == 200
+    assert statuses.json["controllers"][0]["discovery"]["reachable"] is True
+    assert statuses.json["controllers"][0]["outlets"][0]["state"] == "off"
 
     command = client.post(
         "/api/power/controllers/mock-lab-01/outlets/1/commands",
@@ -254,7 +315,45 @@ def test_power_api_lists_controllers_runs_commands_and_executes_lab_phases(clien
     )
     assert end.status_code == 200
     assert end.json["success"] is True
-    assert runtime.registry.get("mock-lab-01").driver.states == {"1": "off", "2": "off"}
+    assert mock_driver(runtime).states == {"1": "off", "2": "off"}
+
+
+def test_power_runtime_separates_catalog_from_cached_status():
+    runtime, driver = build_counting_status_runtime()
+
+    catalog = runtime.describe_controllers()
+
+    assert catalog[0]["name"] == "Counting controller"
+    assert catalog[0]["discovery"] == {}
+    assert catalog[0]["outlets"][0]["state"] == "unknown"
+    assert driver.list_calls == 0
+    assert driver.discover_calls == 0
+
+    first_status = runtime.describe_controller_statuses()
+    second_status = runtime.describe_controller_statuses()
+    forced_status = runtime.describe_controller_statuses(force_refresh=True)
+
+    assert first_status[0]["discovery"]["reachable"] is True
+    assert first_status[0]["outlets"][0]["state"] == "off"
+    assert second_status == first_status
+    assert forced_status == first_status
+    assert driver.list_calls == 2
+    assert driver.discover_calls == 2
+
+
+def test_power_controller_status_api_can_bypass_status_cache(client, monkeypatch):
+    runtime, driver = build_counting_status_runtime()
+    monkeypatch.setitem(worker.APP.extensions, "power_runtime", runtime)
+
+    first = client.get("/api/power/controllers/status")
+    cached = client.get("/api/power/controllers/status")
+    refreshed = client.get("/api/power/controllers/status?refresh=true")
+
+    assert first.status_code == 200
+    assert cached.status_code == 200
+    assert refreshed.status_code == 200
+    assert driver.list_calls == 2
+    assert driver.discover_calls == 2
 
 
 def test_power_controller_api_creates_and_updates_provider_catalog(client, tmp_path, monkeypatch):
@@ -462,6 +561,7 @@ def test_power_operation_store_round_trips_successful_operation(db_engine):
     store.save(operation)
 
     found = store.get_successful(operation["idempotencyKey"])
+    assert found is not None
     assert found["success"] is True
     assert found["reservationId"] == "reservation-store-1"
     assert found["observedStateAfter"] == "on"
@@ -657,7 +757,7 @@ def test_reservation_start_runs_pre_start_power_before_host_operations(db_engine
 def test_required_pre_start_power_failure_prevents_host_start(db_engine, monkeypatch):
     events = []
     runtime = build_runtime(record_operation=lambda _operation: events.append("power"))
-    runtime.registry.get("mock-lab-01").driver.fail_action("on", outlet="1")
+    mock_driver(runtime).fail_action("on", outlet="1")
     monkeypatch.setattr(worker, "POWER_RUNTIME", runtime)
     worker.HOSTS = worker.HostRegistry({"hosts": [{"name": "lab-ws-01", "address": "192.168.1.50"}]})
     monkeypatch.setattr(worker, "perform_wake_step", lambda *args, **kwargs: events.append("wake"))
@@ -707,13 +807,13 @@ def test_policy_respects_local_mode_without_actuating_outlets():
 
     assert result["success"] is True
     assert result["status"] == "skipped_local_mode"
-    assert runtime.registry.get("mock-lab-01").driver.states == {"1": "off", "2": "off"}
+    assert mock_driver(runtime).states == {"1": "off", "2": "off"}
 
 
 def test_end_failure_mode_warns_without_blocking_phase():
     runtime = build_runtime()
-    runtime.registry.get("mock-lab-01").driver.fail_action("off", outlet="2")
-    runtime.registry.get("mock-lab-01").driver.states["2"] = "on"
+    mock_driver(runtime).fail_action("off", outlet="2")
+    mock_driver(runtime).states["2"] = "on"
 
     result = runtime.execute_policy("lab-1", "reservation-end-warning", "post_end", actor="scheduler")
 

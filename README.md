@@ -7,7 +7,7 @@
 Lab Gateway is the access plane for DecentraLabs laboratories. It exposes
 browser-based remote sessions through Guacamole, coordinates optional FMU
 access, and connects the laboratory network to the institutional control plane.
-The repository also embeds the canonical `blockchain-services` backend for a
+The repository also integrates the `blockchain-services` backend for a
 complete deployment.
 
 Start with the [documentation guide](docs/README.md). Its
@@ -87,7 +87,23 @@ cd Lab-Gateway
 
 For a non-interactive deployment, copy `.env.example` and
 `blockchain-services/.env.example`, configure the required secrets and public
-origin, then run:
+origin, and complete the persistent-directory prerequisites in the [manual
+Compose installation guide](docs/install/install-manual-compose.md) before
+materializing the Compose secret files:
+
+```bash
+# Linux/macOS/WSL
+python3 scripts/validate-gateway-env.py --env .env
+bash scripts/sync-compose-secrets.sh
+```
+
+```powershell
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\Validate-GatewayEnv.ps1 -EnvPath .\.env
+powershell -ExecutionPolicy Bypass -File .\scripts\Sync-ComposeSecrets.ps1
+```
+
+Then run:
 
 ```bash
 docker compose up -d --build
@@ -145,8 +161,8 @@ network and operator model.
 ## Documentation map
 
 - [Documentation guide](docs/README.md) — task-based navigation and terminology.
-- [Documentation contract](docs/documentation-contract.md) — canonical source
-  ownership and cross-project consistency rules.
+- [Documentation contract](docs/documentation-contract.md) — source ownership
+  and cross-project consistency rules.
 - [Deployment architectures](docs/deployment-architectures.md) — Full, Lite,
   composite, and standalone topologies.
 - [Configuration reference](docs/reference/configuration.md) — environment
@@ -169,7 +185,7 @@ network and operator model.
 
 ```text
 openresty/                 Public edge, access-code exchange, and access guards
-blockchain-services/       Embedded canonical Spring Boot control-plane backend
+blockchain-services/       Spring Boot control-plane backend
 ops-worker/                Private WinRM, Wake-on-LAN, telemetry, and operations worker
 fmu-runner/                FMU facade and Station integration
 web/                       Lab Manager and static gateway UI

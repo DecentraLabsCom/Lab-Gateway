@@ -177,6 +177,7 @@ runner.describe("Guacamole token content-phase handler", function()
     runner.it("fails closed when any security mapping cannot be stored", function()
         local dict = ngx_factory.new_shared_dict()
         local original_set = dict.set
+        ---@diagnostic disable-next-line: duplicate-set-field
         function dict:set(key, value, ttl)
             if key == "guac_jti:guac-token" then
                 return nil, "no memory"

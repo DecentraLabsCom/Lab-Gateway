@@ -4,6 +4,8 @@ import sys
 import tempfile
 from unittest.mock import patch
 
+import pytest
+
 from sqlalchemy import Boolean, Column, DateTime, Integer, MetaData, String, Table, create_engine, text
 from sqlalchemy.engine import Engine
 
@@ -179,7 +181,7 @@ def test_host_inventory_links_guacamole_connection_by_hostname(client):
     assert response.status_code == 200
     body = response.get_json()
     assert body["hosts"][0]["name"] == "lab-ws-01"
-    assert body["hosts"][0]["guacamole"]["status"] == "linked"
+    assert body["hosts"][0]["guacamole"]["status"] == "single"
     assert body["hosts"][0]["guacamole"]["connections"][0]["name"] == "RDP Lab 01"
     assert body["hosts"][0]["guacamole"]["connections"][0]["selector"] == "guac:id:7"
     assert body["hosts"][0]["guacamole"]["connections"][0]["hostname"] == "lab-ws-01"
@@ -347,12 +349,12 @@ def test_host_inventory_marks_missing_when_no_connection_matches(client):
 
     assert response.status_code == 200
     body = response.get_json()
-    assert body["hosts"][0]["guacamole"]["status"] == "missing"
+    assert body["hosts"][0]["guacamole"]["status"] == "none"
     assert body["hosts"][0]["guacamole"]["connections"] == []
     assert body["guacamoleUnmatched"][0]["name"] == "Other Desktop"
 
 
-def test_host_inventory_marks_ambiguous_when_multiple_connections_match(client):
+def test_host_inventory_marks_multiple_when_multiple_connections_match(client):
     hosts = [{
         "name": "lab-ws-03",
         "address": "192.168.1.52",
@@ -381,7 +383,7 @@ def test_host_inventory_marks_ambiguous_when_multiple_connections_match(client):
 
     assert response.status_code == 200
     guacamole_status = response.get_json()["hosts"][0]["guacamole"]
-    assert guacamole_status["status"] == "ambiguous"
+    assert guacamole_status["status"] == "multiple"
     assert [conn["name"] for conn in guacamole_status["connections"]] == ["Primary RDP", "Backup RDP"]
 
 
@@ -722,6 +724,60 @@ def test_provision_uses_discovered_mac_when_payload_mac_blank(client):
     assert saved["hosts"][0]["mac"] == "00:11:22:33:44:55"
 
 
+def test_provision_rejects_invalid_mac(client):
+    guacamole = [{
+        "id": 16,
+        "name": "Provisionable With Invalid MAC",
+        "protocol": "rdp",
+        "hostname": "lab-ws-16",
+        "port": "3389",
+    }]
+
+    with with_dynamic_inventory_state([], guacamole) as state, \
+            patch("worker.discover_labstation_candidate", return_value={
+                "connection": guacamole[0],
+                "status": "winrm-reachable",
+                "checks": {},
+            }):
+        response = client.post("/api/hosts/provision", json={
+            "connectionId": 16,
+            "name": "lab-ws-16",
+            "mac": "not-a-mac",
+        })
+
+    assert response.status_code == 400
+    assert "mac" in response.get_data(as_text=True).lower()
+    assert not os.path.exists(state.dynamic_path)
+
+
+def test_provision_reports_unwritable_dynamic_catalog(client):
+    guacamole = [{
+        "id": 20,
+        "name": "Provisionable With Unwritable Catalog",
+        "protocol": "rdp",
+        "hostname": "lab-ws-20",
+        "port": "3389",
+    }]
+
+    with with_dynamic_inventory_state([], guacamole), \
+            patch("worker.discover_labstation_candidate", return_value={
+                "connection": guacamole[0],
+                "status": "winrm-reachable",
+                "checks": {},
+            }), \
+            patch("worker.upsert_dynamic_host", side_effect=PermissionError("read-only catalog")):
+        response = client.post("/api/hosts/provision", json={
+            "connectionId": 20,
+            "name": "lab-ws-20",
+        })
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "error": "Ops host catalog is not writable; check the ops-data mount permissions",
+        "code": "OPS_DYNAMIC_CONFIG_NOT_WRITABLE",
+    }
+
+
 def test_save_winrm_credentials_stores_secret_and_reloads(client, monkeypatch, tmp_path):
     guacamole = [{
         "id": 15,
@@ -756,3 +812,102 @@ def test_save_winrm_credentials_stores_secret_and_reloads(client, monkeypatch, t
     assert saved["hosts"][0]["credential_ref"] == "lab-ws-15"
     creds = worker.load_winrm_credentials("lab-ws-15")
     assert creds == {"user": ".\\LabGatewaySvc", "password": "secret-password"}
+
+
+def test_edit_updates_dynamic_host_settings_and_preserves_operational_fields(client):
+    dynamic_host = {
+        "name": "10.192.38.82",
+        "address": "192.168.1.50",
+        "credential_ref": "siemens-admin",
+        "winrm_transport": "ntlm",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+        "heartbeat_path": r"C:\LabStation\labstation\data\telemetry\heartbeat.json",
+        "events_path": r"C:\LabStation\labstation\data\telemetry\session-guard-events.jsonl",
+        "mac": "00:11:22:33:44:55",
+        "labs": ["4"],
+    }
+
+    with with_dynamic_inventory_state([], []) as state:
+        with open(state.dynamic_path, "w", encoding="utf-8") as handle:
+            json.dump({"hosts": [dynamic_host]}, handle)
+        worker.HOSTS = worker.HostRegistry({"hosts": [dynamic_host]})
+
+        response = client.patch("/api/hosts/10.192.38.82", json={
+            "name": "siemens-admin",
+            "mac": "00-22-33-44-55-66",
+            "heartbeatPath": r"C:\Lab Station\labstation\data\telemetry\heartbeat.json",
+        })
+        with open(state.dynamic_path, "r", encoding="utf-8") as handle:
+            saved = json.load(handle)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["host"]["name"] == "siemens-admin"
+    assert body["host"]["address"] == "192.168.1.50"
+    assert body["host"]["credentialRef"] == "siemens-admin"
+    saved_host = saved["hosts"][0]
+    assert saved_host["name"] == "siemens-admin"
+    assert saved_host["address"] == "192.168.1.50"
+    assert saved_host["credential_ref"] == "siemens-admin"
+    assert saved_host["mac"] == "00:22:33:44:55:66"
+    assert saved_host["heartbeat_path"] == r"C:\Lab Station\labstation\data\telemetry\heartbeat.json"
+    assert saved_host["labs"] == ["4"]
+
+
+def test_edit_rejects_invalid_mac_without_changing_dynamic_catalog(client):
+    dynamic_host = {
+        "name": "lab-ws-21",
+        "address": "192.168.1.50",
+        "credential_ref": "lab-ws-21",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+        "heartbeat_path": r"C:\LabStation\heartbeat.json",
+        "events_path": r"C:\LabStation\events.jsonl",
+        "labs": [],
+    }
+
+    with with_dynamic_inventory_state([], []) as state:
+        with open(state.dynamic_path, "w", encoding="utf-8") as handle:
+            json.dump({"hosts": [dynamic_host]}, handle)
+        worker.HOSTS = worker.HostRegistry({"hosts": [dynamic_host]})
+
+        response = client.patch("/api/hosts/lab-ws-21", json={"mac": "not-a-mac"})
+        with open(state.dynamic_path, "r", encoding="utf-8") as handle:
+            saved = json.load(handle)
+
+    assert response.status_code == 400
+    assert "mac" in response.get_json()["error"].lower()
+    assert saved["hosts"] == [dynamic_host]
+
+
+def test_edit_rejects_static_host_catalog_entry(client):
+    static_host = {
+        "name": "static-lab-ws",
+        "address": "192.168.1.50",
+        "winrm_use_ssl": True,
+        "winrm_port": 5986,
+    }
+
+    with with_dynamic_inventory_state([static_host], []) as state:
+        response = client.patch("/api/hosts/static-lab-ws", json={"name": "renamed-static"})
+
+    assert response.status_code == 409
+    assert "static catalog" in response.get_json()["error"]
+    assert not os.path.exists(state.dynamic_path)
+
+
+def test_heartbeat_stream_reports_missing_credentials_without_repeating_internal_errors():
+    host = {
+        "name": "lab-ws-22",
+        "address": "192.168.1.50",
+    }
+
+    with patch("worker.poll_heartbeat", side_effect=ValueError("WinRM credentials are required")):
+        stream = worker.generate_heartbeat_stream(host, include_events=False)
+        first_event = next(stream)
+        with pytest.raises(StopIteration):
+            next(stream)
+
+    assert '"code": "WINRM_CREDENTIALS_REQUIRED"' in first_event
+    assert "requestId" not in first_event

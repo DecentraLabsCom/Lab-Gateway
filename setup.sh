@@ -596,6 +596,22 @@ else
 fi
 echo
 
+echo "Lab Station WinRM Management Network"
+echo "===================================="
+echo "This restricts Ops Worker WinRM access to the private management network used by Lab Stations."
+echo "Enter comma-separated CIDRs. Leave empty only if no Ops hosts will be configured yet."
+winrm_management_cidrs_default="$(get_env_default "WINRM_MANAGEMENT_CIDRS" "$ROOT_ENV_FILE")"
+read -p "WINRM_MANAGEMENT_CIDRS [${winrm_management_cidrs_default:-empty -> configure before adding hosts}]: " winrm_management_cidrs
+winrm_management_cidrs="${winrm_management_cidrs:-$winrm_management_cidrs_default}"
+winrm_management_cidrs=$(echo "$winrm_management_cidrs" | sed 's/[[:space:]]//g')
+update_env_var "$ROOT_ENV_FILE" "WINRM_MANAGEMENT_CIDRS" "$winrm_management_cidrs"
+if [ -z "$winrm_management_cidrs" ]; then
+    echo "   * WINRM_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts."
+else
+    echo "   * WINRM_MANAGEMENT_CIDRS set to: $winrm_management_cidrs"
+fi
+echo
+
 echo "Demo Lab Access"
 echo "================"
 echo "The demo is fail-closed until its on-chain lab, Guacamole connection, Station heartbeat and Marketplace eligibility are ready."
@@ -1061,6 +1077,46 @@ fi
 update_env_var "$ROOT_ENV_FILE" "FMU_JWT_AUDIENCE" "${gateway_public_origin}/fmu"
 echo "   * FMU JWT audience: ${expected_fmu_audience}"
 
+# Resolve the container identity before hardening or creating state directories.
+# This repairs directories left by older releases before an unprivileged setup
+# invocation can fail on chmod/mkdir.
+echo
+echo "Host User Mapping"
+echo "================="
+host_user="${SUDO_USER:-}"
+if [ -z "$host_user" ]; then
+    host_user="$(id -un)"
+fi
+host_uid="$(id -u "$host_user" 2>/dev/null || echo "")"
+host_gid="$(id -g "$host_user" 2>/dev/null || echo "")"
+
+align_state_ownership() {
+    if ! command -v chown >/dev/null 2>&1; then
+        echo "chown is required to prepare Compose bind-mounted state." >&2
+        return 1
+    fi
+    local state_path
+    for state_path in certs blockchain-data fmu-access-state lab-content ops-data; do
+        if [ -e "$state_path" ] && ! chown -R "${host_uid}:${host_gid}" "$state_path" 2>/dev/null; then
+            echo "Unable to assign ${host_uid}:${host_gid} to ${state_path}." >&2
+            return 1
+        fi
+    done
+}
+
+if [ -n "$host_uid" ] && [ -n "$host_gid" ]; then
+    update_env_var "$ROOT_ENV_FILE" "HOST_UID" "$host_uid"
+    update_env_var "$ROOT_ENV_FILE" "HOST_GID" "$host_gid"
+    echo "Configured HOST_UID/HOST_GID to ${host_uid}:${host_gid}"
+    if ! align_state_ownership; then
+        echo "Run the setup as the deployment owner or repair state ownership with sudo before retrying." >&2
+        exit 1
+    fi
+else
+    echo "Unable to detect the deployment user's UID/GID; cannot prepare bind mounts." >&2
+    exit 1
+fi
+
 # Repair modes after all generated values have been written.  This is also
 # executed when the operator chooses not to start Docker services.
 secure_gateway_state
@@ -1083,6 +1139,7 @@ mkdir -p fmu-proxy-runtime/binaries/linux64
 mkdir -p fmu-proxy-runtime/binaries/win64
 mkdir -p fmu-proxy-runtime/binaries/darwin64
 mkdir -p ops-data/guac-revocation-spool
+mkdir -p ops-data/winrm-certificates
 chmod 700 certs 2>/dev/null || true
 chmod 700 blockchain-data 2>/dev/null || true
 chmod 700 fmu-access-state 2>/dev/null || true
@@ -1094,33 +1151,11 @@ chmod 755 fmu-proxy-runtime/binaries/linux64 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/win64 2>/dev/null || true
 chmod 755 fmu-proxy-runtime/binaries/darwin64 2>/dev/null || true
 chmod 700 ops-data/guac-revocation-spool 2>/dev/null || true
+chmod 700 ops-data/winrm-certificates 2>/dev/null || true
 secure_gateway_state
-
-echo
-echo "Host User Mapping"
-echo "================="
-host_user="${SUDO_USER:-}"
-if [ -z "$host_user" ]; then
-    host_user="$(id -un)"
-fi
-host_uid="$(id -u "$host_user" 2>/dev/null || echo "")"
-host_gid="$(id -g "$host_user" 2>/dev/null || echo "")"
-if [ -n "$host_uid" ] && [ -n "$host_gid" ]; then
-    update_env_var "$ROOT_ENV_FILE" "HOST_UID" "$host_uid"
-    update_env_var "$ROOT_ENV_FILE" "HOST_GID" "$host_gid"
-    echo "Configured HOST_UID/HOST_GID to ${host_uid}:${host_gid}"
-
-    # Align permissions so containers can write to bind mounts without manual chmod.
-    if command -v chown >/dev/null 2>&1; then
-        if chown -R "${host_uid}:${host_gid}" certs blockchain-data lab-content 2>/dev/null \
-            && chown -R "${host_uid}:${host_gid}" fmu-access-state 2>/dev/null; then
-            echo "Adjusted ownership of certs/, blockchain-data/, fmu-access-state/, and lab-content/ to ${host_uid}:${host_gid}"
-        else
-            echo "Warning: Unable to change ownership of certs/, blockchain-data/, fmu-access-state/, or lab-content/. Run chown manually if needed." >&2
-        fi
-    fi
-else
-    echo "Warning: Unable to detect host UID/GID; using defaults."
+if ! align_state_ownership; then
+    echo "State directories are not writable by the Compose service identity." >&2
+    exit 1
 fi
 
 # Docker Compose local secrets must be backed by files when a read-only service

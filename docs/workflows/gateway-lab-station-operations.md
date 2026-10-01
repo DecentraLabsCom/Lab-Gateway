@@ -30,6 +30,45 @@ each Lite owns the complete local management path.
 
 WinRM credentials are deliberately separate from `hosts.json`. A host refers to a `credential_ref`; the ops worker encrypts the corresponding credentials using the required `OPS_SECRETS_KEY`.
 
+WinRM certificate trust is also separate from the credentials. The first
+implementation uses the persistent `ops-data` bind mount. For a host whose
+name is `PC-Siemens`, copy the public certificate exported by Lab Station to:
+
+```text
+ops-data/winrm-certificates/pc-siemens/server.cer
+```
+
+The directory name is the lower-case `winrm_trust_ref`; when that field is not
+present in the host catalog, it defaults to the host name. On startup and
+after `POST /ops/api/hosts/reload`, ops-worker creates the directory layout and
+inspects the certificate. If the Windows export is DER, the worker also
+materializes a `server.pem` copy next to it because Requests/OpenSSL consumes
+the PEM form. Every WinRM session then passes that generated PEM as its
+per-host `ca_trust_path` while keeping TLS validation enabled. A certificate
+is never installed as a global trust override and is never trusted for another
+host.
+
+The manual bootstrap procedure, which remains useful for recovery and local
+deployments, is:
+
+1. Run `LabStation.exe winrm configure` on the Windows station.
+2. Copy `C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer` to the
+   matching host directory under `ops-data/winrm-certificates/`.
+3. Confirm the certificate thumbprint out of band. For PC-Siemens the current
+   SHA-1 thumbprint is `DAD0D2C0835FC00796BB5AFCA4D69A88E7EE0799`.
+4. Restart ops-worker or call `POST /ops/api/hosts/reload`.
+5. Check `GET /ops/api/hosts` for `winrmTrustStatus=ready` and run a heartbeat.
+
+The certificate file must be the public CER/DER or PEM export only. Do not
+copy a private key, use `verify=false`, or use `TrustedHosts` as a substitute
+for certificate validation. Lab Manager now manages the same per-host trust
+store from the `WinRM TLS trust` indicator on each host card. It previews the
+certificate, validates SAN/CN identity and validity dates, requires an explicit
+SHA-256 confirmation, and never returns the certificate contents after saving.
+When the managed address is an IP literal, the certificate must contain that
+address as an `iPAddress` SAN entry; a `dNSName` entry containing the same text
+does not satisfy WinRM/OpenSSL hostname verification.
+
 ## Host inventory and telemetry
 
 An ops host records the managed address, optional MAC address, credential reference, telemetry paths, and the laboratory IDs assigned to that host. A minimal entry is:
@@ -61,7 +100,12 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `GET /ops/api/hosts` | Read configured and discovered host information. |
 | `POST /ops/api/hosts/discover` | Probe a Guacamole connection candidate for managed-host signals. |
 | `POST /ops/api/hosts/provision` | Create or update a dynamic host after successful discovery. |
+| `PATCH /ops/api/hosts/{hostName}` | Update the name, MAC, or heartbeat path of a dynamic host. |
 | `POST /ops/api/hosts/winrm-credentials` | Store encrypted credentials for a host reference. |
+| `POST /ops/api/hosts/{hostName}/winrm-trust/preview` | Validate and preview a public CER/DER/PEM certificate without persisting it. |
+| `GET /ops/api/hosts/{hostName}/winrm-trust` | Read per-host trust metadata and classified status. |
+| `PUT /ops/api/hosts/{hostName}/winrm-trust` | Save or replace trust after server-side validation and SHA-256 confirmation. |
+| `DELETE /ops/api/hosts/{hostName}/winrm-trust` | Remove the host trust material and return `WINRM_TRUST_REQUIRED` state. |
 | `POST /ops/api/hosts/reload` | Reload the static/dynamic host catalog. |
 | `POST /ops/api/hosts/local-mode` | Set the station local-mode operational flag. |
 | `POST /ops/api/reservations/start` | Start the operational preparation for one reservation. |

@@ -57,6 +57,7 @@ OPS_BACKEND_MYSQL_USER=ops_backend
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_SECRETS_KEY=<stable-fernet-key>
 WINRM_MANAGEMENT_CIDRS=10.7.74.0/24
+OPS_WINRM_TRUST_PATH=/app/data/winrm-certificates
 
 # Guacamole admin (do not use 'guacadmin' in production)
 GUAC_ADMIN_USER=admin
@@ -74,6 +75,24 @@ CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 # Required by Compose interpolation; use the public FMU origin when FMU is enabled
 FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 ```
+
+`WINRM_MANAGEMENT_CIDRS` is the private management-network allowlist for the
+Ops Worker to reach Lab Stations through WinRM HTTPS on port 5986. It is
+required before configuring any Ops host, and every configured Station address
+must belong to one of these networks. This value is a security policy, not a
+value inferred from Guacamole: Guacamole may also contain administration-only
+desktop connections and does not provide the authorized network mask.
+
+Use the actual management VLAN CIDR. If only one Station is authorized, use a
+host-specific `/32`, for example:
+
+```env
+WINRM_MANAGEMENT_CIDRS=10.192.38.82/32
+```
+
+For several Stations on the same `/24`, use that actual subnet instead, for
+example `10.192.38.0/24`. On a Lite gateway, configure the CIDR of the local
+Stations managed by that Lite gateway.
 
 For a Full gateway, configure the credentials used by opaque access-code
 redemption and FMU session observation. The JSON values must be valid JSON
@@ -238,16 +257,33 @@ mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
   fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 \
   fmu-proxy-runtime/binaries/darwin64 \
-  ops-data/guac-revocation-spool
+  ops-data/guac-revocation-spool \
+  ops-data/winrm-certificates
 
 sudo chown -R "${gateway_uid}:${gateway_gid}" \
-  blockchain-data certs fmu-access-state lab-content
+  blockchain-data certs fmu-access-state lab-content ops-data
 chmod 700 fmu-access-state
 chmod 755 lab-content fmu-data fmu-proxy-runtime \
   fmu-proxy-runtime/binaries fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 fmu-proxy-runtime/binaries/darwin64
-chmod 700 ops-data ops-data/guac-revocation-spool
+chmod 700 ops-data ops-data/guac-revocation-spool ops-data/winrm-certificates
 ```
+
+Do not start Compose if this preflight fails. A bind mount created by Docker
+before this step is commonly owned by `root:root`, while `ops-worker` runs as
+the non-root `HOST_UID:HOST_GID` identity:
+
+```bash
+test -w ops-data/winrm-certificates || {
+  echo "ops-data/winrm-certificates is not writable by the deployment user" >&2
+  exit 1
+}
+```
+
+On an existing installation, repeat the `chown` command after an upgrade: Git,
+image rebuilds and container restarts do not change ownership of host bind
+mounts. If the directory is already owned by root, run the repair with `sudo`
+before running `docker compose`.
 
 If you run the stack through `sudo`, preserve the deployment account's
 `HOST_UID` and `HOST_GID`; do not silently replace them with root's IDs.
@@ -262,6 +298,11 @@ certs/
 └── privkey.pem     # Private key
 ```
 
+These are the stable paths consumed by OpenResty. If Certbot is enabled, its
+managed lineage is stored separately under
+`certs/live/<primary-domain>/`; the deploy hook validates a renewed pair and
+promotes it to the stable paths before OpenResty reloads it.
+
 **Let's Encrypt (automated)** — set in `.env` and start with the `certbot` profile:
 
 ```env
@@ -271,7 +312,24 @@ CERTBOT_STAGING=0
 ```
 
 ```bash
-docker compose --profile certbot up -d
+docker compose --profile certbot up -d certbot-init certbot-renew
+```
+
+The domain must resolve to this gateway and HTTP port 80 must be reachable for
+the HTTP-01 challenge.
+
+`certbot-renew` checks twice daily. On renewal, OpenResty validates the matching
+certificate/key pair and reloads automatically (60 seconds by default), so no
+manual restart is required. A valid CA certificate already present in the
+stable `certs/` paths is preserved until the Certbot profile is deliberately
+enabled; enabling it performs the migration to Let's Encrypt after the first
+successful issuance.
+
+To verify the renewal configuration without replacing the live certificate:
+
+```bash
+docker compose run --rm --profile certbot certbot renew --dry-run \
+  --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
 ```
 
 **Development** — self-signed certificates are generated automatically on first start
@@ -347,7 +405,7 @@ selected. Keep it `false` for the station-backed production profile. See the
 curl -k https://localhost/health
 
 # Blockchain services
-curl -k https://localhost/auth/.well-known/openid-configuration
+curl -k https://localhost/.well-known/openid-configuration
 ```
 
 Both should return JSON without errors. The public health response is intentionally redacted; Lab Manager operators can use `/health/details` with the configured `LAB_MANAGER_TOKEN` for backend diagnostics.
@@ -369,6 +427,16 @@ docker compose exec -T openresty sh -c '
 
 The OpenResty UID/GID must match the owner of `fmu-access-state`. A successful
 health check alone does not test this write path.
+
+Verify the Ops Worker bind mount as well:
+
+```bash
+docker compose exec -T ops-worker sh -c '
+  set -eu
+  test -w /app/data/winrm-certificates
+  echo "ops-worker can write WinRM trust state"
+'
+```
 
 ## Step 9 — Create the institutional wallet
 

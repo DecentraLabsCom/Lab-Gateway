@@ -89,7 +89,7 @@ Marketplace. El operador del Gateway no registra otro SP en eduGAIN.
 ```bash
 docker compose restart blockchain-services
 docker compose logs blockchain-services | grep -Ei 'saml|assertion|metadata'
-curl -k https://gateway.example.edu/auth/.well-known/openid-configuration
+curl -k https://gateway.example.edu/.well-known/openid-configuration
 ```
 
 Prueba SAML contra el plano Full/control-plane; `/auth/**` está bloqueado en

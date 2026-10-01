@@ -15,7 +15,7 @@ on:
 jobs:
   codeql:
     name: CodeQL Analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       security-events: write
       contents: read
@@ -29,21 +29,25 @@ jobs:
           submodules: recursive
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: actions,javascript,python,cpp
           config-file: .github/codeql/codeql-config.yml
 
+      - name: Verify native runtime toolchain
+        run: |
+          cmake --version
+          ninja --version
+          test -f /usr/include/openssl/ssl.h
+
       - name: Build native proxy for CodeQL
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libssl-dev ninja-build
           cmake -S fmu-proxy-runtime-src -B fmu-proxy-runtime-src/build-codeql -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build fmu-proxy-runtime-src/build-codeql --parallel 2
 
       - name: Perform CodeQL Analysis
         id: analyze
-        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           output: sarif-results
 

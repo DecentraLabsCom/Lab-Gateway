@@ -206,6 +206,10 @@ services:
       - HTTPS_PORT=${HTTPS_PORT}
       - HTTP_PORT=${HTTP_PORT}
       - ISSUER=${ISSUER}
+      # Certbot owns the ACME lineage below certs/live. OpenResty uses this
+      # value only to locate the matching lineage during startup fallback.
+      - CERTBOT_DOMAINS=${CERTBOT_DOMAINS:-}
+      - TLS_RELOAD_INTERVAL_SECONDS=${TLS_RELOAD_INTERVAL_SECONDS:-60}
       - AUTH_ACCESS_CODE_REDEEM_URL=${AUTH_ACCESS_CODE_REDEEM_URL:-}
       - AUTH_ACCESS_CODE_REDEEMER_TOKEN_FILE=/run/secrets/auth_access_code_redeemer_token
       - ACCESS_CODE_ENCRYPTION_KEY=${ACCESS_CODE_ENCRYPTION_KEY:-}
@@ -385,50 +389,87 @@ services:
   certbot:
     image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
-    entrypoint: ["sh", "-c", "certbot --version"]
+    entrypoint: ["certbot"]
+    command: ["--version"]
+    environment:
+      - TLS_CERT_HOSTNAME=${SERVER_NAME:-}
+      - TLS_CERT_UID=${HOST_UID:-1000}
+      - TLS_CERT_GID=${HOST_GID:-1000}
     volumes:
       - ./certs:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
+      - ./certbot/deploy-hook.sh:/usr/local/bin/deploy-hook.sh:ro
     # Usage example:
-    # docker compose run --rm --profile certbot certbot certonly --webroot -w /var/www/certbot -d your.domain --email you@example.com --agree-tos --no-eff-email
+    # docker compose run --rm --profile certbot certbot certonly --webroot -w /var/www/certbot -d your.domain --email you@example.com --agree-tos --no-eff-email --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
 
   certbot-renew:
     image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
     restart: unless-stopped
-    entrypoint: ["sh", "-c", "while true; do certbot renew --webroot -w /var/www/certbot --quiet || true; sleep 12h; done"]
+    depends_on:
+      certbot-init:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        while true; do
+          if ! certbot renew --webroot -w /var/www/certbot --quiet \
+              --deploy-hook "sh /usr/local/bin/deploy-hook.sh"; then
+            echo "Certbot renewal attempt failed; retrying in 12 hours" >&2
+          fi
+          sleep 43200
+        done
+    environment:
+      - TLS_CERT_HOSTNAME=${SERVER_NAME:-}
+      - TLS_CERT_UID=${HOST_UID:-1000}
+      - TLS_CERT_GID=${HOST_GID:-1000}
     volumes:
       - ./certs:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
+      - ./certbot/deploy-hook.sh:/usr/local/bin/deploy-hook.sh:ro
 
   certbot-init:
     image: certbot/certbot:v2.11.0
     profiles: ["certbot"]
     restart: "no"
+    depends_on:
+      openresty:
+        condition: service_started
     entrypoint: >
       sh -c '
       if [ -z "$$CERTBOT_DOMAINS" ] || [ -z "$$CERTBOT_EMAIL" ]; then
         echo "CERTBOT_DOMAINS or CERTBOT_EMAIL not set; skipping initial cert issuance";
         exit 0;
       fi;
-      primary_domain=$${CERTBOT_DOMAINS%%,*};
-      if [ -f "/etc/letsencrypt/live/$$primary_domain/fullchain.pem" ]; then
-        echo "Certificate already present for $$primary_domain; skipping issuance";
+      primary_domain=$$(printf '%s' "$$CERTBOT_DOMAINS" | cut -d',' -f1 | tr -d ' ');
+      live_cert="/etc/letsencrypt/live/$$primary_domain/fullchain.pem";
+      live_key="/etc/letsencrypt/live/$$primary_domain/privkey.pem";
+      if [ -s "$$live_cert" ] && [ -s "$$live_key" ] &&
+         openssl x509 -in "$$live_cert" -checkend 0 -noout >/dev/null 2>&1 &&
+         openssl pkey -in "$$live_key" -noout >/dev/null 2>&1; then
+        echo "Valid certificate already present for $$primary_domain; promoting it to the canonical TLS paths";
+        RENEWED_LINEAGE="/etc/letsencrypt/live/$$primary_domain" sh /usr/local/bin/deploy-hook.sh;
         exit 0;
       fi;
       domains="";
-      for d in $${CERTBOT_DOMAINS//,/ }; do domains="$$domains -d $$d"; done;
+      for d in $$(printf '%s' "$$CERTBOT_DOMAINS" | tr ',' ' '); do domains="$$domains -d $$d"; done;
       staging="";
       if [ "$$CERTBOT_STAGING" = "1" ]; then staging="--staging"; fi;
-      certbot certonly --non-interactive --agree-tos $$staging --webroot -w /var/www/certbot $$domains -m "$$CERTBOT_EMAIL"
+      certbot certonly --non-interactive --agree-tos $$staging --webroot -w /var/www/certbot $$domains -m "$$CERTBOT_EMAIL" --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
       '
     environment:
       - CERTBOT_DOMAINS=${CERTBOT_DOMAINS}
       - CERTBOT_EMAIL=${CERTBOT_EMAIL}
       - CERTBOT_STAGING=${CERTBOT_STAGING:-0}
+      - TLS_CERT_HOSTNAME=${SERVER_NAME:-}
+      - TLS_CERT_UID=${HOST_UID:-1000}
+      - TLS_CERT_GID=${HOST_GID:-1000}
     volumes:
       - ./certs:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
+      - ./certbot/deploy-hook.sh:/usr/local/bin/deploy-hook.sh:ro
 
   mysql:
     image: mysql:8.0.41
@@ -598,15 +639,24 @@ services:
       - OPS_CONFIG=/app/hosts.json
       - OPS_DYNAMIC_CONFIG=/app/data/hosts.json
       - OPS_CREDENTIALS_PATH=${OPS_CREDENTIALS_PATH:-/app/data/winrm-credentials.json}
+      - OPS_WINRM_TRUST_PATH=${OPS_WINRM_TRUST_PATH:-/app/data/winrm-certificates}
       - OPS_POWER_CONFIG=${OPS_POWER_CONFIG:-/app/data/power-controllers.json}
       - OPS_POWER_CREDENTIALS_PATH=${OPS_POWER_CREDENTIALS_PATH:-/app/data/power-credentials.json}
+      - OPS_POWER_STATUS_CACHE_SECONDS=${OPS_POWER_STATUS_CACHE_SECONDS:-5}
       - OPS_SECRETS_KEY_FILE=/run/secrets/ops_secrets_key
-      - OPS_POLL_ENABLED=true
-      - OPS_POLL_INTERVAL=60
-      - OPS_RESERVATION_AUTOMATION=true
-      - OPS_RESERVATION_SCAN_INTERVAL=30
-      - OPS_RESERVATION_START_LEAD=120
-      - OPS_RESERVATION_END_DELAY=60
+      - OPS_POLL_ENABLED=${OPS_POLL_ENABLED:-true}
+      - OPS_POLL_INTERVAL=${OPS_POLL_INTERVAL:-60}
+      - OPS_RESERVATION_AUTOMATION=${OPS_RESERVATION_AUTOMATION:-true}
+      - OPS_RESERVATION_SCAN_INTERVAL=${OPS_RESERVATION_SCAN_INTERVAL:-30}
+      - OPS_RESERVATION_START_LEAD=${OPS_RESERVATION_START_LEAD:-120}
+      - OPS_RESERVATION_END_DELAY=${OPS_RESERVATION_END_DELAY:-60}
+      - OPS_RESERVATION_LOOKBACK=${OPS_RESERVATION_LOOKBACK:-21600}
+      - OPS_RESERVATION_RETRY_COOLDOWN=${OPS_RESERVATION_RETRY_COOLDOWN:-60}
+      - OPS_RESERVATION_MAX_BATCH=${OPS_RESERVATION_MAX_BATCH:-200}
+      - OPS_ALLOWED_COMMANDS=${OPS_ALLOWED_COMMANDS:-prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status}
+      - OPS_TIMELINE_MAX_OPS=${OPS_TIMELINE_MAX_OPS:-500}
+      - OPS_TIMELINE_DEFAULT_LIMIT=${OPS_TIMELINE_DEFAULT_LIMIT:-100}
+      - OPS_TIMELINE_PHASE_LOOKBACK=${OPS_TIMELINE_PHASE_LOOKBACK:-500}
       - SERVER_NAME=${SERVER_NAME}
       - HTTPS_PORT=${HTTPS_PORT}
       - ISSUER=${ISSUER}
@@ -628,6 +678,11 @@ services:
       - GUACAMOLE_MYSQL_DATABASE=${MYSQL_DATABASE}
       - ACCESS_AUDIT_URL=${ACCESS_AUDIT_URL:-}
       - NOTIFICATION_SERVICE_ACCESS_TOKEN_FILE=/run/secrets/admin_access_token
+      - NOTIFICATION_SERVICE_ENABLED=${NOTIFICATION_SERVICE_ENABLED:-true}
+      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL:-http://blockchain-services:8080/billing/admin/notifications/send}
+      - NOTIFICATION_SERVICE_RECIPIENTS=${NOTIFICATION_SERVICE_RECIPIENTS:-}
+      - NOTIFICATION_SERVICE_RETRY_ATTEMPTS=${NOTIFICATION_SERVICE_RETRY_ATTEMPTS:-3}
+      - NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS=${NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS:-5}
       - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
       - SESSION_OBSERVER_SIGNING_SECRET_FILE=/run/secrets/session_observer_signing_secret
       - SESSION_OBSERVATION_INGEST_TOKEN_FILE=/run/secrets/session_observation_ingest_token
@@ -644,6 +699,9 @@ services:
       - GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS=${GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS:-900}
       - WINRM_ALLOWED_TRANSPORTS=${WINRM_ALLOWED_TRANSPORTS:-ntlm,kerberos,credssp}
       - WINRM_MANAGEMENT_CIDRS=${WINRM_MANAGEMENT_CIDRS:-}
+      - OPS_DISCOVERY_TIMEOUT_SECONDS=${OPS_DISCOVERY_TIMEOUT_SECONDS:-1.5}
+      - OPS_DISCOVERY_LABSTATION_PORTS=${OPS_DISCOVERY_LABSTATION_PORTS:-8765,8088}
+      - OPS_DISCOVERY_LABSTATION_PATHS=${OPS_DISCOVERY_LABSTATION_PATHS:-/labstation/health,/health}
       - BASYX_AAS_URL=${BASYX_AAS_URL:-http://basyx-aas-server:8081}
       - AAS_ALLOWED_HOSTS=${AAS_ALLOWED_HOSTS:-}
       - AAS_SERVICE_TOKEN_FILE=/run/secrets/aas_service_token

@@ -57,6 +57,7 @@ OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_GUACAMOLE_MYSQL_PASSWORD=cambia_a_contraseña_segura
 OPS_SECRETS_KEY=<clave-fernet-estable>
 WINRM_MANAGEMENT_CIDRS=10.7.74.0/24
+OPS_WINRM_TRUST_PATH=/app/data/winrm-certificates
 
 # Administrador de Guacamole (no uses 'guacadmin' en producción)
 GUAC_ADMIN_USER=admin
@@ -74,6 +75,25 @@ CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 # Obligatorio para la interpolación de Compose; usa el origen FMU público
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
+
+`WINRM_MANAGEMENT_CIDRS` es la lista de redes privadas desde las que Ops
+Worker puede alcanzar las Lab Stations mediante WinRM HTTPS por el puerto
+5986. Es obligatoria antes de configurar cualquier host de Ops, y la dirección
+de cada estación debe pertenecer a una de esas redes. Es una política de
+seguridad y no se deduce de Guacamole: Guacamole también puede contener
+conexiones de escritorio exclusivamente administrativas y no proporciona la
+máscara de red autorizada.
+
+Usa el CIDR real de la VLAN de gestión. Si solo se autoriza una estación, usa
+un `/32` específico, por ejemplo:
+
+```env
+WINRM_MANAGEMENT_CIDRS=10.192.38.82/32
+```
+
+Para varias estaciones de la misma `/24`, usa la subred real, por ejemplo
+`10.192.38.0/24`. En un gateway Lite, configura el CIDR de las estaciones
+locales gestionadas por ese gateway Lite.
 
 En un gateway Full, configura tambien las credenciales usadas para el canje de
 codigos de acceso opacos y la observacion de sesiones FMU. Los valores JSON
@@ -230,16 +250,33 @@ mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
   fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 \
   fmu-proxy-runtime/binaries/darwin64 \
-  ops-data/guac-revocation-spool
+  ops-data/guac-revocation-spool \
+  ops-data/winrm-certificates
 
 sudo chown -R "${gateway_uid}:${gateway_gid}" \
-  blockchain-data certs fmu-access-state lab-content
+  blockchain-data certs fmu-access-state lab-content ops-data
 chmod 700 fmu-access-state
 chmod 755 lab-content fmu-data fmu-proxy-runtime \
   fmu-proxy-runtime/binaries fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 fmu-proxy-runtime/binaries/darwin64
-chmod 700 ops-data ops-data/guac-revocation-spool
+chmod 700 ops-data ops-data/guac-revocation-spool ops-data/winrm-certificates
 ```
+
+No inicies Compose si esta comprobacion falla. Un bind mount creado por Docker
+antes de este paso suele quedar como `root:root`, mientras que `ops-worker`
+ejecuta con la identidad no root `HOST_UID:HOST_GID`:
+
+```bash
+test -w ops-data/winrm-certificates || {
+  echo "ops-data/winrm-certificates no es escribible por el usuario de despliegue" >&2
+  exit 1
+}
+```
+
+En una instalacion existente, repite el `chown` despues de actualizar: Git, las
+reconstrucciones de imagen y los reinicios de contenedores no cambian la
+propiedad de los bind mounts del host. Si el directorio ya pertenece a root,
+ejecuta la reparacion con `sudo` antes de ejecutar `docker compose`.
 
 En particular, `fmu-access-state` debe ser escribible por el UID de OpenResty
 porque almacena los mapeos FMU cifrados y persistentes. Si ejecutas el stack
@@ -264,8 +301,26 @@ CERTBOT_EMAIL=admin@tu-institucion.edu
 CERTBOT_STAGING=0
 ```
 
+Estas son las rutas estables que consume OpenResty. Si se habilita Certbot, su
+linaje administrado se guarda aparte en `certs/live/<dominio-principal>/`; el
+deploy hook valida el par renovado y lo promueve a las rutas estables antes de
+que OpenResty lo recargue.
+
+El dominio debe resolver hacia este gateway y el puerto HTTP 80 debe ser
+accesible para el desafio HTTP-01. `certbot-renew` comprueba dos veces al dia y
+OpenResty recarga automaticamente el par validado (60 segundos por defecto),
+sin reinicio manual. Un certificado valido de una CA que ya este en `certs/` se
+conserva hasta habilitar deliberadamente el perfil Certbot.
+
 ```bash
-docker compose --profile certbot up -d
+docker compose --profile certbot up -d certbot-init certbot-renew
+```
+
+Para verificar la configuracion sin reemplazar el certificado actual:
+
+```bash
+docker compose run --rm --profile certbot certbot renew --dry-run \
+  --deploy-hook "sh /usr/local/bin/deploy-hook.sh"
 ```
 
 **Desarrollo** — los certificados autofirmados se generan automáticamente al primer arranque
@@ -345,7 +400,7 @@ Station. Consulta la
 curl -k https://localhost/health
 
 # Servicios de blockchain
-curl -k https://localhost/auth/.well-known/openid-configuration
+curl -k https://localhost/.well-known/openid-configuration
 ```
 
 Si FMU esta habilitado, verifica tambien el runner seleccionado y el montaje
@@ -367,6 +422,16 @@ docker compose exec -T openresty sh -c '
 El UID/GID de OpenResty debe coincidir con el propietario de
 `fmu-access-state`. Un health check correcto por si solo no prueba esta ruta de
 escritura.
+
+Comprueba tambien el bind mount del Ops Worker:
+
+```bash
+docker compose exec -T ops-worker sh -c '
+  set -eu
+  test -w /app/data/winrm-certificates
+  echo "ops-worker puede escribir el estado de confianza WinRM"
+'
+```
 
 Ambos deben devolver JSON sin errores. La respuesta pública de salud está deliberadamente reducida; los operadores de Lab Manager pueden usar `/health/details` con el `LAB_MANAGER_TOKEN` configurado para obtener el diagnóstico detallado.
 

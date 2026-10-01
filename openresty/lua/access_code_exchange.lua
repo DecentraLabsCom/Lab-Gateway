@@ -17,6 +17,7 @@ if ngx.req.get_method() ~= "POST" then
 end
 
 ngx.req.read_body()
+---@diagnostic disable-next-line: redundant-parameter
 local args, err = ngx.req.get_post_args(4)
 if not args or err then
     return fail(400, "Invalid request")

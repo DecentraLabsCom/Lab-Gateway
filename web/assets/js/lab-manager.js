@@ -70,6 +70,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeWinrmCredentialsModalBtn = $('#closeWinrmCredentialsModal');
     const cancelWinrmCredentialsBtn = $('#cancelWinrmCredentials');
     const saveWinrmCredentialsBtn = $('#saveWinrmCredentials');
+    const winrmTrustModal = $('#winrmTrustModal');
+    const closeWinrmTrustModalBtn = $('#closeWinrmTrustModal');
+    const cancelWinrmTrustBtn = $('#cancelWinrmTrust');
+    const previewWinrmTrustBtn = $('#previewWinrmTrust');
+    const saveWinrmTrustBtn = $('#saveWinrmTrust');
+    const verifyWinrmTrustBtn = $('#verifyWinrmTrust');
+    const deleteWinrmTrustBtn = $('#deleteWinrmTrust');
+    const winrmTrustModalHostEl = $('#winrmTrustModalHost');
+    const winrmTrustCurrentEl = $('#winrmTrustCurrent');
+    const winrmTrustCertificateEl = $('#winrmTrustCertificate');
+    const winrmTrustCertificateNameEl = $('#winrmTrustCertificateName');
+    const winrmTrustPreviewEl = $('#winrmTrustPreview');
+    const winrmTrustPreviewDetailsEl = $('#winrmTrustPreviewDetails');
+    const winrmTrustFingerprintConfirmedEl = $('#winrmTrustFingerprintConfirmed');
+    const editHostModal = $('#editHostModal');
+    const closeEditHostModalBtn = $('#closeEditHostModal');
+    const cancelEditHostBtn = $('#cancelEditHost');
+    const saveEditHostBtn = $('#saveEditHost');
     const winrmCredentialRefEl = $('#winrmCredentialRef');
     const winrmCredentialAddressEl = $('#winrmCredentialAddress');
     const winrmCredentialUserEl = $('#winrmCredentialUser');
@@ -79,9 +97,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const provisionHostNameCandidatesEl = $('#provisionHostNameCandidates');
     const provisionHostAddressEl = $('#provisionHostAddress');
     const provisionHostMacEl = $('#provisionHostMac');
-    const provisionHostLabsEl = $('#provisionHostLabs');
-    const provisionHostLabsSummaryEl = $('#provisionHostLabsSummary');
     const provisionHeartbeatPathEl = $('#provisionHeartbeatPath');
+    const editHostOriginalNameEl = $('#editHostOriginalName');
+    const editHostNameEl = $('#editHostName');
+    const editHostAddressEl = $('#editHostAddress');
+    const editHostMacEl = $('#editHostMac');
+    const editHeartbeatPathEl = $('#editHeartbeatPath');
 
     populateTimezones();
 
@@ -112,6 +133,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeWinrmCredentialsModalBtn) closeWinrmCredentialsModalBtn.addEventListener('click', closeWinrmCredentialsModal);
     if (cancelWinrmCredentialsBtn) cancelWinrmCredentialsBtn.addEventListener('click', closeWinrmCredentialsModal);
     if (saveWinrmCredentialsBtn) saveWinrmCredentialsBtn.addEventListener('click', saveWinrmCredentials);
+    if (closeWinrmTrustModalBtn) closeWinrmTrustModalBtn.addEventListener('click', closeWinrmTrustModal);
+    if (cancelWinrmTrustBtn) cancelWinrmTrustBtn.addEventListener('click', closeWinrmTrustModal);
+    if (previewWinrmTrustBtn) previewWinrmTrustBtn.addEventListener('click', previewWinrmTrust);
+    if (saveWinrmTrustBtn) saveWinrmTrustBtn.addEventListener('click', saveWinrmTrust);
+    if (verifyWinrmTrustBtn) verifyWinrmTrustBtn.addEventListener('click', verifyWinrmTrust);
+    if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.addEventListener('click', deleteWinrmTrust);
+    if (winrmTrustCertificateEl) winrmTrustCertificateEl.addEventListener('change', handleWinrmTrustCertificateSelected);
+    if (winrmTrustFingerprintConfirmedEl) {
+        winrmTrustFingerprintConfirmedEl.addEventListener('change', updateWinrmTrustSaveState);
+    }
+    if (closeEditHostModalBtn) closeEditHostModalBtn.addEventListener('click', closeEditHostModal);
+    if (cancelEditHostBtn) cancelEditHostBtn.addEventListener('click', closeEditHostModal);
+    if (saveEditHostBtn) saveEditHostBtn.addEventListener('click', saveEditedHost);
 
     loadAccessPolicy();
     updateBillingStatusAction();
@@ -141,9 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const powerControllerNetioHttpsFieldEl = $('#powerControllerNetioHttpsField');
     const powerControllerNetioVerifyTlsFieldEl = $('#powerControllerNetioVerifyTlsField');
     const powerControllerProfileFieldEl = $('#powerControllerProfileField');
-    const powerControllerSnmpVersionFieldEl = $('#powerControllerSnmpVersionField');
     const powerControllerProfileEl = $('#powerControllerProfile');
-    const powerControllerSnmpVersionEl = $('#powerControllerSnmpVersion');
     const powerControllerTimeoutSecondsEl = $('#powerControllerTimeoutSeconds');
     const powerControllerRetriesEl = $('#powerControllerRetries');
     const powerControllerOutletsEl = $('#powerControllerOutlets');
@@ -193,10 +225,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const powerPolicyEditorHintEl = $('#powerPolicyEditorHint');
     const hostState = {};
     const hostMetadata = {};
+    let activeWinrmTrustHost = '';
+    let savedWinrmTrustStatus = 'loading';
+    let activeWinrmTrustFile = null;
+    let activeWinrmTrustPreview = null;
     const guacamoleCandidateState = {};
+    const guacamolePopoverClosers = new Set();
     const heartbeatSources = {};
+    const heartbeatStreamErrorShown = {};
+    const heartbeatStreamErrorMessages = {
+        WINRM_CREDENTIALS_REQUIRED: 'WinRM credentials are required',
+        WINRM_TRUST_REQUIRED: 'WinRM certificate trust is required',
+        WINRM_TRUST_INVALID: 'WinRM certificate trust is invalid',
+        WINRM_CERTIFICATE_INVALID: 'WinRM certificate trust is invalid',
+        WINRM_CERTIFICATE_HOST_MISMATCH: 'WinRM certificate does not match the host address',
+        WINRM_CERTIFICATE_EXPIRED: 'WinRM certificate is expired',
+        WINRM_CERTIFICATE_NOT_YET_VALID: 'WinRM certificate is not yet valid',
+        WINRM_TLS_FAILED: 'WinRM TLS validation failed',
+        WINRM_TRUST_STORAGE_UNAVAILABLE: 'WinRM certificate trust storage is unavailable',
+        INTERNAL_ERROR: 'temporary Ops Worker error',
+    };
+    const heartbeatConfigurationErrorCodes = new Set([
+        'WINRM_CREDENTIALS_REQUIRED',
+        'WINRM_TRUST_REQUIRED',
+        'WINRM_TRUST_INVALID',
+        'WINRM_CERTIFICATE_INVALID',
+        'WINRM_CERTIFICATE_HOST_MISMATCH',
+        'WINRM_CERTIFICATE_EXPIRED',
+        'WINRM_CERTIFICATE_NOT_YET_VALID',
+        'WINRM_TLS_FAILED',
+        'WINRM_TRUST_STORAGE_UNAVAILABLE',
+    ]);
     let powerControllers = [];
+    let powerControllerStatusLoading = false;
+    let powerControllerStatusError = false;
+    let powerControllerStatusRequestId = 0;
     let powerControllerOutletDrafts = [];
+    let powerControllerIdWasSuggested = false;
     let lastPowerControllerDriver = 'mock';
     let powerCredentials = [];
     let powerPolicies = [];
@@ -206,6 +271,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let managedLabs = [];
     let hostNames = [];
     let guacamoleCandidates = [];
+    let guacamoleStationCandidates = [];
+    let provisionStationKey = '';
+    let provisionLabsLoading = false;
 
     // FMU AAS sync elements
     const fmuSyncBtn = $('#fmuSyncBtn');
@@ -459,9 +527,21 @@ document.addEventListener('DOMContentLoaded', () => {
         renderHosts();
     }
     if (powerControllerListEl) powerControllerListEl.addEventListener('click', handlePowerActions);
-    if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', loadPowerControllers);
+    if (refreshPowerControllersBtn) refreshPowerControllersBtn.addEventListener('click', () => {
+        loadPowerControllers({ forceStatusRefresh: true });
+    });
     if (powerControllerSelectEl) powerControllerSelectEl.addEventListener('change', loadSelectedPowerController);
-    if (powerControllerDriverEl) powerControllerDriverEl.addEventListener('change', updatePowerControllerDriverFields);
+    if (powerControllerDriverEl) {
+        powerControllerDriverEl.addEventListener('change', updatePowerControllerDriverFields);
+        powerControllerDriverEl.addEventListener('change', suggestPowerControllerId);
+        powerControllerDriverEl.addEventListener('change', renderPowerControllerCredentialOptions);
+    }
+    if (powerControllerHostEl) powerControllerHostEl.addEventListener('input', suggestPowerControllerId);
+    if (powerControllerIdEl) {
+        powerControllerIdEl.addEventListener('input', () => {
+            powerControllerIdWasSuggested = false;
+        });
+    }
     if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.addEventListener('change', updatePowerControllerNetioPort);
     if (addPowerControllerOutletBtn) addPowerControllerOutletBtn.addEventListener('click', addPowerControllerOutlet);
     if (powerControllerOutletsEl) {
@@ -979,10 +1059,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 .filter(name => !nextSet.has(name))
                 .forEach(stopHeartbeatStream);
             hostNames = nextHostNames;
+            hostNames
+                .filter(name => {
+                    const meta = hostMetadata[name] || {};
+                    return meta.winrmConfigured !== true || meta.winrmTrustStatus !== 'ready';
+                })
+                .forEach(stopHeartbeatStream);
             renderHosts();
-            guacamoleCandidates = data.guacamoleUnmatched || [];
+            guacamoleCandidates = Array.isArray(data.guacamoleUnmatched) ? data.guacamoleUnmatched : [];
             guacamoleCandidates.forEach(rememberGuacamoleCandidate);
-            renderGuacamoleCandidates(guacamoleCandidates);
+            guacamoleStationCandidates = groupGuacamoleCandidates(guacamoleCandidates);
+            renderGuacamoleCandidates(guacamoleStationCandidates);
             hostNames.forEach(startHeartbeatStream);
             updateOpsHint(data);
         } catch (err) {
@@ -998,31 +1085,36 @@ document.addEventListener('DOMContentLoaded', () => {
             opsHint.textContent = 'The ops inventory could not be loaded.';
             return;
         }
-        const unmatchedCount = Array.isArray(data.guacamoleUnmatched) ? data.guacamoleUnmatched.length : 0;
+        const stationCount = groupGuacamoleCandidates(data.guacamoleUnmatched).length;
         const guacStatus = data.guacamoleAvailable
-            ? `${unmatchedCount} Guacamole connection${unmatchedCount === 1 ? '' : 's'} not linked to an ops host.`
+            ? `${stationCount} Lab Station candidate${stationCount === 1 ? '' : 's'} awaiting configuration.`
             : 'Guacamole inventory unavailable.';
         opsHint.textContent = `Hosts are loaded from ops-worker/hosts.json and ops-data/hosts.json. ${guacStatus}`;
     }
 
     async function loadPowerControllers(options = {}) {
+        const { forceStatusRefresh = false, ...fetchOptions } = options;
+        fetchOptions.cache = 'no-store';
+        powerControllerStatusRequestId += 1;
         if (powerControllersStatusEl) {
             powerControllersStatusEl.textContent = 'Loading...';
             powerControllersStatusEl.className = 'pill soft';
         }
         try {
-            const res = await fetch('/ops/api/power/controllers', options);
+            const res = await fetch('/ops/api/power/controllers', fetchOptions);
             if (res.status === 403) {
                 showOpsWarning();
-                return;
+                return false;
             }
             if (res.status === 401) {
                 if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power controllers', 'error');
-                return;
+                return false;
             }
             const body = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             powerControllers = Array.isArray(body.controllers) ? body.controllers : [];
+            powerControllerStatusLoading = powerControllers.length > 0;
+            powerControllerStatusError = false;
             renderPowerControllers();
             renderPowerControllerOptions();
             renderPowerPolicySteps();
@@ -1035,9 +1127,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? 'Protected outlets require an explicit maintenance mode toggle. Physical activation remains subject to provider hardware validation.'
                     : 'No controller is configured. Add one to the provider-local power catalog before using this panel.';
             }
+            if (powerControllers.length) {
+                void loadPowerControllerStatuses({
+                    forceRefresh: forceStatusRefresh,
+                    skipAuthPrompt: options.skipAuthPrompt,
+                });
+            }
+            return true;
         } catch (err) {
             console.warn('Unable to load power controllers', err);
             powerControllers = [];
+            powerControllerStatusLoading = false;
+            powerControllerStatusError = false;
             renderPowerControllers();
             renderPowerControllerOptions();
             renderPowerPolicySteps();
@@ -1046,6 +1147,70 @@ document.addEventListener('DOMContentLoaded', () => {
                 powerControllersStatusEl.className = 'pill bad';
             }
             if (powerControllersHintEl) powerControllersHintEl.textContent = 'Power controllers could not be loaded.';
+            return false;
+        }
+    }
+
+    async function loadPowerControllerStatuses(options = {}) {
+        const { forceRefresh = false, ...fetchOptions } = options;
+        fetchOptions.cache = 'no-store';
+        const requestId = ++powerControllerStatusRequestId;
+        if (!powerControllers.length) {
+            powerControllerStatusLoading = false;
+            powerControllerStatusError = false;
+            renderPowerControllers();
+            return;
+        }
+        powerControllerStatusLoading = true;
+        powerControllerStatusError = false;
+        renderPowerControllers();
+        const query = forceRefresh ? '?refresh=true' : '';
+        try {
+            const res = await fetch(`/ops/api/power/controllers/status${query}`, fetchOptions);
+            if (res.status === 403) {
+                showOpsWarning();
+                throw new Error('Power controller status access denied');
+            }
+            if (res.status === 401) {
+                if (!options.skipAuthPrompt) showToast('Lab Manager session required to load power controller status', 'error');
+                throw new Error('Lab Manager session required');
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+            if (!Array.isArray(body.controllers)) throw new Error('Power controller status is invalid');
+            if (requestId !== powerControllerStatusRequestId) return;
+            const statuses = new Map(
+                body.controllers
+                    .filter(controller => controller && controller.id)
+                    .map(controller => [String(controller.id), controller]),
+            );
+            powerControllers = powerControllers.map(controller => {
+                const status = statuses.get(String(controller.id));
+                if (!status) return controller;
+                const statusOutlets = new Map(
+                    (Array.isArray(status.outlets) ? status.outlets : [])
+                        .filter(outlet => outlet && outlet.outlet !== undefined)
+                        .map(outlet => [String(outlet.outlet), outlet]),
+                );
+                return {
+                    ...controller,
+                    discovery: status.discovery || {},
+                    outlets: (Array.isArray(controller.outlets) ? controller.outlets : []).map(outlet => ({
+                        ...outlet,
+                        state: statusOutlets.get(String(outlet.outlet))?.state || 'unknown',
+                    })),
+                };
+            });
+            powerControllerStatusError = false;
+        } catch (err) {
+            if (requestId !== powerControllerStatusRequestId) return;
+            console.warn('Unable to load power controller status', err);
+            powerControllerStatusError = true;
+        } finally {
+            if (requestId === powerControllerStatusRequestId) {
+                powerControllerStatusLoading = false;
+                renderPowerControllers();
+            }
         }
     }
 
@@ -1147,7 +1312,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         powerCredentialsListEl.innerHTML = powerCredentials.map(credential => `
-            <div class="power-controller-row">
+            <div class="power-controller-row power-credential-row">
                 <div>
                     <strong>${escapeHtml(credential.credentialRef || 'unknown')}</strong>
                     <div class="host-meta">Type: ${escapeHtml(credential.type || 'unknown')} · Secret values hidden</div>
@@ -1230,6 +1395,7 @@ document.addEventListener('DOMContentLoaded', () => {
             powerCredentials = Array.isArray(body.credentials) ? body.credentials : [];
             renderPowerCredentials();
             renderPowerCredentialOptions();
+            renderPowerControllerCredentialOptions();
             if (powerCredentialsStatusEl) {
                 powerCredentialsStatusEl.textContent = `${powerCredentials.length} credential${powerCredentials.length === 1 ? '' : 's'}`;
                 powerCredentialsStatusEl.className = 'pill good';
@@ -1242,6 +1408,7 @@ document.addEventListener('DOMContentLoaded', () => {
             powerCredentials = [];
             renderPowerCredentials();
             renderPowerCredentialOptions();
+            renderPowerControllerCredentialOptions();
             if (powerCredentialsStatusEl) {
                 powerCredentialsStatusEl.textContent = 'Unavailable';
                 powerCredentialsStatusEl.className = 'pill bad';
@@ -1274,6 +1441,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             showToast(`${credential.overwrite ? 'Energy credential rotated' : 'Energy credential saved'}: ${credential.credentialRef}`, 'success');
             await loadPowerCredentials({ skipAuthPrompt: true });
+            void loadPowerControllerStatuses({ forceRefresh: true, skipAuthPrompt: true });
             if (powerCredentialSelectEl) powerCredentialSelectEl.value = credential.credentialRef;
             loadSelectedPowerCredential();
         } catch (err) {
@@ -1497,7 +1665,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (policy) {
             if (powerPolicyLabSelectEl) powerPolicyLabSelectEl.value = policy.labId || '';
             populatePowerPolicyForm(policy);
-            if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Edit the policy and save it to the provider-local catalog.';
             return;
         }
         resetPowerPolicyEditor(false);
@@ -1513,7 +1680,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerPolicyEndFailureModeEl) powerPolicyEndFailureModeEl.value = 'warn_and_continue';
         powerPolicyStepDrafts = [];
         renderPowerPolicySteps();
-        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = 'Select a laboratory and configure the policy fields.';
+        if (powerPolicyEditorHintEl) powerPolicyEditorHintEl.textContent = '';
     }
 
     function createPowerPolicyStepDraft(step = {}) {
@@ -1859,7 +2026,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerNetioHttpsFieldEl) powerControllerNetioHttpsFieldEl.hidden = !isNetio;
         if (powerControllerNetioVerifyTlsFieldEl) powerControllerNetioVerifyTlsFieldEl.hidden = !isNetio;
         if (powerControllerProfileFieldEl) powerControllerProfileFieldEl.hidden = !isApc;
-        if (powerControllerSnmpVersionFieldEl) powerControllerSnmpVersionFieldEl.hidden = !isApc;
     }
 
     function updatePowerControllerNetioPort() {
@@ -1869,8 +2035,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function suggestPowerControllerId() {
+        if (!powerControllerIdEl || powerControllerSelectEl?.value) return;
+        const host = String(powerControllerHostEl?.value || '').trim().toLowerCase();
+        if (!host) {
+            if (powerControllerIdWasSuggested) {
+                powerControllerIdEl.value = '';
+                powerControllerIdWasSuggested = false;
+            }
+            return;
+        }
+        const driver = powerControllerDriverEl?.value || 'mock';
+        const prefix = driver === 'apc-powernet-snmp'
+            ? 'apc'
+            : driver === 'netio-json'
+                ? 'netio'
+                : 'power';
+        const hostSlug = host.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 110);
+        if (!hostSlug) return;
+        const suggestion = `${prefix}-${hostSlug}`;
+        const current = String(powerControllerIdEl.value || '').trim();
+        if (!current || powerControllerIdWasSuggested) {
+            powerControllerIdEl.value = suggestion;
+            powerControllerIdWasSuggested = true;
+        }
+    }
+
     function resetPowerControllerEditor() {
         if (powerControllerSelectEl) powerControllerSelectEl.value = '';
+        powerControllerIdWasSuggested = false;
         if (powerControllerIdEl) {
             powerControllerIdEl.value = '';
             powerControllerIdEl.disabled = false;
@@ -1885,16 +2078,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.checked = false;
         if (powerControllerNetioVerifyTlsEl) powerControllerNetioVerifyTlsEl.checked = true;
         if (powerControllerProfileEl) powerControllerProfileEl.value = 'auto';
-        if (powerControllerSnmpVersionEl) powerControllerSnmpVersionEl.value = '';
         if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = '2';
         if (powerControllerRetriesEl) powerControllerRetriesEl.value = '1';
         updatePowerControllerDriverFields();
+        renderPowerControllerCredentialOptions();
         powerControllerOutletDrafts = [createPowerControllerOutletDraft({ outlet: '1' })];
         renderPowerControllerOutlets();
-        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = 'Select an existing controller or configure a new one.';
+        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = '';
     }
 
     function populatePowerControllerForm(controller) {
+        powerControllerIdWasSuggested = false;
         if (powerControllerIdEl) {
             powerControllerIdEl.value = controller.id || '';
             powerControllerIdEl.disabled = true;
@@ -1913,15 +2107,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (powerControllerNetioHttpsEl) powerControllerNetioHttpsEl.checked = config.useHttps === true;
         if (powerControllerNetioVerifyTlsEl) powerControllerNetioVerifyTlsEl.checked = config.verifyTls !== false;
         if (powerControllerProfileEl) powerControllerProfileEl.value = config.profile || 'auto';
-        if (powerControllerSnmpVersionEl) powerControllerSnmpVersionEl.value = config.snmpVersion || '';
         if (powerControllerTimeoutSecondsEl) powerControllerTimeoutSecondsEl.value = config.timeoutSeconds || '2';
         if (powerControllerRetriesEl) powerControllerRetriesEl.value = config.retries ?? '1';
         updatePowerControllerDriverFields();
+        renderPowerControllerCredentialOptions();
         powerControllerOutletDrafts = Array.isArray(controller.outlets)
             ? controller.outlets.map(createPowerControllerOutletDraft)
             : [];
         renderPowerControllerOutlets();
-        if (powerControllerEditorHintEl) powerControllerEditorHintEl.textContent = 'Edit the provider-local controller and save it to apply the configuration.';
     }
 
     function renderPowerControllerOptions() {
@@ -1931,7 +2124,7 @@ document.addEventListener('DOMContentLoaded', () => {
         powerControllers.forEach(controller => {
             const option = document.createElement('option');
             option.value = controller.id || '';
-            option.textContent = `${controller.id || 'unknown'} Â· ${controller.name || 'Unnamed controller'}`;
+            option.textContent = controller.name || controller.id || 'Unnamed controller';
             powerControllerSelectEl.appendChild(option);
         });
         const selected = powerControllers.some(controller => String(controller.id) === String(current)) ? current : '';
@@ -1951,6 +2144,40 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         resetPowerControllerEditor();
+    }
+
+    function renderPowerControllerCredentialOptions() {
+        if (!powerControllerCredentialRefEl) return;
+        const driver = powerControllerDriverEl?.value || 'mock';
+        const current = String(powerControllerCredentialRefEl.value || '').trim();
+        const compatibleTypes = driver === 'apc-powernet-snmp'
+            ? new Set(['snmpv1', 'snmpv2c', 'snmpv3'])
+            : driver === 'netio-json'
+                ? new Set(['netio-http-basic'])
+                : null;
+        const credentials = powerCredentials.filter(credential => {
+            const reference = String(credential?.credentialRef || '').trim();
+            if (!reference) return false;
+            return !compatibleTypes || compatibleTypes.has(String(credential.type || '').trim().toLowerCase());
+        });
+        const currentIsCompatible = credentials.some(credential =>
+            String(credential.credentialRef || '').trim() === current);
+        const emptyLabel = driver === 'apc-powernet-snmp'
+            ? 'Select SNMP credential'
+            : driver === 'netio-json'
+                ? 'No credential (optional)'
+                : 'No credential required';
+        const options = [`<option value="">${emptyLabel}</option>`];
+        if (current && !currentIsCompatible) {
+            options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)} — unavailable for this driver</option>`);
+        }
+        credentials.forEach(credential => {
+            const reference = String(credential.credentialRef || '').trim();
+            const type = String(credential.type || 'unknown').trim();
+            options.push(`<option value="${escapeHtml(reference)}">${escapeHtml(reference)} · ${escapeHtml(type)}</option>`);
+        });
+        powerControllerCredentialRefEl.innerHTML = options.join('');
+        powerControllerCredentialRefEl.value = current;
     }
 
     function renderPowerControllerOutlets() {
@@ -2073,14 +2300,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             : {
                 profile: powerControllerProfileEl?.value || 'auto',
-                snmpVersion: powerControllerSnmpVersionEl?.value || undefined,
                 timeoutSeconds,
                 retries,
             };
         if (driver === 'netio-json' && (!config.path || !config.path.startsWith('/') || config.path.includes('\n') || config.path.includes('\r'))) {
             throw new Error('NETIO API path must start with /');
         }
-        if (!config.snmpVersion) delete config.snmpVersion;
         return {
             id,
             name,
@@ -2122,7 +2347,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.status === 401) throw new Error('Lab Manager session required');
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             showToast(`Power controller ${controller.id} saved`, 'success');
-            await loadPowerControllers({ skipAuthPrompt: true });
+            await loadPowerControllers({ skipAuthPrompt: true, forceStatusRefresh: true });
             if (powerControllerSelectEl) powerControllerSelectEl.value = controller.id;
             loadSelectedPowerController();
         } catch (err) {
@@ -2144,9 +2369,18 @@ document.addEventListener('DOMContentLoaded', () => {
             row.className = 'power-controller-row';
             const discovery = controller.discovery || {};
             const reachable = discovery.reachable === true;
-            const discoveryText = reachable
-                ? 'reachable'
-                : discovery.errorCode ? `unreachable (${discovery.errorCode})` : 'unknown reachability';
+            const discoveryText = powerControllerStatusLoading
+                ? 'checking'
+                : powerControllerStatusError
+                    ? 'status unavailable'
+                    : reachable
+                        ? 'reachable'
+                        : discovery.errorCode ? `unreachable (${discovery.errorCode})` : 'unknown reachability';
+            const discoveryClass = powerControllerStatusLoading
+                ? 'soft'
+                : powerControllerStatusError
+                    ? 'warn'
+                    : reachable ? 'good' : 'warn';
             const safeControllerId = escapeHtml(controller.id);
             const safeName = escapeHtml(controller.name || controller.id);
             const safeDriver = escapeHtml(controller.driver);
@@ -2159,7 +2393,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="host-title">${safeName}</div>
                         <div class="host-meta mono">${safeControllerId} · ${safeDriver} · ${safeHost}</div>
                     </div>
-                    <span class="pill ${reachable ? 'good' : 'warn'}">${safeDiscovery}</span>
+                    <span class="pill ${discoveryClass}">${safeDiscovery}</span>
                 </div>
                 <div class="power-outlet-list">
                     ${outlets.length ? outlets.map(outlet => renderPowerOutlet(controller, outlet)).join('') : '<div class="empty">No outlets configured.</div>'}
@@ -2231,7 +2465,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.status === 401) throw new Error('Lab Manager session required');
             if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
             showToast(`Power ${action} completed for outlet ${outletId}`, 'success');
-            await loadPowerControllers({ skipAuthPrompt: true });
+            void loadPowerControllerStatuses({ forceRefresh: true, skipAuthPrompt: true });
         } catch (err) {
             showToast(`Power ${action} failed: ${err.message}`, 'error');
         } finally {
@@ -2244,19 +2478,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return `lab-manager:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     }
 
+    function formatHeartbeatStreamError(host, payload) {
+        const code = String(payload?.code || '').trim().toUpperCase();
+        const message = heartbeatStreamErrorMessages[code] || 'connection error';
+        const requestId = String(payload?.requestId || '').trim();
+        const safeRequestId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? requestId : '';
+        const requestSuffix = code === 'INTERNAL_ERROR' && safeRequestId
+            ? ` (request ID ${safeRequestId})`
+            : '';
+        return `Heartbeat unavailable for ${host}: ${message}${requestSuffix}`;
+    }
+
     function startHeartbeatStream(host) {
-        if (!host || !window.EventSource || heartbeatSources[host]) return;
+        const meta = hostMetadata[host] || {};
+        const EventSourceCtor = window.EventSource;
+        if (
+            !host ||
+            !EventSourceCtor ||
+            heartbeatSources[host] ||
+            meta.winrmConfigured !== true ||
+            meta.winrmTrustStatus !== 'ready'
+        ) return;
         const url = new URL('/ops/api/heartbeat/stream', window.location.origin);
         url.searchParams.set('host', host);
         url.searchParams.set('include_events', 'false');
 
-        const source = new EventSource(url.toString());
+        const source = new EventSourceCtor(url.toString());
         heartbeatSources[host] = source;
 
         source.addEventListener('heartbeat', evt => {
             try {
                 const data = JSON.parse(evt.data || '{}');
                 hostState[host] = data;
+                delete heartbeatStreamErrorShown[host];
                 renderHosts();
                 loadActivityFeed();
             } catch (err) {
@@ -2265,11 +2519,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         source.addEventListener('error', evt => {
-            const errorText = evt?.data || 'Heartbeat SSE connection error';
-            if (source.readyState === EventSource.CLOSED) {
+            let errorPayload = null;
+            try {
+                errorPayload = JSON.parse(evt?.data || '');
+            } catch (_) {
+                // Browser connection errors do not always include a payload.
+            }
+            if (heartbeatConfigurationErrorCodes.has(String(errorPayload?.code || '').trim().toUpperCase())) {
+                stopHeartbeatStream(host);
+                showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
+                return;
+            }
+            if (source.readyState === EventSourceCtor.CLOSED) {
                 stopHeartbeatStream(host);
             }
-            showToast(`Heartbeat stream error for ${host}: ${errorText}`, 'error');
+            if (!heartbeatStreamErrorShown[host]) {
+                heartbeatStreamErrorShown[host] = true;
+                showToast(formatHeartbeatStreamError(host, errorPayload), 'error');
+            }
         });
     }
 
@@ -2282,10 +2549,101 @@ document.addEventListener('DOMContentLoaded', () => {
             // ignore
         }
         delete heartbeatSources[host];
+        delete heartbeatStreamErrorShown[host];
+    }
+
+    function closeAllGuacamoleMatchPopovers() {
+        Array.from(guacamolePopoverClosers).forEach(closePopover => closePopover());
+    }
+
+    function setupGuacamoleMatchPopover(row) {
+        const trigger = row.querySelector?.('.guacamole-match-trigger');
+        const popover = row.querySelector?.('.guacamole-match-popover');
+        if (!trigger || !popover || !document.body) return;
+
+        let hideTimer = null;
+        let isShown = false;
+
+        function clearHideTimer() {
+            if (hideTimer === null) return;
+            window.clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+
+        function positionPopover() {
+            if (!isShown) return;
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+            const viewportMargin = 12;
+            const popoverWidth = popover.offsetWidth;
+            const popoverHeight = popover.offsetHeight;
+            let left = triggerRect.left;
+            let top = triggerRect.bottom + 8;
+
+            if (
+                top + popoverHeight > viewportHeight - viewportMargin
+                && triggerRect.top - popoverHeight - 8 >= viewportMargin
+            ) {
+                top = triggerRect.top - popoverHeight - 8;
+            }
+            left = Math.min(
+                Math.max(viewportMargin, left),
+                Math.max(viewportMargin, viewportWidth - popoverWidth - viewportMargin),
+            );
+            popover.style.left = Math.round(left) + 'px';
+            popover.style.top = Math.round(top) + 'px';
+        }
+
+        function closePopover() {
+            clearHideTimer();
+            isShown = false;
+            popover.classList.remove('is-visible');
+            popover.style.left = '';
+            popover.style.top = '';
+            if (popover.parentElement === document.body) popover.remove();
+            window.removeEventListener('resize', positionPopover);
+            window.removeEventListener('scroll', positionPopover, true);
+            guacamolePopoverClosers.delete(closePopover);
+        }
+
+        function showPopover() {
+            clearHideTimer();
+            if (popover.parentElement !== document.body) document.body.appendChild(popover);
+            isShown = true;
+            guacamolePopoverClosers.add(closePopover);
+            popover.classList.add('is-visible');
+            positionPopover();
+            window.addEventListener('resize', positionPopover);
+            window.addEventListener('scroll', positionPopover, true);
+        }
+
+        function scheduleClosePopover() {
+            clearHideTimer();
+            hideTimer = window.setTimeout(() => {
+                const triggerHovered = trigger.matches?.(':hover');
+                const popoverHovered = popover.matches?.(':hover');
+                const triggerFocused = document.activeElement === trigger;
+                if (triggerHovered || popoverHovered || triggerFocused) return;
+                closePopover();
+            }, 120);
+        }
+
+        trigger.addEventListener('mouseenter', showPopover);
+        trigger.addEventListener('mouseleave', scheduleClosePopover);
+        trigger.addEventListener('focusin', showPopover);
+        trigger.addEventListener('focusout', scheduleClosePopover);
+        trigger.addEventListener('keydown', event => {
+            if (event.key === 'Escape') closePopover();
+        });
+        popover.addEventListener('mouseenter', showPopover);
+        popover.addEventListener('mouseleave', scheduleClosePopover);
     }
 
     function renderHosts() {
         if (!hostListEl) return;
+        closeAllGuacamoleMatchPopovers();
         hostListEl.innerHTML = '';
         if (!hostNames.length) {
             hostListEl.innerHTML = '<div class="empty">No ops hosts loaded. Configure ops-worker/hosts.json.</div>';
@@ -2311,33 +2669,73 @@ document.addEventListener('DOMContentLoaded', () => {
         const lastForced = operations.lastForcedLogoff;
         const lastPower = operations.lastPowerAction;
         const updated = heartbeat.timestamp;
+        const hasHeartbeat = Boolean(updated);
+        const winrmTrust = getWinrmTrustDisplay(meta);
 
         // Escape all user-controlled data to prevent XSS
         const safeHost = escapeHtml(host);
-        const safeUpdated = escapeHtml(updated) || 'n/a';
-        const safeLastForcedTs = escapeHtml(lastForced && lastForced.timestamp) || 'n/a';
-        const safeLastPowerMode = escapeHtml(lastPower && lastPower.mode);
-        const safeLastPowerTs = escapeHtml(lastPower && lastPower.timestamp);
-        const safeLastPower = safeLastPowerMode ? `${safeLastPowerMode} @ ${safeLastPowerTs}` : 'n/a';
-        const safeGuacamole = escapeHtml(formatGuacamoleStatus(guacamole));
-        const guacamoleClass = guacamoleStatusClass(guacamole.status);
+        const safeAddress = escapeHtml(meta.address) || 'n/a';
+        const canEdit = meta.editable === true;
+        const safeUpdated = escapeHtml(formatHostDate(updated, hasHeartbeat));
+        const safeLastForced = escapeHtml(formatLastForcedLogoff(lastForced, hasHeartbeat));
+        const safeLastPower = escapeHtml(formatLastPowerAction(lastPower, hasHeartbeat));
+        const guacamoleConnections = Array.isArray(guacamole.connections) ? guacamole.connections : [];
+        const safeConnections = escapeHtml(formatConnectionsStatus(guacamoleConnections));
+        const connectionsClass = connectionsStatusClass(guacamole);
+        const hasGuacamoleMatchDetails = guacamoleConnections.length > 1;
+        const guacamoleDetailsId = 'guacamole-matches-'
+            + String(host).replace(/[^A-Za-z0-9_-]/g, '-');
+        const guacamoleMatchMarkup = hasGuacamoleMatchDetails
+            ? guacamoleConnections.map((connection, index) => {
+                const safeName = escapeHtml(
+                    connection?.name || connection?.hostname || 'Connection ' + (index + 1),
+                );
+                const safeProtocol = escapeHtml(connection?.protocol || 'unknown');
+                const safePort = escapeHtml(connection?.port || 'n/a');
+                return '<div class="guacamole-match-item">'
+                    + '<strong class="guacamole-match-name">' + safeName + '</strong>'
+                    + '<span class="guacamole-match-meta">' + safeProtocol + ' · Port: ' + safePort + '</span>'
+                    + '</div>';
+            }).join('')
+            : '';
+        const guacamoleStatusMarkup = hasGuacamoleMatchDetails
+            ? '<span class="guacamole-match-trigger" tabindex="0"'
+                + ' aria-describedby="' + escapeHtml(guacamoleDetailsId) + '">'
+                + '<span class="host-status-text ' + connectionsClass + '">' + safeConnections + '</span>'
+                + '<span class="guacamole-match-popover" id="' + escapeHtml(guacamoleDetailsId) + '" role="tooltip">'
+                + '<span class="guacamole-match-details-title">Connections for this station</span>'
+                + guacamoleMatchMarkup
+                + '</span></span>'
+            : '<span class="host-status-text ' + connectionsClass + '">' + safeConnections + '</span>';
 
         const row = document.createElement('div');
         row.className = 'host-row';
         row.dataset.host = host;
         row.innerHTML = `
             <div>
-                <div class="host-title">${safeHost}</div>
-                <div class="host-meta">Updated: ${safeUpdated}</div>
-                <div class="host-meta">Guacamole: <span class="pill ${guacamoleClass}">${safeGuacamole}</span></div>
-                <div class="host-meta">WinRM credentials: <span class="pill ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></div>
-                <div class="host-meta">Last forced logoff: ${safeLastForcedTs}</div>
-                <div class="host-meta">Last power: ${safeLastPower}</div>
+                <div class="host-title-row">
+                    <div class="host-title">${safeHost}</div>
+                    ${canEdit ? '<button class="host-edit-btn" data-action="edit-host" title="Edit host" aria-label="Edit host"><svg class="host-edit-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg></button>' : ''}
+                </div>
+                <div class="host-meta host-address">Address: <span class="mono">${safeAddress}</span></div>
+                <div class="host-meta">Last heartbeat: ${safeUpdated}</div>
+                <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
+                <div class="host-meta">WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update WinRM credentials" aria-label="Set or update WinRM credentials"><span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></button></div>
+                <div class="host-meta">WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage WinRM TLS trust" aria-label="Manage WinRM TLS trust"><span class="host-status-text ${winrmTrust.className}">${winrmTrust.label}</span></button></div>
             </div>
-            <div class="host-meta">
-                <span class="pill ${ready === true ? 'good' : ready === false ? 'bad' : ''}">Ready: ${ready === undefined ? 'n/a' : ready}</span>
-                <span class="pill ${localSession ? 'warn' : 'soft'}">Local session: ${localSession ? 'yes' : 'no'}</span>
-                <span class="pill ${localMode ? 'warn' : 'soft'}">Local mode: ${localMode ? 'on' : 'off'}</span>
+            <div class="host-state-column">
+                <div class="host-meta host-state" aria-label="Current station state">
+                    <span class="pill ${ready === true ? 'good' : ready === false ? 'bad' : 'soft'}">Ready: ${formatBool(ready)}</span>
+                    <span class="pill ${localSession === true ? 'warn' : 'soft'}">Local session: ${formatBool(localSession)}</span>
+                    <span class="pill ${localMode === true ? 'warn' : 'soft'}">Local mode: ${formatBool(localMode)}</span>
+                </div>
+                <div class="host-meta host-history">
+                    <span class="host-history-label">Last activity:</span>
+                    <span class="host-history-items">
+                        <span class="host-history-item">Forced logoff: ${safeLastForced}</span>
+                        <span class="host-history-item">Power action: ${safeLastPower}</span>
+                    </span>
+                </div>
             </div>
             <div class="host-actions">
                 <button class="mini-btn" data-action="poll">Heartbeat</button>
@@ -2346,10 +2744,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="mini-btn" data-action="release">Release</button>
                 <button class="mini-btn danger" data-action="shutdown">Shutdown</button>
                 <button class="mini-btn secondary" data-action="toggle-local-mode">${localMode ? 'Disable' : 'Enable'} Local</button>
-                <button class="mini-btn" data-action="set-winrm-credentials">WinRM Credentials</button>
                 <button class="mini-btn" data-action="sync-aas" title="Sync Digital Twin metadata to BaSyx AAS server">Sync AAS</button>
             </div>
         `;
+        setupGuacamoleMatchPopover(row);
         return row;
     }
 
@@ -2357,31 +2755,35 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!guacamoleCandidateListEl) return;
         guacamoleCandidateListEl.innerHTML = '';
         if (!Array.isArray(candidates) || !candidates.length) {
-            guacamoleCandidateListEl.innerHTML = '<div class="empty">All Guacamole connections are linked or no connections are configured.</div>';
+            guacamoleCandidateListEl.innerHTML = '<div class="empty">All Lab Station candidates are configured or no connections are available.</div>';
             return;
         }
-        candidates.forEach(candidate => {
-            guacamoleCandidateListEl.appendChild(buildGuacamoleCandidateRow(candidate));
+        candidates.forEach(station => {
+            guacamoleCandidateListEl.appendChild(buildGuacamoleCandidateRow(station));
         });
     }
 
-    function buildGuacamoleCandidateRow(candidate) {
-        const id = String(candidate.id ?? '');
-        const state = guacamoleCandidateState[id] || {};
-        const safeName = escapeHtml(candidate.name || 'Unnamed connection');
-        const safeHost = escapeHtml(candidate.hostname || 'n/a');
-        const safeProtocol = escapeHtml(candidate.protocol || 'unknown');
-        const safePort = escapeHtml(candidate.port || 'n/a');
+    function buildGuacamoleCandidateRow(station) {
+        const state = guacamoleCandidateState[station.key] || {};
+        const safeName = escapeHtml(station.address || station.nameCandidates[0] || 'Unnamed station');
+        const safeConnections = escapeHtml(station.nameCandidates.join(', ') || 'Unnamed connection');
+        const safeHost = escapeHtml(station.address || 'n/a');
+        const connectionSummary = station.connections
+            .map(connection => `${connection.protocol || 'unknown'}:${connection.port || 'n/a'}`)
+            .filter((value, index, values) => values.indexOf(value) === index)
+            .join(', ');
+        const safeProtocol = escapeHtml(connectionSummary || 'unknown');
         const statusText = formatDiscoveryStatus(state.status);
         const statusClass = discoveryStatusClass(state.status);
         const row = document.createElement('div');
         row.className = 'host-row';
-        row.dataset.connectionId = id;
+        row.dataset.stationKey = station.key;
         row.innerHTML = `
             <div>
                 <div class="host-title">${safeName}</div>
                 <div class="host-meta">Host: ${safeHost}</div>
-                <div class="host-meta">Protocol: ${safeProtocol} · Port: ${safePort}</div>
+                <div class="host-meta">Connections: ${safeConnections}</div>
+                <div class="host-meta">Protocol / port: ${safeProtocol}</div>
             </div>
             <div class="candidate-station-status">
                 <span class="pill ${statusClass}">Lab Station: ${escapeHtml(statusText)}</span>
@@ -2420,26 +2822,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const btn = e.target.closest('button[data-action]');
         if (!btn) return;
         const row = btn.closest('.host-row');
-        const connectionId = row?.dataset.connectionId;
-        if (!connectionId) return;
+        const stationKey = row?.dataset.stationKey;
+        if (!stationKey) return;
         if (btn.dataset.action === 'configure-candidate') {
-            openProvisionHostModal(connectionId);
+            openProvisionHostModal(stationKey);
             return;
         }
         if (btn.dataset.action !== 'probe-candidate') return;
-        const candidate = findGuacamoleCandidate(connectionId);
-        guacamoleCandidateState[connectionId] = {
-            ...(guacamoleCandidateState[connectionId] || {}),
-            candidate,
+        const station = findGuacamoleStationCandidate(stationKey);
+        if (!station) return;
+        const representative = station.connections[0];
+        guacamoleCandidateState[stationKey] = {
+            ...(guacamoleCandidateState[stationKey] || {}),
+            candidate: representative,
+            connectionId: representative?.id,
             status: 'checking'
         };
         btn.disabled = true;
-        renderGuacamoleCandidates(guacamoleCandidates);
+        renderGuacamoleCandidates(guacamoleStationCandidates);
         try {
             const res = await fetch('/ops/api/hosts/discover', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ connectionId })
+                body: JSON.stringify({ connectionId: representative?.id })
             });
             const body = await res.json().catch(() => ({}));
             if (!res.ok) {
@@ -2454,19 +2859,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 : winrmOpen.length
                     ? `Open WinRM port${winrmOpen.length === 1 ? '' : 's'}: ${winrmOpen.join(', ')}`
                     : 'No Lab Station health endpoint or WinRM port detected.';
-            guacamoleCandidateState[connectionId] = {
-                ...(guacamoleCandidateState[connectionId] || {}),
-                candidate: body.connection || candidate,
+            guacamoleCandidateState[stationKey] = {
+                ...(guacamoleCandidateState[stationKey] || {}),
+                candidate: body.connection || representative,
+                connectionId: body.connection?.id || representative?.id,
                 status: body.status,
                 detail: suggestedMac ? `${detail} Suggested MAC: ${suggestedMac}` : detail,
                 opsHostDraft: body.opsHostDraft || {}
             };
-            showToast(`Discovery finished for ${body.connection?.hostname || connectionId}`, 'success');
+            showToast(`Discovery finished for ${body.connection?.hostname || station.address || representative?.id}`, 'success');
         } catch (err) {
             console.error(err);
-            guacamoleCandidateState[connectionId] = {
-                ...(guacamoleCandidateState[connectionId] || {}),
-                candidate,
+            guacamoleCandidateState[stationKey] = {
+                ...(guacamoleCandidateState[stationKey] || {}),
+                candidate: representative,
+                connectionId: representative?.id,
                 status: 'error',
                 detail: err.message
             };
@@ -2476,19 +2883,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function findGuacamoleCandidate(connectionId) {
-        const key = String(connectionId);
-        return guacamoleCandidates.find(candidate => String(candidate.id ?? '') === key)
-            || guacamoleCandidateState[key]?.candidate
+    function stationCandidateKey(candidate) {
+        const address = normalizeMatchValue(candidate?.hostname);
+        return address ? `host:${address}` : `connection:${String(candidate?.id ?? '')}`;
+    }
+
+    function groupGuacamoleCandidates(candidates) {
+        const groups = new Map();
+        (Array.isArray(candidates) ? candidates : []).forEach(candidate => {
+            const key = stationCandidateKey(candidate);
+            if (!key || key.endsWith(':')) return;
+            let station = groups.get(key);
+            if (!station) {
+                station = {
+                    key,
+                    address: candidate?.hostname || '',
+                    nameCandidates: [],
+                    connections: []
+                };
+                groups.set(key, station);
+            }
+            station.connections.push(candidate);
+            const name = String(candidate?.name || '').trim();
+            if (name && !station.nameCandidates.includes(name)) {
+                station.nameCandidates.push(name);
+            }
+        });
+        return Array.from(groups.values());
+    }
+
+    function findGuacamoleStationCandidate(stationKey) {
+        return guacamoleStationCandidates.find(station => station.key === stationKey)
             || null;
     }
 
     function rememberGuacamoleCandidate(candidate) {
-        const id = String(candidate?.id ?? '');
-        if (!id) return;
-        guacamoleCandidateState[id] = {
-            ...(guacamoleCandidateState[id] || {}),
-            candidate
+        const key = stationCandidateKey(candidate);
+        if (!key || key.endsWith(':')) return;
+        guacamoleCandidateState[key] = {
+            ...(guacamoleCandidateState[key] || {}),
+            candidate: guacamoleCandidateState[key]?.candidate || candidate,
+            connectionId: guacamoleCandidateState[key]?.connectionId || candidate?.id
         };
     }
 
@@ -2496,38 +2931,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return (value || '').toString().trim().toLowerCase();
     }
 
-    function normalizeLooseValue(value) {
-        return normalizeMatchValue(value).replace(/[^a-z0-9]+/g, '');
-    }
-
-    function urlHost(value) {
+    function urlOrigin(value) {
         const raw = (value || '').toString().trim();
         if (!raw) return '';
         try {
-            return new URL(raw, window.location.origin).hostname.toLowerCase();
+            return normalizeMatchValue(new URL(raw, window.location.origin).origin);
         } catch (_) {
             return '';
         }
     }
 
-    function labMatchesConnection(lab, connection) {
-        const connectionTokens = [
-            connection.id,
-            connection.name,
-            connection.hostname
-        ].map(normalizeMatchValue).filter(Boolean);
-        const looseConnectionTokens = connectionTokens.map(normalizeLooseValue).filter(Boolean);
-        const labTokens = [
-            lab.accessKey,
-            lab.accessURI,
-            urlHost(lab.accessURI)
-        ].map(normalizeMatchValue).filter(Boolean);
-        const looseLabTokens = labTokens.map(normalizeLooseValue).filter(Boolean);
+    function currentGatewayOrigin() {
+        return urlOrigin(window.location.origin);
+    }
 
-        if (labTokens.some(token => connectionTokens.includes(token))) return true;
-        if (looseLabTokens.some(token => looseConnectionTokens.includes(token))) return true;
-        if (connection.hostname && urlHost(lab.accessURI) === normalizeMatchValue(connection.hostname)) return true;
-        return false;
+    function labMatchesConnection(lab, connection) {
+        if (Number(lab?.resourceType) !== 0) return false;
+
+        const expectedAccessKey = normalizeMatchValue(
+            connection?.selector || (connection?.id ? `guac:id:${connection.id}` : '')
+        );
+        const labAccessKey = normalizeMatchValue(lab?.accessKey);
+        if (!expectedAccessKey || labAccessKey !== expectedAccessKey) return false;
+
+        const gatewayOrigin = currentGatewayOrigin();
+        const labOrigin = urlOrigin(lab?.accessURI);
+        return Boolean(gatewayOrigin && labOrigin && labOrigin === gatewayOrigin);
     }
 
     async function loadLabCandidates() {
@@ -2535,61 +2964,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const body = await res.json().catch(() => ({}));
         return Array.isArray(body.labs) ? body.labs : [];
-    }
-
-    function renderProvisionLabOptions(labs, selectedIds = []) {
-        if (!provisionHostLabsEl) return;
-        provisionHostLabsEl.innerHTML = '';
-        if (provisionHostLabsSummaryEl) {
-            provisionHostLabsSummaryEl.hidden = true;
-            provisionHostLabsSummaryEl.textContent = '';
-        }
-        provisionHostLabsEl.hidden = false;
-        const selectedSet = new Set(selectedIds.map(String));
-        const validLabs = (Array.isArray(labs) ? labs : [])
-            .filter(lab => String(lab?.labId || '').trim());
-        if (!validLabs.length) {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'No matching labs found';
-            option.disabled = true;
-            provisionHostLabsEl.appendChild(option);
-            provisionHostLabsEl.disabled = true;
-            return;
-        }
-        provisionHostLabsEl.disabled = false;
-        const singleLab = validLabs.length === 1;
-        validLabs.forEach(lab => {
-            const labId = String(lab.labId || '').trim();
-            const option = document.createElement('option');
-            option.value = labId;
-            option.textContent = formatProvisionLabLabel(lab);
-            option.selected = singleLab || selectedSet.has(labId);
-            provisionHostLabsEl.appendChild(option);
-        });
-        if (singleLab && provisionHostLabsSummaryEl) {
-            provisionHostLabsSummaryEl.textContent = formatProvisionLabLabel(validLabs[0]);
-            provisionHostLabsSummaryEl.hidden = false;
-            provisionHostLabsEl.hidden = true;
-        }
-    }
-
-    function formatProvisionLabLabel(lab) {
-        return `${resolveLabDisplayName(lab)}${lab?.accessKey ? ` - ${lab.accessKey}` : ''}`;
-    }
-
-    function selectedProvisionLabIds() {
-        if (!provisionHostLabsEl) return [];
-        return Array.from(provisionHostLabsEl.selectedOptions || [])
-            .map(option => option.value.trim())
-            .filter(Boolean);
-    }
-
-    function provisionLabCandidateIds() {
-        if (!provisionHostLabsEl) return [];
-        return Array.from(provisionHostLabsEl.options || [])
-            .map(option => option.value.trim())
-            .filter(Boolean);
     }
 
     function renderProvisionNameCandidates(candidates) {
@@ -2606,54 +2980,62 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function populateProvisionLabCandidates(connectionId, candidate, draft) {
-        renderProvisionLabOptions([], []);
-        provisionHostLabsEl.disabled = true;
-        const loading = document.createElement('option');
-        loading.value = '';
-        loading.textContent = 'Loading lab candidates...';
-        loading.disabled = true;
-        provisionHostLabsEl.innerHTML = '';
-        provisionHostLabsEl.appendChild(loading);
+    async function populateProvisionLabCandidates(stationKey, station) {
+        provisionLabsLoading = true;
+        if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = true;
         try {
             const labs = await loadLabCandidates();
-            const candidateLabs = labs.filter(lab => labMatchesConnection(lab, candidate));
-            renderProvisionLabOptions(candidateLabs, draft.labs || []);
+            const candidateLabs = labs.filter(lab => station.connections.some(connection => (
+                labMatchesConnection(lab, connection)
+            )));
+            const labIds = candidateLabs
+                .map(lab => String(lab?.labId || '').trim())
+                .filter(Boolean)
+                .filter((labId, index, values) => values.indexOf(labId) === index);
+            guacamoleCandidateState[stationKey] = {
+                ...(guacamoleCandidateState[stationKey] || {}),
+                labs: labIds,
+                labCandidatesLoaded: true
+            };
         } catch (err) {
             console.warn('Unable to load lab candidates', err);
-            provisionHostLabsEl.innerHTML = '';
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'Unable to load lab candidates';
-            option.disabled = true;
-            provisionHostLabsEl.appendChild(option);
-            provisionHostLabsEl.disabled = true;
+            guacamoleCandidateState[stationKey] = {
+                ...(guacamoleCandidateState[stationKey] || {}),
+                labs: [],
+                labCandidatesLoaded: true,
+                labCandidatesError: err.message
+            };
+        } finally {
+            provisionLabsLoading = false;
+            if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = false;
         }
     }
 
-    function openProvisionHostModal(connectionId) {
-        const candidate = findGuacamoleCandidate(connectionId);
+    function openProvisionHostModal(stationKey) {
+        const station = findGuacamoleStationCandidate(stationKey);
         if (
-            !candidate ||
+            !station ||
             !provisionHostModal ||
             !provisionConnectionIdEl ||
             !provisionHostNameEl ||
             !provisionHostAddressEl ||
             !provisionHostMacEl ||
-            !provisionHostLabsEl ||
             !provisionHeartbeatPathEl
         ) {
             showToast('Host provisioning modal is unavailable', 'error');
             return;
         }
-        const host = candidate.name || candidate.hostname || '';
-        const draft = guacamoleCandidateState[String(connectionId)]?.opsHostDraft || {};
-        provisionConnectionIdEl.value = String(connectionId);
+        const representative = station.connections[0];
+        const state = guacamoleCandidateState[stationKey] || {};
+        const draft = state.opsHostDraft || {};
+        const host = station.address || station.nameCandidates[0] || '';
+        provisionStationKey = stationKey;
+        provisionConnectionIdEl.value = String(state.connectionId || representative?.id || '');
         provisionHostNameEl.value = draft.name || host;
-        renderProvisionNameCandidates(draft.nameCandidates || [candidate.name, candidate.hostname].filter(Boolean));
-        provisionHostAddressEl.value = draft.address || candidate.hostname || '';
+        renderProvisionNameCandidates(draft.nameCandidates || station.nameCandidates);
+        provisionHostAddressEl.value = draft.address || station.address || '';
         provisionHostMacEl.value = draft.mac || '';
-        populateProvisionLabCandidates(connectionId, candidate, draft);
+        populateProvisionLabCandidates(stationKey, station);
         provisionHeartbeatPathEl.value = draft.heartbeat_path || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
         provisionHostModal.classList.add('show');
     }
@@ -2661,6 +3043,91 @@ document.addEventListener('DOMContentLoaded', () => {
     function closeProvisionHostModal() {
         if (provisionHostModal) {
             provisionHostModal.classList.remove('show');
+        }
+    }
+
+    function openEditHostModal(host) {
+        const meta = hostMetadata[host] || {};
+        if (
+            !meta.editable ||
+            !editHostModal ||
+            !editHostOriginalNameEl ||
+            !editHostNameEl ||
+            !editHostAddressEl ||
+            !editHostMacEl ||
+            !editHeartbeatPathEl
+        ) {
+            showToast('Only dynamically configured hosts can be edited', 'error');
+            return;
+        }
+        editHostOriginalNameEl.value = host;
+        editHostNameEl.value = meta.name || host;
+        editHostAddressEl.value = meta.address || host;
+        editHostMacEl.value = meta.mac || '';
+        editHeartbeatPathEl.value = meta.heartbeatPath || 'C:\\LabStation\\labstation\\data\\telemetry\\heartbeat.json';
+        editHostModal.classList.add('show');
+    }
+
+    function closeEditHostModal() {
+        if (editHostModal) {
+            editHostModal.classList.remove('show');
+        }
+    }
+
+    async function saveEditedHost() {
+        if (
+            !editHostOriginalNameEl ||
+            !editHostNameEl ||
+            !editHostMacEl ||
+            !editHeartbeatPathEl
+        ) {
+            showToast('Host edit modal is unavailable', 'error');
+            return;
+        }
+        const originalName = editHostOriginalNameEl.value.trim();
+        const payload = {
+            name: editHostNameEl.value.trim(),
+            mac: editHostMacEl.value.trim(),
+            heartbeatPath: editHeartbeatPathEl.value.trim(),
+        };
+        if (!originalName || !payload.name) {
+            showToast('Name is required', 'error');
+            return;
+        }
+        if (!/^[A-Za-z0-9._-]+$/.test(payload.name)) {
+            showToast('Name must contain only letters, numbers, dots, underscores, and hyphens', 'error');
+            return;
+        }
+        if (payload.mac && !/^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(payload.mac)) {
+            showToast('MAC must use format 00:11:22:33:44:55 or 00-11-22-33-44-55', 'error');
+            return;
+        }
+        if (!payload.heartbeatPath) {
+            showToast('Heartbeat path is required', 'error');
+            return;
+        }
+        if (saveEditHostBtn) saveEditHostBtn.disabled = true;
+        try {
+            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(originalName)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const requestSuffix = body.requestId ? ` (request ID ${body.requestId})` : '';
+                throw new Error(`${body.error || `HTTP ${res.status}`}${requestSuffix}`);
+            }
+            stopHeartbeatStream(originalName);
+            delete hostState[originalName];
+            closeEditHostModal();
+            showToast(`Ops host ${body.host?.name || payload.name} updated`, 'success');
+            await loadHostInventory({ skipAuthPrompt: true });
+        } catch (err) {
+            console.error(err);
+            showToast(`Edit host failed: ${err.message}`, 'error');
+        } finally {
+            if (saveEditHostBtn) saveEditHostBtn.disabled = false;
         }
     }
 
@@ -2725,34 +3192,287 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function winrmTrustStatusLabel(status) {
+        const labels = {
+            missing: 'missing',
+            ready: 'ready',
+            expired: 'expired',
+            'not-yet-valid': 'not yet valid',
+            invalid: 'invalid',
+            unavailable: 'unavailable',
+        };
+        return labels[String(status || '').trim().toLowerCase()] || 'unavailable';
+    }
+
+    function winrmTrustStatusClass(status) {
+        const normalized = String(status || '').trim().toLowerCase();
+        if (normalized === 'ready') return 'good';
+        if (normalized === 'missing' || normalized === 'unavailable') return 'warn';
+        return 'bad';
+    }
+
+    function appendTrustDetail(container, label, value) {
+        const item = document.createElement('div');
+        item.className = 'certificate-detail';
+        const labelEl = document.createElement('dt');
+        labelEl.textContent = label;
+        const valueEl = document.createElement('dd');
+        valueEl.textContent = value === null || value === undefined || value === '' ? 'n/a' : String(value);
+        item.append(labelEl, valueEl);
+        container.appendChild(item);
+    }
+
+    function renderWinrmTrustState(trust) {
+        const status = String(trust?.status || (trust?.configured ? 'ready' : 'missing'))
+            .trim()
+            .toLowerCase();
+        savedWinrmTrustStatus = status;
+        updateWinrmTrustVerifyState();
+        if (!winrmTrustCurrentEl) return;
+        winrmTrustCurrentEl.className = `winrm-trust-current ${winrmTrustStatusClass(status)}`;
+        winrmTrustCurrentEl.replaceChildren();
+
+        const title = document.createElement('strong');
+        title.textContent = `Current trust: ${winrmTrustStatusLabel(status)}`;
+        winrmTrustCurrentEl.appendChild(title);
+
+        const details = document.createElement('dl');
+        details.className = 'certificate-detail-grid';
+        appendTrustDetail(details, 'SHA-256', trust?.fingerprintSha256);
+        appendTrustDetail(details, 'SHA-1', trust?.fingerprintSha1);
+        appendTrustDetail(details, 'Subject', trust?.subject);
+        appendTrustDetail(details, 'SAN DNS', Array.isArray(trust?.sanDnsNames) ? trust.sanDnsNames.join(', ') : '');
+        appendTrustDetail(details, 'SAN IP', Array.isArray(trust?.sanIpAddresses) ? trust.sanIpAddresses.join(', ') : '');
+        appendTrustDetail(details, 'Valid until', trust?.notAfter ? formatDate(trust.notAfter) : '');
+        appendTrustDetail(details, 'Last validated', trust?.lastValidatedAt ? formatDate(trust.lastValidatedAt) : '');
+        appendTrustDetail(details, 'Error code', trust?.errorCode);
+        winrmTrustCurrentEl.appendChild(details);
+    }
+
+    function renderWinrmTrustPreview(preview) {
+        if (!winrmTrustPreviewEl || !winrmTrustPreviewDetailsEl) return;
+        winrmTrustPreviewEl.hidden = !preview;
+        winrmTrustPreviewDetailsEl.replaceChildren();
+        if (!preview) {
+            updateWinrmTrustSaveState();
+            return;
+        }
+
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Status', winrmTrustStatusLabel(preview.status));
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SHA-256', preview.fingerprintSha256);
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SHA-1', preview.fingerprintSha1);
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Subject', preview.subject);
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Issuer', preview.issuer);
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SAN DNS', Array.isArray(preview.sanDnsNames) ? preview.sanDnsNames.join(', ') : '');
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'SAN IP', Array.isArray(preview.sanIpAddresses) ? preview.sanIpAddresses.join(', ') : '');
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Valid from', preview.notBefore ? formatDate(preview.notBefore) : '');
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Valid until', preview.notAfter ? formatDate(preview.notAfter) : '');
+        appendTrustDetail(winrmTrustPreviewDetailsEl, 'Format', preview.format);
+        if (winrmTrustFingerprintConfirmedEl) winrmTrustFingerprintConfirmedEl.checked = false;
+        updateWinrmTrustSaveState();
+    }
+
+    function updateWinrmTrustVerifyState() {
+        if (!verifyWinrmTrustBtn) return;
+        verifyWinrmTrustBtn.disabled = !(
+            activeWinrmTrustHost &&
+            hostMetadata[activeWinrmTrustHost]?.winrmConfigured === true &&
+            savedWinrmTrustStatus === 'ready'
+        );
+    }
+
+    function updateWinrmTrustSaveState() {
+        if (previewWinrmTrustBtn) previewWinrmTrustBtn.disabled = !activeWinrmTrustFile;
+        if (saveWinrmTrustBtn) {
+            saveWinrmTrustBtn.disabled = !(
+                activeWinrmTrustFile &&
+                activeWinrmTrustPreview?.valid === true &&
+                winrmTrustFingerprintConfirmedEl?.checked === true
+            );
+        }
+        updateWinrmTrustVerifyState();
+    }
+
+    function handleWinrmTrustCertificateSelected() {
+        activeWinrmTrustFile = winrmTrustCertificateEl?.files?.[0] || null;
+        activeWinrmTrustPreview = null;
+        if (winrmTrustCertificateNameEl) {
+            winrmTrustCertificateNameEl.textContent = activeWinrmTrustFile?.name || 'No file selected';
+        }
+        renderWinrmTrustPreview(null);
+        updateWinrmTrustSaveState();
+    }
+
+    function winrmTrustErrorMessage(body, status) {
+        const code = String(body?.code || '').trim();
+        const requestSuffix = body?.requestId ? ` (request ID ${body.requestId})` : '';
+        return `${body?.error || `HTTP ${status}`}${code ? ` [${code}]` : ''}${requestSuffix}`;
+    }
+
+    async function openWinrmTrustModal(host) {
+        if (!winrmTrustModal || !winrmTrustCertificateEl) {
+            showToast('WinRM TLS trust modal is unavailable', 'error');
+            return;
+        }
+        activeWinrmTrustHost = host;
+        savedWinrmTrustStatus = 'loading';
+        activeWinrmTrustFile = null;
+        activeWinrmTrustPreview = null;
+        winrmTrustCertificateEl.value = '';
+        if (winrmTrustCertificateNameEl) winrmTrustCertificateNameEl.textContent = 'No file selected';
+        if (winrmTrustModalHostEl) {
+            const meta = hostMetadata[host] || {};
+            winrmTrustModalHostEl.textContent = `Host: ${host} · Address: ${meta.address || 'n/a'}`;
+        }
+        if (winrmTrustFingerprintConfirmedEl) winrmTrustFingerprintConfirmedEl.checked = false;
+        renderWinrmTrustPreview(null);
+        if (winrmTrustCurrentEl) winrmTrustCurrentEl.textContent = 'Loading certificate trust state...';
+        updateWinrmTrustSaveState();
+        winrmTrustModal.classList.add('show');
+        await loadWinrmTrustState(host);
+    }
+
+    async function loadWinrmTrustState(host) {
+        try {
+            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(host)}/winrm-trust`);
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
+            if (activeWinrmTrustHost !== host) return;
+            renderWinrmTrustState(body.trust || body);
+        } catch (err) {
+            if (activeWinrmTrustHost === host) {
+                savedWinrmTrustStatus = 'unavailable';
+                updateWinrmTrustVerifyState();
+                if (winrmTrustCurrentEl) winrmTrustCurrentEl.textContent = `Unable to load trust: ${err.message}`;
+                showToast(`WinRM trust status failed: ${err.message}`, 'error');
+            }
+        }
+    }
+
+    function closeWinrmTrustModal() {
+        if (winrmTrustModal) winrmTrustModal.classList.remove('show');
+        activeWinrmTrustHost = '';
+        savedWinrmTrustStatus = 'unavailable';
+        activeWinrmTrustFile = null;
+        activeWinrmTrustPreview = null;
+        updateWinrmTrustSaveState();
+    }
+
+    async function previewWinrmTrust() {
+        if (!activeWinrmTrustHost || !activeWinrmTrustFile) {
+            showToast('Choose a station certificate first', 'error');
+            return;
+        }
+        if (previewWinrmTrustBtn) previewWinrmTrustBtn.disabled = true;
+        try {
+            const form = new FormData();
+            form.append('certificate', activeWinrmTrustFile, activeWinrmTrustFile.name);
+            const res = await fetch(
+                `/ops/api/hosts/${encodeURIComponent(activeWinrmTrustHost)}/winrm-trust/preview`,
+                { method: 'POST', body: form },
+            );
+            const body = await res.json().catch(() => ({}));
+            if (body.preview) {
+                activeWinrmTrustPreview = body.preview;
+                renderWinrmTrustPreview(activeWinrmTrustPreview);
+            }
+            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
+            activeWinrmTrustPreview = { ...body.preview, valid: true };
+            renderWinrmTrustPreview(activeWinrmTrustPreview);
+            showToast('Certificate preview ready; verify the SHA-256 fingerprint', 'success');
+        } catch (err) {
+            showToast(`Certificate preview failed: ${err.message}`, 'error');
+        } finally {
+            updateWinrmTrustSaveState();
+        }
+    }
+
+    async function saveWinrmTrust() {
+        if (!activeWinrmTrustHost || !activeWinrmTrustFile || activeWinrmTrustPreview?.valid !== true) {
+            showToast('Preview a valid certificate first', 'error');
+            return;
+        }
+        if (!winrmTrustFingerprintConfirmedEl?.checked) {
+            showToast('Verify the SHA-256 fingerprint before saving', 'error');
+            return;
+        }
+        if (saveWinrmTrustBtn) saveWinrmTrustBtn.disabled = true;
+        try {
+            const form = new FormData();
+            form.append('certificate', activeWinrmTrustFile, activeWinrmTrustFile.name);
+            form.append('fingerprintSha256', activeWinrmTrustPreview.fingerprintSha256);
+            form.append('trustRef', activeWinrmTrustPreview.trustRef || '');
+            const res = await fetch(
+                `/ops/api/hosts/${encodeURIComponent(activeWinrmTrustHost)}/winrm-trust`,
+                { method: 'PUT', body: form },
+            );
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
+            const savedHost = activeWinrmTrustHost;
+            closeWinrmTrustModal();
+            showToast(`WinRM TLS trust saved for ${savedHost}`, 'success');
+            await loadHostInventory({ skipAuthPrompt: true });
+            await pollHeartbeat(savedHost);
+        } catch (err) {
+            showToast(`WinRM trust save failed: ${err.message}`, 'error');
+        } finally {
+            updateWinrmTrustSaveState();
+        }
+    }
+
+    async function verifyWinrmTrust() {
+        if (!activeWinrmTrustHost || verifyWinrmTrustBtn?.disabled) return;
+        await pollHeartbeat(activeWinrmTrustHost);
+    }
+
+    async function deleteWinrmTrust() {
+        if (!activeWinrmTrustHost) return;
+        if (!window.confirm(`Remove WinRM TLS trust for ${activeWinrmTrustHost}?`)) return;
+        if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.disabled = true;
+        try {
+            const host = activeWinrmTrustHost;
+            const res = await fetch(`/ops/api/hosts/${encodeURIComponent(host)}/winrm-trust`, { method: 'DELETE' });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(winrmTrustErrorMessage(body, res.status));
+            closeWinrmTrustModal();
+            showToast(`WinRM TLS trust removed for ${host}`, 'success');
+            await loadHostInventory({ skipAuthPrompt: true });
+        } catch (err) {
+            showToast(`WinRM trust removal failed: ${err.message}`, 'error');
+        } finally {
+            if (deleteWinrmTrustBtn) deleteWinrmTrustBtn.disabled = false;
+        }
+    }
+
     async function saveProvisionedHost() {
         if (
             !provisionConnectionIdEl ||
             !provisionHostNameEl ||
             !provisionHostAddressEl ||
             !provisionHostMacEl ||
-            !provisionHostLabsEl ||
             !provisionHeartbeatPathEl
         ) {
             showToast('Host provisioning modal is unavailable', 'error');
             return;
         }
+        if (provisionLabsLoading) {
+            showToast('Lab associations are still loading', 'error');
+            return;
+        }
+        const state = guacamoleCandidateState[provisionStationKey] || {};
+        const labs = Array.isArray(state.labs) ? state.labs : [];
         const payload = {
             connectionId: provisionConnectionIdEl.value,
             name: provisionHostNameEl.value.trim(),
             address: provisionHostAddressEl.value.trim(),
             mac: provisionHostMacEl.value.trim(),
-            labs: selectedProvisionLabIds(),
-            validLabIds: provisionLabCandidateIds(),
+            labs,
             credentialRef: provisionHostAddressEl.value.trim(),
             heartbeatPath: provisionHeartbeatPathEl.value.trim()
         };
+        if (labs.length) payload.validLabIds = labs;
         if (!payload.connectionId || !payload.name || !payload.address) {
             showToast('Name and address are required', 'error');
-            return;
-        }
-        if (!payload.labs.length) {
-            showToast('Select at least one matching lab', 'error');
             return;
         }
         if (saveProvisionHostBtn) saveProvisionHostBtn.disabled = true;
@@ -2764,7 +3484,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const body = await res.json().catch(() => ({}));
             if (!res.ok) {
-                throw new Error(body.error || `HTTP ${res.status}`);
+                const requestSuffix = body.requestId ? ` (request ID ${body.requestId})` : '';
+                throw new Error(`${body.error || `HTTP ${res.status}`}${requestSuffix}`);
             }
             closeProvisionHostModal();
             showToast(`Ops host ${body.host?.name || payload.name} configured`, 'success');
@@ -2777,26 +3498,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function formatGuacamoleStatus(guacamole) {
-        const connections = Array.isArray(guacamole.connections) ? guacamole.connections : [];
-        if (guacamole.status === 'linked' && connections[0]) {
-            const conn = connections[0];
-            return `linked - ${conn.name || conn.hostname || 'connection'} (${conn.protocol || 'unknown'})`;
-        }
-        if (guacamole.status === 'ambiguous') {
-            return `ambiguous - ${connections.length} matches`;
-        }
-        if (guacamole.status === 'missing') {
-            return 'missing';
-        }
-        return 'unknown';
+    function formatConnectionsStatus(connections) {
+        if (!connections.length) return 'No connections';
+        if (connections.length > 1) return `${connections.length} connections`;
+
+        const connection = connections[0] || {};
+        const name = connection.name || connection.hostname;
+        const protocol = connection.protocol;
+        if (!name) return '1 connection';
+        return `1 connection - ${name}${protocol ? ` (${protocol})` : ''}`;
     }
 
-    function guacamoleStatusClass(status) {
-        if (status === 'linked') return 'good';
-        if (status === 'ambiguous') return 'warn';
-        if (status === 'missing') return 'bad';
+    function connectionsStatusClass(guacamole) {
+        if (guacamole.status === 'none') return 'bad';
+        if (guacamole.status === 'single' || guacamole.status === 'multiple') return 'good';
         return 'soft';
+    }
+
+    function getWinrmTrustDisplay(meta) {
+        const status = String(meta.winrmTrustStatus || '').trim().toLowerCase()
+            || (meta.winrmTrustConfigured === true ? 'ready' : 'missing');
+        const states = {
+            missing: { label: 'missing', className: 'warn' },
+            ready: { label: 'ready', className: 'good' },
+            expired: { label: 'expired', className: 'bad' },
+            'not-yet-valid': { label: 'not yet valid', className: 'bad' },
+            invalid: { label: 'invalid', className: 'bad' },
+        };
+        return states[status] || { label: 'unavailable', className: 'warn' };
+    }
+
+    function formatHostDate(value, hasHeartbeat) {
+        return value ? formatDate(value) : hasHeartbeat ? 'never' : 'not available';
+    }
+
+    function formatLastForcedLogoff(info, hasHeartbeat) {
+        if (!info || !info.timestamp) return hasHeartbeat ? 'never' : 'not available';
+        const parts = [formatDate(info.timestamp)];
+        if (info.user) parts.push(info.user);
+        return parts.join(' - ');
+    }
+
+    function formatLastPowerAction(info, hasHeartbeat) {
+        if (!info || (!info.timestamp && !info.mode)) return hasHeartbeat ? 'never' : 'not available';
+        const parts = [];
+        if (info.mode) parts.push(info.mode);
+        if (info.timestamp) parts.push(formatDate(info.timestamp));
+        return parts.join(' - ');
     }
 
     function handleHostActions(e) {
@@ -2805,6 +3553,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const host = btn.closest('.host-row')?.dataset.host;
         if (!host) return;
         const action = btn.dataset.action;
+        if (action === 'edit-host') {
+            openEditHostModal(host);
+            return;
+        }
         if (action === 'poll') {
             pollHeartbeat(host);
             return;
@@ -2834,16 +3586,29 @@ document.addEventListener('DOMContentLoaded', () => {
             openWinrmCredentialsModal(host);
             return;
         }
+        if (action === 'manage-winrm-trust') {
+            openWinrmTrustModal(host);
+            return;
+        }
         if (action === 'sync-aas') {
             syncAasHost(host);
         }
     }
 
-    function refreshAllHosts() {
-        loadHostInventory();
+    async function refreshAllHosts() {
+        await loadHostInventory();
         if (window.EventSource) {
-            hostNames.forEach(startHeartbeatStream);
-            showToast('Heartbeat streaming started for all hosts', 'success');
+            const streamableHosts = hostNames.filter(host =>
+                hostMetadata[host]?.winrmConfigured === true
+                && hostMetadata[host]?.winrmTrustStatus === 'ready'
+            );
+            streamableHosts.forEach(startHeartbeatStream);
+                showToast(
+                    streamableHosts.length
+                        ? 'Heartbeat streaming started for configured hosts'
+                        : 'Heartbeat streaming unavailable: configure WinRM credentials and TLS trust',
+                streamableHosts.length ? 'success' : 'error',
+            );
             return;
         }
         hostNames.forEach(pollHeartbeat);
@@ -2864,8 +3629,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
                 return;
             }
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
             hostState[host] = data;
             renderHosts();
             loadActivityFeed();

@@ -104,11 +104,16 @@ publication or deletion until the current state and transaction are checked.
 In `Operations` → `Lab Station Ops`, the interface shows:
 
 - hosts configured in `ops-worker/hosts.json` and `ops-data/hosts.json`;
-- heartbeat, preparation state, local session, and WoL diagnostics; and
+- the station address, last heartbeat, current readiness/local-session/local-mode
+  state, and the last forced-logoff and power-action information;
+- the number of matching remote-access connections; and
 - Guacamole connections that are not yet associated with an Ops host.
 
 Click `Refresh` after changing the inventory. The UI starts a heartbeat stream
-for each host when the browser and endpoint support it.
+for each host with WinRM credentials and ready TLS trust when the browser and
+endpoint support it.
+Hosts created through the Lab Manager are editable with the pencil action next
+to their name; the address remains read-only.
 
 ![Lab Manager Operations tab](../images/lab-manager-operations.png)
 
@@ -120,21 +125,89 @@ For a Guacamole connection without an Ops host:
 2. Review the address, candidate name, MAC address, and Lab Station signals.
 3. Click `Configure` and complete:
    - `Name`: stable host identifier;
-   - `Address`: detected private address;
+   - `Address`: detected private address (read-only);
    - `MAC`: required for WoL;
-   - `Labs`: laboratories served by the station; and
    - `Heartbeat path`: normally `C:\LabStation\labstation\data\telemetry\heartbeat.json`.
 4. Save the host and reload the inventory.
 
-The `Labs` assignment connects the host to an operational `labId`. It is not
-the same relationship as the Guacamole connection: one station can serve more
-than one lab, and a connection may not yet have station operations configured.
+When published labs match the discovered Guacamole connections, the gateway
+stores those lab associations during provisioning. The association is not a
+manual choice in the station form: one station can serve multiple labs, while
+other Guacamole connections on the same station can remain administrative.
+
+For a provisioned host, use the pencil action to change its name, MAC, or
+heartbeat path. Static entries from `ops-worker/hosts.json` must still be
+edited in that catalog.
 
 ### Store WinRM credentials
 
-From the host credential action, open `Set WinRM Credentials` and save the user
-and password for its `credential_ref`. The password is stored in the encrypted
+Click the `missing` or `configured` WinRM credential status in the host card,
+open `Set WinRM Credentials`, and save the user and password for its
+`credential_ref`. The password is stored in the encrypted
 Ops Worker credential store, not in `hosts.json`.
+
+Until both credentials and certificate trust are ready, heartbeat streaming is
+not started for that host.
+
+The host card reports credentials and certificate trust separately:
+
+- `WinRM credentials: missing` means no user/password is stored;
+- `WinRM TLS trust: missing` means credentials exist but the Station certificate
+  has not been copied to the Gateway;
+- `WinRM TLS trust: ready` means the Gateway can parse the local certificate and
+  it is currently within its validity period; and
+- `expired`, `not yet valid`, or `invalid` identify a certificate that cannot be
+  used.
+
+`ready` describes the local trust prerequisite. A successful heartbeat is still
+needed to prove network reachability, authentication, and that the certificate
+served by the Station matches the trusted certificate.
+
+### Manage WinRM TLS trust
+
+Click the `WinRM TLS trust` status in the host card to open its certificate
+panel. The panel is the single entry point for this host's trust lifecycle:
+
+1. Select the public certificate exported by Lab Station, normally
+   `C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer`.
+2. Click `Preview certificate` and check the displayed host, validity dates,
+   SAN/CN and SHA-256 fingerprint.
+3. Check the explicit fingerprint confirmation and click `Save certificate`.
+   Saving replaces the existing certificate only after the server validates it
+   against the selected host.
+4. Use `Verify connection` to run an immediate heartbeat, or `Remove trust` to
+   delete the host-specific trust material.
+
+The panel reports `missing`, `ready`, `expired`, `not yet valid`, or `invalid`
+independently from the credential status. Error responses include a stable
+code and request ID; internal exceptions and certificate contents are not shown.
+
+These two prerequisites are independent. Until WinRM credentials are saved,
+the Lab Manager does not open a heartbeat stream for the host. If credentials
+exist but certificate trust is missing or invalid, the host remains unable to
+produce a heartbeat until the certificate is installed or corrected. Use the
+`WinRM credentials` and `WinRM TLS trust` statuses on the host card to decide
+which step is missing; do not treat an incomplete host as a Station or Gateway
+failure.
+
+For technical bootstrap or recovery, the public certificate exported by Lab
+Station can also be copied directly to the Gateway host:
+
+```text
+ops-data/winrm-certificates/<lower-case-host-name>/server.cer
+```
+
+For example, the certificate for `PC-Siemens` is copied from
+`C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer` to
+`ops-data/winrm-certificates/pc-siemens/server.cer`. The ops worker discovers
+the file when it starts or when the host catalog is reloaded, validates its
+format and dates, calculates the fingerprints, generates the local PEM trust
+copy when necessary and uses it only for that host's WinRM sessions. `GET /ops/api/hosts` reports the resulting
+`winrmTrustStatus`, fingerprint and certificate metadata.
+
+If the certificate is missing, malformed or expired, the heartbeat reports a
+specific trust error instead of treating the failure as an authentication
+problem. Do not disable TLS validation or configure `TrustedHosts`.
 
 WinRM must use HTTPS/TLS on port `5986`, and the address must belong to
 `WINRM_MANAGEMENT_CIDRS`. Do not publish the listener or Ops Worker to the
@@ -149,6 +222,12 @@ For each host, operators can:
 - execute only Lab Station commands allowed by `OPS_ALLOWED_COMMANDS`;
 - enable or disable local mode according to the operating procedure; and
 - inspect preparation state, the last operation, power state, and WoL NIC data.
+
+Heartbeat streaming starts automatically only for hosts with configured WinRM
+credentials and ready TLS trust. A missing or invalid certificate prevents the
+authenticated heartbeat even when the Station is powered on. If a stream error includes a
+`requestId`, keep it for the Ops Worker logs; the browser message is not a
+substitute for the host-card credential and TLS trust statuses.
 
 Destructive or power actions require an authorized maintenance window and a
 clear operational reason. For the Windows command contract, see

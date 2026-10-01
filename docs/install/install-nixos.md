@@ -71,10 +71,19 @@ LAB_ADMIN_BACKEND_URL=
 LAB_ADMIN_BACKEND_TOKEN=
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
+# Numeric owner of the Compose bind-mounted state (use `id -u` / `id -g`)
+HOST_UID=1000
+HOST_GID=1000
 ```
 
 For environment ownership, Lite trust values, and profile-specific requirements,
 also read the [configuration reference](../reference/configuration.md).
+
+`ops-worker`, OpenResty and the embedded backend run as non-root users whose
+numeric identity comes from `HOST_UID`/`HOST_GID`. The NixOS module prepares and
+chowns the writable bind-mounted state, including `ops-data`, before Compose
+starts. Do not run `docker compose up` manually before the first
+`nixos-rebuild`, because Docker may create missing directories as `root:root`.
 
 ```env
 # blockchain-services/.env
@@ -87,9 +96,9 @@ ALLOWED_ORIGINS=https://lab.your-institution.edu,https://marketplace-decentralab
 MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/jwks.json
 ```
 
-Keep Gateway/OpenResty orchestration values only in `.env`. The root `docker-compose.yml` injects those values into the embedded backend from `.env`.
+Keep Gateway/OpenResty orchestration values only in `.env`. The root `docker-compose.yml` injects those values into the `blockchain-services` backend from `.env`.
 
-In Lite mode, the embedded backend is not the local JWT authority: OpenResty
+In Lite mode, the backend service is not the local JWT authority: OpenResty
 blocks its `/auth` issuer routes and trusts the remote `ISSUER`. For composite
 Full + N Lite or standalone-backend + N Lite deployments, provision each Lite
 with its own trust bundle and remote provisioner route. See
@@ -123,6 +132,14 @@ Check health:
 
 ```bash
 curl -k https://localhost/health
+```
+
+Verify the WinRM trust mount from the running worker:
+
+```bash
+cd /srv/lab-gateway
+docker compose exec -T ops-worker sh -c \
+  'set -eu; test -w /app/data/winrm-certificates; echo writable'
 ```
 
 This public endpoint reports aggregate readiness only. Authenticate as a Lab
@@ -184,6 +201,11 @@ journalctl -u lab-gateway.service -f
 
 # Restart the gateway stack
 systemctl restart lab-gateway.service
+
+# The restart reapplies ownership from HOST_UID/HOST_GID in .env
+cd /srv/lab-gateway
+docker compose exec -T ops-worker sh -c \
+  'set -eu; test -w /app/data/winrm-certificates; echo writable'
 
 # Stop the gateway stack
 systemctl stop lab-gateway.service

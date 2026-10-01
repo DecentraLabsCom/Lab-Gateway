@@ -7,6 +7,8 @@ import logging
 import os
 import tempfile
 import threading
+import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
 
@@ -162,6 +164,7 @@ class PowerRuntime:
         operation_store: Optional[PowerOperationStore] = None,
         credential_resolver: Optional[CredentialResolver] = None,
         config_path: Optional[Path] = None,
+        status_cache_ttl_seconds: float = 5.0,
     ) -> None:
         self.registry = registry
         self.policies = dict(policies)
@@ -171,6 +174,14 @@ class PowerRuntime:
         self._sleep_fn = sleep_fn
         self._operation_store = operation_store
         self._credential_resolver = credential_resolver
+        try:
+            self.status_cache_ttl_seconds = max(0.0, float(status_cache_ttl_seconds))
+        except (TypeError, ValueError):
+            self.status_cache_ttl_seconds = 5.0
+        self._status_cache = None
+        self._status_cache_at = 0.0
+        self._status_cache_lock = threading.RLock()
+        self._status_refresh_lock = threading.Lock()
         self.executor = PowerPolicyExecutor(
             registry,
             record_operation=record_operation,
@@ -188,6 +199,7 @@ class PowerRuntime:
         operation_store: Optional[PowerOperationStore] = None,
         credential_resolver: Optional[CredentialResolver] = None,
         config_path: Optional[Path] = None,
+        status_cache_ttl_seconds: float = 5.0,
     ) -> "PowerRuntime":
         registry = PowerRegistry.from_config(
             config,
@@ -211,6 +223,7 @@ class PowerRuntime:
             operation_store=operation_store,
             credential_resolver=credential_resolver,
             config_path=config_path,
+            status_cache_ttl_seconds=status_cache_ttl_seconds,
         )
 
     @classmethod
@@ -222,6 +235,7 @@ class PowerRuntime:
         sleep_fn: Optional[Callable[[float], None]] = None,
         operation_store: Optional[PowerOperationStore] = None,
         credential_resolver: Optional[CredentialResolver] = None,
+        status_cache_ttl_seconds: float = 5.0,
     ) -> "PowerRuntime":
         config_path = Path(path)
         if not config_path.exists():
@@ -232,6 +246,7 @@ class PowerRuntime:
                 operation_store=operation_store,
                 credential_resolver=credential_resolver,
                 config_path=config_path,
+                status_cache_ttl_seconds=status_cache_ttl_seconds,
             )
         try:
             with config_path.open("r", encoding="utf-8") as handle:
@@ -245,6 +260,7 @@ class PowerRuntime:
             operation_store=operation_store,
             credential_resolver=credential_resolver,
             config_path=config_path,
+            status_cache_ttl_seconds=status_cache_ttl_seconds,
         )
 
     def execute_policy(
@@ -279,6 +295,7 @@ class PowerRuntime:
             actor=actor,
             dry_run=dry_run,
         )
+        self.invalidate_controller_status_cache()
         if not result["success"]:
             failure_mode = (
                 policy.start_failure_mode
@@ -302,16 +319,47 @@ class PowerRuntime:
                 reset_count += 1
         if reset_count:
             self.executor.reset_idempotency()
+            self.invalidate_controller_status_cache()
         return reset_count
 
     def execute_manual(self, **kwargs: Any) -> Dict[str, Any]:
-        return self.executor.execute_manual(**kwargs)
+        try:
+            return self.executor.execute_manual(**kwargs)
+        finally:
+            self.invalidate_controller_status_cache()
 
     def describe_controllers(self):
         return [
-            self.registry.public_description(controller)
+            self.registry.public_catalog_description(controller)
             for controller in self.registry.all()
         ]
+
+    def describe_controller_statuses(self, *, force_refresh: bool = False):
+        """Return live controller state, reusing a short-lived status snapshot."""
+        with self._status_refresh_lock:
+            now = time.monotonic()
+            with self._status_cache_lock:
+                if (
+                    not force_refresh
+                    and self._status_cache is not None
+                    and self.status_cache_ttl_seconds > 0
+                    and now - self._status_cache_at < self.status_cache_ttl_seconds
+                ):
+                    return deepcopy(self._status_cache)
+
+            statuses = [
+                self.registry.public_description(controller)
+                for controller in self.registry.all()
+            ]
+            with self._status_cache_lock:
+                self._status_cache = deepcopy(statuses)
+                self._status_cache_at = time.monotonic()
+            return deepcopy(statuses)
+
+    def invalidate_controller_status_cache(self) -> None:
+        with self._status_cache_lock:
+            self._status_cache = None
+            self._status_cache_at = 0.0
 
     def has_controller(self, controller_id: str) -> bool:
         return any(
@@ -331,11 +379,13 @@ class PowerRuntime:
                 sleep_fn=self._sleep_fn,
                 operation_store=self._operation_store,
                 credential_resolver=credential_resolver,
+                status_cache_ttl_seconds=self.status_cache_ttl_seconds,
             )
             self.registry = candidate_runtime.registry
             self.policies = candidate_runtime.policies
             self.executor.registry = self.registry
             self._credential_resolver = credential_resolver
+            self.invalidate_controller_status_cache()
         return True
 
     def update_controller(self, raw_controller: Mapping[str, Any]) -> Dict[str, Any]:
@@ -384,13 +434,15 @@ class PowerRuntime:
                 operation_store=self._operation_store,
                 credential_resolver=self._credential_resolver,
                 config_path=self.config_path,
+                status_cache_ttl_seconds=self.status_cache_ttl_seconds,
             )
             self._write_config(candidate_config)
             self.registry = candidate_runtime.registry
             self.policies = candidate_runtime.policies
             self.executor.registry = self.registry
+            self.invalidate_controller_status_cache()
 
-        return self.registry.public_description(self.registry.get(controller["id"]))
+        return self.registry.public_catalog_description(self.registry.get(controller["id"]))
 
     def describe_policies(self):
         return [

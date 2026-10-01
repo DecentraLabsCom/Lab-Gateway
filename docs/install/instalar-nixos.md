@@ -68,6 +68,9 @@ LAB_ADMIN_BACKEND_URL=
 LAB_ADMIN_BACKEND_TOKEN=
 CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
+# Sustituye estos valores por la salida de `id -u` y `id -g`.
+HOST_UID=1000
+HOST_GID=1000
 ```
 
 ```env
@@ -105,6 +108,13 @@ conservando los ajustes específicos del host (gestor de arranque, usuarios, dis
 sudo nixos-rebuild switch --flake /srv/lab-gateway#gateway
 ```
 
+`ops-worker`, OpenResty y el backend embebido ejecutan como usuarios no root cuya
+identidad numerica procede de `HOST_UID`/`HOST_GID`. El modulo NixOS prepara y
+asigna el propietario del estado montado, incluido `ops-data`, antes de iniciar
+Compose. No ejecutes `docker compose up` manualmente antes del primer
+`nixos-rebuild`, porque Docker podria crear directorios ausentes como
+`root:root`.
+
 Este comando:
 
 1. Construye el cierre del sistema (puede tardar varios minutos en la primera ejecución).
@@ -121,6 +131,14 @@ Comprueba el estado de salud:
 
 ```bash
 curl -k https://localhost/health
+```
+
+Comprueba el montaje de confianza WinRM desde el worker en ejecucion:
+
+```bash
+cd /srv/lab-gateway
+docker compose exec -T ops-worker sh -c \
+  'set -eu; test -w /app/data/winrm-certificates; echo writable'
 ```
 
 Este endpoint público sólo comunica la salud agregada. Autentícate como
@@ -184,6 +202,11 @@ journalctl -u lab-gateway.service -f
 
 # Reiniciar el stack del gateway
 systemctl restart lab-gateway.service
+
+# El reinicio reaplica la propiedad indicada por HOST_UID/HOST_GID en .env
+cd /srv/lab-gateway
+docker compose exec -T ops-worker sh -c \
+  'set -eu; test -w /app/data/winrm-certificates; echo writable'
 
 # Detener el stack del gateway
 systemctl stop lab-gateway.service

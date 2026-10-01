@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v6">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v18">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -345,12 +345,12 @@
                                 </div>
                                 <div class="asset-list" id="labAssetList"></div>
                             </div>
-                        </div>
-                        <div class="subcard labs-list-card">
-                            <div class="subcard-header">
-                                <h3><i class="fas fa-list"></i> Managed Labs</h3>
+                            <div class="subcard labs-list-card">
+                                <div class="subcard-header">
+                                    <h3><i class="fas fa-list"></i> Manage Labs</h3>
+                                </div>
+                                <div id="labPublisherList" class="lab-publisher-list empty">No labs loaded yet.</div>
                             </div>
-                            <div id="labPublisherList" class="lab-publisher-list empty">No labs loaded yet.</div>
                         </div>
                     </div>
                 </div>
@@ -470,10 +470,6 @@
                                 </select>
                             </label>
                             <label class="field">
-                                <span>Controller ID</span>
-                                <input type="text" id="powerControllerId" maxlength="128" placeholder="pdu-lab-01" required>
-                            </label>
-                            <label class="field">
                                 <span>Name</span>
                                 <input type="text" id="powerControllerName" maxlength="160" placeholder="APC Lab 01" required>
                             </label>
@@ -485,6 +481,10 @@
                                     <option value="netio-json">NETIO REST JSON</option>
                                 </select>
                             </label>
+                            <label class="field">
+                                <span>Host / IP address</span>
+                                <input type="text" id="powerControllerHost" maxlength="255" placeholder="192.168.1.50">
+                            </label>
                             <div class="field toggle-field">
                                 <span>Enabled</span>
                                 <label class="switch" for="powerControllerEnabled">
@@ -493,8 +493,8 @@
                                 </label>
                             </div>
                             <label class="field">
-                                <span>Host / IP address</span>
-                                <input type="text" id="powerControllerHost" maxlength="255" placeholder="192.168.1.50">
+                                <span>Controller ID (generated)</span>
+                                <input type="text" id="powerControllerId" maxlength="128" placeholder="apc-10-192-38-80" required>
                             </label>
                             <label class="field">
                                 <span>Port</span>
@@ -502,7 +502,9 @@
                             </label>
                             <label class="field">
                                 <span>Credential reference</span>
-                                <input type="text" id="powerControllerCredentialRef" maxlength="128" placeholder="pdu-lab-01-snmp">
+                                <select id="powerControllerCredentialRef">
+                                    <option value="">Select credential</option>
+                                </select>
                             </label>
                             <label class="field" id="powerControllerNetioPathField" hidden>
                                 <span>NETIO API path</span>
@@ -530,15 +532,6 @@
                                     <option value="rpdu2">rPDU2</option>
                                 </select>
                             </label>
-                            <label class="field" id="powerControllerSnmpVersionField">
-                                <span>SNMP version</span>
-                                <select id="powerControllerSnmpVersion">
-                                    <option value="">Driver default</option>
-                                    <option value="v1">v1</option>
-                                    <option value="v2c">v2c</option>
-                                    <option value="v3">v3</option>
-                                </select>
-                            </label>
                             <label class="field">
                                 <span>Timeout (seconds)</span>
                                 <input type="number" id="powerControllerTimeoutSeconds" min="1" max="60" value="2" inputmode="numeric">
@@ -549,7 +542,7 @@
                             </label>
                         </div>
                         <div class="hint power-controller-config-hint">
-                            The credential reference points to the encrypted provider-local store. SNMP communities and NETIO passwords are never entered or returned here.
+                            The credential reference points to the encrypted provider-local store. The controller ID is generated from the driver and host; you can override it when needed.
                         </div>
                         <div class="power-controller-outlets-editor">
                             <div class="power-controller-outlets-header">
@@ -564,7 +557,7 @@
                             </div>
                         </div>
                         <div class="power-controller-config-footer">
-                            <div class="hint" id="powerControllerEditorHint" aria-live="polite">Select an existing controller or configure a new one.</div>
+                            <div class="hint" id="powerControllerEditorHint" aria-live="polite"></div>
                             <button class="primary-btn" type="button" id="savePowerControllerBtn"><i class="fas fa-save"></i> Save Controller</button>
                         </div>
                     </div>
@@ -677,7 +670,7 @@
                                 </div>
                             </div>
                             <div class="power-policy-footer">
-                                <div class="hint" id="powerPolicyEditorHint" aria-live="polite">Select an existing policy or a laboratory defined above.</div>
+                                <div class="hint" id="powerPolicyEditorHint" aria-live="polite"></div>
                                 <button class="primary-btn" type="button" id="savePowerPolicyBtn"><i class="fas fa-save"></i> Save Policy</button>
                             </div>
                         </div>
@@ -685,7 +678,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column" data-lm-tab-section="operations" data-lm-order="20">
+            <section class="grid single-column" data-lm-tab-section="operations" data-lm-order="10">
                 <div class="card">
                     <div class="card-header">
                         <div>
@@ -697,13 +690,13 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="hint" id="opsHint">Hosts are loaded from ops-worker/hosts.json plus provisioned hosts in ops-data/hosts.json, then auto-linked to matching Guacamole connections.</div>
+                        <div class="hint hint-spaced" id="opsHint">Hosts are loaded from ops-worker/hosts.json plus provisioned hosts in ops-data/hosts.json, then auto-linked to matching Guacamole connections.</div>
                         <div class="host-list" id="hostList">
                             <div class="empty">No ops hosts loaded yet.</div>
                         </div>
-                        <div class="hint mt-4">Guacamole connections without an ops host</div>
+                        <div class="hint mt-4 hint-spaced">Lab Station candidates awaiting configuration:</div>
                         <div class="host-list" id="guacamoleCandidateList">
-                            <div class="empty">No Guacamole candidates loaded yet.</div>
+                            <div class="empty">No Lab Station candidates loaded yet.</div>
                         </div>
                     </div>
                 </div>
@@ -872,7 +865,7 @@
                 </div>
             </section>
 
-            <section class="grid single-column" data-lm-tab-section="operations" data-lm-order="10">
+            <section class="grid single-column" data-lm-tab-section="operations" data-lm-order="20">
                 <div class="card reservation-card">
                     <div class="card-header">
                         <div>
@@ -915,7 +908,7 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="hint">Paste the on-chain reservation key (transaction hash) to view its orchestration steps.</div>
+                        <div class="hint hint-spaced">Paste the on-chain reservation key (transaction hash) to view its orchestration steps.</div>
                         <div id="timelineResult" class="timeline empty">Awaiting reservation id.</div>
                     </div>
                 </div>
@@ -1018,33 +1011,26 @@
             </div>
             <div class="modal-body">
                 <input type="hidden" id="provisionConnectionId">
-                <div class="form-grid provision-host-grid">
-                    <div class="provision-host-left">
-                        <label class="field">
-                            <span>Name</span>
-                            <input type="text" id="provisionHostName" list="provisionHostNameCandidates" placeholder="lab-ws-01">
-                            <datalist id="provisionHostNameCandidates"></datalist>
+                    <div class="form-grid provision-host-grid">
+                        <div class="provision-host-left">
+                            <label class="field">
+                                <span>Name</span>
+                                <input type="text" id="provisionHostName" list="provisionHostNameCandidates" placeholder="lab-ws-01">
+                                <datalist id="provisionHostNameCandidates"></datalist>
+                            </label>
+                            <label class="field">
+                                <span>Address</span>
+                                <input type="text" id="provisionHostAddress" placeholder="lab-ws-01" readonly aria-readonly="true">
+                            </label>
+                            <label class="field">
+                                <span>MAC <small>(optional; required for WoL)</small></span>
+                                <input type="text" id="provisionHostMac" placeholder="00:11:22:33:44:55">
+                            </label>
+                        </div>
+                        <label class="field full">
+                            <span>Heartbeat path</span>
+                            <input type="text" id="provisionHeartbeatPath" placeholder="C:\LabStation\labstation\data\telemetry\heartbeat.json">
                         </label>
-                        <label class="field">
-                            <span>Address</span>
-                            <input type="text" id="provisionHostAddress" placeholder="lab-ws-01" readonly aria-readonly="true">
-                        </label>
-                        <label class="field">
-                            <span>MAC</span>
-                            <input type="text" id="provisionHostMac" placeholder="00:11:22:33:44:55">
-                        </label>
-                    </div>
-                    <label class="field provision-labs-field">
-                        <span>Labs</span>
-                        <div class="readonly-value provision-labs-summary" id="provisionHostLabsSummary" hidden></div>
-                        <select id="provisionHostLabs" multiple size="4">
-                            <option value="">Check Lab Station to load candidates</option>
-                        </select>
-                    </label>
-                    <label class="field full">
-                        <span>Heartbeat path</span>
-                        <input type="text" id="provisionHeartbeatPath" placeholder="C:\LabStation\labstation\data\telemetry\heartbeat.json">
-                    </label>
                 </div>
             </div>
             <div class="modal-footer">
@@ -1088,11 +1074,91 @@
         </div>
     </div>
 
+    <div class="modal" id="winrmTrustModal">
+        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="winrmTrustModalTitle">
+            <div class="modal-header">
+                <h3 id="winrmTrustModalTitle"><i class="fas fa-shield-halved"></i> WinRM TLS trust</h3>
+                <button class="ghost-btn icon-btn" id="closeWinrmTrustModal" type="button" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="hint" id="winrmTrustModalHost"></div>
+                <div class="winrm-trust-current" id="winrmTrustCurrent" role="status" aria-live="polite">
+                    Loading certificate trust state...
+                </div>
+                <div class="form-grid">
+                    <label class="field full">
+                        <span>Station certificate (.cer, .crt, .der or .pem)</span>
+                        <div class="file-picker">
+                            <label class="file-picker-button" for="winrmTrustCertificate">Choose certificate</label>
+                            <input class="file-picker-input" type="file" id="winrmTrustCertificate"
+                                accept=".cer,.crt,.der,.pem,application/x-x509-ca-cert,application/pkix-cert,text/plain">
+                            <span class="file-picker-name" id="winrmTrustCertificateName" aria-live="polite">No file selected</span>
+                        </div>
+                        <span class="hint">Select the public certificate exported by Lab Station. Private keys are never accepted or stored.</span>
+                    </label>
+                </div>
+                <div class="winrm-trust-preview" id="winrmTrustPreview" hidden>
+                    <div class="form-section-title">Certificate preview</div>
+                    <dl class="certificate-detail-grid" id="winrmTrustPreviewDetails"></dl>
+                    <label class="check-field winrm-trust-confirmation">
+                        <input type="checkbox" id="winrmTrustFingerprintConfirmed">
+                        <span>I verified this SHA-256 fingerprint against the Lab Station.</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="danger-btn" id="deleteWinrmTrust" type="button">Remove trust</button>
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="cancelWinrmTrust" type="button">Close</button>
+                    <button class="ghost-btn" id="verifyWinrmTrust" type="button" disabled>Verify connection</button>
+                    <button class="ghost-btn" id="previewWinrmTrust" type="button" disabled>Preview certificate</button>
+                    <button class="primary-btn" id="saveWinrmTrust" type="button" disabled>Save certificate</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="editHostModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-pen"></i> Edit Ops Host</h3>
+                <button class="ghost-btn icon-btn" id="closeEditHostModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editHostOriginalName">
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Name</span>
+                        <input type="text" id="editHostName" placeholder="lab-ws-01" autocomplete="off">
+                    </label>
+                    <label class="field">
+                        <span>Address</span>
+                        <input type="text" id="editHostAddress" readonly aria-readonly="true">
+                    </label>
+                    <label class="field">
+                        <span>MAC <small>(optional; required for WoL)</small></span>
+                        <input type="text" id="editHostMac" placeholder="00:11:22:33:44:55" autocomplete="off">
+                    </label>
+                    <label class="field full">
+                        <span>Heartbeat path</span>
+                        <input type="text" id="editHeartbeatPath" placeholder="C:\LabStation\labstation\data\telemetry\heartbeat.json" autocomplete="off">
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="cancelEditHost">Cancel</button>
+                    <button class="primary-btn" id="saveEditHost"><i class="fas fa-save"></i> Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="toast" class="toast"></div>
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v2"></script>
     <script src="../assets/js/lab-manager-tabs.js?v=workflow-tabs-v1"></script>
-    <script src="../assets/js/lab-manager.js?v=workflow-tabs-v6"></script>
+        <script src="../assets/js/lab-manager.js?v=workflow-tabs-v18"></script>
     <script src="../assets/js/lab-publisher.js?v=workflow-tabs-v2"></script>
 </body>
 </html>

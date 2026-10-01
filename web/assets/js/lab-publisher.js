@@ -1060,7 +1060,10 @@
             const epoch = Number(text);
             return Number.isSafeInteger(epoch) && epoch > 0 ? epoch : null;
         }
-        return dateInputToUnix(text);
+        const parsed = /^\d{4}-\d{2}-\d{2}$/.test(text)
+            ? new Date(`${text}T00:00:00Z`)
+            : new Date(text);
+        return Number.isFinite(parsed.getTime()) ? Math.floor(parsed.getTime() / 1000) : null;
     }
 
     function ensureContentId() {

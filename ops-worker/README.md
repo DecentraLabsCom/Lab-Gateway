@@ -57,7 +57,40 @@ export OPS_POLL_INTERVAL=60
 python worker.py
 ```
 
+## Per-host WinRM certificate trust
+
+Lab Station exports its public WinRM certificate as
+`C:\ProgramData\DecentraLabs\Lab Station\winrm-server.cer`. Copy that file
+to the matching directory in the Gateway's persistent `ops-data` mount:
+
+```text
+ops-data/winrm-certificates/<lower-case-winrm-trust-ref>/server.cer
+```
+
+The default trust root is `/app/data/winrm-certificates` and can be changed
+with `OPS_WINRM_TRUST_PATH`. The worker creates host directories on startup
+and when `POST /api/hosts/reload` runs. It validates the CER as DER or PEM,
+generates a local `server.pem` for Requests/OpenSSL when necessary, and uses
+that PEM only for the corresponding host's WinRM sessions. The host's
+`winrm_trust_ref` controls the directory; if omitted, the host name is used.
+Uploaded certificates are stored canonically as `server.cer` plus
+`metadata.json`; the metadata records the fingerprint and operational dates,
+never private key material.
+
+After copying a certificate, restart the worker or call the protected reload
+endpoint. `GET /api/hosts` exposes `winrmTrustStatus`, fingerprints, SANs and
+validity dates. Missing, invalid or expired trust returns a classified WinRM
+error. TLS verification remains enabled; do not use `TrustedHosts` or disable
+certificate validation.
+
 ### Local power-driver smoke tests
+
+The power controller catalog and live hardware status are separate operations.
+`GET /api/power/controllers` returns the provider-local catalog without
+contacting hardware. `GET /api/power/controllers/status` performs live driver
+checks and reuses the status snapshot for five seconds by default; append
+`?refresh=true` to bypass that cache. Configure the cache duration with
+`OPS_POWER_STATUS_CACHE_SECONDS`.
 
 The APC and NETIO drivers include deterministic local smoke tests. They start
 an in-process UDP/HTTP device double, perform discovery and outlet operations,
@@ -130,9 +163,20 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ connectionId, name?, address?, mac?, labs?, credentialRef?, heartbeatPath? }`
   - Re-runs discovery and only provisions candidates with Lab Station HTTP health or reachable WinRM.
   - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). Raw WinRM credentials are saved separately.
+- `PATCH /api/hosts/{hostName}`
+  - Body: `{ name?, mac?, heartbeatPath? }`
+  - Updates only a host from the writable dynamic catalog. The address, WinRM policy, credential reference, events path, and lab associations are preserved. Static catalog hosts must be edited in `hosts.json`.
 - `POST /api/hosts/winrm-credentials`
   - Body: `{ credentialRef, user, password }`
   - Encrypts and stores WinRM credentials for the configured host. Credentials are never accepted through `/api/winrm` or stored in the host catalog.
+- `POST /api/hosts/{hostName}/winrm-trust/preview`
+  - Multipart field `certificate` containing a public `.cer`, `.crt`, `.der` or `.pem` file. Returns parsed metadata without persisting the upload.
+- `GET /api/hosts/{hostName}/winrm-trust`
+  - Returns only per-host certificate metadata and status; the certificate bytes are never returned.
+- `PUT /api/hosts/{hostName}/winrm-trust`
+  - Multipart fields `certificate`, `fingerprintSha256` and optional `trustRef`. The worker recalculates SHA-256, validates the certificate identity against the host SAN/CN, rejects expired certificates, and stores it atomically.
+- `DELETE /api/hosts/{hostName}/winrm-trust`
+  - Removes the public certificate, generated PEM and metadata. The operation is idempotent.
 - `POST /api/reservations/start`
   - Body: `{ reservationId, host, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`
 - `POST /api/reservations/end`
@@ -150,7 +194,9 @@ Unexpected failures return a stable generic error with `code=INTERNAL_ERROR` and
   - Body: `{ demoId: "demo:<jti>", labId, reason: "expired"|"failed"|"disconnected" }`.
     Runs `release-session --reboot` and records the cleanup idempotently.
 - `GET /api/power/controllers`
-  - Returns configured power controllers, capabilities and outlet state.
+  - Returns the local power controller catalog, capabilities and configured outlets without contacting hardware.
+- `GET /api/power/controllers/status`
+  - Returns live controller discovery and outlet state; `?refresh=true` bypasses the short status cache.
 - `POST /api/power/controllers`
   - Validates and atomically registers one provider-local controller and its outlets.
 - `PUT /api/power/controllers/{controllerId}`
@@ -234,6 +280,9 @@ Power configuration:
 
 - `OPS_POWER_CONFIG` (compose default: `/app/data/power-controllers.json`)
 - `OPS_POWER_CREDENTIALS_PATH` (compose default: `/app/data/power-credentials.json`)
+- `OPS_POWER_STATUS_CACHE_SECONDS` (compose default: `5`); controls the
+  short-lived cache used by live controller status checks. Set it to `0` to
+  disable the cache for diagnostics.
 - Start from `power-controllers.sample.json`; copy it to the writable `ops-data` directory and change only provider-local values.
 - The `mock` driver is available for development and CI. The `apc-powernet-snmp` driver supports legacy PowerNet and `rPDU2` profiles, while `netio-json` controls NETIO devices through their `/netio.json` HTTP(S) API. Physical activation remains gated on pilot hardware validation.
 - The catalog contains `controllers`, `outlets` and `policies`. It must never contain passwords, SNMP community strings or API tokens. `lab-manager` can manage the validated controller/outlet catalog and power policies through protected endpoints; all data remains provider-local.

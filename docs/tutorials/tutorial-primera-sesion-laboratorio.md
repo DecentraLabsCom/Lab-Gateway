@@ -250,7 +250,7 @@ curl -k https://lab.tu-institucion.edu/health
 ### Comprobar los metadatos OIDC / JWKS (backend Full/plano de control)
 
 ```bash
-curl -k https://lab.tu-institucion.edu/auth/.well-known/openid-configuration
+curl -k https://lab.tu-institucion.edu/.well-known/openid-configuration
 curl -k https://lab.tu-institucion.edu/auth/jwks
 ```
 
@@ -270,7 +270,7 @@ docker compose logs -f openresty
 
 | Síntoma | Causa probable | Solución |
 |---|---|---|
-| El usuario llega a la pantalla de inicio de sesión de Guacamole en lugar de a la sesión | JWT no aceptado por Guacamole | Verifica que `ISSUER` en `.env` coincide con el emisor de blockchain-services mostrado en `/auth/.well-known/openid-configuration`. |
+| El usuario llega a la pantalla de inicio de sesión de Guacamole en lugar de a la sesión | JWT no aceptado por Guacamole | Verifica que `ISSUER` en `.env` coincide con el emisor de blockchain-services mostrado en `/.well-known/openid-configuration`. |
 | La validación de la reserva falla con 401 | Dirección de contrato incorrecta | Comprueba que `CONTRACT_ADDRESS` en `blockchain-services/.env` coincide con el contrato desplegado. |
 | Guacamole muestra "conexión fallida" | Ordenador de laboratorio inaccesible | Comprueba la ruta de red y el firewall de Windows en el ordenador de laboratorio. |
 | La sesión RDP abre pero la aplicación de Lab Station no arranca | Parámetros de Remote App incorrectos | Verifica la clase de ventana y la ruta en la configuración de la conexión de Guacamole. |

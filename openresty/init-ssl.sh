@@ -9,11 +9,16 @@ SSL_DIR="/etc/ssl/private"
 CERT_FILE="$SSL_DIR/fullchain.pem"
 KEY_FILE="$SSL_DIR/privkey.pem"
 TEMP_SSL_DIR="/tmp/ssl"
-RENEW_THRESHOLD_SECONDS=$((30 * 24 * 3600))  # 30 days (ACME renewal threshold)
-SELF_SIGNED_RENEW_THRESHOLD=$((10 * 24 * 3600))  # 10 days (self-signed regeneration threshold)
 SELF_SIGNED_MARKER="$SSL_DIR/.selfsigned_issued"
 SELF_SIGNED_MAX_AGE_SECONDS=$((85 * 24 * 3600))  # 85 days (rotate before 90-day expiry)
-CERTBOT_WEBROOT="/var/www/certbot"
+TLS_RELOAD_INTERVAL_SECONDS="${TLS_RELOAD_INTERVAL_SECONDS:-60}"
+
+case "$TLS_RELOAD_INTERVAL_SECONDS" in
+    ''|*[!0-9]*) TLS_RELOAD_INTERVAL_SECONDS=60 ;;
+esac
+if [ "$TLS_RELOAD_INTERVAL_SECONDS" -eq 0 ]; then
+    TLS_RELOAD_INTERVAL_SECONDS=60
+fi
 
 load_secret_env() {
     variable="$1"
@@ -56,7 +61,7 @@ set_ssl_permissions() {
         chgrp openresty "$KEY_FILE" 2>/dev/null || true
         chmod 640 "$KEY_FILE" 2>/dev/null || true
     else
-        chmod 644 "$KEY_FILE" 2>/dev/null || true
+        chmod 640 "$KEY_FILE" 2>/dev/null || true
     fi
 }
 
@@ -140,6 +145,97 @@ atomic_copy() {
     mv -f "$target_tmp" "$target_path"
 }
 
+atomic_tls_copy() {
+    source_path="$1"
+    target_path="$2"
+    mode="$3"
+    target_tmp="${target_path}.tmp.$$"
+    if ! cp "$source_path" "$target_tmp"; then
+        rm -f "$target_tmp"
+        return 1
+    fi
+    chmod "$mode" "$target_tmp" 2>/dev/null || true
+    mv -f "$target_tmp" "$target_path"
+}
+
+cert_pair_is_usable() {
+    cert_path="$1"
+    key_path="$2"
+
+    [ -s "$cert_path" ] && [ -s "$key_path" ] || return 1
+    openssl x509 -in "$cert_path" -noout >/dev/null 2>&1 || return 1
+    openssl x509 -in "$cert_path" -checkend 0 -noout >/dev/null 2>&1 || return 1
+    openssl pkey -in "$key_path" -noout >/dev/null 2>&1 || return 1
+
+    if [ -n "${SERVER_NAME:-}" ] && [ "$SERVER_NAME" != "localhost" ]; then
+        case "$SERVER_NAME" in
+            *:*)
+                openssl x509 -in "$cert_path" -checkip "$SERVER_NAME" -noout >/dev/null 2>&1 || return 1
+                ;;
+            *)
+                openssl x509 -in "$cert_path" -checkhost "$SERVER_NAME" -noout >/dev/null 2>&1 || return 1
+                ;;
+        esac
+    fi
+
+    mkdir -p "$TEMP_SSL_DIR"
+    cert_public_tmp="$TEMP_SSL_DIR/cert-public.$$"
+    key_public_tmp="$TEMP_SSL_DIR/key-public.$$"
+
+    if ! openssl x509 -in "$cert_path" -pubkey -noout |
+        openssl pkey -pubin -outform DER > "$cert_public_tmp"; then
+        rm -f "$cert_public_tmp" "$key_public_tmp"
+        return 1
+    fi
+    if ! openssl pkey -in "$key_path" -pubout -outform DER > "$key_public_tmp"; then
+        rm -f "$cert_public_tmp" "$key_public_tmp"
+        return 1
+    fi
+
+    cmp -s "$cert_public_tmp" "$key_public_tmp"
+    result=$?
+    rm -f "$cert_public_tmp" "$key_public_tmp"
+    return "$result"
+}
+
+primary_certbot_domain() {
+    certbot_domains="${CERTBOT_DOMAINS:-${SERVER_NAME:-}}"
+    primary_domain=$(echo "$certbot_domains" | cut -d',' -f1 | tr -d ' ')
+    case "$primary_domain" in
+        ''|localhost|*/*|*..*) return 1 ;;
+    esac
+    printf '%s\n' "$primary_domain"
+}
+
+resolve_certbot_live_pair() {
+    primary_domain="$(primary_certbot_domain 2>/dev/null || true)"
+    if [ -z "$primary_domain" ]; then
+        return 1
+    fi
+
+    live_cert="$SSL_DIR/live/$primary_domain/fullchain.pem"
+    live_key="$SSL_DIR/live/$primary_domain/privkey.pem"
+    if cert_pair_is_usable "$live_cert" "$live_key"; then
+        LIVE_CERT_FILE="$live_cert"
+        LIVE_KEY_FILE="$live_key"
+        return 0
+    fi
+    return 1
+}
+
+install_tls_pair() {
+    source_cert="$1"
+    source_key="$2"
+    if ! atomic_tls_copy "$source_cert" "$CERT_FILE" 0644; then
+        return 1
+    fi
+    if ! atomic_tls_copy "$source_key" "$KEY_FILE" 0640; then
+        return 1
+    fi
+    set_ssl_permissions
+    return 0
+}
+
 is_valid_public_key() {
     [ -f "$1" ] && grep -q "BEGIN PUBLIC KEY" "$1" \
         && openssl pkey -pubin -in "$1" -noout >/dev/null 2>&1
@@ -203,12 +299,6 @@ is_localhost_self_signed() {
     echo "$subj" | grep -q "CN=localhost" && echo "$issuer" | grep -q "CN=localhost"
 }
 
-is_acme_cert() {
-    # Check if certificate is issued by Let's Encrypt or other ACME CA
-    issuer=$(openssl x509 -in "$CERT_FILE" -noout -issuer 2>/dev/null || echo "")
-    echo "$issuer" | grep -qiE "(Let's Encrypt|R3|R4|E1|E2|ISRG|ZeroSSL)"
-}
-
 get_cert_days_until_expiry() {
     end_date=$(openssl x509 -in "$CERT_FILE" -noout -enddate 2>/dev/null | sed 's/notAfter=//')
     if [ -z "$end_date" ]; then
@@ -230,97 +320,47 @@ get_cert_days_until_expiry() {
     echo "$days"
 }
 
-cert_expires_within() {
-    threshold_seconds="$1"
-    openssl x509 -checkend "$threshold_seconds" -noout -in "$CERT_FILE" >/dev/null 2>&1
-}
-
-renew_acme_cert() {
-    if [ -z "${CERTBOT_DOMAINS:-}" ] || [ -z "${CERTBOT_EMAIL:-}" ]; then
-        echo "ACME renewal skipped: CERTBOT_DOMAINS or CERTBOT_EMAIL not set"
-        return 1
-    fi
-    
-    echo "Attempting ACME certificate renewal..."
-    mkdir -p "$CERTBOT_WEBROOT"
-    
-    # Try renewal first (faster if cert exists)
-    if certbot renew --webroot -w "$CERTBOT_WEBROOT" --quiet --deploy-hook "echo 'Certificate renewed successfully'" 2>/dev/null; then
-        echo "ACME certificate renewed via certbot renew"
-        return 0
-    fi
-    
-    # If renewal fails, try obtaining a new cert
-    domain_args=""
-    for domain in $(echo "$CERTBOT_DOMAINS" | tr ',' ' '); do
-        domain_args="$domain_args -d $domain"
-    done
-    
-    if certbot certonly --webroot -w "$CERTBOT_WEBROOT" \
-        $domain_args \
-        --email "$CERTBOT_EMAIL" \
-        --agree-tos --non-interactive --quiet 2>/dev/null; then
-        
-        # Copy new certs to expected location
-        primary_domain=$(echo "$CERTBOT_DOMAINS" | cut -d',' -f1)
-        cp "/etc/letsencrypt/live/$primary_domain/fullchain.pem" "$CERT_FILE"
-        cp "/etc/letsencrypt/live/$primary_domain/privkey.pem" "$KEY_FILE"
-        chmod 644 "$CERT_FILE"
-        chmod 600 "$KEY_FILE"
-        echo "ACME certificate obtained and installed"
-        return 0
-    fi
-    
-    echo "ACME certificate renewal failed"
-    return 1
-}
-
-# Check if certificates exist or need renewal
-if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-    # Try ACME first if configured
-    if [ -n "${CERTBOT_DOMAINS:-}" ] && [ -n "${CERTBOT_EMAIL:-}" ]; then
-        if ! renew_acme_cert; then
-            echo "ACME failed, falling back to self-signed"
-            generate_self_signed
-        fi
-    else
+# Keep the stable files as OpenResty's canonical TLS paths. If they are
+# missing, expired, mismatched, or do not cover SERVER_NAME, promote the
+# matching Certbot lineage before starting Nginx. Certbot's deploy hook also
+# performs this promotion after a successful renewal.
+LIVE_CERT_FILE=""
+LIVE_KEY_FILE=""
+if cert_pair_is_usable "$CERT_FILE" "$KEY_FILE"; then
+    echo "SSL certificates found in the canonical certs/ paths"
+elif resolve_certbot_live_pair; then
+    echo "Canonical TLS pair is unavailable; using Certbot certificate from $LIVE_CERT_FILE"
+    if ! install_tls_pair "$LIVE_CERT_FILE" "$LIVE_KEY_FILE"; then
+        echo "Could not promote the Certbot TLS pair; generating a self-signed certificate"
         generate_self_signed
     fi
 else
-    echo "SSL certificates found"
-    set_ssl_permissions
-    days_left=$(get_cert_days_until_expiry)
-    echo "   Days until expiry: $days_left"
-    
-    if is_acme_cert; then
-        # ACME cert: renew at 30 days before expiry
-        if ! cert_expires_within "$RENEW_THRESHOLD_SECONDS"; then
-            echo "   Status: ACME certificate expires in less than 30 days. Renewing..."
-            if renew_acme_cert; then
-                echo "   ACME certificate renewed successfully"
+    echo "No usable TLS certificate pair found; generating a self-signed certificate"
+    generate_self_signed
+fi
+
+set_ssl_permissions
+days_left=$(get_cert_days_until_expiry)
+echo "   Days until expiry: $days_left"
+
+if is_localhost_self_signed; then
+    echo "   Status: self-signed certificate"
+else
+    case "$days_left" in
+        ''|unknown|*[!0-9-]*)
+            echo "   Status: valid certificate (expiry calculation unavailable)"
+            ;;
+        -*)
+            echo "   Status: certificate is expired or invalid"
+            ;;
+        *)
+            if [ "$days_left" -lt 30 ]; then
+                echo "   Warning: certificate expires in $days_left days!"
             else
-                echo "   Warning: ACME renewal failed - will retry later"
+                echo "   Status: valid user-provided certificate"
             fi
-        else
-            echo "   Status: Valid ACME certificate"
-        fi
-    elif is_localhost_self_signed; then
-        # Self-signed cert: regenerate at 10 days before expiry
-        if ! cert_expires_within "$SELF_SIGNED_RENEW_THRESHOLD"; then
-            echo "   Status: Self-signed certificate expiring soon. Regenerating..."
-            generate_self_signed
-        else
-            echo "   Status: Valid self-signed certificate"
-        fi
-    else
-        # User-provided cert: warn but don't replace
-        if [ "$days_left" -lt 30 ]; then
-            echo "   Warning: User-provided certificate expires in $days_left days!"
-            echo "   Please renew manually or configure CERTBOT_DOMAINS and CERTBOT_EMAIL"
-        else
-            echo "   Status: Valid user-provided certificate"
-        fi
-    fi
+            ;;
+    esac
 fi
 
 # Bootstrap JWT public key (local generation in Full mode or remote sync in Lite mode).
@@ -427,14 +467,18 @@ watch_certs() {
     last_cert_ts=$(stat -c %Y "$CERT_FILE" 2>/dev/null || stat -f %m "$CERT_FILE" 2>/dev/null || echo 0)
     last_key_ts=$(stat -c %Y "$KEY_FILE" 2>/dev/null || stat -f %m "$KEY_FILE" 2>/dev/null || echo 0)
     while true; do
-        sleep 43200  # 12h
+        sleep "$TLS_RELOAD_INTERVAL_SECONDS"
         cert_ts=$(stat -c %Y "$CERT_FILE" 2>/dev/null || stat -f %m "$CERT_FILE" 2>/dev/null || echo 0)
         key_ts=$(stat -c %Y "$KEY_FILE" 2>/dev/null || stat -f %m "$KEY_FILE" 2>/dev/null || echo 0)
         if [ "$cert_ts" != "$last_cert_ts" ] || [ "$key_ts" != "$last_key_ts" ]; then
-            echo "Certificate/key changed on disk. Reloading OpenResty..."
-            /usr/local/openresty/bin/openresty -s reload || true
-            last_cert_ts="$cert_ts"
-            last_key_ts="$key_ts"
+            if cert_pair_is_usable "$CERT_FILE" "$KEY_FILE"; then
+                echo "Certificate/key changed on disk. Reloading OpenResty..."
+                /usr/local/openresty/bin/openresty -s reload || true
+                last_cert_ts="$cert_ts"
+                last_key_ts="$key_ts"
+            else
+                echo "WARNING: Changed TLS files do not form a valid matching pair; deferring reload"
+            fi
         fi
     done
 }
@@ -496,10 +540,6 @@ watch_full_jwt_public_key() {
 watch_full_jwt_public_key &
 
 auto_rotate_self_signed() {
-    # Only rotate self-signed certs when ACME is not configured
-    if [ -n "${CERTBOT_DOMAINS:-}" ] && [ -n "${CERTBOT_EMAIL:-}" ]; then
-        return
-    fi
     while true; do
         sleep 86400  # daily check
         if ! is_localhost_self_signed; then
@@ -517,29 +557,6 @@ auto_rotate_self_signed() {
 }
 
 auto_rotate_self_signed &
-
-# Background ACME renewal watcher (runs twice daily for Let's Encrypt best practices)
-auto_renew_acme() {
-    if [ -z "${CERTBOT_DOMAINS:-}" ] || [ -z "${CERTBOT_EMAIL:-}" ]; then
-        return
-    fi
-    while true; do
-        sleep 43200  # 12 hours
-        if ! is_acme_cert; then
-            continue
-        fi
-        days_left=$(get_cert_days_until_expiry)
-        if ! cert_expires_within "$RENEW_THRESHOLD_SECONDS"; then
-            echo "ACME certificate expires in $days_left days - attempting renewal..."
-            if renew_acme_cert; then
-                echo "ACME certificate renewed. Reloading OpenResty..."
-                /usr/local/openresty/bin/openresty -s reload || true
-            fi
-        fi
-    done
-}
-
-auto_renew_acme &
 
 auto_refresh_jwt_public_key() {
     if [ "$jwt_key_sync_mode" != "remote" ]; then

@@ -29,6 +29,11 @@
     "d /srv/lab-gateway 0755 root root -"
     "d /srv/lab-gateway/blockchain-data 0750 root root -"
     "d /srv/lab-gateway/certs 0750 root root -"
+    "d /srv/lab-gateway/fmu-access-state 0700 root root -"
+    "d /srv/lab-gateway/lab-content 0755 root root -"
+    "d /srv/lab-gateway/ops-data 0700 root root -"
+    "d /srv/lab-gateway/ops-data/guac-revocation-spool 0700 root root -"
+    "d /srv/lab-gateway/ops-data/winrm-certificates 0700 root root -"
     "d /srv/lab-gateway/certbot 0755 root root -"
     "d /srv/lab-gateway/certbot/www 0755 root root -"
   ];

@@ -1,15 +1,16 @@
 # Configuration reference
 
 This reference explains the configuration contract for the Compose-managed Lab
-Gateway. It complements `.env.example`, which is the exhaustive list of
-variables and defaults. Do not copy deployment secrets into documentation or
-commit either `.env` file.
+Gateway. It complements `.env.example`, which is the primary list of root
+gateway variables and defaults; component-specific variables are called out in
+their service documentation. Do not copy deployment secrets into documentation
+or commit either `.env` file.
 
 ## Configuration files and responsibilities
 
 | File | Owns | Do not place here |
 | --- | --- | --- |
-| `.env` | Gateway origin, edge ports, Compose services, MySQL credentials, operator tokens, Lite trust settings, FMU, Ops Worker, AAS, and CORS at the edge. | Contract RPC/wallet configuration owned by the embedded backend. |
+| `.env` | Gateway origin, edge ports, Compose services, MySQL credentials, operator tokens, Lite trust settings, FMU, Ops Worker, AAS, and CORS at the edge. | Contract RPC/wallet configuration owned by the `blockchain-services` backend. |
 | `blockchain-services/.env` | Smart-contract/RPC settings, backend wallet behavior, provider features, and backend CORS/security configuration. | Gateway-only OpenResty and Compose orchestration values. |
 | `ops-worker/hosts.json` or configured host catalog | Non-secret Station addresses, lab mappings, and a `credential_ref`. | WinRM passwords or tokens. |
 
@@ -23,7 +24,7 @@ flowchart LR
     Env[.env] --> Edge[OpenResty and Compose]
     Env --> Ops[Ops Worker]
     Env --> Optional[FMU / AAS profiles]
-    BackendEnv[blockchain-services/.env] --> Backend[Embedded backend]
+    BackendEnv[blockchain-services/.env] --> Backend[blockchain-services backend]
     Hosts[Host catalog + credential references] --> Ops
     Edge --> Backend
 ```
@@ -128,9 +129,42 @@ JWT `iss`/`sub` must use that same canonical value.
 | Demo laboratory | `MARKETPLACE_URL`, `DEMO_USER`, `DEMO_LAB_ID`, `DEMO_CONNECTION_ID`, `DEMO_HEARTBEAT_MAX_AGE_SECONDS`, `DEMO_SESSION_TTL_SECONDS`, `DEMO_RATE_LIMIT_PER_MINUTE`, `DEMO_STATION_TIMEOUT_SECONDS`, `DEMO_PENDING_LEASE_SECONDS` | Configure the lab and Guacamole connection together. OpenResty exposes the protected readiness result in `/gateway/health/details`; the demo hand-off stays fail-closed until it is `ready` and the physical lifecycle call completes. The pending lease is bounded to 30–60 seconds so an abandoned browser handoff cannot hold the demo slot for the full session TTL. |
 | Guacamole | `GUAC_ADMIN_*`, `API_SESSION_TIMEOUT`, `JWT_GUAC_IDLE_TIMEOUT_SECONDS`, `BAN_*` | Manual administrator login is an operations path, not the end-user hand-off. Keep anti-brute-force controls enabled. |
 | FMU | `FMU_RUNNER_ENABLED`, `FMU_BACKEND_MODE`, `FMU_LOCAL_DEV_MODE`, `FMU_JWT_AUDIENCE`, `AUTH_JWKS_URL`, `FMU_STATION_*`, `FMU_GATEWAY_ID` | The audience must be the exact public FMU `accessURI`. `FMU_GATEWAY_ID` uses the same host-plus-non-default-port identity as observer credentials. `FMU_BACKEND_MODE` selects local versus Lab Station execution; Full/Lite selects the JWKS source. `AUTH_JWKS_URL` is an optional explicit override and must use HTTPS, except for loopback/private hosts used by local Compose networking. |
-| Ops / Lab Station | `OPS_SECRETS_KEY`, `WINRM_MANAGEMENT_CIDRS`, `OPS_ALLOWED_COMMANDS` | Use TLS WinRM on 5986 and a restricted management network. Losing the stable Fernet key makes stored credentials unreadable. |
+| Ops / Lab Station / Energy | `OPS_SECRETS_KEY`, `OPS_WINRM_TRUST_PATH`, `WINRM_MANAGEMENT_CIDRS`, `OPS_ALLOWED_COMMANDS`, `OPS_RESERVATION_*`, `OPS_DISCOVERY_*`, `OPS_POWER_CONFIG`, `OPS_POWER_CREDENTIALS_PATH`, `OPS_POWER_STATUS_CACHE_SECONDS`, `NOTIFICATION_SERVICE_*` | Use TLS WinRM on 5986 and a restricted management network. Losing the stable Fernet key makes stored WinRM and energy credentials unreadable. The scheduler, timeline, discovery, notification controls, per-host certificate trust path, provider-local power catalog, encrypted power credentials and live-status cache are forwarded to `ops-worker` from the root `.env`. |
 | AAS | `BASYX_AAS_URL`, `AAS_ALLOWED_HOSTS`, `AAS_SERVICE_TOKEN` | Use `https://` and exact host allow-listing for an external AAS. Caller JWTs are not forwarded. |
-| CORS and proxies | `CORS_ALLOWED_ORIGINS`, `TRUST_PROXY_HEADERS` | Keep origins explicit. Trust forwarded client-IP headers only from a controlled upstream proxy. |
+| CORS and proxies | `CORS_ALLOWED_ORIGINS`, `ADMIN_TRUST_FORWARDED_IP` | Keep origins explicit. Set `ADMIN_TRUST_FORWARDED_IP=true` only when forwarded client-IP headers come from a controlled upstream proxy; set it false when OpenResty is the public edge. The template default `true` assumes a private upstream proxy and must be changed for direct public exposure. |
+
+The Compose-managed Ops Worker exposes the following optional tuning controls
+from the root `.env`: `OPS_ALLOWED_COMMANDS`, `OPS_POLL_ENABLED`,
+`OPS_POLL_INTERVAL`, `OPS_RESERVATION_AUTOMATION`,
+`OPS_RESERVATION_SCAN_INTERVAL`, `OPS_RESERVATION_START_LEAD`,
+`OPS_RESERVATION_END_DELAY`, `OPS_RESERVATION_LOOKBACK`,
+`OPS_RESERVATION_RETRY_COOLDOWN`, `OPS_RESERVATION_MAX_BATCH`,
+`OPS_TIMELINE_MAX_OPS`, `OPS_TIMELINE_DEFAULT_LIMIT`,
+`OPS_TIMELINE_PHASE_LOOKBACK`, `NOTIFICATION_SERVICE_ENABLED`,
+`NOTIFICATION_SERVICE_URL`, `NOTIFICATION_SERVICE_RECIPIENTS`,
+`NOTIFICATION_SERVICE_RETRY_ATTEMPTS`,
+`NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS`,
+`OPS_DISCOVERY_TIMEOUT_SECONDS`, `OPS_DISCOVERY_LABSTATION_PORTS` and
+`OPS_DISCOVERY_LABSTATION_PATHS`, `OPS_WINRM_TRUST_PATH`, and
+`OPS_POWER_STATUS_CACHE_SECONDS`. Defaults are kept in `.env.example` and in
+the Compose interpolation expressions so the service documentation and the
+deployed container use the same contract.
+
+Power controller configuration and encrypted device credentials are provider-
+local files under the persistent `ops-data` mount. `GET
+/ops/api/power/controllers` reads the local catalog without contacting
+hardware. Live discovery and outlet state are requested separately through
+`GET /ops/api/power/controllers/status`; the default five-second cache can be
+bypassed with `?refresh=true`. A controller being unreachable is a device or
+private-network condition, not by itself a failure of the public `/ops/health`
+endpoint.
+
+`OPS_WINRM_TRUST_PATH` defaults to `/app/data/winrm-certificates`, which is
+inside the persistent `ops-data` bind mount. Each host certificate is placed
+under `<lower-case-winrm-trust-ref>/server.cer`; the worker creates the host
+directories at startup/reload, materializes a PEM copy for Requests/OpenSSL
+and applies it as a per-host Requests/pywinrm trust path. This is an
+application trust store, not a global container CA installation.
 
 ## Optional Compose profiles
 
@@ -139,7 +173,7 @@ JWT `iss`/`sub` must use that same canonical value.
 | `fmu-runner` | Station-only production FMU facade | Set `FMU_RUNNER_ENABLED=true`, `FMU_JWT_AUDIENCE`, `FMU_STATION_BASE_URL`, and `FMU_STATION_INTERNAL_TOKEN`. |
 | `fmu-local-dev` | Isolated native local FMU executor | Development/test only. It is deliberately isolated from Station and control-plane credentials, but shares the dedicated internal `fmu_auth` network with `blockchain-services` for Full-mode JWKS retrieval. |
 | `aas` | Bundled BaSyx and MongoDB | Set non-default BaSyx Mongo secrets. Omit it when using a valid configured external AAS. |
-| `certbot` | ACME certificate services | Set `CERTBOT_DOMAINS`, `CERTBOT_EMAIL`, and optionally `CERTBOT_STAGING`. |
+| `certbot` | ACME certificate services | Set `CERTBOT_DOMAINS`, `CERTBOT_EMAIL`, and optionally `CERTBOT_STAGING`. The first domain must match `SERVER_NAME`; HTTP-01 requires public port 80. The deploy hook promotes the managed lineage to `certs/fullchain.pem` and `certs/privkey.pem`, and OpenResty reloads the validated pair automatically. |
 | `cloudflare` / `cloudflare-token` | Cloudflare Tunnel | Choose the profile described by the setup script; do not expose internal services through the tunnel. |
 
 The two FMU profiles use the same internal `fmu-runner` alias. Never run them
@@ -198,4 +232,4 @@ service credits.
 - [Gateway and Lab Station operations](../workflows/gateway-lab-station-operations.md)
 - [FMI/FMU support](../fmi-fmu-support.md)
 - [AAS support](../aas-support.md)
-- [Embedded backend deployment guide](../../blockchain-services/docs/configuration/DEPLOYMENT.md)
+- [Backend deployment guide](../../blockchain-services/docs/configuration/DEPLOYMENT.md)
