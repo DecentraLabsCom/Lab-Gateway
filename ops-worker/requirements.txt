@@ -32,12 +32,12 @@ wakeonlan==4.0.0
 
 # Task scheduler
 APScheduler==3.11.3
-pytz==2026.3.post1
+pytz==2026.4
 tzlocal==5.4.4
 six==1.17.0
 
 # Database ORM
-SQLAlchemy==2.0.54
+SQLAlchemy==2.1.0
 typing_extensions==4.16.0
 greenlet==3.5.6
 
