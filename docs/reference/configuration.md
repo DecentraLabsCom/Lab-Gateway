@@ -58,7 +58,7 @@ BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ALLOWED_ORIGINS=https://lab.example.edu,https://marketplace.example.edu
-MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.example.edu/.well-known/public-key.pem
+MARKETPLACE_PUBLIC_KEY_URL=https://marketplace.example.edu/.well-known/jwks.json
 ```
 
 `GUACAMOLE_MYSQL_USER`, `BLOCKCHAIN_MYSQL_USER`, `OPS_BACKEND_MYSQL_USER`,

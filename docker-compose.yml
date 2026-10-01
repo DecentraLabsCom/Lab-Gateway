@@ -40,6 +40,8 @@ services:
       - PROVIDER_CONFIG_PATH=/app/data/provider.properties
       - PRIVATE_KEY_PATH=/app/data/keys/private_key.pem
       - PUBLIC_KEY_PATH=/app/data/keys/public_key.pem
+      # Marketplace JWKS used to validate Marketplace-issued JWTs.
+      - MARKETPLACE_PUBLIC_KEY_URL=${MARKETPLACE_PUBLIC_KEY_URL:-https://marketplace-decentralabs.vercel.app/.well-known/jwks.json}
       - ADMIN_ACCESS_TOKEN_FILE=/run/secrets/admin_access_token
       - ADMIN_ACCESS_TOKEN=
       - ADMIN_ACCESS_TOKEN_HEADER=${ADMIN_ACCESS_TOKEN_HEADER:-X-Access-Token}
