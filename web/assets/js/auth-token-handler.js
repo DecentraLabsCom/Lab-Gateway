@@ -106,7 +106,7 @@
                         }
                     }
                 } else if (config.key === 'billing') {
-                    const sessionCheck = await fetch('/wallet-dashboard', {
+                    const sessionCheck = await fetch('/wallet-dashboard/', {
                         credentials: 'same-origin',
                         cache: 'no-store',
                         skipAuthPrompt: true
