@@ -94,7 +94,10 @@ def test_gateway_ops_schema_is_migrated_before_full_or_lite_services():
     assert "flyway_ops_schema_history" in compose
     assert compose.count("ops-schema-migrator") >= 3
     assert compose.count("service_completed_successfully") >= 2
-    assert "spring.flyway.ignore-migration-patterns=versioned:missing" in application
+    assert (
+        "spring.flyway.ignore-migration-patterns=*:missing,*:future"
+        in application
+    )
 
     for legacy_backend_migration in (
         "V10__labstation_ops.sql",
