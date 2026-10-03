@@ -49,7 +49,7 @@ test('refreshes the Lab Manager session with the existing protected request', as
   }]);
 });
 
-test('reports inventory candidates and disables operations on policy denial', async () => {
+test('keeps the operations hint clear and disables operations on policy denial', async () => {
   const module = loadModule();
   const hint = element();
   const refresh = element();
@@ -59,7 +59,6 @@ test('reports inventory candidates and disables operations on policy denial', as
     opsHintEl: hint,
     refreshHostsBtn: refresh,
     timelineBtn: timeline,
-    groupCandidates: candidates => candidates.map(candidate => candidate.hostname),
     logger: { warn() {} },
   });
 
@@ -67,7 +66,7 @@ test('reports inventory candidates and disables operations on policy denial', as
     guacamoleAvailable: true,
     guacamoleUnmatched: [{ hostname: 'station-1' }, { hostname: 'station-2' }],
   });
-  assert.match(hint.textContent, /2 Lab Station candidates/);
+  assert.equal(hint.textContent, '');
   assert.equal(await controller.checkAvailability(), false);
   assert.equal(refresh.disabled, true);
   assert.equal(timeline.disabled, true);

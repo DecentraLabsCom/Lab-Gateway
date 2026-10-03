@@ -1509,7 +1509,7 @@ test('groups connections by station without copying lab associations into a host
   await flush();
   const candidateList = elements.get('guacamoleCandidateList');
   assert.equal(candidateList.options.length, 1, 'Connections targeting one station should render as one candidate');
-  assert.match(elements.get('opsHint').textContent, /1 Lab Station candidate awaiting configuration\./);
+  assert.equal(elements.get('opsHint').textContent, '');
   const initialRow = candidateList.options.at(-1);
   const checkButton = {
     dataset: { action: 'probe-candidate' },

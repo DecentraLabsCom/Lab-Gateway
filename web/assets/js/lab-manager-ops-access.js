@@ -6,14 +6,10 @@
         refreshHostsBtn,
         timelineBtn,
         fetchImpl,
-        groupCandidates = () => [],
         logger = console,
     } = {}) {
         if (typeof fetchImpl !== 'function') {
             throw new Error('LabManagerOpsAccess requires fetchImpl');
-        }
-        if (typeof groupCandidates !== 'function') {
-            throw new Error('LabManagerOpsAccess requires groupCandidates');
         }
 
         function updateHint(data) {
@@ -22,11 +18,7 @@
                 opsHintEl.textContent = 'The ops inventory could not be loaded.';
                 return;
             }
-            const stationCount = groupCandidates(data.guacamoleUnmatched).length;
-            const guacStatus = data.guacamoleAvailable
-                ? `${stationCount} Lab Station candidate${stationCount === 1 ? '' : 's'} awaiting configuration.`
-                : 'Guacamole inventory unavailable.';
-            opsHintEl.textContent = `Hosts are loaded from ops-worker/hosts.json and ops-data/hosts.json. ${guacStatus}`;
+            opsHintEl.textContent = '';
         }
 
         async function refreshSession() {

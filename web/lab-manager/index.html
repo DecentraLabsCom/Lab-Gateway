@@ -569,7 +569,7 @@
                     <div class="card-header">
                         <div>
                             <h2>Lab Power Control</h2>
-                            <p>Inspect configured power controllers, manage lab policies and run controlled manual tests through /ops.</p>
+                            <p>Inspect configured power controllers, manage lab policies and run controlled manual tests.</p>
                         </div>
                     </div>
                     <div class="card-body">
@@ -600,7 +600,7 @@
                             <div class="subcard-header">
                                 <div>
                                     <h3><i class="fas fa-file-code"></i> Lab power policy</h3>
-                                    <div class="hint">Build the policy from its operational fields. Controllers, outlets and credentials remain provider-local.</div>
+                                    <div class="hint">Build the policy from its operational fields.</div>
                                 </div>
                                 <span class="pill soft" id="powerPoliciesStatus">Loading...</span>
                             </div>
@@ -683,14 +683,14 @@
                     <div class="card-header">
                         <div>
                             <h2>Lab Station Ops</h2>
-                            <p>Poll heartbeat and trigger LabStation commands via /ops.</p>
+                            <p>Poll heartbeat and trigger LabStation commands.</p>
                         </div>
                         <div class="actions inline-actions">
                             <button class="primary-btn" id="refreshHostsBtn"><i class="fas fa-rotate-right"></i> Refresh</button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="hint hint-spaced" id="opsHint">Hosts are loaded from ops-worker/hosts.json plus provisioned hosts in ops-data/hosts.json, then auto-linked to matching Guacamole connections.</div>
+                        <div class="hint hint-spaced" id="opsHint"></div>
                         <div class="host-list" id="hostList">
                             <div class="empty">No ops hosts loaded yet.</div>
                         </div>

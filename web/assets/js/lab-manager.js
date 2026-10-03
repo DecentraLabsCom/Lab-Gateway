@@ -183,7 +183,6 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshHostsBtn,
         timelineBtn: reservationsFeatureController.timelineButton,
         fetchImpl: (...args) => fetch(...args),
-        groupCandidates: candidates => hostFeatureController.groupCandidates(candidates),
         logger: console,
     });
     const operationsLifecycleController = operationsLifecycleModule.createController({
