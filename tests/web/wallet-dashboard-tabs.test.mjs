@@ -7,6 +7,7 @@ const htmlPath = new URL('blockchain-services/src/main/resources/static/wallet-d
 const tabsScriptPath = new URL('blockchain-services/src/main/resources/static/wallet-dashboard/assets/js/wallet-dashboard-tabs.js', repoRoot);
 const adminScriptPath = new URL('blockchain-services/src/main/resources/static/wallet-dashboard/assets/js/admin.js', repoRoot);
 const accessPoliciesScriptPath = new URL('blockchain-services/src/main/resources/static/wallet-dashboard/assets/js/access-policies.js', repoRoot);
+const policyStylesPath = new URL('blockchain-services/src/main/resources/static/wallet-dashboard/assets/css/wallet-dashboard-policy.css', repoRoot);
 
 test('wallet dashboard exposes the three role-aware workflow tabs', () => {
   const html = fs.readFileSync(htmlPath, 'utf8');
@@ -41,6 +42,7 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   const source = fs.readFileSync(tabsScriptPath, 'utf8');
   const admin = fs.readFileSync(adminScriptPath, 'utf8');
   const accessPolicies = fs.readFileSync(accessPoliciesScriptPath, 'utf8');
+  const policyStyles = fs.readFileSync(policyStylesPath, 'utf8');
 
   assert.match(source, /window\.location\.hash/);
   assert.match(source, /ArrowLeft/);
@@ -57,6 +59,10 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(accessPolicies, /data-multiselect-option/);
   assert.match(accessPolicies, /categories: selectedValues\(\$\('accessPolicyTestCategories'\)\)/);
   assert.doesNotMatch(accessPolicies, /accessPolicyTestCategories'\)\.value\.split\(','\)/);
+  assert.doesNotMatch(accessPolicies, /fa-search/);
+  assert.match(policyStyles, /\.policy-multi-select-trigger \{[\s\S]*padding: var\(--spacing-sm\);/);
+  assert.doesNotMatch(policyStyles, /\.policy-multi-select-trigger \{[\s\S]*min-height: 2\.8rem;/);
+  assert.doesNotMatch(policyStyles, /\.policy-multi-select-search input \{[\s\S]*padding: [^;]*2rem;/);
 });
 
 test('settlement payout action stays with the lab selector before the metrics column', () => {
