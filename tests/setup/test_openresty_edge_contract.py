@@ -55,6 +55,7 @@ EXPECTED_LOCATION_MATRIX = (
     "= /auth/fmu/revoke",
     "= /wallet-dashboard",
     "= /wallet-dashboard/login",
+    "/wallet-admin/",
     "/wallet-dashboard/",
     "= /institution-config",
     "= /institution-config/login",
@@ -128,6 +129,7 @@ EXPECTED_WALLET_LOCATIONS = ("/wallet/",)
 EXPECTED_WALLET_DASHBOARD_LOCATIONS = (
     "= /wallet-dashboard",
     "= /wallet-dashboard/login",
+    "/wallet-admin/",
     "/wallet-dashboard/",
 )
 EXPECTED_INSTITUTION_CONFIG_LOCATIONS = (
@@ -1455,6 +1457,26 @@ def test_wallet_dashboard_routes_keep_redirect_login_and_static_proxy_contract()
 
     login_block = _location_block(include, "= /wallet-dashboard/login")
     assert "content_by_lua_file /etc/openresty/lua/admin_login.lua;" in login_block
+
+    admin_api_block = _location_block(include, "/wallet-admin/")
+    for directive in (
+        "access_by_lua_file /etc/openresty/lua/billing_access.lua;",
+        'proxy_set_header Authorization "";',
+        'proxy_set_header Cookie "";',
+        "proxy_set_header Host $host;",
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-For $remote_addr;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
+        "resolver 127.0.0.11 valid=5s;",
+        "set $backend_wallet_admin http://blockchain-services:8080;",
+        "proxy_pass $backend_wallet_admin;",
+    ):
+        assert directive in admin_api_block
+    _assert_order(
+        admin_api_block,
+        "access_by_lua_file /etc/openresty/lua/billing_access.lua;",
+        "proxy_pass $backend_wallet_admin;",
+    )
 
     static_block = _location_block(include, "/wallet-dashboard/")
     assert "access_by_lua_file /etc/openresty/lua/billing_access.lua;" in static_block
