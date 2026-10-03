@@ -60,7 +60,7 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(accessPolicies, /categories: selectedValues\(\$\('accessPolicyTestCategories'\)\)/);
   assert.doesNotMatch(accessPolicies, /accessPolicyTestCategories'\)\.value\.split\(','\)/);
   assert.doesNotMatch(accessPolicies, /fa-search/);
-  assert.match(policyStyles, /\.policy-multi-select-trigger \{[\s\S]*padding: var\(--spacing-sm\);/);
+  assert.match(policyStyles, /\.policy-multi-select-trigger \{[\s\S]*height: 3\.125rem;/);
   assert.doesNotMatch(policyStyles, /\.policy-multi-select-trigger \{[\s\S]*min-height: 2\.8rem;/);
   assert.doesNotMatch(policyStyles, /\.policy-multi-select-search input \{[\s\S]*padding: [^;]*2rem;/);
 });
