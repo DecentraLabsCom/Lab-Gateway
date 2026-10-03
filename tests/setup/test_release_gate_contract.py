@@ -124,6 +124,8 @@ def test_gateway_ops_schema_is_migrated_before_full_or_lite_services():
         ops_migrations / "V6__guacamole_token_validation_marker.sql"
     ).read_text(encoding="utf-8")
     assert "token_validated_at" in validation_marker
+    assert "information_schema.columns" in validation_marker
+    assert "PREPARE add_token_validated_at" in validation_marker
 
 
 def test_setup_contract_job_has_shared_checkout_and_worker_import_dependencies():
