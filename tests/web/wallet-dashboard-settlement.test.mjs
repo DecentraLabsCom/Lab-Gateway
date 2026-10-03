@@ -23,7 +23,7 @@ test('settlement dashboard exposes the canonical claim workflow', () => {
 });
 
 test('settlement dashboard no longer submits the fail-closed generic transition', () => {
-  const handler = admin.match(/async function handleProviderSettlementTransition[\s\S]*?\n}\n/);
+  const handler = admin.match(/async function handleProviderSettlementTransition[\s\S]*?\r?\n}\r?\n/);
   assert.ok(handler, 'canonical settlement handler should exist');
   assert.doesNotMatch(handler[0], /transitionProviderReceivableState/);
   assert.doesNotMatch(html, /value="2:3"/);

@@ -19,9 +19,11 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
     assert.match(html, new RegExp(`data-wallet-tab-section="${tab}"`));
   }
 
-  assert.match(html, /id="accessPoliciesSection"[^>]*class="card hidden"/);
-  assert.match(html, /Access Policies/);
-  assert.match(html, /Coming Soon/);
+  assert.match(html, /id="accessPoliciesSection"[^>]*class="card"/);
+  assert.match(html, /id="accessPolicyForm"/);
+  assert.match(html, /id="accessPolicyActivateBtn"/);
+  assert.doesNotMatch(html, /Access Policies/);
+  assert.doesNotMatch(html, /Coming Soon/);
 });
 
 test('wallet dashboard tab controller supports hashes, keyboard navigation and role visibility', () => {
