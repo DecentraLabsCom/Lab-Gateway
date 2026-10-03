@@ -11,6 +11,9 @@ import re
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "blockchain-services"
+SMART_CONTRACTS = ROOT.parent / "Smart-Contracts"
+if not SMART_CONTRACTS.exists():
+    SMART_CONTRACTS = ROOT / "Smart-Contracts"
 APPLICATION = BACKEND / "src" / "main" / "resources" / "application.properties"
 ENV_EXAMPLE = BACKEND / ".env.example"
 
@@ -48,7 +51,7 @@ def test_operator_example_matches_application_defaults_and_has_no_old_ttl():
 
 def test_release_gate_source_tests_cover_the_high_risk_boundaries():
     expected_fragments = {
-        ROOT.parent / "Smart-Contracts" / "test" / "ReleaseGateReservationWindow.t.sol": (
+        SMART_CONTRACTS / "test" / "ReleaseGateReservationWindow.t.sol": (
             "test_pending_request_expires_at_exactly_five_minutes",
             "test_reservation_start_is_the_effective_deadline_when_it_is_earlier",
         ),
