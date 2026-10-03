@@ -38,3 +38,15 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(admin, /accessPoliciesSection/);
   assert.match(admin, /WalletDashboardTabs/);
 });
+
+test('settlement payout action stays with the lab selector before the metrics column', () => {
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  const selectorStart = html.indexOf('<div class="form-group collect-select-group">');
+  const payoutStart = html.indexOf('<div class="collect-actions" id="providerPayoutActions">');
+  const metricsStart = html.indexOf('<div id="collectStatusMetrics"');
+
+  assert.ok(selectorStart >= 0, 'settlement lab selector should exist');
+  assert.ok(payoutStart > selectorStart, 'payout action should follow the lab selector');
+  assert.ok(metricsStart > payoutStart, 'metrics should remain after the selector/action column');
+  assert.match(html, /id="collectLabBtn"[^>]*>\s*<i class="fas fa-coins"><\/i> Request Payout/);
+});
