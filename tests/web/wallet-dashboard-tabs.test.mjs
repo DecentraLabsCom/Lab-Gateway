@@ -22,6 +22,10 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
   assert.match(html, /id="accessPoliciesSection"[^>]*class="card"/);
   assert.match(html, /id="accessPolicyForm"/);
   assert.match(html, /id="accessPolicyActivateBtn"/);
+  assert.match(html, /data-wallet-tab="institution"[\s\S]*Institutional Policies/);
+  assert.match(html, /id="creditPolicyTitle">Spending Policy<\/h2>/);
+  assert.match(html, /fa-shield-halved[\s\S]*> Access Policy<\/h2>/);
+  assert.doesNotMatch(html, /Institution &amp; Credits/);
   assert.doesNotMatch(html, /Access Policies/);
   assert.doesNotMatch(html, /Coming Soon/);
 });
@@ -39,6 +43,9 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(source, /wallet-dashboard:tab-activated/);
   assert.match(admin, /accessPoliciesSection/);
   assert.match(admin, /WalletDashboardTabs/);
+  assert.match(admin, /creditPolicyTitle\.textContent = 'Spending Policy and Operator Controls'/);
+  assert.match(admin, /creditPolicyTitle\.textContent = 'Spending Policy'/);
+  assert.doesNotMatch(admin, /creditPolicyTitle\.textContent = 'Institution Policy/);
 });
 
 test('settlement payout action stays with the lab selector before the metrics column', () => {
