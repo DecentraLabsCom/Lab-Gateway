@@ -74,6 +74,7 @@ class SetupEnvContractTest(unittest.TestCase):
         cls.issue_lite_ps1 = ISSUE_LITE_PS1.read_text(encoding="utf-8")
         cls.validate_gateway_env_ps1 = (ROOT / "scripts" / "Validate-GatewayEnv.ps1").read_text(encoding="utf-8")
         cls.nginx_conf = NGINX_CONF.read_text(encoding="utf-8")
+        cls.openresty_dockerfile = (ROOT / "openresty" / "Dockerfile").read_text(encoding="utf-8")
         cls.compose_file = COMPOSE_FILE.read_text(encoding="utf-8")
         cls.gateway_tests_workflow = (
             ROOT / ".github" / "workflows" / "gateway-tests.yml"
@@ -792,9 +793,24 @@ class SetupEnvContractTest(unittest.TestCase):
         self.assertIn('ffi.load("crypto")', random_module)
 
     def test_openresty_does_not_install_unused_lua_resty_string_dependency(self):
-        dockerfile = (ROOT / "openresty" / "Dockerfile").read_text(encoding="utf-8")
+        dockerfile = self.openresty_dockerfile
 
         self.assertNotIn("lua-resty-string", dockerfile)
+
+    def test_openresty_luarocks_downloads_are_pinned_and_retryable(self):
+        dockerfile = self.openresty_dockerfile
+
+        self.assertIn("curl --fail --location --retry 5 --retry-all-errors", dockerfile)
+        self.assertIn("sha256sum -c -", dockerfile)
+        for package in (
+            "lua-resty-http-0.18.0-0.src.rock",
+            "lua-resty-jwt-0.3.2-1.src.rock",
+            "lua-resty-openssl-1.9.0-1.src.rock",
+            "lua-resty-mysql-0.15-0.rockspec",
+        ):
+            with self.subTest(package=package):
+                self.assertIn(package, dockerfile)
+                self.assertIn(f'luarocks --tree="$TREE" install "/tmp/${{package}}"', dockerfile)
 
     def test_web_tests_checkout_initializes_embedded_backend_submodule(self):
         web_tests = self.gateway_tests_workflow.split("\n  web-tests:", 1)[1].split(
