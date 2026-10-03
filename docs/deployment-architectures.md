@@ -47,6 +47,13 @@ dormant when a Gateway is Lite (`BLOCKCHAIN_SERVICES_ENABLED=false` or the
 OpenResty selects the remote issuer configured by `ISSUER`; the dormant service
 must not be mistaken for the authority of the deployment.
 
+The local `ops-schema-migrator` is deliberately independent from that Java
+process. It runs Flyway before `blockchain-services` or `ops-worker` starts and
+provisions the Gateway-owned operational tables in both Full and Lite. A Lite
+therefore has a durable local operations journal even though its reservations,
+credentials and blockchain state belong to the connected Full Gateway or
+standalone `blockchain-services` control plane.
+
 ## Topology matrix
 
 | Topology | JWT issuer / control plane | Access planes | Required relationship |

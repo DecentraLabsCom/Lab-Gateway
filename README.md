@@ -120,8 +120,9 @@ setup, TLS, Lite mode, and verification:
 
 ## Services and optional profiles
 
-The default stack starts `openresty`, `blockchain-services` (Full mode only),
-`mysql`, `guacamole`, `guacd`, and `ops-worker`. Compose profiles are opt-in:
+The default stack starts the one-shot `ops-schema-migrator`,
+`openresty`, `blockchain-services` (dormant in Lite mode), `mysql`,
+`guacamole`, `guacd`, and `ops-worker`. Compose profiles are opt-in:
 
 | Profile | Purpose | Typical command |
 | --- | --- | --- |

@@ -13,7 +13,7 @@ are the labels currently shown in Lab Manager.
 | Controllers and Gateway metadata | `Power Controllers` | Local JSON catalog at `OPS_POWER_CONFIG`; physical outputs are read from the device. |
 | Device output names and supported timing configuration | `Power Controllers` | Read from the physical controller; supported APC changes are written back to the device. |
 | Laboratory policies | `Lab Power Control` → `Lab power policy` | The same local JSON catalog. |
-| Operation results and idempotency | `Lab Power Control`, timeline, and Ops APIs | MySQL, primarily `power_operations`; migration `blockchain-services/src/main/resources/db/migration/V56__power_operations.sql`. |
+| Operation results and idempotency | `Lab Power Control`, timeline, and Ops APIs | MySQL, primarily `power_operations`; migration `ops-migrations/sql/V5__power_operations.sql`. |
 | WoL, WinRM, and station shutdown | `Lab Station Ops` | Ops Worker, Lab Station, and their operational records; these are not PDU controllers. |
 
 In the MVP, controller definitions, Gateway outlet metadata and policies remain
@@ -38,11 +38,13 @@ operation detail and idempotency for executed actions.
 
    In Compose, `/app/data` maps to the `ops-data` volume. These files must not
    be committed to Git or included in an unprotected backup.
-4. Flyway applies the `power_operations` migration automatically when the
-   integrated backend starts. Existing installations that still use the
-   legacy `mysql/003-energy-policies.sql` bootstrap remain compatible; the
-   backend baselines those legacy tables at version zero and records the
-   tracked migrations before applying any newer changes.
+4. The one-shot `ops-schema-migrator` applies the `power_operations` migration
+   before the local backend or Ops Worker starts. This also runs in Lite mode,
+   where the embedded backend remains dormant and the connected Full or
+   standalone backend owns the control plane. Existing installations that
+   still have tables from the legacy `mysql/003-energy-policies.sql` bootstrap
+   are adopted by the separate `flyway_ops_schema_history` table without
+   recreating their data.
 5. Verify WoL, WinRM, and the Lab Station heartbeat separately using
    [Gateway and Lab Station operations](gateway-lab-station-operations.md).
 
@@ -301,4 +303,4 @@ operation.
 - [Laboratory connectivity](laboratory-connectivity.md): private-network topology and segmentation.
 - [Lab Station WoL and energy playbook](../../../Lab Station/docs/bios-wol-playbook.md): BIOS, NIC, WoL, and station diagnostics.
 - [`power-controllers.sample.json`](../../ops-worker/power-controllers.sample.json): sample JSON structure.
-- [`V56__power_operations.sql`](../../blockchain-services/src/main/resources/db/migration/V56__power_operations.sql): durable history and idempotency.
+- [`V5__power_operations.sql`](../../ops-migrations/sql/V5__power_operations.sql): durable history and idempotency.

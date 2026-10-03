@@ -1,4 +1,39 @@
 services:
+  # The embedded Java backend is intentionally dormant in Lite mode, but the
+  # local access plane still needs its durable Ops schema. Run the Ops Flyway
+  # history independently so Full and Lite have the same local prerequisite.
+  ops-schema-migrator:
+    image: flyway/flyway:13.8.0
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |-
+        set -eu
+        export FLYWAY_PASSWORD="$$(cat /run/secrets/blockchain_mysql_password)"
+        exec /flyway/flyway \
+          -url="jdbc:mysql://mysql:3306/$${BLOCKCHAIN_MYSQL_DATABASE}?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true" \
+          -user="$${BLOCKCHAIN_MYSQL_USER}" \
+          -locations=filesystem:/flyway/sql \
+          -table=flyway_ops_schema_history \
+          -baselineOnMigrate=true \
+          -baselineVersion=0 \
+          -cleanDisabled=true \
+          -connectRetries=60 \
+          -connectRetriesInterval=2 \
+          migrate
+    environment:
+      - BLOCKCHAIN_MYSQL_DATABASE=${BLOCKCHAIN_MYSQL_DATABASE:-blockchain_services}
+      - BLOCKCHAIN_MYSQL_USER=${BLOCKCHAIN_MYSQL_USER:?BLOCKCHAIN_MYSQL_USER must be configured}
+    volumes:
+      - ./ops-migrations/sql:/flyway/sql:ro
+    secrets:
+      - blockchain_mysql_password
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - database_backend
+
   # Blockchain Services - Authentication and wallet operations
   blockchain-services:
     build:
@@ -85,6 +120,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      ops-schema-migrator:
+        condition: service_completed_successfully
     secrets:
       - blockchain_mysql_password
       - admin_access_token
@@ -754,6 +791,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      ops-schema-migrator:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health').read()"]
       interval: 30s

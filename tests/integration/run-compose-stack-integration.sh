@@ -26,7 +26,7 @@ print_diagnostics() {
   echo "--- Compose status ---" >&2
   compose ps >&2 || true
   echo "--- Compose logs ---" >&2
-  compose logs --no-color --tail=200 mysql blockchain-services guacamole guacd ops-worker openresty fmu-runner >&2 || true
+  compose logs --no-color --tail=200 mysql ops-schema-migrator blockchain-services guacamole guacd ops-worker openresty fmu-runner >&2 || true
 }
 
 cleanup() {
@@ -124,6 +124,20 @@ guacamole_database="$(grep -E '^MYSQL_DATABASE=' "$ROOT_ENV_FILE" | tail -n 1 | 
 guacamole_database="${guacamole_database:-guacamole_db}"
 blockchain_database="$(grep -E '^BLOCKCHAIN_MYSQL_DATABASE=' "$ROOT_ENV_FILE" | tail -n 1 | cut -d= -f2- | tr -d '\r')"
 blockchain_database="${blockchain_database:-blockchain_services}"
+
+ops_history_count="$(mysql_query "$blockchain_database" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'flyway_ops_schema_history';")"
+if [[ "$ops_history_count" != "1" ]]; then
+  echo "Gateway Ops Flyway history table is not available in the real schema." >&2
+  exit 1
+fi
+for table in lab_hosts gateway_session_observation_outbox guacamole_token_revocation_queue wake_ops_schedules power_operations; do
+  table_count="$(mysql_query "$blockchain_database" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = '$table';")"
+  if [[ "$table_count" != "1" ]]; then
+    echo "Gateway Ops table '$table' is not available in the real schema." >&2
+    exit 1
+  fi
+done
+echo "Gateway Ops Flyway schema is available before worker checks."
 
 history_table_count="$(mysql_query "$guacamole_database" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'guacamole_connection_history';")"
 if [[ "$history_table_count" != "1" ]]; then

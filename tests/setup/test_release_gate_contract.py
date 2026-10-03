@@ -74,14 +74,11 @@ def test_release_gate_source_tests_cover_the_high_risk_boundaries():
             assert fragment in source, f"Missing release-gate coverage {fragment} in {path}"
 
 
-def test_integrated_backend_owns_ops_schema_migrations():
+def test_gateway_ops_schema_is_migrated_before_full_or_lite_services():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     mysql_entrypoint = (ROOT / "mysql" / "000-ensure-user.sh").read_text(encoding="utf-8")
+    ops_migrations = ROOT / "ops-migrations" / "sql"
     application = APPLICATION.read_text(encoding="utf-8")
-    power_migration = (
-        BACKEND / "src" / "main" / "resources" / "db" / "migration"
-        / "V56__power_operations.sql"
-    ).read_text(encoding="utf-8")
 
     for migration in (
         "002-labstation-ops.sql",
@@ -91,9 +88,42 @@ def test_integrated_backend_owns_ops_schema_migrations():
         assert f"./mysql/{migration}" not in compose
         assert migration not in mysql_entrypoint
 
-    assert "spring.flyway.baseline-on-migrate=true" in application
-    assert "spring.flyway.baseline-version=0" in application
-    assert "CREATE TABLE IF NOT EXISTS power_operations" in power_migration
+    assert "ops-schema-migrator:" in compose
+    assert "image: flyway/flyway:13.8.0" in compose
+    assert "./ops-migrations/sql:/flyway/sql:ro" in compose
+    assert "flyway_ops_schema_history" in compose
+    assert compose.count("ops-schema-migrator") >= 3
+    assert compose.count("service_completed_successfully") >= 2
+    assert "spring.flyway.ignore-migration-patterns=versioned:missing" in application
+
+    for legacy_backend_migration in (
+        "V10__labstation_ops.sql",
+        "V19__gateway_session_observation_outbox.sql",
+        "V20__guacamole_token_revocation_queue.sql",
+        "V32__guacamole_token_validation_marker.sql",
+        "V55__wake_ops_schedules.sql",
+        "V56__power_operations.sql",
+    ):
+        assert not (
+            BACKEND / "src" / "main" / "resources" / "db" / "migration"
+            / legacy_backend_migration
+        ).exists()
+
+    expected_tables = {
+        "lab_hosts": "V1__labstation_ops.sql",
+        "gateway_session_observation_outbox": "V2__gateway_session_observation_outbox.sql",
+        "guacamole_token_revocation_queue": "V3__guacamole_token_revocation_queue.sql",
+        "wake_ops_schedules": "V4__wake_ops_schedules.sql",
+        "power_operations": "V5__power_operations.sql",
+    }
+    for table, migration_name in expected_tables.items():
+        migration = (ops_migrations / migration_name).read_text(encoding="utf-8")
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in migration
+
+    validation_marker = (
+        ops_migrations / "V6__guacamole_token_validation_marker.sql"
+    ).read_text(encoding="utf-8")
+    assert "token_validated_at" in validation_marker
 
 
 def test_setup_contract_job_has_shared_checkout_and_worker_import_dependencies():
