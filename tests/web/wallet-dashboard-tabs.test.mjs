@@ -26,8 +26,11 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
   assert.match(html, /data-wallet-tab="institution"[\s\S]*Institutional Policies/);
   assert.match(html, /id="creditPolicyTitle">Spending Policy<\/h2>/);
   assert.match(html, /fa-shield-halved[\s\S]*> Access Policy<\/h2>/);
-  assert.match(html, /<select id="accessPolicyTestCategories"[^>]*multiple/);
-  assert.doesNotMatch(html, /<input id="accessPolicyTestCategories"/);
+  assert.match(html, /id="gatewayHomeLink"[^>]*href="\/"/);
+  assert.match(html, /src="assets\/images\/LogoBannerDLabs\.png"/);
+  assert.match(html, /<span class="logo-title">Wallet &amp; Billing<\/span>/);
+  assert.match(html, /id="accessPolicyTestCategories"[^>]*data-policy-multiselect/);
+  assert.doesNotMatch(html, /<select id="accessPolicyTestCategories"[^>]*multiple/);
   assert.match(html, /Price \(raw units\)/);
   assert.doesNotMatch(html, /Institution &amp; Credits/);
   assert.doesNotMatch(html, /Access Policies/);
@@ -51,7 +54,7 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(admin, /creditPolicyTitle\.textContent = 'Spending Policy and Operator Controls'/);
   assert.match(admin, /creditPolicyTitle\.textContent = 'Spending Policy'/);
   assert.doesNotMatch(admin, /creditPolicyTitle\.textContent = 'Institution Policy/);
-  assert.match(accessPolicies, /categoryOptions\(\[\]\)/);
+  assert.match(accessPolicies, /data-multiselect-option/);
   assert.match(accessPolicies, /categories: selectedValues\(\$\('accessPolicyTestCategories'\)\)/);
   assert.doesNotMatch(accessPolicies, /accessPolicyTestCategories'\)\.value\.split\(','\)/);
 });
