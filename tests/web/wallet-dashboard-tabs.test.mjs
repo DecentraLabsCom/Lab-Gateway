@@ -60,6 +60,8 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(admin, /creditPolicyTitle\.textContent = 'Spending Policy'/);
   assert.doesNotMatch(admin, /creditPolicyTitle\.textContent = 'Institution Policy/);
   assert.match(accessPolicies, /data-multiselect-option/);
+  assert.match(accessPolicies, /data-remove-matcher/);
+  assert.match(accessPolicies, /delete matchers\[key\]/);
   assert.match(accessPolicies, /categories: selectedValues\(\$\('accessPolicyTestCategories'\)\)/);
   assert.match(accessPolicies, /price: ['"]1['"]/);
   assert.doesNotMatch(accessPolicies, /accessPolicyTestPrice/);
@@ -70,6 +72,7 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.doesNotMatch(policyStyles, /\.policy-multi-select-search input \{[\s\S]*padding: [^;]*2rem;/);
   assert.match(policyStyles, /\.policy-group-heading input,\s*\.policy-matcher-row input\s*\{[\s\S]*background: var\(--bg-primary\);[\s\S]*padding: var\(--spacing-sm\);/);
   assert.match(policyStyles, /\.policy-group-heading input:focus,\s*\.policy-matcher-row input:focus\s*\{/);
+  assert.match(policyStyles, /\.policy-chip-remove\s*\{[\s\S]*cursor: pointer;/);
   assert.match(policyStyles, /\.policy-transfer,\s*\.policy-test-form textarea\s*\{[\s\S]*padding: 0\.5rem 0\.75rem;[\s\S]*background: var\(--bg-primary\);[\s\S]*resize: vertical;/);
   assert.match(policyStyles, /\.policy-transfer:focus,\s*\.policy-test-form textarea:focus\s*\{/);
   assert.match(policyStyles, /\.policy-transfer,\s*\.policy-test-form textarea\s*\{[\s\S]*background: var\(--bg-primary\);[\s\S]*font-family: monospace;/);
