@@ -17,9 +17,13 @@ def test_admin_bootstrap_is_post_only_and_cookies_are_path_scoped():
     assert '"/ops"' in login
     assert '"/wallet-dashboard"' in login
     assert '"/billing"' in login
+    assert '"/wallet-admin/"' in login
     assert "local max_age = 1800" in login
     assert "admin_session:" in login
     assert "resty.random" in login
+    assert '"/wallet-admin"' in login
+    logout = (openresty_root / "lua" / "admin_logout.lua").read_text(encoding="utf-8")
+    assert '"/wallet-admin"' in logout
     assert "admin_session:lab:" in lab_access
     assert "token, 1800" in lab_access
     assert "Max-Age=1800" in lab_access

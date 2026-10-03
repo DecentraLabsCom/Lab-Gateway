@@ -34,7 +34,7 @@ if cache then
     end
 end
 local cookies = {}
-for _, path in ipairs({ "/wallet", "/billing", "/wallet-dashboard", "/institution-config" }) do
+for _, path in ipairs({ "/wallet", "/billing", "/wallet-dashboard", "/institution-config", "/wallet-admin" }) do
     cookies[#cookies + 1] = cookie_header(admin_name, path)
 end
 for _, path in ipairs({ "/lab-manager", "/lab-admin", "/ops", "/aas-admin", "/health", "/gateway/health" }) do

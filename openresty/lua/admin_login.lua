@@ -85,7 +85,7 @@ local encoded = session_id
 local cookies = {}
 local legacy_paths = is_lab
     and { "/", "/lab-manager/", "/lab-admin/", "/ops/", "/aas-admin/", "/health/", "/gateway/health/" }
-    or { "/", "/wallet/", "/billing/", "/wallet-dashboard/", "/institution-config/" }
+    or { "/", "/wallet/", "/billing/", "/wallet-dashboard/", "/institution-config/", "/wallet-admin/" }
 for _, path in ipairs(legacy_paths) do
     cookies[#cookies + 1] = cookie_name .. "=; Max-Age=0; Path=" .. path
         .. "; HttpOnly; Secure; SameSite=Lax"
@@ -97,7 +97,7 @@ if is_lab then
             .. "; HttpOnly; Secure; SameSite=Lax"
     end
 else
-    for _, path in ipairs({ "/wallet", "/billing", "/wallet-dashboard", "/institution-config" }) do
+    for _, path in ipairs({ "/wallet", "/billing", "/wallet-dashboard", "/institution-config", "/wallet-admin" }) do
         cookies[#cookies + 1] = cookie_name .. "=" .. encoded
             .. "; Max-Age=" .. max_age .. "; Path=" .. path
             .. "; HttpOnly; Secure; SameSite=Lax"
