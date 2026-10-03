@@ -32,7 +32,12 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
     assert.match(html, /<div class="logo">\s*<a[\s\S]*gatewayHomeLink[\s\S]*<\/a>\s*<\/div>\s*<h1 class="logo-title">Wallet &amp; Billing<\/h1>/);
   assert.match(html, /id="accessPolicyTestCategories"[^>]*data-policy-multiselect/);
   assert.doesNotMatch(html, /<select id="accessPolicyTestCategories"[^>]*multiple/);
-  assert.match(html, /<textarea id="accessPolicyTestAttributes"[^>]*rows="3"/);
+  assert.match(html, /<textarea id="accessPolicyTestAttributes"[^>]*class="policy-json-preview"/);
+  assert.match(html, /id="accessPolicyTestAttributes"[^>]*readonly[^>]*aria-haspopup="dialog"/);
+  assert.match(html, /id="accessPolicyTestAttributes"[^>]*rows="1"/);
+  assert.match(html, /id="accessPolicyAttributesModal"[^>]*role="dialog"[^>]*aria-modal="true"/);
+  assert.match(html, /id="accessPolicyAttributesEditor"[^>]*class="policy-json-editor"/);
+  assert.match(html, /id="applyAccessPolicyAttributesBtn"/);
   assert.match(html, /<textarea id="accessPolicyTransfer"[^>]*class="policy-transfer hidden"[^>]*rows="5"/);
   assert.match(html, /class="policy-form-action"[\s\S]*Save policy/);
   assert.match(html, /class="policy-form-action"[\s\S]*> Test/);
@@ -66,6 +71,9 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(accessPolicies, /delete matchers\[key\]/);
   assert.match(accessPolicies, /categories: selectedValues\(\$\('accessPolicyTestCategories'\)\)/);
   assert.match(accessPolicies, /price: ['"]1['"]/);
+  assert.match(accessPolicies, /accessPolicyAttributesModal/);
+  assert.match(accessPolicies, /JSON\.parse/);
+  assert.match(accessPolicies, /applyAccessPolicyAttributes/);
   assert.doesNotMatch(accessPolicies, /accessPolicyTestPrice/);
   assert.doesNotMatch(accessPolicies, /accessPolicyTestCategories'\)\.value\.split\(','\)/);
   assert.doesNotMatch(accessPolicies, /fa-search/);
@@ -75,13 +83,18 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(policyStyles, /\.policy-group-heading input,\s*\.policy-matcher-row input\s*\{[\s\S]*background: var\(--bg-primary\);[\s\S]*padding: var\(--spacing-sm\);/);
   assert.match(policyStyles, /\.policy-group-heading input:focus,\s*\.policy-matcher-row input:focus\s*\{/);
   assert.match(policyStyles, /\.policy-chip-remove\s*\{[\s\S]*cursor: pointer;/);
-  assert.match(policyStyles, /\.policy-transfer,\s*\.policy-test-form textarea\s*\{[\s\S]*padding: 0\.5rem 0\.75rem;[\s\S]*background: var\(--bg-primary\);[\s\S]*resize: vertical;/);
-  assert.match(policyStyles, /\.policy-transfer:focus,\s*\.policy-test-form textarea:focus\s*\{/);
-  assert.match(policyStyles, /\.policy-transfer,\s*\.policy-test-form textarea\s*\{[\s\S]*background: var\(--bg-primary\);[\s\S]*font-family: monospace;/);
+  assert.match(policyStyles, /\.policy-transfer,\s*\.policy-json-preview\s*\{[\s\S]*padding: 0\.5rem 0\.75rem;[\s\S]*background: var\(--bg-primary\);[\s\S]*font-family: monospace;/);
+  assert.match(policyStyles, /\.policy-transfer\s*\{[\s\S]*resize: vertical;/);
+  assert.match(policyStyles, /\.policy-transfer:focus,\s*\.policy-json-preview:focus\s*\{/);
+  assert.match(policyStyles, /\.policy-transfer,\s*\.policy-json-preview\s*\{[\s\S]*background: var\(--bg-primary\);[\s\S]*font-family: monospace;/);
+  assert.match(policyStyles, /\.policy-json-preview\s*\{[\s\S]*height: 3\.125rem;[\s\S]*min-height: 3\.125rem;[\s\S]*max-height: 3\.125rem;[\s\S]*resize: none;/);
+  assert.match(policyStyles, /\.policy-json-preview:hover/);
+  assert.match(policyStyles, /\.policy-json-modal \.modal-content/);
+  assert.match(policyStyles, /\.policy-json-editor\s*\{[\s\S]*resize: vertical;/);
   assert.match(policyStyles, /\.policy-test-form \{ grid-template-columns: 1\.5fr 1fr auto; \}/);
   assert.match(policyStyles, /\.policy-form-action\s*\{[\s\S]*align-self: stretch;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*padding-top: calc\(1\.44rem \+ var\(--spacing-xs\)\);/);
   assert.match(policyStyles, /\.policy-form-action \.btn\s*\{[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*gap: 0\.5rem;/);
-  assert.doesNotMatch(policyStyles, /min-height: 3\.125rem;/);
+  assert.doesNotMatch(policyStyles, /\.policy-form-action\s*\{[^}]*min-height: 3\.125rem;/);
 });
 
 test('settlement payout action stays with the lab selector before the metrics column', () => {
