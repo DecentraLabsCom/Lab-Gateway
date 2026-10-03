@@ -33,7 +33,8 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
   assert.match(html, /id="accessPolicyTestCategories"[^>]*data-policy-multiselect/);
   assert.doesNotMatch(html, /<select id="accessPolicyTestCategories"[^>]*multiple/);
   assert.match(html, /<textarea id="accessPolicyTransfer"[^>]*class="policy-transfer hidden"[^>]*rows="5"/);
-  assert.match(html, /Price \(raw units\)/);
+  assert.doesNotMatch(html, /id="accessPolicyTestPrice"/);
+  assert.doesNotMatch(html, /Price \(raw units\)/);
   assert.doesNotMatch(html, /Institution &amp; Credits/);
   assert.doesNotMatch(html, /Access Policies/);
   assert.doesNotMatch(html, /Coming Soon/);
@@ -59,6 +60,8 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.doesNotMatch(admin, /creditPolicyTitle\.textContent = 'Institution Policy/);
   assert.match(accessPolicies, /data-multiselect-option/);
   assert.match(accessPolicies, /categories: selectedValues\(\$\('accessPolicyTestCategories'\)\)/);
+  assert.match(accessPolicies, /price: ['"]1['"]/);
+  assert.doesNotMatch(accessPolicies, /accessPolicyTestPrice/);
   assert.doesNotMatch(accessPolicies, /accessPolicyTestCategories'\)\.value\.split\(','\)/);
   assert.doesNotMatch(accessPolicies, /fa-search/);
   assert.match(policyStyles, /\.policy-multi-select-trigger \{[\s\S]*height: 3\.125rem;/);
@@ -68,6 +71,7 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(policyStyles, /\.policy-group-heading input:focus,\s*\.policy-matcher-row input:focus\s*\{/);
   assert.match(policyStyles, /\.policy-transfer \{[\s\S]*padding: 0\.5rem 0\.75rem;[\s\S]*background: var\(--bg-primary\);[\s\S]*resize: vertical;/);
   assert.match(policyStyles, /\.policy-transfer:focus\s*\{/);
+  assert.match(policyStyles, /\.policy-test-form \{ grid-template-columns: 1\.5fr 1fr auto; \}/);
 });
 
 test('settlement payout action stays with the lab selector before the metrics column', () => {
