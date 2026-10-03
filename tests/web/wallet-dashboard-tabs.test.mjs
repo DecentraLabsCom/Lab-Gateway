@@ -63,6 +63,8 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(policyStyles, /\.policy-multi-select-trigger \{[\s\S]*height: 3\.125rem;/);
   assert.doesNotMatch(policyStyles, /\.policy-multi-select-trigger \{[\s\S]*min-height: 2\.8rem;/);
   assert.doesNotMatch(policyStyles, /\.policy-multi-select-search input \{[\s\S]*padding: [^;]*2rem;/);
+  assert.match(policyStyles, /\.policy-group-heading input,\s*\.policy-matcher-row input\s*\{[\s\S]*background: var\(--bg-primary\);[\s\S]*padding: var\(--spacing-sm\);/);
+  assert.match(policyStyles, /\.policy-group-heading input:focus,\s*\.policy-matcher-row input:focus\s*\{/);
 });
 
 test('settlement payout action stays with the lab selector before the metrics column', () => {
