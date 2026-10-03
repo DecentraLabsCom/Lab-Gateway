@@ -6,6 +6,7 @@ const repoRoot = new URL('../../', import.meta.url);
 const htmlPath = new URL('blockchain-services/src/main/resources/static/wallet-dashboard/index.html', repoRoot);
 const tabsScriptPath = new URL('blockchain-services/src/main/resources/static/wallet-dashboard/assets/js/wallet-dashboard-tabs.js', repoRoot);
 const adminScriptPath = new URL('blockchain-services/src/main/resources/static/wallet-dashboard/assets/js/admin.js', repoRoot);
+const accessPoliciesScriptPath = new URL('blockchain-services/src/main/resources/static/wallet-dashboard/assets/js/access-policies.js', repoRoot);
 
 test('wallet dashboard exposes the three role-aware workflow tabs', () => {
   const html = fs.readFileSync(htmlPath, 'utf8');
@@ -25,6 +26,9 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
   assert.match(html, /data-wallet-tab="institution"[\s\S]*Institutional Policies/);
   assert.match(html, /id="creditPolicyTitle">Spending Policy<\/h2>/);
   assert.match(html, /fa-shield-halved[\s\S]*> Access Policy<\/h2>/);
+  assert.match(html, /<select id="accessPolicyTestCategories"[^>]*multiple/);
+  assert.doesNotMatch(html, /<input id="accessPolicyTestCategories"/);
+  assert.match(html, /Price \(raw units\)/);
   assert.doesNotMatch(html, /Institution &amp; Credits/);
   assert.doesNotMatch(html, /Access Policies/);
   assert.doesNotMatch(html, /Coming Soon/);
@@ -33,6 +37,7 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
 test('wallet dashboard tab controller supports hashes, keyboard navigation and role visibility', () => {
   const source = fs.readFileSync(tabsScriptPath, 'utf8');
   const admin = fs.readFileSync(adminScriptPath, 'utf8');
+  const accessPolicies = fs.readFileSync(accessPoliciesScriptPath, 'utf8');
 
   assert.match(source, /window\.location\.hash/);
   assert.match(source, /ArrowLeft/);
@@ -46,6 +51,9 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(admin, /creditPolicyTitle\.textContent = 'Spending Policy and Operator Controls'/);
   assert.match(admin, /creditPolicyTitle\.textContent = 'Spending Policy'/);
   assert.doesNotMatch(admin, /creditPolicyTitle\.textContent = 'Institution Policy/);
+  assert.match(accessPolicies, /categoryOptions\(\[\]\)/);
+  assert.match(accessPolicies, /categories: selectedValues\(\$\('accessPolicyTestCategories'\)\)/);
+  assert.doesNotMatch(accessPolicies, /accessPolicyTestCategories'\)\.value\.split\(','\)/);
 });
 
 test('settlement payout action stays with the lab selector before the metrics column', () => {
