@@ -511,9 +511,6 @@ services:
       - ./mysql/healthcheck.sh:/usr/local/bin/mysql-healthcheck.sh:ro
       - ./mysql/000-ensure-user.sh:/usr/local/bin/ensure-user.sh:ro
       - ./mysql/001-create-schema.sql:/docker-entrypoint-initdb.d/001-create-schema.sql:ro
-      - ./mysql/002-labstation-ops.sql:/docker-entrypoint-initdb.d/002-labstation-ops.sql:ro
-      - ./mysql/003-energy-policies.sql:/docker-entrypoint-initdb.d/003-energy-policies.sql:ro
-      - ./mysql/004-wake-ops.sql:/docker-entrypoint-initdb.d/004-wake-ops.sql:ro
     healthcheck:
       test: ["CMD", "bash", "/usr/local/bin/mysql-healthcheck.sh"]
       timeout: 20s

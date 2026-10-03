@@ -364,8 +364,8 @@ PROMPT_CONTRACT = {
         'set /p "allowed_origins=Allowed origins for CORS [',
     ),
     "marketplace_key": (
-        'read -p "Marketplace public key URL [',
-        'set /p "marketplace_pk=Marketplace public key URL [',
+        'read -p "Marketplace JWKS URL [',
+        'set /p "marketplace_pk=Marketplace JWKS URL [',
     ),
     "start_services": (
         'read -p "Do you want to start the services now? (Y/n): "',

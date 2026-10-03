@@ -13,7 +13,7 @@ are the labels currently shown in Lab Manager.
 | Controllers and Gateway metadata | `Power Controllers` | Local JSON catalog at `OPS_POWER_CONFIG`; physical outputs are read from the device. |
 | Device output names and supported timing configuration | `Power Controllers` | Read from the physical controller; supported APC changes are written back to the device. |
 | Laboratory policies | `Lab Power Control` → `Lab power policy` | The same local JSON catalog. |
-| Operation results and idempotency | `Lab Power Control`, timeline, and Ops APIs | MySQL, primarily `power_operations`; migration `mysql/003-energy-policies.sql`. |
+| Operation results and idempotency | `Lab Power Control`, timeline, and Ops APIs | MySQL, primarily `power_operations`; migration `blockchain-services/src/main/resources/db/migration/V56__power_operations.sql`. |
 | WoL, WinRM, and station shutdown | `Lab Station Ops` | Ops Worker, Lab Station, and their operational records; these are not PDU controllers. |
 
 In the MVP, controller definitions, Gateway outlet metadata and policies remain
@@ -38,10 +38,11 @@ operation detail and idempotency for executed actions.
 
    In Compose, `/app/data` maps to the `ops-data` volume. These files must not
    be committed to Git or included in an unprotected backup.
-4. On existing deployments, apply `mysql/003-energy-policies.sql` before
-   enabling physical power control. Without the migration, the worker may fall
-   back to process-local idempotency and durable operation history will be
-   incomplete.
+4. Flyway applies the `power_operations` migration automatically when the
+   integrated backend starts. Existing installations that still use the
+   legacy `mysql/003-energy-policies.sql` bootstrap remain compatible; the
+   backend baselines those legacy tables at version zero and records the
+   tracked migrations before applying any newer changes.
 5. Verify WoL, WinRM, and the Lab Station heartbeat separately using
    [Gateway and Lab Station operations](gateway-lab-station-operations.md).
 
@@ -300,4 +301,4 @@ operation.
 - [Laboratory connectivity](laboratory-connectivity.md): private-network topology and segmentation.
 - [Lab Station WoL and energy playbook](../../../Lab Station/docs/bios-wol-playbook.md): BIOS, NIC, WoL, and station diagnostics.
 - [`power-controllers.sample.json`](../../ops-worker/power-controllers.sample.json): sample JSON structure.
-- [`003-energy-policies.sql`](../../mysql/003-energy-policies.sql): durable history and idempotency.
+- [`V56__power_operations.sql`](../../blockchain-services/src/main/resources/db/migration/V56__power_operations.sql): durable history and idempotency.

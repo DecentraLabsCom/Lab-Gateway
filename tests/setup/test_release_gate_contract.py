@@ -69,3 +69,38 @@ def test_release_gate_source_tests_cover_the_high_risk_boundaries():
         source = path.read_text(encoding="utf-8")
         for fragment in fragments:
             assert fragment in source, f"Missing release-gate coverage {fragment} in {path}"
+
+
+def test_integrated_backend_owns_ops_schema_migrations():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    mysql_entrypoint = (ROOT / "mysql" / "000-ensure-user.sh").read_text(encoding="utf-8")
+    application = APPLICATION.read_text(encoding="utf-8")
+    power_migration = (
+        BACKEND / "src" / "main" / "resources" / "db" / "migration"
+        / "V56__power_operations.sql"
+    ).read_text(encoding="utf-8")
+
+    for migration in (
+        "002-labstation-ops.sql",
+        "003-energy-policies.sql",
+        "004-wake-ops.sql",
+    ):
+        assert f"./mysql/{migration}" not in compose
+        assert migration not in mysql_entrypoint
+
+    assert "spring.flyway.baseline-on-migrate=true" in application
+    assert "spring.flyway.baseline-version=0" in application
+    assert "CREATE TABLE IF NOT EXISTS power_operations" in power_migration
+
+
+def test_setup_contract_job_has_shared_checkout_and_worker_import_dependencies():
+    workflow = (ROOT / ".github" / "workflows" / "gateway-tests.yml").read_text(
+        encoding="utf-8"
+    )
+
+    setup_job = workflow.split("\n  setup-contract-tests:", 1)[1].split(
+        "\n  topology-contracts:", 1
+    )[0]
+    assert "repository: DecentraLabsCom/Smart-Contracts" in setup_job
+    assert "path: Smart-Contracts" in setup_job
+    assert "-r ops-worker/requirements.txt" in setup_job
