@@ -28,7 +28,7 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
   assert.match(html, /fa-shield-halved[\s\S]*> Access Policy<\/h2>/);
   assert.match(html, /id="gatewayHomeLink"[^>]*href="\/"/);
   assert.match(html, /src="assets\/images\/LogoBannerDLabs\.png"/);
-  assert.match(html, /<span class="logo-title">Wallet &amp; Billing<\/span>/);
+    assert.match(html, /<div class="logo">\s*<a[\s\S]*gatewayHomeLink[\s\S]*<\/a>\s*<\/div>\s*<h1 class="logo-title">Wallet &amp; Billing<\/h1>/);
   assert.match(html, /id="accessPolicyTestCategories"[^>]*data-policy-multiselect/);
   assert.doesNotMatch(html, /<select id="accessPolicyTestCategories"[^>]*multiple/);
   assert.match(html, /Price \(raw units\)/);
