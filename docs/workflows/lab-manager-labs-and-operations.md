@@ -97,6 +97,16 @@ secrets.
 Mutable backend operations use idempotency. After a timeout, do not repeat a
 publication or deletion until the current state and transaction are checked.
 
+### Reservation isolation
+
+`Operations` only shows actionable or upcoming reservations for laboratories
+assigned to the current Gateway. The assignment is derived from the lab's
+on-chain `accessURI`, so two Gateways in the same institution remain isolated.
+The Gateway overwrites the browser-supplied scope header with its configured
+identity, and `blockchain-services` checks the scope again before listing or
+cancelling a reservation. A cancellation for a lab assigned to another
+Gateway is rejected, even when both Gateways use the same provider wallet.
+
 ## 2. Operations: prepare the station
 
 ### Inventory and Guacamole candidates

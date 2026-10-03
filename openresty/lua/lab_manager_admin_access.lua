@@ -263,6 +263,15 @@ if backend_header_name == "" then
     backend_header_name = header_name
 end
 
+-- The browser may send an arbitrary X-Gateway-ID header. Replace it with the
+-- identity derived by OpenResty's startup configuration so the backend can
+-- scope lab administration to this gateway's accessURI values.
+ngx.req.clear_header("X-Gateway-ID")
+local gateway_id = ngx.shared.config and ngx.shared.config:get("gateway_id")
+if gateway_id and gateway_id ~= "" then
+    ngx.req.set_header("X-Gateway-ID", gateway_id)
+end
+
 ngx.var.backend_lab_admin = backend_url
 if backend_header_name ~= header_name then
     ngx.req.clear_header(header_name)

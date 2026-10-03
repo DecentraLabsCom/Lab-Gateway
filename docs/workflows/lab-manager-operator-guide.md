@@ -45,6 +45,12 @@ administrative operations are intended for localhost or explicitly allowed
 private networks. In Lite mode, the browser may display the interface, but
 remote routes must be explicitly configured and authorized.
 
+Reservation lists and cancellation are also scoped to the current Gateway:
+the backend matches each lab's `accessURI` to the Gateway identity before
+returning or cancelling a reservation. This keeps faculties or departments
+using different Gateways isolated even when they share an institution or
+provider wallet.
+
 ## Identifiers that must not be confused
 
 | Identifier | Meaning | Where it is used |

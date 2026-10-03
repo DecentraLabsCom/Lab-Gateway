@@ -107,12 +107,17 @@ runner.describe("Lab manager strict admin guard", function()
                 ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
                 SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
             },
-            headers = { ["X-Lab-Manager-Token"] = "secret-token" },
+            config = { gateway_id = "gateway.example.edu" },
+            headers = {
+                ["X-Lab-Manager-Token"] = "secret-token",
+                ["X-Gateway-ID"] = "attacker.example.edu"
+            },
             var = { remote_addr = "172.17.0.2" }
         })
 
         runner.assert.equals(nil, ngx.status)
         runner.assert.equals("secret-token", ngx.req.headers["X-Lab-Manager-Token"])
+        runner.assert.equals("gateway.example.edu", ngx.req.headers["X-Gateway-ID"])
         runner.assert.equals("http://blockchain-services:8080", ngx.var.backend_lab_admin)
     end)
 
