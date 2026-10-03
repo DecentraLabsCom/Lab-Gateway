@@ -34,6 +34,8 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
   assert.doesNotMatch(html, /<select id="accessPolicyTestCategories"[^>]*multiple/);
   assert.match(html, /<textarea id="accessPolicyTestAttributes"[^>]*rows="3"/);
   assert.match(html, /<textarea id="accessPolicyTransfer"[^>]*class="policy-transfer hidden"[^>]*rows="5"/);
+  assert.match(html, /class="policy-form-action"[\s\S]*Save policy/);
+  assert.match(html, /class="policy-form-action"[\s\S]*> Test/);
   assert.doesNotMatch(html, /id="accessPolicyTestPrice"/);
   assert.doesNotMatch(html, /Price \(raw units\)/);
   assert.doesNotMatch(html, /Institution &amp; Credits/);
@@ -77,8 +79,9 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.match(policyStyles, /\.policy-transfer:focus,\s*\.policy-test-form textarea:focus\s*\{/);
   assert.match(policyStyles, /\.policy-transfer,\s*\.policy-test-form textarea\s*\{[\s\S]*background: var\(--bg-primary\);[\s\S]*font-family: monospace;/);
   assert.match(policyStyles, /\.policy-test-form \{ grid-template-columns: 1\.5fr 1fr auto; \}/);
-  assert.match(policyStyles, /\.policy-settings-form > \.btn,\s*\.policy-test-form > \.btn\s*\{[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;/);
-  assert.doesNotMatch(policyStyles, /\.policy-settings-form > \.btn,\s*\.policy-test-form > \.btn\s*\{[\s\S]*min-height: 3\.125rem;/);
+  assert.match(policyStyles, /\.policy-form-action\s*\{[\s\S]*align-self: stretch;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*padding-top: calc\(1\.44rem \+ var\(--spacing-xs\)\);/);
+  assert.match(policyStyles, /\.policy-form-action \.btn\s*\{[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*gap: 0\.5rem;/);
+  assert.doesNotMatch(policyStyles, /min-height: 3\.125rem;/);
 });
 
 test('settlement payout action stays with the lab selector before the metrics column', () => {
