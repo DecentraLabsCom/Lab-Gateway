@@ -32,6 +32,7 @@ test('wallet dashboard exposes the three role-aware workflow tabs', () => {
     assert.match(html, /<div class="logo">\s*<a[\s\S]*gatewayHomeLink[\s\S]*<\/a>\s*<\/div>\s*<h1 class="logo-title">Wallet &amp; Billing<\/h1>/);
   assert.match(html, /id="accessPolicyTestCategories"[^>]*data-policy-multiselect/);
   assert.doesNotMatch(html, /<select id="accessPolicyTestCategories"[^>]*multiple/);
+  assert.match(html, /<textarea id="accessPolicyTransfer"[^>]*class="policy-transfer hidden"[^>]*rows="5"/);
   assert.match(html, /Price \(raw units\)/);
   assert.doesNotMatch(html, /Institution &amp; Credits/);
   assert.doesNotMatch(html, /Access Policies/);
@@ -65,6 +66,8 @@ test('wallet dashboard tab controller supports hashes, keyboard navigation and r
   assert.doesNotMatch(policyStyles, /\.policy-multi-select-search input \{[\s\S]*padding: [^;]*2rem;/);
   assert.match(policyStyles, /\.policy-group-heading input,\s*\.policy-matcher-row input\s*\{[\s\S]*background: var\(--bg-primary\);[\s\S]*padding: var\(--spacing-sm\);/);
   assert.match(policyStyles, /\.policy-group-heading input:focus,\s*\.policy-matcher-row input:focus\s*\{/);
+  assert.match(policyStyles, /\.policy-transfer \{[\s\S]*padding: 0\.5rem 0\.75rem;[\s\S]*background: var\(--bg-primary\);[\s\S]*resize: vertical;/);
+  assert.match(policyStyles, /\.policy-transfer:focus\s*\{/);
 });
 
 test('settlement payout action stays with the lab selector before the metrics column', () => {
