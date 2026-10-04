@@ -66,7 +66,7 @@ LAB_MANAGER_TOKEN=token_aleatorio
 LAB_MANAGER_ALLOWED_CIDRS=
 LAB_ADMIN_BACKEND_URL=
 LAB_ADMIN_BACKEND_TOKEN=
-CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
+CORS_ALLOWED_ORIGINS=https://decentralabs-marketplace.app
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 # Sustituye estos valores por la salida de `id -u` y `id -g`.
 HOST_UID=1000
@@ -80,8 +80,8 @@ ETHEREUM_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
 BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
-ALLOWED_ORIGINS=https://lab.tu-institucion.edu,https://marketplace-decentralabs.vercel.app
-MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/jwks.json
+ALLOWED_ORIGINS=https://lab.tu-institucion.edu,https://decentralabs-marketplace.app
+MARKETPLACE_PUBLIC_KEY_URL=https://decentralabs-marketplace.app/.well-known/jwks.json
 ```
 
 Mantén los valores de orquestacion Gateway/OpenResty solo en `.env`. El `docker-compose.yml` raiz inyecta esos valores al backend embebido desde `.env`.

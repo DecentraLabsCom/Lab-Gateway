@@ -858,7 +858,7 @@ if [ "$demo_enabled" = "y" ] || [ "$demo_enabled" = "yes" ]; then
     demo_user="demo-lab-${demo_lab_id}"
     echo "Using platform-managed Guacamole principal: $demo_user"
     demo_marketplace_url=$(get_env_default "MARKETPLACE_URL" "$ROOT_ENV_FILE")
-    demo_marketplace_url=${demo_marketplace_url:-https://marketplace-decentralabs.vercel.app}
+    demo_marketplace_url=${demo_marketplace_url:-https://decentralabs-marketplace.app}
     read -p "Marketplace authority URL [$demo_marketplace_url]: " demo_marketplace_input
     demo_marketplace_url=${demo_marketplace_input:-$demo_marketplace_url}
     update_env_var "$ROOT_ENV_FILE" "DEMO_USER" "$demo_user"
@@ -1472,14 +1472,14 @@ if [ -n "$sepolia_rpc" ]; then
 fi
 
 allowed_origins_default=$(get_env_default "ALLOWED_ORIGINS" "$BLOCKCHAIN_ENV_FILE")
-read -p "Allowed origins for CORS [${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}]: " allowed_origins
-allowed_origins=${allowed_origins:-${allowed_origins_default:-https://marketplace-decentralabs.vercel.app}}
+read -p "Allowed origins for CORS [${allowed_origins_default:-https://decentralabs-marketplace.app}]: " allowed_origins
+allowed_origins=${allowed_origins:-${allowed_origins_default:-https://decentralabs-marketplace.app}}
 if [ -n "$allowed_origins" ]; then
     update_env_var "$BLOCKCHAIN_ENV_FILE" "ALLOWED_ORIGINS" "$allowed_origins"
 fi
 
 public_key_url_default=$(get_env_default "MARKETPLACE_PUBLIC_KEY_URL" "$BLOCKCHAIN_ENV_FILE")
-read -p "Marketplace JWKS URL [${public_key_url_default:-https://marketplace-decentralabs.vercel.app/.well-known/jwks.json}]: " marketplace_pk
+read -p "Marketplace JWKS URL [${public_key_url_default:-https://decentralabs-marketplace.app/.well-known/jwks.json}]: " marketplace_pk
 marketplace_pk=${marketplace_pk:-$public_key_url_default}
 if [ -n "$marketplace_pk" ]; then
     update_env_var "$BLOCKCHAIN_ENV_FILE" "MARKETPLACE_PUBLIC_KEY_URL" "$marketplace_pk"

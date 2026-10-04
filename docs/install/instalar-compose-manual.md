@@ -70,7 +70,7 @@ ADMIN_ACCESS_TOKEN=cambia_a_token_aleatorio
 LAB_MANAGER_TOKEN=cambia_a_token_aleatorio
 
 # Orígenes permitidos para CORS (URL de tu Marketplace)
-CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app
+CORS_ALLOWED_ORIGINS=https://decentralabs-marketplace.app
 
 # Obligatorio para la interpolación de Compose; usa el origen FMU público
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
@@ -218,8 +218,8 @@ FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 
 # Orígenes permitidos por el servicio de blockchain
-ALLOWED_ORIGINS=https://lab.tu-institucion.edu,https://marketplace-decentralabs.vercel.app
-MARKETPLACE_PUBLIC_KEY_URL=https://marketplace-decentralabs.vercel.app/.well-known/jwks.json
+ALLOWED_ORIGINS=https://lab.tu-institucion.edu,https://decentralabs-marketplace.app
+MARKETPLACE_PUBLIC_KEY_URL=https://decentralabs-marketplace.app/.well-known/jwks.json
 ```
 
 Deja `INSTITUTIONAL_WALLET_ADDRESS` e `INSTITUTIONAL_WALLET_PASSWORD` vacíos — se rellenan

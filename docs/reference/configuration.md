@@ -67,6 +67,22 @@ and `OPS_GUACAMOLE_MYSQL_USER` use the safe defaults from `.env.example` unless
 your database policy requires different names. Each password must remain
 distinct. Empty or placeholder passwords cause the stack to fail closed.
 
+## Marketplace production and Preview environments
+
+Do not add a single `MARKETPLACE_ENV` switch and let the services derive trust
+from it. Run each environment with its own configuration bundle:
+
+| Environment | Root Gateway `.env` | Backend `.env` |
+| --- | --- | --- |
+| Production | `MARKETPLACE_URL=https://decentralabs-marketplace.app` and `CORS_ALLOWED_ORIGINS=https://decentralabs-marketplace.app` | `MARKETPLACE_URL`/`MARKETPLACE_BASE_URL` set to the production origin, `MARKETPLACE_PUBLIC_KEY_URL=https://decentralabs-marketplace.app/.well-known/jwks.json`, and `ALLOWED_ORIGINS` containing that origin |
+| Preview (`develop`) | `MARKETPLACE_URL=https://marketplace-decentralabs.vercel.app` and `CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app` | The same Preview origin for `MARKETPLACE_URL`/`MARKETPLACE_BASE_URL` and JWKS, with `ALLOWED_ORIGINS` containing only the Preview origin plus deliberate local origins |
+
+The backend currently trusts one Marketplace origin and one JWKS URL per
+deployment. Keep the production and Preview backend/Gateway instances
+separate, and use separate Marketplace JWT keys. `SERVER_NAME`, `ISSUER`,
+`BASE_DOMAIN`, `PUBLIC_BASE_URL` and WebAuthn RP settings continue to describe
+the Gateway origin; they must not be changed to the Vercel Marketplace origin.
+
 ## Minimum Lite configuration
 
 Use Lite mode only when a remote Full Gateway or standalone backend is the
