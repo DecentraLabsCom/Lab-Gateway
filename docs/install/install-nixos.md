@@ -69,7 +69,7 @@ LAB_MANAGER_ALLOWED_CIDRS=
 # operations to a remote Full/standalone blockchain-services backend.
 LAB_ADMIN_BACKEND_URL=
 LAB_ADMIN_BACKEND_TOKEN=
-CORS_ALLOWED_ORIGINS=https://decentralabs-marketplace.app
+CORS_ALLOWED_ORIGINS=https://www.decentralabs-marketplace.app
 FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 # Numeric owner of the Compose bind-mounted state (use `id -u` / `id -g`)
 HOST_UID=1000
@@ -92,8 +92,8 @@ ETHEREUM_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
 BLOCKCHAIN_SERVICES_MODE=provider-consumer
 FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
-ALLOWED_ORIGINS=https://lab.your-institution.edu,https://decentralabs-marketplace.app
-MARKETPLACE_PUBLIC_KEY_URL=https://decentralabs-marketplace.app/.well-known/jwks.json
+ALLOWED_ORIGINS=https://lab.your-institution.edu,https://www.decentralabs-marketplace.app
+MARKETPLACE_PUBLIC_KEY_URL=https://www.decentralabs-marketplace.app/.well-known/jwks.json
 ```
 
 Keep Gateway/OpenResty orchestration values only in `.env`. The root `docker-compose.yml` injects those values into the `blockchain-services` backend from `.env`.

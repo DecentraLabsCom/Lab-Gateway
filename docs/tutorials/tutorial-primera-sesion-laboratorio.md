@@ -41,7 +41,7 @@ aplica para completar tanto la configuración local como el registro en la caden
 
 ### 1.1 Iniciar sesión en el Marketplace con credenciales SSO institucionales
 
-Abre `https://decentralabs-marketplace.app` e inicia sesión con tus credenciales
+Abre `https://www.decentralabs-marketplace.app` e inicia sesión con tus credenciales
 **eduGAIN / SSO** institucionales (nombre de usuario y contraseña universitarios).
 Debes tener el rol de **administrador institucional**. Si aún no tienes ese rol,
 contacta con el administrador de la plataforma Marketplace.
@@ -157,7 +157,7 @@ de invitación del Marketplace pero no tiene IdP en eduGAIN.
 
 ### 3.1 Abrir el panel de proveedor
 
-1. Inicia sesión en `https://decentralabs-marketplace.app` con tus credenciales SSO institucionales.
+1. Inicia sesión en `https://www.decentralabs-marketplace.app` con tus credenciales SSO institucionales.
 2. Navega a **Lab Panel** en la barra de navegación. La sección de gestión de laboratorios
    solo es visible para proveedores registrados.
 3. Haz clic en **Add New Lab**. Se abre un modal con dos modos de configuración.
@@ -197,7 +197,7 @@ directamente en lugar de introducir los datos en el formulario.
 ### 3.3 Confirmar que el laboratorio aparece en el Marketplace
 
 Tras confirmar la transacción, tu laboratorio debe aparecer listado cuando cualquier
-usuario busque tu institución en `https://decentralabs-marketplace.app` y estar
+usuario busque tu institución en `https://www.decentralabs-marketplace.app` y estar
 disponible para reservas.
 
 ---

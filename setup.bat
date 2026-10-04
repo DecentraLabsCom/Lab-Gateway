@@ -443,7 +443,7 @@ if errorlevel 1 (
 set "demo_user=demo-lab-!demo_lab_id!"
 echo Using platform-managed Guacamole principal: !demo_user!
 call :ReadEnvValue "%ROOT_ENV_FILE%" "MARKETPLACE_URL" demo_marketplace_url
-if not defined demo_marketplace_url set "demo_marketplace_url=https://decentralabs-marketplace.app"
+if not defined demo_marketplace_url set "demo_marketplace_url=https://www.decentralabs-marketplace.app"
 set "demo_marketplace_input="
 set /p "demo_marketplace_input=Marketplace authority URL [!demo_marketplace_url!]: "
 if defined demo_marketplace_input set "demo_marketplace_url=!demo_marketplace_input!"
@@ -1017,7 +1017,7 @@ if not "!sepolia_rpc!"=="" (
 )
 
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "ALLOWED_ORIGINS" origins_default
-if not defined origins_default set "origins_default=https://decentralabs-marketplace.app"
+if not defined origins_default set "origins_default=https://www.decentralabs-marketplace.app"
 set /p "allowed_origins=Allowed origins for CORS [!origins_default!]: "
 if "!allowed_origins!"=="" set "allowed_origins=!origins_default!"
 if not "!allowed_origins!"=="" (
@@ -1025,7 +1025,7 @@ if not "!allowed_origins!"=="" (
 )
 
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "MARKETPLACE_PUBLIC_KEY_URL" mpk_default
-if not defined mpk_default set "mpk_default=https://decentralabs-marketplace.app/.well-known/jwks.json"
+if not defined mpk_default set "mpk_default=https://www.decentralabs-marketplace.app/.well-known/jwks.json"
 set /p "marketplace_pk=Marketplace JWKS URL [!mpk_default!]: "
 if "!marketplace_pk!"=="" set "marketplace_pk=!mpk_default!"
 if not "!marketplace_pk!"=="" (

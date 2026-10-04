@@ -70,7 +70,7 @@ ADMIN_ACCESS_TOKEN=change_to_random_token
 LAB_MANAGER_TOKEN=change_to_random_token
 
 # Comma-separated origins allowed for CORS (your Marketplace URL)
-CORS_ALLOWED_ORIGINS=https://decentralabs-marketplace.app
+CORS_ALLOWED_ORIGINS=https://www.decentralabs-marketplace.app
 
 # Required by Compose interpolation; use the public FMU origin when FMU is enabled
 FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
@@ -221,8 +221,8 @@ FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 
 # Origins allowed by the blockchain service
-ALLOWED_ORIGINS=https://lab.your-institution.edu,https://decentralabs-marketplace.app
-MARKETPLACE_PUBLIC_KEY_URL=https://decentralabs-marketplace.app/.well-known/jwks.json
+ALLOWED_ORIGINS=https://lab.your-institution.edu,https://www.decentralabs-marketplace.app
+MARKETPLACE_PUBLIC_KEY_URL=https://www.decentralabs-marketplace.app/.well-known/jwks.json
 ```
 
 Leave `INSTITUTIONAL_WALLET_ADDRESS` and `INSTITUTIONAL_WALLET_PASSWORD` empty — they

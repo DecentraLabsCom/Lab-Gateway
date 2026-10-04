@@ -40,7 +40,7 @@ on-chain registration and the local configuration commit.
 
 ### 1.1 Log into the Marketplace with institutional SSO credentials
 
-Open `https://decentralabs-marketplace.app` and sign in using your institution's
+Open `https://www.decentralabs-marketplace.app` and sign in using your institution's
 **eduGAIN / SSO credentials** (university username and password). You must have the
 **institution admin** role. If you do not yet have that role, contact the Marketplace
 platform administrator.
@@ -155,7 +155,7 @@ not have an eduGAIN IdP.
 
 ### 3.1 Open the provider dashboard
 
-1. Log into `https://decentralabs-marketplace.app` with your institutional SSO credentials.
+1. Log into `https://www.decentralabs-marketplace.app` with your institutional SSO credentials.
 2. Navigate to **Lab Panel** in the navbar. The lab management section is only visible to
    registered providers.
 3. Click **Add New Lab**. A modal opens with two setup modes.
@@ -194,7 +194,7 @@ directly rather than re-entering data in the form.
 ### 3.3 Confirm the lab appears in the Marketplace
 
 After the transaction confirms, your lab should be listed when any user searches for
-your institution on `https://decentralabs-marketplace.app` and available for booking.
+your institution on `https://www.decentralabs-marketplace.app` and available for booking.
 
 ---
 
