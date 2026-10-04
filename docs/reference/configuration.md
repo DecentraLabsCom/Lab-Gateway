@@ -75,7 +75,7 @@ from it. Run each environment with its own configuration bundle:
 | Environment | Root Gateway `.env` | Backend `.env` |
 | --- | --- | --- |
 | Production | `MARKETPLACE_URL=https://decentralabs-marketplace.app` and `CORS_ALLOWED_ORIGINS=https://decentralabs-marketplace.app` | `MARKETPLACE_URL`/`MARKETPLACE_BASE_URL` set to the production origin, `MARKETPLACE_PUBLIC_KEY_URL=https://decentralabs-marketplace.app/.well-known/jwks.json`, and `ALLOWED_ORIGINS` containing that origin |
-| Preview (`develop`) | `MARKETPLACE_URL=https://marketplace-decentralabs.vercel.app` and `CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app` | The same Preview origin for `MARKETPLACE_URL`/`MARKETPLACE_BASE_URL` and JWKS, with `ALLOWED_ORIGINS` containing only the Preview origin plus deliberate local origins |
+| Preview (configured branch) | `MARKETPLACE_URL=https://marketplace-decentralabs.vercel.app` and `CORS_ALLOWED_ORIGINS=https://marketplace-decentralabs.vercel.app` | The same Preview origin for `MARKETPLACE_URL`/`MARKETPLACE_BASE_URL` and JWKS, with `ALLOWED_ORIGINS` containing only the Preview origin plus deliberate local origins |
 
 The backend currently trusts one Marketplace origin and one JWKS URL per
 deployment. Keep the production and Preview backend/Gateway instances
