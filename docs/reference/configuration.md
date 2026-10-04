@@ -82,6 +82,12 @@ deployment. Keep the production and Preview backend/Gateway instances
 separate, and use separate Marketplace JWT keys. `SERVER_NAME`, `ISSUER`,
 `BASE_DOMAIN`, `PUBLIC_BASE_URL` and WebAuthn RP settings continue to describe
 the Gateway origin; they must not be changed to the Vercel Marketplace origin.
+Set `PUBLIC_BASE_URL` and `AUTH_MARKETPLACE_ENDPOINTS_AUDIENCE` to that same
+public Gateway/backend origin (for example, `https://gateway.example.edu`),
+not to either Marketplace URL. If `AUTH_MARKETPLACE_ENDPOINTS_AUDIENCE` is
+empty, it derives from `PUBLIC_BASE_URL`; leaving both empty is only suitable
+when the local Gateway origin can be derived unambiguously from
+`SERVER_NAME` and `HTTPS_PORT`.
 
 ## Minimum Lite configuration
 
