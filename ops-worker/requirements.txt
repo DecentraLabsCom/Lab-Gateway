@@ -45,4 +45,4 @@ greenlet==3.5.6
 PyMySQL==1.2.3
 
 # APC PowerNet SNMP driver
-pysnmp==7.1.29
+pysnmp==7.1.30
