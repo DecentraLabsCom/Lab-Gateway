@@ -84,6 +84,7 @@ function createElement(id) {
       if (Array.isArray(element.options)) element.options.push(child);
       return child;
     },
+    closest: () => null,
     append: (...children) => {
       element.children.push(...children);
     },
@@ -1526,6 +1527,7 @@ test('groups connections by station without copying lab associations into a host
   };
   candidateList.dispatchEvent({ type: 'click', target: configureButton });
   await flush();
+  elements.get('provisionLabstationPath').value = 'C:\\Lab Station';
 
   assert.equal(elements.get('provisionHostModal').classList.contains('show'), true);
   assert.equal(elements.get('provisionHostLabs'), undefined, 'Lab selection should not be exposed in the station modal');
@@ -1595,6 +1597,7 @@ test('does not require an administrative connection to have a published lab', as
   };
   candidateList.dispatchEvent({ type: 'click', target: configureButton });
   await flush();
+  elements.get('provisionLabstationPath').value = 'C:\\Lab Station';
   elements.get('saveProvisionHost').click();
   await flush();
 
@@ -1663,6 +1666,7 @@ test('shows the provisioning request id when the backend reports an internal fai
   };
   candidateList.dispatchEvent({ type: 'click', target: configureButton });
   await flush();
+  elements.get('provisionLabstationPath').value = 'C:\\Lab Station';
   elements.get('saveProvisionHost').click();
   await flush();
 
@@ -1728,6 +1732,10 @@ test('edits a dynamic ops host from the pencil action', async () => {
     name: 'siemens-admin',
     mac: '00-22-33-44-55-66',
     broadcast: '',
+    platform: 'windows',
+    managementPort: 5986,
+    profile: 'dedicated',
+    stationCommand: '/usr/bin/labstationctl',
     labstationPath: 'C:\\Program Files\\Lab Station',
   });
   assert.equal(elements.get('editHostModal').classList.contains('show'), false);
@@ -1757,7 +1765,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.doesNotMatch(script, /FMU token:/);
   assert.match(script, /Heartbeat: \$\{safeUpdated\}<\/span>\s*<span class="host-history-item">Forced logoff: \$\{safeLastForced\}<\/span>\s*<span class="host-history-item">Power action: \$\{safeLastPower\}/);
   assert.match(styles, /\.host-history-heartbeat\s*\{[\s\S]*flex-basis:\s*100%/);
-  assert.match(script, /WinRM TLS trust:/);
+  assert.match(script, /WinRM TLS trust/);
   assert.match(script, /formatConnectionsStatus/);
   assert.match(script, /return 'No connections'/);
   assert.match(script, /\$\{connections\.length\} connections/);

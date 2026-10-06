@@ -53,6 +53,7 @@ def test_worker_heartbeat_stream_blueprint_resolves_runtime_dependencies(monkeyp
     host = {"name": "lab-ws-01", "address": "192.168.1.50"}
     calls = []
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    normalized_host = worker.HOSTS.get("lab-ws-01")
     monkeypatch.setattr(
         worker,
         "generate_heartbeat_stream",
@@ -66,4 +67,4 @@ def test_worker_heartbeat_stream_blueprint_resolves_runtime_dependencies(monkeyp
 
     assert response.status_code == 200
     assert response.get_data(as_text=True) == "event: heartbeat\\ndata: {}\\n\\n"
-    assert calls == [(host, False)]
+    assert calls == [(normalized_host, False)]

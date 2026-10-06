@@ -295,6 +295,19 @@ from guacamole_provision_route import (
 from reservation_runtime import create_reservation_orchestrator_class
 from reservation_context import ReservationRuntimeContext
 from winrm_runtime import create_winrm_runtime
+from station_credentials import (
+    delete_ssh_credential,
+    generate_ssh_credential,
+    load_ssh_credential,
+    public_ssh_credential,
+)
+from station_transport_factory import create_station_transport_runtime
+from station_ssh_trust import (
+    confirm_ssh_host_key,
+    delete_ssh_trust,
+    probe_ssh_host_key,
+    ssh_trust_status,
+)
 from winrm_context import WinRMContext
 from reservation_operations import (
     handle_reservation_end as _handle_reservation_end_impl,
@@ -679,6 +692,13 @@ write_winrm_credentials_store = _CREDENTIAL_RUNTIME.write_winrm_credentials_stor
 save_winrm_credentials = _CREDENTIAL_RUNTIME.save_winrm_credentials
 load_winrm_credentials = _CREDENTIAL_RUNTIME.load_winrm_credentials
 winrm_credentials_configured = _CREDENTIAL_RUNTIME.winrm_credentials_configured
+
+
+def station_credentials_configured(credential_ref: str, transport: str = "winrm") -> bool:
+    """Check credential readiness for the selected management protocol."""
+    if str(transport).lower() == "ssh":
+        return load_ssh_credential(credential_ref) is not None
+    return winrm_credentials_configured(credential_ref)
 fernet_key_is_usable = _CREDENTIAL_RUNTIME.fernet_key_is_usable
 
 
@@ -881,7 +901,7 @@ _HOST_CONFIG_CONTEXT = HostConfigContext(
         **kwargs,
     ),
     get_credential_ref_for_host=lambda: credential_ref_for_host,
-    get_credentials_configured=lambda: winrm_credentials_configured,
+    get_credentials_configured=lambda: station_credentials_configured,
     get_logger=lambda: logging,
     catalog_bool_impl=lambda value: _catalog_bool_impl(value),
     resolve_addresses_impl=lambda address, **kwargs: _resolve_addresses_impl(
@@ -1054,6 +1074,25 @@ run_remote_powershell = _WINRM_RUNTIME.run_remote_powershell
 read_remote_file = _WINRM_RUNTIME.read_remote_file
 write_remote_file = _WINRM_RUNTIME.write_remote_file
 remove_remote_file = _WINRM_RUNTIME.remove_remote_file
+
+
+_STATION_TRANSPORT_RUNTIME = create_station_transport_runtime(
+    run_winrm_command=_WINRM_RUNTIME.run_labstation_command,
+    read_winrm_file=_WINRM_RUNTIME.read_remote_file,
+    write_winrm_file=_WINRM_RUNTIME.write_remote_file,
+    remove_winrm_file=_WINRM_RUNTIME.remove_remote_file,
+    run_winrm_powershell=_WINRM_RUNTIME.run_remote_powershell,
+)
+run_station_command = _STATION_TRANSPORT_RUNTIME.execute
+run_labstation_command = run_station_command
+write_station_secret = _STATION_TRANSPORT_RUNTIME.write_secret
+clear_station_secret = _STATION_TRANSPORT_RUNTIME.clear_secret
+read_station_artifact = _STATION_TRANSPORT_RUNTIME.read_artifact
+probe_station = _STATION_TRANSPORT_RUNTIME.probe
+write_station_secret = _STATION_TRANSPORT_RUNTIME.write_secret
+read_remote_file = _STATION_TRANSPORT_RUNTIME.read_remote_file
+write_remote_file = _STATION_TRANSPORT_RUNTIME.write_remote_file
+remove_remote_file = _STATION_TRANSPORT_RUNTIME.remove_remote_file
 
 
 get_local_mode_flag_path = _get_local_mode_flag_path_impl
@@ -1568,7 +1607,7 @@ _HOST_DISCOVERY_CONTEXT = HostDiscoveryContext(
         *args,
         **kwargs,
     ),
-    get_credentials_configured=lambda: winrm_credentials_configured,
+    get_credentials_configured=lambda: station_credentials_configured,
     get_path_candidates=lambda: build_heartbeat_path_candidates,
     get_read_remote_file=lambda: read_remote_file,
     get_suggested_mac=lambda: suggest_mac_from_heartbeat,
@@ -1647,6 +1686,10 @@ _HOST_INVENTORY_CONTEXT = HostInventoryContext(
     winrm_credentials_configured=lambda credential_ref: winrm_credentials_configured(
         credential_ref
     ),
+    station_credentials_configured=lambda credential_ref, transport: station_credentials_configured(
+        credential_ref, transport
+    ),
+    inspect_ssh_trust=lambda host: ssh_trust_status(host),
 )
 _HOST_INVENTORY_RUNTIME = create_host_inventory_runtime(_HOST_INVENTORY_CONTEXT)
 safe_host_inventory_entry = _HOST_INVENTORY_RUNTIME.safe_host_inventory_entry

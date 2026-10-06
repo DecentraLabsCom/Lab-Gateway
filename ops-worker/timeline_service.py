@@ -40,7 +40,8 @@ def fetch_latest_heartbeat(
             SELECT h.timestamp_utc, h.ready, h.local_mode, h.local_session,
                    h.last_power_action_ts, h.last_power_action_mode,
                    h.last_forced_logoff_ts, h.last_forced_logoff_user,
-                   h.raw_json
+                   h.raw_json, h.platform, h.management_transport,
+                   h.contract_version, h.profile, h.normalized_json
             FROM lab_host_heartbeat h
             JOIN lab_hosts ho ON ho.id = h.host_id
             WHERE ho.name = :host
@@ -61,6 +62,15 @@ def fetch_latest_heartbeat(
             parsed_raw = json_loads(raw)
         except ValueError:
             parsed_raw = None
+    normalized_value = row.get("normalized_json")
+    normalized = None
+    if isinstance(normalized_value, str):
+        try:
+            normalized = json_loads(normalized_value)
+        except ValueError:
+            normalized = None
+    elif isinstance(normalized_value, Mapping):
+        normalized = dict(normalized_value)
 
     return {
         "timestamp": to_iso(row.get("timestamp_utc")),
@@ -76,6 +86,11 @@ def fetch_latest_heartbeat(
             "user": row.get("last_forced_logoff_user"),
         },
         "raw": parsed_raw,
+        "station": normalized,
+        "platform": row.get("platform"),
+        "managementTransport": row.get("management_transport"),
+        "contractVersion": row.get("contract_version"),
+        "profile": row.get("profile"),
     }
 
 

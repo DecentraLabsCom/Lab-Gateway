@@ -28,7 +28,11 @@ def test_poll_heartbeat_coordinates_reads_persistence_and_aas_sync():
         "events_path": r"C:\events.jsonl",
         "labs": [101, 102],
     }
-    heartbeat = {"summary": {"ready": True}}
+    heartbeat = {
+        "schemaVersion": "2.0.0",
+        "timestamp": "2026-10-06T12:00:00Z",
+        "status": {"schemaVersion": "2.0.0", "summary": {"ready": True}},
+    }
     event = {"kind": "session-guard"}
     reads = {
         host["heartbeat_path"]: json.dumps(heartbeat),
@@ -61,15 +65,23 @@ def test_poll_heartbeat_coordinates_reads_persistence_and_aas_sync():
         default_events_path="events-default",
     )
 
-    assert result == {"heartbeat": heartbeat, "last_event": event}
+    assert result["heartbeat"] == heartbeat
+    assert result["normalized"]["contractVersion"] == "2.0.0"
+    assert result["normalized"]["summary"] == {"ready": True}
+    assert result["last_event"] == event
     assert persisted == [("db", host, heartbeat, event)]
-    assert synced == [("101", host, heartbeat)]
+    assert synced == [("101", host, {**heartbeat, "station": result["normalized"]})]
 
 
 def test_poll_heartbeat_keeps_best_effort_failures_out_of_the_main_result():
     logger = Logger()
     host = {"name": "lab-ws-01", "labs": [101]}
-    heartbeat = {"summary": {"ready": False}}
+    heartbeat = {
+        "schemaVersion": "2.0.0",
+        "timestamp": "2026-10-06T12:00:00Z",
+        "summary": {"ready": False},
+        "status": {"schemaVersion": "2.0.0", "summary": {"ready": False}},
+    }
 
     def read_remote_file(_host, path, *_args):
         if path == "events-default":
@@ -95,7 +107,9 @@ def test_poll_heartbeat_keeps_best_effort_failures_out_of_the_main_result():
         default_events_path="events-default",
     )
 
-    assert result == {"heartbeat": heartbeat, "last_event": None}
+    assert result["heartbeat"] == heartbeat
+    assert result["normalized"]["contractVersion"] == "2.0.0"
+    assert result["last_event"] is None
     assert len(logger.warning_calls) == 2
     assert len(logger.error_calls) == 1
 

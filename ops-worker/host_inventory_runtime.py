@@ -28,6 +28,8 @@ class HostInventoryRuntime:
             inspect_winrm_trust=context.inspect_winrm_trust,
             winrm_credentials_configured=context.winrm_credentials_configured,
             default_heartbeat_path=context.default_heartbeat_path,
+            station_credentials_configured=context.station_credentials_configured,
+            inspect_ssh_trust=context.inspect_ssh_trust,
         )
 
     def build_host_inventory(

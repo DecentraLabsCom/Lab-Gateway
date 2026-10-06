@@ -63,6 +63,7 @@ def test_worker_heartbeat_poll_blueprint_resolves_runtime_dependencies(monkeypat
     inspected = []
     times = iter((10.0, 10.125))
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    normalized_host = worker.HOSTS.get("lab-ws-01")
     monkeypatch.setattr(
         worker,
         "poll_heartbeat",
@@ -80,4 +81,4 @@ def test_worker_heartbeat_poll_blueprint_resolves_runtime_dependencies(monkeypat
     payload = response.json
     assert payload is not None
     assert payload["duration_ms"] == 125
-    assert inspected == [(host, True)]
+    assert inspected == [(normalized_host, True)]

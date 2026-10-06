@@ -73,12 +73,16 @@ def test_run_labstation_command_contract_preserves_dependencies_payload_and_resu
             ]
         ),
     )
-    assert response == {
-        "exit_code": 7,
-        "stdout": "ok\n",
-        "stderr": "failed\n",
-        "duration_ms": 500,
-    }
+    assert response["exitCode"] == response["exit_code"] == 7
+    assert response["success"] is False
+    assert response["outcome"] == "failure"
+    assert response["stdout"] == "ok\n"
+    assert response["stderr"] == "failed\n"
+    assert response["durationMs"] == response["duration_ms"] == 500
+    assert response["transport"] == "winrm"
+    assert response["metadata"]["platform"] == "windows"
+    assert response["options"] == {}
+    assert response["id"]
 
 
 def _patch_remote_command_dependencies(monkeypatch, *, result):

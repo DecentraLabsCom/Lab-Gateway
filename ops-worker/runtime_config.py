@@ -309,14 +309,17 @@ def load_runtime_policy(
         },
         winrm_management_cidrs=[
             value.strip()
-            for value in (get("WINRM_MANAGEMENT_CIDRS") or "").split(",")
+            for value in (get("STATION_MANAGEMENT_CIDRS") or get("WINRM_MANAGEMENT_CIDRS") or "").split(",")
             if value.strip()
         ],
         allowed_winrm_commands={
             command.strip()
             for command in get(
-                "OPS_ALLOWED_COMMANDS",
+                "OPS_STATION_ALLOWED_COMMANDS",
+                get(
+                    "OPS_ALLOWED_COMMANDS",
                 "prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status",
+                ),
             ).split(",")
             if command.strip()
         },

@@ -167,7 +167,9 @@ def test_aas_lab_sync_route_contract_continues_without_persisted_heartbeat_on_db
 
     assert response.status_code == 200
     assert response.json == {"synced": True, "labId": "lab-1"}
-    sync.assert_called_once_with("lab-1", worker.HOSTS.get("lab-ws-01"), None, {})
+    sync.assert_called_once_with(
+        "lab-1", {"name": "lab-ws-01", "address": "192.168.1.50"}, None, {}
+    )
     assert "secret database details" not in response.get_data(as_text=True)
     warning.assert_called_once()
 

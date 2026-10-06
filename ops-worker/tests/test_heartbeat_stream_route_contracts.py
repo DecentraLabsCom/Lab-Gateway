@@ -21,6 +21,7 @@ def test_heartbeat_stream_route_contract_preserves_sse_headers_and_query_flag(cl
     host = {"name": "lab-ws-01", "address": "192.168.1.50"}
     calls = []
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    normalized_host = worker.HOSTS.get("lab-ws-01")
 
     def fake_stream(host_arg, include_events):
         calls.append((host_arg, include_events))
@@ -36,4 +37,4 @@ def test_heartbeat_stream_route_contract_preserves_sse_headers_and_query_flag(cl
     assert response.content_type == "text/event-stream"
     assert response.headers["Cache-Control"] == "no-cache"
     assert response.get_data(as_text=True) == "event: heartbeat\ndata: {}\n\n"
-    assert calls == [(host, False)]
+    assert calls == [(normalized_host, False)]

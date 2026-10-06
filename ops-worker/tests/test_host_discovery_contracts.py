@@ -61,6 +61,7 @@ def test_discover_labstation_candidate_contract_preserves_signal_order_and_paylo
     assert calls == [
         ("dns", "lab-candidate", None),
         ("tcp", "lab-candidate", 55986, 1.25),
+        ("tcp", "lab-candidate", 22, 1.25),
         ("http", "lab-candidate"),
         ("heartbeat", "lab-candidate"),
         ("names", connection),
@@ -71,6 +72,9 @@ def test_discover_labstation_candidate_contract_preserves_signal_order_and_paylo
         "checks": {
             "dns": True,
             "winrm": {"55986": True},
+            "ssh": {"22": True},
+            "managementPortReachable": True,
+            "managementTrustPending": False,
             "labStationHttp": http_result,
             "heartbeat": heartbeat_result,
         },
@@ -107,6 +111,7 @@ def test_discover_labstation_candidate_contract_preserves_missing_hostname_respo
         "checks": {
             "dns": False,
             "winrm": {},
+            "ssh": {},
             "labStationHttp": {
                 "checked": False,
                 "detected": False,

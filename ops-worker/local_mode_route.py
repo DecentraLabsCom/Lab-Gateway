@@ -20,6 +20,7 @@ def handle_local_mode(
     remove_remote_file: Callable[[Dict[str, Any], str, Optional[str], Optional[str], Optional[str], Optional[bool], Optional[int]], None],
     jsonify: Callable[[Any], Any],
     internal_error_response: Callable[..., Any],
+    run_station_command: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Any:
     """Toggle a host's Lab Station local-mode flag without changing its contract."""
     host_name = payload.get("host")
@@ -36,6 +37,25 @@ def handle_local_mode(
 
     flag_path = get_flag_path(host)
     try:
+        management = host.get("management") if isinstance(host.get("management"), dict) else {}
+        contract = host.get("contract") if isinstance(host.get("contract"), dict) else {}
+        if run_station_command and (
+            str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh"
+            or int(contract.get("major") or 0) >= 3
+        ):
+            result = run_station_command(host, "local-mode", ["set" if enabled else "clear"])
+            if int(result.get("exitCode", result.get("exit_code", 2))) >= 2:
+                return jsonify({
+                    "error": "Station local-mode operation failed",
+                    "code": "STATION_COMMAND_FAILED",
+                    "transport": management.get("transport"),
+                }), 502
+            return jsonify({
+                "host": host_name,
+                "localModeEnabled": enabled,
+                "outcome": result.get("outcome", "success"),
+                "transport": result.get("transport", management.get("transport")),
+            }), 200
         if enabled:
             write_remote_file(host, flag_path, "1", None, None, None, None, None)
         else:

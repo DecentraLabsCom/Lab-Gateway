@@ -195,13 +195,18 @@ def build_technical_data_submodel(
     now_iso = datetime.now(timezone.utc).isoformat()
     hb = heartbeat or {}
 
+    station = hb.get("station") if isinstance(hb.get("station"), dict) else hb
     status = hb.get("status", {})
-    operations = hb.get("operations", {})
+    if not isinstance(status, dict):
+        status = {}
+    operations = station.get("operations") if isinstance(station.get("operations"), dict) else {}
 
-    ready = capability_ready(hb, "physicalLab")
-    local_mode = status.get("localModeEnabled")
-    local_session = status.get("localSessionActive")
-    hb_timestamp = hb.get("timestamp", "")
+    ready = capability_ready(station, "physicalLab")
+    local_mode = station.get("localModeEnabled", status.get("localModeEnabled"))
+    sessions = station.get("sessions") if isinstance(station.get("sessions"), dict) else {}
+    local_session = sessions.get("localSessionActive", status.get("localSessionActive"))
+    hb_timestamp = station.get("timestamp", hb.get("timestamp", ""))
+    platform = station.get("platform") if isinstance(station.get("platform"), dict) else {}
 
     last_power = operations.get("lastPowerAction") or {}
     last_power_ts = last_power.get("timestamp", "")
@@ -240,6 +245,8 @@ def build_technical_data_submodel(
                 "value": [
                     _arbitrary_prop("ResourceType", "xs:string", "PhysicalLaboratory", "DecentraLabs resource classification."),
                     _arbitrary_prop("ResourceStatus", "xs:string", resource_status, "Current publication status."),
+                    _arbitrary_prop("StationPlatform", "xs:string", str(platform.get("os") or ""), "Operating system reported by the normalized station contract."),
+                    _arbitrary_prop("StationVersion", "xs:string", str(station.get("version") or ""), "Lab Station agent version."),
                     _arbitrary_prop("LabStatus", "xs:string", "Ready" if ready else ("NotReady" if ready is False else ""), "Physical lab readiness projection."),
                     _arbitrary_prop("LastPowerActionMode", "xs:string", last_power_mode, "Last power operation mode."),
                     _arbitrary_prop("LastForcedLogoffUser", "xs:string", last_logoff_user, "User affected by the last forced logoff."),

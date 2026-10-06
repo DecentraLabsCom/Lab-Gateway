@@ -347,6 +347,13 @@ jobs:
             --cov=rotate_secrets \
             --cov=power \
             --cov=power_credentials \
+            --cov=station_contract \
+            --cov=station_credentials \
+            --cov=station_ssh_trust \
+            --cov=station_api_blueprint \
+            --cov=station_transport \
+            --cov=station_transport_factory \
+            --cov=transports.ssh \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             --junitxml=pytest-results.xml \

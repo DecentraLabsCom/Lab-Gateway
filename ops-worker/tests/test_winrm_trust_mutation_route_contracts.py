@@ -10,7 +10,7 @@ def _install_host(monkeypatch):
         "winrm_trust_ref": "pc-siemens",
     }
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
-    return host
+    return worker.HOSTS.get("lab-ws-01")
 
 
 def _put_payload(fingerprint="A" * 64, trust_ref="pc-siemens"):

@@ -103,8 +103,13 @@ def test_fetch_latest_heartbeat_projects_public_shape_and_ignores_bad_raw_json()
     )
 
     assert result == {
+        "contractVersion": None,
         "timestamp": timestamp.isoformat(),
         "ready": True,
+        "platform": None,
+        "profile": None,
+        "managementTransport": None,
+        "station": None,
         "localMode": False,
         "localSession": True,
         "lastPower": {"timestamp": None, "mode": "on"},

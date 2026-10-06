@@ -272,6 +272,7 @@ def enroll_fmu_station(
     config: FmuStationConfig,
     hosts: Iterable[Mapping[str, Any]],
     run_remote_powershell: Callable[..., Any],
+    write_station_secret: Optional[Callable[[Mapping[str, Any], str, str], Any]] = None,
 ) -> dict[str, Any]:
     """Provision the Gateway token on its one configured Station host."""
     selected = _resolve_requested_station(
@@ -281,15 +282,27 @@ def enroll_fmu_station(
         require_token=True,
     )
 
-    run_remote_powershell(
-        host=selected,
-        script=build_fmu_station_provision_script(config.internal_token),
-        user=None,
-        password=None,
-        transport=None,
-        use_ssl=None,
-        port=None,
-    )
+    management = selected.get("management") if isinstance(selected.get("management"), Mapping) else {}
+    contract = selected.get("contract") if isinstance(selected.get("contract"), Mapping) else {}
+    use_secure_operation = management.get("transport") == "ssh" or int(contract.get("major") or 0) >= 3
+    if use_secure_operation:
+        if not write_station_secret:
+            raise FmuStationEnrollmentError(
+                "FMU_STATION_SECRET_UNSUPPORTED",
+                "The selected Station does not support secure secret provisioning",
+                409,
+            )
+        write_station_secret(selected, "fmu-internal-token", config.internal_token)
+    else:
+        run_remote_powershell(
+            host=selected,
+            script=build_fmu_station_provision_script(config.internal_token),
+            user=None,
+            password=None,
+            transport=None,
+            use_ssl=None,
+            port=None,
+        )
     return {
         "enrolled": True,
         "host": str(selected.get("name") or ""),
@@ -304,6 +317,7 @@ def release_fmu_station(
     config: FmuStationConfig,
     hosts: Iterable[Mapping[str, Any]],
     run_remote_powershell: Callable[..., Any],
+    clear_station_secret: Optional[Callable[[Mapping[str, Any], str], Any]] = None,
 ) -> dict[str, Any]:
     """Remove the FMU token from the one configured Station host."""
     selected = _resolve_requested_station(
@@ -312,15 +326,27 @@ def release_fmu_station(
         hosts=hosts,
         require_token=False,
     )
-    run_remote_powershell(
-        host=selected,
-        script=build_fmu_station_release_script(),
-        user=None,
-        password=None,
-        transport=None,
-        use_ssl=None,
-        port=None,
-    )
+    management = selected.get("management") if isinstance(selected.get("management"), Mapping) else {}
+    contract = selected.get("contract") if isinstance(selected.get("contract"), Mapping) else {}
+    use_secure_operation = management.get("transport") == "ssh" or int(contract.get("major") or 0) >= 3
+    if use_secure_operation:
+        if not clear_station_secret:
+            raise FmuStationEnrollmentError(
+                "FMU_STATION_SECRET_UNSUPPORTED",
+                "The selected Station does not support secure secret release",
+                409,
+            )
+        clear_station_secret(selected, "fmu-internal-token")
+    else:
+        run_remote_powershell(
+            host=selected,
+            script=build_fmu_station_release_script(),
+            user=None,
+            password=None,
+            transport=None,
+            use_ssl=None,
+            port=None,
+        )
     return {
         "released": True,
         "host": str(selected.get("name") or ""),

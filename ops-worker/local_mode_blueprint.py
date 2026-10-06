@@ -15,6 +15,7 @@ def create_local_mode_blueprint(
     write_remote_file: Callable[..., None],
     remove_remote_file: Callable[..., None],
     internal_error_response: Callable[..., Any],
+    run_station_command: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Blueprint:
     """Create the local-mode Blueprint with explicit remote-operation providers."""
     blueprint = Blueprint("local_mode", __name__)
@@ -31,6 +32,7 @@ def create_local_mode_blueprint(
             remove_remote_file=remove_remote_file,
             jsonify=jsonify,
             internal_error_response=internal_error_response,
+            run_station_command=run_station_command,
         )
 
     return blueprint

@@ -30,6 +30,8 @@ class HostInventoryContext:
     inspect_winrm_trust: Callable[[Dict[str, Any]], Dict[str, Any]]
     winrm_credentials_configured: Callable[[str], bool]
     default_heartbeat_path: str = DEFAULT_HEARTBEAT_PATH
+    station_credentials_configured: Callable[[str, str], bool] = lambda _ref, _transport: False
+    inspect_ssh_trust: Callable[[Dict[str, Any]], Dict[str, Any]] = lambda _host: {"status": "missing"}
 
 
 __all__ = ["HostInventoryContext", "HostRegistryProtocol"]

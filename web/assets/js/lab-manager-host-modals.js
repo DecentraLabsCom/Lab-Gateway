@@ -1,7 +1,7 @@
 (function (root) {
     'use strict';
 
-    const DEFAULT_LABSTATION_PATH = 'C:\\Lab Station';
+    const DEFAULT_LABSTATION_PATH = '';
 
     function deriveLabstationPath(source = {}) {
         const direct = source.labstationPath || source.labstation_path;
@@ -29,6 +29,8 @@
         credentialsController,
         callbacks = {},
         documentImpl = root.document,
+        promptImpl = (message, defaultValue = '') => root.prompt?.(message, defaultValue),
+        confirmImpl = message => root.confirm?.(message),
         logger = console,
     } = {}) {
         if (typeof fetchImpl !== 'function') {
@@ -75,8 +77,7 @@
                 !provision.provisionHostName ||
                 !provision.provisionHostAddress ||
                 !provision.provisionHostMac ||
-                !provision.provisionHostBroadcast ||
-                !provision.provisionLabstationPath
+                !provision.provisionHostBroadcast
             ) {
                 showToast('Host provisioning modal is unavailable', 'error');
                 return;
@@ -92,8 +93,22 @@
             provision.provisionHostAddress.value = draft.address || station.address || '';
             provision.provisionHostMac.value = draft.mac || '';
             provision.provisionHostBroadcast.value = draft.broadcast || '';
-            provision.provisionLabstationPath.value = deriveLabstationPath(draft);
+            if (provision.provisionHostPlatform) provision.provisionHostPlatform.value = draft.platform || 'windows';
+            if (provision.provisionManagementPort) provision.provisionManagementPort.value = draft.management?.port || draft.management_port || (draft.platform === 'linux' ? 22 : 5986);
+            if (provision.provisionProfile) provision.provisionProfile.value = draft.profile || 'dedicated';
+            if (provision.provisionStationCommand) provision.provisionStationCommand.value = draft.station?.command || '/usr/bin/labstationctl';
+            if (provision.provisionLabstationPath) provision.provisionLabstationPath.value = deriveLabstationPath(draft);
+            updateProvisionFields();
             provision.provisionModal.classList.add('show');
+        }
+
+        function updateProvisionFields() {
+            const isLinux = fields.provisionHostPlatform?.value === 'linux';
+            if (fields.provisionLabstationPath?.closest('.field')) fields.provisionLabstationPath.closest('.field').hidden = isLinux;
+            ['provisionManagementPort', 'provisionProfile', 'provisionStationCommand'].forEach(key => {
+                const input = fields[key];
+                if (input?.closest('.field')) input.closest('.field').hidden = !isLinux;
+            });
         }
 
         function closeProvision() {
@@ -107,8 +122,7 @@
                 !provision.provisionHostName ||
                 !provision.provisionHostAddress ||
                 !provision.provisionHostMac ||
-                !provision.provisionHostBroadcast ||
-                !provision.provisionLabstationPath
+                !provision.provisionHostBroadcast
             ) {
                 showToast('Host provisioning modal is unavailable', 'error');
                 return;
@@ -120,9 +134,14 @@
                 mac: provision.provisionHostMac.value.trim(),
                 broadcast: provision.provisionHostBroadcast.value.trim(),
                 credentialRef: provision.provisionHostAddress.value.trim(),
-                labstationPath: provision.provisionLabstationPath.value.trim(),
+                platform: provision.provisionHostPlatform?.value || 'windows',
+                managementTransport: provision.provisionHostPlatform?.value === 'linux' ? 'ssh' : 'winrm',
+                managementPort: Number(provision.provisionManagementPort?.value || (provision.provisionHostPlatform?.value === 'linux' ? 22 : 5986)),
+                profile: provision.provisionProfile?.value || 'dedicated',
+                stationCommand: provision.provisionStationCommand?.value.trim() || '/usr/bin/labstationctl',
+                labstationPath: provision.provisionLabstationPath?.value.trim() || '',
             };
-            if (!payload.labstationPath) {
+            if (payload.platform === 'windows' && !payload.labstationPath) {
                 showToast('Lab Station path is required', 'error');
                 return;
             }
@@ -139,8 +158,7 @@
                 !edit.editName ||
                 !edit.editAddress ||
                 !edit.editMac ||
-                !edit.editBroadcast ||
-                !edit.editLabstationPath
+                !edit.editBroadcast
             ) {
                 showToast('Only dynamically configured hosts can be edited', 'error');
                 return;
@@ -150,7 +168,15 @@
             edit.editAddress.value = meta.address || host;
             edit.editMac.value = meta.mac || '';
             edit.editBroadcast.value = meta.broadcast || '';
-            edit.editLabstationPath.value = deriveLabstationPath(meta);
+            if (edit.editLabstationPath) edit.editLabstationPath.value = deriveLabstationPath(meta);
+            const isLinux = meta.managementTransport === 'ssh' || meta.platform === 'linux';
+            if (edit.editLabstationPath?.closest('.field')) edit.editLabstationPath.closest('.field').hidden = isLinux;
+            if (edit.editManagementPort) edit.editManagementPort.value = meta.managementPort || (isLinux ? 22 : 5986);
+            if (edit.editProfile) edit.editProfile.value = meta.profile || 'dedicated';
+            if (edit.editStationCommand) edit.editStationCommand.value = meta.stationCommand || '/usr/bin/labstationctl';
+            ['editManagementPort', 'editProfile', 'editStationCommand'].forEach(key => {
+                if (edit[key]?.closest('.field')) edit[key].closest('.field').hidden = !isLinux;
+            });
             edit.editModal.classList.add('show');
         }
 
@@ -160,17 +186,22 @@
 
         async function saveEdit() {
             const edit = fields;
-            if (!edit.editOriginalName || !edit.editName || !edit.editMac || !edit.editBroadcast
-                || !edit.editLabstationPath) {
+            if (!edit.editOriginalName || !edit.editName || !edit.editMac || !edit.editBroadcast) {
                 showToast('Host edit modal is unavailable', 'error');
                 return;
             }
             const originalName = edit.editOriginalName.value.trim();
+            const meta = hostMetadata[originalName] || {};
             const payload = {
                 name: edit.editName.value.trim(),
                 mac: edit.editMac.value.trim(),
                 broadcast: edit.editBroadcast.value.trim(),
-                labstationPath: edit.editLabstationPath.value.trim(),
+                platform: meta.platform || 'windows',
+                managementPort: Number(edit.editManagementPort?.value || meta.managementPort
+                    || (meta.managementTransport === 'ssh' || meta.platform === 'linux' ? 22 : 5986)),
+                profile: edit.editProfile?.value || meta.profile || 'dedicated',
+                stationCommand: edit.editStationCommand?.value.trim() || meta.stationCommand || '/usr/bin/labstationctl',
+                labstationPath: edit.editLabstationPath?.value.trim() || '',
             };
             if (!originalName || !payload.name) {
                 showToast('Name is required', 'error');
@@ -184,7 +215,7 @@
                 showToast('MAC must use format 00:11:22:33:44:55 or 00-11-22-33-44-55', 'error');
                 return;
             }
-            if (!payload.labstationPath) {
+            if (payload.platform === 'windows' && !payload.labstationPath) {
                 showToast('Lab Station path is required', 'error');
                 return;
             }
@@ -216,6 +247,10 @@
         function openCredentials(host) {
             const meta = hostMetadata[host] || {};
             const credentialRef = meta.credentialRef || meta.address || host;
+            if ((meta.managementTransport || 'winrm') === 'ssh') {
+                void manageSshCredential(host, credentialRef);
+                return;
+            }
             const credentials = fields;
             if (
                 !credentials.credentialsModal ||
@@ -232,6 +267,67 @@
             credentials.credentialUser.value = '.\\LabGatewaySvc';
             credentials.credentialPassword.value = '';
             credentials.credentialsModal.classList.add('show');
+        }
+
+        async function manageSshCredential(host, credentialRef) {
+            try {
+                let response = await fetchImpl(`/ops/api/station/credentials/${encodeURIComponent(credentialRef)}`);
+                let credential = await response.json().catch(() => ({}));
+                if (response.status === 404) {
+                    if (!confirmImpl(`Generate a new encrypted Ed25519 management key for ${host}? The private key stays in Lab Gateway.`)) return;
+                    response = await fetchImpl(`/ops/api/station/credentials/${encodeURIComponent(credentialRef)}`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: 'labstation-ops' }),
+                    });
+                    credential = await response.json().catch(() => ({}));
+                }
+                if (!response.ok) throw new Error(credential.error || `HTTP ${response.status}`);
+                if (credential.publicKey && typeof promptImpl === 'function') {
+                    const meta = hostMetadata[host] || {};
+                    const profile = meta.profile || 'dedicated';
+                    const port = Number(meta.managementPort) || 22;
+                    promptImpl(`Install this public key for ${credential.username || 'labstation-ops'} on ${host}. Run: sudo labstationctl setup --profile ${profile} --ssh-port ${port} --management-public-key '<key>'. The private key remains encrypted in Gateway.`, credential.publicKey);
+                }
+                showToast(`SSH management key ready for ${host}`, 'success');
+                await loadHostInventory({ skipAuthPrompt: true });
+            } catch (err) {
+                logger.error(err);
+                showToast(`SSH credential setup failed for ${host}: ${err.message}`, 'error');
+            }
+        }
+
+        async function manageSshTrust(host) {
+            try {
+                const previewResponse = await fetchImpl(`/ops/api/station/hosts/${encodeURIComponent(host)}/trust/preview`, { method: 'POST' });
+                const preview = await previewResponse.json().catch(() => ({}));
+                if (!previewResponse.ok) throw new Error(preview.error || `HTTP ${previewResponse.status}`);
+                const confirmation = promptImpl(
+                    `Verify this SSH host fingerprint out of band, then enter it exactly to trust ${host}:\n${preview.algorithm}\n${preview.fingerprint}`,
+                    '',
+                );
+                if (confirmation !== preview.fingerprint) {
+                    showToast(`SSH host-key confirmation cancelled for ${host}`, 'warning');
+                    return;
+                }
+                const response = await fetchImpl(`/ops/api/station/hosts/${encodeURIComponent(host)}/trust/confirm`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fingerprint: confirmation }),
+                });
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+                const verifyResponse = await fetchImpl(`/ops/api/station/hosts/${encodeURIComponent(host)}/verify`, { method: 'POST' });
+                const verified = await verifyResponse.json().catch(() => ({}));
+                if (!verifyResponse.ok || verified.reachable !== true
+                    || verified.identity?.contractVersion !== '3.0.0'
+                    || verified.identity?.platform?.os !== 'linux') {
+                    throw new Error('Host key pinned, but authenticated Station Contract v3 identity was not verified');
+                }
+                showToast(`SSH host key confirmed and Station v3 identity verified for ${host}`, 'success');
+                await loadHostInventory({ skipAuthPrompt: true });
+            } catch (err) {
+                logger.error(err);
+                showToast(`SSH trust setup failed for ${host}: ${err.message}`, 'error');
+            }
         }
 
         function closeCredentials() {
@@ -262,8 +358,14 @@
             closeProvision,
             getState,
             openCredentials,
+            openTrust(host) {
+                if ((hostMetadata[host]?.managementTransport || 'winrm') === 'ssh') {
+                    void manageSshTrust(host);
+                }
+            },
             openEdit,
             openProvision,
+            updateProvisionFields,
             saveCredentials,
             saveEdit,
             saveProvision,

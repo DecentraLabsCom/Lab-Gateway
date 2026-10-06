@@ -66,7 +66,8 @@ def perform_wake_step(
     )
     broadcast = options.get("broadcast") or host.get("broadcast")
     port = int(options.get("port", host.get("wol_port", 9)))
-    configured_probe_port = host.get("winrm_port")
+    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+    configured_probe_port = management.get("port", host.get("management_port", host.get("winrm_port")))
     try:
         probe_port = int(configured_probe_port) if configured_probe_port not in (None, "") else None
     except (TypeError, ValueError):
@@ -141,20 +142,30 @@ def perform_command_step(
 ) -> Tuple[bool, Dict[str, Any]]:
     start = current_epoch()
     success = False
+    exit_code = 2
+    outcome = "failure"
     result: Dict[str, Any] = {}
     message = ""
     try:
         result = run_labstation_command(host, command, args, None, None, None, None, None)
-        success = result.get("exit_code", 1) == 0
-        message = "Exit code {}".format(result.get("exit_code"))
+        exit_code = int(result.get("exitCode", result.get("exit_code", 1)))
+        success = exit_code < 2
+        outcome = "success" if exit_code == 0 else "warning" if exit_code == 1 else "failure"
+        message = "Station command {} (exit code {})".format(outcome, exit_code)
     except Exception:
         logger.exception("Lab Station command failed for %s", host.get("name"))
         message = "Lab Station command failed"
         result = {"error": message}
-    duration_ms = result.get("duration_ms", int((current_epoch() - start) * 1000))
-    status = "completed" if success else "failed"
+    duration_ms = result.get("durationMs", result.get("duration_ms", int((current_epoch() - start) * 1000)))
+    status = "completed" if success and exit_code == 0 else "warning" if success else "failed"
+    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+    contract = host.get("contract") if isinstance(host.get("contract"), Mapping) else {}
     summarized = {
-        "exitCode": result.get("exit_code"),
+        "exitCode": result.get("exitCode", result.get("exit_code")),
+        "outcome": result.get("outcome", outcome),
+        "platform": host.get("platform", "windows"),
+        "transport": result.get("transport", management.get("transport", "winrm")),
+        "contractVersion": result.get("contractVersion", str(contract.get("major") or 2) + ".0.0"),
         "stdout": (result.get("stdout") or "").strip(),
         "stderr": (result.get("stderr") or "").strip(),
         "args": args,
@@ -167,7 +178,7 @@ def perform_command_step(
         action,
         status,
         success,
-        response_code=result.get("exit_code"),
+        response_code=result.get("exitCode", result.get("exit_code")),
         duration_ms=duration_ms,
         payload=summarized,
         message=message,

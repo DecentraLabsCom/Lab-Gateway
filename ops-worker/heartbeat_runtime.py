@@ -36,17 +36,24 @@ class HeartbeatRuntime:
         host: Dict[str, Any],
         heartbeat: Dict[str, Any],
         last_event: Optional[Dict[str, Any]],
+        *,
+        normalized: Optional[Dict[str, Any]] = None,
     ) -> None:
         context = self._context
+        options = dict(
+            to_utc=self.to_utc,
+            now=context.now,
+            sql_text=context.sql_text,
+            json_dumps=context.json_dumps,
+        )
+        if normalized is not None:
+            options["normalized"] = normalized
         return _persist_heartbeat(
             engine,
             host,
             heartbeat,
             last_event,
-            to_utc=self.to_utc,
-            now=context.now,
-            sql_text=context.sql_text,
-            json_dumps=context.json_dumps,
+            **options,
         )
 
     def poll_heartbeat(

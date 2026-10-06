@@ -1,6 +1,7 @@
 """Host catalog loading orchestration with explicit dependencies."""
 
 import os
+import re
 
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Protocol, Tuple
@@ -41,8 +42,14 @@ def resolve_host_secret_refs(
         host.pop("winrm_pass", None)
         host.pop("labs", None)
         host.pop("validLabIds", None)
-        if not credentials_configured(credential_ref_for_host(host)):
-            warn("Missing WinRM credentials for host %s", host.get("name", "<unknown>"))
+        management = host.get("management") if isinstance(host.get("management"), dict) else {}
+        transport = str(management.get("transport") or host.get("management_transport") or "winrm")
+        try:
+            configured = credentials_configured(credential_ref_for_host(host), transport)
+        except TypeError:
+            configured = credentials_configured(credential_ref_for_host(host))
+        if not configured:
+            warn("Missing %s credentials for host %s", transport, host.get("name", "<unknown>"))
     return raw
 
 
@@ -175,6 +182,53 @@ def update_dynamic_host(
             updated["broadcast"] = broadcast
         else:
             updated.pop("broadcast", None)
+
+    management = current.get("management") if isinstance(current.get("management"), dict) else {}
+    if str(management.get("transport") or current.get("management_transport") or "winrm").lower() == "ssh":
+        if "address" in payload:
+            address = str(payload.get("address") or "").strip()
+            if not address or len(address) > 253 or any(ord(char) < 33 for char in address):
+                return None, "address is invalid"
+            updated["address"] = address
+        if "managementPort" in payload:
+            try:
+                port = int(payload.get("managementPort"))
+            except (TypeError, ValueError):
+                return None, "managementPort must be an integer"
+            if not 1 <= port <= 65535:
+                return None, "managementPort must be between 1 and 65535"
+            management["port"] = port
+        if "credentialRef" in payload:
+            credential_ref = str(payload.get("credentialRef") or "").strip().lower()
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,127}", credential_ref) or ".." in credential_ref:
+                return None, "credentialRef is invalid"
+            management["credentialRef"] = credential_ref
+            updated["credential_ref"] = credential_ref
+        if "trustRef" in payload:
+            trust_ref = str(payload.get("trustRef") or "").strip().lower()
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,127}", trust_ref) or ".." in trust_ref:
+                return None, "trustRef is invalid"
+            management["trustRef"] = trust_ref
+            updated["ssh_trust_ref"] = trust_ref
+        if "stationCommand" in payload:
+            command = str(payload.get("stationCommand") or "").strip()
+            if not command.startswith("/") or len(command) > 512 or any(char in command for char in "\r\n\x00"):
+                return None, "stationCommand must be an absolute path"
+            station = dict(updated.get("station") or {})
+            station["command"] = command
+            updated["station"] = station
+        if "profile" in payload:
+            profile = str(payload.get("profile") or "").strip().lower()
+            if profile not in {"dedicated", "hybrid", "fmu-only"}:
+                return None, "profile must be dedicated, hybrid, or fmu-only"
+            updated["profile"] = profile
+        updated["management"] = management
+        updated["management_port"] = int(management.get("port") or 22)
+        updated["management_transport"] = "ssh"
+        hosts[host_index] = updated
+        config["hosts"] = hosts
+        write_config(config)
+        return updated, None
 
     if "heartbeatPath" in payload:
         heartbeat_path = str(payload.get("heartbeatPath") or "").strip()

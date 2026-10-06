@@ -25,6 +25,7 @@ function element(overrides = {}) {
     innerHTML: '',
     textContent: '',
     classList: { add() {}, remove() {} },
+    closest() { return null; },
     appendChild(child) { this.child = child; return child; },
     ...overrides,
   };
@@ -106,6 +107,7 @@ test('keeps provision, edit and credential modal payloads inside one host contro
   });
 
   await controller.openProvision('station-8');
+  fields.provisionLabstationPath.value = 'C:\\Lab Station';
   await new Promise(resolve => setTimeout(resolve, 0));
   await controller.saveProvision();
   controller.openEdit('station-7');
@@ -125,6 +127,11 @@ test('keeps provision, edit and credential modal payloads inside one host contro
     mac: '',
     broadcast: '',
     credentialRef: '10.0.0.8',
+    platform: 'windows',
+    managementTransport: 'winrm',
+    managementPort: 5986,
+    profile: 'dedicated',
+    stationCommand: '/usr/bin/labstationctl',
     labstationPath: 'C:\\Lab Station',
   }]);
   assert.equal(requests.find(request => request.url.includes('/ops/api/hosts/')).options.method, 'PATCH');

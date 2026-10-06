@@ -100,6 +100,11 @@ def db_engine():
         Column("last_power_action_ts", DateTime),
         Column("last_power_action_mode", String(32)),
         Column("raw_json", Text, nullable=False),
+        Column("platform", String(16)),
+        Column("management_transport", String(16)),
+        Column("contract_version", String(16)),
+        Column("profile", String(32)),
+        Column("normalized_json", Text),
         Column("created_at", DateTime),
     )
 

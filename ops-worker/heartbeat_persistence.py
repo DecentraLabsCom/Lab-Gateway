@@ -36,17 +36,26 @@ def persist_heartbeat(
     now: Callable[[], Any],
     sql_text: Callable[[str], Any],
     json_dumps: Callable[[Any], str],
+    normalized: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Upsert a host and persist its heartbeat plus the optional last event."""
     ts = to_utc(heartbeat.get("timestamp")) or now()
     ready = heartbeat.get("summary", {}).get("ready")
     status = heartbeat.get("status", {})
+    if not isinstance(status, Mapping):
+        status = {}
     operations = heartbeat.get("operations", {})
 
     last_forced = operations.get("lastForcedLogoff") or {}
     last_power = operations.get("lastPowerAction") or {}
-    local_mode = status.get("localModeEnabled")
-    local_session = status.get("localSessionActive")
+    station = dict(normalized or {})
+    platform = station.get("platform") if isinstance(station.get("platform"), Mapping) else {}
+    management = station.get("management") if isinstance(station.get("management"), Mapping) else {}
+    local_mode = status.get("localModeEnabled", station.get("localModeEnabled"))
+    sessions = station.get("sessions") if isinstance(station.get("sessions"), Mapping) else {}
+    local_session = status.get("localSessionActive", sessions.get("localSessionActive"))
+    if ready is None and isinstance(station.get("summary"), Mapping):
+        ready = station["summary"].get("ready")
 
     last_forced_ts = to_utc(last_forced.get("timestamp"))
     last_power_ts = to_utc(last_power.get("timestamp"))
@@ -86,12 +95,14 @@ def persist_heartbeat(
                     host_id, timestamp_utc, ready, local_mode, local_session,
                     last_forced_logoff_ts, last_forced_logoff_user,
                     last_power_action_ts, last_power_action_mode,
-                    raw_json
+                    raw_json, platform, management_transport, contract_version,
+                    profile, normalized_json
                 ) VALUES (
                     :host_id, :ts, :ready, :local_mode, :local_session,
                     :last_forced_ts, :last_forced_user,
                     :last_power_ts, :last_power_mode,
-                    :raw_json
+                    :raw_json, :platform, :management_transport, :contract_version,
+                    :profile, :normalized_json
                 )
                 """
             ),
@@ -106,6 +117,11 @@ def persist_heartbeat(
                 "last_power_ts": last_power_ts,
                 "last_power_mode": last_power.get("mode"),
                 "raw_json": json_dumps(heartbeat),
+                "platform": platform.get("os"),
+                "management_transport": management.get("transport"),
+                "contract_version": station.get("contractVersion"),
+                "profile": station.get("profile"),
+                "normalized_json": json_dumps(station),
             },
         )
 

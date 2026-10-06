@@ -55,12 +55,15 @@
         function startHeartbeatStream(host) {
             const meta = hostMetadata[host] || {};
             const EventSourceCtor = getEventSource();
+            const transportReady = meta.managementCredentials?.configured === true
+                && meta.managementTrust?.status === 'ready';
+            const legacyWinrmReady = meta.winrmConfigured === true
+                && meta.winrmTrustStatus === 'ready';
             if (
                 !host
                 || !EventSourceCtor
                 || heartbeatSources[host]
-                || meta.winrmConfigured !== true
-                || meta.winrmTrustStatus !== 'ready'
+                || !(transportReady || legacyWinrmReady)
             ) return;
 
             const url = new URL('/ops/api/heartbeat/stream', getOrigin());
@@ -106,7 +109,17 @@
 
         function applyHeartbeatData(host, data) {
             const override = localModeOverrides[host];
-            const reported = data?.heartbeat?.status?.localModeEnabled;
+            const heartbeat = data?.heartbeat && typeof data.heartbeat === 'object'
+                ? data.heartbeat
+                : {};
+            const rawStatus = heartbeat.status && typeof heartbeat.status === 'object'
+                ? heartbeat.status
+                : heartbeat.station && typeof heartbeat.station === 'object'
+                    ? heartbeat.station
+                    : heartbeat;
+            const reported = typeof rawStatus.localModeEnabled === 'boolean'
+                ? rawStatus.localModeEnabled
+                : heartbeat.localModeEnabled;
             if (typeof override !== 'boolean') {
                 hostState[host] = data;
                 return;
@@ -116,12 +129,11 @@
                 hostState[host] = data;
                 return;
             }
-            const heartbeat = data?.heartbeat && typeof data.heartbeat === 'object'
-                ? data.heartbeat
-                : {};
             const status = heartbeat.status && typeof heartbeat.status === 'object'
                 ? heartbeat.status
-                : {};
+                : heartbeat.station && typeof heartbeat.station === 'object'
+                    ? heartbeat.station
+                    : heartbeat;
             hostState[host] = {
                 ...data,
                 heartbeat: {
@@ -167,7 +179,10 @@
                 state.getHostNames()
                     .filter(name => {
                         const meta = hostMetadata[name] || {};
-                        return meta.winrmConfigured !== true || meta.winrmTrustStatus !== 'ready';
+                        const genericReady = meta.managementCredentials?.configured === true
+                            && meta.managementTrust?.status === 'ready';
+                        const legacyReady = meta.winrmConfigured === true && meta.winrmTrustStatus === 'ready';
+                        return !(genericReady || legacyReady);
                     })
                     .forEach(stopHeartbeatStream);
                 renderHosts();
@@ -196,14 +211,16 @@
             const hostNames = state.getHostNames();
             if (EventSourceCtor) {
                 const streamableHosts = hostNames.filter(host =>
-                    hostMetadata[host]?.winrmConfigured === true
-                    && hostMetadata[host]?.winrmTrustStatus === 'ready'
+                    (hostMetadata[host]?.managementCredentials?.configured === true
+                        && hostMetadata[host]?.managementTrust?.status === 'ready')
+                    || (hostMetadata[host]?.winrmConfigured === true
+                        && hostMetadata[host]?.winrmTrustStatus === 'ready')
                 );
                 streamableHosts.forEach(startHeartbeatStream);
                 showToast(
                     streamableHosts.length
                         ? 'Heartbeat streaming started for configured hosts'
-                        : 'Heartbeat streaming unavailable: configure WinRM credentials and TLS trust',
+                        : 'Heartbeat streaming unavailable: configure management credentials and trust',
                     streamableHosts.length ? 'success' : 'error',
                 );
                 return true;

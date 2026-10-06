@@ -89,12 +89,19 @@
         const provisionHostMac = $('#provisionHostMac');
         const provisionHostBroadcast = $('#provisionHostBroadcast');
         const provisionLabstationPath = $('#provisionLabstationPath');
+        const provisionHostPlatform = $('#provisionHostPlatform');
+        const provisionManagementPort = $('#provisionManagementPort');
+        const provisionProfile = $('#provisionProfile');
+        const provisionStationCommand = $('#provisionStationCommand');
         const editHostOriginalName = $('#editHostOriginalName');
         const editHostName = $('#editHostName');
         const editHostAddress = $('#editHostAddress');
         const editHostMac = $('#editHostMac');
         const editHostBroadcast = $('#editHostBroadcast');
         const editLabstationPath = $('#editLabstationPath');
+        const editManagementPort = $('#editManagementPort');
+        const editProfile = $('#editProfile');
+        const editStationCommand = $('#editStationCommand');
         const wakeOpsModal = $('#wakeOpsModal');
         const closeWakeOpsModalButton = $('#closeWakeOpsModal');
         const cancelWakeOpsButton = $('#cancelWakeOps');
@@ -181,6 +188,9 @@
         }
 
         async function openWinrmTrustModal(host) {
+            if ((hostMetadata[host]?.managementTransport || 'winrm') === 'ssh') {
+                return hostModalsController?.openTrust(host);
+            }
             return winrmTrustModalController?.open(host);
         }
 
@@ -289,6 +299,8 @@
             fetchImpl,
             callbacks: { showToast },
             documentImpl,
+            promptImpl: (message, defaultValue) => windowImpl.prompt?.(message, defaultValue),
+            confirmImpl: message => windowImpl.confirm?.(message),
             logger,
         });
         const hostActionBindingsController = hostActionBindingsModule.createController({
@@ -389,6 +401,10 @@
                 provisionHostMac,
                 provisionHostBroadcast,
                 provisionLabstationPath,
+                provisionHostPlatform,
+                provisionManagementPort,
+                provisionProfile,
+                provisionStationCommand,
                 editModal: editHostModal,
                 editOriginalName: editHostOriginalName,
                 editName: editHostName,
@@ -396,6 +412,9 @@
                 editMac: editHostMac,
                 editBroadcast: editHostBroadcast,
                 editLabstationPath,
+                editManagementPort,
+                editProfile,
+                editStationCommand,
                 editSaveButton: saveEditHostButton,
                 credentialsModal: winrmCredentialsModal,
                 credentialRef: winrmCredentialRef,
@@ -508,6 +527,7 @@
 
         function bind() {
             if (refreshHostsButton) refreshHostsButton.addEventListener('click', refreshAllHosts);
+            if (provisionHostPlatform) provisionHostPlatform.addEventListener('change', () => hostModalsController?.updateProvisionFields());
             hostActionBindingsController.bind();
             if (hostListElement) hostViewController?.renderHosts();
             hostViewController?.bind();

@@ -75,6 +75,7 @@ def test_worker_winrm_trust_preview_blueprint_resolves_runtime_dependencies(monk
     certificate = object()
     calls = []
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    normalized_host = worker.HOSTS.get("lab-ws-01")
     monkeypatch.setattr(worker, "_read_winrm_certificate_upload", lambda: b"der")
     monkeypatch.setattr(worker, "_parse_winrm_certificate_bytes", lambda raw: calls.append(("parse", raw)) or certificate)
     monkeypatch.setattr(
@@ -102,6 +103,6 @@ def test_worker_winrm_trust_preview_blueprint_resolves_runtime_dependencies(monk
     assert payload["preview"]["format"] == "DER"
     assert calls == [
         ("parse", b"der"),
-        ("metadata", certificate, host, "DER"),
-        ("validate", certificate, host),
+        ("metadata", certificate, normalized_host, "DER"),
+        ("validate", certificate, normalized_host),
     ]

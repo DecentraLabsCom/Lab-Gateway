@@ -31,6 +31,7 @@ from winrm_credentials_blueprint import create_winrm_credentials_blueprint
 from winrm_trust_blueprint import create_winrm_trust_blueprint
 from winrm_trust_mutation_blueprint import create_winrm_trust_mutation_blueprint
 from winrm_trust_preview_blueprint import create_winrm_trust_preview_blueprint
+from station_api_blueprint import create_station_api_blueprint
 
 
 def create_app(
@@ -63,6 +64,20 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
     get = providers.__getitem__
 
     app.register_blueprint(get("power_bp"))
+    app.register_blueprint(
+        create_station_api_blueprint(
+            find_host=lambda host_name: get("HOSTS").get(host_name) if host_name else None,
+            run_station_command=lambda *args, **kwargs: get("run_station_command")(*args, **kwargs),
+            generate_ssh_credential=lambda *args, **kwargs: get("generate_ssh_credential")(*args, **kwargs),
+            public_ssh_credential=lambda *args, **kwargs: get("public_ssh_credential")(*args, **kwargs),
+            delete_ssh_credential=lambda *args, **kwargs: get("delete_ssh_credential")(*args, **kwargs),
+            probe_ssh_host_key=lambda *args, **kwargs: get("probe_ssh_host_key")(*args, **kwargs),
+            confirm_ssh_host_key=lambda *args, **kwargs: get("confirm_ssh_host_key")(*args, **kwargs),
+            ssh_trust_status=lambda *args, **kwargs: get("ssh_trust_status")(*args, **kwargs),
+            delete_ssh_trust=lambda *args, **kwargs: get("delete_ssh_trust")(*args, **kwargs),
+            probe_station=lambda *args, **kwargs: get("probe_station")(*args, **kwargs),
+        )
+    )
     app.register_blueprint(
         create_health_blueprint(
             get_db_engine=lambda: get("DB_ENGINE"),
@@ -197,6 +212,8 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
             get_hosts=lambda: get("HOSTS").all_hosts(),
             get_runner_health=lambda: get("read_fmu_runner_health")(),
             run_remote_powershell=lambda **kwargs: get("run_remote_powershell")(**kwargs),
+            write_station_secret=lambda *args: get("write_station_secret")(*args),
+            clear_station_secret=lambda *args: get("clear_station_secret")(*args),
             internal_error_response=lambda *args, **kwargs: get("internal_error_response")(
                 *args,
                 **kwargs,
@@ -402,6 +419,7 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
             get_flag_path=lambda host: get("get_local_mode_flag_path")(host),
             write_remote_file=lambda *args: get("write_remote_file")(*args),
             remove_remote_file=lambda *args: get("remove_remote_file")(*args),
+            run_station_command=lambda *args, **kwargs: get("run_station_command")(*args, **kwargs),
             internal_error_response=lambda *args, **kwargs: get("internal_error_response")(
                 *args,
                 **kwargs,

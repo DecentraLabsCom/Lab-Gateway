@@ -59,6 +59,7 @@ def test_worker_winrm_trust_get_blueprint_resolves_runtime_dependencies(monkeypa
     trust = {"configured": True, "status": "ready"}
     inspected = []
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    normalized_host = worker.HOSTS.get("lab-ws-01")
     monkeypatch.setattr(worker, "inspect_winrm_trust", lambda value: inspected.append(value) or trust)
     monkeypatch.setattr(worker, "_request_id", lambda: "trust-blueprint-2")
 
@@ -69,4 +70,4 @@ def test_worker_winrm_trust_get_blueprint_resolves_runtime_dependencies(monkeypa
     assert payload is not None
     assert payload["requestId"] == "trust-blueprint-2"
     assert payload["trust"] == trust
-    assert inspected == [host]
+    assert inspected == [normalized_host]

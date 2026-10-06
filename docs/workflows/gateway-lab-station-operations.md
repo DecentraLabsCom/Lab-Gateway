@@ -198,10 +198,21 @@ Exit code `0` means success, `1` means completed with warnings, and values of `2
 ## Connectivity requirements
 
 - **Wake-on-LAN:** on Linux, activate `docker-compose.wol.yml` so `ops-worker` and `guacd` have a macvlan endpoint on the Station VLAN. Leave `WOL_LAN_GATEWAY` empty for an isolated VLAN, or set the actual VLAN router when targets exist outside the configured subnet. Persist the directed broadcast (for example `10.192.38.255`) in the host entry and as Guacamole's `wol-broadcast-addr`, alongside `wol-send-packet=true` and `wol-mac-addr`. The Windows firmware/NIC must be configured for magic-packet wake.
-- **WinRM:** the gateway reaches the Station only through its configured management VLAN, using HTTPS/TLS on port 5986. `WINRM_MANAGEMENT_CIDRS` is mandatory when hosts are configured; startup rejects any Station address outside those networks or any non-HTTPS/non-5986 catalog entry.
+- **Station management:** Windows v2 hosts use WinRM HTTPS on 5986; Linux v3 hosts use SSH on their configured port (22 by default), Ed25519 service credentials, a pinned host key, and the forced Station dispatcher. Set `STATION_MANAGEMENT_CIDRS` for the private management VLAN; `WINRM_MANAGEMENT_CIDRS` remains a compatibility alias.
 - **Guacamole:** `guacd` can reach the station's configured RDP, VNC, or SSH service over the lab network.
 - **FMU station mode:** when `FMU_BACKEND_MODE=station`, `fmu-runner` can reach `FMU_STATION_BASE_URL` and authenticate with `FMU_STATION_INTERNAL_TOKEN`.
-- **Telemetry:** the gateway's WinRM identity can read the configured heartbeat and optional session-guard event files.
+- **Telemetry:** Ops Worker reads logical `heartbeat` and `session-events` artifacts through the selected Station transport. Windows v2 path reads remain inside the compatibility adapter.
+
+Linux host rows declare `platform: linux`, `contract.major: 3`, and
+`management.transport: ssh`. Generate a per-host key from Lab Manager, install
+the public key with `labstationctl setup --management-public-key`, preview and
+confirm the SSH host-key fingerprint, then verify the authenticated Station v3
+identity. An open port alone remains `trust-pending` and is not a ready Station.
+
+The canonical Station v3 schemas and Windows/Linux fixtures live in
+`contracts/station/`. Gateway normalizes v2 and v3 before persistence,
+readiness, AAS, and timeline projection. In v3 command results, exit code 1 is
+a completed warning; only exit code 2 or higher fails a reservation step.
 
 No station management service, WinRM listener, RDP endpoint, or FMU executor should be reachable from the public Internet.
 
@@ -222,4 +233,6 @@ The reservation timeline endpoint provides the combined operational view. It is 
 - Ops worker: `ops-worker/worker.py`
 - Host configuration: `ops-worker/hosts.example.json`
 - Lab Station CLI and service: `Lab Station/labstation/`
+- Linux Station core and packaging: `Lab Station Linux/`
+- Shared FMU Executor source: `FMU-Executor/`
 - WinRM command details: `Lab Station/docs/winrm-command-contract.md`

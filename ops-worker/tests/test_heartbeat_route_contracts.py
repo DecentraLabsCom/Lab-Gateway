@@ -23,6 +23,7 @@ def test_heartbeat_poll_route_contract_forwards_include_events_and_adds_host(cli
     host = {"name": "lab-ws-01", "address": "192.168.1.50"}
     calls = []
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
+    normalized_host = worker.HOSTS.get("lab-ws-01")
     monkeypatch.setattr(
         worker,
         "poll_heartbeat",
@@ -39,7 +40,7 @@ def test_heartbeat_poll_route_contract_forwards_include_events_and_adds_host(cli
     assert response.json["host"] == "lab-ws-01"
     assert response.json["heartbeat"]["summary"]["ready"] is True
     assert isinstance(response.json["duration_ms"], int)
-    assert calls == [(host, False)]
+    assert calls == [(normalized_host, False)]
 
 
 def test_heartbeat_poll_route_contract_maps_trust_errors_to_conflict(client, monkeypatch):

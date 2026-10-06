@@ -38,8 +38,8 @@
         }
 
         function getWinrmTrustDisplay(meta) {
-            const status = String(meta.winrmTrustStatus || '').trim().toLowerCase()
-                || (meta.winrmTrustConfigured === true ? 'ready' : 'missing');
+            const status = String(meta.managementTrust?.status || meta.winrmTrustStatus || '').trim().toLowerCase()
+                || (meta.managementTrust?.configured === true || meta.winrmTrustConfigured === true ? 'ready' : 'missing');
             const states = {
                 missing: { label: 'missing', className: 'warn' },
                 ready: { label: 'ready', className: 'good' },
@@ -154,11 +154,17 @@
                 : {};
             const hasSummary = Object.prototype.hasOwnProperty.call(sessions, 'active');
             const legacyLocalSession = !hasSummary && localSession === true;
+            const activeEntries = Array.isArray(sessions.active)
+                ? sessions.active.filter(session => session && session.active !== false
+                    && !['management', 'service'].includes(session.kind))
+                : null;
             const active = sessions.queryOk === false
                 ? null
-                : hasSummary
-                    ? sessions.active
-                    : localSession;
+                : Array.isArray(activeEntries)
+                    ? activeEntries.length > 0
+                    : hasSummary
+                        ? sessions.active
+                        : localSession;
             const kindLabels = {
                 'labuser-local': 'LABUSER (local)',
                 'labuser-remote': 'LABUSER (remote)',
@@ -166,8 +172,12 @@
                 'remote-user': 'Remote user',
                 mixed: 'LABUSER and another user',
             };
+            const contractKinds = Array.isArray(activeEntries)
+                ? [...new Set(activeEntries.map(session => session.kind === 'local' ? 'local-user'
+                    : session.kind === 'remote' ? 'remote-user' : session.kind).filter(Boolean))]
+                : [];
             const detail = active === true
-                ? (kindLabels[sessions.kind] || (legacyLocalSession ? 'local user' : 'session type unavailable'))
+                ? (contractKinds.length ? contractKinds.join(', ') : kindLabels[sessions.kind] || (legacyLocalSession ? 'local user' : 'session type unavailable'))
                 : active === null
                     ? 'session status unavailable'
                     : '';
@@ -175,7 +185,7 @@
         }
 
         const readinessConnectors = [
-            { keys: ['physicalLab'], label: 'Remote app' },
+            { keys: ['physicalLab'], label: 'Physical lab' },
             { keys: ['fmu'], label: 'FMI/FMU' },
             { keys: ['opcUa', 'opc-ua', 'opcua'], label: 'OPC-UA' },
             { keys: ['tango'], label: 'TANGO' },
@@ -267,7 +277,11 @@
             const guacamole = meta.guacamole || {};
             const heartbeat = data.heartbeat || {};
             const summary = heartbeat.summary || {};
-            const status = heartbeat.status || {};
+            const status = heartbeat.status && typeof heartbeat.status === 'object'
+                ? heartbeat.status
+                : heartbeat.station && typeof heartbeat.station === 'object'
+                    ? heartbeat.station
+                    : heartbeat;
             const topLevelOperations = heartbeat.operations && typeof heartbeat.operations === 'object'
                 ? heartbeat.operations
                 : null;
@@ -277,12 +291,17 @@
             const operations = topLevelOperations && Object.keys(topLevelOperations).length
                 ? topLevelOperations
                 : statusOperations || topLevelOperations || {};
-            const winrmConfigured = Boolean(meta.winrmConfigured);
+            const transport = String(meta.managementTransport || 'winrm').toLowerCase();
+            const transportLabel = transport === 'ssh' ? 'SSH' : 'WinRM';
+            const platformLabel = String(meta.platform || (transport === 'ssh' ? 'linux' : 'windows')).toUpperCase();
+            const credentialsConfigured = meta.managementCredentials?.configured === true
+                || (transport === 'winrm' && Boolean(meta.winrmConfigured));
             const readiness = getReadinessDisplay(heartbeat, summary);
             const localSession = status.localSessionActive;
             const activeSessionDisplay = getActiveSessionDisplay(status, localSession);
             const activeSession = activeSessionDisplay.active;
-            const localMode = status.localModeEnabled;
+            const localMode = typeof status.localModeEnabled === 'boolean'
+                ? status.localModeEnabled : heartbeat.localModeEnabled;
             const lastForced = operations.lastForcedLogoff;
             const lastPower = operations.lastPowerAction;
             const updated = heartbeat.timestamp;
@@ -356,8 +375,10 @@
                 </div>
                 <div class="host-meta host-address">Address: <span class="mono">${safeAddress}</span></div>
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
-                <div class="host-meta">WinRM credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update WinRM credentials" aria-label="Set or update WinRM credentials"><span class="host-status-text ${winrmConfigured ? 'good' : 'warn'}">${winrmConfigured ? 'configured' : 'missing'}</span></button></div>
-                <div class="host-meta">WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage WinRM TLS trust" aria-label="Manage WinRM TLS trust"><span class="host-status-text ${winrmTrust.className}">${winrmTrust.label}</span></button></div>
+                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Station contract: ${escapeHtml(meta.contractVersion || 'unknown')}</div>
+                <div class="host-meta">Management: ${escapeHtml(transportLabel)}:${escapeHtml(meta.managementPort || (transport === 'ssh' ? 22 : 5986))}</div>
+                <div class="host-meta">${escapeHtml(transportLabel)} credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update ${escapeHtml(transportLabel)} management credentials" aria-label="Set or update ${escapeHtml(transportLabel)} management credentials"><span class="host-status-text ${credentialsConfigured ? 'good' : 'warn'}">${credentialsConfigured ? 'configured' : 'missing'}</span></button></div>
+                <div class="host-meta">${escapeHtml(transport === 'ssh' ? 'SSH host-key trust' : 'WinRM TLS trust')}: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage ${escapeHtml(transportLabel)} trust" aria-label="Manage ${escapeHtml(transportLabel)} trust"><span class="host-status-text ${winrmTrust.className}">${escapeHtml(winrmTrust.label)}</span></button></div>
             </div>
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">
@@ -395,12 +416,14 @@
         }
 
         function canProvisionCandidate(status) {
-            return status === 'labstation-detected' || status === 'winrm-reachable';
+            return status === 'labstation-detected' || status === 'winrm-reachable'
+                || status === 'management-trust-pending';
         }
 
         function formatDiscoveryStatus(status) {
             if (status === 'labstation-detected') return 'detected';
             if (status === 'winrm-reachable') return 'WinRM reachable';
+            if (status === 'management-trust-pending') return 'SSH reachable · trust pending';
             if (status === 'host-resolves') return 'host resolves';
             if (status === 'no-response') return 'no response';
             if (status === 'checking') return 'checking...';
@@ -410,7 +433,7 @@
 
         function discoveryStatusClass(status) {
             if (status === 'labstation-detected') return 'good';
-            if (status === 'winrm-reachable' || status === 'host-resolves' || status === 'checking') return 'warn';
+            if (status === 'winrm-reachable' || status === 'management-trust-pending' || status === 'host-resolves' || status === 'checking') return 'warn';
             if (status === 'no-response' || status === 'error') return 'bad';
             return 'soft';
         }

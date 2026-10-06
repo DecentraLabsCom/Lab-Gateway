@@ -22,8 +22,15 @@ def test_api_poll_heartbeat_persists_data(db_engine, client, monkeypatch):
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
 
     heartbeat = {
+        "schemaVersion": "2.0.0",
         "timestamp": "2026-01-01T12:00:00.000Z",
         "summary": {"ready": True},
+        "status": {
+            "schemaVersion": "2.0.0",
+            "summary": {"ready": True},
+            "readiness": {},
+            "sessions": {},
+        },
         "status": {
             "localModeEnabled": True,
             "localSessionActive": False,
@@ -75,8 +82,15 @@ def test_generate_heartbeat_stream_emits_heartbeat_event(db_engine, monkeypatch)
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
 
     heartbeat = {
+        "schemaVersion": "2.0.0",
         "timestamp": "2026-01-01T12:00:00.000Z",
         "summary": {"ready": True},
+        "status": {
+            "schemaVersion": "2.0.0",
+            "summary": {"ready": True},
+            "readiness": {},
+            "sessions": {},
+        },
         "status": {
             "localModeEnabled": True,
             "localSessionActive": False,

@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
+from host_catalog import normalize_station_host
 from labstation_paths import resolve_labstation_paths, root_from_executable, root_from_heartbeat
 
 
@@ -11,7 +12,7 @@ class HostRegistry:
         for host in cfg.get("hosts", []):
             if "name" not in host or "address" not in host:
                 continue
-            host = dict(host)
+            host = normalize_station_host(host)
             host.pop("winrm_user", None)
             host.pop("winrm_pass", None)
             # Lab associations are resolved from the provider catalog. Drop
@@ -19,7 +20,7 @@ class HostRegistry:
             # data cannot become an accidental source of truth again.
             host.pop("labs", None)
             host.pop("validLabIds", None)
-            if (
+            if host.get("management_transport") == "winrm" and (
                 root_from_executable(host.get("labstation_exe"))
                 or root_from_heartbeat(host.get("heartbeat_path"))
                 or all(host.get(key) for key in (

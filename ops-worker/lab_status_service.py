@@ -147,6 +147,9 @@ def _merge_persisted_heartbeat(heartbeat: Optional[Mapping[str, Any]]) -> Option
     merged = dict(heartbeat)
     merged.pop("raw", None)
     merged.update(raw)
+    station = heartbeat.get("station")
+    if isinstance(station, Mapping):
+        merged.update(station)
     return merged
 
 
@@ -158,6 +161,8 @@ def _nested_status(heartbeat: Mapping[str, Any]) -> Mapping[str, Any]:
 def _heartbeat_flag(heartbeat: Mapping[str, Any], top_level: str, nested: str) -> bool:
     if heartbeat.get(top_level) is True:
         return True
+    if nested in heartbeat and isinstance(heartbeat.get(nested), bool):
+        return heartbeat.get(nested) is True
     return _nested_status(heartbeat).get(nested) is True
 
 
@@ -181,8 +186,18 @@ def session_projection(heartbeat: Mapping[str, Any]) -> Dict[str, Any]:
     if sessions.get("queryOk") is False:
         return {"known": False, "active": False, "reason": "session_status_unavailable"}
 
-    has_active = "active" in sessions
-    active = sessions.get("active") is True if has_active else legacy_local_session
+    raw_active = sessions.get("active")
+    if isinstance(raw_active, list):
+        active = any(
+            isinstance(entry, Mapping)
+            and entry.get("active") is not False
+            and entry.get("kind") not in {"management", "service"}
+            for entry in raw_active
+        )
+    elif isinstance(raw_active, bool):
+        active = raw_active
+    else:
+        active = legacy_local_session
     lab_user_active = sessions.get("labUserActive") is True
     remote_active = sessions.get("remoteSessionActive") is True
     if lab_user_active:

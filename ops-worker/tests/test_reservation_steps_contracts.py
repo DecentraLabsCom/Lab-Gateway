@@ -92,6 +92,10 @@ def test_command_preserves_result_summary_and_failure_notification():
     assert success is False
     assert step["details"] == {
         "exitCode": 7,
+        "outcome": "failure",
+        "platform": "windows",
+        "transport": "winrm",
+        "contractVersion": "2.0.0",
         "stdout": "out",
         "stderr": "err",
         "args": ["--guard-grace=90"],

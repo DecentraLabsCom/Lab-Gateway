@@ -1017,6 +1017,13 @@
                     <div class="form-grid provision-host-grid">
                         <div class="provision-host-left">
                             <label class="field">
+                                <span>Platform</span>
+                                <select id="provisionHostPlatform">
+                                    <option value="windows">Windows</option>
+                                    <option value="linux">Linux</option>
+                                </select>
+                            </label>
+                            <label class="field">
                                 <span>Name</span>
                                 <input type="text" id="provisionHostName" list="provisionHostNameCandidates" placeholder="lab-ws-01">
                                 <datalist id="provisionHostNameCandidates"></datalist>
@@ -1034,9 +1041,25 @@
                                 <input type="text" id="provisionHostBroadcast" placeholder="10.192.38.255">
                             </label>
                         </div>
-                        <label class="field full">
+                        <label class="field full" id="provisionWindowsPathField">
                             <span>Lab Station path</span>
                             <input type="text" id="provisionLabstationPath" placeholder="C:\Lab Station" autocomplete="off">
+                        </label>
+                        <label class="field" hidden>
+                            <span>SSH management port</span>
+                            <input type="number" id="provisionManagementPort" min="1" max="65535" value="22">
+                        </label>
+                        <label class="field" hidden>
+                            <span>Station profile</span>
+                            <select id="provisionProfile">
+                                <option value="dedicated">Dedicated</option>
+                                <option value="hybrid">Hybrid</option>
+                                <option value="fmu-only">FMU only</option>
+                            </select>
+                        </label>
+                        <label class="field full" hidden>
+                            <span>Station command <small>(advanced)</small></span>
+                            <input type="text" id="provisionStationCommand" value="/usr/bin/labstationctl" autocomplete="off">
                         </label>
                 </div>
             </div>
@@ -1150,9 +1173,25 @@
                         <span>WoL broadcast <small>(optional)</small></span>
                         <input type="text" id="editHostBroadcast" placeholder="10.192.38.255" autocomplete="off">
                     </label>
-                    <label class="field full">
+                    <label class="field full" id="editWindowsPathField">
                         <span>Lab Station path</span>
                         <input type="text" id="editLabstationPath" placeholder="C:\Lab Station" autocomplete="off">
+                    </label>
+                    <label class="field" hidden>
+                        <span>SSH management port</span>
+                        <input type="number" id="editManagementPort" min="1" max="65535" value="22">
+                    </label>
+                    <label class="field" hidden>
+                        <span>Station profile</span>
+                        <select id="editProfile">
+                            <option value="dedicated">Dedicated</option>
+                            <option value="hybrid">Hybrid</option>
+                            <option value="fmu-only">FMU only</option>
+                        </select>
+                    </label>
+                    <label class="field full" hidden>
+                        <span>Station command</span>
+                        <input type="text" id="editStationCommand" autocomplete="off">
                     </label>
                 </div>
             </div>

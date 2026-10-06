@@ -87,7 +87,7 @@
         async function triggerWinrm(host, command, args = []) {
             showLoadingToast(`${command} on ${host}…`);
             try {
-                const res = await fetchImpl('/ops/api/winrm', {
+                const res = await fetchImpl('/ops/api/station/command', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ host, command, args }),
@@ -102,7 +102,8 @@
                 }
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                const ok = data.exit_code === 0;
+                const code = Number(data.exitCode ?? data.exit_code ?? 2);
+                const ok = code < 2;
                 // Lab Station can finish the session guard just before its
                 // telemetry writer publishes the new heartbeat. Give that
                 // writer a short settling window, then retry once. This also
@@ -118,7 +119,8 @@
                     await waitImpl(1000);
                     await pollHeartbeat(host, { silent: true });
                 }
-                showToast(`${command} on ${host}: ${ok ? 'ok' : 'err'}`, ok ? 'success' : 'error');
+                const outcome = code === 1 ? 'completed with warning' : ok ? 'ok' : 'err';
+                showToast(`${command} on ${host}: ${outcome}`, code === 1 ? 'warning' : ok ? 'success' : 'error');
             } catch (err) {
                 logger.error(err);
                 showToast(`${command} failed on ${host}: ${err.message}`, 'error');

@@ -12,6 +12,8 @@ from errors import (
     WinRMHeartbeatError,
     WinRMRemoteFileNotFoundError,
 )
+from station_contract import StationContractError, normalize_station_payload
+from station_errors import StationError
 
 
 def poll_heartbeat(
@@ -28,8 +30,10 @@ def poll_heartbeat(
     default_events_path: str,
 ) -> Dict[str, Any]:
     """Read a Station heartbeat and perform best-effort side effects."""
-    hb_path = host.get("heartbeat_path", default_heartbeat_path)
-    events_path = host.get("events_path", default_events_path)
+    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+    is_ssh = str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh"
+    hb_path = "heartbeat" if is_ssh else host.get("heartbeat_path", default_heartbeat_path)
+    events_path = "session-events" if is_ssh else host.get("events_path", default_events_path)
     try:
         content = read_remote_file(host, hb_path, None, None, None, None, None)
     except WinRMRemoteFileNotFoundError as exc:
@@ -37,6 +41,8 @@ def poll_heartbeat(
             WINRM_HEARTBEAT_NOT_FOUND_CODE,
             WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
         ) from exc
+    except StationError:
+        raise
     try:
         heartbeat = json.loads(content)
     except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as exc:
@@ -44,6 +50,10 @@ def poll_heartbeat(
             WINRM_HEARTBEAT_INVALID_CODE,
             WINRM_HEARTBEAT_INVALID_MESSAGE,
         ) from exc
+    try:
+        normalized = normalize_station_payload(heartbeat)
+    except StationContractError as exc:
+        raise WinRMHeartbeatError("STATION_HEARTBEAT_INVALID", str(exc)) from exc
     last_event: Optional[Dict[str, Any]] = None
     if include_events:
         try:
@@ -54,13 +64,20 @@ def poll_heartbeat(
             logger.warning("Could not read events for %s: %s", host.get("name"), exc)
     if db_engine:
         try:
-            persist_heartbeat(db_engine, host, heartbeat, last_event)
+            try:
+                persist_heartbeat(db_engine, host, heartbeat, last_event, normalized=normalized)
+            except TypeError as exc:
+                if "normalized" not in str(exc):
+                    raise
+                persist_heartbeat(db_engine, host, heartbeat, last_event)
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("DB persistence failed for %s: %s", host.get("name"), exc)
     # Auto-sync AAS TechnicalData on heartbeat (best-effort, never blocks the poll)
     for lab_id in resolve_lab_ids_for_host(dict(host)) or []:
         try:
-            sync_result = sync_lab_to_basyx(str(lab_id), host, heartbeat)
+            aas_payload = dict(heartbeat)
+            aas_payload["station"] = normalized
+            sync_result = sync_lab_to_basyx(str(lab_id), host, aas_payload)
             if sync_result.get("disabled"):
                 break  # AAS not configured on this gateway - skip remaining labs silently
             if sync_result.get("error"):
@@ -69,4 +86,4 @@ def poll_heartbeat(
                 logger.debug("AAS auto-synced for lab %s", lab_id)
         except Exception as exc:  # pylint: disable=broad-except
             logger.warning("AAS auto-sync exception for lab %s: %s", lab_id, exc)
-    return {"heartbeat": heartbeat, "last_event": last_event}
+    return {"heartbeat": heartbeat, "normalized": normalized, "last_event": last_event}

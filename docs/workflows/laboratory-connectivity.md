@@ -11,7 +11,7 @@ This document describes the production connectivity model between Marketplace, t
 | Full Lab Gateway | Local access plane plus `blockchain-services`, Guacamole, OpenResty, ops worker, and optional FMU runner. |
 | Lite Lab Gateway | Local access plane with OpenResty, Guacamole, ops worker, and optional FMU runner; it trusts a remote JWT issuer. The backend service is not the local issuer in this mode. |
 | Standalone `blockchain-services` | Remote control plane that can issue access credentials and administer providers without a local Guacamole access plane. |
-| Lab Station | Windows host that runs the physical-lab control software and, when used, the internal FMU execution plane. |
+| Lab Station | Windows or Linux host that runs the physical-lab control software and, when used, the internal FMU execution plane. |
 
 `ISSUER` determines the JWT authority of a gateway. A lab's on-chain `accessURI` determines the gateway that serves its browser access plane. They are intentionally independent: a Full or standalone backend can issue credentials for a Lite gateway whose `accessURI` points elsewhere.
 
@@ -37,7 +37,7 @@ flowchart LR
     Guac[Guacamole and guacd]
     Ops[ops-worker]
     Fmu[fmu-runner]
-    Station["Lab Station<br/>private lab network"]
+    Station["Lab Station<br/>Windows / Linux · private lab network"]
 
     User -->|HTTPS/WSS| Marketplace
     Marketplace <-->|RPC| Chain
@@ -50,7 +50,7 @@ flowchart LR
     Edge --> Ops
     Edge --> Fmu
     Guac -->|RDP, VNC or SSH| Station
-    Ops -->|WinRM and WoL| Station
+    Ops -->|WinRM v2 / SSH v3 and WoL| Station
     Fmu -->|internal HTTP/WSS in station mode| Station
 ```
 
@@ -65,7 +65,7 @@ Only Marketplace and the selected gateway access URI are normally public. The ba
 | Gateway | JWT issuer | HTTPS + JWKS | JWT validation in Lite mode or remote-issuer deployments. |
 | OpenResty | Guacamole / FMU runner / ops worker | Internal HTTP | Gateway service routing. |
 | guacd | Lab Station or lab device | RDP, VNC, or SSH | Interactive remote laboratory sessions. |
-| Ops worker | Lab Station | WinRM, UDP WoL | Managed host operations and heartbeat collection. |
+| Ops worker | Lab Station | WinRM for Windows v2, SSH for v3, UDP WoL | Managed host operations and heartbeat collection. |
 | FMU runner | Lab Station FMU executor | Internal HTTP/WSS | FMI/FMU execution when station mode is enabled. |
 | Backend | Smart contracts | JSON-RPC / Web3 | Reservation, authorization, and settlement state. |
 
@@ -95,10 +95,11 @@ The gateway exposes the public FMU facade and generated proxy artifacts. The rea
   internal FMU executor at `FMU_STATION_BASE_URL` with
   `FMU_STATION_INTERNAL_TOKEN`.
 
-The Gateway has exactly one FMU Station association. From each configured
-Station row in Lab Manager, `ops-worker` can link the Gateway-owned token onto
-that registered Windows host via WinRM; it stores the value as machine-level
-`FMU_INTERNAL_TOKEN` and restarts the Lab Station background task. The linked
+The Gateway has exactly one FMU Station association. From the configured
+Station row in Lab Manager, `ops-worker` links the Gateway-owned token over the
+Station management channel. Linux stores it in a root-owned `0600` environment
+file; Windows retains its protected WinRM setup path during migration. The
+operation restarts the Station's FMU service. The linked
 row offers `Release FMU token`, which clears the machine token and restarts the
 task again; all other Station rows remain disabled while the link exists. The
 browser receives only status and never receives the token. The runner verifies
@@ -117,8 +118,8 @@ each Lite supplies its own Station/Guacamole/Ops plane.
 Lab Station management is independent of the browser's Guacamole session. The ops worker uses:
 
 - Wake-on-LAN to power or wake the host;
-- WinRM to invoke the allowlisted Lab Station commands;
-- heartbeat files read through the management channel to report readiness, local-mode state, session state, power state, and diagnostics.
+- WinRM for Windows v2 or pinned SSH for Linux v3 to invoke the allowlisted Station dispatcher;
+- logical heartbeat and session-event artifacts read through the selected management channel to report readiness, local-mode state, session state, power state, and diagnostics.
 
 This separation allows the gateway to prepare the host before a confirmed reservation and clean it afterward without exposing Windows management services to users. It also means that an operational status such as `ACTIVE` is not an on-chain `ACCESS_AUTHORIZED` state.
 
@@ -126,8 +127,8 @@ This separation allows the gateway to prepare the host before a confirmed reserv
 
 - Treat `authURI` and `accessURI` as different responsibilities: the former identifies the authentication/control plane; the latter identifies the local browser access gateway.
 - Use HTTPS for public browser and backend routes. Restrict backend APIs to their intended service callers and audiences.
-- Keep station-management traffic on a management VLAN or equivalent private network. Restrict WinRM firewall rules to gateway addresses and rotate its dedicated service credentials.
-- Store WinRM credentials outside host inventory and protect their encryption key as deployment secret material.
+- Keep station-management traffic on a management VLAN or equivalent private network. Restrict WinRM/SSH listeners to gateway addresses and pin SSH host keys.
+- Store typed WinRM or SSH credentials outside host inventory and protect their encryption key as deployment secret material.
 - Keep MySQL, Redis-equivalent stores if used, Guacamole administration, and station telemetry off the public edge.
 - Use `LAB_MANAGER_TOKEN` and the configured network policy for `/lab-manager` and `/ops/`; the ops worker itself is internal.
 

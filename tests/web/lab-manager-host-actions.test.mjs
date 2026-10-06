@@ -198,7 +198,7 @@ test('refreshes heartbeat after Prepare returns warnings', async () => {
     ['poll', 'station-7', { silent: true }],
     ['wait', 3000],
     ['poll', 'station-7', { silent: true }],
-    ['prepare-session on station-7: err', 'error'],
+    ['prepare-session on station-7: completed with warning', 'warning'],
   ]);
 });
 

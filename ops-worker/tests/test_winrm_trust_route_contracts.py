@@ -6,7 +6,7 @@ import worker
 def _install_host(monkeypatch):
     host = {"name": "lab-ws-01", "address": "192.168.1.50"}
     monkeypatch.setattr(worker, "HOSTS", worker.HostRegistry({"hosts": [host]}))
-    return host
+    return worker.HOSTS.get("lab-ws-01")
 
 
 def test_winrm_trust_get_route_contract_returns_not_found_for_unknown_host(client, monkeypatch):

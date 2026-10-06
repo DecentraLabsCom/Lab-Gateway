@@ -75,9 +75,17 @@ def test_reservation_start_heartbeat_timeline_e2e(db_engine, client, monkeypatch
     )
 
     heartbeat = {
+        "schemaVersion": "2.0.0",
         "timestamp": now.isoformat(),
         "summary": {"ready": True},
-        "status": {"localModeEnabled": False, "localSessionActive": False},
+        "status": {
+            "schemaVersion": "2.0.0",
+            "summary": {"ready": True},
+            "readiness": {},
+            "sessions": {},
+            "localModeEnabled": False,
+            "localSessionActive": False,
+        },
     }
     last_event = {"event": "session-started", "timestamp": now.isoformat()}
 
@@ -89,7 +97,7 @@ def test_reservation_start_heartbeat_timeline_e2e(db_engine, client, monkeypatch
         raise RuntimeError(f"Unexpected path: {path}")
 
     monkeypatch.setattr(worker, "read_remote_file", fake_read_remote_file)
-    monkeypatch.setattr(worker.aas_generator, "sync_lab_to_basyx", lambda lab_id, host_arg, hb: {"disabled": True})
+    monkeypatch.setattr(worker.aas_generator, "sync_lab_to_basyx", lambda *args: {"disabled": True})
 
     response = client.post(
         "/api/reservations/start",

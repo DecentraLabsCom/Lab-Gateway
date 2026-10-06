@@ -681,6 +681,11 @@ services:
       - OPS_DYNAMIC_CONFIG=/app/data/hosts.json
       - OPS_CREDENTIALS_PATH=${OPS_CREDENTIALS_PATH:-/app/data/winrm-credentials.json}
       - OPS_WINRM_TRUST_PATH=${OPS_WINRM_TRUST_PATH:-/app/data/winrm-certificates}
+      - OPS_STATION_CREDENTIALS_PATH=${OPS_STATION_CREDENTIALS_PATH:-/app/data/station-credentials.json}
+      - OPS_STATION_TRUST_PATH=${OPS_STATION_TRUST_PATH:-/app/data/station-trust}
+      - OPS_SSH_CONNECT_TIMEOUT=${OPS_SSH_CONNECT_TIMEOUT:-5}
+      - OPS_SSH_COMMAND_TIMEOUT=${OPS_SSH_COMMAND_TIMEOUT:-30}
+      - OPS_SSH_MAX_PARALLEL_PER_HOST=${OPS_SSH_MAX_PARALLEL_PER_HOST:-2}
       - OPS_POWER_CONFIG=${OPS_POWER_CONFIG:-/app/data/power-controllers.json}
       - OPS_POWER_CREDENTIALS_PATH=${OPS_POWER_CREDENTIALS_PATH:-/app/data/power-credentials.json}
       - OPS_POWER_STATUS_CACHE_SECONDS=${OPS_POWER_STATUS_CACHE_SECONDS:-5}
@@ -697,7 +702,7 @@ services:
       - OPS_RESERVATION_LOOKBACK=${OPS_RESERVATION_LOOKBACK:-21600}
       - OPS_RESERVATION_RETRY_COOLDOWN=${OPS_RESERVATION_RETRY_COOLDOWN:-60}
       - OPS_RESERVATION_MAX_BATCH=${OPS_RESERVATION_MAX_BATCH:-200}
-      - OPS_ALLOWED_COMMANDS=${OPS_ALLOWED_COMMANDS:-prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status}
+      - OPS_STATION_ALLOWED_COMMANDS=${OPS_STATION_ALLOWED_COMMANDS:-prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status,local-mode,identity,energy audit,fmu-executor}
       - OPS_TIMELINE_MAX_OPS=${OPS_TIMELINE_MAX_OPS:-500}
       - OPS_TIMELINE_DEFAULT_LIMIT=${OPS_TIMELINE_DEFAULT_LIMIT:-100}
       - OPS_TIMELINE_PHASE_LOOKBACK=${OPS_TIMELINE_PHASE_LOOKBACK:-500}

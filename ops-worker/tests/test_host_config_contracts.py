@@ -35,7 +35,7 @@ def test_resolve_host_secret_refs_contract_sets_reference_and_removes_legacy_sec
         {"name": "station-01", "address": "192.168.1.50", "credential_ref": "192.168.1.50"},
         {"name": "station-02", "address": "192.168.1.51", "credential_ref": "Managed-02"},
     ]
-    assert warnings == [("Missing WinRM credentials for host %s", "station-01")]
+    assert warnings == [("Missing %s credentials for host %s", "winrm", "station-01")]
 
 
 def test_load_config_contract_preserves_read_merge_validate_and_secret_resolution(

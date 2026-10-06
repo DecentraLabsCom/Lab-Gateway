@@ -244,10 +244,10 @@ test('host row renderer shows concrete connector states and scoped readiness rea
       },
     },
   }, {});
-  assert.match(remoteAppHtml, /class="pill good ready-indicator"[^>]*>Remote app/);
+  assert.match(remoteAppHtml, /class="pill good ready-indicator"[^>]*>Physical lab/);
   assert.match(
     remoteAppHtml,
-    /Remote app ready\./,
+    /Physical lab ready\./,
   );
   assert.doesNotMatch(remoteAppHtml, /FMI\/FMU|FMU executor is not running/);
   assert.doesNotMatch(remoteAppHtml, /Ready:/);
@@ -265,7 +265,7 @@ test('host row renderer shows concrete connector states and scoped readiness rea
   }, {});
   assert.match(fmuHtml, /class="pill good ready-indicator"[^>]*>FMI\/FMU/);
   assert.match(fmuHtml, /FMI\/FMU ready\./);
-  assert.doesNotMatch(fmuHtml, /Remote app: WinRM not ready/);
+  assert.doesNotMatch(fmuHtml, /Physical lab: WinRM not ready/);
   assert.doesNotMatch(fmuHtml, /Ready:/);
   assert.match(fmuHtml, /class="ready-indicator-tooltip ready-indicator-tooltip-good"/);
 
@@ -279,7 +279,7 @@ test('host row renderer shows concrete connector states and scoped readiness rea
       },
     },
   }, {});
-  assert.match(allConnectorsHtml, /class="pill good">Remote app · FMI\/FMU/);
+  assert.match(allConnectorsHtml, /class="pill good">Physical lab · FMI\/FMU/);
   assert.doesNotMatch(allConnectorsHtml, /ready-indicator-tooltip/);
 
   const opcUaHtml = renderer.renderHostRowMarkup('station-opc-ua', {
@@ -304,7 +304,7 @@ test('host row renderer shows concrete connector states and scoped readiness rea
   assert.match(unavailableHtml, /class="pill bad ready-indicator"[^>]*>Not ready/);
   assert.match(
     unavailableHtml,
-    /Remote app: WinRM not ready FMI\/FMU: FMU executor is not running/,
+    /Physical lab: WinRM not ready FMI\/FMU: FMU executor is not running/,
   );
   assert.match(unavailableHtml, /class="ready-indicator-tooltip"/);
   assert.doesNotMatch(unavailableHtml, /ready-indicator-tooltip-good/);

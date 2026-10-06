@@ -21,6 +21,8 @@ def create_fmu_station_blueprint(
     get_runner_health: Callable[[], Mapping[str, Any]],
     run_remote_powershell: Callable[..., Any],
     internal_error_response: Callable[..., Any],
+    write_station_secret: Callable[[Mapping[str, Any], str, str], Any] | None = None,
+    clear_station_secret: Callable[[Mapping[str, Any], str], Any] | None = None,
 ) -> Blueprint:
     """Create the protected Ops API for the Gateway's one FMU Station."""
     blueprint = Blueprint("fmu_station", __name__)
@@ -44,6 +46,7 @@ def create_fmu_station_blueprint(
                 config=get_config(),
                 hosts=get_hosts(),
                 run_remote_powershell=run_remote_powershell,
+                write_station_secret=write_station_secret,
             )
         except FmuStationEnrollmentError as exc:
             return jsonify({"error": exc.message, "code": exc.code}), exc.status_code
@@ -60,6 +63,7 @@ def create_fmu_station_blueprint(
                 config=get_config(),
                 hosts=get_hosts(),
                 run_remote_powershell=run_remote_powershell,
+                clear_station_secret=clear_station_secret,
             )
         except FmuStationEnrollmentError as exc:
             return jsonify({"error": exc.message, "code": exc.code}), exc.status_code

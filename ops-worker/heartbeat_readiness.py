@@ -17,17 +17,19 @@ def capability_ready(
     if not isinstance(heartbeat, Mapping):
         return None
 
-    readiness = heartbeat.get("readiness")
+    station = heartbeat.get("station")
+    source = station if isinstance(station, Mapping) else heartbeat
+    readiness = source.get("readiness")
     if not isinstance(readiness, Mapping):
-        status = heartbeat.get("status")
+        status = source.get("status")
         readiness = status.get("readiness") if isinstance(status, Mapping) else None
     entry = readiness.get(capability) if isinstance(readiness, Mapping) else None
     if isinstance(entry, Mapping) and isinstance(entry.get("ready"), bool):
         return entry["ready"]
 
-    legacy = heartbeat.get("ready")
+    legacy = source.get("ready")
     if not isinstance(legacy, bool):
-        summary = heartbeat.get("summary")
+        summary = source.get("summary")
         legacy = summary.get("ready") if isinstance(summary, Mapping) else None
     return legacy if isinstance(legacy, bool) else None
 

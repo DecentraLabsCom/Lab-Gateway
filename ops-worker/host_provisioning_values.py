@@ -43,8 +43,6 @@ def build_provisioned_host(
     address = str(payload.get("address") or connection.get("hostname") or "").strip()
     if not address:
         return None, "address is required"
-
-    credential_ref = str(payload.get("credentialRef") or address).strip()
     raw_mac = str(payload.get("mac") or "").strip()
     mac = normalize_mac_fn(raw_mac) if raw_mac else ""
     if raw_mac and not mac:
@@ -53,6 +51,54 @@ def build_provisioned_host(
     if broadcast and (len(broadcast) > 64 or any(ord(char) < 32 for char in broadcast)):
         return None, "broadcast must be a valid network address"
 
+    platform = str(payload.get("platform") or "windows").strip().lower()
+    if platform == "linux":
+        transport = str(payload.get("managementTransport") or payload.get("transport") or "ssh").strip().lower()
+        if transport != "ssh":
+            return None, "Linux stations require SSH management"
+        try:
+            port = int(payload.get("managementPort") or payload.get("port") or 22)
+        except (TypeError, ValueError):
+            return None, "managementPort must be an integer"
+        if not 1 <= port <= 65535:
+            return None, "managementPort must be between 1 and 65535"
+        credential_ref = str(payload.get("credentialRef") or address).strip()
+        try:
+            trust_ref = normalize_trust_ref_fn(payload.get("trustRef") or name)
+        except ValueError as exc:
+            return None, str(exc)
+        profile = str(payload.get("profile") or "dedicated").strip().lower()
+        if profile not in {"dedicated", "hybrid", "fmu-only"}:
+            return None, "profile must be dedicated, hybrid, or fmu-only"
+        station_command = str(payload.get("stationCommand") or "/usr/bin/labstationctl").strip()
+        if not station_command.startswith("/") or any(char in station_command for char in "\r\n\x00"):
+            return None, "stationCommand must be an absolute path"
+        host_config = {
+            "name": name,
+            "address": address,
+            "platform": "linux",
+            "contract": {"major": 3},
+            "profile": profile,
+            "credential_ref": credential_ref,
+            "ssh_trust_ref": trust_ref,
+            "management": {
+                "transport": "ssh",
+                "port": port,
+                "credentialRef": credential_ref,
+                "trustRef": trust_ref,
+            },
+            "station": {"command": station_command},
+            "artifacts": {"heartbeat": "heartbeat", "events": "session-events"},
+        }
+        if mac:
+            host_config["mac"] = mac
+        if broadcast:
+            host_config["broadcast"] = broadcast
+        return host_config, None
+    if platform != "windows":
+        return None, "platform must be windows or linux"
+
+    credential_ref = str(payload.get("credentialRef") or address).strip()
     labstation_path = str(payload.get("labstationPath") or "").strip()
     if labstation_path and (len(labstation_path) > 1024 or any(ord(char) < 32 for char in labstation_path)):
         return None, "labstationPath must be a valid Windows path"
@@ -83,6 +129,13 @@ def build_provisioned_host(
         "winrm_transport": str(payload.get("winrmTransport") or "ntlm").strip() or "ntlm",
         "winrm_use_ssl": True,
         "winrm_port": 5986,
+        "platform": "windows",
+        "management": {
+            "transport": "winrm",
+            "port": 5986,
+            "credentialRef": credential_ref,
+            "trustRef": normalize_trust_ref_fn(name),
+        },
         **station_paths,
     }
     if mac:
