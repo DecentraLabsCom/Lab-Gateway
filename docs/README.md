@@ -13,6 +13,21 @@ workflow, API reference, installation guide or translation.
 | --- | --- |
 | Documentation ownership and conflict resolution | [Documentation contract](documentation-contract.md) |
 
+## Audiences and boundaries
+
+The repository has a public documentation path and a local maintainer path:
+
+| Audience | Entry point | What belongs there |
+| --- | --- | --- |
+| Operators and laboratory providers | [Gateway README](../README.md), this guide and `docs/` | Installation, deployment modes, public workflows, screenshots and safe operational checks. |
+| Backend integrators and control-plane operators | [`blockchain-services` index](../blockchain-services/SUMMARY.md) | API, authentication, billing, persistence, security and backend recovery. |
+| Maintainers | `dev/` (ignored/local-only) | Test baselines and implementation notes that support maintenance but are not public protocol contracts. |
+
+Private notes may point to implementation details, but the public owning
+document remains authoritative. When they disagree, follow the
+[documentation contract](documentation-contract.md), then update the private
+note or remove the duplicated passage.
+
 ## Core concepts
 
 | Term | Meaning |

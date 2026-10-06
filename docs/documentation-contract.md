@@ -45,6 +45,14 @@ The reservation and session workflows are separate: a confirmed reservation
 does not itself create a session, and `SessionStarted` is durable economic
 evidence rather than a synonym for accepting an access request.
 
+## Current service-credit terminology
+
+The billing model uses internal service credits. They are not cash and are not
+transferable money. When the reservation lifecycle makes credits available to
+return, describe that as a **return of service credits** or **credit-return
+accounting**, not as a monetary reimbursement. The exact wallet, funding, lot and
+settlement behavior belongs to the [backend wallet and billing guide](../blockchain-services/docs/services/wallet/WALLET_BILLING.md).
+
 ## Current lab lifecycle vocabulary
 
 The following terms are deliberately separated between the on-chain protocol

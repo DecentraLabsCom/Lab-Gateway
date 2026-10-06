@@ -26,7 +26,7 @@ reservation cancellation.
 | State | Meaning |
 | --- | --- |
 | `PENDING` | A request exists and awaits confirmation, denial, cancellation, or request expiry. |
-| `CONFIRMED` | The reservation is active and the institutional treasury spend has succeeded. |
+| `CONFIRMED` | The reservation is active and the institutional service-credit spend has succeeded. Credits are not cash or transferable money. |
 | `ACCESS_AUTHORIZED` | The payer institution has subsequently authorized access through check-in. |
 | `SETTLED` | The reservation has reached terminal settlement/cleanup processing. |
 | `CANCELLED` | The request or booking was cancelled or denied. |
@@ -168,7 +168,8 @@ registered backend) may confirm or deny the pending request under the contract
 rules. A confirmed institutional booking may be cancelled before its start
 time by the authorized payer institution/backend with the matching PUC hash;
 the provider backend is not assumed to be available for that cancellation
-path. The contract applies the cancellation fee and institutional refund rules.
+path. The contract applies the cancellation fee and institutional credit-return
+rules.
 
 Before a cancellation is submitted, the Marketplace preview exposes the
 on-chain status, cancellation cutoff, total fee, minimum-fee flag, provider
@@ -178,13 +179,15 @@ amount again. Legacy reservations without recorded source lots are labelled as
 legacy rather than being presented as a fully traceable lot allocation.
 
 For physical laboratories, an eligible payer cancellation before the start
-retains 10% of the reservation price: 6% is provider receivable and 4% is the
-implicit Marketplace margin. Simulation reservations refund 100% on this path.
-If a physical reservation reaches its end without `SessionStarted`, the
+returns the applicable service credits minus 10% of the reservation price: 6%
+is provider receivable and 4% is the implicit Marketplace margin. Simulation
+reservations return 100% of the applicable service credits on this path. If a
+physical reservation reaches its end without `SessionStarted`, the
 post-attestation no-show settlement retains 25%: 15% goes to the provider and
 10% remains the implicit Marketplace margin; the payer receives the remaining
-75%. A simulation still receives a full refund. Provider-initiated
-cancellation is always a full refund, but it affects lab reputation: -1 with
+75% as service credits. A simulation still returns its full service-credit
+amount. Provider-initiated cancellation returns the applicable service credits
+in full, but it affects lab reputation: -1 with
 at least 24 hours' notice, -2 with less than 24 hours' notice, and -3 for an
 explicit service failure after the provider did not deliver the confirmed
 service. The service-failure path requires no `SessionStarted` evidence and
@@ -192,7 +195,10 @@ remains available only through the attestation grace period, so a payer no-show
 is not automatically blamed on the provider. Technical denial of a pending
 request remains unpenalized.
 
-The chain may also cancel or settle reservations during expiry/release processing. UI labels such as "active" or "completed" are operational views and must not be treated as aliases for the on-chain states above.
+The chain may also cancel or settle reservations during expiry/release
+processing. These are service-credit accounting outcomes, not cash payments. UI
+labels such as "active" or "completed" are operational views and must not be
+treated as aliases for the on-chain states above.
 
 ## Listing, deletion and settlement boundaries
 

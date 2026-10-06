@@ -164,26 +164,20 @@ network and operator model.
 
 ## Documentation map
 
-- [Documentation guide](docs/README.md) — task-based navigation and terminology.
-- [Documentation contract](docs/documentation-contract.md) — source ownership
-  and cross-project consistency rules.
-- [Deployment architectures](docs/deployment-architectures.md) — Full, Lite,
-  composite, and standalone topologies.
-- [Configuration reference](docs/reference/configuration.md) — environment
-  files, required secrets, profiles, and validation.
-- [Operations and health](docs/reference/operations-and-health.md) — health
-  endpoints, diagnostics, backups, and incident triage.
-- [Lab Manager energy operations](docs/workflows/lab-manager-energy-operations.md)
-  — credentials, APC/NETIO controllers, outlets, policies, testing, and rotation.
-- [Lab Manager operator guide](docs/workflows/lab-manager-operator-guide.md) and
-  [Labs and Operations](docs/workflows/lab-manager-labs-and-operations.md) —
-  tab-by-tab administration, host provisioning, reservations, and diagnosis.
-- [Lab Manager notifications](docs/workflows/lab-manager-notifications.md) —
-  separate Wallet & Billing administrator configuration.
-- [First lab session](docs/tutorials/tutorial-first-lab-session.md) — provider
-  journey from setup to an authenticated session.
-- [FMI/FMU support](docs/fmi-fmu-support.md) and [AAS support](docs/aas-support.md)
-  — digital-twin capabilities.
+Use the [documentation guide](docs/README.md) for task-based navigation and the
+[documentation contract](docs/documentation-contract.md) when a change crosses
+the Gateway, backend, Marketplace or contracts. The guide links to the owning
+documents for deployment, configuration, operations, Lab Manager, institutional
+access, FMU and AAS; this page deliberately keeps only the entry points.
+
+| Audience | Start here | Scope |
+| --- | --- | --- |
+| Gateway operators and providers | [Documentation guide](docs/README.md) | Public installation, deployment, workflows and runbooks. |
+| Backend integrators | [Backend documentation index](blockchain-services/SUMMARY.md) | API, authentication, billing and backend deployment contracts. |
+| Maintainers | `dev/` (local-only) and the relevant public owning document | Test notes and design records; private notes are not protocol specifications. |
+
+The root [SUMMARY.md](SUMMARY.md) is the GitBook/public index. Maintainer notes
+under `dev/` are intentionally ignored and are not published.
 
 ## Repository layout
 

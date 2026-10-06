@@ -260,7 +260,8 @@ cancelling:
 1. open the reservation details and verify the laboratory and dates;
 2. select a backend-approved reason;
 3. confirm that cancellation is actually necessary; and
-4. retain the response, transaction hash, and any refund or reputation impact.
+4. retain the response, transaction hash, and any service-credit return or
+   reputation impact.
 
 The UI uses `/lab-admin/reservations/actionable` and
 `/lab-admin/reservations/{reservationKey}/cancel`. The backend revalidates
