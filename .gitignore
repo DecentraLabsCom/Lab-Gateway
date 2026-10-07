@@ -106,4 +106,6 @@ ops-data/ops-secrets.key
 ops-data/winrm-certificates/
 
 # Smart contracts
-contracts/
+contracts/*
+!contracts/station/
+!contracts/station/**
