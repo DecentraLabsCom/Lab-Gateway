@@ -3,8 +3,11 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import ValidationError
+from referencing import Registry, Resource
 
 from station_contract import StationContractError, normalize_station_payload
+from station_transport import normalize_command_result
 
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "contracts" / "station"
@@ -86,6 +89,28 @@ def test_v3_requires_every_canonical_envelope_field():
         normalize_station_payload(payload)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schemaVersion", "3.1.0"),
+        ("summary", {"state": "almost-ready", "ready": True, "issues": []}),
+    ],
+)
+def test_v3_rejects_payloads_that_violate_the_canonical_schema(field, value):
+    payload = _read_json(V3_ROOT / "fixtures" / "linux" / "status.fixture.json")
+    payload[field] = value
+
+    with pytest.raises(StationContractError, match="schema"):
+        normalize_station_payload(payload)
+
+
+def test_invalid_future_major_fixture_is_rejected_by_the_ingress_normalizer():
+    payload = _read_json(V3_ROOT / "fixtures" / "invalid" / "future-major.fixture.json")
+
+    with pytest.raises(StationContractError, match="major"):
+        normalize_station_payload(payload)
+
+
 def test_v3_fixture_is_current_with_both_status_and_heartbeat_schemas():
     status = _read_json(V3_ROOT / "fixtures" / "linux" / "status.fixture.json")
     status_schema = _read_json(V3_ROOT / "status.schema.json")
@@ -93,3 +118,34 @@ def test_v3_fixture_is_current_with_both_status_and_heartbeat_schemas():
     Draft202012Validator.check_schema(status_schema)
     Draft202012Validator.check_schema(heartbeat_schema)
     Draft202012Validator(status_schema, format_checker=FormatChecker()).validate(status)
+
+
+def test_all_canonical_v3_schemas_are_valid_and_accept_reference_payloads():
+    status_schema = _read_json(V3_ROOT / "status.schema.json")
+    heartbeat_schema = _read_json(V3_ROOT / "heartbeat.schema.json")
+    capabilities_schema = _read_json(V3_ROOT / "capabilities.schema.json")
+    command_result_schema = _read_json(V3_ROOT / "command-result.schema.json")
+    for schema in (status_schema, heartbeat_schema, capabilities_schema, command_result_schema):
+        Draft202012Validator.check_schema(schema)
+
+    registry = Registry().with_resource(status_schema["$id"], Resource.from_contents(status_schema))
+    capabilities = {
+        "platform": {"os": "linux"},
+        "profile": "fmu-only",
+        "management": {"transport": "ssh", "ready": True},
+        "readiness": {
+            name: {"available": True, "ready": True, "issues": []}
+            for name in ("physicalLab", "wake", "fmu")
+        },
+    }
+    Draft202012Validator(capabilities_schema, registry=registry).validate(capabilities)
+
+    command_result = normalize_command_result(
+        "status-json", 1, "", "completed with a warning", 0, "ssh", request_id="operation-1"
+    )
+    command_result.update({"exit_code": command_result["exitCode"], "duration_ms": command_result["durationMs"]})
+    command_result_validator = Draft202012Validator(command_result_schema, format_checker=FormatChecker())
+    command_result_validator.validate(command_result)
+    command_result["outcome"] = "success"
+    with pytest.raises(ValidationError):
+        command_result_validator.validate(command_result)

@@ -678,6 +678,7 @@ services:
       - OPS_BIND=0.0.0.0
       - OPS_PORT=8081
       - OPS_CONFIG=/app/hosts.json
+      - OPS_STATION_CONTRACT_SCHEMA_DIR=/app/contracts/station/v3
       - OPS_DYNAMIC_CONFIG=/app/data/hosts.json
       - OPS_CREDENTIALS_PATH=${OPS_CREDENTIALS_PATH:-/app/data/winrm-credentials.json}
       - OPS_WINRM_TRUST_PATH=${OPS_WINRM_TRUST_PATH:-/app/data/winrm-certificates}
@@ -775,6 +776,7 @@ services:
     volumes:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
       - ./ops-data:/app/data
+      - ./contracts/station/v3:/app/contracts/station/v3:ro
     secrets:
       - admin_access_token
       - lab_manager_token

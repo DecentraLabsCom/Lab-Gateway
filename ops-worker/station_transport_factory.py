@@ -62,7 +62,7 @@ class StationTransportRuntime:
             metadata={"platform": "windows"},
         )
         # Keep the historical snake_case fields while lifecycle consumers migrate.
-        normalized.update({"exit_code": exit_code, "duration_ms": normalized["durationMs"]})
+        normalized.update({"exit_code": normalized["exitCode"], "duration_ms": normalized["durationMs"]})
         return normalized
 
     def read_artifact(self, host: Mapping[str, Any], artifact_id: str) -> str:

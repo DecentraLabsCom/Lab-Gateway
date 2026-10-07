@@ -1,7 +1,14 @@
 """Single ingress normalizer for Windows v2 and platform-neutral Station v3."""
 
 from datetime import datetime, timezone
+from functools import lru_cache
+import json
+import os
+from pathlib import Path
 from typing import Any, Dict, Mapping
+
+from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import SchemaError
 
 
 class StationContractError(ValueError):
@@ -51,7 +58,45 @@ def normalize_station_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
         return _normalize_windows_v2(root)
     if major != 3:
         raise StationContractError(f"Station Contract major {major} is unsupported")
-    return _normalize_v3(root)
+    normalized = _normalize_v3(root)
+    _validate_v3_schema(root)
+    return normalized
+
+
+def _v3_schema_path() -> Path:
+    configured = os.environ.get("OPS_STATION_CONTRACT_SCHEMA_DIR")
+    candidates = [Path(configured)] if configured else []
+    module_dir = Path(__file__).resolve().parent
+    candidates.extend(
+        (
+            module_dir.parent / "contracts" / "station" / "v3",
+            module_dir / "contracts" / "station" / "v3",
+        )
+    )
+    for candidate in candidates:
+        if (candidate / "status.schema.json").is_file():
+            return candidate
+    raise StationContractError("Station Contract v3 status schema is unavailable")
+
+
+@lru_cache(maxsize=4)
+def _load_v3_status_validator(schema_path: str) -> Draft202012Validator:
+    path = Path(schema_path) / "status.schema.json"
+    try:
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+    except (OSError, ValueError, SchemaError) as exc:
+        raise StationContractError(f"Station Contract v3 status schema could not be loaded: {exc}") from exc
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
+def _validate_v3_schema(payload: Mapping[str, Any]) -> None:
+    validator = _load_v3_status_validator(str(_v3_schema_path()))
+    errors = sorted(validator.iter_errors(payload), key=lambda error: tuple(map(str, error.absolute_path)))
+    if errors:
+        error = errors[0]
+        field = ".".join(str(part) for part in error.absolute_path) or "payload"
+        raise StationContractError(f"Station Contract v3 schema validation failed at {field}: {error.message}")
 
 
 def _normalize_windows_v2(payload: Mapping[str, Any]) -> Dict[str, Any]:

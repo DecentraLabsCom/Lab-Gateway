@@ -37,6 +37,16 @@ def test_transport_selection_and_winrm_command_normalization(runtime):
     calls["run"].assert_called_once_with(host, "status-json", ["--json"])
 
 
+def test_winrm_legacy_aliases_match_normalized_failure_values(runtime):
+    transport, calls = runtime
+    calls["run"].return_value = {"exit_code": -1, "stdout": "", "stderr": "invalid result", "duration_ms": -8}
+
+    result = transport.execute({"name": "station", "management_transport": "winrm"}, "status-json", [])
+
+    assert result["exitCode"] == result["exit_code"] == 2
+    assert result["durationMs"] == result["duration_ms"] == 0
+
+
 def test_execute_routes_ssh_and_maps_transport_failures(runtime):
     transport, calls = runtime
     host = {"name": "station", "management": {"transport": "ssh"}}
