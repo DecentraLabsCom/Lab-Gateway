@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping \
 # Python modules plus the power integration package.
 COPY *.py /app/
 COPY power /app/power
+COPY transports /app/transports
 
 RUN groupadd --gid "${OPS_GID}" opsworker \
     && useradd --uid "${OPS_UID}" --gid "${OPS_GID}" --create-home --shell /usr/sbin/nologin opsworker \
