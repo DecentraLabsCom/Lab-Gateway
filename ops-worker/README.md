@@ -87,6 +87,23 @@ validity dates. Missing, invalid or expired trust returns a classified WinRM
 error. TLS verification remains enabled; do not use `TrustedHosts` or disable
 certificate validation.
 
+### Linux station SSH lease lifecycle
+
+Linux stations use the same station transport boundary and host inventory as
+Windows, with a pinned SSH host key and the `station` forced command. Gateway
+negotiates dispatcher v2 from the authenticated identity response before it
+sends `prepare-session` or `release-session`. The v2 payload is built from the
+durable reservation or demo lifecycle record, includes a UTC execution window,
+and keeps a stable operation ID across retries. Browser input never supplies
+the lease context.
+
+After a transport timeout, Gateway queries `operation.status` before deciding
+what to do. A stored completion is returned to the lifecycle; a `processing`
+result stays pending; a `recovery-required` result is surfaced as a failure for
+operator reconciliation. Gateway does not fall back to dispatcher v1 for a
+lease lifecycle operation. Dispatcher contracts and fixtures live in
+`contracts/station/dispatcher/`.
+
 Heartbeat polling and streaming expose these additional stable downstream
 errors instead of `INTERNAL_ERROR`:
 
@@ -124,7 +141,7 @@ The CI gate measures application modules only (tests are not included in the
 denominator) and requires at least 75% coverage:
 
 ```powershell
-python -m pip install pytest pytest-cov
+python -m pip install -r requirements-dev.txt
 python -m pytest tests `
   --cov=worker `
   --cov=aas_generator `

@@ -202,6 +202,8 @@ class ReservationExecutionRuntime:
         action: str,
         command: str,
         args: List[str],
+        dispatcher_request: Optional[Mapping[str, Any]] = None,
+        dispatcher_request_error: Optional[str] = None,
     ) -> Tuple[bool, Dict[str, Any]]:
         return self._context.perform_command_step_impl(
             host,
@@ -210,6 +212,8 @@ class ReservationExecutionRuntime:
             action,
             command,
             args,
+            dispatcher_request=dispatcher_request,
+            dispatcher_request_error=dispatcher_request_error,
             run_labstation_command=self._context.get_run_labstation_command(),
             record_operation=self._context.get_record_reservation_operation(),
             notify_failure=self._context.get_notify_critical_failure(),

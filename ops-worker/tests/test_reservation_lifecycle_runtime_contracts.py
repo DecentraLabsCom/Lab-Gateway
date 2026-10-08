@@ -30,6 +30,7 @@ def _context(*, hosts=None, calls=None):
         get_normalize_args=lambda: lambda value, default=None: list(
             value or default or []
         ),
+        get_resolve_station_lease=lambda: lambda *args: {"requestId": "lease-request"},
     )
     return context, hosts, calls
 

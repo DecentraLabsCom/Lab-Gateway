@@ -100,5 +100,32 @@ def test_command_preserves_result_summary_and_failure_notification():
         "stderr": "err",
         "args": ["--guard-grace=90"],
         "durationMs": 12,
+        "metadata": {},
     }
+    notify_failure.assert_called_once()
+
+
+def test_command_rejects_result_without_integer_exit_code_as_protocol_failure():
+    record_operation = _record_operation()
+    notify_failure = Mock()
+
+    success, step = perform_command_step(
+        {"name": "lab-linux-01", "platform": "linux"},
+        "reservation-1",
+        "42",
+        "prepare",
+        "prepare-session",
+        [],
+        run_labstation_command=Mock(return_value={"stdout": "looks fine"}),
+        record_operation=record_operation,
+        notify_failure=notify_failure,
+        current_epoch=lambda: 100.0,
+        logger=Mock(),
+    )
+
+    assert success is False
+    assert step["status"] == "failed"
+    assert step["details"]["exitCode"] == 2
+    assert step["details"]["outcome"] == "failure"
+    record_operation.assert_called_once()
     notify_failure.assert_called_once()

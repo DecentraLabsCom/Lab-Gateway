@@ -32,7 +32,15 @@ class StationCommandResult:
 class StationTransport(Protocol):
     name: str
 
-    def execute(self, host: Mapping[str, Any], command: str, args: List[str], *, request_id: Optional[str] = None) -> Dict[str, Any]: ...
+    def execute(
+        self,
+        host: Mapping[str, Any],
+        command: str,
+        args: List[str],
+        *,
+        request_id: Optional[str] = None,
+        dispatcher_request: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]: ...
     def read_artifact(self, host: Mapping[str, Any], artifact_id: str) -> str: ...
     def probe(self, host: Mapping[str, Any]) -> Dict[str, Any]: ...
 

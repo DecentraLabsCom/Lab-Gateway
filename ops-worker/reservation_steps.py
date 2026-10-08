@@ -139,6 +139,8 @@ def perform_command_step(
     notify_failure: Callable[..., Any],
     current_epoch: Callable[[], float],
     logger: Any,
+    dispatcher_request: Optional[Mapping[str, Any]] = None,
+    dispatcher_request_error: Optional[str] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     start = current_epoch()
     success = False
@@ -147,15 +149,39 @@ def perform_command_step(
     result: Dict[str, Any] = {}
     message = ""
     try:
-        result = run_labstation_command(host, command, args, None, None, None, None, None)
-        exit_code = int(result.get("exitCode", result.get("exit_code", 1)))
+        if dispatcher_request_error:
+            result = {"error": dispatcher_request_error, "exitCode": 2, "outcome": "failure"}
+            raise ValueError("authoritative Station lease context is unavailable")
+        if dispatcher_request is not None:
+            result = run_labstation_command(
+                host,
+                command,
+                args,
+                None,
+                None,
+                None,
+                None,
+                None,
+                dispatcher_request=dispatcher_request,
+            )
+        else:
+            result = run_labstation_command(host, command, args, None, None, None, None, None)
+        if not isinstance(result, Mapping):
+            raise ValueError("Station returned a malformed result")
+        raw_exit_code = result.get("exitCode", result.get("exit_code"))
+        if type(raw_exit_code) is not int or raw_exit_code < 0:
+            raise ValueError("Station returned a malformed result")
+        exit_code = raw_exit_code
         success = exit_code < 2
         outcome = "success" if exit_code == 0 else "warning" if exit_code == 1 else "failure"
         message = "Station command {} (exit code {})".format(outcome, exit_code)
     except Exception:
         logger.exception("Lab Station command failed for %s", host.get("name"))
-        message = "Lab Station command failed"
-        result = {"error": message}
+        message = dispatcher_request_error or "Lab Station returned an invalid command result"
+        result = {"error": message, "exitCode": 2, "outcome": "failure", "metadata": {}}
+        exit_code = 2
+        success = False
+        outcome = "failure"
     duration_ms = result.get("durationMs", result.get("duration_ms", int((current_epoch() - start) * 1000)))
     status = "completed" if success and exit_code == 0 else "warning" if success else "failed"
     management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
@@ -170,6 +196,7 @@ def perform_command_step(
         "stderr": (result.get("stderr") or "").strip(),
         "args": args,
         "durationMs": duration_ms,
+        "metadata": dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), Mapping) else {},
     }
     record_operation(
         reservation_id,

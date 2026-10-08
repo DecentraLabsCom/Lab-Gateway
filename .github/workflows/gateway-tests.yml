@@ -54,7 +54,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --junitxml=pytest-results.xml \
-            --cov-fail-under=${FMU_RUNNER_COVERAGE_MIN} \
+            --cov-fail-under="${FMU_RUNNER_COVERAGE_MIN}" \
             -q | tee pytest.log
 
       - name: Build Python suite summary
@@ -357,7 +357,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             --junitxml=pytest-results.xml \
-            --cov-fail-under=${OPS_WORKER_COVERAGE_MIN} \
+            --cov-fail-under="${OPS_WORKER_COVERAGE_MIN}" \
             -q | tee pytest.log
 
       - name: Build Ops Worker suite summary
@@ -689,4 +689,4 @@ jobs:
           python .github/scripts/test_summary.py gate \
             --input-dir .ci-summary \
             --suite-ids python-unit,lua-unit \
-            --min-coverage ${REPO_COVERAGE_MIN}
+            --min-coverage "${REPO_COVERAGE_MIN}"

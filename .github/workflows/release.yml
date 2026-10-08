@@ -119,7 +119,7 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Download source-built proxy runtimes
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -141,7 +141,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --junitxml=pytest-results.xml \
-            --cov-fail-under=${FMU_RUNNER_COVERAGE_MIN} \
+            --cov-fail-under="${FMU_RUNNER_COVERAGE_MIN}" \
             -q
 
       - name: Run Lua unit tests with coverage
@@ -164,7 +164,7 @@ jobs:
              luarocks install luacov >/dev/null && \
              luajit -lluacov tests/run.lua; \
              test_exit=\$?; luacov -c tests/luacov-ci.lua; report_exit=\$?; rm -f .luacov; \
-             test \$report_exit -eq 0 || exit \$report_exit; exit \$test_exit" | tee .ci-logs/lua-unit.log
+             test \"\$report_exit\" -eq 0 || exit \"\$report_exit\"; exit \"\$test_exit\"" | tee .ci-logs/lua-unit.log
 
       - name: Enforce consolidated coverage baseline
         run: |
@@ -184,12 +184,12 @@ jobs:
             --log .ci-logs/lua-unit.log \
             --coverage-report openresty/luacov.report.out \
             --coverage-label "luacov" \
-            --exit-code ${{ steps.run_lua_tests.outcome != 'success' && '1' || '0' }} \
+            --exit-code "${{ steps.run_lua_tests.outcome != 'success' && '1' || '0' }}" \
             --output .ci-summary/lua-unit.json
           python .github/scripts/test_summary.py gate \
             --input-dir .ci-summary \
             --suite-ids python-unit,lua-unit \
-            --min-coverage ${REPO_COVERAGE_MIN}
+            --min-coverage "${REPO_COVERAGE_MIN}"
 
       - name: Fail job if Lua tests failed
         if: steps.run_lua_tests.outcome != 'success'

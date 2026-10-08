@@ -24,6 +24,7 @@ class ReservationLifecycleContext:
     get_perform_command_step: Callable[
         [], Callable[..., Tuple[bool, Dict[str, Any]]]
     ]
+    get_resolve_station_lease: Callable[[], Callable[..., Dict[str, Any]]]
     get_normalize_args: Callable[
         [], Callable[[Any, Optional[List[str]]], List[str]]
     ]

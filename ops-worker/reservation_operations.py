@@ -18,6 +18,7 @@ def handle_reservation_start(
         Tuple[bool, Dict[str, Any]],
     ],
     normalize_args: Callable[[Any, Optional[List[str]]], List[str]],
+    resolve_station_lease_context: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], int]:
     reservation_id = get_mandatory_field(payload, "reservationId", "reservation_id")
     host_name = get_mandatory_field(payload, "host", "hostName")
@@ -86,14 +87,30 @@ def handle_reservation_start(
             payload.get("prepareArgs"),
             [f"--guard-grace={guard_grace}"],
         )
-        ok, step = perform_command_step(
-            host,
-            reservation_id,
-            lab_id,
-            "prepare",
-            "prepare-session",
-            prepare_args,
-        )
+        management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+        dispatcher_request = None
+        dispatcher_request_error = None
+        if str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh":
+            try:
+                if resolve_station_lease_context is None:
+                    raise ValueError("resolver unavailable")
+                dispatcher_request = resolve_station_lease_context(
+                    reservation_id,
+                    lab_id,
+                    host,
+                    "prepare-session",
+                )
+            except Exception:
+                dispatcher_request_error = "authoritative reservation lease context is unavailable"
+        step_args = (host, reservation_id, lab_id, "prepare", "prepare-session", prepare_args)
+        if dispatcher_request is not None or dispatcher_request_error:
+            ok, step = perform_command_step(
+                *step_args,
+                dispatcher_request=dispatcher_request,
+                dispatcher_request_error=dispatcher_request_error,
+            )
+        else:
+            ok, step = perform_command_step(*step_args)
         steps.append(step)
         if not ok:
             success = False
@@ -122,6 +139,7 @@ def handle_reservation_end(
         Tuple[bool, Dict[str, Any]],
     ],
     normalize_args: Callable[[Any, Optional[List[str]]], List[str]],
+    resolve_station_lease_context: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], int]:
     reservation_id = get_mandatory_field(payload, "reservationId", "reservation_id")
     host_name = get_mandatory_field(payload, "host", "hostName")
@@ -161,14 +179,30 @@ def handle_reservation_end(
 
     if success and release_enabled:
         release_args = normalize_args(payload.get("releaseArgs"), [])
-        ok, step = perform_command_step(
-            host,
-            reservation_id,
-            lab_id,
-            "release",
-            "release-session",
-            release_args,
-        )
+        management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+        dispatcher_request = None
+        dispatcher_request_error = None
+        if str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh":
+            try:
+                if resolve_station_lease_context is None:
+                    raise ValueError("resolver unavailable")
+                dispatcher_request = resolve_station_lease_context(
+                    reservation_id,
+                    lab_id,
+                    host,
+                    "release-session",
+                )
+            except Exception:
+                dispatcher_request_error = "authoritative reservation lease context is unavailable"
+        step_args = (host, reservation_id, lab_id, "release", "release-session", release_args)
+        if dispatcher_request is not None or dispatcher_request_error:
+            ok, step = perform_command_step(
+                *step_args,
+                dispatcher_request=dispatcher_request,
+                dispatcher_request_error=dispatcher_request_error,
+            )
+        else:
+            ok, step = perform_command_step(*step_args)
         steps.append(step)
         if not ok:
             success = False

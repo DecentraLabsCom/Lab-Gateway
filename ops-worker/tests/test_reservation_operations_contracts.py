@@ -110,3 +110,62 @@ def test_end_preserves_an_explicit_release_reboot_request():
     assert status == 200
     assert response["success"] is True
     assert deps["perform_command_step"].call_args.args[-1] == ["--reboot"]
+
+
+def test_linux_start_resolves_v2_lease_context_from_authoritative_provider():
+    deps = _dependencies()
+    host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}
+    deps["resolve_host_by_lab"] = lambda _lab_id: host
+    resolver = Mock(return_value={"requestId": "prepare-id", "context": {"kind": "reservation"}})
+
+    response, status = handle_reservation_start(
+        {"reservationId": "0xabc123", "labId": "42", "wake": False},
+        **deps,
+        resolve_station_lease_context=resolver,
+    )
+
+    assert status == 200
+    assert response["success"] is True
+    resolver.assert_called_once_with("0xabc123", "42", host, "prepare-session")
+    assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"]["requestId"] == "prepare-id"
+
+
+def test_linux_end_resolves_generation_scoped_release_context():
+    deps = _dependencies()
+    deps.pop("perform_wake_step")
+    host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}
+    deps["resolve_host_by_lab"] = lambda _lab_id: host
+    resolver = Mock(return_value={"requestId": "release-id", "context": {"generation": 3}})
+
+    response, status = handle_reservation_end(
+        {"reservationId": "0xabc123", "labId": "42"},
+        **deps,
+        resolve_station_lease_context=resolver,
+    )
+
+    assert status == 200
+    assert response["success"] is True
+    resolver.assert_called_once_with("0xabc123", "42", host, "release-session")
+    assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"]["context"]["generation"] == 3
+
+
+def test_linux_context_resolution_failure_is_passed_as_fail_closed_step():
+    deps = _dependencies()
+    host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}
+    deps["resolve_host_by_lab"] = lambda _lab_id: host
+    resolver = Mock(side_effect=RuntimeError("database unavailable"))
+    deps["perform_command_step"].side_effect = lambda *args, **kwargs: (
+        False,
+        {"action": "prepare", "success": False, "message": kwargs.get("dispatcher_request_error")},
+    )
+
+    response, status = handle_reservation_start(
+        {"reservationId": "0xabc123", "labId": "42", "wake": False},
+        **deps,
+        resolve_station_lease_context=resolver,
+    )
+
+    assert status == 502
+    assert response["success"] is False
+    assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"] is None
+    assert "unavailable" in deps["perform_command_step"].call_args.kwargs["dispatcher_request_error"]

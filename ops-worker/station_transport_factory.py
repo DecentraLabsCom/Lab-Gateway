@@ -38,17 +38,30 @@ class StationTransportRuntime:
             return str(management["transport"]).lower()
         return str(host.get("management_transport") or "winrm").lower()
 
-    def execute(self, host: Mapping[str, Any], command: str, args: List[str], *legacy_args: Any, request_id: Optional[str] = None, **legacy_kwargs: Any) -> Dict[str, Any]:
+    def execute(
+        self,
+        host: Mapping[str, Any],
+        command: str,
+        args: List[str],
+        *legacy_args: Any,
+        request_id: Optional[str] = None,
+        dispatcher_request: Optional[Mapping[str, Any]] = None,
+        **legacy_kwargs: Any,
+    ) -> Dict[str, Any]:
         transport = self.transport_for(host)
         if transport == "ssh":
             try:
-                return self._ssh.execute(host, command, list(args or []), request_id=request_id)
+                if dispatcher_request is None:
+                    return self._ssh.execute(host, command, list(args or []), request_id=request_id)
+                return self._ssh.execute(host, command, list(args or []), request_id=request_id, dispatcher_request=dispatcher_request)
             except StationError:
                 raise
             except Exception as exc:
                 raise StationUnreachable() from exc
         if transport != "winrm":
             raise StationUnreachable("Station management transport is unsupported")
+        if dispatcher_request is not None:
+            raise StationUnreachable("Lease dispatcher requests require SSH transport")
         result = self._run_winrm_command(host, command, args, *legacy_args, **legacy_kwargs)
         exit_code = int(result.get("exit_code", result.get("exitCode", 2)))
         normalized = normalize_command_result(

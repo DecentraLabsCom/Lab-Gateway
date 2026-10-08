@@ -315,6 +315,7 @@ from reservation_operations import (
 )
 from reservation_lifecycle_runtime import create_reservation_lifecycle_runtime
 from reservation_lifecycle_context import ReservationLifecycleContext
+from station_lease import resolve_station_dispatch_request
 from reservation_execution_runtime import create_reservation_execution_runtime
 from reservation_execution_context import ReservationExecutionContext
 from reservation_steps import (
@@ -1492,6 +1493,27 @@ handle_demo_event = _DEMO_RUNTIME.handle_demo_event
 handle_demo_end = _DEMO_RUNTIME.handle_demo_end
 
 
+def resolve_station_lease_context(
+    reservation_id: str,
+    lab_id: Optional[str],
+    host: Mapping[str, Any],
+    command: str,
+) -> Dict[str, Any]:
+    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+    if str(management.get("transport") or host.get("management_transport") or "").lower() != "ssh":
+        raise ValueError("dispatcher v2 lease requests require SSH")
+    lead = int(os.getenv("OPS_RESERVATION_START_LEAD", "120"))
+    return resolve_station_dispatch_request(
+        engine=DB_ENGINE,
+        sql_text=text,
+        reservation_id=str(reservation_id),
+        lab_id=str(lab_id or ""),
+        host_name=str(host.get("name") or ""),
+        command=command,
+        start_lead_seconds=lead,
+    )
+
+
 _RESERVATION_LIFECYCLE_CONTEXT = ReservationLifecycleContext(
     handle_reservation_start_impl=lambda *args, **kwargs: _handle_reservation_start_impl(
         *args,
@@ -1509,6 +1531,7 @@ _RESERVATION_LIFECYCLE_CONTEXT = ReservationLifecycleContext(
     get_perform_wake_step=lambda: perform_wake_step,
     get_perform_command_step=lambda: perform_command_step,
     get_normalize_args=lambda: normalize_args,
+    get_resolve_station_lease=lambda: resolve_station_lease_context,
 )
 _RESERVATION_LIFECYCLE_RUNTIME = create_reservation_lifecycle_runtime(
     _RESERVATION_LIFECYCLE_CONTEXT

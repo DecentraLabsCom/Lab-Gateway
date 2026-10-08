@@ -25,6 +25,7 @@ class ReservationLifecycleRuntime:
             perform_wake_step=self._context.get_perform_wake_step(),
             perform_command_step=self._context.get_perform_command_step(),
             normalize_args=self._context.get_normalize_args(),
+            resolve_station_lease_context=self._context.get_resolve_station_lease(),
         )
 
     def handle_reservation_end(self, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
@@ -37,6 +38,7 @@ class ReservationLifecycleRuntime:
             execute_power_phase=self._context.get_execute_power_phase(),
             perform_command_step=self._context.get_perform_command_step(),
             normalize_args=self._context.get_normalize_args(),
+            resolve_station_lease_context=self._context.get_resolve_station_lease(),
         )
 
 
