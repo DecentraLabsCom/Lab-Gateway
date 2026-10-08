@@ -126,6 +126,8 @@ def validate_station_command(command: str, args: List[str]) -> None:
                     allowed = False
                 elif key == "--require-wake" and separator and raw not in {"true", "false"}:
                     allowed = False
+    elif command == "energy audit":
+        allowed = not args
     elif command == "recovery reboot-if-needed":
         allowed = len(args) <= 4 and all(safe_option(value, {"--force", "--timeout", "--reason"}) for value in args)
         if allowed:
