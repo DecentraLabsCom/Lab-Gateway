@@ -1,0 +1,38 @@
+services:
+  linux-station:
+    build:
+      context: .
+      dockerfile: station.Dockerfile
+      additional_contexts:
+        station_src: ${LAB_STATION_LINUX_DIR:?set LAB_STATION_LINUX_DIR to the Lab Station Linux checkout}
+    volumes:
+      - type: bind
+        source: ${E2E_SSH_PUBLIC_KEY_FILE:?set E2E_SSH_PUBLIC_KEY_FILE}
+        target: /run/e2e/gateway.pub
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 2222"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  gateway-test:
+    build:
+      context: .
+      dockerfile: gateway.Dockerfile
+    depends_on:
+      linux-station:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ../../../ops-worker
+        target: /workspace/ops-worker
+        read_only: true
+      - type: bind
+        source: ${E2E_SSH_PRIVATE_KEY_FILE:?set E2E_SSH_PRIVATE_KEY_FILE}
+        target: /run/e2e/gateway
+        read_only: true
+    environment:
+      PYTHONPATH: /workspace/ops-worker
+      OPS_STATION_TRUST_PATH: /tmp/station-trust
+    command: ["python", "/tests/test_gateway_station_ssh_e2e.py"]

@@ -1,0 +1,31 @@
+name: Lab Station SSH E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gateway-linux-station-ssh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Lab Gateway
+        uses: actions/checkout@v7
+        with:
+          path: lab-gateway
+
+      - name: Checkout Lab Station Linux
+        uses: actions/checkout@v7
+        with:
+          repository: DecentraLabsCom/Lab-Station-Linux
+          ref: main
+          path: lab-station-linux
+
+      - name: Run containerized Gateway to Station SSH E2E
+        working-directory: lab-gateway
+        env:
+          LAB_STATION_LINUX_DIR: ${{ github.workspace }}/lab-station-linux
+        run: bash tests/integration/station-ssh-e2e/run-station-ssh-e2e.sh

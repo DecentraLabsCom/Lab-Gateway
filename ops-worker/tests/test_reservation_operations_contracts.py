@@ -4,7 +4,7 @@ from reservation_operations import handle_reservation_end, handle_reservation_st
 
 
 def _dependencies():
-    host = {"name": "lab-ws-01"}
+    host = {"name": "lab-ws-01", "management": {"transport": "legacy-test"}}
     return {
         "find_host": lambda name: host if name == "lab-ws-01" else None,
         "resolve_host_by_lab": lambda lab_id: host if lab_id == "42" else None,
@@ -36,7 +36,7 @@ def test_start_preserves_phase_order_and_defaults():
     assert deps["execute_power_phase"].call_args_list[0].args[3] == "pre_start"
     assert deps["execute_power_phase"].call_args_list[1].args[3] == "post_start"
     deps["perform_command_step"].assert_called_once_with(
-        {"name": "lab-ws-01"},
+        {"name": "lab-ws-01", "management": {"transport": "legacy-test"}},
         "r-1",
         "42",
         "prepare",
@@ -55,7 +55,7 @@ def test_start_uses_the_resolved_host_when_the_request_host_is_stale_or_missing(
 
     assert status == 200
     assert response["host"] == "lab-ws-01"
-    assert deps["perform_wake_step"].call_args.args[0] == {"name": "lab-ws-01"}
+    assert deps["perform_wake_step"].call_args.args[0] == {"name": "lab-ws-01", "management": {"transport": "legacy-test"}}
 
 
 def test_end_rejects_missing_host_without_invoking_physical_callbacks():
@@ -84,7 +84,7 @@ def test_end_uses_release_without_reboot_by_default():
     assert status == 200
     assert response["success"] is True
     deps["perform_command_step"].assert_called_once_with(
-        {"name": "lab-ws-01"},
+        {"name": "lab-ws-01", "management": {"transport": "legacy-test"}},
         "r-1",
         "42",
         "release",
@@ -112,7 +112,7 @@ def test_end_preserves_an_explicit_release_reboot_request():
     assert deps["perform_command_step"].call_args.args[-1] == ["--reboot"]
 
 
-def test_linux_start_resolves_v2_lease_context_from_authoritative_provider():
+def test_station_start_resolves_v2_lease_context_from_authoritative_provider():
     deps = _dependencies()
     host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}
     deps["resolve_host_by_lab"] = lambda _lab_id: host
@@ -130,7 +130,7 @@ def test_linux_start_resolves_v2_lease_context_from_authoritative_provider():
     assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"]["requestId"] == "prepare-id"
 
 
-def test_linux_end_resolves_generation_scoped_release_context():
+def test_station_end_resolves_generation_scoped_release_context():
     deps = _dependencies()
     deps.pop("perform_wake_step")
     host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}
@@ -169,3 +169,38 @@ def test_linux_context_resolution_failure_is_passed_as_fail_closed_step():
     assert response["success"] is False
     assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"] is None
     assert "unavailable" in deps["perform_command_step"].call_args.kwargs["dispatcher_request_error"]
+
+
+def test_windows_start_uses_the_durable_lease_contract_over_winrm():
+    deps = _dependencies()
+    host = {"name": "lab-ws-01", "management": {"transport": "winrm"}}
+    deps["resolve_host_by_lab"] = lambda _lab_id: host
+    resolver = Mock(return_value={"requestId": "windows-prepare-id", "context": {"kind": "reservation"}})
+
+    response, status = handle_reservation_start(
+        {"reservationId": "0xabc123", "labId": "42", "wake": False},
+        **deps,
+        resolve_station_lease_context=resolver,
+    )
+
+    assert status == 200 and response["success"] is True
+    resolver.assert_called_once_with("0xabc123", "42", host, "prepare-session")
+    assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"]["requestId"] == "windows-prepare-id"
+
+
+def test_windows_end_uses_the_generation_scoped_release_contract_over_winrm():
+    deps = _dependencies()
+    deps.pop("perform_wake_step")
+    host = {"name": "lab-ws-01", "management": {"transport": "winrm"}}
+    deps["resolve_host_by_lab"] = lambda _lab_id: host
+    resolver = Mock(return_value={"requestId": "windows-release-id", "context": {"generation": 3}})
+
+    response, status = handle_reservation_end(
+        {"reservationId": "0xabc123", "labId": "42"},
+        **deps,
+        resolve_station_lease_context=resolver,
+    )
+
+    assert status == 200 and response["success"] is True
+    resolver.assert_called_once_with("0xabc123", "42", host, "release-session")
+    assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"]["requestId"] == "windows-release-id"

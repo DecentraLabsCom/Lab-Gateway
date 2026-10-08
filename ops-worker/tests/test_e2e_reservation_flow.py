@@ -221,6 +221,19 @@ def test_failed_reservation_start_triggers_notification(db_engine, client, monke
 def test_demo_lifecycle_prepares_connects_and_releases_without_onchain_reservation(
     db_engine, client, monkeypatch
 ):
+    demo_id = "demo:abc123"
+    token_created = datetime.now(timezone.utc).replace(tzinfo=None)
+    token_expiry = token_created + timedelta(minutes=15)
+    with db_engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE guacamole_token_revocation_queue "
+            "(jwt_jti VARCHAR(128), expires_at DATETIME, created_at DATETIME)"
+        ))
+        conn.execute(text(
+            "INSERT INTO guacamole_token_revocation_queue (jwt_jti,expires_at,created_at) "
+            "VALUES ('abc123',:expires,:created)"
+        ), {"expires": token_expiry, "created": token_created})
+
     host = {
         "name": "demo-station",
         "address": "192.168.1.50",
@@ -232,15 +245,34 @@ def test_demo_lifecycle_prepares_connects_and_releases_without_onchain_reservati
     monkeypatch.setattr(worker, "resolve_lab_ids_for_host", lambda _host: ["42"])
     monkeypatch.setattr(worker, "DEMO_LAB_ID", "42")
     monkeypatch.setattr(worker, "wol_and_wait", lambda *args, **kwargs: (True, 1))
-    monkeypatch.setattr(
-        worker,
-        "run_labstation_command",
-        lambda *args, **kwargs: {"exit_code": 0, "stdout": "ok", "stderr": "", "duration_ms": 12},
-    )
+    dispatches = []
+
+    def fake_station_command(*args, **kwargs):
+        command = args[1]
+        request = kwargs["dispatcher_request"]
+        dispatches.append((command, request))
+        state = "active" if command == "prepare-session" else "released"
+        expires_at = token_expiry.replace(tzinfo=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        return {
+            "exit_code": 0,
+            "stdout": "ok",
+            "stderr": "",
+            "duration_ms": 12,
+            "metadata": {
+                "lease": {
+                    "leaseId": demo_id,
+                    "generation": 1,
+                    "state": state,
+                    "expiresAt": expires_at,
+                }
+            },
+        }
+
+    monkeypatch.setattr(worker, "run_labstation_command", fake_station_command)
 
     start = client.post(
         "/api/demo/start",
-        json={"demoId": "demo:abc123", "labId": "42", "expiresAt": 900},
+        json={"demoId": demo_id, "labId": "42", "expiresAt": 900},
     )
     assert start.status_code == 200
     assert start.json["success"] is True
@@ -249,14 +281,14 @@ def test_demo_lifecycle_prepares_connects_and_releases_without_onchain_reservati
 
     connected = client.post(
         "/api/demo/event",
-        json={"demoId": "demo:abc123", "labId": "42", "event": "connected"},
+        json={"demoId": demo_id, "labId": "42", "event": "connected"},
     )
     assert connected.status_code == 200
     assert connected.json["success"] is True
 
     end = client.post(
         "/api/demo/end",
-        json={"demoId": "demo:abc123", "labId": "42", "reason": "expired"},
+        json={"demoId": demo_id, "labId": "42", "reason": "expired"},
     )
     assert end.status_code == 200
     assert end.json["success"] is True
@@ -264,7 +296,7 @@ def test_demo_lifecycle_prepares_connects_and_releases_without_onchain_reservati
     # Cleanup is idempotent and must not invoke release-session twice.
     second_end = client.post(
         "/api/demo/end",
-        json={"demoId": "demo:abc123", "labId": "42", "reason": "expired"},
+        json={"demoId": demo_id, "labId": "42", "reason": "expired"},
     )
     assert second_end.status_code == 200
     assert second_end.json["alreadyReleased"] is True
@@ -290,9 +322,25 @@ def test_demo_lifecycle_prepares_connects_and_releases_without_onchain_reservati
     ]
     assert all(bool(row["success"]) for row in operations)
     assert reservations == 0
+    assert [command for command, _ in dispatches] == ["prepare-session", "release-session"]
+    assert all(request["context"]["kind"] == "demo" for _, request in dispatches)
+    assert all(request["context"]["leaseId"] == demo_id for _, request in dispatches)
+    assert dispatches[1][1]["context"]["generation"] == 1
+    assert dispatches[0][1]["context"]["expiresAt"] == dispatches[1][1]["context"]["expiresAt"]
 
 
-def test_demo_start_failure_attempts_physical_cleanup(db_engine, client, monkeypatch):
+def test_demo_start_failure_fails_closed_without_a_durable_lease(db_engine, client, monkeypatch):
+    token_created = datetime.now(timezone.utc).replace(tzinfo=None)
+    with db_engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE guacamole_token_revocation_queue "
+            "(jwt_jti VARCHAR(128), expires_at DATETIME, created_at DATETIME)"
+        ))
+        conn.execute(text(
+            "INSERT INTO guacamole_token_revocation_queue (jwt_jti,expires_at,created_at) "
+            "VALUES ('failed',:expires,:created)"
+        ), {"expires": token_created + timedelta(minutes=15), "created": token_created})
+
     host = {
         "name": "demo-station",
         "address": "192.168.1.50",
@@ -319,7 +367,9 @@ def test_demo_start_failure_attempts_physical_cleanup(db_engine, client, monkeyp
 
     assert response.status_code == 502
     assert response.json["success"] is False
-    assert commands == ["release-session"]
+    # Wake failed before prepare, so no successful durable generation exists
+    # to authorize a release against this demo lease.
+    assert commands == []
 
     with db_engine.connect() as conn:
         operations = conn.execute(

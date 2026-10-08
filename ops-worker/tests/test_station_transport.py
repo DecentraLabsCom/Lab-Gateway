@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -88,6 +89,124 @@ def test_legacy_winrm_contract_remains_normalized_and_preserves_historical_keys(
     assert result["exit_code"] == 1
     assert result["duration_ms"] == 17
     assert result["metadata"]["platform"] == "windows"
+
+
+def test_winrm_dispatcher_v2_sends_a_single_json_argument_and_parses_durable_result():
+    response = {
+        "id": "lease-operation-1",
+        "command": "prepare-session",
+        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "success": True,
+        "exitCode": 0,
+        "outcome": "success",
+        "message": "session prepared",
+        "stdout": "session prepared",
+        "stderr": "",
+        "durationMs": 12,
+        "metadata": {"lease": {"leaseId": "lease-1", "generation": 1, "state": "active", "expiresAt": "2026-10-08T23:00:00Z"}},
+    }
+    calls = []
+    runtime = StationTransportRuntime(
+        run_winrm_command=lambda *args, **kwargs: calls.append((args, kwargs)) or (
+            {"exit_code": 0, "stdout": json.dumps({"managementCapabilities": ["reservation-lease-v1"]}), "stderr": "", "duration_ms": 2}
+            if args[1] == "status-json"
+            else {"exit_code": 0, "stdout": json.dumps(response), "stderr": "", "duration_ms": 18}
+        ),
+        read_winrm_file=lambda *args: "{}",
+        write_winrm_file=lambda *args: None,
+        remove_winrm_file=lambda *args: None,
+    )
+    issued = datetime.now(timezone.utc).replace(microsecond=0)
+    request = {
+        "requestId": "lease-operation-1",
+        "issuedAt": issued.isoformat().replace("+00:00", "Z"),
+        "executeBefore": (issued + timedelta(minutes=4)).isoformat().replace("+00:00", "Z"),
+        "timeoutSeconds": 120,
+        "context": {
+            "kind": "reservation", "labId": "lab-1", "reservationKey": "reservation-1",
+            "leaseId": "lease-1", "generation": 0,
+            "notBefore": issued.isoformat().replace("+00:00", "Z"),
+            "expiresAt": "2026-10-08T23:00:00Z",
+        },
+    }
+
+    result = runtime.execute(
+        {"name": "windows-station", "management_transport": "winrm"},
+        "prepare-session", ["--guard-grace=90"],
+        request_id="lease-operation-1", dispatcher_request=request,
+    )
+
+    assert result["id"] == "lease-operation-1"
+    assert result["metadata"]["lease"]["generation"] == 1
+    assert result["transport"] == "winrm"
+    assert calls[0][0][1:3] == ("status-json", [])
+    args = calls[1][0]
+    assert args[1] == "lease-dispatch"
+    assert len(args[2]) == 1 and args[2][0].startswith("--request-json=")
+    envelope = json.loads(args[2][0].partition("=")[2])
+    assert envelope == {
+        "schemaVersion": 2,
+        "id": "lease-operation-1",
+        "operation": "execute",
+        "command": "prepare-session",
+        "args": ["--guard-grace=90"],
+        "issuedAt": request["issuedAt"],
+        "executeBefore": request["executeBefore"],
+        "context": request["context"],
+    }
+
+
+def test_winrm_dispatcher_v2_rejects_mismatched_result_and_request_id():
+    runtime = StationTransportRuntime(
+        run_winrm_command=lambda *args, **kwargs: (
+            {"exit_code": 0, "stdout": json.dumps({"managementCapabilities": ["reservation-lease-v1"]}), "stderr": "", "duration_ms": 1}
+            if args[1] == "status-json"
+            else {
+                "exit_code": 0,
+                "stdout": json.dumps({"id": "different-id", "command": "prepare-session"}),
+                "stderr": "",
+                "duration_ms": 1,
+            }
+        ),
+        read_winrm_file=lambda *args: "{}",
+        write_winrm_file=lambda *args: None,
+        remove_winrm_file=lambda *args: None,
+    )
+    issued = datetime.now(timezone.utc).replace(microsecond=0)
+    request = {
+        "requestId": "lease-operation-1", "issuedAt": issued.isoformat().replace("+00:00", "Z"),
+        "executeBefore": (issued + timedelta(minutes=3)).isoformat().replace("+00:00", "Z"),
+        "context": {"kind": "reservation", "labId": "lab-1", "reservationKey": "r-1", "leaseId": "l-1", "generation": 0,
+                    "notBefore": issued.isoformat().replace("+00:00", "Z"), "expiresAt": "2026-10-08T23:00:00Z"},
+    }
+    with pytest.raises(StationUnreachable, match="invalid result"):
+        runtime.execute({"management_transport": "winrm"}, "prepare-session", [], dispatcher_request=request)
+    with pytest.raises(StationCommandRejected):
+        runtime.execute({"management_transport": "winrm"}, "prepare-session", [], request_id="other-id", dispatcher_request=request)
+
+
+def test_winrm_dispatcher_fails_closed_when_station_has_not_advertised_lease_support():
+    calls = []
+    runtime = StationTransportRuntime(
+        run_winrm_command=lambda *args, **kwargs: calls.append(args) or {
+            "exit_code": 0, "stdout": json.dumps({"schemaVersion": "2.0.0"}), "stderr": "", "duration_ms": 1
+        },
+        read_winrm_file=lambda *args: "{}",
+        write_winrm_file=lambda *args: None,
+        remove_winrm_file=lambda *args: None,
+    )
+    issued = datetime.now(timezone.utc).replace(microsecond=0)
+    request = {
+        "requestId": "lease-operation-1", "issuedAt": issued.isoformat().replace("+00:00", "Z"),
+        "executeBefore": (issued + timedelta(minutes=3)).isoformat().replace("+00:00", "Z"),
+        "context": {"kind": "reservation", "labId": "lab-1", "reservationKey": "r-1", "leaseId": "l-1", "generation": 0,
+                    "notBefore": issued.isoformat().replace("+00:00", "Z"), "expiresAt": "2026-10-08T23:00:00Z"},
+    }
+
+    with pytest.raises(StationUnreachable, match="does not advertise"):
+        runtime.execute({"management_transport": "winrm"}, "prepare-session", [], dispatcher_request=request)
+
+    assert [call[1] for call in calls] == ["status-json"]
 
 
 def test_transport_selection_is_explicit_and_does_not_fallback_from_unsupported_values():

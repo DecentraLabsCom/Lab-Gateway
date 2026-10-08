@@ -1500,8 +1500,9 @@ def resolve_station_lease_context(
     command: str,
 ) -> Dict[str, Any]:
     management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
-    if str(management.get("transport") or host.get("management_transport") or "").lower() != "ssh":
-        raise ValueError("dispatcher v2 lease requests require SSH")
+    transport = str(management.get("transport") or host.get("management_transport") or "winrm").lower()
+    if transport not in {"ssh", "winrm"}:
+        raise ValueError("dispatcher v2 lease requests require a supported station transport")
     lead = int(os.getenv("OPS_RESERVATION_START_LEAD", "120"))
     return resolve_station_dispatch_request(
         engine=DB_ENGINE,

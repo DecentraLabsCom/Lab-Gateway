@@ -90,7 +90,7 @@ def handle_reservation_start(
         management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
         dispatcher_request = None
         dispatcher_request_error = None
-        if str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh":
+        if str(management.get("transport") or host.get("management_transport") or "winrm").lower() in {"ssh", "winrm"}:
             try:
                 if resolve_station_lease_context is None:
                     raise ValueError("resolver unavailable")
@@ -182,7 +182,7 @@ def handle_reservation_end(
         management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
         dispatcher_request = None
         dispatcher_request_error = None
-        if str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh":
+        if str(management.get("transport") or host.get("management_transport") or "winrm").lower() in {"ssh", "winrm"}:
             try:
                 if resolve_station_lease_context is None:
                     raise ValueError("resolver unavailable")
