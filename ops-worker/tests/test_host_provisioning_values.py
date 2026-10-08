@@ -77,3 +77,43 @@ def test_host_provisioning_values_derives_all_paths_from_installation_root():
     assert host["local_mode_flag_path"] == r"C:\Program Files\Lab Station\labstation\data\local-mode.flag"
     assert host["heartbeat_path"] == r"C:\Program Files\Lab Station\labstation\data\telemetry\heartbeat.json"
     assert host["events_path"] == r"C:\Program Files\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"
+
+
+def test_host_provisioning_values_builds_linux_ssh_station_without_windows_paths():
+    host, error = _build({
+        "name": "linux-station-1",
+        "platform": "linux",
+        "managementTransport": "ssh",
+        "managementPort": 2222,
+        "credentialRef": "linux-station-key",
+        "trustRef": "linux-station-1",
+        "profile": "hybrid",
+        "stationCommand": "/usr/local/bin/labstationctl",
+    })
+
+    assert error is None
+    assert host is not None
+    assert host["platform"] == "linux"
+    assert host["contract"] == {"major": 3}
+    assert host["profile"] == "hybrid"
+    assert host["management"] == {
+        "transport": "ssh",
+        "port": 2222,
+        "credentialRef": "linux-station-key",
+        "trustRef": "linux-station-1",
+    }
+    assert host["station"] == {"command": "/usr/local/bin/labstationctl"}
+    assert host["artifacts"] == {"heartbeat": "heartbeat", "events": "session-events"}
+    assert not {"winrm_transport", "winrm_port", "labstation_exe", "heartbeat_path"} & host.keys()
+
+
+def test_host_provisioning_values_rejects_unsafe_linux_management_configuration():
+    for payload in (
+        {"platform": "linux", "managementTransport": "winrm"},
+        {"platform": "linux", "managementPort": 0},
+        {"platform": "linux", "profile": "desktop"},
+        {"platform": "linux", "stationCommand": "labstationctl"},
+    ):
+        host, error = _build({"name": "linux-station-1", **payload})
+        assert host is None
+        assert error

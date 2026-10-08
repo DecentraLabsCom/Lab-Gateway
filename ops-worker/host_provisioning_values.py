@@ -56,8 +56,11 @@ def build_provisioned_host(
         transport = str(payload.get("managementTransport") or payload.get("transport") or "ssh").strip().lower()
         if transport != "ssh":
             return None, "Linux stations require SSH management"
+        raw_port = payload.get("managementPort", payload.get("port", 22))
+        if raw_port is None or raw_port == "":
+            raw_port = 22
         try:
-            port = int(payload.get("managementPort") or payload.get("port") or 22)
+            port = int(raw_port)
         except (TypeError, ValueError):
             return None, "managementPort must be an integer"
         if not 1 <= port <= 65535:
