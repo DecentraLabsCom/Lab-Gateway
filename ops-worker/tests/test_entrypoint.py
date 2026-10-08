@@ -26,6 +26,7 @@ def test_ops_worker_image_groups_runtime_files_into_shallow_copy_layers():
         "COPY requirements.txt .",
         "COPY *.py /app/",
         "COPY power /app/power",
+        "COPY transports /app/transports",
     ]
     assert "legacy_api.py" not in dockerfile.read_text(encoding="utf-8")
 
