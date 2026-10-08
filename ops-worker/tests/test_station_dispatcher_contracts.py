@@ -9,6 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 V1_SCHEMA_PATH = ROOT / "contracts" / "station" / "dispatcher" / "v1" / "request.schema.json"
 V2_SCHEMA_PATH = ROOT / "contracts" / "station" / "dispatcher" / "v2" / "request.schema.json"
+V2_RESPONSE_SCHEMA_PATH = ROOT / "contracts" / "station" / "dispatcher" / "v2" / "response.schema.json"
 
 
 def _validator(path):
@@ -52,3 +53,19 @@ def test_operation_status_schema_rejects_extra_dispatch_execution_fields():
     request = json.loads(path.read_text(encoding="utf-8"))
     request["context"] = {"leaseId": "demo:jti"}
     assert list(validator.iter_errors(request))
+
+
+def test_dispatcher_v2_response_schema_accepts_success_warning_and_failure_fixtures():
+    validator = _validator(V2_RESPONSE_SCHEMA_PATH)
+    fixtures = ROOT / "contracts" / "station" / "dispatcher" / "fixtures"
+    for path in sorted(fixtures.glob("*-v2-response.fixture.json")):
+        response = json.loads(path.read_text(encoding="utf-8"))
+        assert list(validator.iter_errors(response)) == [], path.name
+
+
+def test_dispatcher_v2_response_schema_rejects_inconsistent_exit_contract():
+    validator = _validator(V2_RESPONSE_SCHEMA_PATH)
+    fixture = ROOT / "contracts" / "station" / "dispatcher" / "fixtures" / "prepare-v2-response.fixture.json"
+    response = json.loads(fixture.read_text(encoding="utf-8"))
+    response["success"] = False
+    assert list(validator.iter_errors(response))

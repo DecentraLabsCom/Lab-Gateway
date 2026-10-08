@@ -6,8 +6,10 @@ Lab Gateway, Lab Station for Windows, and Lab Station Linux.
 - `v2/` freezes representative Windows payloads for the compatibility adapter.
 - `v3/` defines the common status/heartbeat, capabilities, and command result
   schemas. Platform-specific details belong under `platformSpecific`.
-- `dispatcher/v1/` and `dispatcher/v2/` define the SSH request envelopes. The
-  dispatcher protocol is independent of the status contract version.
+- `dispatcher/v1/` and `dispatcher/v2/` define the SSH request envelopes.
+  Dispatcher v2 also defines the correlated response shape and success/warning/
+  failure fixtures. The dispatcher protocol is independent of the status
+  contract version.
 
 Consumers must normalize payloads once at ingress. Reservation, readiness,
 timeline, AAS, and public status code use the normalized model and must not
