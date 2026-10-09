@@ -443,7 +443,7 @@ class SetupEnvContractTest(unittest.TestCase):
         expected_shell = [
             "mkdir -p lab-content",
             "chmod 755 lab-content",
-            "for state_path in certs blockchain-data fmu-access-state lab-content ops-data; do",
+            "for state_path in certs blockchain-data fmu-access-state fmu-executor-state lab-content ops-data; do",
         ]
         expected_bat = [
             "if not exist lab-content mkdir lab-content",
@@ -457,7 +457,7 @@ class SetupEnvContractTest(unittest.TestCase):
 
     def test_setup_assigns_ops_data_to_the_compose_runner_identity(self):
         self.assertIn(
-            "for state_path in certs blockchain-data fmu-access-state lab-content ops-data; do",
+            "for state_path in certs blockchain-data fmu-access-state fmu-executor-state lab-content ops-data; do",
             self.setup_sh,
         )
         self.assertIn('chown -R "${host_uid}:${host_gid}" "$state_path"', self.setup_sh)

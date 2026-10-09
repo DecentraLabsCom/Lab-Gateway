@@ -14,10 +14,10 @@ def create_history_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    def _backend():
+    def _backend(operation_name: str):
         if get_station_backend is None:
-            reject_unsupported_operation("Simulation history endpoint")
-        return get_station_backend()
+            reject_unsupported_operation(operation_name)
+        return get_station_backend(operation_name)
 
     @router.get("/api/v1/simulations/history")
     async def get_history(
@@ -28,7 +28,7 @@ def create_history_router(
         claims: dict = Depends(verify_jwt),
     ):
         enforce_fmu_claim(claims)
-        backend = _backend()
+        backend = _backend("Simulation history endpoint")
         return await backend.get_authorized_simulation_history(
             claims=claims,
             requested_lab_id=labId,
@@ -40,13 +40,13 @@ def create_history_router(
     @router.get("/api/v1/simulations/{sim_id}/result")
     async def get_simulation_result(sim_id: str, claims: dict = Depends(verify_jwt)):
         enforce_fmu_claim(claims)
-        backend = _backend()
+        backend = _backend("Simulation result endpoint")
         return await backend.get_authorized_simulation_result(claims=claims, sim_id=sim_id)
 
     @router.get("/api/v1/simulations/{sim_id}")
     async def get_simulation_status(sim_id: str, claims: dict = Depends(verify_jwt)):
         enforce_fmu_claim(claims)
-        backend = _backend()
+        backend = _backend("Simulation status endpoint")
         return await backend.get_authorized_simulation_status(claims=claims, sim_id=sim_id)
 
     return router

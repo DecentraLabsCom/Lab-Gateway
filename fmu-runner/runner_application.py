@@ -945,10 +945,12 @@ _proxy_router = create_proxy_router(
 _run_router = create_run_router(
     verify_jwt=verify_jwt,
     enforce_fmu_claim=_enforce_fmu_claim,
-    get_station_backend=_get_station_backend,
+    get_station_backend=lambda: _get_station_backend(),
     simulation_request_payload=_simulation_request_payload,
     extract_authorization_header=_extract_authorization_header,
-    record_browser_session_started=_record_browser_session_started,
+    record_browser_session_started=lambda request, claims, sim_id: _record_browser_session_started(
+        request, claims, sim_id
+    ),
     new_simulation_id=lambda: uuid4().hex,
     reject_unsupported_operation=_reject_unsupported_remote_operation,
 )
@@ -957,7 +959,7 @@ _history_router = create_history_router(
     verify_jwt=verify_jwt,
     enforce_fmu_claim=_history_enforce_fmu_claim,
     reject_unsupported_operation=_history_reject_unsupported_remote_operation,
-    get_station_backend=lambda: _get_scoped_station_backend("Simulation history endpoint"),
+    get_station_backend=_get_scoped_station_backend,
 )
 
 

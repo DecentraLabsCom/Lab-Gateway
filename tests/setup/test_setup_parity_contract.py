@@ -174,7 +174,7 @@ def test_setup_scripts_materialize_the_same_compose_secret_inventory():
     windows = _inventory(SETUP_BAT, windows=True)
 
     assert shell.compose_secrets == windows.compose_secrets
-    assert len(shell.compose_secrets) == 20
+    assert len(shell.compose_secrets) == 21
 
 
 def test_setup_scripts_preserve_feature_and_side_effect_boundaries():
