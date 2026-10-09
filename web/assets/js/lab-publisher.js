@@ -83,7 +83,6 @@
     const fetchJson = (url, options) => publisherValues.fetchJson(url, options, fetch);
     const assertLabMutationSuccess = publisherValues.assertLabMutationSuccess;
     const CLASSIFICATION_SCHEMES = publisherValues.CLASSIFICATION_SCHEMES;
-    const CLASSIFICATION_SCHEME_VERSIONS = publisherValues.CLASSIFICATION_SCHEME_VERSIONS;
     const getFordField = publisherValues.getFordField;
     const normalizeClassificationEntries = publisherValues.normalizeClassificationEntries;
     const buildClassificationEntries = publisherValues.buildClassificationEntries;
@@ -105,8 +104,6 @@
     const RESOURCE_TYPES = { LAB: 'lab', FMU: 'fmu' };
     const escapeHtml = publisherValues.escapeHtml;
     const escapeAttr = publisherValues.escapeAttr;
-
-    const normalizeConnectionUsers = publisherValues.normalizeConnectionUsers;
 
     const resolveConnectionAccessKey = publisherValues.resolveConnectionAccessKey;
 
@@ -647,11 +644,6 @@
     function setChecked(id, checked) {
         const el = $(id);
         if (el) el.checked = checked;
-    }
-
-    function setText(id, value) {
-        const el = $(id);
-        if (el) el.textContent = value;
     }
 
     function updateEditControls() {

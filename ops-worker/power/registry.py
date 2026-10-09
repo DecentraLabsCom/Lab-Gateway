@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
@@ -14,6 +15,7 @@ from .drivers.netio_json import NetioJsonDriver
 
 
 CredentialResolver = Callable[[str], Mapping[str, Any]]
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -196,8 +198,12 @@ class PowerRegistry:
         if outlet is None:
             try:
                 self._refresh_outlets(controller)
-            except PowerDriverError:
-                pass
+            except PowerDriverError as exc:
+                LOGGER.warning(
+                    "Unable to refresh outlets for controller %s (%s); checking cached outlets",
+                    controller_id,
+                    type(exc).__name__,
+                )
             outlet = controller.outlets.get(str(outlet_id))
         if outlet is None:
             raise KeyError(f"outlet '{outlet_id}' not found on controller '{controller_id}'")

@@ -1,7 +1,7 @@
 """Composition adapter for the WinRM trust-store lifecycle."""
 
 from collections.abc import Sequence
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from winrm_trust_context import WinRMTrustContext
 

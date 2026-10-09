@@ -14,11 +14,10 @@ import pytest
 
 # ── Pure generator tests ─────────────────────────────────────────────
 
-from aas_generator import (
+from fmu_aas_generator import (
     _aas_id_for_lab,
     _submodel_id_for_fmu,
     _submodel_id_for_technical,
-    _submodel_id_for_execution,
     _submodel_id_for_interfaces,
     _submodel_id_for_contact,
     _submodel_id_for_handover,
@@ -40,7 +39,7 @@ from aas_generator import (
     serialize_aasx_resources,
 )
 
-_aas_mod: Any = sys.modules["aas_generator"]
+_aas_mod: Any = sys.modules["fmu_aas_generator"]
 
 
 def _assert_submodel_lists_are_typed(payload: Any) -> None:
@@ -677,7 +676,7 @@ class TestAasSyncEndpoint:
 
         return md
 
-    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
     @patch("runner_application.read_model_description")
     @patch("runner_application._resolve_fmu_path")
     def test_sync_success(self, mock_resolve, mock_read_md, mock_sync):
@@ -698,7 +697,7 @@ class TestAasSyncEndpoint:
         assert body["synced"] is True
         assert body["aasId"] == "urn:decentralabs:lab:test.fmu"
 
-    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
     @patch("runner_application.read_model_description")
     @patch("runner_application._resolve_fmu_path")
     def test_sync_with_lab_id_param(self, mock_resolve, mock_read_md, mock_sync):
@@ -729,7 +728,7 @@ class TestAasSyncEndpoint:
         resp = client.post("/aas-admin/fmu/nonexistent.fmu/sync")
         assert resp.status_code == 404
 
-    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
     @patch("runner_application.read_model_description")
     @patch("runner_application._resolve_fmu_path")
     def test_sync_basyx_error(self, mock_resolve, mock_read_md, mock_sync):
@@ -742,7 +741,7 @@ class TestAasSyncEndpoint:
         assert resp.status_code == 502
         assert "submodel creation failed" in resp.json()["detail"]
 
-    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
     @patch("runner_application.read_model_description")
     @patch("runner_application._resolve_fmu_path")
     def test_sync_extra_info_passed_via_query(self, mock_resolve, mock_read_md, mock_sync):
@@ -1248,7 +1247,7 @@ class TestSyncFmuToBasyxAasx:
 class TestAasSyncEndpointMultipart:
     """Test POST /aas-admin/fmu/{accessKey}/sync with multipart AASX upload."""
 
-    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
     def test_sync_with_aasx_file(self, mock_sync):
         pkg = _make_aasx(shells=[{"id": "urn:s:1"}], submodels=[{"id": "urn:sm:1"}])
         mock_sync.return_value = {
@@ -1274,7 +1273,7 @@ class TestAasSyncEndpointMultipart:
         call_kwargs = mock_sync.call_args.kwargs
         assert call_kwargs.get("aasx_bytes") is not None
 
-    @patch("aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
     def test_sync_with_aasx_and_lab_id_form_field(self, mock_sync):
         pkg = _make_aasx(shells=[{"id": "urn:s:99"}], submodels=[])
         mock_sync.return_value = {

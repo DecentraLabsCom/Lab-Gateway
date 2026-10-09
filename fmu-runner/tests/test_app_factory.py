@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter
 
-from app_factory import create_app
+from fmu_app_factory import create_app
 
 
 def test_app_factory_preserves_fmu_runner_identity_and_lifespan():

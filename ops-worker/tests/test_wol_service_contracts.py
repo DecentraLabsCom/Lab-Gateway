@@ -30,7 +30,7 @@ def test_wol_and_wait_contract_preserves_retry_order_and_arguments():
 def test_wol_and_wait_contract_returns_attempt_count_when_all_probes_fail():
     calls = []
 
-    assert wol_and_wait(
+    result = wol_and_wait(
         "00:11:22:33:44:55",
         "192.168.1.255",
         7,
@@ -40,5 +40,6 @@ def test_wol_and_wait_contract_returns_attempt_count_when_all_probes_fail():
         send_magic_packet=lambda *args, **kwargs: calls.append((args, kwargs)),
         sleep=lambda _seconds: None,
         host_is_up=lambda *_args, **_kwargs: False,
-    ) == (False, 2)
+    )
+    assert result == (False, 2)
     assert len(calls) == 2

@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from heartbeat_readiness import capability_ready
 from lab_status_service import session_projection

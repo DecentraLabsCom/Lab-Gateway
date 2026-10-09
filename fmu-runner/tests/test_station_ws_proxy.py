@@ -15,7 +15,7 @@ from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSessi
 
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu", "reservationKey": "res-1", "pucHash": "puc-user-1"}):
     import runner_application as application
-    from runner_application import app
+    app = application.app
 
 
 client = TestClient(app)

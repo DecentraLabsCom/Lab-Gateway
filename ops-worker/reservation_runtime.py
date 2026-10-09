@@ -16,7 +16,7 @@ class ReservationOrchestratorClass(Protocol):
         engine: Optional[Any],
         registry: Any,
     ) -> BaseReservationOrchestrator:
-        ...
+        raise NotImplementedError
 
 
 def create_reservation_orchestrator_class(

@@ -63,7 +63,7 @@ def test_ingest_encrypts_the_guacamole_token(monkeypatch):
             "SELECT token_validated_at FROM guacamole_token_revocation_queue"
         )).scalar_one()
     assert "guac-secret-token" not in ciphertext
-    assert worker._decrypt_runtime_secret(ciphertext) == "guac-secret-token"
+    assert worker._SESSION_OBSERVATION_RUNTIME.decrypt_runtime_secret(ciphertext) == "guac-secret-token"
     assert validated_at is not None
 
 
@@ -148,7 +148,7 @@ def test_reconciliation_emits_session_started_only_for_an_active_guacamole_conne
     monkeypatch.setattr(worker.requests, "get", get)
     monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
 
-    worker._reconcile_guacamole_observations("admin-token", "mysql")
+    worker._SESSION_OBSERVATION_RUNTIME.reconcile_guacamole_observations("admin-token", "mysql")
 
     assert len(observed) == 1
     assert observed[0]["reservationKey"] == "0xreservation"
@@ -176,7 +176,7 @@ def test_reconciliation_does_not_emit_evidence_for_a_rejected_or_inactive_tunnel
     monkeypatch.setattr(worker.requests, "get", lambda *_, **__: Response())
     monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
 
-    worker._reconcile_guacamole_observations("admin-token", "mysql")
+    worker._SESSION_OBSERVATION_RUNTIME.reconcile_guacamole_observations("admin-token", "mysql")
 
     assert observed == []
 
@@ -216,7 +216,7 @@ def test_reconciliation_uses_guacamole_connection_history_for_short_sessions(mon
         queue_row = conn.execute(text(
             "SELECT username, created_at, expires_at FROM guacamole_token_revocation_queue"
         )).mappings().one()
-    history_start = worker._guacamole_connection_history_observed(
+    history_start = worker._SESSION_OBSERVATION_RUNTIME.guacamole_connection_history_observed(
         cast(Mapping[str, Any], queue_row)
     )
     assert history_start is not None
@@ -235,7 +235,7 @@ def test_reconciliation_uses_guacamole_connection_history_for_short_sessions(mon
     monkeypatch.setattr(worker.requests, "get", lambda *_, **__: Response())
     monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
 
-    worker._reconcile_guacamole_observations("admin-token", "mysql")
+    worker._SESSION_OBSERVATION_RUNTIME.reconcile_guacamole_observations("admin-token", "mysql")
 
     assert len(observed) == 1
     assert observed[0]["sessionId"].startswith("guac:")
@@ -277,7 +277,7 @@ def test_reconciliation_keeps_recently_expired_tokens_in_the_evidence_window(mon
             "INSERT INTO guacamole_connection_history (history_id, username, start_date, end_date) "
             "VALUES (1, :username, datetime('now', '-60 seconds'), datetime('now', '-20 seconds'))"
         ), {"username": "dlabs-res-user"})
-    assert worker._guacamole_connection_history_observed(
+    assert worker._SESSION_OBSERVATION_RUNTIME.guacamole_connection_history_observed(
         cast(Mapping[str, Any], queue_row)
     ) is not None
 
@@ -292,7 +292,7 @@ def test_reconciliation_keeps_recently_expired_tokens_in_the_evidence_window(mon
     monkeypatch.setattr(worker.requests, "get", lambda *_, **__: Response())
     monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
 
-    worker._reconcile_guacamole_observations("admin-token", "mysql")
+    worker._SESSION_OBSERVATION_RUNTIME.reconcile_guacamole_observations("admin-token", "mysql")
 
     assert len(observed) == 1
     assert observed[0]["reservationKey"] == "0xreservation"
@@ -344,7 +344,7 @@ def test_reconciliation_keeps_revoked_rows_eligible_until_evidence_retention_exp
     monkeypatch.setattr(worker.requests, "get", lambda *_, **__: Response())
     monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
 
-    worker._reconcile_guacamole_observations("admin-token", "mysql")
+    worker._SESSION_OBSERVATION_RUNTIME.reconcile_guacamole_observations("admin-token", "mysql")
 
     assert len(observed) == 1
 
@@ -400,7 +400,7 @@ def test_revoked_historical_evidence_does_not_require_the_revoked_token(monkeypa
     monkeypatch.setattr(worker.requests, "get", get)
     monkeypatch.setattr(worker, "enqueue_session_observation", lambda value: observed.append(value) or True)
 
-    worker._reconcile_guacamole_observations("admin-token", "mysql")
+    worker._SESSION_OBSERVATION_RUNTIME.reconcile_guacamole_observations("admin-token", "mysql")
 
     assert len(observed) == 1
     assert observed[0]["reservationKey"] == "0xreservation"

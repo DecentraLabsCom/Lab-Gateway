@@ -149,39 +149,5 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
 
 CONFIG = load_config()
 
-FMU_DATA_PATH = CONFIG.fmu_data_path
-_AAS_LINK_DATA_PATH = CONFIG.aas_link_data_path
-_AAS_CATALOG_PATH = CONFIG.aas_catalog_path
-MAX_SIMULATION_TIMEOUT = CONFIG.max_simulation_timeout
-MAX_CONCURRENT_PER_MODEL = CONFIG.max_concurrent_per_model
-FMU_WORKER_ADDRESS_SPACE_LIMIT = CONFIG.fmu_worker_address_space_limit
-MAX_STOP_TIME = CONFIG.max_stop_time
-MIN_STEP_SIZE = CONFIG.min_step_size
-HISTORY_DB_PATH = CONFIG.history_db_path
-WS_SESSION_QUEUE_SIZE = CONFIG.ws_session_queue_size
-WS_HEARTBEAT_SECONDS = CONFIG.ws_heartbeat_seconds
-WS_EXPIRING_NOTICE_SECONDS = CONFIG.ws_expiring_notice_seconds
-WS_ATTACH_GRACE_SECONDS = CONFIG.ws_attach_grace_seconds
-WS_CLEANUP_SECONDS = CONFIG.ws_cleanup_seconds
-INTERNAL_WS_TOKEN = CONFIG.internal_ws_token
-AUTH_SESSION_TICKET_ISSUE_URL = CONFIG.auth_session_ticket_issue_url
-AUTH_SESSION_TICKET_REDEEM_URL = CONFIG.auth_session_ticket_redeem_url
-AUTH_SESSION_TICKET_INTERNAL_TOKEN = CONFIG.auth_session_ticket_internal_token
-SESSION_OBSERVER_GATEWAY_ID = CONFIG.session_observer_gateway_id
-SESSION_OBSERVER_SIGNING_SECRET = CONFIG.session_observer_signing_secret
-ACCESS_AUDIT_URL = CONFIG.access_audit_url
-FMU_PROXY_RUNTIME_PATH = CONFIG.fmu_proxy_runtime_path
-FMU_PROXY_GATEWAY_WS_URL = CONFIG.fmu_proxy_gateway_ws_url
-FMU_PROXY_SIGNING_KEY = CONFIG.fmu_proxy_signing_key
-FMU_BACKEND_MODE = CONFIG.fmu_backend_mode
-FMU_LOCAL_DEV_MODE = CONFIG.fmu_local_dev_mode
-FMU_LOCAL_REALTIME_ENABLED = CONFIG.fmu_local_realtime_enabled
-FMU_STATION_BASE_URL = CONFIG.fmu_station_base_url
-FMU_STATION_INTERNAL_TOKEN = CONFIG.fmu_station_internal_token
-FMU_STATION_REQUEST_TIMEOUT = CONFIG.fmu_station_request_timeout
-FMU_SESSION_OBSERVATION_MAX_ATTEMPTS = CONFIG.fmu_session_observation_max_attempts
-PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE = CONFIG.proxy_download_rate_limit_per_minute
-WS_CREATE_RATE_LIMIT_PER_MINUTE = CONFIG.ws_create_rate_limit_per_minute
-
 
 __all__ = ["FmuRunnerConfig", "CONFIG", "load_config"]

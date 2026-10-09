@@ -1,4 +1,3 @@
-import asyncio
 from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock

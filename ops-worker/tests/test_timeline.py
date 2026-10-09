@@ -2,7 +2,6 @@ import os
 import sys
 import json
 from datetime import datetime, timedelta, timezone
-import pytest
 
 from sqlalchemy import text
 

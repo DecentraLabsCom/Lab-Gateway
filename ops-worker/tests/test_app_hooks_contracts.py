@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from flask import Flask, abort, jsonify
 
 import app_hooks
@@ -90,18 +92,18 @@ def test_app_hooks_delegate_unexpected_errors_and_preserve_http_errors():
     assert not_found.status_code == 404
 
 
-def test_worker_keeps_hook_facades_and_moves_decorators_to_composition_module():
-    source = open(worker.__file__, encoding="utf-8").read()
+def test_worker_moves_hook_registration_to_composition_module():
+    source = Path(worker.__file__).read_text(encoding="utf-8")
 
-    assert callable(worker.handle_unexpected_exception)
-    assert callable(worker.require_ops_internal_auth)
+    assert callable(app_hooks.handle_unexpected_exception)
+    assert callable(app_hooks.requires_ops_internal_auth)
     assert "@APP.errorhandler(Exception)" not in source
     assert "@APP.before_request" not in source
 
 
 def test_worker_auth_facade_keeps_the_public_health_contract():
     with worker.APP.test_request_context("/health"):
-        assert worker.require_ops_internal_auth() is None
+        assert worker._APP_HOOKS_RUNTIME.require_ops_internal_auth() is None
 
 
 def test_internal_error_response_contract_keeps_public_payload_and_sanitizes_context():

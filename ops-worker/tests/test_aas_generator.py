@@ -1,5 +1,5 @@
 """
-Tests for ops-worker AAS generator (aas_generator.py).
+Tests for ops-worker AAS generator (ops_aas_generator.py).
 
 Tests the pure generation logic (no BaSyx, no DB needed) and the
 sync function behaviour when BaSyx is not configured or unreachable.
@@ -13,7 +13,7 @@ from unittest.mock import patch, MagicMock
 # Make the ops-worker package root importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import aas_generator as _mod
+import ops_aas_generator as _mod
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -312,7 +312,7 @@ class TestBuildAasShell:
         desc = " ".join(d["text"] for d in shell["description"])
         assert desc == "Registered remote laboratory"
 
-    def test_registered_metadata_is_published_in_the_nameplate(self):
+    def test_registered_metadata_is_published_in_optional_submodels(self):
         submodel = _mod.build_nameplate_submodel(
             "42",
             SAMPLE_HOST,
@@ -325,6 +325,7 @@ class TestBuildAasShell:
                 "contactEmail": "lab@example.test",
             },
         )
+        assert submodel["idShort"] == "Nameplate"
         contact = _mod.build_contact_information_submodel("42", {"contactEmail": "lab@example.test"})
         assert contact["submodelElements"][0]["value"][0]["value"][0]["value"] == "lab@example.test"
         handover = _mod.build_handover_documentation_submodel(
@@ -378,7 +379,7 @@ class TestSyncLabToBasyxDegradation:
         original = _mod.BASYX_AAS_URL
         _mod.BASYX_AAS_URL = "https://basyx-mock:8081"
         try:
-            with patch("aas_generator.requests.Session") as mock_session:
+            with patch("ops_aas_generator.requests.Session") as mock_session:
                 result = _mod.sync_lab_to_basyx(lab_id, SAMPLE_HOST, SAMPLE_HEARTBEAT)
 
             assert result == {"error": "AAS lab ID rejected", "created": False, "updated": False}
@@ -423,7 +424,7 @@ class TestSyncLabToBasyxDegradation:
             mock_resp.status_code = 201
             mock_resp.text = ""
 
-            with patch("aas_generator.requests.Session") as MockSession:
+            with patch("ops_aas_generator.requests.Session") as MockSession:
                 session_instance = MagicMock()
                 MockSession.return_value = session_instance
                 session_instance.put.return_value = mock_resp
@@ -447,7 +448,7 @@ class TestSyncLabToBasyxDegradation:
             mock_put.status_code = 500
             mock_put.text = "internal server error"
 
-            with patch("aas_generator.requests.Session") as MockSession:
+            with patch("ops_aas_generator.requests.Session") as MockSession:
                 session_instance = MagicMock()
                 MockSession.return_value = session_instance
                 session_instance.put.return_value = mock_put

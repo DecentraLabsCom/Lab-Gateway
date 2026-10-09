@@ -15,8 +15,6 @@ import logging
 import tempfile
 import asyncio
 import re
-from datetime import datetime, timezone
-from urllib.parse import urlparse, urlunparse
 from pathlib import Path
 from typing import Any, Optional
 from concurrent.futures import ProcessPoolExecutor, Future
@@ -25,9 +23,8 @@ from uuid import uuid4
 import httpx
 import jwt
 from fmpy import read_model_description
-from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, Request
-from fastapi.responses import StreamingResponse, Response
-from starlette.datastructures import UploadFile
+from fastapi import HTTPException, WebSocket, Request
+from fastapi.responses import StreamingResponse
 from xml.etree import ElementTree as ET
 
 from auth import _fetch_jwks, verify_jwt, verify_jwt_token, jwks_health
@@ -66,13 +63,7 @@ from local_fmu_catalog import (
     _local_backend_health_payload as _catalog_local_backend_health_payload,
 )
 from metadata import (
-    _collect_declared_type_definitions,
-    _collect_variable_dimensions,
-    _format_fmi3_binary_start_value,
-    _format_fmi_start_value,
     _model_metadata_from_model_description,
-    _normalize_metadata_value,
-    _normalize_proxy_fmi3_type,
     _normalize_xml_value,
     _parse_fmi_major_version,
     _public_model_metadata,
@@ -81,7 +72,6 @@ from proxy_fmu import (
     _build_proxy_model_description_xml,
     _collect_runtime_files as _collect_proxy_runtime_files,
     _proxy_model_identifier as _proxy_model_identifier_impl,
-    _validate_proxy_generation_supported,
 )
 from proxy_artifact import build_proxy_artifact, build_proxy_artifact_headers
 from proxy_session_config import (
@@ -130,41 +120,9 @@ from simulation_worker import run_simulation as _run_simulation
 from simulation_request import SimulationRequest
 from config import (
     _default_access_audit_url as _default_access_audit_url_value,
-    _env_or_secret_file,
-    _AAS_LINK_DATA_PATH,
-    _AAS_CATALOG_PATH,
-    ACCESS_AUDIT_URL,
-    AUTH_SESSION_TICKET_INTERNAL_TOKEN,
-    AUTH_SESSION_TICKET_ISSUE_URL,
-    AUTH_SESSION_TICKET_REDEEM_URL,
-    FMU_BACKEND_MODE,
-    FMU_DATA_PATH,
-    FMU_LOCAL_DEV_MODE,
-    FMU_LOCAL_REALTIME_ENABLED,
-    FMU_PROXY_GATEWAY_WS_URL,
-    FMU_PROXY_RUNTIME_PATH,
-    FMU_PROXY_SIGNING_KEY,
-    FMU_SESSION_OBSERVATION_MAX_ATTEMPTS,
-    FMU_STATION_BASE_URL,
-    FMU_STATION_INTERNAL_TOKEN,
-    FMU_STATION_REQUEST_TIMEOUT,
-    HISTORY_DB_PATH,
-    INTERNAL_WS_TOKEN,
-    MAX_CONCURRENT_PER_MODEL,
-    MAX_SIMULATION_TIMEOUT,
-    MAX_STOP_TIME,
-    MIN_STEP_SIZE,
-    PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE,
-    SESSION_OBSERVER_GATEWAY_ID,
-    SESSION_OBSERVER_SIGNING_SECRET,
-    WS_ATTACH_GRACE_SECONDS,
-    WS_CLEANUP_SECONDS,
-    WS_CREATE_RATE_LIMIT_PER_MINUTE,
-    WS_EXPIRING_NOTICE_SECONDS,
-    WS_HEARTBEAT_SECONDS,
-    WS_SESSION_QUEUE_SIZE,
+    CONFIG,
 )
-from app_factory import create_app
+from fmu_app_factory import create_app
 from lifecycle import create_lifespan
 from health_router import create_health_router
 from catalog_router import create_catalog_router
@@ -180,6 +138,39 @@ from aasx_router import create_aasx_router
 from aasx_catalog import AasxPackageCatalog
 from aas_association_service import AasAssociationService
 from proxy_router import create_proxy_router
+
+FMU_DATA_PATH = CONFIG.fmu_data_path
+_AAS_LINK_DATA_PATH = CONFIG.aas_link_data_path
+_AAS_CATALOG_PATH = CONFIG.aas_catalog_path
+MAX_SIMULATION_TIMEOUT = CONFIG.max_simulation_timeout
+MAX_CONCURRENT_PER_MODEL = CONFIG.max_concurrent_per_model
+MAX_STOP_TIME = CONFIG.max_stop_time
+MIN_STEP_SIZE = CONFIG.min_step_size
+HISTORY_DB_PATH = CONFIG.history_db_path
+WS_SESSION_QUEUE_SIZE = CONFIG.ws_session_queue_size
+WS_HEARTBEAT_SECONDS = CONFIG.ws_heartbeat_seconds
+WS_EXPIRING_NOTICE_SECONDS = CONFIG.ws_expiring_notice_seconds
+WS_ATTACH_GRACE_SECONDS = CONFIG.ws_attach_grace_seconds
+WS_CLEANUP_SECONDS = CONFIG.ws_cleanup_seconds
+INTERNAL_WS_TOKEN = CONFIG.internal_ws_token
+AUTH_SESSION_TICKET_ISSUE_URL = CONFIG.auth_session_ticket_issue_url
+AUTH_SESSION_TICKET_REDEEM_URL = CONFIG.auth_session_ticket_redeem_url
+AUTH_SESSION_TICKET_INTERNAL_TOKEN = CONFIG.auth_session_ticket_internal_token
+SESSION_OBSERVER_GATEWAY_ID = CONFIG.session_observer_gateway_id
+SESSION_OBSERVER_SIGNING_SECRET = CONFIG.session_observer_signing_secret
+ACCESS_AUDIT_URL = CONFIG.access_audit_url
+FMU_PROXY_RUNTIME_PATH = CONFIG.fmu_proxy_runtime_path
+FMU_PROXY_GATEWAY_WS_URL = CONFIG.fmu_proxy_gateway_ws_url
+FMU_PROXY_SIGNING_KEY = CONFIG.fmu_proxy_signing_key
+FMU_BACKEND_MODE = CONFIG.fmu_backend_mode
+FMU_LOCAL_DEV_MODE = CONFIG.fmu_local_dev_mode
+FMU_LOCAL_REALTIME_ENABLED = CONFIG.fmu_local_realtime_enabled
+FMU_STATION_BASE_URL = CONFIG.fmu_station_base_url
+FMU_STATION_INTERNAL_TOKEN = CONFIG.fmu_station_internal_token
+FMU_STATION_REQUEST_TIMEOUT = CONFIG.fmu_station_request_timeout
+FMU_SESSION_OBSERVATION_MAX_ATTEMPTS = CONFIG.fmu_session_observation_max_attempts
+PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE = CONFIG.proxy_download_rate_limit_per_minute
+WS_CREATE_RATE_LIMIT_PER_MINUTE = CONFIG.ws_create_rate_limit_per_minute
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -403,25 +394,25 @@ def _aas_sync_metadata_builder(model_description):
 
 
 async def _aas_sync_to_basyx(**kwargs):
-    from aas_generator import sync_fmu_to_basyx
+    from fmu_aas_generator import sync_fmu_to_basyx
 
     return await sync_fmu_to_basyx(**kwargs)
 
 
 async def _aas_delete_resources(**kwargs):
-    from aas_generator import delete_aasx_resources
+    from fmu_aas_generator import delete_aasx_resources
 
     return await delete_aasx_resources(**kwargs)
 
 
 async def _aas_serialize_resources(**kwargs):
-    from aas_generator import serialize_aasx_resources
+    from fmu_aas_generator import serialize_aasx_resources
 
     return await serialize_aasx_resources(**kwargs)
 
 
 async def _aas_discover_shells():
-    from aas_generator import discover_basyx_shells
+    from fmu_aas_generator import discover_basyx_shells
 
     return await discover_basyx_shells()
 

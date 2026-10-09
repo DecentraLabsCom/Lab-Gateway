@@ -1,7 +1,7 @@
 """Lab Station host discovery orchestration with explicit dependencies."""
 
 from collections.abc import Callable, Sequence
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from labstation_paths import resolve_labstation_paths
 

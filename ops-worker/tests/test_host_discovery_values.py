@@ -1,5 +1,3 @@
-import json
-
 import host_discovery_values
 
 

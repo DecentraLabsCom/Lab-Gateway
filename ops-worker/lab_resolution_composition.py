@@ -13,27 +13,27 @@ class LabCatalogPolicy(Protocol):
 
     @property
     def lab_catalog_url(self) -> str:
-        ...
+        raise NotImplementedError
 
     @property
     def lab_catalog_token(self) -> str:
-        ...
+        raise NotImplementedError
 
     @property
     def lab_catalog_token_header(self) -> str:
-        ...
+        raise NotImplementedError
 
     @property
     def lab_catalog_allow_insecure(self) -> bool:
-        ...
+        raise NotImplementedError
 
     @property
     def lab_catalog_timeout_seconds(self) -> float:
-        ...
+        raise NotImplementedError
 
     @property
     def lab_catalog_cache_seconds(self) -> float:
-        ...
+        raise NotImplementedError
 
 
 def create_lab_resolution_composition(

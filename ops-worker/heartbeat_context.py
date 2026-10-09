@@ -11,7 +11,7 @@ class HostRegistryProtocol(Protocol):
     """Minimal registry surface required by background heartbeat polling."""
 
     def all_hosts(self) -> Iterable[Dict[str, Any]]:
-        ...
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)

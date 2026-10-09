@@ -12,7 +12,7 @@ class HostRegistryProtocol(Protocol):
     """Minimal host registry surface required by the inventory projection."""
 
     def all_hosts(self) -> Sequence[Dict[str, Any]]:
-        ...
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)

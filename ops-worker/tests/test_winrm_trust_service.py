@@ -143,7 +143,7 @@ def test_refresh_creates_host_directories_and_preserves_states(tmp_path):
         str(tmp_path),
         trust_ref_for_host=lambda host: host["winrm_trust_ref"],
         inspect_trust=lambda host: states[host["name"]],
-        sanitize_log_value=lambda value: str(value),
+        sanitize_log_value=str,
     )
 
     assert result == states

@@ -13,6 +13,9 @@ def test_runtime_context_keeps_a_live_read_only_view_of_worker_values():
     assert len(context) == 1
 
 
-def test_worker_uses_the_explicit_runtime_context_for_blueprints_and_facades():
-    assert isinstance(worker._RUNTIME_CONTEXT, RuntimeContext)
-    assert worker._RUNTIME_CONTEXT["APP"] is worker.APP
+def test_worker_builds_blueprints_from_an_explicit_runtime_context():
+    context = worker._worker_runtime_context(worker.__dict__)
+
+    assert isinstance(context, RuntimeContext)
+    assert context["APP"] is worker.APP
+    assert context["hmac"] is worker.hmac

@@ -1,6 +1,6 @@
 """Flask transport boundary for the WinRM credentials route."""
 
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Tuple
 
 from flask import Blueprint, jsonify, request
 

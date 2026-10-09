@@ -171,7 +171,7 @@ test('reports access denial on an explicit controller refresh', async () => {
 });
 
 test('sends the unified physical output name and keeps the local name aligned', () => {
-  const { controller, fields } = loadControllers({
+  const { controller } = loadControllers({
     createPowerControllerOutletDraft: outlet => ({
       outlet: String(outlet.outlet || ''),
       deviceName: outlet.deviceName || '',

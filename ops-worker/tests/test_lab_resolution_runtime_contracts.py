@@ -1,3 +1,6 @@
+from functools import partial
+from types import SimpleNamespace
+
 from lab_resolution_context import LabResolutionContext
 from lab_resolution_runtime import LabResolutionRuntime
 
@@ -8,6 +11,14 @@ class _Lock:
 
     def __exit__(self, *_args):
         return False
+
+
+class _Registry:
+    def __init__(self, hosts):
+        self.hosts = hosts
+
+    def all_hosts(self):
+        return self.hosts
 
 
 def test_runtime_fetches_catalog_once_within_cache_window_and_resolves_both_directions():
@@ -27,9 +38,9 @@ def test_runtime_fetches_catalog_once_within_cache_window_and_resolves_both_dire
                 {"labId": "lab-1", "accessKey": "guac:id:5"},
             ]}}
         )(),
-        get_logger=lambda: type("Logger", (), {"warning": lambda *_args, **_kwargs: None})(),
-        get_cache_lock=lambda: _Lock(),
-        get_host_registry=lambda: type("Registry", (), {"all_hosts": lambda _self: hosts})(),
+        get_logger=partial(SimpleNamespace, warning=lambda *_args, **_kwargs: None),
+        get_cache_lock=_Lock,
+        get_host_registry=partial(_Registry, hosts),
         get_guacamole_connections=lambda: (connections, None),
         get_parse_selector=lambda: lambda value: int(str(value).split(":id:", 1)[1]),
         get_normalize_key=lambda: lambda value: str(value or "").strip().lower(),

@@ -2,7 +2,6 @@
 
 import os
 import re
-
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
@@ -13,7 +12,7 @@ class ConfigReader(Protocol):
     """Callable shape for readers supporting the optional-file flag."""
 
     def __call__(self, path: str, missing_ok: bool = True) -> Dict[str, Any]:
-        ...
+        raise NotImplementedError
 
 
 __all__ = [

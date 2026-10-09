@@ -21,7 +21,7 @@ async def _cancel_task(task: Optional[asyncio.Task]) -> None:
     try:
         await task
     except asyncio.CancelledError:
-        pass
+        return
 
 
 class _StationWebSocket(Protocol):

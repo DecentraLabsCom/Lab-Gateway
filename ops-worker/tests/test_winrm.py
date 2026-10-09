@@ -65,10 +65,10 @@ def test_winrm_defaults_to_https_and_rejects_plaintext():
         "winrm_use_ssl": True,
         "winrm_port": 5986,
     }
-    endpoint = worker.winrm_endpoint(host, None, None)
+    endpoint = worker._WINRM_RUNTIME.winrm_endpoint(host, None, None)
     assert endpoint == "https://192.168.1.50:5986/wsman"
     try:
-        worker.winrm_endpoint(host, False, 5985)
+        worker._WINRM_RUNTIME.winrm_endpoint(host, False, 5985)
         assert False, "Expected plaintext WinRM to be rejected"
     except ValueError as exc:
         assert "HTTPS" in str(exc) or "use_ssl" in str(exc)

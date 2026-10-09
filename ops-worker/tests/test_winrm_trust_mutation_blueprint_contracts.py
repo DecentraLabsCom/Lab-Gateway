@@ -21,7 +21,7 @@ def _blueprint(**overrides):
         "delete_trust": lambda _host: None,
         "inspect_trust": lambda _host: {"configured": False},
         "request_id": lambda: "request-1",
-        "sanitize_log_value": lambda value: str(value),
+        "sanitize_log_value": str,
         "log_info": lambda *_args: None,
         "log_warning": lambda *_args: None,
         "trust_error_type": worker.WinRMTrustError,

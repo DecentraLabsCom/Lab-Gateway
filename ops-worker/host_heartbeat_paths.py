@@ -1,6 +1,5 @@
 """Heartbeat path discovery and fallback composition."""
 
-import json
 from collections.abc import Callable, Sequence
 from typing import Any, Dict, List, Optional
 

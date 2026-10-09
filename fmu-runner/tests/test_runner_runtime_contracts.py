@@ -1,5 +1,4 @@
 from concurrent.futures import Future
-from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -10,10 +9,10 @@ from runner_runtime import create_fmu_runner_runtime
 def _runtime():
     return create_fmu_runner_runtime(
         create_executor=lambda: "executor",
-        slots_factory=lambda: _Slots(),
-        registry_factory=lambda: _Registry(),
+        slots_factory=_Slots,
+        registry_factory=_Registry,
         observation_set_factory=set,
-        lock_factory=lambda: object(),
+        lock_factory=object,
         history_db_path="history.db",
     )
 

@@ -33,15 +33,14 @@ def test_aas_profile_isolated_and_authenticated():
 
 
 def test_external_aas_policy_is_applied_to_proxy_and_workers():
-    conf = (ROOT / "openresty" / "gateway.conf").read_text(encoding="utf-8")
     aas_public = (
         ROOT / "openresty" / "conf.d" / "gateway_aas_public.conf"
     ).read_text(encoding="utf-8")
     internal_health = (
         ROOT / "openresty" / "conf.d" / "gateway_health_internal.conf"
     ).read_text(encoding="utf-8")
-    ops = (ROOT / "ops-worker" / "aas_generator.py").read_text(encoding="utf-8")
-    fmu = (ROOT / "fmu-runner" / "aas_generator.py").read_text(encoding="utf-8")
+    ops = (ROOT / "ops-worker" / "ops_aas_generator.py").read_text(encoding="utf-8")
+    fmu = (ROOT / "fmu-runner" / "fmu_aas_generator.py").read_text(encoding="utf-8")
 
     assert "location /aas/" in aas_public
     assert "access_by_lua_file /etc/openresty/lua/aas_access.lua;" in aas_public

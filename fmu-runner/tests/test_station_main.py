@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu"}):
     import runner_application as application
-    from runner_application import app
-    from runner_application import verify_jwt as _original_verify_jwt
+    app = application.app
+    _original_verify_jwt = application.verify_jwt
 
 
 def _fake_jwt(**claims):

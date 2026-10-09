@@ -38,7 +38,7 @@ async def _cancel_task(task: Optional[asyncio.Task]) -> None:
     try:
         await task
     except asyncio.CancelledError:
-        pass
+        return
 
 
 @dataclass
@@ -894,9 +894,6 @@ class RealtimeWsManager:
                     # FMU_SESSION), issue the reservation-scoped ticket
                     # server-side before creating the local session.
                     if not internal and not session_ticket:
-                        if create_claims is None:
-                            raise HTTPException(status_code=401, detail="Missing session claims")
-
                         claim_lab_id = self.get_claim_lab_id(create_claims)
                         if claim_lab_id and req_lab_id and claim_lab_id != req_lab_id:
                             response = self.error_payload(

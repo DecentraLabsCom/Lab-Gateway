@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from runtime_state import RuntimeState, create_runtime_state, replace_host_registry
 
 
@@ -93,23 +95,23 @@ def test_create_runtime_state_contract_skips_engine_factory_without_dsn():
 def test_worker_uses_runtime_state_factory_without_inline_engine_initialization():
     import worker
 
-    source = open(worker.__file__, encoding="utf-8").read()
+    source = Path(worker.__file__).read_text(encoding="utf-8")
 
     assert "create_runtime_state(" in source
     assert "DB_ENGINE: Optional[Engine] = create_engine(" not in source
     assert "HOSTS = _RUNTIME_STATE.hosts" in source
     assert "HOSTS_LOCK = _RUNTIME_STATE.hosts_lock" in source
-    assert "OPS_DSN = _RUNTIME_STATE.ops_dsn" in source
     assert "DB_ENGINE: Optional[Engine] = _RUNTIME_STATE.db_engine" in source
-    assert "GUACAMOLE_DSN = _RUNTIME_STATE.guacamole_dsn" in source
     assert "GUACAMOLE_DB_ENGINE: Optional[Engine] = _RUNTIME_STATE.guacamole_db_engine" in source
     assert worker._RUNTIME_STATE.hosts is not None
+    assert hasattr(worker._RUNTIME_STATE, "ops_dsn")
+    assert hasattr(worker._RUNTIME_STATE, "guacamole_dsn")
 
 
 def test_worker_uses_runtime_config_snapshot_for_paths_and_database_inputs():
     import worker
 
-    source = open(worker.__file__, encoding="utf-8").read()
+    source = Path(worker.__file__).read_text(encoding="utf-8")
 
     assert "load_runtime_paths(" in source
     assert "publish_runtime_paths(_RUNTIME_PATHS, globals())" in source

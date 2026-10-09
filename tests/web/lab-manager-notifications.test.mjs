@@ -163,7 +163,7 @@ test('preserves notification save payloads and omits blank secrets', async () =>
 });
 
 test('preserves the protected test-email request and modal access guard', async () => {
-  const { controller, elements, fetchCalls, promptCalls } = loadNotifications({
+  const { elements, promptCalls } = loadNotifications({
     billingResponse: {
       ok: false,
       status: 401,

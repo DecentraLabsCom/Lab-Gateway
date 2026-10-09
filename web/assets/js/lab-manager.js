@@ -229,8 +229,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function $(sel) { return document.querySelector(sel); }
-
     // ---- Lab Station ops helpers ----
     function updateOpsHint(data) {
         return opsAccessController?.updateHint(data);

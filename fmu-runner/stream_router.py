@@ -1,6 +1,5 @@
 """HTTP composition for the reservation-scoped FMU NDJSON stream."""
 
-import asyncio
 import json
 from concurrent.futures import Future
 from typing import Any

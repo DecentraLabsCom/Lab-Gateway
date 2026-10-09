@@ -124,7 +124,7 @@
                 if (aasxFile) {
                     const form = new formDataCtor();
                     form.append('file', aasxFile);
-                    if (labId) form.append('labId', labId);
+                    form.append('labId', labId);
                     appendMetadataToForm(form, syncInfo);
                     response = await fetchImpl(url, { method: 'POST', body: form });
                 } else if (!isFmu) {
@@ -140,7 +140,7 @@
                     });
                 } else {
                     const params = new urlSearchParamsCtor();
-                    if (labId) params.set('labId', labId);
+                    params.set('labId', labId);
                     if (syncInfo.description) params.set('description', syncInfo.description);
                     if (syncInfo.license) params.set('license', syncInfo.license);
                     if (syncInfo.documentationUrls.length) {

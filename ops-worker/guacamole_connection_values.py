@@ -1,6 +1,5 @@
 """Pure Guacamole selector parsing and response projection helpers."""
 
-import re
 from typing import Any, Dict, Pattern
 
 

@@ -1,6 +1,6 @@
 """Composition adapter for Wake-on-LAN orchestration."""
 
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
 from wol_context import WolContext
 

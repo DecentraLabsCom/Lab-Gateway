@@ -1,6 +1,6 @@
 """Flask transport boundary for the host catalog reload route."""
 
-from typing import Any, Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from flask import Blueprint, jsonify
 
