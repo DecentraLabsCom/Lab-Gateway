@@ -106,15 +106,6 @@ def test_worker_keeps_the_historical_trust_reference_facade():
     assert worker.normalize_winrm_trust_ref("PC-Siemens") == "pc-siemens"
 
 
-def test_worker_keeps_the_historical_private_helper_aliases():
-    assert worker._certificate_datetime is winrm_trust._certificate_datetime
-    assert worker._certificate_matches_host is winrm_trust._certificate_matches_host
-    assert worker._dns_name_matches is winrm_trust._dns_name_matches
-    assert worker._format_certificate_datetime is winrm_trust._format_certificate_datetime
-    assert worker._is_valid_ip_address is winrm_trust._is_valid_ip_address
-    assert worker._winrm_certificate_metadata is winrm_trust._winrm_certificate_metadata
-
-
 def test_certificate_parser_accepts_der_and_pem_and_keeps_the_size_guard():
     certificate = _certificate()
     der = certificate.public_bytes(serialization.Encoding.DER)

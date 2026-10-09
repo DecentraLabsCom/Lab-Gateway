@@ -1,5 +1,6 @@
 from unittest.mock import Mock
 
+import errors
 import worker
 
 
@@ -97,8 +98,8 @@ def test_heartbeat_poll_route_maps_winrm_network_failure_to_actionable_unavailab
 
     assert response.status_code == 503
     assert response.json == {
-        "error": worker.WINRM_UNREACHABLE_MESSAGE,
-        "code": worker.WINRM_UNREACHABLE_CODE,
+        "error": errors.WINRM_UNREACHABLE_MESSAGE,
+        "code": errors.WINRM_UNREACHABLE_CODE,
         "host": "lab-ws-01",
         "address": "192.168.1.50",
         "port": 5986,
@@ -118,8 +119,8 @@ def test_heartbeat_poll_route_maps_rejected_credentials_to_actionable_error(clie
 
     assert response.status_code == 409
     assert response.json == {
-        "error": worker.WINRM_AUTH_FAILED_MESSAGE,
-        "code": worker.WINRM_AUTH_FAILED_CODE,
+        "error": errors.WINRM_AUTH_FAILED_MESSAGE,
+        "code": errors.WINRM_AUTH_FAILED_CODE,
         "host": "lab-ws-01",
         "requestId": "heartbeat-auth-1",
     }
@@ -132,8 +133,8 @@ def test_heartbeat_poll_route_maps_missing_remote_file_to_actionable_error(clien
     monkeypatch.setattr(
         worker,
         "poll_heartbeat",
-        Mock(side_effect=worker.WinRMHeartbeatError(
-            worker.WINRM_HEARTBEAT_NOT_FOUND_CODE,
+        Mock(side_effect=errors.WinRMHeartbeatError(
+            errors.WINRM_HEARTBEAT_NOT_FOUND_CODE,
             "remote path details",
         )),
     )
@@ -142,8 +143,8 @@ def test_heartbeat_poll_route_maps_missing_remote_file_to_actionable_error(clien
 
     assert response.status_code == 502
     assert response.json == {
-        "error": worker.WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
-        "code": worker.WINRM_HEARTBEAT_NOT_FOUND_CODE,
+        "error": errors.WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
+        "code": errors.WINRM_HEARTBEAT_NOT_FOUND_CODE,
         "host": "lab-ws-01",
         "requestId": "heartbeat-file-1",
     }
@@ -157,8 +158,8 @@ def test_heartbeat_poll_route_maps_invalid_heartbeat_to_actionable_error(client,
     monkeypatch.setattr(
         worker,
         "poll_heartbeat",
-        Mock(side_effect=worker.WinRMHeartbeatError(
-            worker.WINRM_HEARTBEAT_INVALID_CODE,
+        Mock(side_effect=errors.WinRMHeartbeatError(
+            errors.WINRM_HEARTBEAT_INVALID_CODE,
             "invalid JSON details",
         )),
     )
@@ -167,8 +168,8 @@ def test_heartbeat_poll_route_maps_invalid_heartbeat_to_actionable_error(client,
 
     assert response.status_code == 502
     assert response.json == {
-        "error": worker.WINRM_HEARTBEAT_INVALID_MESSAGE,
-        "code": worker.WINRM_HEARTBEAT_INVALID_CODE,
+        "error": errors.WINRM_HEARTBEAT_INVALID_MESSAGE,
+        "code": errors.WINRM_HEARTBEAT_INVALID_CODE,
         "host": "lab-ws-01",
         "requestId": "heartbeat-json-1",
     }

@@ -57,8 +57,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from waitress import serve
 import ops_aas_generator as aas_generator
 from errors import (
-    WINRM_AUTH_FAILED_CODE,
-    WINRM_AUTH_FAILED_MESSAGE,
     WINRM_CERTIFICATE_EXPIRED_MESSAGE,
     WINRM_CERTIFICATE_INVALID_MESSAGE,
     WINRM_CERTIFICATE_NOT_YET_VALID_MESSAGE,
@@ -66,29 +64,18 @@ from errors import (
     WINRM_CREDENTIALS_REQUIRED_MESSAGE,
     WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE,
     WINRM_FINGERPRINT_MISMATCH_MESSAGE,
-    WINRM_HEARTBEAT_INVALID_CODE,
-    WINRM_HEARTBEAT_INVALID_MESSAGE,
-    WINRM_HEARTBEAT_NOT_FOUND_CODE,
-    WINRM_HEARTBEAT_NOT_FOUND_MESSAGE,
     WINRM_TLS_FAILED_MESSAGE,
     WINRM_TRUST_ERROR_MESSAGES,
     WINRM_TRUST_REF_MISMATCH_MESSAGE,
     WINRM_TRUST_REQUIRED_CODE,
     WINRM_TRUST_REQUIRED_MESSAGE,
-    WINRM_UNREACHABLE_CODE,
-    WINRM_UNREACHABLE_MESSAGE,
-    WinRMHeartbeatError,
-    WinRMRemoteFileNotFoundError,
     WinRMTrustError,
     build_winrm_trust_error_payload as _build_winrm_trust_error_payload_impl,
     is_missing_winrm_credentials_error,
 )
 from winrm_trust import (
-    _certificate_datetime,
     _certificate_matches_host,
-    _dns_name_matches,
     _format_certificate_datetime,
-    _is_valid_ip_address,
     _parse_winrm_certificate_bytes as _parse_winrm_certificate_bytes_impl,
     normalize_trust_ref as _normalize_trust_ref_impl,
     resolve_trust_file_path as _resolve_trust_file_path_impl,
@@ -419,9 +406,7 @@ _WORKER_COMPATIBILITY_RUNTIME = create_worker_compatibility_runtime(
 )
 _is_lite_gateway = _WORKER_COMPATIBILITY_RUNTIME.is_lite_gateway
 _now_utc = _WORKER_COMPATIBILITY_RUNTIME.now_utc
-_winrm_trust_host_or_404 = _WORKER_COMPATIBILITY_RUNTIME.winrm_trust_host_or_404
 _replace_host_registry = _WORKER_COMPATIBILITY_RUNTIME.replace_host_registry
-_set_host_registry = _WORKER_COMPATIBILITY_RUNTIME.set_host_registry
 
 _APP_HOOKS_CONTEXT = AppHooksContext(
     get_env_or_secret_file_impl=lambda: _env_or_secret_file_impl,
@@ -1262,9 +1247,6 @@ def run_wake_ops() -> None:
 def _wake_ops_get_schedule(host_name: str) -> Dict[str, Any]:
     return _wake_ops_schedule(host_name)
 
-_format_sse_event = _HEARTBEAT_RUNTIME.format_sse_event
-
-
 generate_heartbeat_stream = _HEARTBEAT_RUNTIME.generate_heartbeat_stream
 
 
@@ -1669,33 +1651,16 @@ _SESSION_OBSERVATION_CONTEXT = SessionObservationContext(
 _SESSION_OBSERVATION_RUNTIME = create_session_observation_runtime(
     _SESSION_OBSERVATION_CONTEXT
 )
-_encrypt_runtime_secret = _SESSION_OBSERVATION_RUNTIME.encrypt_runtime_secret
-_decrypt_runtime_secret = _SESSION_OBSERVATION_RUNTIME.decrypt_runtime_secret
 _session_observations_service = _SESSION_OBSERVATION_RUNTIME.create_service
 enqueue_guacamole_token_revocation = _SESSION_OBSERVATION_RUNTIME.enqueue_guacamole_token_revocation
 
 
-_guacamole_admin_session = _SESSION_OBSERVATION_RUNTIME.guacamole_admin_session
-_guacamole_connection_history_observed = (
-    _SESSION_OBSERVATION_RUNTIME.guacamole_connection_history_observed
-)
-_reconcile_guacamole_observations = _SESSION_OBSERVATION_RUNTIME.reconcile_guacamole_observations
 process_guacamole_token_revocations = (
     _SESSION_OBSERVATION_RUNTIME.process_guacamole_token_revocations
 )
 enqueue_session_observation = _SESSION_OBSERVATION_RUNTIME.enqueue_session_observation
 
 
-_claim_session_observation_outbox_rows = (
-    _SESSION_OBSERVATION_RUNTIME.claim_session_observation_outbox_rows
-)
-_mark_session_observation_delivered = (
-    _SESSION_OBSERVATION_RUNTIME.mark_session_observation_delivered
-)
-_mark_session_observation_failure = _SESSION_OBSERVATION_RUNTIME.mark_session_observation_failure
-_session_observed_epoch = _SESSION_OBSERVATION_RUNTIME.session_observed_epoch
-_base64url_json = _SESSION_OBSERVATION_RUNTIME.base64url_json
-_session_observer_authorization = _SESSION_OBSERVATION_RUNTIME.session_observer_authorization
 deliver_session_observation_outbox = _SESSION_OBSERVATION_RUNTIME.deliver_session_observation_outbox
 
 
