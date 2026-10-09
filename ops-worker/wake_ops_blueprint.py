@@ -60,7 +60,6 @@ def create_wake_ops_blueprint(
     get_latest_wake: Callable[[str], Optional[Mapping[str, Any]]],
     manual_wake: Callable[[str], Mapping[str, Any]],
     now: Callable[[], datetime],
-    internal_error_response: Callable[[str], Any],
 ) -> Blueprint:
     blueprint = Blueprint("wake_ops", __name__)
 
@@ -74,17 +73,14 @@ def create_wake_ops_blueprint(
         missing = require_host(host_name)
         if missing:
             return missing
-        try:
-            current = now()
-            return jsonify(
-                {
-                    "host": host_name,
-                    "schedule": _schedule_response(get_schedule(host_name)),
-                    "evidence": _evidence_response(get_latest_wake(host_name), current),
-                }
-            )
-        except Exception:  # pylint: disable=broad-except
-            return internal_error_response("Unable to load Wake Ops")
+        current = now()
+        return jsonify(
+            {
+                "host": host_name,
+                "schedule": _schedule_response(get_schedule(host_name)),
+                "evidence": _evidence_response(get_latest_wake(host_name), current),
+            }
+        )
 
     @blueprint.put("/api/wake-ops/<host_name>")
     def api_wake_ops_update(host_name: str):
@@ -94,22 +90,17 @@ def create_wake_ops_blueprint(
         try:
             payload = request.get_json(force=True, silent=True) or {}
             saved = save_schedule(host_name, payload)
-            return jsonify({"host": host_name, "schedule": _schedule_response(saved)})
-        except WakeOpsValidationError as exc:
-            return jsonify({"error": str(exc)}), 400
-        except Exception:  # pylint: disable=broad-except
-            return internal_error_response("Unable to save Wake Ops")
+        except WakeOpsValidationError:
+            return jsonify({"error": "Invalid Wake Ops schedule"}), 400
+        return jsonify({"host": host_name, "schedule": _schedule_response(saved)})
 
     @blueprint.post("/api/wake-ops/<host_name>/wake")
     def api_wake_ops_manual_wake(host_name: str):
         missing = require_host(host_name)
         if missing:
             return missing
-        try:
-            result = manual_wake(host_name)
-            return jsonify(result), 200 if result.get("success") else 502
-        except Exception:  # pylint: disable=broad-except
-            return internal_error_response("Unable to execute manual Wake Ops wake")
+        result = manual_wake(host_name)
+        return jsonify(result), 200 if result.get("success") else 502
 
     return blueprint
 

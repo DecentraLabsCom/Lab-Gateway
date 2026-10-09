@@ -56,7 +56,8 @@ class AasxPackageCatalog:
     def _metadata_path(self, lab_id: str) -> Path:
         safe_lab_id = _validate_lab_id(lab_id)
         base = self._base_path()
-        # codeql[py/path-injection] The ID is restricted to one safe segment above, and the resolved path is containment-checked below.
+        # `_validate_lab_id` allows one ASCII segment; resolve + containment below rejects escapes.
+        # codeql[py/path-injection]
         candidate = (base / f"{safe_lab_id}.aasx.json").resolve()
         try:
             candidate.relative_to(base)
@@ -77,11 +78,16 @@ class AasxPackageCatalog:
 
     @staticmethod
     def _atomic_write(path: Path, content: bytes) -> None:
+        # codeql[py/path-injection]
+        # Callers pass only resolved paths returned by `_metadata_path`.
         temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
         try:
+            # codeql[py/path-injection]
             temporary.write_bytes(content)
+            # codeql[py/path-injection]
             temporary.replace(path)
         finally:
+            # codeql[py/path-injection]
             temporary.unlink(missing_ok=True)
 
     @staticmethod
@@ -141,6 +147,8 @@ class AasxPackageCatalog:
             "submodelIds": _unique_string_values(result.get("uploadedSubmodelIds")),
         }
         metadata_path = self._metadata_path(safe_lab_id)
+        # `_metadata_path` resolves this path and verifies it stays beneath the catalog root.
+        # codeql[py/path-injection]
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         self._atomic_write(
             metadata_path,

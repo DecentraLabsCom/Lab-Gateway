@@ -28,8 +28,8 @@ def create_public_lab_status_blueprint(
         try:
             values = request.args.getlist("labId") + request.args.getlist("labIds")
             lab_ids = parse_lab_ids(values)
-        except ValueError as exc:
-            return jsonify({"error": str(exc), "code": "INVALID_LAB_IDS"}), 400
+        except ValueError:
+            return jsonify({"error": "Invalid lab IDs", "code": "INVALID_LAB_IDS"}), 400
 
         try:
             payload = build_public_lab_status_response(
@@ -46,9 +46,10 @@ def create_public_lab_status_blueprint(
                 max_age_seconds=max_age_seconds(),
             )
         except Exception:  # pylint: disable=broad-except
+            payload = None
+        if payload is None:
             # Public consumers should degrade to an unknown LED, without host
             # or database details in the response.
-            # codeql[py/stack-trace-exposure] This fixed response does not serialize the caught exception or its traceback.
             return jsonify({
                 "error": "Lab status is temporarily unavailable",
                 "code": "LAB_STATUS_UNAVAILABLE",

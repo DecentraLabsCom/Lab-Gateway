@@ -195,10 +195,6 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
             get_latest_wake=lambda host_name: get("_wake_ops_latest_wake")(host_name),
             manual_wake=lambda host_name: get("_wake_ops_manual_wake")(host_name),
             now=lambda: get("_wake_ops_now")(),
-            internal_error_response=lambda *args, **kwargs: get("internal_error_response")(
-                *args,
-                **kwargs,
-            ),
         )
     )
     app.register_blueprint(
