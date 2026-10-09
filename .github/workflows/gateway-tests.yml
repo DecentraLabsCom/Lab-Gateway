@@ -204,6 +204,9 @@ jobs:
       contents: read
     env:
       TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/library/
+      # GitHub-hosted jobs run on disposable VMs, so the runner cleans up containers after the job.
+      # Disabling Ryuk avoids rewriting its non-library image to an unavailable GCR cache path.
+      TESTCONTAINERS_RYUK_DISABLED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
