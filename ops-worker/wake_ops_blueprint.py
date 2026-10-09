@@ -76,7 +76,7 @@ def create_wake_ops_blueprint(
             return missing
         try:
             current = now()
-            return jsonify(
+            response = jsonify(
                 {
                     "host": host_name,
                     "schedule": _schedule_response(get_schedule(host_name)),
@@ -84,7 +84,10 @@ def create_wake_ops_blueprint(
                 }
             )
         except Exception:  # pylint: disable=broad-except
+            response = None
+        if response is None:
             return internal_error_response("Unable to load Wake Ops")
+        return response
 
     @blueprint.put("/api/wake-ops/<host_name>")
     def api_wake_ops_update(host_name: str):
@@ -94,11 +97,14 @@ def create_wake_ops_blueprint(
         try:
             payload = request.get_json(force=True, silent=True) or {}
             saved = save_schedule(host_name, payload)
-            return jsonify({"host": host_name, "schedule": _schedule_response(saved)})
+            response = jsonify({"host": host_name, "schedule": _schedule_response(saved)})
         except WakeOpsValidationError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception:  # pylint: disable=broad-except
+            response = None
+        if response is None:
             return internal_error_response("Unable to save Wake Ops")
+        return response
 
     @blueprint.post("/api/wake-ops/<host_name>/wake")
     def api_wake_ops_manual_wake(host_name: str):
@@ -107,9 +113,12 @@ def create_wake_ops_blueprint(
             return missing
         try:
             result = manual_wake(host_name)
-            return jsonify(result), 200 if result.get("success") else 502
+            response = jsonify(result), 200 if result.get("success") else 502
         except Exception:  # pylint: disable=broad-except
+            response = None
+        if response is None:
             return internal_error_response("Unable to execute manual Wake Ops wake")
+        return response
 
     return blueprint
 
