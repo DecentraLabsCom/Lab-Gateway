@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from flask import Flask, abort, jsonify
 
 import app_hooks
@@ -91,7 +93,7 @@ def test_app_hooks_delegate_unexpected_errors_and_preserve_http_errors():
 
 
 def test_worker_keeps_hook_facades_and_moves_decorators_to_composition_module():
-    source = open(worker.__file__, encoding="utf-8").read()
+    source = Path(worker.__file__).read_text(encoding="utf-8")
 
     assert callable(worker.handle_unexpected_exception)
     assert callable(worker.require_ops_internal_auth)

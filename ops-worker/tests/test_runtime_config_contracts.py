@@ -205,11 +205,12 @@ def test_resolve_gateway_timezone_uses_system_timezone_when_tz_is_not_configured
     assert resolve_gateway_timezone("", local_timezone=lambda: "Europe/London") == "Europe/London"
 
     errors = []
-    assert resolve_gateway_timezone(
+    fallback_timezone = resolve_gateway_timezone(
         "Invalid/Zone",
         local_timezone=lambda: "UTC",
         log_error=lambda *args: errors.append(args),
-    ) == "UTC"
+    )
+    assert fallback_timezone == "UTC"
     assert errors
 
 

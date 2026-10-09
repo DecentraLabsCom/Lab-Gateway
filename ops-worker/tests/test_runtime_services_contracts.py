@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from runtime_services import RuntimeServices, create_runtime_services
 
 
@@ -28,7 +30,7 @@ def test_create_runtime_services_preserves_power_then_reservation_order():
 def test_worker_publishes_power_and_reservation_aliases_from_runtime_services():
     import worker
 
-    source = open(worker.__file__, encoding="utf-8").read()
+    source = Path(worker.__file__).read_text(encoding="utf-8")
 
     assert "_RUNTIME_SERVICES = create_runtime_services(" in source
     assert "_POWER_RUNTIME_STATE = _RUNTIME_SERVICES.power_state" in source

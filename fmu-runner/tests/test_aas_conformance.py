@@ -19,7 +19,7 @@ from basyx.aas.adapter.aasx import (
 )
 from basyx.aas.adapter.json import read_aas_json_file
 
-from aas_generator import (
+from fmu_aas_generator import (
     build_aas_shell,
     build_asset_interfaces_description_submodel,
     build_contact_information_submodel,

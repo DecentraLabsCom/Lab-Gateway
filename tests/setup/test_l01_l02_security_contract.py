@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_gateway_error_contract_does_not_return_exception_text():
     ops = (ROOT / "ops-worker" / "worker.py").read_text(encoding="utf-8")
     app_hooks = (ROOT / "ops-worker" / "app_hooks.py").read_text(encoding="utf-8")
-    aas = (ROOT / "ops-worker" / "aas_generator.py").read_text(encoding="utf-8")
+    aas = (ROOT / "ops-worker" / "ops_aas_generator.py").read_text(encoding="utf-8")
     auth = (ROOT / "fmu-runner" / "auth.py").read_text(encoding="utf-8")
     backend = (ROOT / "fmu-runner" / "fmu_backend.py").read_text(encoding="utf-8")
     main = (ROOT / "fmu-runner" / "main.py").read_text(encoding="utf-8")

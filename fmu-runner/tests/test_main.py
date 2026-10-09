@@ -22,31 +22,30 @@ from fastapi.testclient import TestClient
 from fastapi import HTTPException
 from starlette.requests import Request
 from fmpy import read_model_description
+from proxy_fmu import _validate_proxy_generation_supported
 
 # Patch auth before importing main so the import doesn't fail
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "accessKey": "test.fmu"}):
-    from runner_application import (
-        app,
-        _init_db,
-        _effective_timeout_seconds,
-        MAX_SIMULATION_TIMEOUT,
-        _build_proxy_model_description_xml,
-        _model_metadata_from_model_description,
-        _issue_session_ticket,
-        _redeem_session_ticket,
-        _confirm_fmu_session_started,
-        _record_browser_session_started,
-        _preload_jwks_if_enabled,
-        _validate_proxy_generation_supported,
-        _derive_gateway_ws_url,
-        _shutdown_simulation_executor,
-        _resolve_fmu_path,
-        _enforce_fmu_claim,
-    )
+    import runner_application
     from auth import verify_jwt as _original_verify_jwt
 
-from config import FMU_WORKER_ADDRESS_SPACE_LIMIT
-import runner_application
+from config import CONFIG
+
+app = runner_application.app
+_init_db = runner_application._init_db
+_effective_timeout_seconds = runner_application._effective_timeout_seconds
+MAX_SIMULATION_TIMEOUT = runner_application.MAX_SIMULATION_TIMEOUT
+_build_proxy_model_description_xml = runner_application._build_proxy_model_description_xml
+_model_metadata_from_model_description = runner_application._model_metadata_from_model_description
+_issue_session_ticket = runner_application._issue_session_ticket
+_redeem_session_ticket = runner_application._redeem_session_ticket
+_confirm_fmu_session_started = runner_application._confirm_fmu_session_started
+_record_browser_session_started = runner_application._record_browser_session_started
+_preload_jwks_if_enabled = runner_application._preload_jwks_if_enabled
+_derive_gateway_ws_url = runner_application._derive_gateway_ws_url
+_shutdown_simulation_executor = runner_application._shutdown_simulation_executor
+_resolve_fmu_path = runner_application._resolve_fmu_path
+_enforce_fmu_claim = runner_application._enforce_fmu_claim
 
 
 # Override FastAPI dependency so all endpoints skip real JWT validation
@@ -1043,7 +1042,7 @@ def _make_delayed_future(result, delay_sec=0.1):
 
 
 def test_worker_address_space_limit_leaves_native_loader_headroom():
-    assert FMU_WORKER_ADDRESS_SPACE_LIMIT == 2 * 1024 ** 3
+    assert CONFIG.fmu_worker_address_space_limit == 2 * 1024 ** 3
 
 
 def test_effective_timeout_caps_to_configured_max_without_exp():

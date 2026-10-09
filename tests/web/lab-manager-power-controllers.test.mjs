@@ -69,7 +69,7 @@ function loadControllers(overrides = {}) {
 }
 
 test('preserves controller form validation and NETIO payload shape', () => {
-  const { controller, fields } = loadControllers({
+  const { controller } = loadControllers({
     createPowerControllerOutletDraft: outlet => ({
       outlet: String(outlet.outlet || ''),
       logicalName: '',

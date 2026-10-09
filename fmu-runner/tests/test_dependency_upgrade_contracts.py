@@ -10,7 +10,7 @@ import zipfile
 from fastapi import HTTPException
 import pytest
 
-import aas_generator as aas
+import fmu_aas_generator as aas
 import auth
 
 

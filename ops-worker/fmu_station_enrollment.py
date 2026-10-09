@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 _TOKEN_MIN_LENGTH = 32
 _TOKEN_MAX_LENGTH = 512
-_TOKEN_RE = re.compile(r"^[^\r\n]{32,512}$")
+_TOKEN_RE = re.compile(fr"^[^\r\n]{{{_TOKEN_MIN_LENGTH},{_TOKEN_MAX_LENGTH}}}$")
 
 
 class FmuStationEnrollmentError(ValueError):

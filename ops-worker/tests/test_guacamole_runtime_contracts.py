@@ -15,7 +15,7 @@ def _context(**overrides):
         ),
         "get_db_engine": lambda: None,
         "get_sql_text": lambda: "sql-text",
-        "get_logger": lambda: SimpleNamespace(),
+        "get_logger": SimpleNamespace,
         "get_request_headers": lambda: {"X-Token": "secret"},
         "get_check_auth_impl": lambda: lambda headers, **kwargs: (headers, kwargs),
         "get_expected_token": lambda: "secret",

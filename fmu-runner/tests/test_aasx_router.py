@@ -90,7 +90,8 @@ def test_aasx_router_returns_not_found_for_unknown_packages(tmp_path: Path):
 
     assert client.get("/aas-admin/aas/missing/view").status_code == 404
     assert client.get("/aas-admin/aas/missing/download").status_code == 404
-    assert client.delete("/aas-admin/aas/missing").status_code == 404
+    response = client.delete("/aas-admin/aas/missing")
+    assert response.status_code == 404
 
 
 def test_aasx_router_keeps_the_catalog_when_basyx_deletion_fails(tmp_path: Path):

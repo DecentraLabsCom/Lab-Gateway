@@ -32,7 +32,7 @@ def _context(*, calls=None):
             ("mac", value, kwargs)
         ) or "AA:BB",
         get_mac_pattern=lambda: "mac-pattern",
-        parse_boolish_impl=lambda value: bool(value),
+        parse_boolish_impl=bool,
         extract_nic_candidates_impl=lambda heartbeat, **kwargs: calls.append(
             ("nics", heartbeat, kwargs)
         ) or [{"mac": "AA:BB"}],
@@ -140,4 +140,4 @@ def test_host_discovery_context_is_immutable():
     context, _state, _calls = _context()
 
     with pytest.raises(FrozenInstanceError):
-        setattr(context, "get_logger", lambda: SimpleNamespace())
+        setattr(context, "get_logger", SimpleNamespace)

@@ -7,7 +7,6 @@ and current operational status derived from the Lab Station heartbeat.
 """
 
 import base64
-import json
 import logging
 import os
 import re

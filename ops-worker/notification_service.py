@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from datetime import timedelta
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Optional
 
 
 def _safe_log_value(value: Any) -> str:

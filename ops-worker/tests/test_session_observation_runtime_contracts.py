@@ -121,7 +121,8 @@ def test_session_observation_runtime_closes_injected_resources():
         close=lambda: calls.append("close"),
     )
 
-    assert runtime.close() is None
+    result = runtime.close()
+    assert result is None
     assert calls == ["close"]
 
 

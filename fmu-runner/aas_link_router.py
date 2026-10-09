@@ -4,6 +4,18 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 
+def _read_aas_target(path: Any) -> str | None:
+    """Return a valid linked AAS ID, or None when a stored mapping is unusable."""
+    try:
+        link = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(link, dict):
+        return None
+    target = link.get("aasId")
+    return target.strip() if isinstance(target, str) and target.strip() else None
+
+
 def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
     router = APIRouter()
 
@@ -145,23 +157,15 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
         lab_key = shellId[len(prefix):]
         fp = get_link_path(lab_key)
         if fp.is_file():
-            try:
-                link = json.loads(fp.read_text(encoding="utf-8"))
-                target = link.get("aasId", "").strip()
-                if target:
-                    return {"targetId": target, "override": True}
-            except Exception:
-                pass
+            target = _read_aas_target(fp)
+            if target:
+                return {"targetId": target, "override": True}
 
         fp_fmu = get_link_path(f"{lab_key}.fmu")
         if fp_fmu.is_file():
-            try:
-                link = json.loads(fp_fmu.read_text(encoding="utf-8"))
-                target = link.get("aasId", "").strip()
-                if target:
-                    return {"targetId": target, "override": True}
-            except Exception:
-                pass
+            target = _read_aas_target(fp_fmu)
+            if target:
+                return {"targetId": target, "override": True}
 
         return {"targetId": shellId, "override": False}
 

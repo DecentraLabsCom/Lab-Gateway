@@ -11,7 +11,7 @@ from basyx.aas.adapter.aasx import (
 )
 from basyx.aas.adapter.json import read_aas_json_file
 
-import aas_generator as generator
+import ops_aas_generator as generator
 
 
 HOST = {

@@ -38,10 +38,12 @@ def test_catalog_replaces_one_association_per_lab_and_deletes_metadata(tmp_path:
 
     assert catalog.list_packages() == [replacement]
     assert not (tmp_path / "7.aasx").exists()
-    assert catalog.delete("7") is True
+    deleted = catalog.delete("7")
+    assert deleted is True
     assert catalog.list_packages() == []
     assert catalog.get("7") is None
-    assert catalog.delete("7") is False
+    deleted = catalog.delete("7")
+    assert deleted is False
 
 
 def test_catalog_delete_cleans_a_legacy_archive_after_basyx_deletion(tmp_path: Path):
@@ -50,7 +52,8 @@ def test_catalog_delete_cleans_a_legacy_archive_after_basyx_deletion(tmp_path: P
     legacy_archive = tmp_path / "8.aasx"
     legacy_archive.write_bytes(b"legacy-copy")
 
-    assert catalog.delete("8") is True
+    deleted = catalog.delete("8")
+    assert deleted is True
     assert not legacy_archive.exists()
 
 

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from entrypoint import configure_logging, run
 
 
@@ -76,7 +78,7 @@ def test_run_shuts_down_the_scheduler_after_waitress_returns():
 def test_worker_delegates_process_startup_to_entrypoint_module():
     import worker
 
-    source = open(worker.__file__, encoding="utf-8").read()
+    source = Path(worker.__file__).read_text(encoding="utf-8")
 
     assert "from entrypoint import" in source
     assert "create_entrypoint_runtime" in source

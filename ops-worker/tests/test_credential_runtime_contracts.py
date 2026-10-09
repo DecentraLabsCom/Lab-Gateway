@@ -43,7 +43,7 @@ def _context(**overrides):
         "fernet_key_is_usable_impl": lambda **kwargs: calls.append(
             ("health", kwargs)
         ) or True,
-        "get_logger": lambda: SimpleNamespace(),
+        "get_logger": SimpleNamespace,
     }
     values.update(overrides)
     return CredentialContext(**values), cache, state, calls
@@ -87,4 +87,4 @@ def test_credential_context_is_immutable():
     context, _cache, _state, _calls = _context()
 
     with pytest.raises(FrozenInstanceError):
-        setattr(context, "get_logger", lambda: SimpleNamespace())
+        setattr(context, "get_logger", SimpleNamespace)

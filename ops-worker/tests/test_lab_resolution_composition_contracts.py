@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from types import SimpleNamespace
 from pathlib import Path
 from typing import Any, Callable, cast
 

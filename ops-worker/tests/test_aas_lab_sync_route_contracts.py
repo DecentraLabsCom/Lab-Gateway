@@ -49,7 +49,7 @@ def test_aas_lab_sync_route_contract_returns_not_found_for_unmapped_lab(client, 
 
 
 def test_aas_lab_sync_route_contract_uses_persisted_heartbeat_by_default(client, monkeypatch):
-    host = _install_host(monkeypatch)
+    _install_host(monkeypatch)
     connection = object()
     heartbeat = {"ready": True, "source": "db"}
     calls = []

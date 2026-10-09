@@ -27,7 +27,6 @@ def test_public_health_is_aggregate_only_and_details_are_guarded():
 def test_ops_worker_container_and_winrm_policy_are_hardened():
     dockerfile = (ROOT / "ops-worker" / "Dockerfile").read_text(encoding="utf-8")
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    worker = (ROOT / "ops-worker" / "worker.py").read_text(encoding="utf-8")
     runtime_values = (ROOT / "ops-worker" / "runtime_values.py").read_text(encoding="utf-8")
     winrm_policy = (ROOT / "ops-worker" / "winrm_session_policy.py").read_text(encoding="utf-8")
     sample = (ROOT / "ops-worker" / "hosts.sample.json").read_text(encoding="utf-8")

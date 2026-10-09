@@ -1,9 +1,10 @@
-from typing import Any
-
-from typing import Optional
+import logging
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 
 def create_health_router(*, backend_health: Any, refresh_jwks: Any, auth_health: Any) -> APIRouter:
@@ -18,8 +19,11 @@ def create_health_router(*, backend_health: Any, refresh_jwks: Any, auth_health:
         )
         try:
             await refresh_jwks()
-        except HTTPException:
-            pass
+        except HTTPException as exc:
+            logger.warning(
+                "Unable to refresh JWKS while building health response (status %s)",
+                exc.status_code,
+            )
         auth_status = auth_health()
         checks = dict(payload.get("checks") or {})
         checks["jwks"] = auth_status["status"] == "UP"

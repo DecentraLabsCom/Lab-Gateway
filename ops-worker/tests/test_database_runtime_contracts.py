@@ -35,8 +35,8 @@ def test_database_context_is_immutable():
     context = DatabaseContext(
         database_is_usable=lambda *args, **kwargs: True,
         get_sql_text=lambda: str,
-        get_logger=lambda: SimpleNamespace(),
+        get_logger=SimpleNamespace,
     )
 
     with pytest.raises(FrozenInstanceError):
-        setattr(context, "get_logger", lambda: SimpleNamespace())
+        setattr(context, "get_logger", SimpleNamespace)

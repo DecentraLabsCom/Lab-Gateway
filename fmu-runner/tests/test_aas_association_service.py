@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -87,7 +88,7 @@ async def test_deleting_linked_association_only_removes_the_link(tmp_path: Path)
     links_path = tmp_path / "links"
     links_path.mkdir()
     link = {"labId": "2", "aasId": "urn:external:aas:2"}
-    (links_path / "2.aas-link.json").write_text('{"labId":"2","aasId":"urn:external:aas:2"}', encoding="utf-8")
+    (links_path / "2.aas-link.json").write_text(json.dumps(link), encoding="utf-8")
 
     result = await service.delete_association("2")
 

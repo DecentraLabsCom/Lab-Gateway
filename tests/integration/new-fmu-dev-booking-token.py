@@ -3,7 +3,6 @@ import hashlib
 import time
 import uuid
 from pathlib import Path
-from typing import cast
 
 import jwt
 from cryptography.hazmat.primitives import serialization

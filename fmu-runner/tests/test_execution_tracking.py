@@ -28,9 +28,11 @@ def test_simulation_registry_pop_removes_entry_and_returns_missing_as_none():
     future = Future()
     registry.register("sim-1", future, "42", {})
 
-    assert registry.pop("sim-1") == (future, "42", "", "", None)
+    popped = registry.pop("sim-1")
+    assert popped == (future, "42", "", "", None)
     assert registry.get("sim-1") is None
-    assert registry.pop("missing") is None
+    missing = registry.pop("missing")
+    assert missing is None
 
 
 def test_simulation_registry_counts_entries_for_a_lab():

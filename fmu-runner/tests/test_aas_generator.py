@@ -14,11 +14,10 @@ import pytest
 
 # ── Pure generator tests ─────────────────────────────────────────────
 
-from aas_generator import (
+from fmu_aas_generator import (
     _aas_id_for_lab,
     _submodel_id_for_fmu,
     _submodel_id_for_technical,
-    _submodel_id_for_execution,
     _submodel_id_for_interfaces,
     _submodel_id_for_contact,
     _submodel_id_for_handover,

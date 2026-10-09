@@ -1,6 +1,8 @@
+from pathlib import Path
+
 from flask import jsonify
 
-import app_factory
+import ops_app_factory as app_factory
 import worker
 
 
@@ -22,7 +24,7 @@ def test_app_factory_preserves_import_name_and_registers_cross_cutting_hooks():
 
 
 def test_worker_constructs_app_through_the_factory_and_keeps_flask_app_surface():
-    source = open(worker.__file__, encoding="utf-8").read()
+    source = Path(worker.__file__).read_text(encoding="utf-8")
 
     assert "APP = create_app(" in source
     assert "APP = Flask(__name__)" not in source
@@ -30,7 +32,7 @@ def test_worker_constructs_app_through_the_factory_and_keeps_flask_app_surface()
 
 
 def test_worker_delegates_all_blueprint_registration_to_the_app_factory():
-    source = open(worker.__file__, encoding="utf-8").read()
+    source = Path(worker.__file__).read_text(encoding="utf-8")
 
     assert "APP.register_blueprint(" not in source
     assert "compose_worker_app(" in source

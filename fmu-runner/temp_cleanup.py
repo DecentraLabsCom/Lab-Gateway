@@ -1,5 +1,8 @@
 import shutil
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def cleanup_fmu_temp_files(temp_dir: Path) -> int:
@@ -9,6 +12,6 @@ def cleanup_fmu_temp_files(temp_dir: Path) -> int:
             try:
                 shutil.rmtree(entry)
                 removed += 1
-            except Exception:
-                pass
+            except OSError:
+                logger.warning("Unable to remove temporary FMU directory %s", entry, exc_info=True)
     return removed

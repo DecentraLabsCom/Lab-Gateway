@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from fmpy import simulate_fmu
 
-from config import FMU_WORKER_ADDRESS_SPACE_LIMIT
+from config import CONFIG
 
 
 def run_simulation(
@@ -23,7 +23,7 @@ def run_simulation(
     solver_name: str = "Euler",
     *,
     resource_api: Optional[Any] = posix_resource,
-    address_space_limit: int = FMU_WORKER_ADDRESS_SPACE_LIMIT,
+    address_space_limit: int = CONFIG.fmu_worker_address_space_limit,
     simulate_fmu_fn: Any = simulate_fmu,
 ) -> dict:
     """Execute an FMU simulation and return JSON-compatible result data."""

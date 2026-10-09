@@ -2,7 +2,6 @@ from typing import Any, Callable, Dict, Optional, cast
 
 import heartbeat_runtime
 from heartbeat_context import HeartbeatContext, HostRegistryProtocol
-from heartbeat_runtime import HeartbeatRuntime, create_heartbeat_runtime
 
 
 def _context():
@@ -27,7 +26,7 @@ def _context():
         missing_credentials_predicate=lambda _error: False,
         trust_error_payload=lambda host, code: {"host": host, "code": code},
         request_id=lambda: "request-id",
-        sanitize_log_value=lambda value: str(value),
+        sanitize_log_value=str,
         credentials_required_message="credentials",
         heartbeat_interval_seconds=10,
         sleep=lambda seconds: None,
@@ -68,9 +67,9 @@ def test_heartbeat_runtime_uses_explicit_context_dependencies(monkeypatch):
     )
 
     context = _context()
-    runtime = create_heartbeat_runtime(context)
+    runtime = heartbeat_runtime.create_heartbeat_runtime(context)
 
-    assert isinstance(runtime, HeartbeatRuntime)
+    assert isinstance(runtime, heartbeat_runtime.HeartbeatRuntime)
     assert runtime.to_utc("timestamp") == "utc"
     assert runtime.persist_heartbeat("db", {"name": "host"}, {}, None) is None
     assert runtime.poll_heartbeat({"name": "host"}, include_events=True) == {"heartbeat": {}}

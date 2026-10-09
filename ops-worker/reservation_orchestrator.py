@@ -11,7 +11,7 @@ class SchedulerProtocol(Protocol):
     """Minimal scheduler surface required by the reservation orchestrator."""
 
     def add_job(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+        raise NotImplementedError
 
 
 class ReservationOrchestrator:
