@@ -156,7 +156,7 @@ jobs:
             -e LUA_PATH="${LUA_PATH}" \
             -v "${{ github.workspace }}/openresty:/workspace" \
             -w /workspace \
-            openresty/openresty:1.31.1.1-1-alpine-fat sh -c \
+            ghcr.io/neomantra/openresty:1.31.1.1-1-alpine-fat sh -c \
             "cp tests/luacov-ci.lua .luacov && \
              apk add --no-cache build-base openssl openssl-dev git luarocks >/dev/null && \
              luarocks install lua-cjson >/dev/null && \

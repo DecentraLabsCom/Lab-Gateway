@@ -121,6 +121,18 @@ for name in "${!secrets[@]}"; do
   printf '  %s:\n    file: %s\n' "$name" "$secret_file" >> "$OVERRIDE_FILE"
 done
 
+# Keep the real-stack resilience gate independent of anonymous Docker Hub
+# quotas while preserving the production compose image references.
+cat >> "$OVERRIDE_FILE" <<'YAML'
+services:
+  ops-schema-migrator:
+    image: mirror.gcr.io/flyway/flyway:13.8.0
+  mysql:
+    image: mirror.gcr.io/library/mysql:8.0.41
+  guacd:
+    image: mirror.gcr.io/guacamole/guacd:1.6.0
+YAML
+
 # A developer may already have the production stack running. Explicit /24s
 # keep this disposable project independent from Docker's exhausted default
 # address pool and make parallel CI jobs deterministic.

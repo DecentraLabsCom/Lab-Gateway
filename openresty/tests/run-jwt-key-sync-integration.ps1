@@ -49,7 +49,7 @@ try {
     docker network create $NetworkName | Out-Null
     docker run -d --name $KeyServerContainer --network $NetworkName `
         -v "${TempRootDocker}/keysrv:/srv:ro" `
-        python:3.12-alpine `
+        public.ecr.aws/docker/library/python:3.12-alpine `
         sh -c "cd /srv && python -m http.server 8000" | Out-Null
 
     docker run -d --name $LiteContainer --network $NetworkName `

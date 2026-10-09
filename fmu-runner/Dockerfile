@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.11-slim-bookworm
 
 LABEL maintainer="Lab Gateway Team"
 LABEL description="Gateway FMU facade for remote execution services"

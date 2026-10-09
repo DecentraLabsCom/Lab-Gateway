@@ -1,6 +1,6 @@
-# Pin to specific version for reproducibility and security
-# Check https://hub.docker.com/r/openresty/openresty/tags for updates
-FROM openresty/openresty:1.31.1.1-3-alpine-fat
+# Pin the upstream OpenResty image version for reproducibility and security.
+# Check https://github.com/openresty/docker-openresty for supported tags.
+FROM ghcr.io/neomantra/openresty:1.31.1.1-3-alpine-fat
 
 # Use the default system tree
 ENV TREE=/usr/local

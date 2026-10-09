@@ -112,7 +112,7 @@ jobs:
             -e LUA_PATH="${LUA_PATH}" \
             -v "${{ github.workspace }}/openresty:/workspace" \
             -w /workspace \
-            openresty/openresty:1.31.1.1-1-alpine-fat sh -c \
+            ghcr.io/neomantra/openresty:1.31.1.1-1-alpine-fat sh -c \
             "cp tests/luacov-ci.lua .luacov && \
              apk add --no-cache build-base openssl openssl-dev git luarocks >/dev/null && \
              luarocks install lua-cjson >/dev/null && \
@@ -202,6 +202,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: public.ecr.aws/docker/library/
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -299,7 +301,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mariadb:
-        image: mariadb:11.4
+        image: public.ecr.aws/docker/library/mariadb:11.4
         env:
           MARIADB_ROOT_PASSWORD: test-root-password
           MARIADB_DATABASE: guacamole_test

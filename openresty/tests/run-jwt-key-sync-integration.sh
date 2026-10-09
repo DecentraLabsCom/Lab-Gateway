@@ -39,7 +39,7 @@ before_hash="$(sha256sum "${TEMP_ROOT}/lite-certs/public_key.pem" | awk '{print 
 docker network create "$NETWORK_NAME" >/dev/null
 docker run -d --name "$KEYSERVER_CONTAINER" --network "$NETWORK_NAME" \
     -v "${TEMP_ROOT}/keysrv:/srv:ro" \
-    python:3.12-alpine \
+    public.ecr.aws/docker/library/python:3.12-alpine \
     sh -c "cd /srv && python -m http.server 8000" >/dev/null
 
 docker run -d --name "$LITE_CONTAINER" --network "$NETWORK_NAME" \

@@ -94,11 +94,24 @@ try {
     if (-not $SkipTooling) {
         # These commands validate the optional images without starting a
         # public tunnel or requiring a Cloudflare account/token.
+        # Use upstream public registry mirrors in CI and keep the compose
+        # service's configured image name available locally for this check.
+        $cloudflaredMirror = "mirror.gcr.io/cloudflare/cloudflared:2024.11.0"
+        $certbotMirror = "mirror.gcr.io/certbot/certbot:v2.11.0"
+        & docker pull $certbotMirror
+        if ($LASTEXITCODE -ne 0) { throw "Could not pull $certbotMirror" }
+        & docker tag $certbotMirror "certbot/certbot:v2.11.0"
+        if ($LASTEXITCODE -ne 0) { throw "Could not tag the mirrored Certbot image" }
+        & docker pull $cloudflaredMirror
+        if ($LASTEXITCODE -ne 0) { throw "Could not pull $cloudflaredMirror" }
+        & docker tag $cloudflaredMirror "cloudflare/cloudflared:2024.11.0"
+        if ($LASTEXITCODE -ne 0) { throw "Could not tag the mirrored Cloudflare image" }
+
         Write-Host "Checking Certbot's no-op initialization path..."
-        Invoke-Compose @("--profile", "certbot", "run", "--rm", "--no-deps", "certbot-init")
+        Invoke-Compose @("--profile", "certbot", "run", "--pull", "never", "--rm", "--no-deps", "certbot-init")
         Write-Host "Checking Cloudflare image availability..."
-        Invoke-Compose @("--profile", "cloudflare", "run", "--rm", "--no-deps", "cloudflared", "--version")
-        Invoke-Compose @("--profile", "cloudflare-token", "run", "--rm", "--no-deps", "cloudflared-token", "--version")
+        Invoke-Compose @("--profile", "cloudflare", "run", "--pull", "never", "--rm", "--no-deps", "cloudflared", "--version")
+        Invoke-Compose @("--profile", "cloudflare-token", "run", "--pull", "never", "--rm", "--no-deps", "cloudflared-token", "--version")
     }
 
     if ($Runtime) {

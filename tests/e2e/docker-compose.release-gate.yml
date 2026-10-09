@@ -1,6 +1,6 @@
 services:
   mysql:
-    image: mysql:8.0.41
+    image: mirror.gcr.io/library/mysql:8.0.41
     environment:
       MYSQL_ROOT_PASSWORD: release-gate-root
       MYSQL_DATABASE: blockchain_services
@@ -18,7 +18,7 @@ services:
       start_period: 20s
 
   redis:
-    image: redis:7.4.2-alpine
+    image: public.ecr.aws/docker/library/redis:7.4.2-alpine
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
     ports:
       - "16379:6379"

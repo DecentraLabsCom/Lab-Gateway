@@ -20,7 +20,7 @@ fi
 
 # Create temporary Dockerfile
 cat > "${OPENRESTY_DIR}/Dockerfile.test" << 'EOF'
-FROM openresty/openresty:1.31.1.1-1-alpine-fat
+FROM ghcr.io/neomantra/openresty:1.31.1.1-1-alpine-fat
 
 # Match the production Lua/OpenSSL runtime used by openresty/Dockerfile.
 ENV TREE=/usr/local
