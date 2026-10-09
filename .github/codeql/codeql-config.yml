@@ -5,6 +5,7 @@ paths-ignore:
 
 queries:
   - uses: security-extended
+  - uses: security-and-quality
 
 # The monorepo scan covers multiple languages, so suppression queries must be
 # configured here instead of through the init action's single-language input.
