@@ -90,8 +90,8 @@ def create_wake_ops_blueprint(
         try:
             payload = request.get_json(force=True, silent=True) or {}
             saved = save_schedule(host_name, payload)
-        except WakeOpsValidationError as exc:
-            return jsonify({"error": str(exc)}), 400
+        except WakeOpsValidationError:
+            return jsonify({"error": "Invalid Wake Ops schedule"}), 400
         return jsonify({"host": host_name, "schedule": _schedule_response(saved)})
 
     @blueprint.post("/api/wake-ops/<host_name>/wake")
