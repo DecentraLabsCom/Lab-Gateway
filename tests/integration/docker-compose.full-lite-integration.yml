@@ -1,6 +1,6 @@
 services:
   jwt-key-material:
-    image: public.ecr.aws/docker/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.20
     volumes:
       - full_lite_jwt_keys:/keys
     command:
@@ -12,7 +12,7 @@ services:
         openssl rsa -in /keys/private_key.pem -pubout -out /keys/public_key.pem >/dev/null 2>&1
 
   lite-cert-material:
-    image: public.ecr.aws/docker/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.20
     volumes:
       - ./certs:/source:ro
       - full_lite_lite_ssl:/ssl
@@ -26,7 +26,7 @@ services:
         cp /source/public_key.pem /ssl/public_key.pem
 
   full-cert-material:
-    image: public.ecr.aws/docker/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.20
     volumes:
       - ./certs:/source:ro
       - full_lite_full_ssl:/ssl
@@ -158,7 +158,7 @@ services:
       retries: 20
 
   guacd-full:
-    image: public.ecr.aws/docker/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.20
     command: ["sh", "-c", "apk add --no-cache netcat-openbsd >/dev/null && exec nc -lk -p 4822"]
     networks:
       full_edge:
@@ -171,7 +171,7 @@ services:
       retries: 20
 
   guacd-lite:
-    image: public.ecr.aws/docker/library/alpine:3.20
+    image: mirror.gcr.io/library/alpine:3.20
     command: ["sh", "-c", "apk add --no-cache netcat-openbsd >/dev/null && exec nc -lk -p 4822"]
     networks:
       lite_edge:

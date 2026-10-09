@@ -203,7 +203,7 @@ jobs:
     permissions:
       contents: read
     env:
-      TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: public.ecr.aws/docker/library/
+      TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/library/
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -301,7 +301,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mariadb:
-        image: public.ecr.aws/docker/library/mariadb:11.4
+        image: mirror.gcr.io/library/mariadb:11.4
         env:
           MARIADB_ROOT_PASSWORD: test-root-password
           MARIADB_DATABASE: guacamole_test

@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/python:3.14-alpine
+FROM mirror.gcr.io/library/python:3.14-alpine
 
 WORKDIR /app
 COPY server.py /app/server.py

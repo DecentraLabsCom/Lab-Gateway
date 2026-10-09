@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/python:3.11-slim-bookworm
+FROM mirror.gcr.io/library/python:3.11-slim-bookworm
 
 WORKDIR /app
 
