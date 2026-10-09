@@ -86,6 +86,8 @@ def create_wake_ops_blueprint(
         except Exception:  # pylint: disable=broad-except
             response = None
         if response is None:
+            # The exception is discarded; this callback receives a fixed context outside the handler.
+            # codeql[py/stack-trace-exposure]
             return internal_error_response("Unable to load Wake Ops")
         return response
 
@@ -103,6 +105,8 @@ def create_wake_ops_blueprint(
         except Exception:  # pylint: disable=broad-except
             response = None
         if response is None:
+            # The exception is discarded; this callback receives a fixed context outside the handler.
+            # codeql[py/stack-trace-exposure]
             return internal_error_response("Unable to save Wake Ops")
         return response
 
@@ -117,6 +121,8 @@ def create_wake_ops_blueprint(
         except Exception:  # pylint: disable=broad-except
             response = None
         if response is None:
+            # The exception is discarded; this callback receives a fixed context outside the handler.
+            # codeql[py/stack-trace-exposure]
             return internal_error_response("Unable to execute manual Wake Ops wake")
         return response
 

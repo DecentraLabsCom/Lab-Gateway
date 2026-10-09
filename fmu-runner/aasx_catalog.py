@@ -56,8 +56,8 @@ class AasxPackageCatalog:
     def _metadata_path(self, lab_id: str) -> Path:
         safe_lab_id = _validate_lab_id(lab_id)
         base = self._base_path()
-        # codeql[py/path-injection]
         # `_validate_lab_id` allows one ASCII segment; resolve + containment below rejects escapes.
+        # codeql[py/path-injection]
         candidate = (base / f"{safe_lab_id}.aasx.json").resolve()
         try:
             candidate.relative_to(base)
@@ -147,8 +147,8 @@ class AasxPackageCatalog:
             "submodelIds": _unique_string_values(result.get("uploadedSubmodelIds")),
         }
         metadata_path = self._metadata_path(safe_lab_id)
-        # codeql[py/path-injection]
         # `_metadata_path` resolves this path and verifies it stays beneath the catalog root.
+        # codeql[py/path-injection]
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         self._atomic_write(
             metadata_path,

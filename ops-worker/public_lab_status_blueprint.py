@@ -28,8 +28,8 @@ def create_public_lab_status_blueprint(
         try:
             values = request.args.getlist("labId") + request.args.getlist("labIds")
             lab_ids = parse_lab_ids(values)
-        except ValueError as exc:
-            return jsonify({"error": str(exc), "code": "INVALID_LAB_IDS"}), 400
+        except ValueError:
+            return jsonify({"error": "Invalid lab IDs", "code": "INVALID_LAB_IDS"}), 400
 
         try:
             payload = build_public_lab_status_response(

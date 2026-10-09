@@ -45,6 +45,30 @@ def test_public_lab_status_failure_returns_a_fixed_payload_without_exception_det
     assert b"private database stack details" not in response.data
 
 
+def test_public_lab_status_invalid_ids_does_not_return_validation_exception_text():
+    app = Flask("public-lab-status-invalid-ids-contract")
+    app.register_blueprint(
+        create_public_lab_status_blueprint(
+            get_db_engine=lambda: None,
+            resolve_lab_associations=lambda: [],
+            resolve_lab_status_targets=lambda: [],
+            fetch_latest_heartbeat=lambda *_args: None,
+            probe_lab_targets=lambda _targets: {},
+            now=lambda: datetime(2026, 9, 23, 10, 0, 30, tzinfo=timezone.utc),
+            max_age_seconds=lambda: 180,
+        )
+    )
+
+    response = app.test_client().get("/public/labs/status?labId=private-invalid-value")
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Invalid lab IDs",
+        "code": "INVALID_LAB_IDS",
+    }
+    assert b"private-invalid-value" not in response.data
+
+
 class Connection:
     def __init__(self):
         self.closed = False
