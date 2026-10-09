@@ -178,7 +178,8 @@ El validador debe terminar sin errores antes de continuar con Compose.
 ISSUER=
 ```
 
-**Modo Lite** (confía en los JWT de un gateway externo en modo Full):
+**Modo Lite** (confía en JWT de una autoridad proveedora remota: un gateway
+Full o un backend `blockchain-services` proveedor independiente):
 
 ```env
 ISSUER=https://auth-gateway.otra-institucion.edu/auth

@@ -140,7 +140,7 @@ flowchart TD
 | --- | --- | --- |
 | `/health` is down | `docker compose ps`, `docker compose logs --tail=100 openresty` | Resolve edge startup, TLS, port binding, or configuration errors. |
 | `/gateway/health` is down in Full | `blockchain-services`, MySQL, Guacamole, `guacd`, and Ops Worker | Use protected details to identify the failed local dependency; do not treat a public response as detailed telemetry. |
-| `/gateway/health` is down in Lite | Remote issuer DNS/TLS, issuer public-key/JWKS sync, and per-Lite trust values | Confirm `ISSUER` is external and exact; refresh the Full-issued trust bundle if keys rotated. |
+| `/gateway/health` is down in Lite | Remote issuer DNS/TLS, issuer public-key/JWKS sync, and per-Lite trust values | Confirm `ISSUER` is external and exact; refresh the Full-issued trust bundle or equivalent remote issuer configuration if keys rotated. |
 | End user sees Guacamole login | Access-code redemption and reservation state | Use the access-code flow, not a browser JWT or a manual Guacamole account. |
 | Guacamole connection fails | `guacd` and the private RDP/VNC/SSH route | Test only from the controlled lab network and verify the selected local connection ID. |
 | Ops action fails | `/ops/health/details`, host catalog, WinRM TLS and CIDR policy | Confirm host address is allowed by `WINRM_MANAGEMENT_CIDRS`; verify the encrypted credential reference. |

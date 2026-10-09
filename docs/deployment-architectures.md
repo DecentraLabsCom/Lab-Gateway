@@ -28,8 +28,10 @@ without acquiring provider registration, lab publication or access-gateway
 authority. `ISSUER` selects the JWT authority; it does not select the backend
 role.
 
-Every Lite needs a unique public origin/gateway ID, a control-plane-issued
-trust bundle, and an explicit protected provisioner route. Do not publish a
+Every Lite needs a unique public origin/gateway ID, per-Lite credentials on the
+control plane and the Lite, and an explicit protected provisioner route. A Full
+Gateway can generate a trust bundle; with a standalone provider backend, set
+the equivalent values in the backend and Lite configurations. Do not publish a
 lab to a Lite `accessURI` until those three conditions are true.
 
 ## Components and boundaries
@@ -136,9 +138,11 @@ LAB_ADMIN_BACKEND_TOKEN=<remote-lab-admin-token>    # required when URL is set
 LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 ```
 
-Use a Full-issued trust bundle whenever possible. It binds the Lite origin to
-`ISSUER`, `FMU_GATEWAY_ID`, `FMU_JWT_AUDIENCE`, the session-observer credential
-the Guacamole provisioner credential and the reservation projection feed. The
+For a Full control plane, use its trust-bundle script. With a standalone
+provider backend, configure the same per-Lite values in the provider and Lite
+environments. These values bind the Lite origin to `ISSUER`,
+`FMU_GATEWAY_ID`, `FMU_JWT_AUDIENCE`, the session-observer credential, the
+Guacamole provisioner credential and the reservation projection feed. The
 technical gateway ID is the
 normalized public host plus `:port` for a non-default HTTPS port; `SERVER_NAME`
 stays hostname-only for local URL construction. A Lite setup without a remote

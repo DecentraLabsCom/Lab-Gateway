@@ -107,12 +107,14 @@ AUTH_SESSION_TICKET_REDEEM_URL=https://control.example.edu/auth/fmu/session-tick
 OPS_SESSION_OBSERVATION_INGEST_URL=https://control.example.edu/access-audit/internal/session-observed
 RESERVATION_PROJECTION_URL=https://control.example.edu/reservations/projection
 RESERVATION_PROJECTION_GATEWAY_ID=lite-lab.example.edu
-RESERVATION_PROJECTION_TOKEN=<Full-issued-reservation-feed-token>
+RESERVATION_PROJECTION_TOKEN=<control-plane-issued-reservation-feed-token>
 ```
 
 Set only the remote URLs and credentials that the selected capabilities require;
-the Full-issued trust bundle is the preferred source for per-Lite redeemer,
-session-observer, FMU, and Guacamole-provisioner credentials. Set
+the Full-issued trust bundle is the preferred source for Full deployments. For
+a standalone provider backend, configure the equivalent per-Lite redeemer,
+session-observer, FMU, and Guacamole-provisioner credentials in the backend and
+Lite environments. Set
 `BLOCKCHAIN_SERVICES_ENABLED=false` if you want to state the dormant backend
 explicitly; `auto` makes the same decision when `ISSUER` is external.
 The reservation projection URL, gateway ID and token are also supplied by the

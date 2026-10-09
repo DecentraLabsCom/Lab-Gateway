@@ -173,7 +173,8 @@ directory while the deployment is in use.
 ISSUER=
 ```
 
-**Lite mode** (trust JWTs from an external full-mode gateway):
+**Lite mode** (trust JWTs from a remote provider authority, either a Full
+gateway or standalone `blockchain-services` provider backend):
 
 ```env
 ISSUER=https://auth-gateway.other-institution.edu/auth
@@ -184,8 +185,8 @@ Lite is an access-plane mode, not a second issuer. The root Compose file keeps
 the embedded `blockchain-services` container dormant
 (`BLOCKCHAIN_SERVICES_ENABLED=false`) and OpenResty uses the remote issuer for
 access-code, FMU and observation calls. For Full + N Lite or standalone `blockchain-services` + N
-Lite, configure one trust bundle, gateway ID and explicit provisioner route per
-Lite; see [Deployment Architectures](../deployment-architectures.md).
+Lite, configure the Full-issued trust bundle or equivalent per-Lite values,
+gateway ID and explicit provisioner route; see [Deployment Architectures](../deployment-architectures.md).
 
 #### Bind address
 
