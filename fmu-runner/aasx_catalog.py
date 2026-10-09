@@ -56,6 +56,7 @@ class AasxPackageCatalog:
     def _metadata_path(self, lab_id: str) -> Path:
         safe_lab_id = _validate_lab_id(lab_id)
         base = self._base_path()
+        # codeql[py/path-injection] The ID is restricted to one safe segment above, and the resolved path is containment-checked below.
         candidate = (base / f"{safe_lab_id}.aasx.json").resolve()
         try:
             candidate.relative_to(base)
@@ -66,6 +67,7 @@ class AasxPackageCatalog:
     def _legacy_archive_path(self, lab_id: str) -> Path:
         safe_lab_id = _validate_lab_id(lab_id)
         base = self._base_path()
+        # codeql[py/path-injection] The ID is restricted to one safe segment above, and the resolved path is containment-checked below.
         candidate = (base / f"{safe_lab_id}.aasx").resolve()
         try:
             candidate.relative_to(base)

@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 
+from flask import Flask
 import pytest
 
+from public_lab_status_blueprint import create_public_lab_status_blueprint
 from public_lab_status_route import build_public_lab_status_response, parse_lab_ids
 
 
@@ -14,6 +16,33 @@ def test_parse_lab_ids_rejects_empty_and_invalid_values():
         parse_lab_ids([])
     with pytest.raises(ValueError):
         parse_lab_ids(["1,abc"])
+
+
+def test_public_lab_status_failure_returns_a_fixed_payload_without_exception_details():
+    def fail_engine():
+        raise RuntimeError("private database stack details")
+
+    app = Flask("public-lab-status-error-contract")
+    app.register_blueprint(
+        create_public_lab_status_blueprint(
+            get_db_engine=fail_engine,
+            resolve_lab_associations=lambda: [],
+            resolve_lab_status_targets=lambda: [],
+            fetch_latest_heartbeat=lambda *_args: None,
+            probe_lab_targets=lambda _targets: {},
+            now=lambda: datetime(2026, 9, 23, 10, 0, 30, tzinfo=timezone.utc),
+            max_age_seconds=lambda: 180,
+        )
+    )
+
+    response = app.test_client().get("/public/labs/status?labId=11")
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "error": "Lab status is temporarily unavailable",
+        "code": "LAB_STATUS_UNAVAILABLE",
+    }
+    assert b"private database stack details" not in response.data
 
 
 class Connection:

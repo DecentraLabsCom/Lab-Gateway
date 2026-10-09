@@ -5,12 +5,12 @@ from flask import Flask
 from wake_ops_blueprint import create_wake_ops_blueprint
 
 
-def _app(calls):
+def _app(calls, *, get_schedule=None):
     app = Flask("wake-ops-blueprint-contract")
     app.register_blueprint(
         create_wake_ops_blueprint(
             find_host=lambda host: {"name": host},
-            get_schedule=lambda host: {
+            get_schedule=get_schedule or (lambda host: {
                 "enabled": True,
                 "dayOfWeek": 6,
                 "hour": 8,
@@ -22,7 +22,7 @@ def _app(calls):
                 "lastStatus": None,
                 "lastMessage": None,
                 "lastInitialPowerState": None,
-            },
+            }),
             save_schedule=lambda host, payload: calls.append(("save", host, payload))
             or {
                 "enabled": payload.get("enabled", True),
@@ -40,7 +40,7 @@ def _app(calls):
             manual_wake=lambda host: calls.append(("wake", host))
             or {"host": host, "success": True, "status": "completed"},
             now=lambda: datetime(2026, 9, 27, 6, 5, tzinfo=timezone.utc),
-            internal_error_response=lambda message, _exc: ({"error": message}, 500),
+            internal_error_response=lambda message: ({"error": message}, 500),
         )
     )
     return app
@@ -72,3 +72,14 @@ def test_wake_ops_update_and_manual_wake_are_separate_actions():
         ("save", "lab-ws-01", {"enabled": False, "dayOfWeek": 2, "hour": 9, "minute": 30}),
         ("wake", "lab-ws-01"),
     ]
+
+
+def test_wake_ops_error_response_does_not_expose_exception_details():
+    def fail(_host):
+        raise RuntimeError("private database stack details")
+
+    response = _app([], get_schedule=fail).test_client().get("/api/wake-ops/lab-ws-01")
+
+    assert response.status_code == 500
+    assert response.get_json() == {"error": "Unable to load Wake Ops"}
+    assert b"private database stack details" not in response.data
