@@ -187,7 +187,7 @@ def test_aas_lab_sync_route_contract_returns_disabled_result_unchanged(client, m
 
 
 def test_aas_lab_sync_route_contract_maps_sync_error_to_502(client, monkeypatch):
-    host = _install_host(monkeypatch)
+    _install_host(monkeypatch)
     monkeypatch.setattr(worker, "DB_ENGINE", None)
     result = {"error": "AAS synchronization failed", "labId": "lab-1"}
     sync = Mock(return_value=result)

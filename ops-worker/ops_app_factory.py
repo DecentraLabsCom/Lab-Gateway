@@ -56,9 +56,10 @@ def create_app(
 def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
     """Register every Ops Worker capability from a live provider namespace.
 
-    ``worker`` passes its module globals as *providers*.  Lambdas resolve
-    mutable providers at request time so existing monkeypatch points and the
-    runtime reload behavior remain intact while registration lives here.
+    ``worker`` passes a runtime provider context backed by explicit defaults
+    and live module globals. Lambdas resolve mutable providers at request time
+    so existing patch points and runtime reload behavior remain intact while
+    registration lives here.
     """
     get = providers.__getitem__
 

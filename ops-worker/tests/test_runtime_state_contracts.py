@@ -101,11 +101,11 @@ def test_worker_uses_runtime_state_factory_without_inline_engine_initialization(
     assert "DB_ENGINE: Optional[Engine] = create_engine(" not in source
     assert "HOSTS = _RUNTIME_STATE.hosts" in source
     assert "HOSTS_LOCK = _RUNTIME_STATE.hosts_lock" in source
-    assert "OPS_DSN = _RUNTIME_STATE.ops_dsn" in source
     assert "DB_ENGINE: Optional[Engine] = _RUNTIME_STATE.db_engine" in source
-    assert "GUACAMOLE_DSN = _RUNTIME_STATE.guacamole_dsn" in source
     assert "GUACAMOLE_DB_ENGINE: Optional[Engine] = _RUNTIME_STATE.guacamole_db_engine" in source
     assert worker._RUNTIME_STATE.hosts is not None
+    assert hasattr(worker._RUNTIME_STATE, "ops_dsn")
+    assert hasattr(worker._RUNTIME_STATE, "guacamole_dsn")
 
 
 def test_worker_uses_runtime_config_snapshot_for_paths_and_database_inputs():

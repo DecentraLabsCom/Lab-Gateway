@@ -4,6 +4,7 @@ Ops worker: WoL + WinRM wrapper + heartbeat poller for Lab Station hosts.
 Exposes a small Flask API and optional scheduler.
 """
 import json
+import hmac
 import ipaddress
 import logging
 import os
@@ -451,9 +452,7 @@ _as_utc_datetime = _APP_HOOKS_RUNTIME.as_utc_datetime
 _parse_reservation_datetime = _APP_HOOKS_RUNTIME.parse_reservation_datetime
 _request_id = _APP_HOOKS_RUNTIME.request_id
 internal_error_response = _APP_HOOKS_RUNTIME.internal_error_response
-handle_unexpected_exception = _APP_HOOKS_RUNTIME.handle_unexpected_exception
 _requires_ops_internal_auth = _APP_HOOKS_RUNTIME.requires_ops_internal_auth
-require_ops_internal_auth = _APP_HOOKS_RUNTIME.require_ops_internal_auth
 
 
 _RUNTIME_PATHS = load_runtime_paths(
@@ -484,8 +483,8 @@ publish_runtime_paths(_RUNTIME_PATHS, globals())
 
 
 _INPUT_CONTEXT = InputContext(
-    coerce_bool=LiveCallable(globals(), '_coerce_bool_impl'),
-    parse_bool=LiveCallable(globals(), '_parse_bool_impl'),
+    coerce_bool=LiveCallable(globals(), '_coerce_bool_impl', _coerce_bool_impl),
+    parse_bool=LiveCallable(globals(), '_parse_bool_impl', _parse_bool_impl),
     normalize_args=lambda value, default=None: _normalize_args_impl(value, default),
     parse_recipients=lambda value, default=None: _parse_recipients_impl(value, default),
 )
@@ -615,28 +614,26 @@ APP = create_app(
 
 
 _CREDENTIAL_CONTEXT = CredentialContext(
-    load_fernet_impl=LiveCallable(globals(), '_load_fernet_store_impl'),
+    load_fernet_impl=LiveCallable(globals(), '_load_fernet_store_impl', _load_fernet_store_impl),
     get_cached_fernet=lambda: _FERNET,
     set_cached_fernet=_set_cached_fernet,
     get_load_fernet=lambda: _load_fernet,
     get_read_secret=lambda: _env_or_secret_file,
     get_fernet_factory=lambda: Fernet,
-    normalize_credential_ref=LiveCallable(globals(), '_normalize_credential_ref_impl'),
-    credential_ref_for_host=LiveCallable(globals(), '_credential_ref_for_host_impl'),
-    read_credentials_store_impl=LiveCallable(globals(), '_read_credentials_store_impl'),
+    normalize_credential_ref=LiveCallable(globals(), '_normalize_credential_ref_impl', _normalize_credential_ref_impl),
+    credential_ref_for_host=LiveCallable(globals(), '_credential_ref_for_host_impl', _credential_ref_for_host_impl),
+    read_credentials_store_impl=LiveCallable(globals(), '_read_credentials_store_impl', _read_credentials_store_impl),
     get_credentials_path=lambda: OPS_CREDENTIALS_PATH,
-    write_credentials_store_impl=LiveCallable(globals(), '_write_credentials_store_impl'),
-    save_credentials_impl=LiveCallable(globals(), '_save_credentials_store_impl'),
-    load_credentials_impl=LiveCallable(globals(), '_load_credentials_store_impl'),
-    fernet_key_is_usable_impl=LiveCallable(globals(), '_fernet_key_is_usable_impl'),
+    write_credentials_store_impl=LiveCallable(globals(), '_write_credentials_store_impl', _write_credentials_store_impl),
+    save_credentials_impl=LiveCallable(globals(), '_save_credentials_store_impl', _save_credentials_store_impl),
+    load_credentials_impl=LiveCallable(globals(), '_load_credentials_store_impl', _load_credentials_store_impl),
+    fernet_key_is_usable_impl=LiveCallable(globals(), '_fernet_key_is_usable_impl', _fernet_key_is_usable_impl),
     get_logger=lambda: logging,
 )
 _CREDENTIAL_RUNTIME = create_credential_runtime(_CREDENTIAL_CONTEXT)
 _load_fernet = _CREDENTIAL_RUNTIME.load_fernet
 normalize_credential_ref = _CREDENTIAL_RUNTIME.normalize_credential_ref
 credential_ref_for_host = _CREDENTIAL_RUNTIME.credential_ref_for_host
-read_winrm_credentials_store = _CREDENTIAL_RUNTIME.read_winrm_credentials_store
-write_winrm_credentials_store = _CREDENTIAL_RUNTIME.write_winrm_credentials_store
 save_winrm_credentials = _CREDENTIAL_RUNTIME.save_winrm_credentials
 load_winrm_credentials = _CREDENTIAL_RUNTIME.load_winrm_credentials
 winrm_credentials_configured = _CREDENTIAL_RUNTIME.winrm_credentials_configured
@@ -652,7 +649,7 @@ _WINRM_TRUST_CONTEXT = WinRMTrustContext(
         secure_filename=secure_filename,
         trust_ref_pattern=WINRM_TRUST_REF_RE,
     ),
-    trust_http_status=LiveCallable(globals(), '_trust_http_status_impl'),
+    trust_http_status=LiveCallable(globals(), '_trust_http_status_impl', _trust_http_status_impl),
     winrm_trust_error_payload=lambda host_name, code: _build_winrm_trust_error_payload_impl(
         host_name,
         code,
@@ -698,7 +695,7 @@ _WINRM_TRUST_CONTEXT = WinRMTrustContext(
         host,
         WINRM_TRUST_METADATA_NAME,
     ),
-    write_winrm_trust_bytes=LiveCallable(globals(), '_write_trust_bytes_impl'),
+    write_winrm_trust_bytes=LiveCallable(globals(), '_write_trust_bytes_impl', _write_trust_bytes_impl),
     read_winrm_trust_metadata=lambda host: _read_trust_metadata_file(
         _winrm_trust_metadata_path(host)
     ),
@@ -833,29 +830,29 @@ _HOST_CONFIG_CONTEXT = HostConfigContext(
         path,
         missing_ok,
     ),
-    merge_host_configs_impl=LiveCallable(globals(), '_merge_host_configs_impl'),
-    resolve_host_secret_refs_impl=LiveCallable(globals(), '_resolve_host_secret_refs_impl'),
+    merge_host_configs_impl=LiveCallable(globals(), '_merge_host_configs_impl', _merge_host_configs_impl),
+    resolve_host_secret_refs_impl=LiveCallable(globals(), '_resolve_host_secret_refs_impl', _resolve_host_secret_refs_impl),
     get_credential_ref_for_host=lambda: credential_ref_for_host,
     get_credentials_configured=lambda: winrm_credentials_configured,
     get_logger=lambda: logging,
-    catalog_bool_impl=LiveCallable(globals(), '_catalog_bool_impl'),
-    resolve_addresses_impl=LiveCallable(globals(), '_resolve_addresses_impl'),
+    catalog_bool_impl=LiveCallable(globals(), '_catalog_bool_impl', _catalog_bool_impl),
+    resolve_addresses_impl=LiveCallable(globals(), '_resolve_addresses_impl', _resolve_addresses_impl),
     get_ip_address=lambda: ipaddress.ip_address,
     get_getaddrinfo=lambda: socket.getaddrinfo,
-    validate_winrm_catalog_impl=LiveCallable(globals(), '_validate_winrm_catalog_impl'),
+    validate_winrm_catalog_impl=LiveCallable(globals(), '_validate_winrm_catalog_impl', _validate_winrm_catalog_impl),
     get_management_cidrs=lambda: WINRM_MANAGEMENT_CIDRS,
     get_winrm_port=lambda: WINRM_PORT,
     get_trust_ref_pattern=lambda: WINRM_TRUST_REF_RE,
     get_catalog_bool=lambda: _catalog_bool,
     get_resolved_addresses=lambda: _resolved_addresses,
-    load_host_config_impl=LiveCallable(globals(), '_load_host_config_impl'),
+    load_host_config_impl=LiveCallable(globals(), '_load_host_config_impl', _load_host_config_impl),
     get_config_path=lambda: CONFIG_PATH,
     get_dynamic_config_path=lambda: DYNAMIC_CONFIG_PATH,
     get_read_hosts_config=lambda: read_hosts_config,
     get_merge_host_configs=lambda: merge_host_configs,
     get_validate_winrm_catalog=lambda: validate_winrm_catalog,
     get_resolve_host_secret_refs=lambda: resolve_host_secret_refs,
-    build_ops_dsn_impl=LiveCallable(globals(), '_build_ops_dsn_impl'),
+    build_ops_dsn_impl=LiveCallable(globals(), '_build_ops_dsn_impl', _build_ops_dsn_impl),
     get_mysql_dsn=lambda: MYSQL_DSN,
     get_ops_mysql_user=lambda: OPS_MYSQL_USER,
     get_ops_mysql_password=lambda: OPS_MYSQL_PASSWORD,
@@ -863,7 +860,7 @@ _HOST_CONFIG_CONTEXT = HostConfigContext(
     get_mysql_hostname=lambda: MYSQL_HOSTNAME,
     get_mysql_port=lambda: MYSQL_PORT,
     get_url_create=lambda: URL.create,
-    build_guacamole_dsn_impl=LiveCallable(globals(), '_build_guacamole_dsn_impl'),
+    build_guacamole_dsn_impl=LiveCallable(globals(), '_build_guacamole_dsn_impl', _build_guacamole_dsn_impl),
     get_guacamole_dsn=lambda: GUACAMOLE_MYSQL_DSN,
     get_guacamole_user=lambda: GUACAMOLE_MYSQL_USER,
     get_guacamole_password=lambda: GUACAMOLE_MYSQL_PASSWORD,
@@ -871,19 +868,19 @@ _HOST_CONFIG_CONTEXT = HostConfigContext(
     get_parse_url=lambda: make_url,
     get_load_dynamic_config=lambda: load_dynamic_config,
     get_write_dynamic_config=lambda: write_dynamic_config,
-    load_dynamic_config_impl=LiveCallable(globals(), '_load_dynamic_config_impl'),
-    write_dynamic_config_impl=LiveCallable(globals(), '_write_dynamic_config_impl'),
+    load_dynamic_config_impl=LiveCallable(globals(), '_load_dynamic_config_impl', _load_dynamic_config_impl),
+    write_dynamic_config_impl=LiveCallable(globals(), '_write_dynamic_config_impl', _write_dynamic_config_impl),
     get_path_dirname=lambda: os.path.dirname,
     get_make_dirs=lambda: os.makedirs,
     get_open_file=lambda: open,
     get_dump_json=lambda: json.dump,
     get_replace_file=lambda: os.replace,
-    upsert_dynamic_host_impl=LiveCallable(globals(), '_upsert_dynamic_host_impl'),
+    upsert_dynamic_host_impl=LiveCallable(globals(), '_upsert_dynamic_host_impl', _upsert_dynamic_host_impl),
     get_normalize_match_key=lambda: normalize_match_key,
     get_sanitize_host_name=lambda: sanitize_host_name,
     get_normalize_mac=lambda: normalize_mac,
     get_host_get=lambda: HOSTS.get,
-    update_dynamic_host_impl=LiveCallable(globals(), '_update_dynamic_host_impl'),
+    update_dynamic_host_impl=LiveCallable(globals(), '_update_dynamic_host_impl', _update_dynamic_host_impl),
 )
 _HOST_CONFIG_RUNTIME = create_host_config_runtime(_HOST_CONFIG_CONTEXT)
 read_hosts_config = _HOST_CONFIG_RUNTIME.read_hosts_config
@@ -910,9 +907,7 @@ _RUNTIME_STATE = create_runtime_state(
 )
 HOSTS = _RUNTIME_STATE.hosts
 HOSTS_LOCK = _RUNTIME_STATE.hosts_lock
-OPS_DSN = _RUNTIME_STATE.ops_dsn
 DB_ENGINE: Optional[Engine] = _RUNTIME_STATE.db_engine
-GUACAMOLE_DSN = _RUNTIME_STATE.guacamole_dsn
 GUACAMOLE_DB_ENGINE: Optional[Engine] = _RUNTIME_STATE.guacamole_db_engine
 
 
@@ -924,7 +919,7 @@ _HEARTBEAT_CONTEXT = HeartbeatContext(
     json_dumps=json.dumps,
     read_remote_file=lambda *args, **kwargs: read_remote_file(*args, **kwargs),
     get_db_engine=lambda: DB_ENGINE,
-    sync_lab_to_basyx=LiveCallable(globals(), 'aas_generator.sync_lab_to_basyx'),
+    sync_lab_to_basyx=LiveCallable(globals(), 'aas_generator.sync_lab_to_basyx', aas_generator.sync_lab_to_basyx),
     resolve_lab_ids_for_host=lambda host: resolve_lab_ids_for_host(host),
     get_logger=lambda: logging,
     get_host_registry=lambda: HOSTS,
@@ -935,13 +930,13 @@ _HEARTBEAT_CONTEXT = HeartbeatContext(
         **kwargs,
     ),
     trust_error_type=WinRMTrustError,
-    missing_credentials_predicate=LiveCallable(globals(), 'is_missing_winrm_credentials_error'),
+    missing_credentials_predicate=LiveCallable(globals(), 'is_missing_winrm_credentials_error', is_missing_winrm_credentials_error),
     trust_error_payload=lambda host_name, code: _winrm_trust_error_payload(host_name, code),
     request_id=lambda: _request_id(),
     sanitize_log_value=lambda value: _sanitize_log_value(value),
     credentials_required_message=WINRM_CREDENTIALS_REQUIRED_MESSAGE,
     heartbeat_interval_seconds=HEARTBEAT_SSE_INTERVAL_SECONDS,
-    sleep=LiveCallable(globals(), 'time.sleep'),
+    sleep=LiveCallable(globals(), 'time.sleep', time.sleep),
 )
 _HEARTBEAT_RUNTIME = create_heartbeat_runtime(_HEARTBEAT_CONTEXT)
 to_utc = _HEARTBEAT_RUNTIME.to_utc
@@ -955,7 +950,7 @@ _WINRM_CONTEXT = WinRMContext(
     get_load_credentials=lambda reference: load_winrm_credentials(reference),
     get_credentials_required_message=lambda: WINRM_CREDENTIALS_REQUIRED_MESSAGE,
     get_load_trust=lambda host: load_winrm_trust(host),
-    get_session_factory=lambda: LiveCallable(globals(), 'winrm.Session'),
+    get_session_factory=lambda: LiveCallable(globals(), 'winrm.Session', winrm.Session),
     get_ssl_error_type=lambda: requests.exceptions.SSLError,
     get_trust_error_type=lambda: WinRMTrustError,
     tls_error_code="WINRM_TLS_FAILED",
@@ -964,7 +959,7 @@ _WINRM_CONTEXT = WinRMContext(
     get_read_timeout_sec=lambda: WINRM_READ_TIMEOUT,
     get_operation_timeout_sec=lambda: WINRM_OPERATION_TIMEOUT,
     get_logger=lambda: logging,
-    clock=LiveCallable(globals(), 'time.time'),
+    clock=LiveCallable(globals(), 'time.time', time.time),
     get_resolve_credentials=lambda: _winrm_credentials,
     get_resolve_policy=lambda: _winrm_connection_policy,
     get_create_session=lambda: create_winrm_session,
@@ -979,7 +974,6 @@ _winrm_connection_policy = _WINRM_RUNTIME.winrm_connection_policy
 _winrm_credentials = _WINRM_RUNTIME.winrm_credentials
 create_winrm_session = _WINRM_RUNTIME.create_winrm_session
 run_winrm_method = _WINRM_RUNTIME.run_winrm_method
-winrm_endpoint = _WINRM_RUNTIME.winrm_endpoint
 run_labstation_command = _WINRM_RUNTIME.run_labstation_command
 run_remote_powershell = _WINRM_RUNTIME.run_remote_powershell
 read_remote_file = _WINRM_RUNTIME.read_remote_file
@@ -994,7 +988,7 @@ persist_heartbeat = _HEARTBEAT_RUNTIME.persist_heartbeat
 
 
 _DATABASE_CONTEXT = DatabaseContext(
-    database_is_usable=LiveCallable(globals(), '_database_is_usable_impl'),
+    database_is_usable=LiveCallable(globals(), '_database_is_usable_impl', _database_is_usable_impl),
     get_sql_text=lambda: text,
     get_logger=lambda: logging,
 )
@@ -1002,32 +996,32 @@ _DATABASE_RUNTIME = create_database_runtime(_DATABASE_CONTEXT)
 database_is_usable = _DATABASE_RUNTIME.database_is_usable
 
 _RESERVATION_EXECUTION_CONTEXT = ReservationExecutionContext(
-    record_reservation_operation_impl=LiveCallable(globals(), '_record_reservation_operation_impl'),
+    record_reservation_operation_impl=LiveCallable(globals(), '_record_reservation_operation_impl', _record_reservation_operation_impl),
     get_db_engine=lambda: DB_ENGINE,
     get_now_utc=lambda: _now_utc,
     get_sql_text=lambda: text,
     get_json_dumps=lambda: json.dumps,
     get_check_failure_alert=lambda: _check_failure_alert,
-    check_failure_alert_impl=LiveCallable(globals(), '_check_failure_alert_impl'),
+    check_failure_alert_impl=LiveCallable(globals(), '_check_failure_alert_impl', _check_failure_alert_impl),
     get_logger=lambda: logging,
     get_sanitize_log_value=lambda: _sanitize_log_value,
-    project_power_operation_impl=LiveCallable(globals(), '_project_power_operation_impl'),
+    project_power_operation_impl=LiveCallable(globals(), '_project_power_operation_impl', _project_power_operation_impl),
     get_record_reservation_operation=lambda: record_reservation_operation,
-    host_local_mode_enabled_impl=LiveCallable(globals(), '_host_local_mode_enabled_impl'),
+    host_local_mode_enabled_impl=LiveCallable(globals(), '_host_local_mode_enabled_impl', _host_local_mode_enabled_impl),
     get_fetch_latest_heartbeat=lambda: _fetch_latest_heartbeat,
     get_parse_bool=lambda: parse_bool,
-    execute_reservation_power_phase_impl=LiveCallable(globals(), '_execute_reservation_power_phase_impl'),
+    execute_reservation_power_phase_impl=LiveCallable(globals(), '_execute_reservation_power_phase_impl', _execute_reservation_power_phase_impl),
     get_power_runtime=lambda: POWER_RUNTIME,
     get_power_validation_error_type=lambda: PowerValidationError,
     get_host_local_mode_enabled=lambda: _host_local_mode_enabled,
-    should_send_failure_alert_impl=LiveCallable(globals(), '_should_send_failure_alert_impl'),
+    should_send_failure_alert_impl=LiveCallable(globals(), '_should_send_failure_alert_impl', _should_send_failure_alert_impl),
     get_notification_enabled=lambda: NOTIFICATION_SERVICE_ENABLED,
     get_notification_url=lambda: NOTIFICATION_SERVICE_URL,
     get_failure_threshold=lambda: OPS_ALERT_FAILURE_THRESHOLD,
     get_window_seconds=lambda: OPS_ALERT_WINDOW_SECONDS,
     get_cooldown_seconds=lambda: OPS_ALERT_COOLDOWN_SECONDS,
     get_should_send_failure_alert=lambda: _should_send_failure_alert,
-    send_failure_alert_impl=LiveCallable(globals(), '_send_failure_alert_impl'),
+    send_failure_alert_impl=LiveCallable(globals(), '_send_failure_alert_impl', _send_failure_alert_impl),
     get_send_failure_alert=lambda: _send_failure_alert,
     get_recipients=lambda: NOTIFICATION_SERVICE_RECIPIENTS,
     get_token_header=lambda: NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER,
@@ -1037,12 +1031,12 @@ _RESERVATION_EXECUTION_CONTEXT = ReservationExecutionContext(
     get_http_post=lambda: requests.post,
     get_sleep=lambda: time.sleep,
     get_current_epoch=lambda: time.time,
-    notify_critical_failure_impl=LiveCallable(globals(), '_notify_critical_failure_impl'),
+    notify_critical_failure_impl=LiveCallable(globals(), '_notify_critical_failure_impl', _notify_critical_failure_impl),
     get_notify_critical_failure=lambda: notify_critical_failure,
-    perform_wake_step_impl=LiveCallable(globals(), '_perform_wake_step_impl'),
+    perform_wake_step_impl=LiveCallable(globals(), '_perform_wake_step_impl', _perform_wake_step_impl),
     get_wol_and_wait=lambda: wol_and_wait,
     get_run_labstation_command=lambda: run_labstation_command,
-    perform_command_step_impl=LiveCallable(globals(), '_perform_command_step_impl'),
+    perform_command_step_impl=LiveCallable(globals(), '_perform_command_step_impl', _perform_command_step_impl),
 )
 _RESERVATION_EXECUTION_RUNTIME = create_reservation_execution_runtime(
     _RESERVATION_EXECUTION_CONTEXT
@@ -1276,9 +1270,9 @@ generate_heartbeat_stream = _HEARTBEAT_RUNTIME.generate_heartbeat_stream
 
 
 _DEMO_CONTEXT = DemoContext(
-    get_mandatory_field_impl=LiveCallable(globals(), '_get_mandatory_field_impl'),
-    canonical_demo_lab_id_impl=LiveCallable(globals(), '_canonical_demo_lab_id_impl'),
-    build_demo_readiness_impl=LiveCallable(globals(), '_build_demo_readiness_impl'),
+    get_mandatory_field_impl=LiveCallable(globals(), '_get_mandatory_field_impl', _get_mandatory_field_impl),
+    canonical_demo_lab_id_impl=LiveCallable(globals(), '_canonical_demo_lab_id_impl', _canonical_demo_lab_id_impl),
+    build_demo_readiness_impl=LiveCallable(globals(), '_build_demo_readiness_impl', _build_demo_readiness_impl),
     get_demo_lab_id=lambda: DEMO_LAB_ID,
     get_demo_connection_id=lambda: DEMO_CONNECTION_ID,
     get_demo_user=lambda: DEMO_USER,
@@ -1291,15 +1285,15 @@ _DEMO_CONTEXT = DemoContext(
     get_sql_text=lambda: text,
     get_now=lambda: lambda: datetime.now(timezone.utc),
     get_logger=lambda: logging,
-    build_demo_context_impl=LiveCallable(globals(), '_build_demo_context_impl'),
+    build_demo_context_impl=LiveCallable(globals(), '_build_demo_context_impl', _build_demo_context_impl),
     get_demo_operation_id_pattern=lambda: DEMO_OPERATION_ID_RE,
     get_canonical_demo_lab_id=lambda: _canonical_demo_lab_id,
-    operation_completed_impl=LiveCallable(globals(), '_demo_operation_completed_impl'),
-    record_demo_event_impl=LiveCallable(globals(), '_record_demo_event_impl'),
+    operation_completed_impl=LiveCallable(globals(), '_demo_operation_completed_impl', _demo_operation_completed_impl),
+    record_demo_event_impl=LiveCallable(globals(), '_record_demo_event_impl', _record_demo_event_impl),
     get_demo_event_actions=lambda: DEMO_EVENT_ACTIONS,
     get_record_reservation_operation=lambda: record_reservation_operation,
-    demo_host_is_ready_impl=LiveCallable(globals(), '_demo_host_is_ready_impl'),
-    handle_demo_start_impl=LiveCallable(globals(), '_handle_demo_start_impl'),
+    demo_host_is_ready_impl=LiveCallable(globals(), '_demo_host_is_ready_impl', _demo_host_is_ready_impl),
+    handle_demo_start_impl=LiveCallable(globals(), '_handle_demo_start_impl', _handle_demo_start_impl),
     get_demo_context=lambda: _demo_context,
     get_operation_completed=lambda: _demo_operation_completed,
     get_parse_bool=lambda: parse_bool,
@@ -1307,8 +1301,8 @@ _DEMO_CONTEXT = DemoContext(
     get_reservation_start=lambda: handle_reservation_start,
     get_reservation_end=lambda: handle_reservation_end,
     get_record_demo_event=lambda: _record_demo_event,
-    handle_demo_event_impl=LiveCallable(globals(), '_handle_demo_event_impl'),
-    handle_demo_end_impl=LiveCallable(globals(), '_handle_demo_end_impl'),
+    handle_demo_event_impl=LiveCallable(globals(), '_handle_demo_event_impl', _handle_demo_event_impl),
+    handle_demo_end_impl=LiveCallable(globals(), '_handle_demo_end_impl', _handle_demo_end_impl),
 )
 _DEMO_RUNTIME = create_demo_runtime(_DEMO_CONTEXT)
 _get_mandatory_field = _DEMO_RUNTIME.get_mandatory_field
@@ -1324,8 +1318,8 @@ handle_demo_end = _DEMO_RUNTIME.handle_demo_end
 
 
 _RESERVATION_LIFECYCLE_CONTEXT = ReservationLifecycleContext(
-    handle_reservation_start_impl=LiveCallable(globals(), '_handle_reservation_start_impl'),
-    handle_reservation_end_impl=LiveCallable(globals(), '_handle_reservation_end_impl'),
+    handle_reservation_start_impl=LiveCallable(globals(), '_handle_reservation_start_impl', _handle_reservation_start_impl),
+    handle_reservation_end_impl=LiveCallable(globals(), '_handle_reservation_end_impl', _handle_reservation_end_impl),
     get_hosts=lambda: HOSTS,
     get_resolve_host_by_lab=lambda: resolve_host_by_lab,
     get_mandatory_field=lambda: _get_mandatory_field,
@@ -1343,16 +1337,16 @@ handle_reservation_end = _RESERVATION_LIFECYCLE_RUNTIME.handle_reservation_end
 
 
 _TIMELINE_CONTEXT = TimelineContext(
-    to_iso_impl=LiveCallable(globals(), '_to_iso_impl'),
+    to_iso_impl=LiveCallable(globals(), '_to_iso_impl', _to_iso_impl),
     get_datetime=lambda: datetime,
     get_timezone=lambda: timezone,
-    sanitize_limit_impl=LiveCallable(globals(), '_sanitize_limit_impl'),
+    sanitize_limit_impl=LiveCallable(globals(), '_sanitize_limit_impl', _sanitize_limit_impl),
     get_default_limit=lambda: TIMELINE_DEFAULT_LIMIT,
     get_max_limit=lambda: TIMELINE_MAX_LIMIT,
-    sanitize_offset_impl=LiveCallable(globals(), '_sanitize_offset_impl'),
-    rows_to_operations_impl=LiveCallable(globals(), '_rows_to_operations_impl'),
+    sanitize_offset_impl=LiveCallable(globals(), '_sanitize_offset_impl', _sanitize_offset_impl),
+    rows_to_operations_impl=LiveCallable(globals(), '_rows_to_operations_impl', _rows_to_operations_impl),
     get_to_iso=lambda: _to_iso,
-    build_reservation_timeline_impl=LiveCallable(globals(), '_build_reservation_timeline_impl'),
+    build_reservation_timeline_impl=LiveCallable(globals(), '_build_reservation_timeline_impl', _build_reservation_timeline_impl),
     get_db_engine=lambda: DB_ENGINE,
     get_host_by_lab=lambda: resolve_host_by_lab,
     get_sql_text=lambda: text,
@@ -1360,9 +1354,9 @@ _TIMELINE_CONTEXT = TimelineContext(
     get_phase_lookback=lambda: TIMELINE_PHASE_LOOKBACK,
     get_fetch_latest_heartbeat=lambda: _fetch_latest_heartbeat,
     get_summarize_phases=lambda: _summarize_phases,
-    fetch_latest_heartbeat_impl=LiveCallable(globals(), '_fetch_latest_heartbeat_impl'),
+    fetch_latest_heartbeat_impl=LiveCallable(globals(), '_fetch_latest_heartbeat_impl', _fetch_latest_heartbeat_impl),
     get_json_loads=lambda: json.loads,
-    summarize_phases_impl=LiveCallable(globals(), '_summarize_phases_impl'),
+    summarize_phases_impl=LiveCallable(globals(), '_summarize_phases_impl', _summarize_phases_impl),
 )
 _TIMELINE_RUNTIME = create_timeline_runtime(_TIMELINE_CONTEXT)
 _to_iso = _TIMELINE_RUNTIME.to_iso
@@ -1374,47 +1368,47 @@ _fetch_latest_heartbeat = _TIMELINE_RUNTIME.fetch_latest_heartbeat
 _summarize_phases = _TIMELINE_RUNTIME.summarize_phases
 
 _HOST_DISCOVERY_CONTEXT = HostDiscoveryContext(
-    is_valid_ping_target_impl=LiveCallable(globals(), '_is_valid_ping_target_impl'),
+    is_valid_ping_target_impl=LiveCallable(globals(), '_is_valid_ping_target_impl', _is_valid_ping_target_impl),
     get_is_valid_ping_target=lambda: _is_valid_ping_target,
-    host_is_up_impl=LiveCallable(globals(), '_host_is_up_impl'),
+    host_is_up_impl=LiveCallable(globals(), '_host_is_up_impl', _host_is_up_impl),
     get_winrm_port=lambda: WINRM_PORT,
     get_create_connection=lambda: socket.create_connection,
     get_logger=lambda: logging,
-    normalize_match_key_impl=LiveCallable(globals(), '_normalize_match_key_impl'),
-    tcp_port_open_impl=LiveCallable(globals(), '_tcp_port_open_impl'),
+    normalize_match_key_impl=LiveCallable(globals(), '_normalize_match_key_impl', _normalize_match_key_impl),
+    tcp_port_open_impl=LiveCallable(globals(), '_tcp_port_open_impl', _tcp_port_open_impl),
     get_discovery_timeout=lambda: DISCOVERY_TIMEOUT_SECONDS,
-    response_looks_like_labstation_impl=LiveCallable(globals(), '_response_looks_like_labstation_impl'),
-    normalize_mac_impl=LiveCallable(globals(), '_normalize_mac_impl'),
+    response_looks_like_labstation_impl=LiveCallable(globals(), '_response_looks_like_labstation_impl', _response_looks_like_labstation_impl),
+    normalize_mac_impl=LiveCallable(globals(), '_normalize_mac_impl', _normalize_mac_impl),
     get_mac_pattern=lambda: MAC_RE,
-    parse_boolish_impl=LiveCallable(globals(), '_parse_boolish_impl'),
-    extract_nic_candidates_impl=LiveCallable(globals(), '_extract_nic_candidates_from_heartbeat_impl'),
+    parse_boolish_impl=LiveCallable(globals(), '_parse_boolish_impl', _parse_boolish_impl),
+    extract_nic_candidates_impl=LiveCallable(globals(), '_extract_nic_candidates_from_heartbeat_impl', _extract_nic_candidates_from_heartbeat_impl),
     get_normalize_mac=lambda: normalize_mac,
     get_parse_boolish=lambda: parse_boolish,
-    choose_wol_mac_impl=LiveCallable(globals(), '_choose_wol_mac_impl'),
-    suggest_mac_from_heartbeat_impl=LiveCallable(globals(), '_suggest_mac_from_heartbeat_impl'),
+    choose_wol_mac_impl=LiveCallable(globals(), '_choose_wol_mac_impl', _choose_wol_mac_impl),
+    suggest_mac_from_heartbeat_impl=LiveCallable(globals(), '_suggest_mac_from_heartbeat_impl', _suggest_mac_from_heartbeat_impl),
     get_discovery_ports=lambda: DISCOVERY_LABSTATION_PORTS,
     get_discovery_paths=lambda: DISCOVERY_LABSTATION_PATHS,
     get_http_get=lambda: requests.get,
     get_request_exception=lambda: requests.RequestException,
     get_response_classifier=lambda: response_looks_like_labstation,
     get_suggest_mac=lambda: suggest_mac_from_heartbeat,
-    probe_labstation_http_impl=LiveCallable(globals(), '_probe_labstation_http_impl'),
-    query_labstation_task_heartbeat_path_impl=LiveCallable(globals(), '_query_labstation_task_heartbeat_path_impl'),
+    probe_labstation_http_impl=LiveCallable(globals(), '_probe_labstation_http_impl', _probe_labstation_http_impl),
+    query_labstation_task_heartbeat_path_impl=LiveCallable(globals(), '_query_labstation_task_heartbeat_path_impl', _query_labstation_task_heartbeat_path_impl),
     get_run_remote_powershell=lambda: run_remote_powershell,
     get_json_loads=lambda: json.loads,
-    build_heartbeat_path_candidates_impl=LiveCallable(globals(), '_build_heartbeat_path_candidates_impl'),
+    build_heartbeat_path_candidates_impl=LiveCallable(globals(), '_build_heartbeat_path_candidates_impl', _build_heartbeat_path_candidates_impl),
     get_query_task_path=lambda: query_labstation_task_heartbeat_path,
     get_heartbeat_paths=lambda: DISCOVERY_HEARTBEAT_PATHS,
-    discover_heartbeat_hint_impl=LiveCallable(globals(), '_discover_heartbeat_hint_impl'),
+    discover_heartbeat_hint_impl=LiveCallable(globals(), '_discover_heartbeat_hint_impl', _discover_heartbeat_hint_impl),
     get_credentials_configured=lambda: winrm_credentials_configured,
     get_path_candidates=lambda: build_heartbeat_path_candidates,
     get_read_remote_file=lambda: read_remote_file,
     get_suggested_mac=lambda: suggest_mac_from_heartbeat,
-    guacamole_name_candidates_impl=LiveCallable(globals(), '_guacamole_name_candidates_impl'),
+    guacamole_name_candidates_impl=LiveCallable(globals(), '_guacamole_name_candidates_impl', _guacamole_name_candidates_impl),
     get_load_guacamole_connections=lambda: load_guacamole_connections,
     get_normalize_match_key=lambda: normalize_match_key,
-    resolve_guacamole_connection_impl=LiveCallable(globals(), '_resolve_guacamole_connection_impl'),
-    discover_labstation_candidate_impl=LiveCallable(globals(), '_discover_labstation_candidate_impl'),
+    resolve_guacamole_connection_impl=LiveCallable(globals(), '_resolve_guacamole_connection_impl', _resolve_guacamole_connection_impl),
+    discover_labstation_candidate_impl=LiveCallable(globals(), '_discover_labstation_candidate_impl', _discover_labstation_candidate_impl),
     get_resolve_dns=lambda: socket.getaddrinfo,
     get_tcp_probe=lambda: tcp_port_open,
     get_http_probe=lambda: probe_labstation_http,
@@ -1430,8 +1424,6 @@ tcp_port_open = _HOST_DISCOVERY_RUNTIME.tcp_port_open
 response_looks_like_labstation = _HOST_DISCOVERY_RUNTIME.response_looks_like_labstation
 normalize_mac = _HOST_DISCOVERY_RUNTIME.normalize_mac
 parse_boolish = _HOST_DISCOVERY_RUNTIME.parse_boolish
-extract_nic_candidates_from_heartbeat = _HOST_DISCOVERY_RUNTIME.extract_nic_candidates_from_heartbeat
-choose_wol_mac = _HOST_DISCOVERY_RUNTIME.choose_wol_mac
 suggest_mac_from_heartbeat = _HOST_DISCOVERY_RUNTIME.suggest_mac_from_heartbeat
 probe_labstation_http = _HOST_DISCOVERY_RUNTIME.probe_labstation_http
 query_labstation_task_heartbeat_path = _HOST_DISCOVERY_RUNTIME.query_labstation_task_heartbeat_path
@@ -1442,7 +1434,7 @@ resolve_guacamole_connection = _HOST_DISCOVERY_RUNTIME.resolve_guacamole_connect
 discover_labstation_candidate = _HOST_DISCOVERY_RUNTIME.discover_labstation_candidate
 
 _WOL_CONTEXT = WolContext(
-    wol_and_wait=LiveCallable(globals(), '_wol_and_wait_impl'),
+    wol_and_wait=LiveCallable(globals(), '_wol_and_wait_impl', _wol_and_wait_impl),
     get_send_magic_packet=lambda: wake,
     get_sleep=lambda: time.sleep,
     get_host_is_up=lambda: host_is_up,
@@ -1522,14 +1514,10 @@ _LAB_RESOLUTION_RUNTIME = create_lab_resolution_composition(
     get_logger=lambda: logging,
     get_monotonic=lambda: time.monotonic,
 )
-resolve_lab_access_key = _LAB_RESOLUTION_RUNTIME.resolve_lab_access_key
 resolve_host_by_lab = _LAB_RESOLUTION_RUNTIME.resolve_host_by_lab
 resolve_lab_ids_for_host = _LAB_RESOLUTION_RUNTIME.resolve_lab_ids_for_host
 resolve_lab_associations = _LAB_RESOLUTION_RUNTIME.resolve_lab_associations
 resolve_lab_status_targets = _LAB_RESOLUTION_RUNTIME.resolve_lab_status_targets
-refresh_lab_catalog = _LAB_RESOLUTION_RUNTIME.refresh_catalog
-
-
 def resolve_lab_resources() -> List[Dict[str, str]]:
     """Resolve catalog resources using this Gateway's active FMU backend."""
     return _LAB_RESOLUTION_RUNTIME.resolve_lab_resources(
@@ -1590,7 +1578,7 @@ _RESERVATION_RUNTIME_CONTEXT = ReservationRuntimeContext(
     get_env_or_secret_file=lambda: _env_or_secret_file,
     get_parse_reservation_datetime=lambda: _parse_reservation_datetime,
     get_as_utc_datetime=lambda: _as_utc_datetime,
-    get_http_get=lambda: LiveCallable(globals(), 'requests.get'),
+    get_http_get=lambda: LiveCallable(globals(), 'requests.get', requests.get),
     get_sql_text=lambda: text,
     get_bindparam=lambda: bindparam,
     get_dispatch_start=lambda: lambda payload: handle_reservation_start(payload),
@@ -1630,8 +1618,6 @@ _RUNTIME_SERVICES = create_runtime_services(
     reservation_registry=HOSTS,
 )
 _POWER_RUNTIME_STATE = _RUNTIME_SERVICES.power_state
-POWER_OPERATION_STORE = _POWER_RUNTIME_STATE.operation_store
-POWER_CREDENTIAL_STORE = _POWER_RUNTIME_STATE.credential_store
 POWER_RUNTIME = _POWER_RUNTIME_STATE.runtime
 RESERVATION_AUTOMATOR = _RUNTIME_SERVICES.reservation_automator
 
@@ -1683,7 +1669,6 @@ _SESSION_OBSERVATION_CONTEXT = SessionObservationContext(
 _SESSION_OBSERVATION_RUNTIME = create_session_observation_runtime(
     _SESSION_OBSERVATION_CONTEXT
 )
-session_observation_retry_delay_seconds = _SESSION_OBSERVATION_RUNTIME.retry_delay_seconds
 _encrypt_runtime_secret = _SESSION_OBSERVATION_RUNTIME.encrypt_runtime_secret
 _decrypt_runtime_secret = _SESSION_OBSERVATION_RUNTIME.decrypt_runtime_secret
 _session_observations_service = _SESSION_OBSERVATION_RUNTIME.create_service
@@ -1715,9 +1700,9 @@ deliver_session_observation_outbox = _SESSION_OBSERVATION_RUNTIME.deliver_sessio
 
 
 _HOST_RELOAD_CONTEXT = HostReloadContext(
-    reload_hosts=LiveCallable(globals(), '_reload_hosts_impl'),
+    reload_hosts=LiveCallable(globals(), '_reload_hosts_impl', _reload_hosts_impl),
     load_config=lambda: load_config(),
-    registry_factory=LiveCallable(globals(), 'HostRegistry'),
+    registry_factory=LiveCallable(globals(), 'HostRegistry', HostRegistry),
     refresh_trust_store=lambda hosts: refresh_winrm_trust_store(hosts),
     replace_registry=lambda registry: _replace_host_registry(registry),
     get_logger=lambda: logging,
@@ -1726,10 +1711,117 @@ _HOST_RELOAD_RUNTIME = create_host_reload_runtime(_HOST_RELOAD_CONTEXT)
 reload_hosts = _HOST_RELOAD_RUNTIME.reload_hosts
 
 
+_WORKER_BLUEPRINT_PROVIDERS = {
+    "ALLOWED_WINRM_COMMANDS": ALLOWED_WINRM_COMMANDS,
+    "DB_ENGINE": DB_ENGINE,
+    "ENOUGH_DISCOVERY_SIGNALS": ENOUGH_DISCOVERY_SIGNALS,
+    "FMU_STATION_INTERNAL_TOKEN": FMU_STATION_INTERNAL_TOKEN,
+    "FMU_STATUS_BACKEND": FMU_STATUS_BACKEND,
+    "FMU_STATUS_STATION_BASE_URL": FMU_STATUS_STATION_BASE_URL,
+    "FMU_STATUS_STATION_HOST": FMU_STATUS_STATION_HOST,
+    "FmuStationConfig": FmuStationConfig,
+    "GUACAMOLE_DB_ENGINE": GUACAMOLE_DB_ENGINE,
+    "HOSTS": HOSTS,
+    "LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS": LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS,
+    "Response": Response,
+    "SESSION_OBSERVATION_INGEST_TOKEN": SESSION_OBSERVATION_INGEST_TOKEN,
+    "WINRM_CREDENTIALS_REQUIRED_MESSAGE": WINRM_CREDENTIALS_REQUIRED_MESSAGE,
+    "WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE": WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE,
+    "WINRM_FINGERPRINT_MISMATCH_MESSAGE": WINRM_FINGERPRINT_MISMATCH_MESSAGE,
+    "WINRM_TRUST_REF_MISMATCH_MESSAGE": WINRM_TRUST_REF_MISMATCH_MESSAGE,
+    "WinRMTrustError": WinRMTrustError,
+    "_build_health_response_impl": _build_health_response_impl,
+    "_delete_winrm_trust_certificate": _delete_winrm_trust_certificate,
+    "_fetch_latest_heartbeat": _fetch_latest_heartbeat,
+    "_is_valid_ping_target": _is_valid_ping_target,
+    "_load_aas_persisted_heartbeat": _load_aas_persisted_heartbeat,
+    "_parse_winrm_certificate_bytes": _parse_winrm_certificate_bytes,
+    "_read_winrm_certificate_upload": _read_winrm_certificate_upload,
+    "_request_id": _request_id,
+    "_rows_to_operations": _rows_to_operations,
+    "_sanitize_limit": _sanitize_limit,
+    "_sanitize_log_value": _sanitize_log_value,
+    "_sanitize_offset": _sanitize_offset,
+    "_store_winrm_trust_certificate": _store_winrm_trust_certificate,
+    "_validate_winrm_certificate": _validate_winrm_certificate,
+    "_wake_ops_get_schedule": _wake_ops_get_schedule,
+    "_wake_ops_latest_wake": _wake_ops_latest_wake,
+    "_wake_ops_manual_wake": _wake_ops_manual_wake,
+    "_wake_ops_now": _wake_ops_now,
+    "_wake_ops_save_schedule": _wake_ops_save_schedule,
+    "_winrm_certificate_response_metadata": _winrm_certificate_response_metadata,
+    "_winrm_trust_error_payload": _winrm_trust_error_payload,
+    "_winrm_trust_http_status": _winrm_trust_http_status,
+    "_winrm_trust_request_value": _winrm_trust_request_value,
+    "aas_generator": aas_generator,
+    "build_host_inventory": build_host_inventory,
+    "build_provisioned_host": build_provisioned_host,
+    "build_reservation_timeline": build_reservation_timeline,
+    "database_is_usable": database_is_usable,
+    "datetime": datetime,
+    "delete_guacamole_temporary_user": delete_guacamole_temporary_user,
+    "demo_readiness": demo_readiness,
+    "discover_labstation_candidate": discover_labstation_candidate,
+    "enqueue_guacamole_token_revocation": enqueue_guacamole_token_revocation,
+    "enqueue_session_observation": enqueue_session_observation,
+    "fernet_key_is_usable": fernet_key_is_usable,
+    "fetch_fmu_runner_status": fetch_fmu_runner_status,
+    "fetch_latest_wake_operations": fetch_latest_wake_operations,
+    "generate_heartbeat_stream": generate_heartbeat_stream,
+    "get_local_mode_flag_path": get_local_mode_flag_path,
+    "handle_demo_end": handle_demo_end,
+    "handle_demo_event": handle_demo_event,
+    "handle_demo_start": handle_demo_start,
+    "handle_reservation_end": handle_reservation_end,
+    "handle_reservation_start": handle_reservation_start,
+    "hmac": hmac,
+    "inspect_winrm_trust": inspect_winrm_trust,
+    "internal_error_response": internal_error_response,
+    "is_missing_winrm_credentials_error": is_missing_winrm_credentials_error,
+    "load_guacamole_connections": load_guacamole_connections,
+    "logging": logging,
+    "normalize_credential_ref": normalize_credential_ref,
+    "normalize_winrm_trust_ref": normalize_winrm_trust_ref,
+    "parse_bool": parse_bool,
+    "poll_heartbeat": poll_heartbeat,
+    "power_bp": power_bp,
+    "probe_lab_targets": probe_lab_targets,
+    "provision_guacamole_temporary_user": provision_guacamole_temporary_user,
+    "read_fmu_runner_health": read_fmu_runner_health,
+    "reload_hosts": reload_hosts,
+    "remove_remote_file": remove_remote_file,
+    "require_guacamole_provisioner_auth": require_guacamole_provisioner_auth,
+    "resolve_guacamole_connection": resolve_guacamole_connection,
+    "resolve_host_by_lab": resolve_host_by_lab,
+    "resolve_lab_associations": resolve_lab_associations,
+    "resolve_lab_resources": resolve_lab_resources,
+    "resolve_lab_status_targets": resolve_lab_status_targets,
+    "run_labstation_command": run_labstation_command,
+    "run_remote_powershell": run_remote_powershell,
+    "safe_connection_response": safe_connection_response,
+    "safe_host_inventory_entry": safe_host_inventory_entry,
+    "save_winrm_credentials": save_winrm_credentials,
+    "stream_with_context": stream_with_context,
+    "text": text,
+    "time": time,
+    "timezone": timezone,
+    "update_dynamic_host": update_dynamic_host,
+    "upsert_dynamic_host": upsert_dynamic_host,
+    "winrm_trust_ref_for_host": winrm_trust_ref_for_host,
+    "wol_and_wait": wol_and_wait,
+    "write_remote_file": write_remote_file,
+}
+
+
+def _worker_runtime_context(values: Mapping[str, Any]) -> RuntimeContext:
+    """Resolve current worker bindings with an explicit blueprint provider base."""
+    return RuntimeContext(values, fallbacks=_WORKER_BLUEPRINT_PROVIDERS)
+
+
 compose_worker_app(
     APP,
     globals(),
-    context_factory=RuntimeContext,
+    context_factory=_worker_runtime_context,
     register_blueprints=register_blueprints,
 )
 
@@ -1774,59 +1866,6 @@ _ENTRYPOINT_CONTEXT = EntrypointContext(
 _ENTRYPOINT_RUNTIME = create_entrypoint_runtime(_ENTRYPOINT_CONTEXT)
 configure_logging = _ENTRYPOINT_RUNTIME.configure_logging
 main = _ENTRYPOINT_RUNTIME.main
-
-# This entrypoint is also the live provider namespace passed to
-# ``ops_app_factory.register_blueprints``. The explicit exports document the
-# provider names resolved by that composition boundary and the module-level
-# compatibility points exercised by the runtime contract tests.
-__all__ = [
-    "APP",
-    "ENOUGH_DISCOVERY_SIGNALS",
-    "FmuStationConfig",
-    "Response",
-    "WINRM_AUTH_FAILED_CODE",
-    "WINRM_AUTH_FAILED_MESSAGE",
-    "WINRM_FINGERPRINT_CONFIRMATION_REQUIRED_MESSAGE",
-    "WINRM_FINGERPRINT_MISMATCH_MESSAGE",
-    "WINRM_HEARTBEAT_INVALID_CODE",
-    "WINRM_HEARTBEAT_INVALID_MESSAGE",
-    "WINRM_HEARTBEAT_NOT_FOUND_CODE",
-    "WINRM_HEARTBEAT_NOT_FOUND_MESSAGE",
-    "WINRM_TRUST_REF_MISMATCH_MESSAGE",
-    "WINRM_UNREACHABLE_CODE",
-    "WINRM_UNREACHABLE_MESSAGE",
-    "WinRMHeartbeatError",
-    "WinRMRemoteFileNotFoundError",
-    "_base64url_json",
-    "_build_health_response_impl",
-    "_certificate_datetime",
-    "_claim_session_observation_outbox_rows",
-    "_decrypt_runtime_secret",
-    "_delete_winrm_trust_certificate",
-    "_dns_name_matches",
-    "_encrypt_runtime_secret",
-    "_format_certificate_datetime",
-    "_format_sse_event",
-    "_guacamole_admin_session",
-    "_guacamole_connection_history_observed",
-    "_is_valid_ip_address",
-    "_load_aas_persisted_heartbeat",
-    "_mark_session_observation_delivered",
-    "_mark_session_observation_failure",
-    "_read_winrm_certificate_upload",
-    "_reconcile_guacamole_observations",
-    "_sanitize_limit",
-    "_sanitize_offset",
-    "_session_observed_epoch",
-    "_session_observer_authorization",
-    "_set_host_registry",
-    "_store_winrm_trust_certificate",
-    "_winrm_trust_host_or_404",
-    "_winrm_trust_http_status",
-    "_winrm_trust_request_value",
-    "stream_with_context",
-]
-
 
 if __name__ == "__main__":
     main()
