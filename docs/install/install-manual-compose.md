@@ -364,14 +364,16 @@ FMU_STATION_INTERNAL_TOKEN=<station-internal-token>
 docker compose --profile fmu-runner up -d --build
 ```
 
-For development-only local FMU execution, use `fmu-local-dev` instead; never
-start both FMU profiles. Set the local mode explicitly in `.env`:
+For development-only FMU execution, use `fmu-local-dev` instead; never start
+both FMU profiles. The profile pulls the shared FMU Executor image configured
+by `FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.1.1`)
+and delegates execution to it. No additional repository clone is needed. Set
+the local mode explicitly in `.env`:
 
 ```env
 FMU_RUNNER_ENABLED=true
 FMU_BACKEND_MODE=local
 FMU_LOCAL_DEV_MODE=true
-FMU_LOCAL_REALTIME_ENABLED=true
 ```
 
 ```bash
@@ -380,7 +382,9 @@ docker compose --profile fmu-local-dev up -d --build openresty fmu-runner-local
 
 The local runner needs `secrets/session_observer_signing_secret`, generated
 from `SESSION_OBSERVER_SIGNING_SECRET`, to redeem FMU tickets and record
-accepted sessions. It does not need Station or administrator credentials.
+accepted sessions. The local Executor and facade share the generated internal
+development FMU token. It is separate from the Lab Station token. Neither
+needs Station or administrator credentials.
 
 For local execution, place each published FMU in one of the supported layouts
 and make its `accessKey`/`fmuFileName` match the configured resource:
@@ -394,9 +398,7 @@ See [FMU data layout](../../fmu-data/README.md) for provider-scoped storage
 and [FMI/FMU support](../fmi-fmu-support.md) for publication and validation.
 
 `FMU_BACKEND_MODE` controls FMU execution location; Full/Lite authentication
-controls the JWKS source independently. The setup scripts persist
-`FMU_LOCAL_REALTIME_ENABLED=true` automatically when the local backend is
-selected. Keep it `false` for the station-backed production profile. See the
+controls the JWKS source independently. See the
 [configuration reference](../reference/configuration.md).
 
 ## Step 8 — Verify health

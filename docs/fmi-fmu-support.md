@@ -135,18 +135,15 @@ and is revalidated inside the provider confirmation lock. A capacity read
 failure leaves a pending reservation retryable.
 
 For isolated local development/tests, start the `fmu-local-dev` Compose
-profile. It sets `FMU_BACKEND_MODE=local` and `FMU_LOCAL_DEV_MODE=true` in a
-container that has only the internal local edge network and no Station,
-control-plane or proxy-signing secrets. It receives only the dedicated
-session-observer credential required for authenticated ticket redemption and
-durable session observation. Local batch requests use one
-killable worker process per simulation. Native local realtime requires the
-additional switch `FMU_LOCAL_REALTIME_ENABLED=true`; the setup scripts set it
-automatically for the local backend, while manual Compose starts must set it
-explicitly. Keep it false outside an isolated test environment. The internal
-Station channel is private and
-authenticated with an internal token or mTLS; the public booking JWT is not
-the sole protection of the internal channel.
+profile. The Gateway facade delegates batch, stream and realtime execution to
+`fmu-executor-local`, pulled from the versioned image configured by
+`FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.1.1`).
+No separate `FMU-Executor` source checkout is required. The Executor shares
+`./fmu-data` with the Gateway facade and is reachable only over the internal
+local edge. It receives a dedicated internal token; the Gateway also receives
+the session-observer credential required for authenticated ticket redemption
+and durable session observation. The public booking JWT is not the sole
+protection of the internal channel.
 
 JWT key retrieval is independent of the FMU execution backend. In Full mode the
 runner uses `http://blockchain-services:8080/auth/jwks`; in Lite mode it uses

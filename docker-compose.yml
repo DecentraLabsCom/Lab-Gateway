@@ -846,8 +846,8 @@ services:
     group_add:
       - "${HOST_GID:-1000}"
     environment:
-      # The production facade is Station-only. Local native execution uses
-      # the separate fmu-runner-local profile below, without control secrets.
+      # The production facade is Station-only. The isolated development
+      # profile below uses a local FMU Executor sidecar.
       - FMU_BACKEND_MODE=station
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
@@ -929,12 +929,52 @@ services:
       - fmu_aas
       - fmu_status
 
-  # Explicit development-only local FMU execution. This service deliberately
-  # does not receive Station/control-plane/proxy-signing credentials. It
-  # receives only the dedicated session-observer credential needed to redeem
-  # FMU tickets and record the accepted session. The optional bundled BaSyx
-  # connection is limited to the internal fmu_aas network so local tests can
-  # publish AAS metadata without exposing the control plane or Lab Station.
+  # Development-only FMU Executor image shared with Lab Station. It shares the
+  # local FMU data directory with the Gateway facade.
+  fmu-executor-local:
+    profiles: ["fmu-local-dev"]
+    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.1.1}
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      - FMU_EXECUTOR_HOST=0.0.0.0
+      - FMU_EXECUTOR_PORT=8091
+      - FMU_ROOT=/app/fmu-data
+      - FMU_EXECUTOR_TEMP=/tmp
+      - FMU_INTERNAL_TOKEN_FILE=/run/secrets/fmu_local_executor_token
+    volumes:
+      - ./fmu-data:/app/fmu-data:ro
+    tmpfs:
+      - /tmp:exec,size=256M,mode=1777
+    read_only: true
+    secrets:
+      - fmu_local_executor_token
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/internal/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=fmu-executor-local"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    networks:
+      - fmu_local_edge
+
+  # Development-only Gateway facade. It keeps the public contract and auth
+  # handling while delegating FMU work to the shared Executor above.
   fmu-runner-local:
     profiles: ["fmu-local-dev"]
     build:
@@ -943,10 +983,12 @@ services:
     environment:
       - FMU_BACKEND_MODE=local
       - FMU_LOCAL_DEV_MODE=true
-      - FMU_LOCAL_REALTIME_ENABLED=${FMU_LOCAL_REALTIME_ENABLED:-false}
+      - FMU_LOCAL_REALTIME_ENABLED=false
+      - FMU_LOCAL_EXECUTOR_BASE_URL=${FMU_LOCAL_EXECUTOR_BASE_URL:-http://fmu-executor-local:8091}
+      - FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN_FILE=/run/secrets/fmu_local_executor_token
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
-      # FMPy extracts native FMU binaries here before loading them.
+      # Retained for direct local-backend utility code and AAS parsing.
       - TMPDIR=/app/fmu-runtime
       - HISTORY_DB_PATH=/app/data/history.db
       - ISSUER=${ISSUER:-}
@@ -981,6 +1023,10 @@ services:
     read_only: true
     secrets:
       - session_observer_signing_secret
+      - fmu_local_executor_token
+    depends_on:
+      fmu-executor-local:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
       interval: 30s
@@ -1139,6 +1185,8 @@ secrets:
     file: ./secrets/lab_admin_backend_token
   fmu_station_internal_token:
     file: ./secrets/fmu_station_internal_token
+  fmu_local_executor_token:
+    file: ./secrets/fmu_local_executor_token
   auth_session_ticket_internal_token:
     file: ./secrets/auth_session_ticket_internal_token
   session_observer_signing_secret:

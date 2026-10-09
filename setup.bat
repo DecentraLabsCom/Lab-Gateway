@@ -370,6 +370,19 @@ if "!fmu_station_internal_token!"=="" (
     echo Generated FMU Station internal token.
 )
 call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_STATION_INTERNAL_TOKEN" "!fmu_station_internal_token!"
+call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" fmu_local_executor_internal_token
+if /i "!fmu_local_executor_internal_token!"=="CHANGE_ME" set "fmu_local_executor_internal_token="
+if "!fmu_local_executor_internal_token!"=="" (
+    call :GenerateHex 32 generated_hex
+    if not defined generated_hex set "generated_hex=%RANDOM%%RANDOM%%RANDOM%%RANDOM%"
+    set "fmu_local_executor_internal_token=fmu_dev_!generated_hex!"
+    echo Generated local FMU Executor token.
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "!fmu_local_executor_internal_token!"
+call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_EXECUTOR_IMAGE" fmu_executor_image
+if not defined fmu_executor_image set "fmu_executor_image=ghcr.io/decentralabscom/fmu-executor:0.1.1"
+call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_EXECUTOR_IMAGE" "!fmu_executor_image!"
+call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_EXECUTOR_SOURCE_PATH"
 echo.
 
 echo Lab Manager Backend Allowlist
@@ -767,9 +780,9 @@ if "!fmu_runner_enabled!"=="1" (
         set "fmu_runner_profile=fmu-local-dev"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "local"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "true"
-        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "true"
-        echo    * Local FMU execution selected.
-        echo    * Local realtime FMU sessions enabled for isolated development.
+        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "false"
+        echo    * The local Gateway facade will pull the versioned FMU Executor image ^(no second checkout required^).
+        echo    * Batch, streaming and realtime execution run in the Executor container.
         echo    * The local FMU runner will restart automatically after a Docker or host restart.
         echo    * Full mode retrieves JWKS over the dedicated fmu_auth network; Lite mode uses the external issuer JWKS endpoint.
     ) else if /i "!selected_fmu_backend_mode!"=="station" (
@@ -1086,6 +1099,15 @@ echo.
 echo Building and starting services...
 echo This may take several minutes on first run...
 
+if "!fmu_runner_enabled!"=="1" if /i "!fmu_runner_profile!"=="fmu-local-dev" (
+    echo Pulling shared FMU Executor image: !fmu_executor_image!
+    call !compose_full! pull fmu-executor-local
+    if errorlevel 1 (
+        echo Failed to pull the configured FMU Executor image. Check FMU_EXECUTOR_IMAGE and registry access.
+        goto compose_fail
+    )
+)
+
 call !compose_full! down --remove-orphans
 if errorlevel 1 goto compose_fail
 call !compose_full! build --no-cache
@@ -1253,6 +1275,7 @@ call :WriteComposeSecret "reservation_projection_token" "RESERVATION_PROJECTION_
 call :WriteComposeSecret "aas_service_token" "AAS_SERVICE_TOKEN"
 call :WriteComposeSecret "lab_admin_backend_token" "LAB_ADMIN_BACKEND_TOKEN"
 call :WriteComposeSecret "fmu_station_internal_token" "FMU_STATION_INTERNAL_TOKEN"
+call :WriteComposeSecret "fmu_local_executor_token" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN"
 call :WriteComposeSecret "auth_session_ticket_internal_token" "AUTH_SESSION_TICKET_INTERNAL_TOKEN"
 call :WriteComposeSecret "session_observer_signing_secret" "SESSION_OBSERVER_SIGNING_SECRET"
 call :WriteComposeSecret "fmu_proxy_signing_key" "FMU_PROXY_SIGNING_KEY"

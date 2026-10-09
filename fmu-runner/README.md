@@ -13,15 +13,17 @@ Deployment contract:
 
 Backend strategy:
 
-- the production Compose service is `station`-only; local FMPy execution is
-  provided by the separate `fmu-runner-local` development profile
-- local `fmu-data` mounting remains useful for development, smoke tests and automated tests
+- production and local Compose profiles both delegate FMU execution to the
+  shared FMU Executor; production targets Lab Station and development uses a
+  local container
+- the `fmu-runner-local` development profile keeps the Gateway facade and
+  delegates execution to a local FMU Executor container pulled from the shared
+  versioned FMU-Executor image
+- the local `fmu-data` directory is shared with that Executor; Gateway keeps a
+  read-only mount for AAS metadata and proxy generation
 - `station` is the production target when real FMUs must remain on Lab Station
-- Local batch simulations run in a fresh one-process worker that is killed on
-  timeout/cancel; the service never falls back to a thread for native FMU code.
-- Native local realtime sessions are disabled by default. Set
-  `FMU_LOCAL_REALTIME_ENABLED=true` only for isolated development; production
-  realtime uses the Station WebSocket proxy.
+- Batch simulations run in a fresh Executor worker process; realtime sessions
+  remain stateful in the Executor and Gateway proxies the WebSocket channel.
 
 ```mermaid
 flowchart LR
@@ -87,7 +89,7 @@ connection (fail-closed). The Station endpoint applies the same rule to
 
 | Mode | Purpose | Real FMU location | Notes |
 |------|---------|-------------------|-------|
-| `local` | Development and test | Gateway filesystem (`fmu-data`) | Permanent non-production path via FMPy |
+| `local` | Development and test | Local FMU Executor container | Gateway facade delegates through the Station HTTP/WSS contract |
 | `station` | Target production mode | Lab Station | Gateway becomes auth + proxy + router only |
 
 ## Unit Tests
@@ -95,8 +97,10 @@ connection (fail-closed). The Station endpoint applies the same rule to
 Tests use **pytest** + **FastAPI TestClient** (httpx). FMPy and JWT auth are mocked,
 so no real FMU files or running services are required.
 
-Tests cover the public contract, the permanent `local` backend path and the Gateway-side `station`
-adapters for internal REST/WSS forwarding. `local` remains a supported path for dev/test.
+Tests cover the public contract, the isolated local backend and the Gateway-side
+Station adapters for internal REST/WSS forwarding. The Compose development
+profile uses the shared FMU Executor service so local runs follow the same
+execution path as production.
 
 ### Prerequisites
 
@@ -146,12 +150,17 @@ Built and started automatically by `docker-compose.yml` in the Lab Gateway root.
 # From Lab Gateway root: production Station facade
 docker compose --profile fmu-runner up --build fmu-runner
 
-# Development-only local FMPy facade (isolated network, observer credential only)
-FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-runner-local
+# Development-only facade plus shared local FMU Executor
+FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-runner-local
 ```
 
-FMU files are mounted from `./fmu-data` into `/fmu-data` inside the container.
-See [fmu-data/README.md](../fmu-data/README.md) for the expected directory layout.
+The local profile pulls `ghcr.io/decentralabscom/fmu-executor:0.1.1` by default.
+Set `FMU_EXECUTOR_IMAGE` in `.env` to select another released image tag. No
+FMU-Executor source checkout is required.
+
+FMU files are mounted read-only in both containers. The local Executor uses a
+private executable tmpfs for extraction. See
+[fmu-data/README.md](../fmu-data/README.md) for the expected directory layout.
 
 That mount belongs to the `fmu-runner-local` development profile. It is not
 part of the intended production execution topology.
@@ -185,14 +194,12 @@ Marketplace upload is disabled by design.
 ## Station Mode Notes
 
 - `fmu-runner` keeps the public API on Gateway and forwards execution to Lab Station.
-- `fmu-runner-local` is an explicit development profile; its container sets
-  `FMU_BACKEND_MODE=local` and `FMU_LOCAL_DEV_MODE=true` without receiving
-  Station/control-plane/proxy-signing credentials. It receives only the
-  dedicated session-observer credential required for authenticated ticket
-  redemption and durable session observation.
-- The local profile extracts native FMU binaries into the dedicated
-  executable tmpfs `/app/fmu-runtime` via `TMPDIR`; the general `/tmp` mount
-  remains restricted while FMPy loads the FMU shared library.
+- `fmu-runner-local` is an explicit development facade; it calls the local
+  `fmu-executor-local` container over the same internal HTTP/WSS contract used
+  for Lab Station. Neither container joins the Station control plane.
+- The local Gateway facade receives a dedicated executor token and the
+  session-observer credential needed for ticket redemption and durable session
+  observation. It does not receive proxy-signing or external Station secrets.
 - FMU execution mode is independent of JWT key retrieval. Full mode uses the
   local `blockchain-services` JWKS endpoint, Lite mode uses the external
   issuer's JWKS endpoint, and `AUTH_JWKS_URL` can override either choice.
@@ -204,15 +211,17 @@ Marketplace upload is disabled by design.
   - `POST /internal/fmu/simulations/stream` (the JSON body contains `accessKey`)
 - Internal realtime target:
   - `WS /internal/fmu/sessions`
-- Lab Station's current realtime executor is the same FMPy `0.3.32` family as
-  this runner and supports FMI 2/FMI 3 Co-Simulation, including typed scalar
+- The shared Executor uses FMPy `0.3.32` and supports FMI 2/FMI 3
+  Co-Simulation, including typed scalar
   and array values. One-shot and stream work is process-isolated on Station;
   interactive sessions remain stateful on the Station side.
 - Station exposes `GET /internal/fmu/backends` for diagnostics. OMSimulator is
   reserved as an optional future SSP/multi-FMU backend and is not silently
   selected for current single-FMU requests.
 - `session.create` and `session.attach` are forwarded with `gatewayContext` containing validated claims plus effective `accessKey`, `labId`, `reservationKey`, `pucHash`, and `targetGatewayId`.
-- `cancel`, `history` and `result` remain local-only endpoints for now; in `station` mode they return `501` until their internal contract exists.
+- `cancel`, `history` and `result` remain local-only endpoints for now; the
+  Executor-backed local profile and `station` mode return `501` until their
+  internal contract exists.
 
 ## Current limitations and operational contract
 

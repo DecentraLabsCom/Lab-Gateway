@@ -87,10 +87,10 @@ COMPOSE_PROFILES=aas docker compose up -d
 
 The bundled deployment persists AAS data through MongoDB and named volumes.
 For local FMU development, start both the `fmu-local-dev` and `aas` Compose
-profiles. The local runner joins only the internal `fmu_aas` network for the
-bundled BaSyx service; it does not receive Station or control-plane
-credentials. External AAS credentials are not exposed to that development
-runner.
+profiles. The Gateway facade reaches bundled BaSyx through the internal
+`fmu_aas` network and the local FMU Executor through `fmu_local_edge`. It does
+not join Station or control-plane networks. External AAS credentials are not
+exposed to the development profile.
 
 ### Lite Gateway
 

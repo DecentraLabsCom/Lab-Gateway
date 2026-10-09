@@ -78,6 +78,8 @@ class FmuRunnerConfig:
     fmu_backend_mode: str
     fmu_local_dev_mode: bool
     fmu_local_realtime_enabled: bool
+    fmu_local_executor_base_url: str
+    fmu_local_executor_internal_token: str
     fmu_station_base_url: str
     fmu_station_internal_token: str
     fmu_station_request_timeout: float
@@ -132,6 +134,10 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
         fmu_backend_mode=values.get("FMU_BACKEND_MODE", "station").strip().lower(),
         fmu_local_dev_mode=_flag(values, "FMU_LOCAL_DEV_MODE"),
         fmu_local_realtime_enabled=_flag(values, "FMU_LOCAL_REALTIME_ENABLED"),
+        fmu_local_executor_base_url=values.get("FMU_LOCAL_EXECUTOR_BASE_URL", "").strip(),
+        fmu_local_executor_internal_token=_env_or_secret_file(
+            "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN", environ=values,
+        ).strip(),
         fmu_station_base_url=values.get("FMU_STATION_BASE_URL", "").strip(),
         fmu_station_internal_token=_env_or_secret_file(
             "FMU_STATION_INTERNAL_TOKEN", environ=values,

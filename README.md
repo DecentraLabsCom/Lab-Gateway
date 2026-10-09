@@ -127,16 +127,18 @@ The default stack starts the one-shot `ops-schema-migrator`,
 | Profile | Purpose | Typical command |
 | --- | --- | --- |
 | `fmu-runner` | Production FMU facade; executes through Lab Station | `FMU_RUNNER_ENABLED=true docker compose --profile fmu-runner up -d` |
-| `fmu-local-dev` | Isolated local FMU development/testing with optional bundled AAS sync; never production | `FMU_RUNNER_ENABLED=true FMU_LOCAL_REALTIME_ENABLED=true docker compose --profile fmu-local-dev --profile aas up -d` |
+| `fmu-local-dev` | Gateway development facade backed by the shared local FMU Executor; never production | `FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev --profile aas up -d --build` |
 | `aas` | Bundled BaSyx AAS and MongoDB | `docker compose --profile aas up -d` |
 | `certbot` | ACME certificate acquisition/renewal | `docker compose --profile certbot up -d` |
 | `cloudflare` / `cloudflare-token` | Cloudflare Tunnel variants | See the setup guide |
 
 Do not start both FMU profiles: they intentionally use the same internal
 upstream alias. When testing AAS with the local runner, start the `aas` profile
-alongside `fmu-local-dev`; the local runner reaches only the internal bundled
-BaSyx network and keeps the Station/control-plane isolation. For the complete
-configuration model, see
+alongside `fmu-local-dev`; the Gateway facade reaches BaSyx over the internal
+`fmu_aas` network and the local Executor over the isolated `fmu_local_edge`
+network. The local profile pulls the version pinned by `FMU_EXECUTOR_IMAGE`,
+so it does not require a separate FMU-Executor checkout. Neither service joins
+the Station/control-plane networks. For the complete configuration model, see
 [Configuration reference](docs/reference/configuration.md).
 
 `FMU_BACKEND_MODE` selects where the FMU executes and is independent of the

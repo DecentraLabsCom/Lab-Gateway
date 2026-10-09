@@ -165,6 +165,8 @@ FMU_PROXY_SIGNING_KEY = CONFIG.fmu_proxy_signing_key
 FMU_BACKEND_MODE = CONFIG.fmu_backend_mode
 FMU_LOCAL_DEV_MODE = CONFIG.fmu_local_dev_mode
 FMU_LOCAL_REALTIME_ENABLED = CONFIG.fmu_local_realtime_enabled
+FMU_LOCAL_EXECUTOR_BASE_URL = CONFIG.fmu_local_executor_base_url
+FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN = CONFIG.fmu_local_executor_internal_token
 FMU_STATION_BASE_URL = CONFIG.fmu_station_base_url
 FMU_STATION_INTERNAL_TOKEN = CONFIG.fmu_station_internal_token
 FMU_STATION_REQUEST_TIMEOUT = CONFIG.fmu_station_request_timeout
@@ -710,6 +712,8 @@ def _build_fmu_backend():
     return _build_fmu_backend_impl(
         mode=FMU_BACKEND_MODE,
         local_dev_mode=FMU_LOCAL_DEV_MODE,
+        local_executor_base_url=FMU_LOCAL_EXECUTOR_BASE_URL,
+        local_executor_internal_token=FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN,
         station_base_url=FMU_STATION_BASE_URL,
         station_internal_token=FMU_STATION_INTERNAL_TOKEN,
         station_request_timeout=FMU_STATION_REQUEST_TIMEOUT,

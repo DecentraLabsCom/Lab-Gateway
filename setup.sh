@@ -808,6 +808,24 @@ if [ -z "$fmu_station_internal_token" ] || is_placeholder_secret "$fmu_station_i
 fi
 update_env_var "$ROOT_ENV_FILE" "FMU_STATION_INTERNAL_TOKEN" "$fmu_station_internal_token"
 
+# The development Executor gets a separate credential; it is never shared with
+# a registered Lab Station.
+fmu_local_executor_internal_token="$(get_env_default "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "$ROOT_ENV_FILE")"
+if [ -z "$fmu_local_executor_internal_token" ] || is_placeholder_secret "$fmu_local_executor_internal_token"; then
+    fmu_local_executor_internal_token="fmu_dev_$(openssl rand -hex 32 2>/dev/null || echo ${RANDOM}${RANDOM}${RANDOM}${RANDOM})"
+    echo "Generated local FMU Executor token."
+fi
+update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "$fmu_local_executor_internal_token"
+
+# The local Gateway profile pulls a released Executor image; it does not need
+# a second source checkout. Keep any explicit operator override.
+fmu_executor_image="$(get_env_default "FMU_EXECUTOR_IMAGE" "$ROOT_ENV_FILE")"
+if [ -z "$fmu_executor_image" ]; then
+    fmu_executor_image="ghcr.io/decentralabscom/fmu-executor:0.1.1"
+fi
+update_env_var "$ROOT_ENV_FILE" "FMU_EXECUTOR_IMAGE" "$fmu_executor_image"
+remove_env_var "$ROOT_ENV_FILE" "FMU_EXECUTOR_SOURCE_PATH"
+
 echo
 echo "Lab Manager Backend Allowlist"
 echo "============================="
@@ -1176,9 +1194,9 @@ if [ "$fmu_runner_enabled" = "true" ]; then
             fmu_runner_profile="fmu-local-dev"
             update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "local"
             update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "true"
-            update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED" "true"
-            echo "   * Local FMU execution selected."
-            echo "   * Local realtime FMU sessions enabled for isolated development."
+            update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED" "false"
+            echo "   * The local Gateway facade will pull the versioned FMU Executor image (no second checkout required)."
+            echo "   * Batch, streaming and realtime execution run in the Executor container."
             echo "   * The local FMU runner will restart automatically after a Docker or host restart."
             echo "   * Full mode retrieves JWKS over the dedicated fmu_auth network; Lite mode uses the external issuer JWKS endpoint."
             ;;
@@ -1602,6 +1620,14 @@ esac
 echo
 echo "Building and starting services..."
 echo "This may take several minutes on first run..."
+
+if [ "$fmu_runner_enabled" = "true" ] && [ "$fmu_runner_profile" = "fmu-local-dev" ]; then
+    echo "Pulling shared FMU Executor image: $fmu_executor_image"
+    if ! $compose_full pull fmu-executor-local; then
+        echo "Failed to pull the configured FMU Executor image. Check FMU_EXECUTOR_IMAGE and registry access." >&2
+        exit 1
+    fi
+fi
 
 $compose_full down --remove-orphans
 if ! $compose_full build --no-cache; then

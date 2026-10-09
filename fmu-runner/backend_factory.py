@@ -9,6 +9,8 @@ def build_fmu_backend(
     *,
     mode: str,
     local_dev_mode: bool,
+    local_executor_base_url: str = "",
+    local_executor_internal_token: str = "",
     station_base_url: str,
     station_internal_token: str,
     station_request_timeout: float,
@@ -19,12 +21,20 @@ def build_fmu_backend(
     station_backend_factory: Any = StationFmuBackend,
     local_backend_factory: Any = LocalFmuBackend,
 ) -> Any:
-    """Select a backend while preserving the production-safe local guard."""
+    """Select the Station service, local Executor service or guarded test backend."""
     if mode == "station":
         logger.info("FMU backend mode selected: station")
         return station_backend_factory(
             base_url=station_base_url,
             internal_token=station_internal_token,
+            request_timeout=station_request_timeout,
+        )
+
+    if mode == "local" and local_dev_mode and local_executor_base_url:
+        logger.info("FMU backend mode selected: local FMU Executor service")
+        return station_backend_factory(
+            base_url=local_executor_base_url,
+            internal_token=local_executor_internal_token,
             request_timeout=station_request_timeout,
         )
 

@@ -357,24 +357,23 @@ docker compose --profile fmu-runner up -d --build
 ```
 
 Para ejecución FMU local exclusiva de desarrollo usa `fmu-local-dev`; nunca
-arranques los dos perfiles FMU a la vez. Activa explícitamente el realtime
-local:
+arranques los dos perfiles FMU a la vez. El perfil descarga la imagen versionada del FMU-Executor configurada por `FMU_EXECUTOR_IMAGE` (por defecto `ghcr.io/decentralabscom/fmu-executor:0.1.1`) y delega allí las simulaciones. No hace falta clonar otro repositorio:
 
 ```env
 FMU_RUNNER_ENABLED=true
 FMU_BACKEND_MODE=local
 FMU_LOCAL_DEV_MODE=true
-FMU_LOCAL_REALTIME_ENABLED=true
 ```
 
 ```bash
 docker compose --profile fmu-local-dev up -d --build openresty fmu-runner-local
 ```
 
-La ejecución local necesita `secrets/session_observer_signing_secret`, generado
+El runner local necesita `secrets/session_observer_signing_secret`, generado
 a partir de `SESSION_OBSERVER_SIGNING_SECRET`, para canjear tickets FMU y
-registrar sesiones aceptadas. No necesita credenciales de Lab Station ni de
-administrador.
+registrar sesiones aceptadas. El Executor y el runner comparten el token FMU
+interno de desarrollo generado por el setup, separado del token de Lab
+Station. Ninguno necesita credenciales de Lab Station ni de administrador.
 
 Para la ejecución local, coloca cada FMU publicado en uno de los layouts
 soportados y haz coincidir `accessKey`/`fmuFileName` con el recurso configurado:
@@ -388,10 +387,7 @@ Consulta [FMU data layout](../../fmu-data/README.md) para el almacenamiento por
 proveedor y [soporte FMI/FMU](../fmi-fmu-support.md) para publicación y validación.
 
 `FMU_BACKEND_MODE` controla dónde se ejecuta el FMU; el modo Full/Lite determina
-independientemente el origen de JWKS. Los scripts de setup guardan
-automáticamente `FMU_LOCAL_REALTIME_ENABLED=true` cuando se selecciona el
-backend local. Mantén `false` para el perfil de producción respaldado por Lab
-Station. Consulta la
+independientemente el origen de JWKS. Consulta la
 [referencia de configuración](../reference/configuration.md).
 
 ## Paso 8 — Verificar el estado de salud
