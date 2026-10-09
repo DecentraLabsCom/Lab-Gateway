@@ -4,7 +4,7 @@ from collections.abc import Callable
 import hmac
 import logging
 import re
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 from uuid import uuid4
 
 from flask import Flask, jsonify, request
@@ -37,7 +37,7 @@ def request_id_from_headers(
 
 def internal_error_response(
     context: str,
-    exc: Optional[BaseException] = None,
+    exc: BaseException,
     *,
     request_id: Callable[[], str],
     sanitize_log_value: Callable[[Any], str],

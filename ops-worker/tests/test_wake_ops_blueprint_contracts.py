@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from flask import Flask
 
+from app_hooks import internal_error_response, register_app_hooks
 from wake_ops_blueprint import create_wake_ops_blueprint
 
 
@@ -40,8 +41,20 @@ def _app(calls, *, get_schedule=None):
             manual_wake=lambda host: calls.append(("wake", host))
             or {"host": host, "success": True, "status": "completed"},
             now=lambda: datetime(2026, 9, 27, 6, 5, tzinfo=timezone.utc),
-            internal_error_response=lambda message: ({"error": message}, 500),
         )
+    )
+    register_app_hooks(
+        app,
+        internal_error_response=lambda context, exc: internal_error_response(
+            context,
+            exc,
+            request_id=lambda: "test-request",
+            sanitize_log_value=str,
+            log_exception=lambda *_args: None,
+        ),
+        internal_auth_token=lambda: "",
+        internal_auth_header=lambda: "X-Ops-Token",
+        requires_internal_auth=lambda _path: False,
     )
     return app
 
@@ -81,5 +94,9 @@ def test_wake_ops_error_response_does_not_expose_exception_details():
     response = _app([], get_schedule=fail).test_client().get("/api/wake-ops/lab-ws-01")
 
     assert response.status_code == 500
-    assert response.get_json() == {"error": "Unable to load Wake Ops"}
+    assert response.get_json() == {
+        "error": "Internal server error",
+        "code": "INTERNAL_ERROR",
+        "requestId": "test-request",
+    }
     assert b"private database stack details" not in response.data

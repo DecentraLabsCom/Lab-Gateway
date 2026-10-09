@@ -60,7 +60,6 @@ def create_wake_ops_blueprint(
     get_latest_wake: Callable[[str], Optional[Mapping[str, Any]]],
     manual_wake: Callable[[str], Mapping[str, Any]],
     now: Callable[[], datetime],
-    internal_error_response: Callable[[str], Any],
 ) -> Blueprint:
     blueprint = Blueprint("wake_ops", __name__)
 
@@ -74,22 +73,14 @@ def create_wake_ops_blueprint(
         missing = require_host(host_name)
         if missing:
             return missing
-        try:
-            current = now()
-            response = jsonify(
-                {
-                    "host": host_name,
-                    "schedule": _schedule_response(get_schedule(host_name)),
-                    "evidence": _evidence_response(get_latest_wake(host_name), current),
-                }
-            )
-        except Exception:  # pylint: disable=broad-except
-            response = None
-        if response is None:
-            # The exception is discarded; this callback receives a fixed context outside the handler.
-            # codeql[py/stack-trace-exposure]
-            return internal_error_response("Unable to load Wake Ops")
-        return response
+        current = now()
+        return jsonify(
+            {
+                "host": host_name,
+                "schedule": _schedule_response(get_schedule(host_name)),
+                "evidence": _evidence_response(get_latest_wake(host_name), current),
+            }
+        )
 
     @blueprint.put("/api/wake-ops/<host_name>")
     def api_wake_ops_update(host_name: str):
@@ -99,32 +90,17 @@ def create_wake_ops_blueprint(
         try:
             payload = request.get_json(force=True, silent=True) or {}
             saved = save_schedule(host_name, payload)
-            response = jsonify({"host": host_name, "schedule": _schedule_response(saved)})
         except WakeOpsValidationError as exc:
             return jsonify({"error": str(exc)}), 400
-        except Exception:  # pylint: disable=broad-except
-            response = None
-        if response is None:
-            # The exception is discarded; this callback receives a fixed context outside the handler.
-            # codeql[py/stack-trace-exposure]
-            return internal_error_response("Unable to save Wake Ops")
-        return response
+        return jsonify({"host": host_name, "schedule": _schedule_response(saved)})
 
     @blueprint.post("/api/wake-ops/<host_name>/wake")
     def api_wake_ops_manual_wake(host_name: str):
         missing = require_host(host_name)
         if missing:
             return missing
-        try:
-            result = manual_wake(host_name)
-            response = jsonify(result), 200 if result.get("success") else 502
-        except Exception:  # pylint: disable=broad-except
-            response = None
-        if response is None:
-            # The exception is discarded; this callback receives a fixed context outside the handler.
-            # codeql[py/stack-trace-exposure]
-            return internal_error_response("Unable to execute manual Wake Ops wake")
-        return response
+        result = manual_wake(host_name)
+        return jsonify(result), 200 if result.get("success") else 502
 
     return blueprint
 

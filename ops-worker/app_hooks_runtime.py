@@ -42,7 +42,7 @@ class AppHooksRuntime:
     def internal_error_response(
         self,
         context_name: str,
-        exc: Optional[BaseException] = None,
+        exc: BaseException,
         *,
         success: Optional[bool] = None,
         status: int = 500,
