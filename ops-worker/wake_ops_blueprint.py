@@ -60,7 +60,7 @@ def create_wake_ops_blueprint(
     get_latest_wake: Callable[[str], Optional[Mapping[str, Any]]],
     manual_wake: Callable[[str], Mapping[str, Any]],
     now: Callable[[], datetime],
-    internal_error_response: Callable[..., Any],
+    internal_error_response: Callable[[str], Any],
 ) -> Blueprint:
     blueprint = Blueprint("wake_ops", __name__)
 
@@ -83,8 +83,8 @@ def create_wake_ops_blueprint(
                     "evidence": _evidence_response(get_latest_wake(host_name), current),
                 }
             )
-        except Exception as exc:  # pylint: disable=broad-except
-            return internal_error_response("Unable to load Wake Ops", exc)
+        except Exception:  # pylint: disable=broad-except
+            return internal_error_response("Unable to load Wake Ops")
 
     @blueprint.put("/api/wake-ops/<host_name>")
     def api_wake_ops_update(host_name: str):
@@ -97,8 +97,8 @@ def create_wake_ops_blueprint(
             return jsonify({"host": host_name, "schedule": _schedule_response(saved)})
         except WakeOpsValidationError as exc:
             return jsonify({"error": str(exc)}), 400
-        except Exception as exc:  # pylint: disable=broad-except
-            return internal_error_response("Unable to save Wake Ops", exc)
+        except Exception:  # pylint: disable=broad-except
+            return internal_error_response("Unable to save Wake Ops")
 
     @blueprint.post("/api/wake-ops/<host_name>/wake")
     def api_wake_ops_manual_wake(host_name: str):
@@ -108,8 +108,8 @@ def create_wake_ops_blueprint(
         try:
             result = manual_wake(host_name)
             return jsonify(result), 200 if result.get("success") else 502
-        except Exception as exc:  # pylint: disable=broad-except
-            return internal_error_response("Unable to execute manual Wake Ops wake", exc)
+        except Exception:  # pylint: disable=broad-except
+            return internal_error_response("Unable to execute manual Wake Ops wake")
 
     return blueprint
 

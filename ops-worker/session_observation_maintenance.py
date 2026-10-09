@@ -216,6 +216,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Use this JSON object instead of querying Guacamole activeConnections.",
     )
     args = parser.parse_args(argv)
+    active_connections: Optional[Mapping[str, Any]] = None
     try:
         active_connections = _parse_active_connections(args.active_connections_json)
     except (TypeError, ValueError, json.JSONDecodeError) as exc:

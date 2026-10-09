@@ -46,9 +46,9 @@ def create_public_lab_status_blueprint(
                 max_age_seconds=max_age_seconds(),
             )
         except Exception:  # pylint: disable=broad-except
-            # Public consumers should degrade to an unknown LED.  The global
-            # Flask error hook still handles programmer/dependency failures,
-            # while the route avoids exposing host or database details.
+            # Public consumers should degrade to an unknown LED, without host
+            # or database details in the response.
+            # codeql[py/stack-trace-exposure] This fixed response does not serialize the caught exception or its traceback.
             return jsonify({
                 "error": "Lab status is temporarily unavailable",
                 "code": "LAB_STATUS_UNAVAILABLE",
