@@ -46,7 +46,7 @@ the full description of each variable):
 ```env
 # .env
 SERVER_NAME=lab.your-institution.edu
-# Leave ISSUER empty for Full mode. Set it to https://<full-gateway>/auth for Lite mode.
+# Leave ISSUER empty for Full mode. For Lite mode, use the remote Full or standalone provider /auth URL.
 ISSUER=
 BLOCKCHAIN_SERVICES_ENABLED=auto
 MYSQL_ROOT_PASSWORD=strong_password
@@ -101,7 +101,7 @@ Keep Gateway/OpenResty orchestration values only in `.env`. The root `docker-com
 In Lite mode, the backend service is not the local JWT authority: OpenResty
 blocks its `/auth` issuer routes and trusts the remote `ISSUER`. For composite
 Full + N Lite or standalone-backend + N Lite deployments, provision each Lite
-with its own trust bundle and remote provisioner route. See
+with its own trust bundle or equivalent per-Lite config and remote provisioner route. See
 [Deployment Architectures](../deployment-architectures.md).
 
 For a standalone `blockchain-services` deployment not managed by this Gateway compose stack, configure that standalone service's own `.env` with its `LAB_MANAGER_TOKEN` and, if desired, `LAB_MANAGER_ALLOWED_CIDRS`.
