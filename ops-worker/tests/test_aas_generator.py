@@ -379,7 +379,7 @@ class TestSyncLabToBasyxDegradation:
         original = _mod.BASYX_AAS_URL
         _mod.BASYX_AAS_URL = "https://basyx-mock:8081"
         try:
-            with patch("aas_generator.requests.Session") as mock_session:
+            with patch("ops_aas_generator.requests.Session") as mock_session:
                 result = _mod.sync_lab_to_basyx(lab_id, SAMPLE_HOST, SAMPLE_HEARTBEAT)
 
             assert result == {"error": "AAS lab ID rejected", "created": False, "updated": False}
@@ -424,7 +424,7 @@ class TestSyncLabToBasyxDegradation:
             mock_resp.status_code = 201
             mock_resp.text = ""
 
-            with patch("aas_generator.requests.Session") as MockSession:
+            with patch("ops_aas_generator.requests.Session") as MockSession:
                 session_instance = MagicMock()
                 MockSession.return_value = session_instance
                 session_instance.put.return_value = mock_resp
@@ -448,7 +448,7 @@ class TestSyncLabToBasyxDegradation:
             mock_put.status_code = 500
             mock_put.text = "internal server error"
 
-            with patch("aas_generator.requests.Session") as MockSession:
+            with patch("ops_aas_generator.requests.Session") as MockSession:
                 session_instance = MagicMock()
                 MockSession.return_value = session_instance
                 session_instance.put.return_value = mock_put
