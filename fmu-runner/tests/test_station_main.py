@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -103,22 +103,6 @@ def test_run_station_mode_forwards_request(monkeypatch):
     assert station_backend.run_call["request_payload"]["reservationKey"] == "res-1"
 
 
-def test_run_station_mode_does_not_use_local_runner_capacity(monkeypatch):
-    station_backend = _StationBackendStub()
-    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
-    monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
-    acquire = Mock(side_effect=AssertionError("local capacity must not be consulted in Station mode"))
-    monkeypatch.setattr(application, "_acquire_slot", acquire)
-
-    response = client.post(
-        "/api/v1/simulations/run",
-        json={"labId": "1", "reservationKey": "res-1"},
-    )
-
-    assert response.status_code == 200
-    acquire.assert_not_called()
-
-
 def test_run_station_records_observation_before_releasing_job(monkeypatch):
     station_backend = _StationBackendStub()
     events = []
@@ -185,7 +169,7 @@ def test_stream_station_mode_forwards_request(monkeypatch):
 
 
 def test_history_is_blocked_in_station_mode(monkeypatch):
-    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station", "supports_local_execution": False})())
+    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
 
     response = client.get("/api/v1/simulations/history")
 

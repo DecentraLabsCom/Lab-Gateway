@@ -1,29 +1,17 @@
-"""Application lifespan orchestration for the FMU Runner."""
+"""Application lifespan orchestration for the Gateway FMU facade."""
 
 from contextlib import asynccontextmanager
 from typing import Any
 
 
-def create_lifespan(
-    *,
-    initialize_runtime: Any = None,
-    init_db: Any,
-    preload_jwks: Any,
-    get_realtime_manager: Any,
-    get_executor: Any,
-    shutdown_executor: Any,
-    cleanup_temp_files: Any,
-) -> Any:
-    """Build the lifespan while keeping resource effects explicitly injected."""
+def create_lifespan(*, preload_jwks: Any, get_realtime_manager: Any) -> Any:
+    """Start the remote WebSocket proxy and stop it cleanly at shutdown."""
 
     @asynccontextmanager
     async def lifespan(_app):
         manager: Any = None
         manager_started = False
         try:
-            if initialize_runtime is not None:
-                await initialize_runtime()
-            await init_db()
             await preload_jwks()
             manager = get_realtime_manager()
             if manager is not None:
@@ -31,14 +19,8 @@ def create_lifespan(
                 await manager.start()
             yield
         finally:
-            try:
-                if manager_started and manager is not None:
-                    await manager.stop()
-            finally:
-                try:
-                    shutdown_executor(get_executor())
-                finally:
-                    await cleanup_temp_files()
+            if manager_started and manager is not None:
+                await manager.stop()
 
     return lifespan
 

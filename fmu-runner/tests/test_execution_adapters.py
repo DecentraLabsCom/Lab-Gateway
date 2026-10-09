@@ -1,9 +1,7 @@
-from types import SimpleNamespace
-
 import pytest
 from fastapi import HTTPException
 
-from execution_adapters import ensure_local_execution_backend, simulation_request_payload
+from execution_adapters import reject_unsupported_remote_operation, simulation_request_payload
 
 
 def test_simulation_request_payload_preserves_request_fields():
@@ -44,21 +42,12 @@ def test_simulation_request_payload_omits_empty_simulation_id():
     }
 
 
-def test_ensure_local_execution_backend_accepts_supported_backend():
-    backend = SimpleNamespace(mode="local", supports_local_execution=True)
-
-    assert ensure_local_execution_backend("Simulation run endpoint", backend) is None
-
-
-def test_ensure_local_execution_backend_rejects_unsupported_backend():
-    backend = SimpleNamespace(mode="station", supports_local_execution=False)
-
+def test_reject_unsupported_remote_operation_returns_not_implemented():
     with pytest.raises(HTTPException) as error:
-        ensure_local_execution_backend("Simulation run endpoint", backend)
+        reject_unsupported_remote_operation("Simulation history endpoint", "station")
 
     assert error.value.status_code == 501
     assert error.value.detail == (
-        "Simulation run endpoint is not wired for FMU_BACKEND_MODE=station. "
-        "Use FMU_BACKEND_MODE=station in production, or explicitly set "
-        "FMU_BACKEND_MODE=local and FMU_LOCAL_DEV_MODE=true for isolated development."
+        "Simulation history endpoint is not available through FMU_BACKEND_MODE=station. "
+        "The remote FMU Executor does not expose this operation."
     )

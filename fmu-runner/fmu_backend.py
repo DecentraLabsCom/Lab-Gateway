@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
+import json
 import logging
 import re
 from typing import Any, Callable, Optional
@@ -14,11 +16,32 @@ ModelMetadata = dict[str, Any]
 logger = logging.getLogger("fmu-runner.backend")
 
 _FMU_ACCESS_KEY_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_SIMULATION_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_SAFE_SIMULATION_ERRORS = {
+    "ASYNC_EXECUTION_REQUIRES_PROCESS_ISOLATION",
+    "BATCH_SIZE_LIMIT_EXCEEDED",
+    "BATCH_STEP_LIMIT_EXCEEDED",
+    "FMU_COSIMULATION_REQUIRED",
+    "FMU_EXECUTION_TIMEOUT",
+    "FMU_NOT_FOUND",
+    "INVALID_SIMULATION_ID",
+    "INVALID_SIMULATION_OPTIONS",
+    "INVALID_SIMULATION_PARAMETERS",
+    "INVALID_SIMULATION_REQUEST",
+    "RESERVATION_DAILY_SCENARIO_LIMIT",
+    "RESULT_SIZE_LIMIT_EXCEEDED",
+    "SIMULATION_NOT_FINISHED",
+    "SIMULATION_NOT_FOUND",
+    "SIMULATION_PARAMETER_LIMIT_EXCEEDED",
+    "SIMULATION_PARAMETER_SIZE_LIMIT_EXCEEDED",
+    "SIMULATION_STEP_LIMIT_EXCEEDED",
+    "STATION_CAPACITY_EXHAUSTED",
+    "UNSUPPORTED_SIMULATION_OPTIONS",
+}
 
 
 class BaseFmuBackend:
     mode = "unknown"
-    supports_local_execution = False
 
     @staticmethod
     def validate_access_key(access_key: Any) -> str:
@@ -64,31 +87,19 @@ class BaseFmuBackend:
 
 
 @dataclass
-class LocalFmuBackend(BaseFmuBackend):
+class LocalFmuMetadataBackend(BaseFmuBackend):
     health_loader: Callable[[], dict]
     model_metadata_loader: Callable[[str], ModelMetadata]
     list_loader: Callable[[str], dict]
-    allow_execution: bool = True
 
     mode = "local"
 
-    @property
-    def supports_local_execution(self) -> bool:
-        return self.allow_execution
-
     async def health(self, *, lab_id: Optional[str] = None) -> dict:
-        payload = dict(
+        return dict(
             self.health_loader()
             if lab_id is None
             else self.health_loader(lab_id=lab_id)
         )
-        if not self.allow_execution:
-            checks = dict(payload.get("checks") or {})
-            checks["localExecutionEnabled"] = False
-            payload["checks"] = checks
-            payload["status"] = "DEGRADED"
-            payload["backendMode"] = "local-disabled"
-        return payload
 
     async def get_authorized_model_metadata(self, *, claims: dict, requested_fmu_filename: Optional[str] = None) -> ModelMetadata:
         fmu_filename = self.ensure_requested_access_key(claims, requested_fmu_filename)
@@ -139,17 +150,33 @@ class StationFmuBackend(BaseFmuBackend):
         lab_id: Optional[str],
         reservation_key: Optional[str],
         sim_id: Optional[str] = None,
+        batch_id: Optional[str] = None,
         parameters: Optional[dict[str, Any]] = None,
         options: Optional[dict[str, Any]] = None,
+        scenarios: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
+        gateway_context = {
+            "mode": self.mode,
+            "accessKey": access_key,
+            "claims": claims,
+        }
+        if lab_id:
+            gateway_context["labId"] = lab_id
+        if reservation_key:
+            gateway_context["reservationKey"] = reservation_key
         payload: dict[str, Any] = {
             "accessKey": access_key,
             "claims": claims,
+            "gatewayContext": gateway_context,
             "parameters": parameters or {},
             "options": options or {},
         }
         if sim_id:
             payload["simId"] = sim_id
+        if batch_id:
+            payload["batchId"] = batch_id
+        if scenarios is not None:
+            payload["scenarios"] = scenarios
         if lab_id:
             payload["labId"] = lab_id
         if reservation_key:
@@ -157,9 +184,27 @@ class StationFmuBackend(BaseFmuBackend):
         return payload
 
     @staticmethod
-    def _response_error_detail(response: httpx.Response) -> str:
-        # Do not relay Station's body: it may contain filesystem paths,
-        # upstream URLs or framework diagnostics. Preserve only the status.
+    def _response_error_detail(response: httpx.Response) -> Any:
+        # Relay only known short codes and bounded public fields. Never forward
+        # paths, URLs, submitted values, or framework diagnostics from Station.
+        try:
+            payload = response.json()
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+        except Exception:
+            detail = None
+        if isinstance(detail, str) and detail in _SAFE_SIMULATION_ERRORS:
+            return detail
+        if isinstance(detail, dict):
+            code = detail.get("code")
+            if isinstance(code, str) and code in _SAFE_SIMULATION_ERRORS:
+                safe: dict[str, Any] = {"code": code}
+                if code == "RESERVATION_DAILY_SCENARIO_LIMIT" and isinstance(detail.get("remaining"), int):
+                    safe["remaining"] = max(0, min(10000, detail["remaining"]))
+                if code == "BATCH_SIZE_LIMIT_EXCEEDED" and isinstance(detail.get("maximum"), int):
+                    safe["maximum"] = max(1, min(20, detail["maximum"]))
+                if code == "SIMULATION_NOT_FINISHED" and isinstance(detail.get("status"), str) and detail["status"] in {"queued", "running", "cancelling"}:
+                    safe["status"] = detail["status"]
+                return safe
         return f"Station backend rejected request ({response.status_code})"
 
     def build_authorized_context(
@@ -303,12 +348,16 @@ class StationFmuBackend(BaseFmuBackend):
             raise HTTPException(status_code=503, detail="Station backend is not configured")
 
         key = str(access_key)
-        if operation != "run" or not re.fullmatch(
+        if operation not in {"run", "jobs", "batches"} or not re.fullmatch(
             r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)*[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.fmu",
             key,
         ):
             raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
-        path = "/internal/fmu/simulations/run"
+        path = {
+            "run": "/internal/fmu/simulations/run",
+            "jobs": "/internal/fmu/simulations/jobs",
+            "batches": "/internal/fmu/simulations/batches",
+        }[operation]
         station_payload = dict(payload)
         station_payload["accessKey"] = key
         try:
@@ -414,6 +463,167 @@ class StationFmuBackend(BaseFmuBackend):
             payload=payload,
             authorization=authorization,
         )
+
+    async def submit_authorized_job(
+        self,
+        *,
+        claims: dict,
+        request_payload: dict[str, Any],
+        authorization: Optional[str] = None,
+    ) -> dict[str, Any]:
+        context = self.build_authorized_context(
+            claims=claims,
+            requested_lab_id=request_payload.get("labId"),
+            requested_reservation_key=request_payload.get("reservationKey"),
+        )
+        payload = self._json_payload_for_station(
+            claims=context["claims"],
+            access_key=context["accessKey"],
+            lab_id=context["labId"],
+            reservation_key=context["reservationKey"],
+            sim_id=request_payload.get("simId"),
+            parameters=request_payload.get("parameters"),
+            options=request_payload.get("options"),
+        )
+        return await self._post_json(
+            "jobs",
+            access_key=context["accessKey"],
+            payload=payload,
+            authorization=authorization,
+        )
+
+    async def submit_authorized_batch(
+        self,
+        *,
+        claims: dict,
+        request_payload: dict[str, Any],
+        authorization: Optional[str] = None,
+    ) -> dict[str, Any]:
+        context = self.build_authorized_context(
+            claims=claims,
+            requested_lab_id=request_payload.get("labId"),
+            requested_reservation_key=request_payload.get("reservationKey"),
+        )
+        payload = self._json_payload_for_station(
+            claims=context["claims"],
+            access_key=context["accessKey"],
+            lab_id=context["labId"],
+            reservation_key=context["reservationKey"],
+            batch_id=request_payload.get("batchId"),
+            options=request_payload.get("options"),
+            scenarios=request_payload.get("scenarios"),
+        )
+        return await self._post_json(
+            "batches",
+            access_key=context["accessKey"],
+            payload=payload,
+            authorization=authorization,
+        )
+
+    def _gateway_context_for_scope(
+        self,
+        *,
+        claims: dict,
+        requested_lab_id: Optional[str] = None,
+        requested_reservation_key: Optional[str] = None,
+    ) -> dict[str, Any]:
+        context = self.build_authorized_context(
+            claims=claims,
+            requested_lab_id=requested_lab_id,
+            requested_reservation_key=requested_reservation_key,
+        )
+        return {
+            "mode": self.mode,
+            "accessKey": context["accessKey"],
+            "claims": context["claims"],
+            "labId": context["labId"],
+            "reservationKey": context["reservationKey"],
+        }
+
+    async def _request_scoped_json(
+        self,
+        operation: str,
+        *,
+        claims: dict,
+        sim_id: Optional[str] = None,
+        requested_lab_id: Optional[str] = None,
+        requested_reservation_key: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        if not self.base_url:
+            raise HTTPException(status_code=503, detail="Station backend is not configured")
+        context = self._gateway_context_for_scope(
+            claims=claims,
+            requested_lab_id=requested_lab_id,
+            requested_reservation_key=requested_reservation_key,
+        )
+        if operation == "history":
+            path, method, params = "/internal/fmu/simulations/history", "GET", {"limit": limit, "offset": offset}
+        else:
+            if not sim_id or not _SIMULATION_ID_RE.fullmatch(sim_id):
+                raise HTTPException(status_code=400, detail="INVALID_SIMULATION_ID")
+            if operation == "status":
+                path, method, params = f"/internal/fmu/simulations/{sim_id}", "GET", None
+            elif operation == "result":
+                path, method, params = f"/internal/fmu/simulations/{sim_id}/result", "GET", None
+            elif operation == "cancel":
+                path, method, params = f"/internal/fmu/simulations/{sim_id}/cancel", "POST", None
+            else:
+                raise ValueError("Unsupported scoped simulation operation")
+        encoded_context = base64.urlsafe_b64encode(
+            json.dumps(context, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        ).rstrip(b"=").decode("ascii")
+        if len(encoded_context) > 12000:
+            raise HTTPException(status_code=413, detail="GATEWAY_CONTEXT_TOO_LARGE")
+        headers = self._headers()
+        headers["X-Gateway-Context"] = encoded_context
+        try:
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
+                response = await client.request(method, path, headers=headers, params=params)
+        except httpx.HTTPError as exc:
+            logger.warning("Station backend %s failed: %s", operation, exc)
+            raise HTTPException(status_code=503, detail="Station backend unavailable") from exc
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=self._response_error_detail(response))
+        try:
+            payload = response.json()
+        except Exception as exc:
+            logger.warning("Station backend returned invalid JSON for %s: %s", operation, exc)
+            raise HTTPException(status_code=502, detail="Station backend returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=502, detail="Station backend returned invalid payload")
+        return payload
+
+    async def get_authorized_simulation_history(
+        self,
+        *,
+        claims: dict,
+        limit: int = 20,
+        offset: int = 0,
+        requested_lab_id: Optional[str] = None,
+        requested_reservation_key: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return await self._request_scoped_json(
+            "history", claims=claims, limit=limit, offset=offset,
+            requested_lab_id=requested_lab_id,
+            requested_reservation_key=requested_reservation_key,
+        )
+
+    async def get_authorized_simulation_status(
+        self, *, claims: dict, sim_id: str,
+    ) -> dict[str, Any]:
+        return await self._request_scoped_json("status", claims=claims, sim_id=sim_id)
+
+    async def get_authorized_simulation_result(
+        self, *, claims: dict, sim_id: str,
+    ) -> dict[str, Any]:
+        return await self._request_scoped_json("result", claims=claims, sim_id=sim_id)
+
+    async def cancel_authorized_simulation(
+        self, *, claims: dict, sim_id: str,
+    ) -> dict[str, Any]:
+        return await self._request_scoped_json("cancel", claims=claims, sim_id=sim_id)
 
     @staticmethod
     def _normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str, Any]:

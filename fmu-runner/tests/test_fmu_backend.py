@@ -2,12 +2,12 @@ import pytest
 import httpx
 from fastapi import HTTPException
 
-from fmu_backend import LocalFmuBackend, StationFmuBackend
+from fmu_backend import LocalFmuMetadataBackend, StationFmuBackend
 
 
 @pytest.mark.asyncio
 async def test_local_backend_delegates_to_loaders():
-    backend = LocalFmuBackend(
+    backend = LocalFmuMetadataBackend(
         health_loader=lambda: {"status": "UP", "checks": {"fmuDataPath": True}, "fmuCount": 1},
         model_metadata_loader=lambda filename: {"modelName": filename, "modelVariables": []},
         list_loader=lambda access_key: {"fmus": [{"filename": access_key}]},
@@ -33,7 +33,7 @@ async def test_local_backend_passes_lab_id_to_health_loader():
         calls.append(kwargs)
         return {"status": "UP", "checks": {"fmuDataPath": True}, "fmuCount": 1}
 
-    backend = LocalFmuBackend(
+    backend = LocalFmuMetadataBackend(
         health_loader=_health_loader,
         model_metadata_loader=lambda filename: {"modelName": filename, "modelVariables": []},
         list_loader=lambda access_key: {"fmus": [{"filename": access_key}]},

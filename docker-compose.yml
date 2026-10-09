@@ -855,7 +855,6 @@ services:
       - FMU_STATION_INTERNAL_TOKEN_FILE=/run/secrets/fmu_station_internal_token
       - FMU_STATION_REQUEST_TIMEOUT=${FMU_STATION_REQUEST_TIMEOUT:-10}
       - FMU_SESSION_OBSERVATION_MAX_ATTEMPTS=${FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:-3}
-      - HISTORY_DB_PATH=/app/data/history.db
       - ISSUER=${ISSUER:-}
       - JWT_ISSUER=${JWT_ISSUER:-}
       - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}
@@ -870,9 +869,6 @@ services:
       - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
       - SESSION_OBSERVER_SIGNING_SECRET_FILE=/run/secrets/session_observer_signing_secret
       - SERVER_NAME=${SERVER_NAME}
-      - MAX_SIMULATION_TIMEOUT=${FMU_MAX_SIMULATION_TIMEOUT:-300}
-      - FMU_WORKER_ADDRESS_SPACE_LIMIT=${FMU_WORKER_ADDRESS_SPACE_LIMIT:-2147483648}
-      - MAX_CONCURRENT_PER_MODEL=${FMU_MAX_CONCURRENT_PER_MODEL:-10}
       - PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE=${FMU_PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE:-20}
       - WS_CREATE_RATE_LIMIT_PER_MINUTE=${FMU_WS_CREATE_RATE_LIMIT_PER_MINUTE:-30}
       - FMU_PROXY_GATEWAY_WS_URL=${FMU_PROXY_GATEWAY_WS_URL:-}
@@ -885,6 +881,7 @@ services:
     volumes:
       - ./fmu-data:/app/fmu-data:ro
       - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
+      # Existing volume IDs also hold Gateway-managed AAS catalogs and links.
       - fmu-history:/app/data
     tmpfs:
       - /tmp:size=64M,mode=1777
@@ -933,16 +930,26 @@ services:
   # local FMU data directory with the Gateway facade.
   fmu-executor-local:
     profiles: ["fmu-local-dev"]
-    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.1.1}
+    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.2.1}
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
       - FMU_EXECUTOR_HOST=0.0.0.0
       - FMU_EXECUTOR_PORT=8091
       - FMU_ROOT=/app/fmu-data
       - FMU_EXECUTOR_TEMP=/tmp
+      - FMU_EXECUTOR_STATE_DIR=/var/lib/fmu-executor/state
+      - FMU_EXECUTION_TIMEOUT_SECONDS=${FMU_EXECUTION_TIMEOUT_SECONDS:-300}
+      - FMU_MAX_BATCH_CASES=${FMU_MAX_BATCH_CASES:-8}
+      - FMU_MAX_SCENARIOS_PER_RESERVATION_PER_DAY=${FMU_MAX_SCENARIOS_PER_RESERVATION_PER_DAY:-100}
+      - FMU_MAX_SIMULATION_STEPS=${FMU_MAX_SIMULATION_STEPS:-10000}
+      - FMU_HISTORY_RETENTION_DAYS=${FMU_HISTORY_RETENTION_DAYS:-7}
+      - FMU_MAX_HISTORY_RECORDS=${FMU_MAX_HISTORY_RECORDS:-10000}
+      - FMU_MAX_RESULT_BYTES=${FMU_MAX_RESULT_BYTES:-8388608}
+      - FMU_MAX_HISTORY_BYTES=${FMU_MAX_HISTORY_BYTES:-268435456}
       - FMU_INTERNAL_TOKEN_FILE=/run/secrets/fmu_local_executor_token
     volumes:
       - ./fmu-data:/app/fmu-data:ro
+      - ./fmu-executor-state:/var/lib/fmu-executor/state
     tmpfs:
       - /tmp:exec,size=256M,mode=1777
     read_only: true
@@ -983,14 +990,10 @@ services:
     environment:
       - FMU_BACKEND_MODE=local
       - FMU_LOCAL_DEV_MODE=true
-      - FMU_LOCAL_REALTIME_ENABLED=false
       - FMU_LOCAL_EXECUTOR_BASE_URL=${FMU_LOCAL_EXECUTOR_BASE_URL:-http://fmu-executor-local:8091}
       - FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN_FILE=/run/secrets/fmu_local_executor_token
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
-      # Retained for direct local-backend utility code and AAS parsing.
-      - TMPDIR=/app/fmu-runtime
-      - HISTORY_DB_PATH=/app/data/history.db
       - ISSUER=${ISSUER:-}
       - JWT_ISSUER=${JWT_ISSUER:-}
       - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}
@@ -1003,9 +1006,6 @@ services:
       - SESSION_OBSERVER_GATEWAY_ID=${SESSION_OBSERVER_GATEWAY_ID:-}
       - SESSION_OBSERVER_SIGNING_SECRET_FILE=/run/secrets/session_observer_signing_secret
       - SERVER_NAME=${SERVER_NAME}
-      - MAX_SIMULATION_TIMEOUT=${FMU_MAX_SIMULATION_TIMEOUT:-300}
-      - FMU_WORKER_ADDRESS_SPACE_LIMIT=${FMU_WORKER_ADDRESS_SPACE_LIMIT:-2147483648}
-      - MAX_CONCURRENT_PER_MODEL=${FMU_MAX_CONCURRENT_PER_MODEL:-10}
       - PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE=${FMU_PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE:-20}
       - WS_CREATE_RATE_LIMIT_PER_MINUTE=${WS_CREATE_RATE_LIMIT_PER_MINUTE:-30}
       # Local development supports the bundled AAS profile. External AAS
@@ -1016,9 +1016,9 @@ services:
     volumes:
       - ./fmu-data:/app/fmu-data:ro
       - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
+      # Existing volume IDs also hold Gateway-managed AAS catalogs and links.
       - fmu-local-history:/app/data
     tmpfs:
-      - /app/fmu-runtime:exec,size=64M,mode=1777
       - /tmp:size=64M,mode=1777
     read_only: true
     secrets:

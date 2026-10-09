@@ -29,15 +29,12 @@ def test_guacamole_manual_login_has_ip_and_user_rate_limits():
 
 def test_fmu_auth_requires_issuer_and_bearer_only():
     auth = (ROOT / "fmu-runner" / "auth.py").read_text(encoding="utf-8")
-    realtime = (ROOT / "fmu-runner" / "realtime_ws.py").read_text(encoding="utf-8")
     station = (ROOT / "fmu-runner" / "station_ws_proxy.py").read_text(encoding="utf-8")
 
     assert "_build_local_issuer" in auth
     assert '"require": ["exp", "iat", "iss"]' in auth
-    assert 'query_params.get("token")' not in realtime
     assert 'query_params.get("token")' not in station
     assert 'cookie_name in ("token", "jwt", "jti", "JTI")' not in auth
-    assert 'cookie_name in ("token", "jwt", "jti", "JTI")' not in realtime
     assert 'cookie_name in ("token", "jwt", "jti", "JTI")' not in station
 
 

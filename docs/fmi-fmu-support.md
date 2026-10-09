@@ -55,7 +55,61 @@ It does not contain the provider's model binaries or model assets.
 
 Lab Station stores, loads and executes the real FMU. In production, the Gateway must not require the real FMU in its own filesystem.
 
-The Gateway retains a `local` backend for development, smoke tests and automated tests. `station` is the production backend and forwards execution through the private Station APIs.
+The Gateway does not execute FMUs in-process. Its `fmu-local-dev` profile
+points the facade at the shared FMU Executor container through the same private
+HTTP/WSS contract used by Lab Station. Production uses `station` mode to
+forward through the private Station APIs. When no Executor is configured, the
+local backend is limited to listing and reading metadata; run, stream and
+realtime requests require a remote Executor.
+
+## Batches, cancellation, and simulation history
+
+Clients can submit one asynchronous simulation or a small batch of parameter
+scenarios through the reservation-authorized Gateway API:
+
+| Method | Route | Description |
+|---|---|---|
+| `POST` | `/api/v1/simulations/jobs` | Queue one cancellable simulation |
+| `POST` | `/api/v1/simulations/batches` | Queue up to 8 scenarios for the same FMU |
+| `GET` | `/api/v1/simulations/{id}` | Check status and batch progress |
+| `POST` | `/api/v1/simulations/{id}/cancel` | Cancel an active run or remaining cases |
+| `GET` | `/api/v1/simulations/{id}/result` | Read final or terminal partial output |
+| `GET` | `/api/v1/simulations/history?limit=20&offset=0` | Browse history for the current reservation |
+
+For example, a batch body contains shared options and one parameter map per
+case:
+
+~~~json
+{
+  "labId": "lab-01",
+  "reservationKey": "reservation-123",
+  "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.01},
+  "scenarios": [
+    {"label": "low", "parameters": {"ambient": 285}},
+    {"label": "high", "parameters": {"ambient": 305}}
+  ]
+}
+~~~
+
+The `202 Accepted` response includes the job ID and its public status and
+result URLs. Results are read after the job reaches a terminal state. A
+cancelled batch keeps the completed cases as a partial result and stops the
+current worker plus all cases not yet started.
+
+Each request remains bound to its authorized Gateway, lab, reservation and
+pseudonymous user claim. A different reservation receives no indication that
+the job exists. By default, each reservation can start 100 scenarios per UTC
+day. A batch case, single run, stream request, realtime initialization or
+reset, and each non-empty realtime input update consumes one start. Runs are capped at 10,000 communication
+steps; a batch is capped at 20,000 total steps. Requests may set at most 32
+parameters using no more than 16 KiB of parameter JSON. These controls bound
+automated sweeps while keeping the model binary on the Station.
+
+History expires after 7 days by default. The Executor also caps history at
+10,000 records, 8 MiB for one stored result and 256 MiB of stored results in
+total. Parameters and options remain available on each retained job; result
+data may be pruned earlier when the total result-size cap is reached. The
+limits can be configured in the Executor environment.
 
 ## Provider guide
 
@@ -137,13 +191,18 @@ failure leaves a pending reservation retryable.
 For isolated local development/tests, start the `fmu-local-dev` Compose
 profile. The Gateway facade delegates batch, stream and realtime execution to
 `fmu-executor-local`, pulled from the versioned image configured by
-`FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.1.1`).
+`FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.2.1`).
 No separate `FMU-Executor` source checkout is required. The Executor shares
 `./fmu-data` with the Gateway facade and is reachable only over the internal
 local edge. It receives a dedicated internal token; the Gateway also receives
 the session-observer credential required for authenticated ticket redemption
 and durable session observation. The public booking JWT is not the sole
 protection of the internal channel.
+
+Gateway no longer contains an in-process FMU execution engine. It still uses
+FMPy to read model descriptions for AAS metadata and proxy generation. The
+development profile runs the shared FMU Executor implementation in a container;
+Lab Stations package that implementation in their own runtime bundles.
 
 JWT key retrieval is independent of the FMU execution backend. In Full mode the
 runner uses `http://blockchain-services:8080/auth/jwks`; in Lite mode it uses

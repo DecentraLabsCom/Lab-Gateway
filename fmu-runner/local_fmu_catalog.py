@@ -3,18 +3,11 @@ from pathlib import Path
 from fastapi import HTTPException
 
 
-def _local_backend_health_payload(*, data_path: str | Path, executor) -> dict:
-    checks = {"fmuDataPath": False, "executor": False}
+def _local_metadata_backend_health_payload(*, data_path: str | Path) -> dict:
+    checks = {"fmuDataPath": False, "remoteExecutorConfigured": False}
     base = Path(data_path)
     checks["fmuDataPath"] = base.is_dir()
     fmu_count = sum(1 for _ in base.rglob("*.fmu")) if checks["fmuDataPath"] else 0
-    try:
-        checks["executor"] = (
-            executor is not None
-            and (not executor._broken if hasattr(executor, "_broken") else True)
-        )
-    except Exception:
-        checks["executor"] = False
     overall = all(checks.values())
     return {
         "status": "UP" if overall else "DEGRADED",

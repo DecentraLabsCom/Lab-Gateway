@@ -7,7 +7,7 @@ It exposes the public REST/WSS contract consumed by generated `proxy.fmu` artifa
 
 Deployment contract:
 
-- real `.fmu` files live on Lab Station
+- production `.fmu` files live on Lab Station
 - this service remains in the Gateway as the public FMU facade
 - execution and model loading move behind an internal `station` backend
 
@@ -54,6 +54,12 @@ does not change between these topologies.
 | GET | `/api/v1/fmu/proxy/{labId}?reservationKey=...` | Auto-generate reservation-scoped `proxy.fmu` |
 | GET | `/api/v1/simulations/describe?fmuFileName=<file>` | Read FMU model description through the active backend |
 | POST | `/api/v1/simulations/run` | Execute a simulation through the active backend |
+| POST | `/api/v1/simulations/jobs` | Submit one reservation-scoped, cancellable simulation |
+| POST | `/api/v1/simulations/batches` | Submit up to 8 parameter scenarios against the same FMU |
+| GET | `/api/v1/simulations/{id}` | Read job state, elapsed time, and batch progress |
+| POST | `/api/v1/simulations/{id}/cancel` | Cancel a running job or remaining batch cases |
+| GET | `/api/v1/simulations/{id}/result` | Read a terminal result, including available partial output |
+| GET | `/api/v1/simulations/history?limit=20&offset=0` | Page through history for the authorized reservation |
 | POST | `/api/v1/simulations/stream` | Stream simulation output through the active backend |
 | WS | `/api/v1/fmu/sessions` | Realtime FMU session API (`requestId`, `model.describe`, control, subscribe/unsubscribe, ping/pong) |
 | WS (internal) | `/internal/fmu/sessions` | Internal realtime channel for Lab Station integration |
@@ -85,62 +91,42 @@ through `X-Internal-Session-Token`. If it is absent, the endpoint rejects every
 connection (fail-closed). The Station endpoint applies the same rule to
 `FMU_INTERNAL_TOKEN`; keep both services private even when the tokens are set.
 
+The Executor enforces per-reservation daily scenario quotas, per-run step
+limits, bounded batch sizes, and history retention. Defaults are 100 scenario
+starts per UTC day, 10,000 steps per run, 7 days of history, and 8 scenarios
+per batch. A batch is charged once per case; realtime initialize, reset, and
+non-empty input update operations also consume a scenario. History, status, cancellation, and result
+routes forward the authenticated reservation scope to the Executor, which
+returns `404` for jobs outside that scope.
+
 ## Backend Modes
 
 | Mode | Purpose | Real FMU location | Notes |
 |------|---------|-------------------|-------|
-| `local` | Development and test | Local FMU Executor container | Gateway facade delegates through the Station HTTP/WSS contract |
+| `local` | Development profile | Local FMU Executor container | Gateway delegates through the same internal HTTP/WSS contract as Station mode |
 | `station` | Target production mode | Lab Station | Gateway becomes auth + proxy + router only |
 
 ## Unit Tests
 
-Tests use **pytest** + **FastAPI TestClient** (httpx). FMPy and JWT auth are mocked,
-so no real FMU files or running services are required.
-
-Tests cover the public contract, the isolated local backend and the Gateway-side
-Station adapters for internal REST/WSS forwarding. The Compose development
-profile uses the shared FMU Executor service so local runs follow the same
-execution path as production.
+Tests use **pytest** + **FastAPI TestClient** (httpx). They cover the public
+facade, AAS metadata, authorization, and forwarding to the remote FMU Executor
+over its internal REST/WSS contract. Gateway tests do not run FMUs in-process.
+The Compose development profile uses the shared FMU Executor image so local
+runs follow the same execution path as production.
 
 ### Prerequisites
 
 ```bash
-# From fmu-runner/
-pip install fastapi uvicorn fmpy pyjwt[crypto] httpx pydantic pytest httpx numpy
-```
-
-Or install from requirements (adding test deps):
-
-```bash
+cd fmu-runner
 pip install -r requirements.txt pytest numpy
 ```
 
 ### Run
 
 ```bash
-# From fmu-runner/ — recommended
-cd fmu-runner
 pytest
-
-# Verbose
 pytest -v
-
-# From root of Lab Gateway (also works thanks to conftest.py sys.path fix)
-pytest fmu-runner/
 ```
-
-### Test coverage
-
-| Test | What it validates |
-|------|------------------|
-| `test_health_returns_up` | `/health` returns `{"status": "UP"}` |
-| `test_describe_returns_model_metadata` | `/describe` parses FMPy model description |
-| `test_describe_requires_fmuFileName` | Missing query param → 422 |
-| `test_run_executes_simulation` | Happy-path simulation returns structured result |
-| `test_run_rejects_invalid_time_range` | stopTime ≤ startTime → 400 |
-| `test_run_rejects_zero_step_size` | stepSize ≤ 0 → 400 |
-| `test_run_rejects_missing_access_key` | JWT without accessKey → 400 |
-| `test_run_returns_429_when_concurrency_exceeded` | Concurrency limit → 429 |
 
 ## Docker
 
@@ -154,9 +140,10 @@ docker compose --profile fmu-runner up --build fmu-runner
 FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-runner-local
 ```
 
-The local profile pulls `ghcr.io/decentralabscom/fmu-executor:0.1.1` by default.
+The local profile pulls `ghcr.io/decentralabscom/fmu-executor:0.2.1` by default.
 Set `FMU_EXECUTOR_IMAGE` in `.env` to select another released image tag. No
-FMU-Executor source checkout is required.
+FMU-Executor source checkout is required. The job, batch, cancellation, and
+history APIs require FMU Executor 0.2.1 or newer.
 
 FMU files are mounted read-only in both containers. The local Executor uses a
 private executable tmpfs for extraction. See
@@ -219,17 +206,19 @@ Marketplace upload is disabled by design.
   reserved as an optional future SSP/multi-FMU backend and is not silently
   selected for current single-FMU requests.
 - `session.create` and `session.attach` are forwarded with `gatewayContext` containing validated claims plus effective `accessKey`, `labId`, `reservationKey`, `pucHash`, and `targetGatewayId`.
-- `cancel`, `history` and `result` remain local-only endpoints for now; the
-  Executor-backed local profile and `station` mode return `501` until their
-  internal contract exists.
+- Gateway does not execute FMUs in-process. Run, stream and realtime requests
+  are forwarded to the configured remote Executor; AAS parsing remains in the
+  Gateway facade.
+- `cancel`, `history` and `result` retain their routes but return `501` until
+  the remote Executor contract supports those operations.
 
 ## Current limitations and operational contract
 
 - `FMU_BACKEND_MODE=station` forwards catalog, describe, run, stream and
   realtime session operations to Lab Station. The Station executor is internal
   and must not be exposed through OpenResty.
-- `cancel`, `history` and `result` remain local-only and return `501` in
-  station mode until their internal Station contract is implemented.
+- `cancel`, `history` and `result` return `501` until the remote Executor
+  contract supports them.
 - External realtime `session.create` always obtains a reservation-scoped ticket
   and records the durable observation before `session.created`; a bearer or
   `FMU_SESSION` is not a bypass.
@@ -238,6 +227,6 @@ Marketplace upload is disabled by design.
 - In station mode, a public WebSocket disconnect closes only the Gateway's
   internal channel; Lab Station retains the FMU state for its configured
   `FMU_ATTACH_GRACE_SECONDS` window so a new authenticated channel can attach.
-- A job is accepted and observed before the local executor or Station is
-  released. If release or execution fails, the accepted job remains visible in
-  history for retry/reconciliation.
+- Gateway records the accepted-session observation before forwarding work. A
+  remote execution failure remains visible through that observation; simulation
+  history is not currently stored by Gateway.

@@ -355,7 +355,6 @@ example, the production FMU facade is Station-only and uses its own profile:
 FMU_RUNNER_ENABLED=true
 FMU_BACKEND_MODE=station
 FMU_LOCAL_DEV_MODE=false
-FMU_LOCAL_REALTIME_ENABLED=false
 FMU_STATION_BASE_URL=https://station.internal.example
 FMU_STATION_INTERNAL_TOKEN=<station-internal-token>
 ```
@@ -366,9 +365,13 @@ docker compose --profile fmu-runner up -d --build
 
 For development-only FMU execution, use `fmu-local-dev` instead; never start
 both FMU profiles. The profile pulls the shared FMU Executor image configured
-by `FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.1.1`)
+by `FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.2.1`)
 and delegates execution to it. No additional repository clone is needed. Set
 the local mode explicitly in `.env`:
+
+Setup creates `fmu-executor-state/` as a private bind-mounted directory for
+reservation-scoped history and results. Use FMU Executor 0.2.1 or newer for
+batch jobs, cancellation, and the new history routes.
 
 ```env
 FMU_RUNNER_ENABLED=true

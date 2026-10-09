@@ -37,6 +37,7 @@ fmu-data/*
 !fmu-data/*.fmu
 !fmu-data/test-fmus/
 !fmu-data/test-fmus/**
+fmu-executor-state/
 fmu-proxy-runtime/*
 !fmu-proxy-runtime/README.md
 !fmu-proxy-runtime/binaries/

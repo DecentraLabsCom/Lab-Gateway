@@ -1,7 +1,7 @@
 FROM python:3.11-slim-bookworm
 
 LABEL maintainer="Lab Gateway Team"
-LABEL description="FMU Runner — FMI Co-Simulation execution service"
+LABEL description="Gateway FMU facade for remote execution services"
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Create non-root user for security
 RUN useradd -r -s /bin/false fmurunner
 
-# Create writable directory for history DB
+# Create writable directory for AAS association metadata
 RUN mkdir -p /app/data && chown -R fmurunner:fmurunner /app/data
 
 COPY . .

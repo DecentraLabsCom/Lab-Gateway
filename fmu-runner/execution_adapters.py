@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import HTTPException
 
@@ -22,14 +22,11 @@ def simulation_request_payload(
     return payload
 
 
-def ensure_local_execution_backend(feature_name: str, backend: Any) -> None:
-    if backend.supports_local_execution:
-        return
+def reject_unsupported_remote_operation(feature_name: str, backend_mode: str) -> None:
     raise HTTPException(
         status_code=501,
         detail=(
-            f"{feature_name} is not wired for FMU_BACKEND_MODE={backend.mode}. "
-            "Use FMU_BACKEND_MODE=station in production, or explicitly set "
-            "FMU_BACKEND_MODE=local and FMU_LOCAL_DEV_MODE=true for isolated development."
+            f"{feature_name} is not available through FMU_BACKEND_MODE={backend_mode}. "
+            "The remote FMU Executor does not expose this operation."
         ),
     )

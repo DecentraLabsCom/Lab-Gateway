@@ -1,5 +1,5 @@
 """
-FMU Runner — FastAPI service for FMI Co-Simulation execution.
+FMU Runner — FastAPI facade for remote FMI simulation services.
 
 Endpoints:
   POST /api/v1/simulations/run      — Execute a simulation
@@ -12,12 +12,10 @@ import os
 import time
 import json
 import logging
-import tempfile
 import asyncio
 import re
 from pathlib import Path
 from typing import Any, Optional
-from concurrent.futures import ProcessPoolExecutor, Future
 from uuid import uuid4
 
 import httpx
@@ -25,7 +23,6 @@ import jwt
 from fmpy import read_model_description
 from fastapi import HTTPException, WebSocket, Request
 from fastapi.responses import StreamingResponse
-from xml.etree import ElementTree as ET
 
 from auth import _fetch_jwks, verify_jwt, verify_jwt_token, jwks_health
 from claim_values import (
@@ -34,33 +31,16 @@ from claim_values import (
     get_claim_lab_id as _get_claim_lab_id_value,
     normalize_lab_id as _normalize_lab_id_value,
 )
-from fmu_backend import LocalFmuBackend, StationFmuBackend
+from fmu_backend import LocalFmuMetadataBackend, StationFmuBackend
 from backend_factory import build_fmu_backend as _build_fmu_backend_impl
 from execution_adapters import (
-    ensure_local_execution_backend as _ensure_local_execution_backend_adapter,
+    reject_unsupported_remote_operation as _reject_unsupported_remote_operation_adapter,
     simulation_request_payload as _simulation_request_payload_adapter,
-)
-from execution_lifecycle import (
-    create_simulation_executor as _create_simulation_executor_impl,
-    preload_jwks_if_enabled as _preload_jwks_if_enabled_impl,
-    shutdown_simulation_executor as _shutdown_simulation_executor_impl,
-    submit_simulation as _submit_simulation_impl,
-)
-from timeout_policy import effective_timeout_seconds as _effective_timeout_seconds_policy
-from simulation_options import (
-    SimulationOptions,
-    SimulationOptionsError,
-    parse_simulation_options as _parse_simulation_options_impl,
-)
-from simulation_model import resolve_fmi_type as _resolve_fmi_type_impl
-from simulation_stream_payloads import (
-    build_completed_event as _build_simulation_completed_event,
-    iter_result_chunks as _iter_simulation_result_chunks,
 )
 from local_fmu_catalog import (
     _list_local_fmus_payload as _catalog_list_local_fmus_payload,
     _load_local_model_metadata as _catalog_load_local_model_metadata,
-    _local_backend_health_payload as _catalog_local_backend_health_payload,
+    _local_metadata_backend_health_payload as _catalog_local_metadata_backend_health_payload,
 )
 from metadata import (
     _model_metadata_from_model_description,
@@ -78,18 +58,9 @@ from proxy_session_config import (
     build_proxy_session_config as _build_proxy_session_config_impl,
     derive_gateway_ws_url as _derive_gateway_ws_url_impl,
 )
-from simulation_history import (
-    get_history_result as _get_history_result,
-    init_history_db as _init_history_db,
-    list_history as _list_history,
-    save_history as _save_history_to_db,
-)
-from stream_errors import build_stream_error_payload as _build_stream_error_payload
-from realtime_ws import RealtimeWsManager
 from station_ws_proxy import StationRealtimeWsProxyManager
 from realtime_factory import build_realtime_manager as _build_realtime_manager_impl
 from proxy_rate_limiter import allow_download as _allow_proxy_download_impl
-from temp_cleanup import cleanup_fmu_temp_files
 from session_ticket_responses import (
     extract_error_payload as _extract_error_payload,
     extract_error_text as _extract_error_text,
@@ -116,7 +87,6 @@ from session_observation_service import (
     record_browser_session_started as _record_browser_session_started_service,
 )
 from runner_runtime import create_fmu_runner_runtime
-from simulation_worker import run_simulation as _run_simulation
 from simulation_request import SimulationRequest
 from config import (
     _default_access_audit_url as _default_access_audit_url_value,
@@ -142,15 +112,6 @@ from proxy_router import create_proxy_router
 FMU_DATA_PATH = CONFIG.fmu_data_path
 _AAS_LINK_DATA_PATH = CONFIG.aas_link_data_path
 _AAS_CATALOG_PATH = CONFIG.aas_catalog_path
-MAX_SIMULATION_TIMEOUT = CONFIG.max_simulation_timeout
-MAX_CONCURRENT_PER_MODEL = CONFIG.max_concurrent_per_model
-MAX_STOP_TIME = CONFIG.max_stop_time
-MIN_STEP_SIZE = CONFIG.min_step_size
-HISTORY_DB_PATH = CONFIG.history_db_path
-WS_SESSION_QUEUE_SIZE = CONFIG.ws_session_queue_size
-WS_HEARTBEAT_SECONDS = CONFIG.ws_heartbeat_seconds
-WS_EXPIRING_NOTICE_SECONDS = CONFIG.ws_expiring_notice_seconds
-WS_ATTACH_GRACE_SECONDS = CONFIG.ws_attach_grace_seconds
 WS_CLEANUP_SECONDS = CONFIG.ws_cleanup_seconds
 INTERNAL_WS_TOKEN = CONFIG.internal_ws_token
 AUTH_SESSION_TICKET_ISSUE_URL = CONFIG.auth_session_ticket_issue_url
@@ -164,7 +125,6 @@ FMU_PROXY_GATEWAY_WS_URL = CONFIG.fmu_proxy_gateway_ws_url
 FMU_PROXY_SIGNING_KEY = CONFIG.fmu_proxy_signing_key
 FMU_BACKEND_MODE = CONFIG.fmu_backend_mode
 FMU_LOCAL_DEV_MODE = CONFIG.fmu_local_dev_mode
-FMU_LOCAL_REALTIME_ENABLED = CONFIG.fmu_local_realtime_enabled
 FMU_LOCAL_EXECUTOR_BASE_URL = CONFIG.fmu_local_executor_base_url
 FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN = CONFIG.fmu_local_executor_internal_token
 FMU_STATION_BASE_URL = CONFIG.fmu_station_base_url
@@ -204,10 +164,6 @@ logger.handlers.clear()
 logger.addHandler(_handler)
 logger.setLevel(logging.INFO)
 
-# ---------------------------------------------------------------------------
-# Concurrency tracking
-# ---------------------------------------------------------------------------
-
 def _normalize_ticket_id(session_ticket: Optional[str]) -> Optional[str]:
     return _normalize_ticket_id_value(session_ticket)
 
@@ -222,83 +178,21 @@ def _allow_proxy_download(key: str) -> bool:
     )
 
 
-def _acquire_slot(lab_id: str):
-    return _runner_runtime.acquire_slot(lab_id, MAX_CONCURRENT_PER_MODEL)
-
-
-def _release_slot(lab_id: str):
-    return _runner_runtime.release_slot(lab_id)
-
-
-# ---------------------------------------------------------------------------
-# Execution pool for simulations
-# ---------------------------------------------------------------------------
-
-def _create_executor():
-    return _create_simulation_executor_impl(logger=logger)
-
-
-_runner_runtime = create_fmu_runner_runtime(
-    create_executor=lambda: None,
-    history_db_path=HISTORY_DB_PATH,
-)
-
-
-async def _initialize_runtime():
-    """Create process-bound resources only when the application starts."""
-    if _runner_runtime.executor is None:
-        _runner_runtime.executor = _create_executor()
-
-
-def _track_running_future(
-    sim_id: str,
-    future: Future,
-    lab_id: str,
-    claims: dict,
-    executor: Optional[ProcessPoolExecutor] = None,
-):
-    _runner_runtime.track_running_future(sim_id, future, lab_id, claims, executor)
-
-
-def _get_running_entry(sim_id: str):
-    return _runner_runtime.get_running_entry(sim_id)
-
-
-def _shutdown_simulation_executor(executor: Any, *, force: bool = False) -> None:
-    return _shutdown_simulation_executor_impl(executor, force=force)
-
-
-def _submit_simulation(*args):
-    return _submit_simulation_impl(
-        _runner_runtime.executor,
-        _run_simulation,
-        _shutdown_simulation_executor,
-        *args,
-        process_pool_type=ProcessPoolExecutor,
-        process_pool_factory=ProcessPoolExecutor,
-    )
+_runner_runtime = create_fmu_runner_runtime()
 
 
 async def _preload_jwks_if_enabled():
     enabled = os.getenv("JWKS_PRELOAD_ON_STARTUP", "true").strip().lower() not in {
         "0", "false", "no", "off",
     }
-    return await _preload_jwks_if_enabled_impl(
-        fetch_jwks=_fetch_jwks,
-        enabled=enabled,
-    )
-
-
-def _finalize_simulation_tracking(sim_id: str, lab_id_fallback: Optional[str] = None):
-    """Remove simulation from registry and release one concurrency slot."""
-    lab_to_release = lab_id_fallback
-    executor = None
-    entry = _runner_runtime.pop_running_entry(sim_id)
-    if entry is not None:
-        _, lab_to_release, _, _, executor = entry
-        _shutdown_simulation_executor(executor)
-    if lab_to_release is not None:
-        _release_slot(lab_to_release)
+    if not enabled:
+        return False
+    try:
+        await _fetch_jwks(force=True)
+    except HTTPException:
+        logger.warning("JWKS preload failed; health will remain DOWN until keys are loaded")
+        return False
+    return True
 
 # ---------------------------------------------------------------------------
 # App
@@ -341,27 +235,8 @@ def _history_enforce_fmu_claim(claims: dict):
     return _enforce_fmu_claim(claims)
 
 
-def _history_ensure_local_execution_backend(feature_name: str):
-    return _ensure_local_execution_backend(feature_name)
-
-
-def _history_get_claim_lab_id(claims: dict):
-    return _get_claim_lab_id(claims)
-
-
-def _history_normalize_lab_id(value):
-    return _normalize_lab_id(value)
-
-
-def _history_claim_reservation_key(claims: dict):
-    return _claim_reservation_key(claims)
-
-
-def _history_db_path():
-    path = _runner_runtime.history_db_path
-    if not path:
-        raise RuntimeError("FMU history database path is not configured")
-    return path
+def _history_reject_unsupported_remote_operation(feature_name: str):
+    return _reject_unsupported_remote_operation_adapter(feature_name, _runner_runtime.backend.mode)
 
 
 def _aas_link_path_for_router(access_key: str) -> Path:
@@ -421,10 +296,8 @@ async def _aas_discover_shells():
 
 async def _aas_sync_runtime_status(lab_id: str):
     """Return bounded runner status to publish in the generated AAS."""
-    health = dict(await _runner_runtime.backend.health())
-    health["activeSimulationCount"] = _runner_runtime.registry.count_for_lab(lab_id)
-    health["maxConcurrentSimulations"] = MAX_CONCURRENT_PER_MODEL
-    return health
+    del lab_id
+    return dict(await _runner_runtime.backend.health())
 
 
 _health_router = create_health_router(
@@ -438,17 +311,6 @@ _catalog_router = create_catalog_router(
     get_authorized_model_metadata=_catalog_get_authorized_model_metadata,
     public_model_metadata=_catalog_public_model_metadata,
     list_authorized_fmu=_catalog_list_authorized_fmu,
-)
-_history_router = create_history_router(
-    verify_jwt=verify_jwt,
-    enforce_fmu_claim=_history_enforce_fmu_claim,
-    ensure_local_execution_backend=_history_ensure_local_execution_backend,
-    get_claim_lab_id=_history_get_claim_lab_id,
-    normalize_lab_id=_history_normalize_lab_id,
-    claim_reservation_key=_history_claim_reservation_key,
-    get_history_db_path=_history_db_path,
-    list_history=_list_history,
-    get_history_result=_get_history_result,
 )
 _aas_link_router = create_aas_link_router(get_link_path=_aas_link_path_for_router)
 _aas_hints_router = create_aas_hints_router(
@@ -475,31 +337,6 @@ _aasx_router = create_aasx_router(
     ),
     serialize_resources=_aas_serialize_resources,
 )
-
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Simulation history persistence (SQLite)
-# ---------------------------------------------------------------------------
-
-async def _init_db():
-    return await _init_history_db(_history_db_path())
-
-
-async def _save_history(sim_id, lab_id, claims, fmu_filename, fmi_type, params, options, result, elapsed):
-    return await _save_history_to_db(
-        _history_db_path(),
-        sim_id=sim_id,
-        lab_id=lab_id,
-        claims=claims,
-        fmu_filename=fmu_filename,
-        fmi_type=fmi_type,
-        params=params,
-        options=options,
-        result=result,
-        elapsed=elapsed,
-        logger=logger,
-    )
 
 
 # ----- helpers -----
@@ -561,36 +398,6 @@ def _enforce_requested_reservation(claims: dict, requested: Optional[str]) -> st
 
 def _coerce_epoch_seconds(value) -> Optional[int]:
     return _coerce_epoch_seconds_value(value)
-
-
-def _effective_timeout_seconds(requested_timeout: int, claims: dict) -> int:
-    return _effective_timeout_seconds_policy(
-        requested_timeout,
-        max_timeout=MAX_SIMULATION_TIMEOUT,
-        exp_ts=_coerce_epoch_seconds(claims.get("exp")),
-        now=time.time(),
-    )
-
-
-def _parse_simulation_options(options: dict, claims: dict) -> SimulationOptions:
-    try:
-        return _parse_simulation_options_impl(
-            options,
-            max_timeout=MAX_SIMULATION_TIMEOUT,
-            max_stop_time=MAX_STOP_TIME,
-            min_step_size=MIN_STEP_SIZE,
-            effective_timeout_seconds=lambda requested: _effective_timeout_seconds(requested, claims),
-        )
-    except SimulationOptionsError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-def _resolve_fmi_type(requested_type: Any, fmu_path: Path) -> Any:
-    return _resolve_fmi_type_impl(
-        requested_type,
-        str(fmu_path),
-        read_model_description,
-    )
 
 
 def _resolve_fmu_path(fmu_filename: str) -> Path:
@@ -673,20 +480,11 @@ def _build_proxy_session_config(
     )
 
 
-def _local_backend_health_payload(lab_id: Optional[str] = None) -> dict:
-    payload = _catalog_local_backend_health_payload(
+def _local_metadata_backend_health_payload(lab_id: Optional[str] = None) -> dict:
+    del lab_id
+    return _catalog_local_metadata_backend_health_payload(
         data_path=FMU_DATA_PATH,
-        executor=_runner_runtime.executor,
     )
-    if lab_id is not None:
-        active = _runner_runtime.registry.count_for_lab(str(lab_id))
-        maximum = max(0, int(MAX_CONCURRENT_PER_MODEL))
-        payload.update({
-            "activeExecutions": active,
-            "maxConcurrentExecutions": maximum,
-            "availableCapacity": max(0, maximum - active),
-        })
-    return payload
 
 
 def _load_local_model_metadata(fmu_filename: str) -> dict:
@@ -717,19 +515,19 @@ def _build_fmu_backend():
         station_base_url=FMU_STATION_BASE_URL,
         station_internal_token=FMU_STATION_INTERNAL_TOKEN,
         station_request_timeout=FMU_STATION_REQUEST_TIMEOUT,
-        health_loader=_local_backend_health_payload,
+        health_loader=_local_metadata_backend_health_payload,
         model_metadata_loader=_load_local_model_metadata,
         list_loader=_list_local_fmus_payload,
         logger=logger,
         station_backend_factory=StationFmuBackend,
-        local_backend_factory=LocalFmuBackend,
+        local_metadata_backend_factory=LocalFmuMetadataBackend,
     )
 
 
 def _get_station_backend() -> StationFmuBackend:
     if isinstance(_runner_runtime.backend, StationFmuBackend):
         return _runner_runtime.backend
-    raise HTTPException(status_code=500, detail="Active FMU backend is not station")
+    raise HTTPException(status_code=503, detail="No remote FMU Executor is configured")
 
 
 def _simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = None) -> dict:
@@ -742,8 +540,14 @@ def _simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = 
     )
 
 
-def _ensure_local_execution_backend(feature_name: str):
-    return _ensure_local_execution_backend_adapter(feature_name, _runner_runtime.backend)
+def _reject_unsupported_remote_operation(feature_name: str):
+    return _reject_unsupported_remote_operation_adapter(feature_name, _runner_runtime.backend.mode)
+
+
+def _get_scoped_station_backend(feature_name: str) -> StationFmuBackend:
+    if isinstance(_runner_runtime.backend, StationFmuBackend):
+        return _runner_runtime.backend
+    _reject_unsupported_remote_operation(feature_name)
 
 
 async def _stream_station_simulation(request: Request, req: SimulationRequest, claims: dict):
@@ -953,10 +757,6 @@ def _extract_response_error_payload(response: httpx.Response) -> dict[str, Any]:
     return _extract_error_payload(response)
 
 
-def _stream_error_payload(exc: Exception, *, sim_id: Optional[str] = None) -> dict[str, Any]:
-    return _build_stream_error_payload(exc, sim_id=sim_id)
-
-
 _runner_runtime.bind_backend(_build_fmu_backend())
 
 
@@ -974,8 +774,7 @@ class _UnsupportedRealtimeManager:
         await websocket.accept()
         message = self.reason or (
             f"Realtime FMU sessions are not wired for FMU_BACKEND_MODE={_runner_runtime.backend.mode}. "
-            "Use FMU_BACKEND_MODE=station in production, or explicitly set "
-            "FMU_BACKEND_MODE=local and FMU_LOCAL_DEV_MODE=true for isolated development."
+            "Configure a remote Station or FMU Executor service."
         )
         await websocket.send_json({
             "type": "error",
@@ -988,27 +787,18 @@ class _UnsupportedRealtimeManager:
 
 _runner_runtime.bind_realtime_manager(_build_realtime_manager_impl(
     backend=_runner_runtime.backend,
-    local_realtime_enabled=FMU_LOCAL_REALTIME_ENABLED,
     logger=logger,
     verify_jwt_token=verify_jwt_token,
     enforce_fmu_claim=_enforce_fmu_claim,
-    resolve_fmu_path=_resolve_fmu_path,
     get_claim_lab_id=_get_claim_lab_id,
     normalize_lab_id=_normalize_lab_id,
     coerce_epoch_seconds=_coerce_epoch_seconds,
-    acquire_slot=_acquire_slot,
-    release_slot=_release_slot,
     redeem_session_ticket=_redeem_session_ticket,
     issue_session_ticket=_issue_session_ticket,
     confirm_session_started=_confirm_fmu_session_started,
-    ws_session_queue_size=WS_SESSION_QUEUE_SIZE,
-    ws_heartbeat_seconds=WS_HEARTBEAT_SECONDS,
-    ws_expiring_notice_seconds=WS_EXPIRING_NOTICE_SECONDS,
-    ws_attach_grace_seconds=WS_ATTACH_GRACE_SECONDS,
     ws_cleanup_seconds=WS_CLEANUP_SECONDS,
     internal_ws_token=INTERNAL_WS_TOKEN,
     ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
-    local_manager_factory=RealtimeWsManager,
     station_manager_factory=StationRealtimeWsProxyManager,
     unsupported_manager_factory=_UnsupportedRealtimeManager,
 ))
@@ -1058,110 +848,6 @@ def _get_realtime_manager_for_route():
 _realtime_router = create_realtime_router(
     get_realtime_manager=_get_realtime_manager_for_route,
 )
-
-
-def _run_enforce_fmu_claim(claims: dict):
-    return _enforce_fmu_claim(claims)
-
-
-def _run_backend_mode() -> str:
-    return _runner_runtime.backend.mode
-
-
-def _run_get_station_backend():
-    return _get_station_backend()
-
-
-def _run_simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = None):
-    return _simulation_request_payload(req, sim_id)
-
-
-def _run_extract_authorization_header(request: Request):
-    return _extract_authorization_header(request)
-
-
-async def _run_record_browser_session_started(*args, **kwargs):
-    return await _record_browser_session_started(*args, **kwargs)
-
-
-def _run_ensure_local_execution_backend(message: str):
-    return _ensure_local_execution_backend(message)
-
-
-def _run_get_claim_lab_id(claims: dict):
-    return _get_claim_lab_id(claims)
-
-
-def _run_normalize_lab_id(value):
-    return _normalize_lab_id(value)
-
-
-def _run_enforce_requested_reservation(claims: dict, requested: Optional[str]):
-    return _enforce_requested_reservation(claims, requested)
-
-
-def _run_resolve_fmu_path(fmu_filename: str):
-    return _resolve_fmu_path(fmu_filename)
-
-
-def _run_parse_simulation_options(options: dict, claims: dict):
-    return _parse_simulation_options(options, claims)
-
-
-def _run_resolve_fmi_type(fmi_type, fmu_path):
-    return _resolve_fmi_type(fmi_type, fmu_path)
-
-
-def _run_acquire_slot(lab_id: str):
-    return _acquire_slot(lab_id)
-
-
-def _run_new_simulation_id() -> str:
-    return uuid4().hex
-
-
-def _run_monotonic() -> float:
-    return time.monotonic()
-
-
-def _run_submit_simulation(*args):
-    return _submit_simulation(*args)
-
-
-def _run_track_running_future(*args, **kwargs):
-    return _track_running_future(*args, **kwargs)
-
-
-def _run_shutdown_executor(executor: Any, *, force: bool = False):
-    return _shutdown_simulation_executor(executor, force=force)
-
-
-def _run_finalize_tracking(*args, **kwargs):
-    return _finalize_simulation_tracking(*args, **kwargs)
-
-
-async def _run_save_history(*args, **kwargs):
-    return await _save_history(*args, **kwargs)
-
-
-async def _stream_station_simulation_for_route(*args, **kwargs):
-    return await _stream_station_simulation(*args, **kwargs)
-
-
-def _stream_iter_result_chunks(simulation_result):
-    return _iter_simulation_result_chunks(simulation_result)
-
-
-def _stream_build_completed_event(**kwargs):
-    return _build_simulation_completed_event(**kwargs)
-
-
-def _stream_error_payload_for_route(exc: Exception, *, sim_id: Optional[str] = None):
-    return _stream_error_payload(exc, sim_id=sim_id)
-
-
-async def _stream_sleep(seconds: float):
-    await asyncio.sleep(seconds)
 
 
 def _proxy_enforce_fmu_claim(claims: dict):
@@ -1258,28 +944,20 @@ _proxy_router = create_proxy_router(
 
 _run_router = create_run_router(
     verify_jwt=verify_jwt,
-    enforce_fmu_claim=_run_enforce_fmu_claim,
-    get_backend_mode=_run_backend_mode,
-    get_station_backend=_run_get_station_backend,
-    simulation_request_payload=_run_simulation_request_payload,
-    extract_authorization_header=_run_extract_authorization_header,
-    record_browser_session_started=_run_record_browser_session_started,
-    ensure_local_execution_backend=_run_ensure_local_execution_backend,
-    get_claim_lab_id=_run_get_claim_lab_id,
-    normalize_lab_id=_run_normalize_lab_id,
-    enforce_requested_reservation=_run_enforce_requested_reservation,
-    resolve_fmu_path=_run_resolve_fmu_path,
-    parse_simulation_options=_run_parse_simulation_options,
-    resolve_fmi_type=_run_resolve_fmi_type,
-    acquire_slot=_run_acquire_slot,
-    new_simulation_id=_run_new_simulation_id,
-    monotonic=_run_monotonic,
-    submit_simulation=_run_submit_simulation,
-    track_running_future=_run_track_running_future,
-    shutdown_executor=_run_shutdown_executor,
-    finalize_tracking=_run_finalize_tracking,
-    save_history=_run_save_history,
-    logger=logger,
+    enforce_fmu_claim=_enforce_fmu_claim,
+    get_station_backend=_get_station_backend,
+    simulation_request_payload=_simulation_request_payload,
+    extract_authorization_header=_extract_authorization_header,
+    record_browser_session_started=_record_browser_session_started,
+    new_simulation_id=lambda: uuid4().hex,
+    reject_unsupported_operation=_reject_unsupported_remote_operation,
+)
+
+_history_router = create_history_router(
+    verify_jwt=verify_jwt,
+    enforce_fmu_claim=_history_enforce_fmu_claim,
+    reject_unsupported_operation=_history_reject_unsupported_remote_operation,
+    get_station_backend=lambda: _get_scoped_station_backend("Simulation history endpoint"),
 )
 
 
@@ -1290,63 +968,20 @@ _run_router = create_run_router(
 _cancel_router = create_cancel_router(
     verify_jwt=verify_jwt,
     enforce_fmu_claim=_enforce_fmu_claim,
-    ensure_local_execution_backend=_ensure_local_execution_backend,
-    get_running_entry=_get_running_entry,
-    get_claim_lab_id=_get_claim_lab_id,
-    normalize_lab_id=_normalize_lab_id,
-    claim_reservation_key=_claim_reservation_key,
-    shutdown_executor=_shutdown_simulation_executor,
-    finalize_tracking=_finalize_simulation_tracking,
+    reject_unsupported_operation=_reject_unsupported_remote_operation,
+    get_station_backend=lambda: _get_scoped_station_backend("Simulation cancel endpoint"),
 )
 
 
 _stream_router = create_stream_router(
     verify_jwt=verify_jwt,
-    enforce_fmu_claim=_run_enforce_fmu_claim,
-    get_backend_mode=_run_backend_mode,
-    stream_station_simulation=_stream_station_simulation_for_route,
-    ensure_local_execution_backend=_run_ensure_local_execution_backend,
-    get_claim_lab_id=_run_get_claim_lab_id,
-    normalize_lab_id=_run_normalize_lab_id,
-    enforce_requested_reservation=_run_enforce_requested_reservation,
-    resolve_fmu_path=_run_resolve_fmu_path,
-    parse_simulation_options=_run_parse_simulation_options,
-    resolve_fmi_type=_run_resolve_fmi_type,
-    new_simulation_id=_run_new_simulation_id,
-    monotonic=_run_monotonic,
-    acquire_slot=_run_acquire_slot,
-    record_browser_session_started=_run_record_browser_session_started,
-    submit_simulation=_run_submit_simulation,
-    track_running_future=_run_track_running_future,
-    shutdown_executor=_run_shutdown_executor,
-    finalize_tracking=_run_finalize_tracking,
-    iter_result_chunks=_stream_iter_result_chunks,
-    build_completed_event=_stream_build_completed_event,
-    stream_error_payload=_stream_error_payload_for_route,
-    save_history=_run_save_history,
-    sleep=_stream_sleep,
-    logger=logger,
+    enforce_fmu_claim=_enforce_fmu_claim,
+    stream_station_simulation=_stream_station_simulation,
 )
 
-# ---------------------------------------------------------------------------
-# Temp file cleanup (FMPy extracts FMUs to tempdir)
-# ---------------------------------------------------------------------------
-
-async def _cleanup_temp_files():
-    """Best-effort cleanup of FMPy temp dirs on shutdown."""
-    removed = cleanup_fmu_temp_files(Path(tempfile.gettempdir()))
-    if removed:
-        logger.info("Cleaned up %d FMPy temp directories", removed)
-
-
 _lifespan = create_lifespan(
-    initialize_runtime=_initialize_runtime,
-    init_db=_init_db,
     preload_jwks=_preload_jwks_if_enabled,
     get_realtime_manager=lambda: _runner_runtime.realtime_manager,
-    get_executor=lambda: _runner_runtime.executor,
-    shutdown_executor=_shutdown_simulation_executor,
-    cleanup_temp_files=_cleanup_temp_files,
 )
 
 

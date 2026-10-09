@@ -72,7 +72,7 @@ secure_gateway_state() {
             return 1
         }
     fi
-    for state_dir in certs blockchain-data fmu-access-state ops-data secrets; do
+    for state_dir in certs blockchain-data fmu-access-state fmu-executor-state ops-data secrets; do
         if [ -d "$state_dir" ]; then
             chmod 700 "$state_dir" || {
                 echo "Unable to restrict state directory permissions: $state_dir" >&2
@@ -173,6 +173,7 @@ sync_compose_secrets() {
     write_compose_secret aas_service_token AAS_SERVICE_TOKEN "$host_uid" "$host_gid"
     write_compose_secret lab_admin_backend_token LAB_ADMIN_BACKEND_TOKEN "$host_uid" "$host_gid"
     write_compose_secret fmu_station_internal_token FMU_STATION_INTERNAL_TOKEN "$host_uid" "$host_gid"
+    write_compose_secret fmu_local_executor_token FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN "$host_uid" "$host_gid"
     write_compose_secret auth_session_ticket_internal_token AUTH_SESSION_TICKET_INTERNAL_TOKEN "$host_uid" "$host_gid"
     write_compose_secret session_observer_signing_secret SESSION_OBSERVER_SIGNING_SECRET "$host_uid" "$host_gid"
     write_compose_secret fmu_proxy_signing_key FMU_PROXY_SIGNING_KEY "$host_uid" "$host_gid"
@@ -821,10 +822,15 @@ update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "$fmu_local_
 # a second source checkout. Keep any explicit operator override.
 fmu_executor_image="$(get_env_default "FMU_EXECUTOR_IMAGE" "$ROOT_ENV_FILE")"
 if [ -z "$fmu_executor_image" ]; then
-    fmu_executor_image="ghcr.io/decentralabscom/fmu-executor:0.1.1"
+    fmu_executor_image="ghcr.io/decentralabscom/fmu-executor:0.2.1"
 fi
 update_env_var "$ROOT_ENV_FILE" "FMU_EXECUTOR_IMAGE" "$fmu_executor_image"
 remove_env_var "$ROOT_ENV_FILE" "FMU_EXECUTOR_SOURCE_PATH"
+remove_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED"
+remove_env_var "$ROOT_ENV_FILE" "FMU_MAX_SIMULATION_TIMEOUT"
+remove_env_var "$ROOT_ENV_FILE" "FMU_WORKER_ADDRESS_SPACE_LIMIT"
+remove_env_var "$ROOT_ENV_FILE" "FMU_MAX_CONCURRENT_PER_MODEL"
+remove_env_var "$ROOT_ENV_FILE" "HISTORY_DB_PATH"
 
 echo
 echo "Lab Manager Backend Allowlist"
@@ -1194,7 +1200,6 @@ if [ "$fmu_runner_enabled" = "true" ]; then
             fmu_runner_profile="fmu-local-dev"
             update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "local"
             update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "true"
-            update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED" "false"
             echo "   * The local Gateway facade will pull the versioned FMU Executor image (no second checkout required)."
             echo "   * Batch, streaming and realtime execution run in the Executor container."
             echo "   * The local FMU runner will restart automatically after a Docker or host restart."
@@ -1204,7 +1209,6 @@ if [ "$fmu_runner_enabled" = "true" ]; then
             fmu_runner_profile="fmu-runner"
             update_env_var "$ROOT_ENV_FILE" "FMU_BACKEND_MODE" "station"
             update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"
-            update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED" "false"
             echo "   * Lab Station FMU execution selected."
             echo "   * The production FMU runner will restart automatically after a Docker or host restart."
             ;;
@@ -1220,7 +1224,6 @@ else
     # disabled. The local profile also hard-codes this guard, but clearing it
     # prevents stale .env state from being mistaken for an active deployment.
     update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_DEV_MODE" "false"
-    update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_REALTIME_ENABLED" "false"
     echo "   * FMU runner disabled. Startup will use '--scale fmu-runner=0'."
     echo "   * No FMU runner container will be configured."
 fi
@@ -1343,7 +1346,7 @@ align_state_ownership() {
         return 1
     fi
     local state_path
-    for state_path in certs blockchain-data fmu-access-state lab-content ops-data; do
+    for state_path in certs blockchain-data fmu-access-state fmu-executor-state lab-content ops-data; do
         if [ -e "$state_path" ] && ! chown -R "${host_uid}:${host_gid}" "$state_path" 2>/dev/null; then
             echo "Unable to assign ${host_uid}:${host_gid} to ${state_path}." >&2
             return 1
@@ -1382,6 +1385,7 @@ mkdir -p blockchain-data
 mkdir -p fmu-access-state
 mkdir -p lab-content
 mkdir -p fmu-data
+mkdir -p fmu-executor-state
 mkdir -p fmu-proxy-runtime/binaries/linux64
 mkdir -p fmu-proxy-runtime/binaries/win64
 mkdir -p fmu-proxy-runtime/binaries/darwin64
@@ -1390,6 +1394,7 @@ mkdir -p ops-data/winrm-certificates
 chmod 700 certs 2>/dev/null || true
 chmod 700 blockchain-data 2>/dev/null || true
 chmod 700 fmu-access-state 2>/dev/null || true
+chmod 700 fmu-executor-state 2>/dev/null || true
 chmod 755 lab-content 2>/dev/null || true
 chmod 755 fmu-data 2>/dev/null || true
 chmod 755 fmu-proxy-runtime 2>/dev/null || true

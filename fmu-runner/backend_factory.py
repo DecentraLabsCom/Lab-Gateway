@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fmu_backend import LocalFmuBackend, StationFmuBackend
+from fmu_backend import LocalFmuMetadataBackend, StationFmuBackend
 
 
 def build_fmu_backend(
@@ -19,9 +19,9 @@ def build_fmu_backend(
     list_loader: Any,
     logger: Any,
     station_backend_factory: Any = StationFmuBackend,
-    local_backend_factory: Any = LocalFmuBackend,
+    local_metadata_backend_factory: Any = LocalFmuMetadataBackend,
 ) -> Any:
-    """Select the Station service, local Executor service or guarded test backend."""
+    """Select the remote Station/Executor service or local metadata reader."""
     if mode == "station":
         logger.info("FMU backend mode selected: station")
         return station_backend_factory(
@@ -40,22 +40,21 @@ def build_fmu_backend(
 
     if mode != "local":
         logger.error(
-            "Unknown FMU_BACKEND_MODE=%s; local execution remains disabled",
+            "Unknown FMU_BACKEND_MODE=%s; remote FMU execution is unavailable",
             mode,
         )
 
     if mode == "local" and not local_dev_mode:
         logger.error(
             "FMU_BACKEND_MODE=local requires FMU_LOCAL_DEV_MODE=true; "
-            "native FMU execution is disabled",
+            "configure a remote Executor to enable simulation requests",
         )
 
-    logger.info("FMU backend mode selected: local")
-    return local_backend_factory(
+    logger.info("FMU backend mode selected: local metadata only")
+    return local_metadata_backend_factory(
         health_loader=health_loader,
         model_metadata_loader=model_metadata_loader,
         list_loader=list_loader,
-        allow_execution=mode == "local" and local_dev_mode,
     )
 
 

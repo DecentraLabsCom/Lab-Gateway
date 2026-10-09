@@ -54,16 +54,6 @@ class FmuRunnerConfig:
     fmu_data_path: str
     aas_link_data_path: Path
     aas_catalog_path: Path
-    max_simulation_timeout: int
-    max_concurrent_per_model: int
-    fmu_worker_address_space_limit: int
-    max_stop_time: float
-    min_step_size: float
-    history_db_path: str
-    ws_session_queue_size: int
-    ws_heartbeat_seconds: float
-    ws_expiring_notice_seconds: int
-    ws_attach_grace_seconds: int
     ws_cleanup_seconds: float
     internal_ws_token: str
     auth_session_ticket_issue_url: str
@@ -77,7 +67,6 @@ class FmuRunnerConfig:
     fmu_proxy_signing_key: str
     fmu_backend_mode: str
     fmu_local_dev_mode: bool
-    fmu_local_realtime_enabled: bool
     fmu_local_executor_base_url: str
     fmu_local_executor_internal_token: str
     fmu_station_base_url: str
@@ -100,19 +89,6 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
         fmu_data_path=values.get("FMU_DATA_PATH", "/app/fmu-data"),
         aas_link_data_path=Path(values.get("AAS_LINK_DATA_PATH", "/app/data/aas-links")),
         aas_catalog_path=Path(values.get("AAS_CATALOG_PATH", "/app/data/aasx")),
-        max_simulation_timeout=int(values.get("MAX_SIMULATION_TIMEOUT", "300")),
-        max_concurrent_per_model=int(values.get("MAX_CONCURRENT_PER_MODEL", "10")),
-        fmu_worker_address_space_limit=int(values.get(
-            "FMU_WORKER_ADDRESS_SPACE_LIMIT",
-            str(2 * 1024 ** 3),
-        )),
-        max_stop_time=float(values.get("MAX_STOP_TIME", "86400")),
-        min_step_size=float(values.get("MIN_STEP_SIZE", "1e-6")),
-        history_db_path=values.get("HISTORY_DB_PATH", "/app/data/history.db"),
-        ws_session_queue_size=int(values.get("WS_SESSION_QUEUE_SIZE", "64")),
-        ws_heartbeat_seconds=float(values.get("WS_HEARTBEAT_SECONDS", "15")),
-        ws_expiring_notice_seconds=int(values.get("WS_EXPIRING_NOTICE_SECONDS", "60")),
-        ws_attach_grace_seconds=int(values.get("WS_ATTACH_GRACE_SECONDS", "120")),
         ws_cleanup_seconds=float(values.get("WS_CLEANUP_SECONDS", "15")),
         internal_ws_token=_env_or_secret_file("FMU_INTERNAL_WS_TOKEN", environ=values),
         auth_session_ticket_issue_url=values.get(
@@ -133,7 +109,6 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
         fmu_proxy_signing_key=_env_or_secret_file("FMU_PROXY_SIGNING_KEY", environ=values),
         fmu_backend_mode=values.get("FMU_BACKEND_MODE", "station").strip().lower(),
         fmu_local_dev_mode=_flag(values, "FMU_LOCAL_DEV_MODE"),
-        fmu_local_realtime_enabled=_flag(values, "FMU_LOCAL_REALTIME_ENABLED"),
         fmu_local_executor_base_url=values.get("FMU_LOCAL_EXECUTOR_BASE_URL", "").strip(),
         fmu_local_executor_internal_token=_env_or_secret_file(
             "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN", environ=values,

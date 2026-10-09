@@ -380,9 +380,14 @@ if "!fmu_local_executor_internal_token!"=="" (
 )
 call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "!fmu_local_executor_internal_token!"
 call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_EXECUTOR_IMAGE" fmu_executor_image
-if not defined fmu_executor_image set "fmu_executor_image=ghcr.io/decentralabscom/fmu-executor:0.1.1"
+if not defined fmu_executor_image set "fmu_executor_image=ghcr.io/decentralabscom/fmu-executor:0.2.1"
 call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_EXECUTOR_IMAGE" "!fmu_executor_image!"
 call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_EXECUTOR_SOURCE_PATH"
+call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED"
+call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_MAX_SIMULATION_TIMEOUT"
+call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_WORKER_ADDRESS_SPACE_LIMIT"
+call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_MAX_CONCURRENT_PER_MODEL"
+call :RemoveEnv "%ROOT_ENV_FILE%" "HISTORY_DB_PATH"
 echo.
 
 echo Lab Manager Backend Allowlist
@@ -780,7 +785,6 @@ if "!fmu_runner_enabled!"=="1" (
         set "fmu_runner_profile=fmu-local-dev"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "local"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "true"
-        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "false"
         echo    * The local Gateway facade will pull the versioned FMU Executor image ^(no second checkout required^).
         echo    * Batch, streaming and realtime execution run in the Executor container.
         echo    * The local FMU runner will restart automatically after a Docker or host restart.
@@ -789,7 +793,6 @@ if "!fmu_runner_enabled!"=="1" (
         set "fmu_runner_profile=fmu-runner"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_BACKEND_MODE" "station"
         call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"
-        call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "false"
         echo    * Lab Station FMU execution selected.
         echo    * The production FMU runner will restart automatically after a Docker or host restart.
     ) else (
@@ -804,7 +807,6 @@ if "!fmu_runner_enabled!"=="1" (
     rem The local profile also hard-codes this guard, but clearing stale state
     rem keeps .env and the selected deployment mode consistent.
     call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_DEV_MODE" "false"
-    call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED" "false"
     echo    * FMU runner disabled. Startup will use '--scale fmu-runner=0'.
     echo    * No FMU runner container will be configured.
 )
@@ -927,6 +929,7 @@ if not exist blockchain-data mkdir blockchain-data
 if not exist fmu-access-state mkdir fmu-access-state
 if not exist lab-content mkdir lab-content
 if not exist fmu-data mkdir fmu-data
+if not exist fmu-executor-state mkdir fmu-executor-state
 if not exist fmu-proxy-runtime mkdir fmu-proxy-runtime
 if not exist fmu-proxy-runtime\binaries mkdir fmu-proxy-runtime\binaries
 if not exist fmu-proxy-runtime\binaries\linux64 mkdir fmu-proxy-runtime\binaries\linux64
@@ -942,6 +945,7 @@ call :SecureEnvFile "%BLOCKCHAIN_ENV_FILE%"
 call :SecureSecretTree "certs"
 call :SecureSecretTree "blockchain-data"
 call :SecureSecretTree "fmu-access-state"
+call :SecureSecretTree "fmu-executor-state"
 call :SecureSecretTree "ops-data"
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "scripts\Validate-GatewayEnv.ps1" -EnvPath "%ROOT_ENV_FILE%"
 if errorlevel 1 exit /b 1

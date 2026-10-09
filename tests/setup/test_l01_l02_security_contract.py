@@ -10,7 +10,6 @@ def test_gateway_error_contract_does_not_return_exception_text():
     auth = (ROOT / "fmu-runner" / "auth.py").read_text(encoding="utf-8")
     backend = (ROOT / "fmu-runner" / "fmu_backend.py").read_text(encoding="utf-8")
     main = (ROOT / "fmu-runner" / "main.py").read_text(encoding="utf-8")
-    realtime = (ROOT / "fmu-runner" / "realtime_ws.py").read_text(encoding="utf-8")
     station = (ROOT / "fmu-runner" / "station_ws_proxy.py").read_text(encoding="utf-8")
 
     assert "def internal_error_response" in app_hooks
@@ -21,7 +20,6 @@ def test_gateway_error_contract_does_not_return_exception_text():
     assert 'detail=f"Invalid token: {exc}"' not in auth
     assert 'detail=f"Station backend unavailable: {exc}"' not in backend
     assert 'detail=f"Simulation error: {exc}"' not in main
-    assert 'message=str(exc)' not in realtime
     assert 'message=str(exc.detail)' not in station
     assert 'message=str(detail)' not in station
 

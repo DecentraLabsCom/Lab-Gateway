@@ -165,46 +165,4 @@ if [[ "$observation_count" != "1" ]]; then
 fi
 echo "Guacamole history produced a durable session observation."
 
-echo "Checking the production FMU runner queue under backpressure..."
-compose exec -T fmu-runner python - <<'PY'
-import asyncio
-from pathlib import Path
-from types import SimpleNamespace
-
-from realtime_ws import RealtimeWsManager, _RealtimeSession, _WsConnection
-
-
-class SlowWebSocket:
-    async def send_json(self, _payload):
-        await asyncio.sleep(60)
-
-
-async def main():
-    manager = RealtimeWsManager(
-        logger=SimpleNamespace(error=lambda *args, **kwargs: None),
-        verify_jwt_token=None,
-        enforce_fmu_claim=lambda claims: None,
-        resolve_fmu_path=lambda access_key: Path('/tmp/' + access_key),
-        get_claim_lab_id=lambda claims: 'resilience-lab',
-        normalize_lab_id=lambda value: str(value),
-        coerce_epoch_seconds=lambda value: int(value) if value is not None else None,
-        acquire_slot=lambda lab_id: None,
-        release_slot=lambda lab_id: None,
-    )
-    claims = {'sub': 'resilience-user', 'labId': 'resilience-lab', 'accessKey': 'test.fmu', 'reservationKey': 'resilience-reservation', 'pucHash': 'resilience-puc', 'exp': 4102444800}
-    session = _RealtimeSession(manager, 'resilience-session', claims, Path('/tmp/test.fmu'))
-    connection = _WsConnection(SlowWebSocket(), queue_size=2)
-    session.connection = connection
-    await session._enqueue_event({'type': 'event', 'sequence': 1})
-    await session._enqueue_event({'type': 'event', 'sequence': 2})
-    await session._enqueue_event({'type': 'event', 'sequence': 3})
-    values = [connection.queue.get_nowait()['sequence'] for _ in range(2)]
-    assert values == [2, 3], values
-    assert session._pending_queue_drops == 1, session._pending_queue_drops
-
-
-asyncio.run(main())
-PY
-echo "Production FMU runner retained the newest WebSocket events and counted the dropped oldest event."
-
 echo "Real Compose resilience checks passed."

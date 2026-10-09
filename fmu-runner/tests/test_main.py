@@ -17,7 +17,6 @@ from collections import Counter, defaultdict, deque
 from xml.etree import ElementTree as ET
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from concurrent.futures import Future, ProcessPoolExecutor
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -32,9 +31,6 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
 from config import CONFIG
 
 app = runner_application.app
-_init_db = runner_application._init_db
-_effective_timeout_seconds = runner_application._effective_timeout_seconds
-MAX_SIMULATION_TIMEOUT = runner_application.MAX_SIMULATION_TIMEOUT
 _build_proxy_model_description_xml = runner_application._build_proxy_model_description_xml
 _model_metadata_from_model_description = runner_application._model_metadata_from_model_description
 _issue_session_ticket = runner_application._issue_session_ticket
@@ -43,7 +39,6 @@ _confirm_fmu_session_started = runner_application._confirm_fmu_session_started
 _record_browser_session_started = runner_application._record_browser_session_started
 _preload_jwks_if_enabled = runner_application._preload_jwks_if_enabled
 _derive_gateway_ws_url = runner_application._derive_gateway_ws_url
-_shutdown_simulation_executor = runner_application._shutdown_simulation_executor
 _resolve_fmu_path = runner_application._resolve_fmu_path
 _enforce_fmu_claim = runner_application._enforce_fmu_claim
 
@@ -137,28 +132,6 @@ def test_describe_scope_without_provider_purpose_still_requires_reservation_clai
         _enforce_fmu_claim(claims, allow_provider_describe=True)
 
     assert error.value.status_code == 403
-
-
-def test_native_worker_is_killed_when_isolated_executor_is_forced_to_stop():
-    """Cancellation must terminate the process, not only cancel its Future."""
-    killed = []
-
-    class FakeProcess:
-        def is_alive(self):
-            return True
-
-        def kill(self):
-            killed.append(True)
-
-    executor = object.__new__(ProcessPoolExecutor)
-    setattr(executor, "_processes", {1: FakeProcess()})
-    shutdown_calls = []
-    setattr(executor, "shutdown", lambda **kwargs: shutdown_calls.append(kwargs))
-
-    _shutdown_simulation_executor(executor, force=True)
-
-    assert killed == [True]
-    assert shutdown_calls == [{"wait": False, "cancel_futures": True}]
 
 
 @pytest.fixture(autouse=True)
@@ -1000,344 +973,6 @@ def test_validate_proxy_generation_rejects_dimensioned_clock_for_fmi3_proxy():
     assert "Clock" in exc.value.detail
 
 
-# ─── /api/v1/simulations/run ────────────────────────────────────────
-
-import numpy as np
-
-
-def _make_sim_result():
-    """Create a fake numpy structured array like FMPy returns."""
-    dt = np.dtype([("time", float), ("position", float), ("velocity", float)])
-    arr = np.array([(0.0, 0.0, 0.0), (0.1, 0.15, 0.98), (0.2, 0.35, 1.1)], dtype=dt)
-    return arr
-
-
-def _make_run_result(fmi_type="CoSimulation"):
-    """Return the dict that _run_simulation would produce."""
-    return {
-        "time": [0.0, 0.1, 0.2],
-        "outputs": {"position": [0.0, 0.15, 0.35], "velocity": [0.0, 0.98, 1.1]},
-        "outputVariables": ["position", "velocity"],
-    }
-
-
-def _make_future(result):
-    """Wrap a value in a resolved Future so the executor mock works."""
-    from concurrent.futures import Future
-    f = Future()
-    f.set_result(result)
-    return f
-
-
-def _make_delayed_future(result, delay_sec=0.1):
-    """Return a Future that resolves after *delay_sec* seconds."""
-    from concurrent.futures import Future
-    from threading import Timer
-    f = Future()
-    def _set_result_if_pending():
-        if not f.done():
-            f.set_result(result)
-    Timer(delay_sec, _set_result_if_pending).start()
-    return f
-
-
-def test_worker_address_space_limit_leaves_native_loader_headroom():
-    assert CONFIG.fmu_worker_address_space_limit == 2 * 1024 ** 3
-
-
-def test_effective_timeout_caps_to_configured_max_without_exp():
-    assert _effective_timeout_seconds(MAX_SIMULATION_TIMEOUT + 100, {}) == MAX_SIMULATION_TIMEOUT
-
-
-def test_effective_timeout_caps_to_jwt_exp():
-    with patch("runner_application.time.time", return_value=1000.0):
-        assert _effective_timeout_seconds(120, {"exp": 1005}) == 5
-
-
-def test_effective_timeout_rejects_expired_jwt():
-    with patch("runner_application.time.time", return_value=1000.0):
-        with pytest.raises(HTTPException) as exc:
-            _effective_timeout_seconds(120, {"exp": 999})
-        assert exc.value.status_code == 401
-
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application.read_model_description")
-@patch("runner_application._runner_runtime.execution.executor")
-def test_run_executes_simulation(mock_exec, mock_md, mock_resolve, _stub_browser_session_observation):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-    md_obj = MagicMock(); md_obj.coSimulation = True; md_obj.modelExchange = False
-    mock_md.return_value = md_obj
-    mock_exec.submit.return_value = _make_future(_make_run_result())
-
-    async def _assert_worker_not_started_yet(*_args, **_kwargs):
-        assert not mock_exec.submit.called
-        return True
-
-    _stub_browser_session_observation.side_effect = _assert_worker_not_started_yet
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {"mass": 1.5},
-        "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
-    })
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "completed"
-    assert "time" in data
-    assert "outputs" in data
-    assert "position" in data["outputs"]
-    assert "simId" in data
-    assert data["fmiType"] == "CoSimulation"
-
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application.read_model_description")
-@patch("runner_application._runner_runtime.execution.executor")
-def test_run_still_observes_when_worker_submission_fails(
-    mock_exec,
-    mock_md,
-    mock_resolve,
-    _stub_browser_session_observation,
-):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-    md_obj = MagicMock(); md_obj.coSimulation = True; md_obj.modelExchange = False
-    mock_md.return_value = md_obj
-    mock_exec.submit.side_effect = RuntimeError("worker unavailable")
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {},
-        "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
-    })
-
-    assert response.status_code == 500
-    _stub_browser_session_observation.assert_awaited_once()
-
-
-@patch("runner_application._resolve_fmu_path")
-def test_run_rejects_invalid_time_range(mock_resolve):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {},
-        "options": {"startTime": 10, "stopTime": 5, "stepSize": 0.1},
-    })
-
-    assert response.status_code == 400
-    assert "stopTime" in response.json()["detail"]
-
-
-@patch("runner_application._resolve_fmu_path")
-def test_run_rejects_zero_step_size(mock_resolve):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {},
-        "options": {"startTime": 0, "stopTime": 10, "stepSize": 0},
-    })
-
-    assert response.status_code == 400
-    assert "stepSize" in response.json()["detail"]
-
-
-@patch("runner_application._resolve_fmu_path")
-def test_run_rejects_non_positive_timeout(mock_resolve):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {},
-        "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.1, "timeout": 0},
-    })
-
-    assert response.status_code == 400
-    assert "timeout" in response.json()["detail"]
-
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application.read_model_description")
-@patch("runner_application._runner_runtime.execution.executor")
-def test_run_times_out_when_exceeding_timeout(mock_exec, mock_md, mock_resolve):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-    md_obj = MagicMock(); md_obj.coSimulation = True; md_obj.modelExchange = False
-    mock_md.return_value = md_obj
-    mock_exec.submit.return_value = _make_delayed_future(_make_run_result(), delay_sec=1.5)
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {"mass": 1.5},
-        "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1, "timeout": 1},
-    })
-
-    assert response.status_code == 504
-    assert "timed out" in response.json()["detail"]
-    # Allow deferred cleanup callback to release the concurrency slot.
-    time.sleep(0.7)
-
-
-def test_run_rejects_non_fmu_resource_type():
-    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(resourceType="lab")
-    try:
-        response = client.post("/api/v1/simulations/run", json={
-            "labId": "1",
-            "parameters": {},
-            "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.1},
-        })
-        assert response.status_code == 403
-        assert "FMU endpoints" in response.json()["detail"]
-    finally:
-        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
-
-
-def test_run_rejects_missing_access_key():
-    """When JWT has no accessKey, fail before selecting a model."""
-    # Temporarily override with claims missing accessKey
-    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(accessKey=None)
-    try:
-        response = client.post("/api/v1/simulations/run", json={
-            "labId": "1",
-            "parameters": {},
-            "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.1},
-        })
-        assert response.status_code == 403
-        assert "required FMU claims" in response.json()["detail"]
-    finally:
-        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
-
-
-# ─── Concurrency ────────────────────────────────────────────────────
-
-
-@patch("runner_application._resolve_fmu_path")
-def test_run_rejects_lab_id_mismatch(mock_resolve):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(labId="99", accessKey="test.fmu")
-    try:
-        response = client.post("/api/v1/simulations/run", json={
-            "labId": "1",
-            "parameters": {},
-            "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.1},
-        })
-        assert response.status_code == 403
-        assert "labId" in response.json()["detail"]
-    finally:
-        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
-
-@patch("runner_application.MAX_CONCURRENT_PER_MODEL", 0)
-@patch("runner_application._resolve_fmu_path")
-def test_run_returns_429_when_concurrency_exceeded(mock_resolve):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {},
-        "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.1},
-    })
-
-    assert response.status_code == 429
-    assert "Concurrency limit" in response.json()["detail"]
-
-
-# ─── NDJSON Streaming ─────────────────────────────────────────
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application._runner_runtime.execution.executor")
-@patch("runner_application.read_model_description")
-def test_stream_returns_ndjson_events(mock_md, mock_exec, mock_resolve):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-    mock_md_obj = MagicMock()
-    mock_md_obj.coSimulation = True
-    mock_md_obj.modelExchange = False
-    mock_md.return_value = mock_md_obj
-    mock_exec.submit.return_value = _make_future(_make_run_result())
-
-    response = client.post("/api/v1/simulations/stream", json={
-        "labId": 1,
-        "parameters": {"mass": 1.5},
-        "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
-    })
-
-    assert response.status_code == 200
-    assert "application/x-ndjson" in response.headers.get("content-type", "")
-
-    lines = [json.loads(line) for line in response.text.strip().split("\n") if line.strip()]
-    types = [event["type"] for event in lines]
-    assert "started" in types
-    assert "completed" in types
-    # At least one data chunk
-    assert "data" in types
-    # Started message has simId
-    started = next(l for l in lines if l["type"] == "started")
-    assert "simId" in started
-
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application.read_model_description")
-@patch("runner_application._runner_runtime.execution.executor")
-def test_stream_logs_worker_exception_details(mock_exec, mock_md, mock_resolve, caplog):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-    mock_md_obj = MagicMock()
-    mock_md_obj.coSimulation = True
-    mock_md_obj.modelExchange = False
-    mock_md.return_value = mock_md_obj
-
-    failed = Future()
-    failed.set_exception(RuntimeError("native FMU load failed"))
-    mock_exec.submit.return_value = failed
-
-    with caplog.at_level("ERROR", logger="fmu-runner"):
-        response = client.post("/api/v1/simulations/stream", json={
-            "labId": 1,
-            "parameters": {},
-            "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
-        })
-
-    assert response.status_code == 200
-    assert "native FMU load failed" in caplog.text
-    assert any(record.exc_info for record in caplog.records if record.name == "fmu-runner")
-
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application.read_model_description")
-@patch("runner_application._runner_runtime.execution.executor")
-def test_stream_preserves_safe_structured_error_details(mock_exec, mock_md, mock_resolve):
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-    mock_md_obj = MagicMock()
-    mock_md_obj.coSimulation = True
-    mock_md_obj.modelExchange = False
-    mock_md.return_value = mock_md_obj
-
-    async def fail_session_observation(*_args, **_kwargs):
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "SESSION_OBSERVATION_UNAVAILABLE",
-                "error": "ACCESS_AUDIT_URL is not configured",
-            },
-        )
-
-    with patch("runner_application._record_browser_session_started", fail_session_observation):
-        response = client.post("/api/v1/simulations/stream", json={
-            "labId": 1,
-            "parameters": {},
-            "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
-        })
-
-    assert response.status_code == 200
-    events = [json.loads(line) for line in response.text.strip().split("\n") if line.strip()]
-    assert len(events) == 1
-    assert events[0] == {
-        "type": "error",
-        "simId": events[0]["simId"],
-        "code": "SESSION_OBSERVATION_UNAVAILABLE",
-        "detail": "ACCESS_AUDIT_URL is not configured",
-    }
-
-
 # --- Simulation History ---
 def test_upload_endpoint_removed():
     """FMU upload is intentionally not exposed from Marketplace/Gateway."""
@@ -1696,16 +1331,6 @@ def test_proxy_download_rate_limited(mock_resolve, mock_issue_ticket, mock_read_
     finally:
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
 
-def test_history_empty_initially(tmp_path, monkeypatch):
-    monkeypatch.setattr(runner_application._runner_runtime, "history_db_path", str(tmp_path / "test.db"))
-    # Ensure schema exists
-    asyncio.run(_init_db())
-
-    response = client.get("/api/v1/simulations/history")
-    assert response.status_code == 200
-    assert response.json()["simulations"] == []
-
-
 def _iter_registered_routes(routes):
     """Flatten FastAPI's route wrappers across supported FastAPI versions."""
     for route in routes:
@@ -1744,56 +1369,6 @@ def test_aas_routes_are_registered_once_and_openapi_is_warning_free():
     ]
     assert duplicate_warnings == []
 
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application._runner_runtime.execution.executor")
-@patch("runner_application.read_model_description")
-def test_run_persists_to_history(mock_md, mock_exec, mock_resolve, tmp_path, monkeypatch):
-    """After a successful run, the simulation appears in the history endpoint."""
-    mock_resolve.return_value = "/fake/path/spring.fmu"
-    mock_md_obj = MagicMock()
-    mock_md_obj.coSimulation = True
-    mock_md_obj.modelExchange = False
-    mock_md.return_value = mock_md_obj
-    mock_exec.submit.return_value = _make_future(_make_run_result())
-
-    db_path = str(tmp_path / "hist.db")
-    monkeypatch.setattr(runner_application._runner_runtime, "history_db_path", db_path)
-    asyncio.run(_init_db())
-
-    # Run a simulation
-    run_resp = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {"mass": 1.5},
-        "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.1},
-    })
-    assert run_resp.status_code == 200
-    sim_id = run_resp.json()["simId"]
-
-    # Check history
-    hist_resp = client.get("/api/v1/simulations/history?labId=1")
-    assert hist_resp.status_code == 200
-    sims = hist_resp.json()["simulations"]
-    assert len(sims) >= 1
-    assert sims[0]["id"] == sim_id
-
-    # Retrieve full result
-    result_resp = client.get(f"/api/v1/simulations/{sim_id}/result")
-    assert result_resp.status_code == 200
-    assert "result" in result_resp.json()
-
-    # The same lab and reservation are still isolated by pseudonymous user.
-    app.dependency_overrides[_original_verify_jwt] = _fake_jwt(pucHash="puc-other-user")
-    try:
-        other_history = client.get("/api/v1/simulations/history?labId=1")
-        assert other_history.status_code == 200
-        assert other_history.json()["simulations"] == []
-        assert client.get(f"/api/v1/simulations/{sim_id}/result").status_code == 404
-    finally:
-        app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
-
-
-# ─── Model Exchange ───────────────────────────────────────────
 
 class MockModelExchangeDescription:
     """Fake FMPy model description for a ModelExchange-only FMU."""
@@ -1836,51 +1411,4 @@ def test_describe_model_exchange(mock_resolve, mock_read):
         assert data["supportsModelExchange"] is True
     finally:
         app.dependency_overrides[_original_verify_jwt] = _fake_jwt()
-
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application._runner_runtime.execution.executor")
-@patch("runner_application.read_model_description", return_value=MockModelExchangeDescription())
-def test_run_model_exchange_auto_detect(mock_md, mock_exec, mock_resolve):
-    """When fmiType is not specified, auto-detect from model description."""
-    mock_resolve.return_value = "/fake/path/pendulum.fmu"
-    mock_exec.submit.return_value = _make_future(_make_run_result("ModelExchange"))
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {"theta": 0.5},
-        "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.01},
-    })
-    assert response.status_code == 200
-    data = response.json()
-    assert data["fmiType"] == "ModelExchange"
-    # Verify _run_simulation was called with ModelExchange fmi_type
-    call_args = mock_exec.submit.call_args
-    # positional args: _run_simulation, fmu_path, start, stop, step, params, timeout, fmi_type, solver
-    assert call_args[0][7] == "ModelExchange"
-
-
-@patch("runner_application._resolve_fmu_path")
-@patch("runner_application._runner_runtime.execution.executor")
-@patch("runner_application.read_model_description", return_value=MockModelExchangeDescription())
-def test_run_explicit_fmi_type_and_solver(mock_md, mock_exec, mock_resolve):
-    """Client can explicitly set fmiType and solver in options."""
-    mock_resolve.return_value = "/fake/path/pendulum.fmu"
-    mock_exec.submit.return_value = _make_future(_make_run_result("ModelExchange"))
-
-    response = client.post("/api/v1/simulations/run", json={
-        "labId": "1",
-        "parameters": {},
-        "options": {
-            "startTime": 0, "stopTime": 1, "stepSize": 0.01,
-            "fmiType": "ModelExchange", "solver": "CVode",
-        },
-    })
-    assert response.status_code == 200
-    assert response.json()["fmiType"] == "ModelExchange"
-
-
-
-
-
 

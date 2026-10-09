@@ -347,7 +347,6 @@ su propio perfil:
 FMU_RUNNER_ENABLED=true
 FMU_BACKEND_MODE=station
 FMU_LOCAL_DEV_MODE=false
-FMU_LOCAL_REALTIME_ENABLED=false
 FMU_STATION_BASE_URL=https://station.internal.example
 FMU_STATION_INTERNAL_TOKEN=<station-internal-token>
 ```
@@ -357,7 +356,11 @@ docker compose --profile fmu-runner up -d --build
 ```
 
 Para ejecución FMU local exclusiva de desarrollo usa `fmu-local-dev`; nunca
-arranques los dos perfiles FMU a la vez. El perfil descarga la imagen versionada del FMU-Executor configurada por `FMU_EXECUTOR_IMAGE` (por defecto `ghcr.io/decentralabscom/fmu-executor:0.1.1`) y delega allí las simulaciones. No hace falta clonar otro repositorio:
+arranques los dos perfiles FMU a la vez. El perfil descarga la imagen versionada del FMU-Executor configurada por `FMU_EXECUTOR_IMAGE` (por defecto `ghcr.io/decentralabscom/fmu-executor:0.2.1`) y delega allí las simulaciones. No hace falta clonar otro repositorio:
+
+El setup crea `fmu-executor-state/` como directorio privado y persistente para
+el historial y los resultados asociados a cada reserva. Los lotes,
+cancelación e historial nuevo requieren FMU Executor 0.2.1 o posterior.
 
 ```env
 FMU_RUNNER_ENABLED=true

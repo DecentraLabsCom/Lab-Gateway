@@ -7,22 +7,21 @@ from fastapi import HTTPException
 from local_fmu_catalog import (
     _list_local_fmus_payload,
     _load_local_model_metadata,
-    _local_backend_health_payload,
+    _local_metadata_backend_health_payload,
 )
 
 
-def test_local_backend_health_counts_fmus_and_executor_state(tmp_path):
+def test_local_metadata_backend_health_counts_fmus_and_reports_missing_executor(tmp_path):
     (tmp_path / "provider-1").mkdir()
     (tmp_path / "provider-1" / "model.fmu").write_bytes(b"fmu")
 
-    payload = _local_backend_health_payload(
+    payload = _local_metadata_backend_health_payload(
         data_path=tmp_path,
-        executor=SimpleNamespace(_broken=False),
     )
 
     assert payload == {
-        "status": "UP",
-        "checks": {"fmuDataPath": True, "executor": True},
+        "status": "DEGRADED",
+        "checks": {"fmuDataPath": True, "remoteExecutorConfigured": False},
         "fmuCount": 1,
         "backendMode": "local",
     }
