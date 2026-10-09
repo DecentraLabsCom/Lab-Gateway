@@ -9,6 +9,21 @@ class EchoHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self._respond(include_body=False)
 
+    def do_POST(self):
+        self._respond()
+
+    def do_PUT(self):
+        self._respond()
+
+    def do_PATCH(self):
+        self._respond()
+
+    def do_DELETE(self):
+        self._respond()
+
+    def do_OPTIONS(self):
+        self._respond(include_body=False)
+
     def _respond(self, *, include_body=True):
         body = os.environ.get("ECHO_BODY", "ok").encode("utf-8")
         self.send_response(200)
