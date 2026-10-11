@@ -54,11 +54,12 @@ redeemer="acr_$(openssl rand -hex 32)"
 secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
 provisioner="gpr_$(openssl rand -hex 32)"
 projection="rpr_$(openssl rand -hex 32)"
+lab_admin="lam_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
 
-python3 - "$env_file" "$lite_public_origin" "$gateway_id" "$secret" "$redeemer" "$provisioner" "$projection" <<'PY'
+python3 - "$env_file" "$lite_public_origin" "$gateway_id" "$secret" "$redeemer" "$provisioner" "$projection" "$lab_admin" <<'PY'
 import json, pathlib, sys
 path = pathlib.Path(sys.argv[1])
-lite_origin, gateway_id, secret, redeemer, provisioner, projection = sys.argv[2:]
+lite_origin, gateway_id, secret, redeemer, provisioner, projection, lab_admin = sys.argv[2:]
 lines = path.read_text(encoding="utf-8").splitlines()
 for key, value in (
     ("SESSION_OBSERVER_CREDENTIALS_JSON", secret),
@@ -101,6 +102,18 @@ found = any(line.startswith(projection_key + "=") for line in lines)
 lines = [replacement if line.startswith(projection_key + "=") else line for line in lines]
 if not found:
     lines.append(replacement)
+admin_key = "LAB_ADMIN_GATEWAY_CREDENTIALS_JSON"
+current = next((line.split("=", 1)[1] for line in lines if line.startswith(admin_key + "=")), "{}")
+admin_credentials = json.loads(current or "{}")
+admin_credentials[gateway_id.lower()] = {
+    "token": lab_admin,
+    "accessUri": lite_origin,
+}
+replacement = admin_key + "=" + json.dumps(admin_credentials, separators=(",", ":"), sort_keys=True)
+found = any(line.startswith(admin_key + "=") for line in lines)
+lines = [replacement if line.startswith(admin_key + "=") else line for line in lines]
+if not found:
+    lines.append(replacement)
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
@@ -108,6 +121,9 @@ umask 077
 {
     echo "ISSUER=${full_origin}/auth"
     echo "SERVER_NAME=${server_name}"
+    echo "LAB_ADMIN_BACKEND_URL=${full_origin}"
+    echo "LAB_ADMIN_BACKEND_TOKEN=${lab_admin}"
+    echo "LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token"
     echo "AUTH_ACCESS_CODE_REDEEMER_TOKEN=${redeemer}"
     echo "ACCESS_AUDIT_URL=${full_origin}/access-audit/internal/session-observed"
     echo "SESSION_OBSERVER_GATEWAY_ID=${gateway_id}"
@@ -124,4 +140,4 @@ umask 077
 } > "$output_file"
 chmod 600 "$output_file"
 echo "Created ${output_file}; transfer it securely and delete it after Lite setup."
-echo "Restart blockchain-services on Full so the new gateway credential is loaded."
+echo "Install the complete bundle on Lite, then restart blockchain-services on Full and the Lite gateway."

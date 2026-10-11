@@ -67,6 +67,8 @@ services:
       # Full-only map of Lite gateway IDs to reservation projection credentials
       # and their on-chain accessURI scope.
       - RESERVATION_PROJECTION_CREDENTIALS_JSON=${RESERVATION_PROJECTION_CREDENTIALS_JSON:-}
+      # Full-only map of Lite gateway IDs to their scoped lab-admin credential.
+      - LAB_ADMIN_GATEWAY_CREDENTIALS_JSON=${LAB_ADMIN_GATEWAY_CREDENTIALS_JSON:-}
       # Full-only map of canonical host[:non-default-port] gateway IDs to the
       # short-lived session-observer
       # credentials accepted by the embedded backend. The FMU runner signs
