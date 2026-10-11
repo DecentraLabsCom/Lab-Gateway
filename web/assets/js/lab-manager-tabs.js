@@ -138,6 +138,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     tab.setAttribute('aria-disabled', 'true');
                     tab.title = 'Available only in Full Gateway mode';
                 });
+            tabs
+                .filter(tab => tab.matches('[data-lite-only="true"]'))
+                .forEach(tab => {
+                    tab.hidden = false;
+                    tab.disabled = false;
+                    tab.removeAttribute('aria-disabled');
+                    tab.title = 'Read-only income for this Lite Gateway';
+                });
             if (status) {
                 status.textContent = 'Lite mode: Digital Twins and Notifications are unavailable.';
             }

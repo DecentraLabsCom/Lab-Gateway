@@ -204,6 +204,35 @@ body {
 .card-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .card-body { padding: 12px 20px 20px; }
 
+.lm-income-scope { margin: 0 0 6px; color: var(--primary); font-weight: 700; }
+.lm-income-status { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.lm-income-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+    gap: 10px;
+    margin: 16px 0;
+}
+.lm-income-summary > div {
+    min-width: 0;
+    padding: 13px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(26, 36, 54, 0.7);
+}
+.lm-income-summary dt { color: var(--muted); font-size: 0.82rem; }
+.lm-income-summary dd { margin: 8px 0 0; font-size: 1.2rem; font-weight: 700; overflow-wrap: anywhere; }
+.lm-income-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+.lm-income-table { width: 100%; min-width: 1040px; border-collapse: collapse; }
+.lm-income-table th, .lm-income-table td {
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    white-space: nowrap;
+}
+.lm-income-table th { color: var(--muted); font-size: 0.8rem; }
+.lm-income-table tbody tr:last-child td { border-bottom: 0; }
+.lm-income-table tbody tr:hover { background: rgba(77, 225, 255, 0.04); }
+
 .notifications-access-gate {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;

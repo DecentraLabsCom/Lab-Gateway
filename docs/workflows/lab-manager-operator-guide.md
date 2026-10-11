@@ -12,8 +12,9 @@ order therefore matters.
 | 1 | `Labs` | Publish, edit, and maintain physical laboratories or FMU simulations. | `blockchain-services` through `/lab-admin/**`; local discovery through Ops Worker. |
 | 2 | `Operations` | Monitor stations, heartbeat, reservations, and timelines. | Ops Worker through `/ops/**`; cancellation through `/lab-admin/**`. |
 | 3 | `Energy` | Manage credentials, controllers, outlets, policies, and power tests. | Ops Worker through `/ops/api/power/**`. |
-| 4 | `Digital Twins` | Synchronize an FMU or physical laboratory with AAS, import a prepared AASX, or link an external shell. | `fmu-runner`, Ops Worker, and BaSyx through `/aas-admin/**`. |
-| 5 | `Notifications` | Configure and test reservation email/ICS delivery. | `blockchain-services` through `/billing/admin/notifications/**`. |
+| 4 | `Income` (Lite only) | Read income totals for this Gateway and its labs. | Provider backend through the Gateway-scoped `/lab-admin/billing/provider-income` route. |
+| 5 | `Digital Twins` | Synchronize an FMU or physical laboratory with AAS, import a prepared AASX, or link an external shell. | `fmu-runner`, Ops Worker, and BaSyx through `/aas-admin/**`. |
+| 6 | `Notifications` | Configure and test reservation email/ICS delivery. | `blockchain-services` through `/billing/admin/notifications/**`. |
 
 The tabs are declared in [Lab Manager](../../web/lab-manager/index.html) and
 grouped dynamically by [lab-manager-tabs.js](../../web/assets/js/lab-manager-tabs.js).
@@ -32,6 +33,7 @@ or an allowed private CIDR.
 | `Labs` | Available when the local backend runs in `provider-consumer` mode. | Available only when `LAB_ADMIN_BACKEND_URL`, `LAB_ADMIN_BACKEND_TOKEN`, and its header are configured. |
 | `Operations` | Uses the local Ops Worker and stations. | Uses the Lite Gateway's local Ops Worker and stations. |
 | `Energy` | Uses controllers local to the Gateway. | Uses controllers local to the Lite Gateway. |
+| `Income` | Hidden. | Read-only report for the authenticated Gateway's department and labs. |
 | `Digital Twins` | Available when AAS/FMUs are configured. | Disabled by the UI and blocked by the backend. |
 | `Notifications` | Available through the local administrative backend. | Disabled; configuration belongs to the Full control plane. |
 
@@ -39,6 +41,12 @@ or an allowed private CIDR.
 AAS administration routes. `Notifications` is the exception: opening it asks
 for the Wallet & Billing administrator token and must not request that token
 while the other tabs are loading.
+
+The Lite `Income` tab uses the Lite's configured backend credential. OpenResty
+replaces any browser-supplied `X-Gateway-ID`, and the backend validates that
+identity against the credential before returning income for that Gateway. The
+endpoint is read-only; the browser cannot select another Gateway or access the
+institution-wide Wallet & Billing report.
 
 Network policy still applies even when a token is present. `/ops/` and
 administrative operations are intended for localhost or explicitly allowed

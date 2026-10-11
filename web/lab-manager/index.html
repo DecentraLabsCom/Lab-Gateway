@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=workflow-tabs-v38">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-income-v1">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -37,6 +37,11 @@
                     data-lm-tab="energy" aria-controls="lm-panel-energy" aria-selected="false" tabindex="-1">
                     <i class="fas fa-bolt" aria-hidden="true"></i> Energy
                 </button>
+                <button class="lm-tab" id="lm-tab-income" role="tab" type="button"
+                    data-lm-tab="income" data-lite-only="true" aria-controls="lm-panel-income"
+                    aria-selected="false" aria-disabled="true" tabindex="-1" hidden disabled>
+                    <i class="fas fa-coins" aria-hidden="true"></i> Income
+                </button>
                 <button class="lm-tab" id="lm-tab-digital-twins" role="tab" type="button"
                     data-lm-tab="digital-twins" data-full-only="true" aria-controls="lm-panel-digital-twins" aria-selected="false" tabindex="-1">
                     <i class="fas fa-cubes" aria-hidden="true"></i> Digital Twins
@@ -53,8 +58,58 @@
             <div id="lm-panel-laboratories" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-laboratories" hidden></div>
             <div id="lm-panel-operations" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-operations" hidden></div>
             <div id="lm-panel-energy" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-energy" hidden></div>
+            <div id="lm-panel-income" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-income" hidden></div>
             <div id="lm-panel-digital-twins" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-digital-twins" hidden></div>
             <div id="lm-panel-notifications" class="lm-tab-panel" role="tabpanel" aria-labelledby="lm-tab-notifications" hidden></div>
+
+            <section class="grid single-column" data-lm-tab-section="income" data-lm-order="10">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Department income</h2>
+                            <p>Read-only income totals for this Lite Gateway and its laboratories.</p>
+                        </div>
+                        <button class="ghost-btn" type="button" id="lmIncomeRefreshBtn">
+                            <i class="fas fa-rotate-right" aria-hidden="true"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <p class="lm-income-scope" id="lmIncomeScope">Loading Gateway scope...</p>
+                        <p class="lm-income-status" id="lmIncomeStatus" role="status" aria-live="polite">
+                            Open this tab to load the latest income report.
+                        </p>
+                        <dl class="lm-income-summary" aria-label="Department income totals">
+                            <div><dt>Confirmed reservations</dt><dd id="lmIncomeConfirmed">--</dd></div>
+                            <div><dt>Potential share (credits)</dt><dd id="lmIncomePotential">--</dd></div>
+                            <div><dt>Accrued (credits)</dt><dd id="lmIncomeAccrued">--</dd></div>
+                            <div><dt>Unbatched (credits)</dt><dd id="lmIncomeUnbatched">--</dd></div>
+                            <div><dt>Queued (credits)</dt><dd id="lmIncomeQueued">--</dd></div>
+                            <div><dt>In process (credits)</dt><dd id="lmIncomeInProcess">--</dd></div>
+                            <div><dt>Paid externally (credits)</dt><dd id="lmIncomePaid">--</dd></div>
+                        </dl>
+                        <div class="lm-income-table-wrap">
+                            <table class="lm-income-table">
+                                <thead>
+                                    <tr>
+                                        <th>Laboratory</th>
+                                        <th>Confirmed</th>
+                                        <th>Potential share</th>
+                                        <th>Accrued</th>
+                                        <th>Unbatched</th>
+                                        <th>Queued</th>
+                                        <th>In process</th>
+                                        <th>Paid externally</th>
+                                        <th>Invalidated</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="lmIncomeRows">
+                                    <tr><td colspan="9">Open this tab to load income details.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
             <section class="grid single-column" data-lm-tab-section="laboratories" data-lm-order="10">
                 <div class="card">
@@ -1279,7 +1334,8 @@
     <div id="toast" class="toast"></div>
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v3"></script>
-    <script src="../assets/js/lab-manager-tabs.js?v=workflow-tabs-v1"></script>
+    <script src="../assets/js/lab-manager-tabs.js?v=lab-manager-income-v1"></script>
+    <script src="../assets/js/lab-manager-income.js?v=lab-manager-income-v1"></script>
     <script src="../assets/js/core/state.js?v=lab-manager-state-v1"></script>
     <script src="../assets/js/core/api-client.js?v=lab-manager-api-client-v1"></script>
     <script src="../assets/js/lab-manager-activity.js?v=lab-manager-activity-v4"></script>
