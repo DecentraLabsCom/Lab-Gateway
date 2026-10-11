@@ -17,6 +17,20 @@ referencia completa de variables y perfiles opcionales está en
 | Git | cualquier versión reciente |
 | 2 núcleos CPU, 4 GB RAM, 20 GB de disco libre | — |
 
+### Kernel de Linux para construir imágenes localmente
+
+La compilación de Guacamole usa GNU tar de la imagen base de Tomcat para
+extraer el archivo verificado `guacamole-auth-ban`. Versiones recientes de esa
+imagen base incluyen GNU tar 1.35 con glibc 2.43; esta combinación usa
+`openat2`, disponible en Linux upstream 5.6 y versiones posteriores. Cuando
+la imagen base tenga esa combinación, el kernel Linux del daemon de Docker
+debe ofrecer `openat2`; de lo contrario, la extracción puede fallar con
+`Function not implemented`, incluso dentro de un contenedor. Es un requisito
+de compatibilidad del host de build para esa versión de la imagen base de
+Guacamole, no un requisito general para ejecutar imágenes de Gateway ya
+construidas. Revisa esta nota si cambia la imagen base de Tomcat en
+`guacamole/Dockerfile`.
+
 ## Paso 1 — Clonar el repositorio
 
 ```bash

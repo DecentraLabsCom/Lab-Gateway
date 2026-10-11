@@ -16,6 +16,12 @@ to migrate the SAML environment configuration before the containers start.
 | Python | 3.x |
 | 2 CPU cores, 4 GB RAM, 20 GB free disk | — |
 
+When Compose builds the Guacamole image locally, the Docker daemon's Linux
+kernel must provide `openat2` (upstream Linux 5.6+). See the [manual Compose
+guide](install-manual-compose.md#linux-kernel-for-local-image-builds) for the
+scope and details; this is not a general minimum kernel for running
+already-built Gateway images.
+
 Verify Docker is working before running the script:
 
 ```bash

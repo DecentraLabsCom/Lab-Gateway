@@ -14,7 +14,14 @@ configuración del entorno SAML antes de iniciar los contenedores.
 | Docker Engine (Linux) o Docker Desktop (Windows/macOS) | 20.10+ |
 | Plugin de Docker Compose | 2.14.0+ (`docker compose`; no se admite el legacy `docker-compose`) |
 | Git | cualquier versión reciente |
+| Python | 3.x |
 | 2 núcleos CPU, 4 GB RAM, 20 GB de disco libre | — |
+
+Cuando Compose construye localmente la imagen de Guacamole, el kernel Linux
+del daemon de Docker debe ofrecer `openat2` (Linux upstream 5.6 o posterior).
+Consulta la [guía manual de Compose](instalar-compose-manual.md) para ver el
+alcance y los detalles; no es un requisito general del kernel para ejecutar
+imágenes de Gateway ya construidas.
 
 Verifica que Docker funciona antes de ejecutar el script:
 
