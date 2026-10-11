@@ -134,19 +134,30 @@ gateway still owns its local Guacamole catalog, FMU facade and operations plane.
 ISSUER=https://<issuer-origin>/auth
 LAB_MANAGER_TOKEN=<unique-token-for-this-lite>
 LAB_ADMIN_BACKEND_URL=https://<issuer-origin>       # optional but required for /lab-admin
-LAB_ADMIN_BACKEND_TOKEN=<remote-lab-admin-token>    # required when URL is set
+LAB_ADMIN_BACKEND_TOKEN=<unique-token-from-the-trust-bundle>
 LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 ```
 
-For a Full control plane, use its trust-bundle script. With a standalone
-provider backend, configure the same per-Lite values in the provider and Lite
-environments. These values bind the Lite origin to `ISSUER`,
-`FMU_GATEWAY_ID`, `FMU_JWT_AUDIENCE`, the session-observer credential, the
-Guacamole provisioner credential and the reservation projection feed. The
-technical gateway ID is the
+For a Full control plane, use its trust-bundle script. It generates a unique
+lab-admin backend token for this Lite, registers the token and `accessURI` in
+`LAB_ADMIN_GATEWAY_CREDENTIALS_JSON`, and places the token in the Lite bundle.
+With a standalone provider backend, register the same per-Lite credential in
+the provider environment and transfer its token to the Lite securely. The
+credential binds lab listing and mutation to this Lite's Gateway; requests
+with a mismatched `X-Gateway-ID` are rejected. The bundle also binds the Lite
+origin to `ISSUER`, `FMU_GATEWAY_ID`, `FMU_JWT_AUDIENCE`, the
+session-observer credential, the Guacamole provisioner credential and the
+reservation projection feed. The technical gateway ID is the
 normalized public host plus `:port` for a non-default HTTPS port; `SERVER_NAME`
 stays hostname-only for local URL construction. A Lite setup without a remote
 `LAB_ADMIN_BACKEND_URL` deliberately blocks on-chain lab administration.
+When enabling this version for existing Lite gateways, issue one fresh trust
+bundle for each Lite and securely replace that Lite's full bundle. Reissuing
+rotates all per-Gateway credentials in the bundle. Install the replacement on
+the Lite and restart the provider backend and Lite gateway so both sides load
+the matching values. For a standalone provider backend, update its
+`LAB_ADMIN_GATEWAY_CREDENTIALS_JSON` entry and the Lite bundle together before
+restarting either side.
 
 The local `/auth/**` surface is disabled in Lite mode. Access-code redemption,
 FMU ticket operations and session observations target the configured remote
@@ -162,7 +173,7 @@ observer secrets:
 ISSUER=https://full.example.edu/auth
 LAB_MANAGER_TOKEN=<unique-lite-token>
 LAB_ADMIN_BACKEND_URL=https://full.example.edu
-LAB_ADMIN_BACKEND_TOKEN=<token-accepted-by-full-lab-admin>
+LAB_ADMIN_BACKEND_TOKEN=<unique-token-generated-for-this-lite>
 LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 ```
 
@@ -174,6 +185,10 @@ scripts/issue-lite-trust-bundle.sh \
   https://lite-a.example.edu https://full.example.edu
 ```
 
+If a Lite already has a bundle, reissue and securely deploy the complete
+replacement; the old credentials stop working after the Full backend reloads
+its environment.
+
 The Full backend must have an explicit `GUACAMOLE_PROVISIONER_ROUTES_JSON`
 entry for every remote origin, or a single shared
 `GUACAMOLE_PROVISIONER_TOKEN` only when the same credential is intentionally
@@ -181,8 +196,11 @@ used by all Lite provisioner routes. The route map is fail-closed: an
 unmapped remote `accessURI` is rejected and is never sent to the Full local
 ops-worker.
 
-The trust-bundle script also registers a distinct
-`RESERVATION_PROJECTION_CREDENTIALS_JSON` entry. The Lite `ops-worker` polls
+The trust-bundle script also registers distinct
+`LAB_ADMIN_GATEWAY_CREDENTIALS_JSON` and
+`RESERVATION_PROJECTION_CREDENTIALS_JSON` entries. The first binds the
+Lite's lab-admin token to its Gateway ID and `accessURI`; the Lite receives
+that token as `LAB_ADMIN_BACKEND_TOKEN`. The Lite `ops-worker` polls
 `/reservations/projection` with that credential. The Full backend filters the
 response by the registered `accessURI`, so a Lite cannot request another
 gateway's reservations. The local worker keeps its durable operation journal;
@@ -227,12 +245,14 @@ FEATURES_PROVIDERS_ENABLED=true
 FEATURES_PROVIDERS_REGISTRATION_ENABLED=true
 ```
 
-Each Lite uses the standalone backend as issuer and lab-admin backend:
+Each Lite uses the standalone backend as issuer and lab-admin backend. Register
+a unique `LAB_ADMIN_GATEWAY_CREDENTIALS_JSON` entry on that backend for each
+Lite, keyed by canonical Gateway ID with its token and exact `accessURI`:
 
 ```env
 ISSUER=https://backend.example.edu/auth
 LAB_ADMIN_BACKEND_URL=https://backend.example.edu
-LAB_ADMIN_BACKEND_TOKEN=<backend-lab-admin-token>
+LAB_ADMIN_BACKEND_TOKEN=<unique-token-generated-for-this-lite>
 LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 ```
 

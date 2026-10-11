@@ -15,10 +15,15 @@ be registered as a provider, and the Gateway must have a configured
 
 ```env
 LAB_ADMIN_BACKEND_URL=https://full.example.edu
-LAB_ADMIN_BACKEND_TOKEN=<token-accepted-by-the-control-plane>
+LAB_ADMIN_BACKEND_TOKEN=<unique-token-from-this-lite-trust-bundle>
 LAB_ADMIN_BACKEND_TOKEN_HEADER=X-Lab-Manager-Token
 ```
 
+The Full/backend must register this Lite token against the Lite's Gateway ID and
+`accessURI` in `LAB_ADMIN_GATEWAY_CREDENTIALS_JSON`. With the trust-bundle
+script, that registration is automatic. The Labs tab then lists and mutates
+only labs assigned to this Gateway; an institutional administrator with the
+normal admin access token can still oversee the full provider catalogue.
 The publication contract is described in [Lab administration](../../blockchain-services/docs/services/lab-administration/LAB_ADMINISTRATION.md).
 
 ### Detect the resource
