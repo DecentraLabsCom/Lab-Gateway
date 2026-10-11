@@ -17,6 +17,18 @@ variable ownership and optional-profile reference is
 | Git | any recent version |
 | 2 CPU cores, 4 GB RAM, 20 GB free disk | — |
 
+### Linux kernel for local image builds
+
+The Guacamole build uses GNU tar from its Tomcat base image to unpack the
+verified `guacamole-auth-ban` archive. Recent builds of that base image contain
+GNU tar 1.35 with glibc 2.43; this combination uses `openat2`, available in
+upstream Linux 5.6 and newer. When the base image has this combination, the
+Docker daemon's Linux kernel must provide `openat2`; otherwise extraction can
+fail with `Function not implemented`, even from inside a container. This is a
+build-host compatibility requirement for that Guacamole base-image revision,
+not a general minimum kernel for running already-built Gateway images. Recheck
+it when changing the Tomcat base image in `guacamole/Dockerfile`.
+
 ## Step 1 — Clone the repository
 
 ```bash
