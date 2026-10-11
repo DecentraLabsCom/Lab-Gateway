@@ -951,7 +951,11 @@ services:
       - FMU_INTERNAL_TOKEN_FILE=/run/secrets/fmu_local_executor_token
     volumes:
       - ./fmu-data:/app/fmu-data:ro
-      - ./fmu-executor-state:/var/lib/fmu-executor/state
+      - type: bind
+        source: ./fmu-executor-state
+        target: /var/lib/fmu-executor/state
+        bind:
+          create_host_path: false
     tmpfs:
       - /tmp:exec,size=256M,mode=1777
     read_only: true

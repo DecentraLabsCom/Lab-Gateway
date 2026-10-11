@@ -255,13 +255,18 @@ HOST_UID=1000
 HOST_GID=1000
 ```
 
-Crea y asigna propietario a los directorios de datos:
+Crea y asigna propietario a los directorios de datos. Tanto
+`fmu-access-state` como `fmu-executor-state` deben ser escribibles por el UID
+configurado: OpenResty guarda en el primero los mapeos FMU cifrados y
+persistentes; `fmu-local-dev` guarda en el segundo el historial y los
+resultados. Compose ahora falla si falta `fmu-executor-state` en vez de
+crearlo silenciosamente como `root`:
 
 ```bash
 gateway_uid="$(id -u)"
 gateway_gid="$(id -g)"
 
-mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
+mkdir -p blockchain-data certs fmu-access-state fmu-executor-state lab-content fmu-data \
   fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 \
   fmu-proxy-runtime/binaries/darwin64 \
@@ -269,8 +274,8 @@ mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
   ops-data/winrm-certificates
 
 sudo chown -R "${gateway_uid}:${gateway_gid}" \
-  blockchain-data certs fmu-access-state lab-content ops-data
-chmod 700 fmu-access-state
+  blockchain-data certs fmu-access-state fmu-executor-state lab-content ops-data
+chmod 700 fmu-access-state fmu-executor-state
 chmod 755 lab-content fmu-data fmu-proxy-runtime \
   fmu-proxy-runtime/binaries fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 fmu-proxy-runtime/binaries/darwin64
@@ -284,6 +289,10 @@ ejecuta con la identidad no root `HOST_UID:HOST_GID`:
 ```bash
 test -w ops-data/winrm-certificates || {
   echo "ops-data/winrm-certificates no es escribible por el usuario de despliegue" >&2
+  exit 1
+}
+test -w fmu-executor-state || {
+  echo "fmu-executor-state no es escribible por el usuario de despliegue" >&2
   exit 1
 }
 ```
@@ -372,9 +381,10 @@ docker compose --profile fmu-runner up -d --build
 Para ejecución FMU local exclusiva de desarrollo usa `fmu-local-dev`; nunca
 arranques los dos perfiles FMU a la vez. El perfil descarga la imagen versionada del FMU-Executor configurada por `FMU_EXECUTOR_IMAGE` (por defecto `ghcr.io/decentralabscom/fmu-executor:0.2.1`) y delega allí las simulaciones. No hace falta clonar otro repositorio:
 
-El setup crea `fmu-executor-state/` como directorio privado y persistente para
-el historial y los resultados asociados a cada reserva. Los lotes,
-cancelación e historial nuevo requieren FMU Executor 0.2.1 o posterior.
+`setup.sh` crea `fmu-executor-state/` como directorio privado y persistente
+para el historial y los resultados asociados a cada reserva. La instalación
+manual lo crea y asigna en el Paso 5. Los lotes, cancelación e historial nuevo
+requieren FMU Executor 0.2.1 o posterior.
 
 ```env
 FMU_RUNNER_ENABLED=true

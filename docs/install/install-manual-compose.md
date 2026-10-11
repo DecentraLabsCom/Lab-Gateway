@@ -258,15 +258,18 @@ HOST_UID=1000
 HOST_GID=1000
 ```
 
-Create the bind-mounted directories before starting Compose. In particular,
-`fmu-access-state` must be writable by the OpenResty UID because it stores
-encrypted, durable FMU session mappings:
+Create the bind-mounted directories before starting Compose. Both
+`fmu-access-state` and `fmu-executor-state` must be writable by the configured
+service UID: OpenResty stores encrypted, durable FMU session mappings in the
+first, while `fmu-local-dev` stores job history and results in the second.
+Compose now fails if `fmu-executor-state` is missing instead of silently
+creating a root-owned directory:
 
 ```bash
 gateway_uid="$(id -u)"
 gateway_gid="$(id -g)"
 
-mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
+mkdir -p blockchain-data certs fmu-access-state fmu-executor-state lab-content fmu-data \
   fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 \
   fmu-proxy-runtime/binaries/darwin64 \
@@ -274,8 +277,8 @@ mkdir -p blockchain-data certs fmu-access-state lab-content fmu-data \
   ops-data/winrm-certificates
 
 sudo chown -R "${gateway_uid}:${gateway_gid}" \
-  blockchain-data certs fmu-access-state lab-content ops-data
-chmod 700 fmu-access-state
+  blockchain-data certs fmu-access-state fmu-executor-state lab-content ops-data
+chmod 700 fmu-access-state fmu-executor-state
 chmod 755 lab-content fmu-data fmu-proxy-runtime \
   fmu-proxy-runtime/binaries fmu-proxy-runtime/binaries/linux64 \
   fmu-proxy-runtime/binaries/win64 fmu-proxy-runtime/binaries/darwin64
@@ -289,6 +292,10 @@ the non-root `HOST_UID:HOST_GID` identity:
 ```bash
 test -w ops-data/winrm-certificates || {
   echo "ops-data/winrm-certificates is not writable by the deployment user" >&2
+  exit 1
+}
+test -w fmu-executor-state || {
+  echo "fmu-executor-state is not writable by the deployment user" >&2
   exit 1
 }
 ```
@@ -381,9 +388,10 @@ by `FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.2.1`)
 and delegates execution to it. No additional repository clone is needed. Set
 the local mode explicitly in `.env`:
 
-Setup creates `fmu-executor-state/` as a private bind-mounted directory for
-reservation-scoped history and results. Use FMU Executor 0.2.1 or newer for
-batch jobs, cancellation, and the new history routes.
+`setup.sh` creates `fmu-executor-state/` as a private bind-mounted directory
+for reservation-scoped history and results. The manual install creates and
+assigns it in Step 5. Use FMU Executor 0.2.1 or newer for batch jobs,
+cancellation, and the new history routes.
 
 ```env
 FMU_RUNNER_ENABLED=true
