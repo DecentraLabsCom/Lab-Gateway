@@ -1038,6 +1038,8 @@ services:
       - session_observer_signing_secret
       - fmu_local_executor_token
     depends_on:
+      blockchain-services:
+        condition: service_healthy
       fmu-executor-local:
         condition: service_healthy
     healthcheck:
