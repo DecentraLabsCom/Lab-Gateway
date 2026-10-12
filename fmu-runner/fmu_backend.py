@@ -22,14 +22,25 @@ _SAFE_SIMULATION_ERRORS = {
     "BATCH_SIZE_LIMIT_EXCEEDED",
     "BATCH_STEP_LIMIT_EXCEEDED",
     "FMU_COSIMULATION_REQUIRED",
+    "FMU_ARCHIVE_SIZE_LIMIT_EXCEEDED",
+    "FMU_SNAPSHOT_HASH_MISMATCH",
     "FMU_EXECUTION_TIMEOUT",
+    "FMU_PROCESS_ISOLATION_REQUIRED",
+    "FMU_NOT_COMPATIBLE",
     "FMU_NOT_FOUND",
+    "EXECUTION_AUTHORIZATION_EXPIRED",
+    "EXECUTION_AUTHORIZATION_EXPIRY_REQUIRED",
+    "INVALID_EXECUTION_AUTHORIZATION_EXPIRY",
+    "INVALID_RESERVATION_END",
+    "INVALID_FMU_EXECUTION_POLICY",
+    "RESERVATION_NOT_ACTIVE",
     "INVALID_SIMULATION_ID",
     "INVALID_SIMULATION_OPTIONS",
     "INVALID_SIMULATION_PARAMETERS",
     "INVALID_SIMULATION_REQUEST",
     "RESERVATION_DAILY_SCENARIO_LIMIT",
     "RESULT_SIZE_LIMIT_EXCEEDED",
+    "RESERVATION_ENDED",
     "SIMULATION_NOT_FINISHED",
     "SIMULATION_NOT_FOUND",
     "SIMULATION_PARAMETER_LIMIT_EXCEEDED",
@@ -37,6 +48,11 @@ _SAFE_SIMULATION_ERRORS = {
     "SIMULATION_STEP_LIMIT_EXCEEDED",
     "STATION_CAPACITY_EXHAUSTED",
     "UNSUPPORTED_SIMULATION_OPTIONS",
+    "INVALID_OUTPUT_SELECTION",
+    "INVALID_OUTPUT_SAMPLING",
+    "UNKNOWN_OUTPUT_VARIABLE",
+    "FMU_WORKER_ISOLATION_UNAVAILABLE",
+    "FMU_WORKER_START_FAILED",
 }
 
 
@@ -88,7 +104,7 @@ class BaseFmuBackend:
 
 @dataclass
 class LocalFmuMetadataBackend(BaseFmuBackend):
-    health_loader: Callable[[], dict]
+    health_loader: Callable[..., dict]
     model_metadata_loader: Callable[[str], ModelMetadata]
     list_loader: Callable[[str], dict]
 
@@ -160,6 +176,12 @@ class StationFmuBackend(BaseFmuBackend):
             "accessKey": access_key,
             "claims": claims,
         }
+        authorization_expiry = claims.get("exp")
+        if authorization_expiry is not None:
+            gateway_context["executionAuthorizationExpiresAt"] = authorization_expiry
+        reservation_ends_at = claims.get("reservationEndsAt")
+        if reservation_ends_at is not None:
+            gateway_context["reservationEndsAt"] = reservation_ends_at
         if lab_id:
             gateway_context["labId"] = lab_id
         if reservation_key:

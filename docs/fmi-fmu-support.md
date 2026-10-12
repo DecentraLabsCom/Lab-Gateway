@@ -100,10 +100,36 @@ Each request remains bound to its authorized Gateway, lab, reservation and
 pseudonymous user claim. A different reservation receives no indication that
 the job exists. By default, each reservation can start 100 scenarios per UTC
 day. A batch case, single run, stream request, realtime initialization or
-reset, and each non-empty realtime input update consumes one start. Runs are capped at 10,000 communication
-steps; a batch is capped at 20,000 total steps. Requests may set at most 32
-parameters using no more than 16 KiB of parameter JSON. These controls bound
-automated sweeps while keeping the model binary on the Station.
+reset consumes one start. Realtime input updates use separate per-reservation
+rate and byte budgets, so they do not spend scenario starts. Runs are capped
+at 10,000 communication steps; a batch is capped at 20,000 total steps.
+Requests may set at most 32 parameters using no more than 16 KiB of parameter
+JSON. The signed Gateway context may also carry an `fmuExecutionPolicy` with
+lower per-model limits for daily scenarios, steps, CPU seconds, memory and
+result bytes; Station hard limits still apply.
+
+Admission is immediate across interactive sessions, runs, streams, jobs and
+validation probes. When no shared Station slot is available, the request gets
+HTTP 429 `STATION_CAPACITY_EXHAUSTED` before its scenario quota is charged.
+`queued` in the accepted job response means the reserved worker is starting;
+the Executor does not keep an unbounded waiting queue.
+
+Jobs retain separate authorization and reservation deadlines. The signed
+authorization expiry may be shorter than the on-chain reservation end. The
+Gateway forwards both values, and the Executor checks them before every batch
+case and during a running worker. The resulting job records whether execution
+stopped because authorization expired or because the reservation ended.
+
+Run, stream, job and batch options accept `outputVariables` and
+`outputSampleEverySteps` (default `1`) to limit collected output. The FMU used
+by each accepted job is a read-only content-addressed snapshot; replacing the
+provisioned file cannot switch the model between batch cases. Results include
+technical evidence with the FMU SHA-256, Executor version/commit, FMPy and
+platform versions, effective inputs/options/policy, finish reason, warnings
+and result hash. This provider-side evidence supports reproduction but is not
+an independent institutional attestation. A successful NDJSON stream puts the
+same evidence on its final `sim.done` record; its result hash covers the data
+lines sent before that record.
 
 History expires after 7 days by default. The Executor also caps history at
 10,000 records, 8 MiB for one stored result and 256 MiB of stored results in
@@ -122,7 +148,18 @@ fmu-data/<accessKey>.fmu
 fmu-data/<accessKey>/model.fmu
 ~~~
 
-Before publication, validate that the archive is parseable, has a valid model description and GUID, and exposes Co-Simulation. Invalid or untrusted models can be quarantined; quarantined FMUs are excluded from the catalogue and session creation.
+Before publication, call Station validation and review the separate
+`archiveValid`, `modelDescriptionValid`, `stationCompatible` and
+`executionChecked` values. The report includes the Station OS/architecture,
+FMI version and capabilities, expected native binary, compressed and expanded
+archive sizes and limits, model-description size, and whether native
+dependencies were checked. A binary being present establishes compatibility
+only; dependencies are checked by the
+optional worker probe. For that stronger check, use `probe=true`, which loads
+and initializes the FMU in an isolated worker. A passing initialization does
+not certify all later simulation paths. Invalid or untrusted models can be
+quarantined; quarantined FMUs are excluded from the catalogue and session
+creation.
 
 Internal Station operations include:
 
@@ -130,7 +167,7 @@ Internal Station operations include:
 GET  /internal/health
 GET  /internal/fmu/catalog  (X-FMU-Access-Key header)
 GET  /internal/fmu/describe  (X-FMU-Access-Key header)
-POST /internal/fmu/validate/{accessKey}?auto_quarantine=true
+POST /internal/fmu/validate/{accessKey}?probe=true&auto_quarantine=false
 POST /internal/fmu/quarantine/{accessKey}
 DELETE /internal/fmu/quarantine/{accessKey}
 ~~~
@@ -210,6 +247,21 @@ the external issuer's JWKS endpoint. `AUTH_JWKS_URL` may explicitly override
 that selection, but it is subject to the same HTTPS requirement; HTTP is only
 accepted for loopback/private hosts used by local Compose networking. The local profile reaches the Full-mode endpoint through the
 dedicated internal `fmu_auth` network.
+
+The Linux Executor applies CPU, memory, per-file and descriptor limits,
+Landlock rules that limit reads to the runtime and pinned FMU and writes to
+the private work directory, and seccomp rules that deny network sockets and
+executable child processes; it fails closed if those kernel controls are not
+available. The Windows Station uses a Job Object to bound CPU time, memory and
+child processes and to terminate the full worker tree. Its FMU worker retains
+the Windows service identity, can access files allowed to that identity, is
+not network-isolated, and has no aggregate temporary-disk quota. The validation
+response's `workerIsolation` field reports these platform-specific controls.
+The local Docker profile adds a non-root user, read-only root filesystem,
+container resource and process limits, and bounded temporary storage. For
+Windows deployments that need filesystem, network, or low-privilege identity
+isolation, run the sidecar under a dedicated restricted service account and
+apply host policy outside the Executor.
 
 ### 4. Manage interface disclosure
 
