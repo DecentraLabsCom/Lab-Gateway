@@ -1133,6 +1133,7 @@ services:
   basyx-mongo:
     image: mongo:7.0.14
     profiles: ["aas"]
+    init: true
     command: mongod --auth --quiet --logpath /dev/null
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${BASYX_MONGO_ROOT_USER:-basyx_root}
@@ -1143,16 +1144,16 @@ services:
       - basyx_mongo_data:/data/db
       - ./basyx-mongo/init-user.js:/docker-entrypoint-initdb.d/01-create-aas-user.js:ro
     healthcheck:
-      test: ["CMD-SHELL", "test \"$${MONGO_INITDB_ROOT_PASSWORD}\" != CHANGE_ME && test \"$${BASYX_MONGO_PASSWORD}\" != CHANGE_ME && mongosh --quiet --host localhost -u \"$${MONGO_INITDB_ROOT_USERNAME}\" -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q '^1$' && mongosh --quiet --host localhost -u \"$${BASYX_MONGO_USER}\" -p \"$${BASYX_MONGO_PASSWORD}\" --authenticationDatabase basyx --eval \"db.adminCommand('ping').ok\" | grep -q '^1$'"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      test: ["CMD-SHELL", "test \"$${MONGO_INITDB_ROOT_PASSWORD}\" != CHANGE_ME && test \"$${BASYX_MONGO_PASSWORD}\" != CHANGE_ME && mongosh --quiet --host localhost -u \"$${BASYX_MONGO_USER}\" -p \"$${BASYX_MONGO_PASSWORD}\" --authenticationDatabase basyx --eval \"db.adminCommand('ping').ok\" | grep -q '^1$'"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: '0.5'
+          memory: 1G
+          cpus: '1.0'
         reservations:
           memory: 64M
     # The official MongoDB entrypoint starts as root and uses gosu to drop
