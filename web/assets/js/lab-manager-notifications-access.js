@@ -6,30 +6,30 @@
         applyNotificationConfig,
         setNotificationsLocked,
         setStatus,
-        updateBillingStatusAction,
+        updateNotificationStatusAction,
         showToast,
         getAuthTokenHandler,
         logger = console,
     }) {
-        let billingAccessReady = false;
-        let billingAccessPromise = null;
-        let billingTokenRequired = false;
+        let notificationAccessReady = false;
+        let notificationAccessPromise = null;
+        let managerTokenRequired = false;
 
-        function hasBillingAccess() {
-            return billingAccessReady;
+        function hasNotificationAccess() {
+            return notificationAccessReady;
         }
 
         function loadConfig(onSuccess) {
             setStatus('Loading...');
-            updateBillingStatusAction();
-            if (billingAccessPromise) {
-                return billingAccessPromise.then(accessReady => {
+            updateNotificationStatusAction();
+            if (notificationAccessPromise) {
+                return notificationAccessPromise.then(accessReady => {
                     if (accessReady && typeof onSuccess === 'function') onSuccess();
                     return accessReady;
                 });
             }
 
-            const request = fetchImpl('/billing/admin/notifications', {
+            const request = fetchImpl('/lab-admin/notifications', {
                 credentials: 'include',
                 skipAuthPrompt: true,
             })
@@ -38,28 +38,28 @@
                     return res.json();
                 })
                 .then(data => {
-                    billingAccessReady = true;
-                    billingTokenRequired = false;
+                    notificationAccessReady = true;
+                    managerTokenRequired = false;
                     applyNotificationConfig(data.config || {});
                     setNotificationsLocked(false);
                     setStatus('Loaded');
-                    updateBillingStatusAction();
+                    updateNotificationStatusAction();
                     showToast('Configuration loaded', 'success');
                     if (typeof onSuccess === 'function') onSuccess();
                     return true;
                 })
                 .catch(err => {
-                    billingAccessReady = false;
+                    notificationAccessReady = false;
                     const needsToken = err.message === 'HTTP 401';
                     if (!needsToken) logger.error(err);
-                    billingTokenRequired = needsToken;
+                    managerTokenRequired = needsToken;
                     setNotificationsLocked(true);
-                    setStatus(needsToken ? 'Gateway administrator token required' : 'Error');
-                    updateBillingStatusAction();
+                    setStatus(needsToken ? 'Lab Manager token required' : 'Error');
+                    updateNotificationStatusAction();
                     showToast(
                         needsToken
-                            ? 'Enter the Gateway administrator token to load notifications'
-                            : 'Cannot load config (check administrator access)',
+                            ? 'Lab Manager access is required to load this Gateway’s notifications'
+                            : 'Cannot load config (check Lab Manager access)',
                         'error',
                     );
                     return false;
@@ -67,16 +67,16 @@
 
             let pending;
             pending = request.finally(() => {
-                if (billingAccessPromise === pending) billingAccessPromise = null;
+                if (notificationAccessPromise === pending) notificationAccessPromise = null;
             });
-            billingAccessPromise = pending;
+            notificationAccessPromise = pending;
             return pending.then(accessReady => {
                 if (accessReady && typeof onSuccess === 'function') onSuccess();
                 return accessReady;
             });
         }
 
-        function promptBillingToken(onSuccess) {
+        function promptManagerToken(onSuccess) {
             const handler = getAuthTokenHandler();
             if (!handler || typeof handler.showTokenModal !== 'function') {
                 showToast('Token prompt unavailable on this page', 'error');
@@ -85,37 +85,35 @@
 
             let config = null;
             if (typeof handler.getTokenConfigForPath === 'function') {
-                config = handler.getTokenConfigForPath('/billing/admin/notifications');
+                config = handler.getTokenConfigForPath('/lab-admin/notifications');
             }
             if (!config) {
                 config = {
-                    key: 'billing',
-                    login: '/admin/login',
-                    header: 'X-Access-Token',
-                    cookie: 'access_token',
-                    title: 'Gateway administrator token required',
-                    description: 'Enter the Gateway administrator token for Wallet & Billing.',
-                    invalidMessage: 'Invalid Gateway administrator token.',
+                    key: 'lab-manager',
+                    login: '/lab-manager/login',
+                    title: 'Lab Manager token required',
+                    description: 'Enter this Gateway’s Lab Manager token.',
+                    invalidMessage: 'Invalid Lab Manager token.',
                 };
             }
 
             handler.showTokenModal(config, () => {
-                billingAccessReady = true;
+                notificationAccessReady = true;
                 if (typeof onSuccess === 'function') onSuccess();
             });
         }
 
         function requestAccess() {
             return loadConfig().then(accessReady => {
-                if (!accessReady && billingTokenRequired) {
-                    promptBillingToken(() => loadConfig());
+                if (!accessReady && managerTokenRequired) {
+                    promptManagerToken(() => loadConfig());
                 }
                 return accessReady;
             });
         }
 
         function requireAccess(onAuthenticated, onTokenAuthenticated) {
-            if (hasBillingAccess()) {
+            if (hasNotificationAccess()) {
                 if (typeof onAuthenticated === 'function') onAuthenticated();
                 return;
             }
@@ -125,16 +123,16 @@
                     if (typeof onAuthenticated === 'function') onAuthenticated();
                     return;
                 }
-                if (billingTokenRequired) {
-                    promptBillingToken(onTokenAuthenticated || onAuthenticated);
+                if (managerTokenRequired) {
+                    promptManagerToken(onTokenAuthenticated || onAuthenticated);
                 }
             });
         }
 
         return Object.freeze({
-            hasBillingAccess,
+            hasNotificationAccess,
             loadConfig,
-            promptBillingToken,
+            promptManagerToken,
             requestAccess,
             requireAccess,
         });

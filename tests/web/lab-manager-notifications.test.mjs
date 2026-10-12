@@ -70,7 +70,7 @@ function loadNotifications({ billingResponse, testResponse } = {}) {
   const window = {
     AuthTokenHandler: {
       showTokenModal: (...args) => promptCalls.push(args),
-      getTokenConfigForPath: () => ({ key: 'billing', login: '/admin/login' }),
+      getTokenConfigForPath: () => ({ key: 'lab-manager', login: '/lab-manager/login' }),
     },
   };
   const context = vm.createContext({
@@ -95,7 +95,7 @@ function loadNotifications({ billingResponse, testResponse } = {}) {
   };
   const fetchImpl = (url, options = {}) => {
     fetchCalls.push({ url: String(url), options });
-    if (String(url) === '/billing/admin/notifications/test') {
+    if (String(url) === '/lab-admin/notifications/test') {
       return Promise.resolve(testResponse || defaultResponse);
     }
     return Promise.resolve(billingResponse || defaultResponse);
@@ -132,7 +132,7 @@ test('preserves notification access loading, lock state and status lifecycle', a
   assert.equal(elements.get('notificationsConfigContent').hidden, true);
   assert.equal(elements.get('saveConfigBtn').disabled, true);
   assert.equal(await controller.requestAccess(), true);
-  assert.equal(fetchCalls[0].url, '/billing/admin/notifications');
+  assert.equal(fetchCalls[0].url, '/lab-admin/notifications');
   assert.equal(fetchCalls[0].options.credentials, 'include');
   assert.equal(elements.get('notificationsConfigContent').hidden, false);
   assert.equal(elements.get('driver').value, 'SMTP');
@@ -154,9 +154,9 @@ test('preserves notification save payloads and omits blank secrets', async () =>
   elements.get('graphClientSecret').value = '';
   await controller.saveConfig();
 
-  const saveCall = fetchCalls.find(({ options }) => options.method === 'POST');
+  const saveCall = fetchCalls.find(({ options }) => options.method === 'PUT');
   assert.ok(saveCall);
-  assert.equal(saveCall.url, '/billing/admin/notifications');
+  assert.equal(saveCall.url, '/lab-admin/notifications');
   const payload = JSON.parse(saveCall.options.body);
   assert.equal(Object.hasOwn(payload.smtp, 'password'), false);
   assert.equal(Object.hasOwn(payload.graph, 'clientSecret'), false);
@@ -195,7 +195,7 @@ test('preserves the protected test-email request and modal access guard', async 
   });
   await access.controller.requestAccess();
   await access.controller.sendTestEmail();
-  const testCall = access.fetchCalls.find(({ url }) => url === '/billing/admin/notifications/test');
+  const testCall = access.fetchCalls.find(({ url }) => url === '/lab-admin/notifications/test');
   assert.ok(testCall);
   assert.equal(testCall.options.method, 'POST');
 });

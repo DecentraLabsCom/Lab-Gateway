@@ -14,10 +14,11 @@ def test_notify_critical_failure_sends_expected_payload_and_headers(monkeypatch)
     monkeypatch.setattr(
         worker,
         "NOTIFICATION_SERVICE_URL",
-        "http://blockchain-services:8080/billing/admin/notifications/send",
+        "http://blockchain-services:8080/lab-admin/notifications/send",
     )
-    monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER", "X-Access-Token")
+    monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER", "X-Lab-Manager-Token")
     monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ACCESS_TOKEN", "super-secret")
+    monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_GATEWAY_ID", "gateway.example")
     monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_RETRY_ATTEMPTS", 1)
     worker.NOTIFICATION_SERVICE_RECIPIENTS = ["ops@example.com", "support@example.com"]
 
@@ -38,7 +39,8 @@ def test_notify_critical_failure_sends_expected_payload_and_headers(monkeypatch)
     mock_post.assert_called_once()
     args, kwargs = mock_post.call_args
     assert args[0] == worker.NOTIFICATION_SERVICE_URL
-    assert kwargs["headers"]["X-Access-Token"] == "super-secret"
+    assert kwargs["headers"]["X-Lab-Manager-Token"] == "super-secret"
+    assert kwargs["headers"]["X-Gateway-ID"] == "gateway.example"
 
     payload = kwargs["json"]
     assert payload["recipients"] == ["ops@example.com", "support@example.com"]
@@ -55,10 +57,11 @@ def test_repeated_failures_trigger_alert_notification(db_engine, monkeypatch):
     monkeypatch.setattr(
         worker,
         "NOTIFICATION_SERVICE_URL",
-        "http://blockchain-services:8080/billing/admin/notifications/send",
+        "http://blockchain-services:8080/lab-admin/notifications/send",
     )
-    monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER", "X-Access-Token")
+    monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER", "X-Lab-Manager-Token")
     monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_ACCESS_TOKEN", "super-secret")
+    monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_GATEWAY_ID", "gateway.example")
     monkeypatch.setattr(worker, "NOTIFICATION_SERVICE_RETRY_ATTEMPTS", 1)
     monkeypatch.setattr(worker, "OPS_ALERT_FAILURE_THRESHOLD", 2)
     monkeypatch.setattr(worker, "OPS_ALERT_WINDOW_SECONDS", 3600)

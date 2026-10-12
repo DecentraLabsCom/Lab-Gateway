@@ -90,8 +90,8 @@ For the complete design and trust requirements, read
   for tabs, permissions, Full/Lite boundaries, identifiers, and recommended order.
 - Use [Labs and Operations](workflows/lab-manager-labs-and-operations.md) for
   publication, host provisioning, WinRM, reservations, and timeline diagnosis.
-- Use [Notifications](workflows/lab-manager-notifications.md) for the separate
-  Wallet & Billing administrator flow.
+- Use [Notifications](workflows/lab-manager-notifications.md) for Gateway-scoped
+  reservation email settings.
 - Use [Energy operations](workflows/lab-manager-energy-operations.md) for
   controllers, credentials, outlets, policies, and power tests.
 

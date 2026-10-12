@@ -48,10 +48,10 @@ operation detail and idempotency for executed actions.
 5. Verify WoL, WinRM, and the Lab Station heartbeat separately using
    [Gateway and Lab Station operations](gateway-lab-station-operations.md).
 
-Energy control uses the Lab Manager token (`LAB_MANAGER_TOKEN`). It does not
-require the Wallet/Admin token requested by `Notifications`. In Lite mode, the
-remote backend remains the control-plane authority, while controllers, Ops
-Worker, and the laboratory network remain local to the Lite Gateway.
+Energy control and Notifications use the Lab Manager session. In Lite mode,
+the configured remote backend remains the control-plane authority, while
+controllers, Ops Worker, and the laboratory network remain local to the Lite
+Gateway.
 
 ![Lab Manager Energy tab](../images/lab-manager-energy.png)
 

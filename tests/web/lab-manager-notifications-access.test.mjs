@@ -24,7 +24,7 @@ function loadController({ fetchImpl, authTokenHandler = null }) {
     applyNotificationConfig: (config) => events.configs.push(config),
     setNotificationsLocked: (locked) => events.locked.push(locked),
     setStatus: (status) => events.statuses.push(status),
-    updateBillingStatusAction: () => { events.statusUpdates += 1; },
+    updateNotificationStatusAction: () => { events.statusUpdates += 1; },
     showToast: (message, type) => events.toasts.push({ message, type }),
     getAuthTokenHandler: () => authTokenHandler,
   });
@@ -47,7 +47,7 @@ test('loads notifications once while sharing a pending request', async () => {
   const firstLoad = controller.loadConfig();
   const secondLoad = controller.loadConfig();
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, '/billing/admin/notifications');
+  assert.equal(calls[0].url, '/lab-admin/notifications');
   assert.equal(calls[0].options.credentials, 'include');
   assert.equal(calls[0].options.skipAuthPrompt, true);
 
@@ -68,10 +68,11 @@ test('loads notifications once while sharing a pending request', async () => {
   });
 });
 
-test('prompts for the billing token after a protected failure', async () => {
+test('prompts for the Lab Manager token after a protected failure', async () => {
   const promptCalls = [];
+  let requestCount = 0;
   const authTokenHandler = {
-    getTokenConfigForPath: (path) => ({ key: 'billing', path }),
+    getTokenConfigForPath: (path) => ({ key: 'lab-manager', path }),
     showTokenModal: (config, onSuccess) => {
       promptCalls.push({ config, onSuccess });
       onSuccess();
@@ -79,20 +80,22 @@ test('prompts for the billing token after a protected failure', async () => {
   };
   const { controller, events } = loadController({
     authTokenHandler,
-    fetchImpl: async () => ({
-      ok: false,
-      status: 401,
-      json: async () => ({}),
-    }),
+    fetchImpl: async () => {
+      requestCount += 1;
+      return requestCount === 1
+        ? { ok: false, status: 401, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => ({ config: { enabled: true } }) };
+    },
   });
 
   assert.equal(await controller.requestAccess(), false);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(promptCalls.length, 1);
-  assert.equal(promptCalls[0].config.path, '/billing/admin/notifications');
-  assert.equal(controller.hasBillingAccess(), true);
-  assert.equal(events.locked.at(-1), true);
+  assert.equal(promptCalls[0].config.path, '/lab-admin/notifications');
+  assert.equal(controller.hasNotificationAccess(), true);
+  assert.equal(events.locked.at(-1), false);
   assert.deepEqual(events.toasts.at(-1), {
-    message: 'Enter the Gateway administrator token to load notifications',
-    type: 'error',
+    message: 'Configuration loaded',
+    type: 'success',
   });
 });

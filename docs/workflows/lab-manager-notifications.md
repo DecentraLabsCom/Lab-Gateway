@@ -1,32 +1,33 @@
 # Lab Manager: Notifications
 
-The `Notifications` tab configures email and ICS invitations for the
-reservation lifecycle. It is an administrative capability of the Wallet &
-Billing control plane, not a capability of the Lab Manager token.
+The `Notifications` tab configures email and ICS invitations for reservations
+in labs managed by the current Gateway. Each Gateway has its own settings and
+recipient list.
 
 ## Access and boundaries
 
-- The tab is loaded locked and requests the administrator token only when the
-  operator clicks `Unlock Notifications` or performs a configuration action.
-- The token is sent through the backend's configured header/cookie
-  (`X-Access-Token` and `access_token` by default). Never put it in a URL.
-- The endpoint also applies the `blockchain-services` administrative network
-  policy; a token does not turn an untrusted public network into an allowed one.
-- In Lite mode the tab is disabled: configuration belongs to the Full Gateway
-  or the remote backend acting as the control plane.
+- The tab uses the existing Lab Manager session and never requests the
+  institution-wide Wallet & Billing administrator token.
+- In Full mode, OpenResty forwards the local Lab Manager credential to the
+  embedded provider backend. In Lite mode, it forwards the Gateway's mapped
+  `LAB_ADMIN_BACKEND_TOKEN` to the configured provider backend and sets the
+  Gateway ID itself.
+- The provider backend derives an authorization scope from the trusted
+  credential and stores settings under that Gateway ID. The browser cannot
+  select a different Gateway by changing a request header.
+- The backend also applies the configured administrative network policy.
 
-When the operator opens the tab, Lab Manager keeps the panel behind a separate
-Wallet & Billing administrator-token prompt:
-
-![Lab Manager Notifications access prompt](../images/lab-manager-notifications.png)
+Notifications are available when the provider backend runs in
+`provider-consumer` mode. A Lite also needs its trust-bundle entry and remote
+Lab Manager backend configured.
 
 The endpoint set is:
 
 ```text
-GET  /billing/admin/notifications
-POST /billing/admin/notifications
-POST /billing/admin/notifications/test
-POST /billing/admin/notifications/send
+GET  /lab-admin/notifications
+PUT  /lab-admin/notifications
+POST /lab-admin/notifications/test
+POST /lab-admin/notifications/send
 ```
 
 ## Tab configuration
@@ -92,17 +93,15 @@ when none are provided, it uses `defaultTo`.
 ## Persistence and secrets
 
 Changes made through the UI are persisted in the file configured by
-`NOTIFICATIONS_CONFIG_FILE`:
+`NOTIFICATIONS_CONFIG_FILE`. Version 2 stores a separate mail configuration
+for each normalized Gateway ID:
 
 ```env
 NOTIFICATIONS_CONFIG_FILE=./data/notifications-config.json
 ```
 
 The default is relative to the backend's working directory. Keep the file on
-persistent storage, outside Git, with restricted permissions. The GET endpoint
-returns only public configuration details: it never returns the SMTP password
-or Graph client secret, only indicators such as `passwordConfigured` and
-`clientSecretConfigured`.
+persistent storage, outside Git, with restricted permissions.
 
 Initial values may also come from these backend variables:
 
@@ -126,19 +125,31 @@ NOTIFICATIONS_MAIL_GRAPH_CLIENT_SECRET=
 NOTIFICATIONS_MAIL_GRAPH_FROM=
 ```
 
-Configuration persisted through the API is loaded at startup and complements
-the values in `application.properties`. Change secrets only through the
-approved secret store or protected UI, never in logs, URLs, or documentation.
+The first save of a pre-version-2 global file assigns that configuration only
+to the local Full Gateway. A standalone provider backend retains an old global
+configuration as unassigned and does not expose it to any Gateway. New remote
+Gateway entries start with default settings and do not inherit another
+Gateway's credentials.
+
+The GET endpoint returns only public configuration details: it never returns
+the SMTP password or Graph client secret, only indicators such as
+`passwordConfigured` and `clientSecretConfigured`. Change secrets only
+through the protected Lab Manager UI, never in logs, URLs, or documentation.
 
 ## Relationship with reservations and Ops Worker
 
-The backend includes the laboratory, time window, renter/payer, and transaction
-reference in reservation notifications when those values are available. Ops
-Worker can send operational failure alerts through `NOTIFICATION_SERVICE_URL`,
-but the delivery channel remains configured by the backend:
+For each reservation event, the provider backend resolves the lab's historical
+on-chain `accessURI` at the event block and selects that Gateway's mail
+configuration. A lab managed by one Gateway therefore cannot inherit another
+Gateway's recipient list or SMTP/Graph credentials.
+
+Ops Worker sends operational failure alerts through the same Gateway-scoped
+endpoint. By default, it derives the URL, credential, and token header from
+the existing Full local Lab Manager token or Lite backend trust configuration;
+it also sends its Gateway ID:
 
 ```env
-NOTIFICATION_SERVICE_URL=http://blockchain-services:8080/billing/admin/notifications/send
+NOTIFICATION_SERVICE_URL=
 NOTIFICATION_SERVICE_RECIPIENTS=
 NOTIFICATION_SERVICE_RETRY_ATTEMPTS=3
 NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS=5

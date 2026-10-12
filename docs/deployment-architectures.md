@@ -200,10 +200,13 @@ The trust-bundle script also registers distinct
 `LAB_ADMIN_GATEWAY_CREDENTIALS_JSON` and
 `RESERVATION_PROJECTION_CREDENTIALS_JSON` entries. The first binds the
 Lite's lab-admin token to its Gateway ID and `accessURI`; the Lite receives
-that token as `LAB_ADMIN_BACKEND_TOKEN`. The Lite `ops-worker` polls
-`/reservations/projection` with that credential. The Full backend filters the
-response by the registered `accessURI`, so a Lite cannot request another
-gateway's reservations. The local worker keeps its durable operation journal;
+that token as `LAB_ADMIN_BACKEND_TOKEN`. The Lite uses this same trust entry
+for `/lab-admin/notifications`; OpenResty supplies the Lite's Gateway ID and
+the backend stores notification settings under that identity. Reservation
+events use the lab's historical `accessURI` to select the matching settings.
+The Lite `ops-worker` polls `/reservations/projection` with that credential.
+The Full backend filters the response by the registered `accessURI`, so a Lite
+cannot request another gateway's reservations. The local worker keeps its durable operation journal;
 successful start/end actions are not replayed when the remote projection
 remains in `CONFIRMED`/`ACTIVE` state.
 
