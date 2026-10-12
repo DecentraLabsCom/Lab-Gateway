@@ -47,8 +47,8 @@
                     <i class="fas fa-cubes" aria-hidden="true"></i> Digital Twins
                 </button>
                 <button class="lm-tab" id="lm-tab-notifications" role="tab" type="button"
-                    data-lm-tab="notifications" data-full-only="true" aria-controls="lm-panel-notifications" aria-selected="false" tabindex="-1">
-                    <i class="fas fa-lock" aria-hidden="true"></i> Notifications
+                    data-lm-tab="notifications" aria-controls="lm-panel-notifications" aria-selected="false" tabindex="-1">
+                    <i class="fas fa-envelope" aria-hidden="true"></i> Notifications
                 </button>
             </div>
             <p class="lm-tab-status" id="lmTabStatus" role="status" aria-live="polite"></p>
@@ -876,8 +876,8 @@
                         <div class="notifications-access-gate" id="notificationsAccessGate">
                             <i class="fas fa-lock" aria-hidden="true"></i>
                             <div>
-                                <h3>Gateway administrator access required</h3>
-                                <p>Notification settings use the Wallet & Billing administrator token, separate from Lab Manager access.</p>
+                                <h3>Lab Manager access required</h3>
+                                <p>Configure notifications for the labs managed by this Gateway. The Gateway’s trusted backend connection scopes these settings to this Gateway.</p>
                             </div>
                             <button class="primary-btn" id="unlockNotificationsBtn" type="button">Unlock Notifications</button>
                         </div>
@@ -1295,7 +1295,7 @@
     <div id="toast" class="toast"></div>
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v3"></script>
-    <script src="../assets/js/lab-manager-tabs.js?v=lab-manager-income-v1"></script>
+    <script src="../assets/js/lab-manager-tabs.js?v=lab-manager-tabs-v2"></script>
     <script src="../assets/js/lab-manager-income.js?v=lab-manager-income-v1"></script>
     <script src="../assets/js/core/state.js?v=lab-manager-state-v1"></script>
     <script src="../assets/js/core/api-client.js?v=lab-manager-api-client-v1"></script>
@@ -1320,7 +1320,7 @@
     <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v10"></script>
     <script src="../assets/js/lab-manager-fmu-station.js?v=lab-manager-fmu-station-v3"></script>
     <script src="../assets/js/core/toast.js?v=lab-manager-toast-v3"></script>
-    <script src="../assets/js/lab-manager-notifications-access.js?v=lab-manager-notifications-access-v1"></script>
+    <script src="../assets/js/lab-manager-notifications-access.js?v=lab-manager-notifications-access-v2"></script>
     <script src="../assets/js/core/pagination.js?v=lab-manager-pagination-v1"></script>
     <script src="../assets/js/core/formatters.js?v=lab-manager-formatters-v1"></script>
     <script src="../assets/js/lab-manager-reservation-values.js?v=lab-manager-reservation-values-v1"></script>
@@ -1328,7 +1328,7 @@
     <script src="../assets/js/lab-manager-actionable-reservations.js?v=lab-manager-actionable-reservations-v3"></script>
     <script src="../assets/js/lab-manager-timeline.js?v=lab-manager-timeline-v2"></script>
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v2"></script>
-    <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v1"></script>
+    <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v2"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
     <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v6"></script>
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v4"></script>

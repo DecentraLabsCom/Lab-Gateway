@@ -76,7 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (options.focus === true) tab.focus();
         if (status && requestedTab?.disabled) {
-            status.textContent = 'Digital twins and notifications are available only in Full Gateway mode.';
+            status.textContent = 'Digital twins are available only in Full Gateway mode.';
         } else if (status) {
             status.textContent = '';
         }
@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     tab.title = 'Read-only income for this Lite Gateway';
                 });
             if (status) {
-                status.textContent = 'Lite mode: Digital Twins and Notifications are unavailable.';
+                status.textContent = 'Lite mode: Digital Twins are unavailable.';
             }
         } catch (error) {
             console.warn('Gateway mode could not be determined; endpoint guards remain active.', error);

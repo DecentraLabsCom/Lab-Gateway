@@ -177,6 +177,9 @@ def test_load_runtime_policy_contract_preserves_operational_defaults_and_precede
     assert config.timeline_default_limit == 50
     assert config.timeline_phase_lookback == 50
     assert config.notification_service_url == "http://notify/send"
+    assert config.notification_service_access_token_header == "X-Lab-Manager-Token"
+    assert config.notification_service_access_token == "legacy-secret"
+    assert config.notification_service_gateway_id == "localhost"
     assert config.notification_service_enabled is False
     assert config.notification_service_retry_attempts == 0
     assert config.notification_service_recipients == ["ops@example.com", "support@example.com"]
@@ -221,7 +224,6 @@ def test_load_runtime_policy_contract_preserves_explicit_empty_values_and_fails_
             "WINRM_ALLOWED_TRANSPORTS": "",
             "OPS_ALLOWED_COMMANDS": "",
             "NOTIFICATION_SERVICE_URL": "",
-            "NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER": "",
             "OPS_DISCOVERY_LABSTATION_PORTS": "",
             "OPS_DISCOVERY_LABSTATION_PATHS": "",
             "OPS_DISCOVERY_HEARTBEAT_PATHS": "",
@@ -238,7 +240,7 @@ def test_load_runtime_policy_contract_preserves_explicit_empty_values_and_fails_
     assert config.winrm_allowed_transports == set()
     assert config.allowed_winrm_commands == set()
     assert config.notification_service_url == ""
-    assert config.notification_service_access_token_header == ""
+    assert config.notification_service_access_token_header == "X-Lab-Manager-Token"
     assert config.discovery_labstation_ports == []
     assert config.discovery_labstation_paths == []
     assert config.discovery_heartbeat_paths == []
@@ -322,8 +324,7 @@ def test_runtime_config_publication_preserves_legacy_path_and_policy_names():
         "TIMELINE_DEFAULT_LIMIT": "timeline_default_limit",
         "TIMELINE_PHASE_LOOKBACK": "timeline_phase_lookback",
         "NOTIFICATION_SERVICE_URL": "notification_service_url",
-        "NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER": "notification_service_access_token_header",
-        "NOTIFICATION_SERVICE_ACCESS_TOKEN": "notification_service_access_token",
+        "NOTIFICATION_SERVICE_GATEWAY_ID": "notification_service_gateway_id",
         "NOTIFICATION_SERVICE_ENABLED": "notification_service_enabled",
         "NOTIFICATION_SERVICE_RETRY_ATTEMPTS": "notification_service_retry_attempts",
         "NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS": "notification_service_retry_backoff_seconds",

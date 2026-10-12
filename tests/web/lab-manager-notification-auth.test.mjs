@@ -276,7 +276,7 @@ function loadLabManager({
     confirm,
     AuthTokenHandler: {
       showTokenModal: (...args) => promptCalls.push(args),
-      getTokenConfigForPath: () => ({ key: 'billing', login: '/admin/login' }),
+      getTokenConfigForPath: () => ({ key: 'lab-manager', login: '/lab-manager/login' }),
     },
     ...(eventSource ? { EventSource: eventSource } : {}),
   };
@@ -346,7 +346,7 @@ function loadLabManager({
       if (parsedUrl.pathname.endsWith('/winrm-trust') && (!options.method || options.method === 'GET')) {
         return Promise.resolve(winrmTrustResponse);
       }
-      return parsedUrl.pathname === '/billing/admin/notifications'
+      return parsedUrl.pathname === '/lab-admin/notifications'
         ? billingResponse
         : Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
     },
@@ -669,7 +669,7 @@ test('updates the English FMU file picker name after choosing a file', () => {
   assert.equal(fileName.textContent, 'spring-damper.aasx');
 });
 
-test('does not request or prompt for billing access until Notifications is opened', async () => {
+test('does not request or prompt for Lab Manager access until Notifications is opened', async () => {
   const { fetchCalls, promptCalls, activateTab } = loadLabManager({
     activeTabs: [],
     billingResponse: Promise.resolve({
@@ -680,20 +680,20 @@ test('does not request or prompt for billing access until Notifications is opene
   });
 
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(fetchCalls.some(({ url }) => url === '/billing/admin/notifications'), false);
+  assert.equal(fetchCalls.some(({ url }) => url === '/lab-admin/notifications'), false);
   assert.equal(promptCalls.length, 0);
 
   activateTab('energy');
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(fetchCalls.some(({ url }) => url === '/billing/admin/notifications'), false);
+  assert.equal(fetchCalls.some(({ url }) => url === '/lab-admin/notifications'), false);
 
   activateTab('notifications');
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(fetchCalls.filter(({ url }) => url === '/billing/admin/notifications').length, 1);
+  assert.equal(fetchCalls.filter(({ url }) => url === '/lab-admin/notifications').length, 1);
   assert.equal(promptCalls.length, 1);
 });
 
-test('reuses an existing billing session while the Notifications access check is pending', async () => {
+test('reuses an existing Lab Manager session while the Notifications access check is pending', async () => {
   let resolveBilling;
   const billingResponse = new Promise((resolve) => {
     resolveBilling = resolve;

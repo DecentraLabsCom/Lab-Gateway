@@ -225,7 +225,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
   const energyScreenshot = path.join(energyOutput, 'screenshot.png');
   const liteScreenshot = path.join(liteOutput, 'screenshot.png');
   try {
-    setScreenshotReadyPath('/lab-admin/status');
+    setScreenshotReadyPath('/lab-admin/notifications');
     const labsResult = await runFirefoxScreenshot(
       browser,
       firefoxScreenshotArgs(labsProfile, url),
@@ -236,7 +236,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
     assert.ok(fs.statSync(labsScreenshot).size > 0, 'Firefox produced an empty Laboratories screenshot');
     assert.ok(requests.includes('/lab-admin/status'), 'The default Laboratories tab did not load publisher status');
     assert.equal(requests.includes('/ops/api/power/controllers'), false, 'Energy loaded before its tab was opened');
-    assert.equal(requests.includes('/billing/admin/notifications'), false, 'Notifications loaded before its tab was opened');
+    assert.equal(requests.includes('/lab-admin/notifications'), false, 'Notifications loaded before its tab was opened');
 
     requests.length = 0;
     setScreenshotReadyPath('/ops/api/power/policies');
@@ -251,7 +251,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
     assert.ok(requests.includes('/ops/api/power/controllers'), 'Lab Manager did not load power controllers');
     assert.ok(requests.includes('/ops/api/power/credentials'), 'Lab Manager did not load power credentials');
     assert.ok(requests.includes('/ops/api/power/policies'), 'Lab Manager did not load power policies');
-    assert.equal(requests.includes('/billing/admin/notifications'), false, 'Energy requested the Notifications admin session');
+    assert.equal(requests.includes('/lab-admin/notifications'), false, 'Energy requested the Notifications admin session');
 
     requests.length = 0;
     setLiteMode(true);
@@ -260,11 +260,10 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
       browser,
       firefoxScreenshotArgs(liteProfile, `${url}#notifications`),
       liteScreenshot,
-      () => requests.includes('/lab-admin/status'),
+      () => requests.includes('/lab-admin/notifications'),
     );
     assert.ok(liteResult.screenshotReady, firefoxFailureMessage(liteResult, liteScreenshot, tempDirectory));
-    assert.ok(requests.includes('/lab-admin/status'), 'A Full-only deep link did not fall back to Laboratories in Lite mode');
-    assert.equal(requests.includes('/billing/admin/notifications'), false, 'Lite mode attempted to open Full-only Notifications');
+    assert.ok(requests.includes('/lab-admin/notifications'), 'Lite mode did not load its Gateway-scoped notification settings');
   } finally {
     setScreenshotReadyPath(null);
     await new Promise((resolve) => server.close(resolve));

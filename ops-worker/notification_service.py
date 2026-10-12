@@ -69,10 +69,12 @@ def _build_payload(
     }
 
 
-def _build_headers(token_header: str, token: str) -> Dict[str, str]:
+def _build_headers(token_header: str, token: str, gateway_id: str = "") -> Dict[str, str]:
     headers = {"Content-Type": "application/json"}
     if token:
         headers[token_header] = token
+    if gateway_id:
+        headers["X-Gateway-ID"] = gateway_id
     return headers
 
 
@@ -87,6 +89,7 @@ def send_failure_alert(
     url: str,
     token_header: str,
     token: str,
+    gateway_id: str = "",
     retry_attempts: int,
     retry_backoff_seconds: int,
     http_post: Callable[..., Any],
@@ -106,7 +109,7 @@ def send_failure_alert(
         body.append(f"Details: {json_dumps(details, default=str)}")
 
     payload = _build_payload(subject, body, recipients)
-    headers = _build_headers(token_header, token)
+    headers = _build_headers(token_header, token, gateway_id)
 
     attempt = 0
     response = None
@@ -208,6 +211,7 @@ def notify_critical_failure(
     recipients: Sequence[str],
     token_header: str,
     token: str,
+    gateway_id: str = "",
     retry_attempts: int,
     retry_backoff_seconds: int,
     http_post: Callable[..., Any],
@@ -234,7 +238,7 @@ def notify_critical_failure(
         body.append(f"Details: {json_dumps(details, default=str)}")
 
     payload = _build_payload(subject, body, recipients)
-    headers = _build_headers(token_header, token)
+    headers = _build_headers(token_header, token, gateway_id)
 
     attempt = 0
     duration_ms = 0

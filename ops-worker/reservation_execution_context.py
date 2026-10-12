@@ -39,6 +39,7 @@ class ReservationExecutionContext:
     get_recipients: Callable[[], list[str]]
     get_token_header: Callable[[], str]
     get_token: Callable[[], str]
+    get_notification_gateway_id: Callable[[], str]
     get_retry_attempts: Callable[[], int]
     get_retry_backoff_seconds: Callable[[], float]
     get_http_post: Callable[[], Callable[..., Any]]

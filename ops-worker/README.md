@@ -330,10 +330,15 @@ When a lab has a configured power policy, reservation start executes `pre_start`
 
 Notification integration knobs:
 
-- `NOTIFICATION_SERVICE_URL` (default `http://blockchain-services:8080/billing/admin/notifications/send`)
+- `NOTIFICATION_SERVICE_URL` (defaults to the configured Lab Manager backend's `/lab-admin/notifications/send` route)
 - `NOTIFICATION_SERVICE_RECIPIENTS` (comma-separated recipients for failure alerts; optional if blockchain-services has `defaultTo` configured)
 - `NOTIFICATION_SERVICE_RETRY_ATTEMPTS` (default `3`)
 - `NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS` (default `5`)
+
+Ops Worker reuses the Full Gateway's Lab Manager credential or the Lite
+Gateway's existing backend trust credential and sends the canonical
+`X-Gateway-ID`. It does not mount or read the institutional
+`ADMIN_ACCESS_TOKEN` secret for notifications.
 
 Discovery knobs:
 

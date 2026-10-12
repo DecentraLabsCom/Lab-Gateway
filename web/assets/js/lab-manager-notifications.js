@@ -89,11 +89,11 @@
             if (configStatusEl) configStatusEl.textContent = text;
         }
 
-        function updateBillingStatusAction() {
+        function updateNotificationStatusAction() {
             if (!configStatusEl) return;
-            const needsToken = !notificationsAccessController.hasBillingAccess();
+            const needsToken = !notificationsAccessController.hasNotificationAccess();
             configStatusEl.classList.toggle('token-required-action', needsToken);
-            configStatusEl.title = needsToken ? 'Click to enter the Gateway administrator token' : '';
+            configStatusEl.title = needsToken ? 'Click to enter the Lab Manager token' : '';
             configStatusEl.setAttribute('aria-disabled', needsToken ? 'false' : 'true');
         }
 
@@ -102,26 +102,26 @@
             applyNotificationConfig,
             setNotificationsLocked,
             setStatus,
-            updateBillingStatusAction,
+            updateNotificationStatusAction,
             showToast,
             getAuthTokenHandler,
             logger,
         });
-        const hasBillingAccess = notificationsAccessController.hasBillingAccess;
+        const hasNotificationAccess = notificationsAccessController.hasNotificationAccess;
         const loadConfig = notificationsAccessController.loadConfig;
-        const promptBillingToken = notificationsAccessController.promptBillingToken;
+        const promptLabManagerToken = notificationsAccessController.promptManagerToken;
         const requestAccess = notificationsAccessController.requestAccess;
         const requireAccess = notificationsAccessController.requireAccess;
 
         function saveConfig() {
-            if (!hasBillingAccess()) {
+            if (!hasNotificationAccess()) {
                 requireAccess(() => saveConfig());
                 return Promise.resolve(false);
             }
 
             const payload = buildNotificationPayload();
-            return fetchImpl('/billing/admin/notifications', {
-                method: 'POST',
+            return fetchImpl('/lab-admin/notifications', {
+                method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify(payload),
@@ -149,18 +149,18 @@
                 .catch(err => {
                     logger.error(err);
                     setStatus('Error');
-                    showToast('Save failed (check admin access)', 'error');
+                    showToast('Save failed (check Lab Manager access)', 'error');
                     return false;
                 });
         }
 
         function sendTestEmail() {
-            if (!hasBillingAccess()) {
+            if (!hasNotificationAccess()) {
                 requireAccess(() => sendTestEmail());
                 return Promise.resolve(false);
             }
 
-            return fetchImpl('/billing/admin/notifications/test', {
+            return fetchImpl('/lab-admin/notifications/test', {
                 method: 'POST',
                 credentials: 'include',
             })
@@ -194,7 +194,7 @@
 
             if (btnTestLoad) {
                 btnTestLoad.addEventListener('click', () => {
-                    if (!hasBillingAccess()) {
+                    if (!hasNotificationAccess()) {
                         requireAccess(() => loadConfig(), () => loadConfig());
                         return;
                     }
@@ -206,7 +206,7 @@
             if (fields.driver) fields.driver.addEventListener('change', toggleSections);
             if (configureBtn) {
                 configureBtn.addEventListener('click', () => {
-                    if (!hasBillingAccess()) {
+                    if (!hasNotificationAccess()) {
                         requireAccess(() => openModal(), () => loadConfig(() => {
                             openModal();
                         }));
@@ -222,28 +222,28 @@
                 configStatusEl.setAttribute('role', 'button');
                 configStatusEl.tabIndex = 0;
                 configStatusEl.addEventListener('click', () => {
-                    if (!hasBillingAccess()) promptBillingToken(() => loadConfig());
+                    if (!hasNotificationAccess()) promptLabManagerToken(() => loadConfig());
                 });
                 configStatusEl.addEventListener('keydown', (event) => {
-                    if ((event.key === 'Enter' || event.key === ' ') && !hasBillingAccess()) {
+                    if ((event.key === 'Enter' || event.key === ' ') && !hasNotificationAccess()) {
                         event.preventDefault();
-                        promptBillingToken(() => loadConfig());
+                        promptLabManagerToken(() => loadConfig());
                     }
                 });
             }
 
-            updateBillingStatusAction();
+            updateNotificationStatusAction();
             setNotificationsLocked(true);
             if (unlockNotificationsBtn) unlockNotificationsBtn.addEventListener('click', requestAccess);
         }
 
         return Object.freeze({
             closeModal,
-            hasBillingAccess,
+            hasNotificationAccess,
             initialize,
             loadConfig,
             openModal,
-            promptBillingToken,
+            promptLabManagerToken,
             requestAccess,
             requireAccess,
             saveConfig,

@@ -52,6 +52,7 @@ def _context(*, calls=None, **overrides):
         "get_recipients": lambda: ["ops@example.com"],
         "get_token_header": lambda: "Authorization",
         "get_token": lambda: "token",
+        "get_notification_gateway_id": lambda: "gateway-1",
         "get_retry_attempts": lambda: 2,
         "get_retry_backoff_seconds": lambda: 0.1,
         "get_http_post": lambda: "post",

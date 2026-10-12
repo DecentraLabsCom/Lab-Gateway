@@ -730,9 +730,8 @@ services:
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - GUACAMOLE_MYSQL_DATABASE=${MYSQL_DATABASE}
       - ACCESS_AUDIT_URL=${ACCESS_AUDIT_URL:-}
-      - NOTIFICATION_SERVICE_ACCESS_TOKEN_FILE=/run/secrets/admin_access_token
       - NOTIFICATION_SERVICE_ENABLED=${NOTIFICATION_SERVICE_ENABLED:-true}
-      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL:-http://blockchain-services:8080/billing/admin/notifications/send}
+      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL:-}
       - NOTIFICATION_SERVICE_RECIPIENTS=${NOTIFICATION_SERVICE_RECIPIENTS:-}
       - NOTIFICATION_SERVICE_RETRY_ATTEMPTS=${NOTIFICATION_SERVICE_RETRY_ATTEMPTS:-3}
       - NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS=${NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS:-5}
@@ -773,7 +772,6 @@ services:
       - ${OPS_CONFIG_PATH:-./ops-worker/hosts.empty.json}:/app/hosts.json:ro
       - ./ops-data:/app/data
     secrets:
-      - admin_access_token
       - lab_manager_token
       - ops_internal_auth_token
       - ops_secrets_key

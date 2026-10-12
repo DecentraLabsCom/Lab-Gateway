@@ -14,7 +14,7 @@ order therefore matters.
 | 3 | `Energy` | Manage credentials, controllers, outlets, policies, and power tests. | Ops Worker through `/ops/api/power/**`. |
 | 4 | `Income` (Lite only) | Read income totals for this Gateway and its labs. | Provider backend through the Gateway-scoped `/lab-admin/billing/provider-income` route. |
 | 5 | `Digital Twins` | Synchronize an FMU or physical laboratory with AAS, import a prepared AASX, or link an external shell. | `fmu-runner`, Ops Worker, and BaSyx through `/aas-admin/**`. |
-| 6 | `Notifications` | Configure and test reservation email/ICS delivery. | `blockchain-services` through `/billing/admin/notifications/**`. |
+| 6 | `Notifications` | Configure and test email/ICS delivery for this Gateway's labs. | Provider backend through the Gateway-scoped `/lab-admin/notifications/**` routes. |
 
 The tabs are declared in [Lab Manager](../../web/lab-manager/index.html) and
 grouped dynamically by [lab-manager-tabs.js](../../web/assets/js/lab-manager-tabs.js).
@@ -35,12 +35,12 @@ or an allowed private CIDR.
 | `Energy` | Uses controllers local to the Gateway. | Uses controllers local to the Lite Gateway. |
 | `Income` | Hidden. | Read-only report for the authenticated Gateway's department and labs. |
 | `Digital Twins` | Available when AAS/FMUs are configured. | Disabled by the UI and blocked by the backend. |
-| `Notifications` | Available through the local administrative backend. | Disabled; configuration belongs to the Full control plane. |
+| `Notifications` | Available when the local backend runs in `provider-consumer` mode. | Available when the configured provider backend runs in `provider-consumer` mode and the Lite has a mapped backend credential. |
 
 `LAB_MANAGER_TOKEN` protects the Lab Manager session, `/lab-admin`, `/ops`, and
-AAS administration routes. `Notifications` is the exception: opening it asks
-for the Wallet & Billing administrator token and must not request that token
-while the other tabs are loading.
+AAS administration routes. Notifications use that existing session. For Lite,
+the backend trust bundle maps its backend credential to one Gateway ID; the
+operator does not need the institution-wide Wallet & Billing token.
 
 The Lite `Income` tab uses the Lite's configured backend credential. OpenResty
 replaces any browser-supplied `X-Gateway-ID`, and the backend validates that
@@ -142,7 +142,7 @@ published from Marketplace and Lab Manager consistent.
 ## Notification workflow
 
 1. Open `Notifications` only when changing or testing the configuration.
-2. Enter the Wallet & Billing administrator token when prompted.
+2. Use the existing Lab Manager session for this Gateway.
 3. Choose `NOOP`, `SMTP`, or `GRAPH`, complete the form, and save.
 4. Use `Send Test Email` and verify recipients, logs, and ICS calendar data
    when applicable.
@@ -156,7 +156,7 @@ The detailed configuration, secrets, and persistence rules are in
 | --- | --- |
 | No laboratory appears in selectors | Refresh `Labs`, verify `LAB_MANAGER_TOKEN`, check the publication backend, and for physical labs confirm that the lab uses a valid `guac:id:<connection_id>` and that the matching connection appears under a registered Ops Worker host. |
 | `Operations` shows a network warning | Access from localhost or an allowed CIDR; check dashboard policy. |
-| `Digital Twins` or `Notifications` are disabled | Confirm that the Gateway is Full and is not running with an external `ISSUER`. |
+| `Digital Twins` is disabled | Confirm that the Gateway is Full and is not running with an external `ISSUER`. |
 | A tab loads but its data is empty | Identify the responsible route in the opening table and inspect that service, not only the browser. |
 | The timeline has no events | Use the correct on-chain `reservationKey` and check heartbeat, Ops Worker, and MySQL. |
 

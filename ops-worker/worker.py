@@ -520,6 +520,7 @@ TIMELINE_PHASE_LOOKBACK: int
 NOTIFICATION_SERVICE_URL: str
 NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER: str
 NOTIFICATION_SERVICE_ACCESS_TOKEN: str
+NOTIFICATION_SERVICE_GATEWAY_ID: str
 NOTIFICATION_SERVICE_ENABLED: bool
 NOTIFICATION_SERVICE_RETRY_ATTEMPTS: int
 NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS: int
@@ -556,6 +557,9 @@ DISCOVERY_HEARTBEAT_PATHS: List[str]
 publish_runtime_policy(_RUNTIME_POLICY, globals())
 # Keep the dynamically published values explicit for static analyzers.  The
 # module-level names remain part of the worker's existing test/runtime seam.
+ALLOWED_WINRM_COMMANDS = _RUNTIME_POLICY.allowed_winrm_commands
+LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS = _RUNTIME_POLICY.lab_status_heartbeat_max_age_seconds
+SESSION_OBSERVATION_INGEST_TOKEN = _RUNTIME_POLICY.session_observation_ingest_token
 LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS = _RUNTIME_POLICY.lab_status_target_probe_timeout_seconds
 LAB_STATUS_TARGET_PROBE_CACHE_SECONDS = _RUNTIME_POLICY.lab_status_target_probe_cache_seconds
 FMU_STATUS_URL = _RUNTIME_POLICY.fmu_status_url
@@ -1011,6 +1015,7 @@ _RESERVATION_EXECUTION_CONTEXT = ReservationExecutionContext(
     get_recipients=lambda: NOTIFICATION_SERVICE_RECIPIENTS,
     get_token_header=lambda: NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER,
     get_token=lambda: NOTIFICATION_SERVICE_ACCESS_TOKEN,
+    get_notification_gateway_id=lambda: NOTIFICATION_SERVICE_GATEWAY_ID,
     get_retry_attempts=lambda: NOTIFICATION_SERVICE_RETRY_ATTEMPTS,
     get_retry_backoff_seconds=lambda: NOTIFICATION_SERVICE_RETRY_BACKOFF_SECONDS,
     get_http_post=lambda: requests.post,
