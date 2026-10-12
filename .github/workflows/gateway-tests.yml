@@ -72,14 +72,14 @@ jobs:
 
       - name: Upload Python coverage artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fmu-runner-coverage
           path: fmu-runner/coverage.xml
 
       - name: Upload Python summary artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-unit-summary
           path: .ci-summary/python-unit.json
@@ -137,7 +137,7 @@ jobs:
 
       - name: Upload Lua coverage artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: openresty-luacov
           path: |
@@ -146,7 +146,7 @@ jobs:
 
       - name: Upload Lua summary artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: lua-unit-summary
           path: .ci-summary/lua-unit.json
@@ -256,7 +256,7 @@ jobs:
 
       - name: Upload canonical backend test artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: embedded-backend-test-results
           path: |
@@ -368,7 +368,7 @@ jobs:
 
       - name: Upload Ops Worker coverage artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ops-worker-coverage
           path: |
@@ -378,7 +378,7 @@ jobs:
 
       - name: Upload Ops Worker summary artifact
         if: always() && hashFiles('.github/scripts/test_summary.py') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ops-worker-summary
           path: .ci-summary/ops-worker.json
@@ -418,7 +418,7 @@ jobs:
 
       - name: Upload integration summary artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: integration-summary
           path: .ci-summary/integration.json
@@ -447,7 +447,7 @@ jobs:
 
       - name: Upload Full/Lite access integration log
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: full-lite-access-integration-log
           path: .ci-logs/full-lite-access-integration.log
@@ -500,7 +500,7 @@ jobs:
 
       - name: Upload real Compose resilience log
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: real-compose-resilience-log
           path: .ci-logs/real-compose-resilience.log
@@ -540,7 +540,7 @@ jobs:
 
       - name: Upload FMU integration summary artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fmu-integration-summary
           path: .ci-summary/fmu-integration.json
@@ -586,7 +586,7 @@ jobs:
 
       - name: Upload smoke summary artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: smoke-summary
           path: .ci-summary/smoke.json
@@ -629,7 +629,7 @@ jobs:
 
       - name: Upload web test log
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: web-tests-log
           path: .ci-logs/web-tests.log
