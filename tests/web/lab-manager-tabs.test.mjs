@@ -6,12 +6,13 @@ const repoRoot = new URL('../../', import.meta.url);
 const htmlPath = new URL('web/lab-manager/index.html', repoRoot);
 const tabsScriptPath = new URL('web/assets/js/lab-manager-tabs.js', repoRoot);
 
-test('Lab Manager exposes five accessible workflow tabs with mapped sections', () => {
+test('Lab Manager exposes accessible workflow tabs with mapped sections', () => {
   const html = fs.readFileSync(htmlPath, 'utf8');
   const expectedTabs = [
     'laboratories',
     'operations',
     'energy',
+    'income',
     'digital-twins',
     'notifications',
   ];
@@ -23,8 +24,9 @@ test('Lab Manager exposes five accessible workflow tabs with mapped sections', (
     assert.match(html, new RegExp(`id="lm-panel-${tab}"[^>]*role="tabpanel"`));
     assert.match(html, new RegExp(`data-lm-tab-section="${tab}"`));
   }
+  assert.match(html, /data-lm-tab="income"[^>]*data-lite-only="true"/);
   assert.match(html, /data-lm-tab="digital-twins"[^>]*data-full-only="true"/);
-  assert.match(html, /data-lm-tab="notifications"[^>]*data-full-only="true"/);
+  assert.doesNotMatch(html, /data-lm-tab="notifications"[^>]*data-full-only="true"/);
   assert.match(html, /id="notificationsAccessGate"/);
   assert.match(html, /id="unlockNotificationsBtn"/);
 });
