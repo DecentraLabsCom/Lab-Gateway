@@ -255,7 +255,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
 
     requests.length = 0;
     setLiteMode(true);
-    setScreenshotReadyPath('/lab-admin/status');
+    setScreenshotReadyPath('/lab-admin/notifications');
     const liteResult = await runFirefoxScreenshot(
       browser,
       firefoxScreenshotArgs(liteProfile, `${url}#notifications`),
