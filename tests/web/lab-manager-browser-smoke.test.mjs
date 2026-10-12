@@ -225,7 +225,7 @@ test('renders workflow tabs and lazily loads their data in a real headless brows
   const energyScreenshot = path.join(energyOutput, 'screenshot.png');
   const liteScreenshot = path.join(liteOutput, 'screenshot.png');
   try {
-    setScreenshotReadyPath('/lab-admin/notifications');
+    setScreenshotReadyPath('/lab-admin/status');
     const labsResult = await runFirefoxScreenshot(
       browser,
       firefoxScreenshotArgs(labsProfile, url),

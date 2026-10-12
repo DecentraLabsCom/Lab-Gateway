@@ -324,6 +324,10 @@ def test_runtime_config_publication_preserves_legacy_path_and_policy_names():
         "TIMELINE_DEFAULT_LIMIT": "timeline_default_limit",
         "TIMELINE_PHASE_LOOKBACK": "timeline_phase_lookback",
         "NOTIFICATION_SERVICE_URL": "notification_service_url",
+        "NOTIFICATION_SERVICE_ACCESS_TOKEN_HEADER": (
+            "notification_service_access_token_header"
+        ),
+        "NOTIFICATION_SERVICE_ACCESS_TOKEN": "notification_service_access_token",
         "NOTIFICATION_SERVICE_GATEWAY_ID": "notification_service_gateway_id",
         "NOTIFICATION_SERVICE_ENABLED": "notification_service_enabled",
         "NOTIFICATION_SERVICE_RETRY_ATTEMPTS": "notification_service_retry_attempts",
