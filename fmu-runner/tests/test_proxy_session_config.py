@@ -56,4 +56,5 @@ def test_build_proxy_session_config_preserves_runtime_contract():
         "sessionTicket": "st_ticket_1",
         "ticketExpiresAt": 4102444800,
         "timeMode": "simtime",
+        "playbackSpeed": 1.0,
     }

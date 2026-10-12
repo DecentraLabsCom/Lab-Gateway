@@ -886,7 +886,6 @@ services:
     tmpfs:
       - /tmp:size=64M,mode=1777
     read_only: true
-    pids_limit: 96
     depends_on:
       blockchain-services:
         condition: service_healthy
@@ -907,6 +906,7 @@ services:
         limits:
           memory: 1G
           cpus: '2.0'
+          pids: 96
         reservations:
           memory: 512M
           cpus: '0.5'
@@ -965,7 +965,6 @@ services:
     tmpfs:
       - /tmp:exec,size=256M,mode=1777
     read_only: true
-    pids_limit: 64
     secrets:
       - fmu_local_executor_token
     healthcheck:
@@ -979,6 +978,7 @@ services:
         limits:
           memory: 1G
           cpus: '2.0'
+          pids: 64
     logging:
       driver: "json-file"
       options:
@@ -1034,7 +1034,6 @@ services:
     tmpfs:
       - /tmp:size=64M,mode=1777
     read_only: true
-    pids_limit: 96
     secrets:
       - session_observer_signing_secret
       - fmu_local_executor_token
@@ -1052,6 +1051,7 @@ services:
         limits:
           memory: 1G
           cpus: '2.0'
+          pids: 96
         reservations:
           memory: 512M
           cpus: '0.5'
