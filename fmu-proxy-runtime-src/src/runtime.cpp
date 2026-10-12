@@ -1,10 +1,12 @@
 #include "decentralabs_proxy/runtime.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -683,8 +685,13 @@ OperationResult ProxyRuntime::Configure(const std::string& instance_name, const 
     experiment_.stop_time = model_.default_stop_time.value_or(10.0);
     experiment_.step_size = model_.default_step_size.value_or(0.01);
     current_time_ = experiment_.start_time;
+    last_step_early_return_ = false;
+    last_step_event_handling_needed_ = false;
+    last_step_terminated_ = false;
+    simulation_finished_ = false;
     gateway_client_ = std::make_unique<GatewayClient>(transport_factory_());
     SeedCacheFromModelDefaults();
+    initial_inputs_.clear();
     pending_inputs_.clear();
     string_cache_.clear();
     last_error_.clear();
@@ -708,11 +715,13 @@ OperationResult ProxyRuntime::EnterInitializationMode() {
     if (!status) {
         return status;
     }
-    status = gateway_client_->CreateSession(config_);
-    if (!status) {
-        state_ = SessionState::kError;
-        SetError(status.message);
-        return status;
+    if (gateway_client_->SessionId().empty()) {
+        status = gateway_client_->CreateSession(config_);
+        if (!status) {
+            state_ = SessionState::kError;
+            SetError(status.message);
+            return status;
+        }
     }
     status = Transition(SessionState::kSocketReady);
     if (!status) {
@@ -729,7 +738,8 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
         return OperationResult::Failure("STATE_ERROR", "Runtime is not in session_created state");
     }
 
-    const auto status = gateway_client_->Initialize(config_, experiment_, pending_inputs_);
+    const auto status = gateway_client_->Initialize(
+        config_, experiment_, pending_inputs_, early_return_allowed_);
     if (!status) {
         state_ = SessionState::kError;
         SetError(status.message);
@@ -737,7 +747,14 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
     }
     pending_inputs_.clear();
     current_time_ = experiment_.start_time;
+    realtime_sim_origin_ = current_time_;
+    realtime_wall_origin_ = std::chrono::steady_clock::now();
+    realtime_clock_started_ = true;
     return Transition(SessionState::kInitialized);
+}
+
+void ProxyRuntime::SetEarlyReturnAllowed(const bool allowed) {
+    early_return_allowed_ = allowed;
 }
 
 OperationResult ProxyRuntime::ApplyOutputSnapshot(const OutputSnapshot& snapshot) {
@@ -756,13 +773,26 @@ OperationResult ProxyRuntime::ApplyOutputSnapshot(const OutputSnapshot& snapshot
     return OperationResult::Success();
 }
 
-OperationResult ProxyRuntime::DoStep(const double, const double step_size) {
+OperationResult ProxyRuntime::DoStep(const double current_time, const double step_size) {
     if (gateway_client_ == nullptr) {
         return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
     }
     if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
         return OperationResult::Failure("STATE_ERROR", "Runtime is not initialized");
     }
+    if (simulation_finished_) {
+        return OperationResult::Failure("STATE_ERROR", "Simulation has finished");
+    }
+    if (!std::isfinite(current_time) || !std::isfinite(step_size) || step_size <= 0.0) {
+        return OperationResult::Failure("INVALID_STEP", "Step time and size must be finite and step size positive");
+    }
+    const double time_tolerance = std::max(1e-12, std::abs(current_time_) * 1e-12);
+    if (std::abs(current_time - current_time_) > time_tolerance) {
+        return OperationResult::Failure("INVALID_STEP", "Current communication point does not match simulation time");
+    }
+    last_step_early_return_ = false;
+    last_step_event_handling_needed_ = false;
+    last_step_terminated_ = false;
     if (!pending_inputs_.empty()) {
         const auto set_status = gateway_client_->SetInputs(pending_inputs_);
         if (!set_status) {
@@ -773,7 +803,7 @@ OperationResult ProxyRuntime::DoStep(const double, const double step_size) {
         pending_inputs_.clear();
     }
 
-    const auto snapshot = gateway_client_->Step(step_size);
+    const auto snapshot = gateway_client_->Step(current_time, step_size);
     if (!snapshot) {
         state_ = SessionState::kError;
         SetError(snapshot.status.message);
@@ -783,11 +813,25 @@ OperationResult ProxyRuntime::DoStep(const double, const double step_size) {
     if (!status) {
         return status;
     }
+    last_step_early_return_ = snapshot.value.early_return;
+    last_step_event_handling_needed_ = snapshot.value.event_handling_needed;
+    last_step_terminated_ = snapshot.value.terminate_simulation;
+    simulation_finished_ = snapshot.value.finished;
+    if (last_step_early_return_ && !early_return_allowed_) {
+        return OperationResult::Failure("UNNEGOTIATED_EARLY_RETURN", "FMU returned early without permission");
+    }
     if (state_ == SessionState::kInitialized) {
         status = Transition(SessionState::kRunning);
         if (!status) {
             return status;
         }
+    }
+    if (config_.time_mode == TimeMode::kRealtime && realtime_clock_started_) {
+        const auto simulated_elapsed = std::chrono::duration<double>(
+            (current_time_ - realtime_sim_origin_) / config_.playback_speed);
+        const auto target = realtime_wall_origin_
+            + std::chrono::duration_cast<std::chrono::steady_clock::duration>(simulated_elapsed);
+        std::this_thread::sleep_until(target);
     }
     return OperationResult::Success();
 }
@@ -815,14 +859,43 @@ OperationResult ProxyRuntime::Reset() {
         }
     }
     SeedCacheFromModelDefaults();
-    pending_inputs_.clear();
+    pending_inputs_ = initial_inputs_;
+    for (const auto& [name, value] : initial_inputs_) {
+        const VariableInfo* variable = FindVariableByName(model_, name);
+        if (variable != nullptr) {
+            cached_values_[variable->value_reference] = value;
+        }
+    }
     current_time_ = experiment_.start_time;
+    last_step_early_return_ = false;
+    last_step_event_handling_needed_ = false;
+    last_step_terminated_ = false;
+    simulation_finished_ = false;
+    realtime_clock_started_ = false;
     state_ = SessionState::kInstantiated;
     return OperationResult::Success();
 }
 
 OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue value) {
+    const bool initialization_state =
+        state_ == SessionState::kInstantiated || state_ == SessionState::kSessionCreated;
+    const bool runtime_state = state_ == SessionState::kInitialized || state_ == SessionState::kRunning;
+    const bool writable_input = variable.causality == "input" && (initialization_state || runtime_state);
+    const bool writable_parameter = initialization_state
+        && variable.causality == "parameter"
+        && variable.variability != "constant";
+    if (!writable_input && !writable_parameter) {
+        return OperationResult::Failure(
+            "VARIABLE_NOT_SETTABLE",
+            "Variable is not settable in the current FMI mode");
+    }
+    if (simulation_finished_) {
+        return OperationResult::Failure("SIMULATION_FINISHED", "Simulation has finished");
+    }
     cached_values_[variable.value_reference] = value;
+    if (initialization_state) {
+        initial_inputs_[variable.name] = value;
+    }
     pending_inputs_[variable.name] = std::move(value);
     return OperationResult::Success();
 }
@@ -1386,6 +1459,22 @@ SessionState ProxyRuntime::State() const {
 
 double ProxyRuntime::CurrentTime() const {
     return current_time_;
+}
+
+bool ProxyRuntime::LastStepEarlyReturn() const {
+    return last_step_early_return_;
+}
+
+bool ProxyRuntime::LastStepEventHandlingNeeded() const {
+    return last_step_event_handling_needed_;
+}
+
+bool ProxyRuntime::LastStepTerminated() const {
+    return last_step_terminated_;
+}
+
+bool ProxyRuntime::SimulationFinished() const {
+    return simulation_finished_;
 }
 
 const std::string& ProxyRuntime::LastError() const {

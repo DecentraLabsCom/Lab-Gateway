@@ -23,6 +23,10 @@ struct ExperimentConfig {
 struct OutputSnapshot {
     double sim_time = 0.0;
     JsonObject values;
+    bool early_return = false;
+    bool event_handling_needed = false;
+    bool terminate_simulation = false;
+    bool finished = false;
 };
 
 class GatewayClient {
@@ -32,9 +36,11 @@ public:
     OperationResult CreateSession(const RuntimeConfig& config);
     OperationResult Initialize(const RuntimeConfig& config,
                                const ExperimentConfig& experiment,
-                               const std::map<std::string, ScalarValue>& initial_inputs);
+                               const std::map<std::string, ScalarValue>& initial_inputs,
+                               bool early_return_allowed = false);
     OperationResult SetInputs(const std::map<std::string, ScalarValue>& values);
     ValueResult<OutputSnapshot> Step(double delta_t);
+    ValueResult<OutputSnapshot> Step(double current_time, double delta_t);
     ValueResult<OutputSnapshot> GetOutputs(const std::vector<std::string>& variables);
     OperationResult Reset();
     OperationResult Terminate();

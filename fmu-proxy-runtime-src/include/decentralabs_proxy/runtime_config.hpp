@@ -11,6 +11,7 @@ namespace decentralabs::proxy {
 enum class TimeMode {
     kSimTime,
     kRealtime,
+    kExternal,
 };
 
 struct RuntimeConfig {
@@ -22,6 +23,7 @@ struct RuntimeConfig {
     std::optional<long long> ticket_expires_at;
     std::string protocol_version = "1.0";
     TimeMode time_mode = TimeMode::kSimTime;
+    double playback_speed = 1.0;
 };
 
 std::vector<std::string> MissingRequiredConfigFields(const RuntimeConfig& config);

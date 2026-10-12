@@ -106,6 +106,8 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
                 "canHandleVariableCommunicationStepSize": "true",
                 "canGetAndSetFMUState": "false",
                 "canSerializeFMUState": "false",
+                "hasEventMode": "false",
+                "mightReturnEarly": "true",
             },
         )
     else:

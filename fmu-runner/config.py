@@ -65,6 +65,8 @@ class FmuRunnerConfig:
     fmu_proxy_runtime_path: str
     fmu_proxy_gateway_ws_url: str
     fmu_proxy_signing_key: str
+    fmu_proxy_time_mode: str
+    fmu_proxy_playback_speed: float
     fmu_backend_mode: str
     fmu_local_dev_mode: bool
     fmu_local_executor_base_url: str
@@ -85,6 +87,12 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
         "http://blockchain-services:8080/auth/fmu/session-ticket/redeem",
     )
     configured_audit_url = values.get("ACCESS_AUDIT_URL", "").strip()
+    proxy_time_mode = values.get("FMU_PROXY_TIME_MODE", "external").strip().lower()
+    if proxy_time_mode not in {"simtime", "realtime", "external"}:
+        raise ValueError("FMU_PROXY_TIME_MODE must be simtime, realtime, or external")
+    proxy_playback_speed = float(values.get("FMU_PROXY_PLAYBACK_SPEED", "1"))
+    if not 0.1 <= proxy_playback_speed <= 100:
+        raise ValueError("FMU_PROXY_PLAYBACK_SPEED must be between 0.1 and 100")
     return FmuRunnerConfig(
         fmu_data_path=values.get("FMU_DATA_PATH", "/app/fmu-data"),
         aas_link_data_path=Path(values.get("AAS_LINK_DATA_PATH", "/app/data/aas-links")),
@@ -107,6 +115,8 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
         fmu_proxy_runtime_path=values.get("FMU_PROXY_RUNTIME_PATH", "/app/fmu-proxy-runtime"),
         fmu_proxy_gateway_ws_url=values.get("FMU_PROXY_GATEWAY_WS_URL", ""),
         fmu_proxy_signing_key=_env_or_secret_file("FMU_PROXY_SIGNING_KEY", environ=values),
+        fmu_proxy_time_mode=proxy_time_mode,
+        fmu_proxy_playback_speed=proxy_playback_speed,
         fmu_backend_mode=values.get("FMU_BACKEND_MODE", "station").strip().lower(),
         fmu_local_dev_mode=_flag(values, "FMU_LOCAL_DEV_MODE"),
         fmu_local_executor_base_url=values.get("FMU_LOCAL_EXECUTOR_BASE_URL", "").strip(),

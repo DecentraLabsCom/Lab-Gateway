@@ -203,7 +203,7 @@ fmi3Instance fmi3InstantiateCoSimulation(
     fmi3Boolean,
     fmi3Boolean loggingOn,
     fmi3Boolean,
-    fmi3Boolean,
+    fmi3Boolean earlyReturnAllowed,
     const fmi3ValueReference[],
     size_t,
     fmi3InstanceEnvironment instanceEnvironment,
@@ -226,6 +226,7 @@ fmi3Instance fmi3InstantiateCoSimulation(
         delete instance;
         return nullptr;
     }
+    instance->runtime.SetEarlyReturnAllowed(earlyReturnAllowed != fmi3False);
     return instance;
 }
 
@@ -745,13 +746,13 @@ fmi3Status fmi3DoStep(
         return ToFmiStatus(impl, status);
     }
     if (eventHandlingNeeded != nullptr) {
-        *eventHandlingNeeded = fmi3False;
+        *eventHandlingNeeded = impl->runtime.LastStepEventHandlingNeeded() ? fmi3True : fmi3False;
     }
     if (terminateSimulation != nullptr) {
-        *terminateSimulation = fmi3False;
+        *terminateSimulation = impl->runtime.LastStepTerminated() ? fmi3True : fmi3False;
     }
     if (earlyReturn != nullptr) {
-        *earlyReturn = fmi3False;
+        *earlyReturn = impl->runtime.LastStepEarlyReturn() ? fmi3True : fmi3False;
     }
     if (lastSuccessfulTime != nullptr) {
         *lastSuccessfulTime = impl->runtime.CurrentTime();

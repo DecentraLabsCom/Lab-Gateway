@@ -6,6 +6,7 @@ route retain ownership of authentication, reservation, ticket, and backend
 orchestration while preserving the existing runtime contract.
 """
 
+import math
 from typing import Any, Mapping
 from urllib.parse import urlparse, urlunparse
 
@@ -41,8 +42,16 @@ def build_proxy_session_config(
     session_ticket: str,
     ticket_expires_at: int,
     time_mode: str = "simtime",
+    playback_speed: float = 1.0,
 ) -> dict[str, Any]:
     """Build the config payload consumed by the proxy runtime."""
+
+    if not isinstance(time_mode, str) or time_mode not in {"simtime", "realtime", "external"}:
+        raise ValueError("Unknown proxy time mode")
+    if isinstance(playback_speed, bool) or not isinstance(playback_speed, (int, float)):
+        raise ValueError("Proxy playback speed must be a number")
+    if not math.isfinite(playback_speed) or not 0.1 <= playback_speed <= 100:
+        raise ValueError("Proxy playback speed must be between 0.1 and 100")
 
     return {
         "protocolVersion": "1.0",
@@ -53,4 +62,5 @@ def build_proxy_session_config(
         "sessionTicket": session_ticket,
         "ticketExpiresAt": ticket_expires_at,
         "timeMode": time_mode,
+        "playbackSpeed": float(playback_speed),
     }

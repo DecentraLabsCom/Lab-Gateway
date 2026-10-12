@@ -123,6 +123,8 @@ ACCESS_AUDIT_URL = CONFIG.access_audit_url
 FMU_PROXY_RUNTIME_PATH = CONFIG.fmu_proxy_runtime_path
 FMU_PROXY_GATEWAY_WS_URL = CONFIG.fmu_proxy_gateway_ws_url
 FMU_PROXY_SIGNING_KEY = CONFIG.fmu_proxy_signing_key
+FMU_PROXY_TIME_MODE = CONFIG.fmu_proxy_time_mode
+FMU_PROXY_PLAYBACK_SPEED = CONFIG.fmu_proxy_playback_speed
 FMU_BACKEND_MODE = CONFIG.fmu_backend_mode
 FMU_LOCAL_DEV_MODE = CONFIG.fmu_local_dev_mode
 FMU_LOCAL_EXECUTOR_BASE_URL = CONFIG.fmu_local_executor_base_url
@@ -467,7 +469,8 @@ def _build_proxy_session_config(
     reservation_key: str,
     session_ticket: str,
     ticket_expires_at: int,
-    time_mode: str = "simtime",
+    time_mode: str = FMU_PROXY_TIME_MODE,
+    playback_speed: float = FMU_PROXY_PLAYBACK_SPEED,
 ) -> dict[str, Any]:
     return _build_proxy_session_config_impl(
         fmi_version=fmi_version,
@@ -477,6 +480,7 @@ def _build_proxy_session_config(
         session_ticket=session_ticket,
         ticket_expires_at=ticket_expires_at,
         time_mode=time_mode,
+        playback_speed=playback_speed,
     )
 
 

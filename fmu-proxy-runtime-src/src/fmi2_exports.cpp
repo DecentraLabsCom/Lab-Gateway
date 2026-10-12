@@ -351,7 +351,14 @@ fmi2Status fmi2DoStep(fmi2Component c,
     if (instance == nullptr) {
         return fmi2Fatal;
     }
-    return ToFmiStatus(instance, instance->runtime.DoStep(currentCommunicationPoint, communicationStepSize));
+    const auto status = instance->runtime.DoStep(currentCommunicationPoint, communicationStepSize);
+    const auto fmi_status = ToFmiStatus(instance, status);
+    if (fmi_status != fmi2OK) {
+        return fmi_status;
+    }
+    return instance->runtime.LastStepEarlyReturn() || instance->runtime.LastStepTerminated()
+        ? fmi2Discard
+        : fmi2OK;
 }
 
 fmi2Status fmi2CancelStep(fmi2Component) {
@@ -392,7 +399,7 @@ fmi2Status fmi2GetBooleanStatus(fmi2Component c, const fmi2StatusKind s, fmi2Boo
         return fmi2Fatal;
     }
     if (s == fmi2Terminated) {
-        *value = instance->runtime.State() == SessionState::kTerminated ? fmi2True : fmi2False;
+        *value = instance->runtime.LastStepTerminated() ? fmi2True : fmi2False;
         return fmi2OK;
     }
     return fmi2Discard;

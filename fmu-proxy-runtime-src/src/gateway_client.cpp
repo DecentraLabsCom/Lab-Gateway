@@ -231,12 +231,15 @@ OperationResult GatewayClient::CreateSession(const RuntimeConfig& config) {
 
 OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
                                           const ExperimentConfig& experiment,
-                                          const std::map<std::string, ScalarValue>& initial_inputs) {
+                                          const std::map<std::string, ScalarValue>& initial_inputs,
+                                          const bool early_return_allowed) {
     JsonObject options = {
         {"timeMode", JsonValue(std::string(ToString(config.time_mode)))},
         {"startTime", JsonValue(experiment.start_time)},
         {"stopTime", JsonValue(experiment.stop_time)},
         {"stepSize", JsonValue(experiment.step_size)},
+        {"earlyReturnAllowed", JsonValue(early_return_allowed)},
+        {"playbackSpeed", JsonValue(config.playback_speed)},
     };
     if (!initial_inputs.empty()) {
         options.emplace("inputs", JsonValue(ToJsonObject(initial_inputs)));
@@ -276,10 +279,15 @@ OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue
 }
 
 ValueResult<OutputSnapshot> GatewayClient::Step(const double delta_t) {
+    return Step(0.0, delta_t);
+}
+
+ValueResult<OutputSnapshot> GatewayClient::Step(const double current_time, const double delta_t) {
     JsonObject request = {
         {"type", JsonValue(std::string(kSimStep))},
         {"requestId", JsonValue(NextRequestId())},
         {"sessionId", JsonValue(session_id_)},
+        {"currentCommunicationPoint", JsonValue(current_time)},
         {"deltaT", JsonValue(delta_t)},
     };
 
@@ -294,6 +302,10 @@ ValueResult<OutputSnapshot> GatewayClient::Step(const double delta_t) {
 
     OutputSnapshot snapshot;
     snapshot.sim_time = JsonNumber(response.value, "simTime", 0.0);
+    snapshot.early_return = JsonBool(response.value, "earlyReturn");
+    snapshot.event_handling_needed = JsonBool(response.value, "eventHandlingNeeded");
+    snapshot.terminate_simulation = JsonBool(response.value, "terminateSimulation");
+    snapshot.finished = JsonBool(response.value, "finished");
     if (const JsonValue* values = FindObjectValue(response.value, "values")) {
         if (const JsonObject* object = values->AsObject()) {
             snapshot.values = *object;
@@ -339,6 +351,7 @@ OperationResult GatewayClient::Reset() {
         {"type", JsonValue(std::string(kSimReset))},
         {"requestId", JsonValue(NextRequestId())},
         {"sessionId", JsonValue(session_id_)},
+        {"deferInitialization", JsonValue(true)},
     };
 
     const auto response = SendRequest(request);

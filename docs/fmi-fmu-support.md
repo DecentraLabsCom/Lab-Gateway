@@ -282,12 +282,45 @@ A ticket-based `session.create` is bound to the user, lab and reservation and ha
 
 `sim.initialize.options.timeMode` supports:
 
-- `simtime`: advance simulated time as quickly as possible;
-- `realtime`: try to follow the wall clock.
+- `simtime`: automatic sessions advance as quickly as the FMU permits;
+- `realtime`: automatic sessions follow wall-clock time, scaled by
+  `playbackSpeed` (default `1`, range `0.1` to `100`);
+- `external`: the caller owns every step. `sim.start`, `sim.resume` and
+  `sim.runUntil` are rejected; `sim.step` requires the current
+  `currentCommunicationPoint`.
 
-`simtime` is the recommended default.
+`simtime` is the default for automatic sessions. A proxy FMI runtime advances
+through its caller's FMI `doStep` calls and sends each current communication
+point to Station. Generated proxy FMUs use `external` by default because the
+importing FMI tool owns the step sequence; operators can select another mode
+with `FMU_PROXY_TIME_MODE` (`simtime`, `realtime` or `external`). In a generated
+proxy, `realtime` paces `doStep` calls against the wall clock; `simtime` leaves
+them unpaced. `FMU_PROXY_PLAYBACK_SPEED` sets the realtime multiplier from 0.1
+to 100 (default `1`).
+FMI 3 proxy instantiation forwards the importer's `earlyReturnAllowed`
+negotiation to Station, and `doStep` returns the last successful time and
+termination/early-return flags from the remote session.
+The proxy's FMI `reset` requests a deferred Station reset, then sends a fresh
+`sim.initialize` with the importer's new experiment and retained initial input
+values.
 
 Streaming uses bounded per-session queues. Output events include `seq` and `dropped`, and subscriptions can set `periodMs`, `maxHz` and `maxBatchSize`.
+The Station limits subscriptions to 60 Hz and 256 samples per batch by default;
+automatic `sim.progress` messages are throttled independently from the FMU
+communication step. Individual step responses include `requestedTime`,
+`timeAdvanced`, `earlyReturn`, `eventOccurred`, `terminateSimulation` and
+`finishReason` where applicable. FMI 3 event iteration is completed by the
+isolated Station Executor before it returns the step response.
+
+Initialization values are sent in `sim.initialize.options.inputs`. Runtime
+`sim.setInputs` accepts only declared FMU inputs, with strict type, range and
+array-size validation. Invalid variables are rejected before any setter is
+called. Scenario execution and runtime input changes have independent quotas:
+the default scenario budget is 100 per reservation per UTC day; input updates
+are tracked separately per reservation and FMU (10,000 updates and 64 MiB per
+day, 30 updates per 10-second window, 64 KiB per update by default). Operators
+can tune the Station limits with the `FMU_MAX_INPUT_*` and
+`FMU_INPUT_UPDATE_WINDOW_SECONDS` environment variables.
 
 ## Gateway-to-Station contract
 

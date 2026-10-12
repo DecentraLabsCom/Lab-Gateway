@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <memory>
@@ -29,6 +30,7 @@ public:
     OperationResult SetupExperiment(double start_time, double stop_time, double step_size);
     OperationResult EnterInitializationMode();
     OperationResult ExitInitializationMode();
+    void SetEarlyReturnAllowed(bool allowed);
     OperationResult DoStep(double current_time, double step_size);
     OperationResult Terminate();
     OperationResult Reset();
@@ -56,6 +58,10 @@ public:
     const ModelDescription& Model() const;
     SessionState State() const;
     double CurrentTime() const;
+    bool LastStepEarlyReturn() const;
+    bool LastStepEventHandlingNeeded() const;
+    bool LastStepTerminated() const;
+    bool SimulationFinished() const;
     const std::string& LastError() const;
 
 private:
@@ -93,7 +99,16 @@ private:
     std::string instance_name_;
     std::string last_error_;
     double current_time_ = 0.0;
+    bool early_return_allowed_ = false;
+    bool last_step_early_return_ = false;
+    bool last_step_event_handling_needed_ = false;
+    bool last_step_terminated_ = false;
+    bool simulation_finished_ = false;
+    std::chrono::steady_clock::time_point realtime_wall_origin_{};
+    double realtime_sim_origin_ = 0.0;
+    bool realtime_clock_started_ = false;
     std::map<std::uint32_t, ScalarValue> cached_values_;
+    std::map<std::string, ScalarValue> initial_inputs_;
     std::map<std::string, ScalarValue> pending_inputs_;
     std::vector<std::string> string_cache_;
 };
