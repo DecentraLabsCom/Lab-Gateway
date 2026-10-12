@@ -43,7 +43,7 @@ jobs:
             fmu-proxy-runtime/binaries/linux64/decentralabs_proxy.so
 
       - name: Upload source-built linux64 runtime
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: proxy-runtime-linux64
           path: fmu-proxy-runtime-src/build-ci/libdecentralabs_proxy.so
@@ -77,7 +77,7 @@ jobs:
           Get-FileHash $promoted -Algorithm SHA256
 
       - name: Upload source-built win64 runtime
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: proxy-runtime-win64
           path: fmu-proxy-runtime-src/build-ci/Release/decentralabs_proxy.dll
