@@ -166,6 +166,7 @@ Marketplace upload is disabled by design.
 - Every client command must include `requestId` (idempotent replay support).
 - `session.terminate` is idempotent.
 - `sim.outputs` includes `seq` and `dropped` for backpressure visibility.
+- Realtime output reads share the Executor's per-session `FMU_MAX_OUTPUT_SUBSCRIPTION_HZ` cap across subscriptions, `sim.getOutputs`, `sim.step`, and `sim.runUntil`. `OUTPUT_READ_RATE_LIMITED` errors include `retryAfterMs`; retry after that delay with a new `requestId` because duplicate IDs replay the prior response.
 - Keepalive/telemetry events: `session.pong`, `session.heartbeat`, `session.expiring`.
 - External `session.create` always passes through a short-lived, reservation-bounded `sessionTicket`. The ticket authorizes the handoff; it is not the FMU session or its reconnect handle. Ticket-only clients provide it directly; when a bearer is already present (for example from `FMU_SESSION`), the runner issues and redeems the ticket server-side. The durable session observation is recorded before `session.created` is returned. Internal Station hops do not issue a second ticket; the gateway proxy confirms the observation after Station accepts the session.
 - FMU HTTP and WebSocket JWT authentication accepts only `Authorization: Bearer <jwt>`; query-string and ambient cookie JWTs are rejected. Browser clients that cannot set a WebSocket header must use the opaque `sessionTicket` in `session.create`.
