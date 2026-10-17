@@ -3,7 +3,7 @@ uvicorn[standard]==0.54.0
 fmpy==0.3.32
 pyjwt[crypto]==2.15.1
 httpx==0.28.1
-websockets==17.1
+websockets==17.2
 pydantic==2.14.0
 aiosqlite==0.22.1
 python-multipart==0.0.32
