@@ -2,4 +2,4 @@
 -r requirements.txt
 pytest>=9.1.1
 pytest-cov>=7.1.0
-basyx-python-sdk==2.1.0
+basyx-python-sdk==2.2.0
