@@ -14,7 +14,7 @@ are the labels currently shown in Lab Manager.
 | Device output names and supported timing configuration | `Power Controllers` | Read from the physical controller; supported APC changes are written back to the device. |
 | Laboratory policies | `Lab Power Control` → `Lab power policy` | The same local JSON catalog. |
 | Operation results and idempotency | `Lab Power Control`, timeline, and Ops APIs | MySQL, primarily `power_operations`; migration `ops-migrations/sql/V5__power_operations.sql`. |
-| WoL, WinRM, and station shutdown | `Lab Station Ops` | Ops Worker, Lab Station, and their operational records; these are not PDU controllers. |
+| WoL, Station management, and station shutdown | `Lab Station Ops` | Ops Worker, Lab Station, and their operational records; Windows v2 uses WinRM and Linux v3 uses SSH. These are not PDU controllers. |
 
 In the MVP, controller definitions, Gateway outlet metadata and policies remain
 JSON-backed. Physical output names and device configuration are not copied
@@ -45,7 +45,8 @@ operation detail and idempotency for executed actions.
    still have tables from the legacy `mysql/003-energy-policies.sql` bootstrap
    are adopted by the separate `flyway_ops_schema_history` table without
    recreating their data.
-5. Verify WoL, WinRM, and the Lab Station heartbeat separately using
+5. Verify WoL, the selected Station management transport (WinRM or SSH), and
+   the Lab Station heartbeat separately using
    [Gateway and Lab Station operations](gateway-lab-station-operations.md).
 
 Energy control and Notifications use the Lab Manager session. In Lite mode,
@@ -255,10 +256,10 @@ flow is:
 | Release | `release-session` and the configured closing operation. |
 | After end | Policy `post_end` phase, normally to switch outlets off. |
 
-Energy automation does not replace WoL, WinRM, heartbeat, or Lab Station
-session control. These are complementary layers. `respectLocalMode` prevents
-the policy from being applied when the heartbeat reports local station
-operation, according to the implemented flow.
+Energy automation does not replace WoL, Station management, heartbeat, or Lab
+Station session control. These are complementary layers. `respectLocalMode`
+prevents the policy from being applied when the heartbeat reports local
+station operation, according to the implemented flow.
 
 ## Credential rotation and maintenance
 
@@ -299,7 +300,7 @@ operation.
 ## Related references
 
 - [Ops Worker README](../../ops-worker/README.md): variables, drivers, stores, and security boundaries.
-- [Gateway and Lab Station operations](gateway-lab-station-operations.md): WoL, WinRM, heartbeat, reservations, and timeline.
+- [Gateway and Lab Station operations](gateway-lab-station-operations.md): WoL, WinRM/SSH management, heartbeat, reservations, and timeline.
 - [Laboratory connectivity](laboratory-connectivity.md): private-network topology and segmentation.
 - [Lab Station WoL and energy playbook](../../../Lab Station/docs/bios-wol-playbook.md): BIOS, NIC, WoL, and station diagnostics.
 - [`power-controllers.sample.json`](../../ops-worker/power-controllers.sample.json): sample JSON structure.

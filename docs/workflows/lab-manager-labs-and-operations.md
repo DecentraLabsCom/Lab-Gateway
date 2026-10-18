@@ -125,8 +125,9 @@ In `Operations` → `Lab Station Ops`, the interface shows:
 - Guacamole connections that are not yet associated with an Ops host.
 
 Click `Refresh` after changing the inventory. The UI starts a heartbeat stream
-for each host with WinRM credentials and ready TLS trust when the browser and
-endpoint support it.
+only when the host's selected management credentials and trust are ready:
+WinRM credentials and TLS trust for Windows v2, or an SSH credential and pinned
+host key for Linux v3, when the browser and endpoint support streaming.
 Hosts created through the Lab Manager are editable with the pencil action next
 to their name; the address remains read-only.
 
@@ -137,22 +138,34 @@ to their name; the address remains read-only.
 For a Guacamole connection without an Ops host:
 
 1. Run `Check Lab Station`.
-2. Review the address, candidate name, MAC address, and Lab Station signals.
+2. Review the address, candidate name, MAC address, platform, and Station
+   signals. An open SSH port is only a Linux v3 provisioning hint; the host
+   remains `management-trust-pending` until credentials, host-key trust, and
+   Station identity are verified.
 3. Click `Configure` and complete:
+   - `Platform`: choose Windows or Linux to match the Station installation;
    - `Name`: stable host identifier;
    - `Address`: detected private address (read-only);
    - `MAC`: required for WoL;
-   - `Heartbeat path`: discovered automatically; for current Lab Station releases it is normally `C:\Lab Station\labstation\data\telemetry\heartbeat.json`.
+   - Windows: `Lab Station path` and the WinRM management endpoint. The
+     heartbeat and event paths are derived from the installed Station; the
+     current heartbeat path is normally
+     `C:\Lab Station\labstation\data\telemetry\heartbeat.json`;
+   - Linux: SSH management port (default `22`), Station profile, and command
+     (default `/usr/bin/labstationctl`). Linux v3 uses the logical `heartbeat`
+     and `session-events` artifacts, not Windows file paths.
 4. Save the host and reload the inventory.
 
 The station form stores only the host configuration. At runtime the worker reads the provider catalog, follows each physical lab's Guacamole `accessKey`, and associates the connection with exactly one registered host; one station can therefore serve
 multiple labs while other connections on the same station remain administrative.
 
-For a provisioned host, use the pencil action to change its name, MAC, or
-heartbeat path. Static entries from `ops-worker/hosts.json` must still be
-edited in that catalog.
+For a provisioned host, use the pencil action to change its name, MAC, WoL
+broadcast, or platform-specific Station settings. Static entries from
+`ops-worker/hosts.json` must still be edited in that catalog.
 
-### Store WinRM credentials
+### Windows v2: WinRM credentials and TLS trust
+
+The following credential and certificate steps apply to Windows v2 hosts.
 
 Click the `missing` or `configured` WinRM credential status in the host card,
 open `Set WinRM Credentials`, and save the user and password for its
@@ -232,9 +245,39 @@ If the certificate is missing, malformed or expired, the heartbeat reports a
 specific trust error instead of treating the failure as an authentication
 problem. Do not disable TLS validation or configure `TrustedHosts`.
 
-WinRM must use HTTPS/TLS on port `5986`, and the address must belong to
+Windows v2 WinRM must use HTTPS/TLS on port `5986`, and the address must belong to
 `WINRM_MANAGEMENT_CIDRS`. Do not publish the listener or Ops Worker to the
 Internet.
+
+### Linux v3: SSH credential and host-key trust
+
+Linux v3 hosts use an encrypted Ed25519 service key and a host key pinned to
+that specific station. The host card shows `SSH credentials` and `SSH host-key
+trust` independently.
+
+1. Click the `SSH credentials` status. If no credential exists, Lab Manager
+   generates one in the Gateway and displays its public key. The private key
+   remains encrypted in Lab Gateway.
+2. Install the displayed public key on the Station with the command shown by
+   Lab Manager, normally:
+
+   ```bash
+   sudo labstationctl setup --profile <profile> --ssh-port <port> --management-public-key '<public-key>'
+   ```
+
+3. Click `SSH host-key trust` to preview the server key. Verify its fingerprint
+   through a trusted out-of-band channel, then enter the exact fingerprint to
+   pin it. Do not accept a fingerprint solely because it was returned by the
+   same untrusted connection.
+4. Use `Verify connection` to check the pinned SSH connection and authenticated
+   Station identity. A Linux v3 host is ready only when identity reports
+   `contractVersion: 3.0.0` and `platform.os: linux`; an open SSH port alone is
+   not sufficient.
+
+The SSH trust status is `missing`, `ready`, or `mismatch`. If it changes to
+`mismatch`, investigate the host-key change before confirming a replacement.
+After credentials and trust are ready, heartbeat polling reads the logical
+`heartbeat` artifact and does not require a Windows heartbeat path.
 
 ### Manual actions and heartbeat
 
@@ -246,15 +289,17 @@ For each host, operators can:
 - enable or disable local mode according to the operating procedure; and
 - inspect preparation state, the last operation, power state, and WoL NIC data.
 
-Heartbeat streaming starts automatically only for hosts with configured WinRM
-credentials and ready TLS trust. A missing or invalid certificate prevents the
-authenticated heartbeat even when the Station is powered on. If a stream error includes a
-`requestId`, keep it for the Ops Worker logs; the browser message is not a
-substitute for the host-card credential and TLS trust statuses.
+Heartbeat streaming starts only when the selected management credentials and
+trust are ready. For Windows v2, that means WinRM credentials and valid TLS
+trust; for Linux v3, an encrypted SSH credential and a pinned host key. If a
+stream error includes a `requestId`, keep it for the Ops Worker logs; the
+browser message does not replace the host-card credential and trust statuses.
 
 Destructive or power actions require an authorized maintenance window and a
-clear operational reason. For the Windows command contract, see
+clear operational reason. For the Windows v2 command contract, see
 [winrm-command-contract.md](../../../Lab Station/docs/winrm-command-contract.md).
+For the shared status and Linux v3 dispatcher contracts, see
+[`contracts/station/README.md`](../../contracts/station/README.md).
 
 ### Actionable Reservations
 
@@ -276,7 +321,7 @@ reservation change must fail safely.
 ### Recent Operations and Reservation Timeline
 
 `Recent Operations` shows recent Ops Worker activity with pagination. Use it to
-identify WoL, WinRM, preparation, release, and scheduler failures.
+identify WoL, Station management, preparation, release, and scheduler failures.
 
 `Reservation Timeline` requires the on-chain `reservationKey`, normally the
 reservation hash. It displays:
@@ -296,7 +341,8 @@ Before considering the laboratory ready:
 - the Guacamole connection works over the private network;
 - Lab Station launches the application and publishes heartbeat;
 - WoL wakes the host from an approved state;
-- WinRM authenticates and accepts `prepare-session` and `release-session`;
+- the selected Station transport authenticates and accepts `prepare-session`
+  and `release-session` (WinRM for Windows v2, SSH dispatcher for Linux v3);
 - the published `labId` matches the host and, if present, the energy policy;
 - a test reservation reaches Guacamole without a manual login screen; and
 - the timeline contains enough evidence to diagnose the session.

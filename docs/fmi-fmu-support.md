@@ -203,14 +203,19 @@ the Gateway host inventory and set `FMU_STATION_BASE_URL` to its executor URL
 (`http://<station-address>:8091` by default). If the URL hostname is not the
 inventory address, set `FMU_STATUS_STATION_HOST` to the registered host name.
 
-From Lab Manager > Lab Station Ops, each configured Station row exposes a
-`Link FMU token` action for the one configured Station. Linking writes the
-token to the Windows machine-level `FMU_INTERNAL_TOKEN` variable and restarts
-`LabStation\BackgroundService` so the sidecar picks it up. Once linked, that
-row changes to `Release FMU token` and the other Station rows remain disabled.
-The token is never returned to the browser. A Gateway cannot link a second
-host: the selected host must resolve to the single Station represented by
-`FMU_STATION_BASE_URL`/`FMU_STATUS_STATION_HOST`.
+From Lab Manager > Lab Station Ops, the configured Station row exposes a
+`Link FMU token` action. The operation follows the Station management contract:
+Windows v2 over WinRM writes the token to the machine-level
+`FMU_INTERNAL_TOKEN` variable and starts or restarts
+`LabStation\BackgroundService`; Linux v3 over SSH stores it in the
+root-owned `/etc/decentralabs/lab-station/secrets/fmu-internal-token.env` file
+with mode `0600`, then starts or restarts `decentralabs-labstation-fmu`.
+Releasing the token removes the Windows machine variable and restarts the
+background task; on Linux it removes the secret file and stops the FMU service.
+Once linked, the row changes to `Release FMU token` and other Station rows
+remain disabled. The token is never returned to the browser. A Gateway cannot
+link a second host: the selected host must resolve to the single Station
+represented by `FMU_STATION_BASE_URL`/`FMU_STATUS_STATION_HOST`.
 
 The panel status is authenticated end-to-end through
 `GET /internal/fmu/capacity`; the unauthenticated `/internal/health` response
@@ -431,6 +436,7 @@ FMI/FMU is the protected execution and interoperability layer. It is not a compl
 Use these documents when the work is implementation- or deployment-specific:
 
 - [FMU Runner](../fmu-runner/README.md) — Gateway facade, endpoints, backend modes, tests and Docker operation.
+- [FMU Executor source](https://github.com/DecentraLabsCom/FMU-Executor) — shared Station execution service, releases and internal API contract.
 - [FMU data layout](../fmu-data/README.md) — provider-scoped FMU storage and provisioning layout.
 - [FMU proxy runtime](../fmu-proxy-runtime/README.md) — runtime binary drop path and platform packaging.
 - [FMU proxy runtime source](../fmu-proxy-runtime-src/README.md) — native runtime source, build and release procedures.

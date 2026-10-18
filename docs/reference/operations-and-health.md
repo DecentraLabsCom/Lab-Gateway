@@ -33,7 +33,11 @@ The projection also separates `access` (`ready`, `busy`, `inaccessible` or
 `wake.verified` requires a recent persisted wake operation that sent WoL and
 then observed the host answering; a configured MAC and ping target alone only
 produce `wake.configured`. Successful WoL evidence remains verified for seven
-days; a weekly Wake Ops verification can refresh that evidence automatically.
+days. Weekly Wake Ops can refresh that evidence; its current reachability check
+probes the WinRM port and applies to Windows v2, not Linux v3 SSH. Keep the
+Linux per-host schedule disabled because a stale heartbeat can make the cycle
+misclassify a powered-on Station. See the
+[Wake Ops limitation](../workflows/gateway-lab-station-operations.md#wake-ops).
 Physical-lab entries use the persisted Station heartbeat, with the bounded
 Guacamole target probe and WoL evidence as independent fallback/enrichment
 signals. FMU entries use the private `fmu-runner` health signal in both local
@@ -81,7 +85,7 @@ anonymous demo. Its status is one of:
   connection-group, sharing-profile permission or group membership;
 - `unready`: the gateway, Marketplace authority, or Station heartbeat cannot
   currently prove readiness;
-- `busy`: the Station has an active Windows session or local-only mode enabled, or the Marketplace
+- `busy`: the Station has an active session or local-only mode enabled, or the Marketplace
   authority denies the requested demo window;
 - `ready`: all local checks, the physical host and the Marketplace authority
   agree for a short probe window.
@@ -143,13 +147,17 @@ flowchart TD
 | `/gateway/health` is down in Lite | Remote issuer DNS/TLS, issuer public-key/JWKS sync, and per-Lite trust values | Confirm `ISSUER` is external and exact; refresh the Full-issued trust bundle or equivalent remote issuer configuration if keys rotated. |
 | End user sees Guacamole login | Access-code redemption and reservation state | Use the access-code flow, not a browser JWT or a manual Guacamole account. |
 | Guacamole connection fails | `guacd` and the private RDP/VNC/SSH route | Test only from the controlled lab network and verify the selected local connection ID. |
-| Ops action fails | `/ops/health/details`, host catalog, WinRM TLS and CIDR policy | Confirm host address is allowed by `WINRM_MANAGEMENT_CIDRS`; verify the encrypted credential reference. |
+| Ops action fails | `/ops/health/details`, host catalog, `managementTransport`, `managementTrust`, and CIDR policy | Check the host's selected transport. Windows v2 uses WinRM TLS; Linux v3 uses the pinned SSH host key and encrypted Ed25519 credential. Confirm the address is allowed by `STATION_MANAGEMENT_CIDRS` and retain the request ID. |
 | Power controller is `checking`, `unknown`, or `unreachable` | Lab Manager `Energy` status, controller host/port, private route, credentials and Ops Worker logs | Wait for the background status check, then use `Refresh`; for APC verify UDP `161`, the source-IP authorization and the credential's SNMP version. |
-| Heartbeat reports `WINRM_UNREACHABLE` | Station power state, WinRM listener/firewall, host address/port and the private management route | The Station may be powered off or WinRM may be unavailable; restore reachability and retry. |
-| Heartbeat reports `WINRM_AUTH_FAILED` | Host-card WinRM credentials, account permissions and the Ops Worker request ID | Recheck or replace the stored Station credential, then retry the heartbeat. |
-| Heartbeat reports `WINRM_HEARTBEAT_NOT_FOUND` | Station heartbeat path, `heartbeat_path` and the remote file-read log | Restore the configured heartbeat file or correct the host path, then retry. |
-| Heartbeat reports `WINRM_HEARTBEAT_INVALID` | Station heartbeat artifact and `status-json` output | Correct the malformed JSON produced by the Station, then retry; do not treat it as a TLS or authentication failure. |
-| Heartbeat stream fails for an incomplete Station | Host-card `WinRM credentials` and `WinRM TLS trust` statuses, then `/ops/health/details` and Ops Worker logs | Save the WinRM credential and save the Station certificate through the host card's `WinRM TLS trust` control (or copy it into the matching per-host `ops-data/winrm-certificates/<winrm-trust-ref>/` directory) before retrying heartbeat; retain any `requestId` for generic internal failures. |
+| Windows v2 heartbeat reports `WINRM_UNREACHABLE` | Station power state, WinRM listener/firewall, host address/port and private management route | The Station may be powered off or WinRM may be unavailable; restore reachability and retry. |
+| Windows v2 heartbeat reports `WINRM_AUTH_FAILED` | Host-card WinRM credentials, account permissions and Ops Worker request ID | Recheck or replace the stored WinRM credential, then retry the heartbeat. |
+| Windows v2 heartbeat reports `WINRM_HEARTBEAT_NOT_FOUND` | Station heartbeat path, `heartbeat_path` and the remote file-read log | Restore the configured Windows heartbeat file or correct the host path, then retry. |
+| Windows v2 heartbeat reports `WINRM_HEARTBEAT_INVALID` | Station heartbeat artifact and `status-json` output | Correct malformed JSON produced by the Station, then retry; do not treat it as a TLS or authentication failure. |
+| Linux v3 reports `STATION_TRUST_REQUIRED` or `STATION_TRUST_MISMATCH` | Host-card `SSH host-key trust` status and the Station's current fingerprint | Verify the fingerprint through a trusted out-of-band channel, then pin or replace the host key from Lab Manager. Never bypass the host-key check. |
+| Linux v3 reports `STATION_AUTH_FAILED` | SSH credential reference, installed public key, and Ops Worker request ID | Confirm the generated public key is installed for the configured account with `labstationctl setup`, then verify the host again. |
+| Linux v3 reports `STATION_UNREACHABLE` | SSH port, private route, Station service, and dispatcher response | Restore network reachability and verify that the pinned Station accepts the structured dispatcher request; retain the request ID. |
+| Linux v3 reports `STATION_HEARTBEAT_INVALID` | Heartbeat payload and `contracts/station/v3/heartbeat.schema.json` | Correct the Station v3 contract payload, then retry. Linux reads the logical `heartbeat` artifact rather than a Windows file path. |
+| Heartbeat stream fails for an incomplete Station | Host-card management transport, credential status, trust status, `/ops/health/details`, and Ops Worker logs | Complete the selected transport's credential and trust setup: WinRM credentials plus TLS trust for Windows v2, or an SSH key plus pinned host key for Linux v3. Retain any `requestId` for diagnosis. |
 | FMU route returns `503` | `FMU_RUNNER_ENABLED` and active profile | Start exactly one FMU profile and verify the public audience and, for production, Station connectivity. |
 
 ## Useful Compose commands
@@ -201,7 +209,7 @@ rotation. Use the institution's approved encrypted backup process.
 | --- | --- |
 | `blockchain-data/` | Encrypted institutional wallets and backend key material. |
 | `.env` and `blockchain-services/.env` | Deployment configuration and secret references. Keep outside source control. |
-| `OPS_SECRETS_KEY` | Required to decrypt stored WinRM credentials. It must be stable and recoverable. |
+| `OPS_SECRETS_KEY` | Required to decrypt stored WinRM and SSH Station credentials. It must be stable and recoverable. |
 | `OPS_POWER_CONFIG`, `OPS_POWER_CREDENTIALS_PATH`, and `OPS_SECRETS_KEY` | Provider-local power-controller catalog and encrypted APC/SNMP/NETIO credentials. Back them up together through the approved encrypted process; never expose the credential store or copy it into an unprotected backup. |
 | MySQL data volume | Guacamole, backend operational, and Ops Worker state. |
 | `lab-content/` | Lab Manager-generated metadata and uploaded provider content. |
@@ -220,8 +228,8 @@ production environment.
   operational timeline, and on-chain state.
 - A local Ops state such as `ACTIVE` is operational telemetry, not the
   on-chain `ACCESS_AUTHORIZED` state.
-- Do not expose MySQL, Ops Worker internals, station WinRM, or FMU internal
-  endpoints to simplify troubleshooting.
+- Do not expose MySQL, Ops Worker internals, Station management (WinRM/SSH), or
+  FMU internal endpoints to simplify troubleshooting.
 
 ## Related documents
 

@@ -75,7 +75,8 @@ provider wallet.
    and [health](../reference/operations-and-health.md).
 2. Create and test the local Guacamole connection using
    [Guacamole connections](../configuring-lab-connections/guacamole-connections.md).
-3. Prepare Lab Station, Wake-on-LAN, WinRM, and heartbeat according to
+3. Prepare Lab Station, Wake-on-LAN, the platform's management transport, and
+   heartbeat according to
    [Gateway and Lab Station operations](gateway-lab-station-operations.md).
 4. Open `Labs`, publish the laboratory, and confirm that the `labId` and
    `accessKey` are the expected values. For a physical lab, the Digital Twins
@@ -83,13 +84,18 @@ provider wallet.
     Guacamole connection and registered host inventory.
 5. Configure `Energy` if a smart power strip is present. Never cut power to
    the Gateway, network switch, or any control-plane equipment with that strip.
-6. Return to `Operations`, provision the host, save WinRM credentials, check
-   heartbeat, and run a controlled test.
+6. Return to `Operations`, provision the host, complete its management
+   credentials and trust setup, check heartbeat, and run a controlled test.
 7. Create a test reservation and inspect the complete timeline: WoL,
    `prepare-session`, access, `release-session`, and any power actions.
 
 The details for steps 3, 4, and 6 are in [Labs and Operations](lab-manager-labs-and-operations.md).
 The complete energy workflow is in [Lab Manager energy operations](lab-manager-energy-operations.md).
+
+Windows v2 uses WinRM with TLS certificate trust. Linux v3 uses an encrypted
+Ed25519 SSH credential, a pinned SSH host key, and Station identity
+verification. Follow the platform-specific onboarding steps in
+[Labs and Operations](lab-manager-labs-and-operations.md).
 
 ## Recommended order for an FMU or physical laboratory digital twin
 

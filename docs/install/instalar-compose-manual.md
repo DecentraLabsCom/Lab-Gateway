@@ -70,7 +70,7 @@ OPS_BACKEND_MYSQL_PASSWORD=cambia_a_contraseña_segura
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_GUACAMOLE_MYSQL_PASSWORD=cambia_a_contraseña_segura
 OPS_SECRETS_KEY=<clave-fernet-estable>
-WINRM_MANAGEMENT_CIDRS=10.7.74.0/24
+STATION_MANAGEMENT_CIDRS=10.7.74.0/24
 OPS_WINRM_TRUST_PATH=/app/data/winrm-certificates
 
 # Administrador de Guacamole (no uses 'guacadmin' en producción)
@@ -90,19 +90,21 @@ CORS_ALLOWED_ORIGINS=https://www.decentralabs-marketplace.app
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
 
-`WINRM_MANAGEMENT_CIDRS` es la lista de redes privadas desde las que Ops
-Worker puede alcanzar las Lab Stations mediante WinRM HTTPS por el puerto
-5986. Es obligatoria antes de configurar cualquier host de Ops, y la dirección
-de cada estación debe pertenecer a una de esas redes. Es una política de
-seguridad y no se deduce de Guacamole: Guacamole también puede contener
-conexiones de escritorio exclusivamente administrativas y no proporciona la
-máscara de red autorizada.
+`STATION_MANAGEMENT_CIDRS` es la lista de redes privadas desde las que Ops
+Worker puede alcanzar las Lab Stations configuradas. Windows v2 usa WinRM
+HTTPS por el puerto 5986; Linux v3 usa SSH en el puerto definido para el host.
+Es obligatoria antes de configurar cualquier host de Ops, y la dirección de
+cada estación debe pertenecer a una de esas redes. `WINRM_MANAGEMENT_CIDRS`
+sigue disponible como alias de compatibilidad. Es una política de seguridad y
+no se deduce de Guacamole: Guacamole también puede contener conexiones de
+escritorio exclusivamente administrativas y no proporciona la máscara de red
+autorizada.
 
 Usa el CIDR real de la VLAN de gestión. Si solo se autoriza una estación, usa
 un `/32` específico, por ejemplo:
 
 ```env
-WINRM_MANAGEMENT_CIDRS=10.192.38.82/32
+STATION_MANAGEMENT_CIDRS=10.192.38.82/32
 ```
 
 Para varias estaciones de la misma `/24`, usa la subred real, por ejemplo

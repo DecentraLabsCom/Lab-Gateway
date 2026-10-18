@@ -41,7 +41,7 @@ lab to a Lite `accessURI` until those three conditions are true.
 | Full Gateway | Embedded `blockchain-services` issues/validates local credentials, handles provider operations and signs institutional transactions. | OpenResty, Guacamole, FMU Runner and Ops Worker serve local labs. |
 | Lite Gateway | Does not become the primary issuer. It validates credentials from the configured remote issuer and can delegate `/lab-admin`. | Owns its local OpenResty, Guacamole, FMU Runner and Ops Worker. |
 | Standalone `blockchain-services` | Can be the remote provider/consumer backend and JWT issuer without a local browser access plane. | No local Guacamole or Station plane. It provisions configured remote gateways. |
-| Lab Station | No public auth role. | Windows-side execution, WinRM commands, telemetry and optional FMU station backend. |
+| Lab Station | No public auth role. | Windows v2 uses WinRM; Linux v3 uses the Station contract over pinned SSH. Both provide telemetry and may host the optional FMU backend. |
 
 The root Compose project keeps the embedded `blockchain-services` container
 dormant when a Gateway is Lite (`BLOCKCHAIN_SERVICES_ENABLED=false` or the
@@ -228,7 +228,7 @@ sequenceDiagram
     L->>L: Validate JWT, destination and local state
     L->>F: Commit handle, or release on failure
     L-->>M: Secure cookie and clean local Guacamole URL
-    G->>S: RDP/WinRM/FMUs on private network
+    G->>S: RDP/WinRM v2/SSH v3/FMUs on private network
 ```
 
 Full-owned labs use the Full local provisioner; Lite-owned labs use the route
@@ -292,7 +292,8 @@ For every composite deployment verify:
 - `GET /gateway/mode` reports the expected local edge mode and `/gateway/health`
   shows the selected backend dependencies;
 - remote origins are present in the backend route map before publishing a lab;
-- Station WinRM, FMU internal HTTP/WSS and MySQL remain off the public edge.
+- Station management (WinRM/SSH), FMU internal HTTP/WSS and MySQL remain off
+  the public edge.
 
 See [Guacamole Session Policy](guacamole-session-policy.md) for expiry and
 reconnect semantics, and [Laboratory Connectivity](workflows/laboratory-connectivity.md)

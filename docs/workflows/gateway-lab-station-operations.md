@@ -1,6 +1,6 @@
 # Lab Gateway and Lab Station Operations
 
-This guide describes the current operational integration between a Lab Gateway and the Windows **Lab Station** that controls a physical laboratory. It replaces the former planning-oriented document with the implemented interfaces, trust boundaries, and reservation lifecycle.
+This guide describes the current operational integration between a Lab Gateway and a **Lab Station** that controls a physical laboratory. Windows stations use the v2 compatibility contract over WinRM; Linux stations use Station Contract v3 over pinned SSH. The Gateway normalizes both transports before persisting telemetry or running reservation operations.
 
 For the network topology around these components, see [Laboratory Connectivity](laboratory-connectivity.md). For the on-chain reservation lifecycle, see [Institutional Reservation Workflow](institutional-reservation-workflow.md).
 
@@ -10,8 +10,8 @@ For the network topology around these components, see [Laboratory Connectivity](
 | --- | --- |
 | Lab Manager | Gateway UI for host inventory, Guacamole connection selection, operation history, and reservation timeline. |
 | OpenResty | Publishes `/lab-manager` and proxies protected `/ops/` requests to the ops worker. |
-| Ops worker | Internal Flask service that wraps Wake-on-LAN, WinRM, heartbeat collection, host inventory, and reservation automation. |
-| Lab Station | Windows-side CLI, scheduled service, telemetry publisher, and controller for the physical lab host. |
+| Ops worker | Internal Flask service that wraps Wake-on-LAN, WinRM or SSH management, Station telemetry, host inventory, and reservation automation. |
+| Lab Station | Windows or Linux CLI/service, telemetry publisher, and controller for the physical lab host. |
 | Guacamole / guacd | Browser remote-access plane and protocol proxy for RDP, VNC, or SSH targets. |
 | `fmu-runner` | Gateway FMU facade; in station mode it forwards internal requests to the Lab Station FMU executor. |
 
@@ -28,7 +28,12 @@ each Lite owns the complete local management path.
 
 `/ops/health` remains available for service readiness. Every other Ops route is gateway-proxied and subject to the Lab Manager access policy. OpenResty injects the separate `OPS_INTERNAL_AUTH_TOKEN` only after that edge check; the worker rejects direct `/api/*` and `/aas-admin/*` calls without it. The ops worker itself should not be published directly outside the container network.
 
-WinRM credentials are deliberately separate from `hosts.json`. A host refers to a `credential_ref`; the ops worker encrypts the corresponding credentials using the required `OPS_SECRETS_KEY`.
+### Windows v2: WinRM credentials and TLS trust
+
+The following credentials and certificate guidance applies to Windows v2.
+WinRM credentials are deliberately separate from `hosts.json`. A host refers
+to a `credential_ref`; the ops worker encrypts the corresponding credentials
+using the required `OPS_SECRETS_KEY`.
 
 WinRM certificate trust is also separate from the credentials. The preferred
 operator path is to upload the public certificate from the host card's
@@ -76,9 +81,10 @@ does not satisfy WinRM/OpenSSL hostname verification.
 ## Host inventory and telemetry
 
 An ops host records the managed address, optional MAC address, optional
-directed WoL broadcast, credential reference, and telemetry paths. It does not
-contain laboratory IDs; the provider catalog and Guacamole are the source of
-the lab-to-host association. A minimal entry is:
+directed WoL broadcast, credential reference, and telemetry settings. It does
+not contain laboratory IDs; the provider catalog and Guacamole are the source
+of the lab-to-host association. The following example shows a Windows v2
+entry:
 
 ```json
 {
@@ -97,31 +103,49 @@ the lab-to-host association. A minimal entry is:
 }
 ```
 
-Lab Station periodically writes `heartbeat.json`. The ops worker reads it through WinRM, persists it in `lab_host_heartbeat`, and exposes it through the heartbeat and timeline APIs. Important fields include capability-specific readiness (`physicalLab` and `fmu`), the typed `status.sessions` active-session summary, `localModeEnabled`, the legacy `localSessionActive` signal, recent operations, power state, and Wake-on-LAN NIC diagnostics. FMU Executor health is therefore relevant to FMU resources, but does not by itself make a physical lab unavailable.
+Windows v2 periodically writes `heartbeat.json` and session-event files at the
+configured Windows paths. Ops Worker reads them through WinRM and persists the
+raw payload alongside its normalized Station model. Linux v3 exposes the
+logical `heartbeat` and `session-events` artifacts through the pinned SSH
+dispatcher; it does not use Windows paths. Both feeds are available through
+the heartbeat and timeline APIs. The normalized model includes
+capability-specific readiness (`physicalLab` and `fmu`), active-session state,
+local-mode state, recent operations, power state, and Wake-on-LAN diagnostics.
+FMU Executor health is relevant to FMU resources, but does not by itself make a
+physical lab unavailable.
 
-During host discovery, the worker derives the executable, local-mode flag,
+For Windows v2 discovery, the worker derives the executable, local-mode flag,
 heartbeat, and event paths from the installed scheduled task. It keeps legacy
 `C:\LabStation` and current `C:\Lab Station` roots compatible; a mixed catalog
-is normalized to the root identified by the heartbeat or executable.
+is normalized to the root identified by the heartbeat or executable. Linux v3
+host entries instead declare `platform: linux`, `contract.major: 3`,
+`management.transport: ssh`, and the Station command; their telemetry uses the
+logical artifact names above.
 
 The current operational API, exposed through the gateway as `/ops/...`, includes:
 
 | Gateway route | Purpose |
 | --- | --- |
 | `POST /ops/api/wol` | Send a magic packet and optionally wait for the host to become reachable. |
-| `POST /ops/api/winrm` | Run an allowlisted Lab Station command over WinRM. |
+| `POST /ops/api/winrm` | Run an allowlisted Windows v2 command over WinRM. |
 | `POST /ops/api/heartbeat/poll` | Collect and persist the current heartbeat. |
 | `GET /ops/api/heartbeat/stream` | Stream heartbeats as server-sent events. |
 | `GET /ops/api/hosts` | Read configured and discovered host information. |
 | `GET /ops/api/lab-associations` | Read calculated provider-laboratory to registered-host associations used by Lab Manager. |
 | `POST /ops/api/hosts/discover` | Probe a Guacamole connection candidate for managed-host signals. |
 | `POST /ops/api/hosts/provision` | Create or update a dynamic host after successful discovery. |
-| `PATCH /ops/api/hosts/{hostName}` | Update the name, MAC, WoL broadcast, or heartbeat path of a dynamic host. |
-| `POST /ops/api/hosts/winrm-credentials` | Store encrypted credentials for a host reference. |
+| `PATCH /ops/api/hosts/{hostName}` | Update a dynamic host's name, MAC, WoL broadcast, or platform-specific Station settings. |
+| `POST /ops/api/hosts/winrm-credentials` | Store encrypted Windows v2 WinRM credentials. |
 | `POST /ops/api/hosts/{hostName}/winrm-trust/preview` | Validate and preview a public CER/DER/PEM certificate without persisting it. |
 | `GET /ops/api/hosts/{hostName}/winrm-trust` | Read per-host trust metadata and classified status. |
 | `PUT /ops/api/hosts/{hostName}/winrm-trust` | Save or replace trust after server-side validation and SHA-256 confirmation. |
 | `DELETE /ops/api/hosts/{hostName}/winrm-trust` | Remove the host trust material and return `WINRM_TRUST_REQUIRED` state. |
+| `POST /ops/api/station/credentials/{credential_ref}` | Generate an encrypted Ed25519 SSH credential and return its public key for Linux v3 enrollment. |
+| `POST /ops/api/station/hosts/{hostName}/trust/preview` | Preview the Linux station SSH host key and fingerprint. |
+| `POST /ops/api/station/hosts/{hostName}/trust/confirm` | Pin the SSH host key after the operator confirms its fingerprint out of band. |
+| `GET /ops/api/station/hosts/{hostName}/trust` / `DELETE .../trust` | Read or remove the Linux host-key trust entry. |
+| `POST /ops/api/station/hosts/{hostName}/verify` | Verify SSH connectivity and the authenticated Station v3 identity. |
+| `POST /ops/api/station/command` | Run a neutral allowlisted Station command through the configured transport. |
 | `POST /ops/api/hosts/reload` | Reload the static/dynamic host catalog. |
 | `POST /ops/api/hosts/local-mode` | Set the station local-mode operational flag. |
 | `POST /ops/api/reservations/start` | Start the operational preparation for one reservation. |
@@ -131,7 +155,12 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `GET/PUT /ops/api/wake-ops/<host_name>` | Read or configure the per-host weekly Wake Ops verification. |
 | `POST /ops/api/wake-ops/<host_name>/wake` | Send a manual Wake and record successful reachability evidence. |
 
-The WinRM wrapper accepts only commands configured in `OPS_ALLOWED_COMMANDS`. The default allowlist includes `prepare-session`, `release-session`, `power`, `session`, `energy`, `status-json`, `recovery`, `account`, `service`, `wol`, and `status`.
+The `/ops/api/winrm` route and `/hosts/*/winrm-*` routes are the Windows v2
+compatibility surface. They accept only commands configured in
+`OPS_ALLOWED_COMMANDS`. Linux v3 uses `/ops/api/station/*` and the fixed SSH
+dispatcher; Gateway verifies Station identity and does not expose an arbitrary
+remote shell. Shared status and dispatcher schemas are documented in
+`contracts/station/`.
 
 ## Reservation preparation and release
 
@@ -171,18 +200,30 @@ The start path is normally:
 
 The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
 
+## Wake Ops
+
 Wake Ops is enabled by default for configured hosts and runs once a week on
 Sunday at 08:00 in the Gateway's `TZ` timezone. Lab Manager exposes the same
-schedule under **Operations → Wake Ops**, including the manual **Wake** action. The
-weekly cycle classifies the initial power state using the canonical WinRM TCP
-probe and recent heartbeat evidence: an online station is shut down before
-WoL; a verified-off station is woken and shut down again; an ambiguous state
-does not receive a remote shutdown. Successful WoL evidence remains valid for
-seven days and is stored in `reservation_operations`.
+schedule under **Operations → Wake Ops**, including the manual **Wake** action.
+The weekly cycle currently classifies power with a TCP probe against the
+host's WinRM port (5986 by default), plus recent heartbeat evidence. This
+probe applies to Windows v2; Wake Ops does not use the Linux v3 SSH identity
+probe. Keep the per-host Wake Ops schedule disabled for Linux v3 until this
+check is transport-aware: an online Linux Station with a stale heartbeat can
+be classified as off, and the cycle may then send WoL and a shutdown command.
+For Windows v2, an online station is shut down before WoL; a verified-off
+station is woken and shut down again; an ambiguous state does not receive a
+remote shutdown. Successful WoL evidence remains valid for seven days and is
+stored in `reservation_operations`.
 
-## Lab Station command contract
+## Windows v2 CLI and Linux v3 dispatcher
 
-Lab Station exposes a small CLI surface at the host's configured `labstation_exe` path (normally `C:\Lab Station\LabStation.exe`). The operational commands used most often are:
+The following CLI examples describe Windows v2 at the host's configured
+`labstation_exe` path (normally `C:\Lab Station\LabStation.exe`). Linux v3
+uses the configured `station.command` (normally `/usr/bin/labstationctl`) over
+the pinned SSH connection and the structured dispatcher contract in
+`contracts/station/dispatcher/v2/`. Do not substitute arbitrary shell commands
+for the dispatcher request.
 
 | Command | Use in the gateway lifecycle |
 | --- | --- |
@@ -193,7 +234,9 @@ Lab Station exposes a small CLI surface at the host's configured `labstation_exe
 | `recovery reboot-if-needed` | Performs a safeguard reboot only when station diagnostics justify it, unless explicitly forced. |
 | `service ...` | Manages the Lab Station scheduled background task when required. |
 
-Exit code `0` means success, `1` means completed with warnings, and values of `2` or greater indicate a hard failure. The station records its actions in `labstation.log`, the heartbeat, and operation-specific telemetry.
+For both platforms, exit code `0` means success, `1` means completed with a
+warning, and values of `2` or greater indicate failure. The station records
+actions in its platform logs, heartbeat, and operation-specific telemetry.
 
 ## Connectivity requirements
 
@@ -214,7 +257,8 @@ The canonical Station v3 schemas and Windows/Linux fixtures live in
 readiness, AAS, and timeline projection. In v3 command results, exit code 1 is
 a completed warning; only exit code 2 or higher fails a reservation step.
 
-No station management service, WinRM listener, RDP endpoint, or FMU executor should be reachable from the public Internet.
+No station management service, WinRM or SSH listener, RDP endpoint, or FMU
+executor should be reachable from the public Internet.
 
 ## Failure handling and observability
 
@@ -222,8 +266,8 @@ The ops worker persists heartbeat and reservation operation records, and retries
 
 - `reservation_operations` for wake, prepare, release, and scheduler outcomes;
 - `lab_host_heartbeat` for the last station state and raw telemetry;
-- `labstation.log` and Lab Station telemetry on the Windows host;
-- ops-worker logs for WoL, WinRM, database, or notification errors.
+- Lab Station logs and telemetry on the affected Windows or Linux host;
+- ops-worker logs for WoL, WinRM/SSH, database, or notification errors.
 
 The reservation timeline endpoint provides the combined operational view. It is the correct first diagnostic surface; it does not prove an on-chain access authorization or settlement state.
 
@@ -235,4 +279,5 @@ The reservation timeline endpoint provides the combined operational view. It is 
 - Lab Station CLI and service: `Lab Station/labstation/`
 - Linux Station core and packaging: `Lab Station Linux/`
 - Shared FMU Executor source: `FMU-Executor/`
-- WinRM command details: `Lab Station/docs/winrm-command-contract.md`
+- Windows v2 WinRM command details: `Lab Station/docs/winrm-command-contract.md`
+- Shared Station status and dispatcher contracts: `contracts/station/README.md`

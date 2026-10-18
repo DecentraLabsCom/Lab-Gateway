@@ -54,7 +54,7 @@ flowchart LR
     Fmu -->|internal HTTP/WSS in station mode| Station
 ```
 
-Only Marketplace and the selected gateway access URI are normally public. The backend-to-backend authorization calls, Guacamole protocol links, WinRM, Wake-on-LAN, FMU executor, MySQL, and station telemetry belong on controlled private networks.
+Only Marketplace and the selected gateway access URI are normally public. The backend-to-backend authorization calls, Guacamole protocol links, Station management (WinRM/SSH), Wake-on-LAN, FMU executor, MySQL, and station telemetry belong on controlled private networks.
 
 ## Protocol matrix
 
@@ -121,7 +121,7 @@ Lab Station management is independent of the browser's Guacamole session. The op
 - WinRM for Windows v2 or pinned SSH for Linux v3 to invoke the allowlisted Station dispatcher;
 - logical heartbeat and session-event artifacts read through the selected management channel to report readiness, local-mode state, session state, power state, and diagnostics.
 
-This separation allows the gateway to prepare the host before a confirmed reservation and clean it afterward without exposing Windows management services to users. It also means that an operational status such as `ACTIVE` is not an on-chain `ACCESS_AUTHORIZED` state.
+This separation allows the gateway to prepare the host before a confirmed reservation and clean it afterward without exposing Station management services to users. It also means that an operational status such as `ACTIVE` is not an on-chain `ACCESS_AUTHORIZED` state.
 
 ## Security and routing rules
 

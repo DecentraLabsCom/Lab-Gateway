@@ -142,8 +142,9 @@ FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-ru
 
 The local profile pulls `ghcr.io/decentralabscom/fmu-executor:0.2.1` by default.
 Set `FMU_EXECUTOR_IMAGE` in `.env` to select another released image tag. No
-FMU-Executor source checkout is required. The job, batch, cancellation, and
-history APIs require FMU Executor 0.2.1 or newer.
+FMU-Executor source checkout is required. Station mode and the local profile
+require FMU Executor 0.2.1 or newer for the asynchronous job, batch, status,
+cancellation, result, and history APIs.
 
 FMU files are mounted read-only in both containers. The local Executor uses a
 private executable tmpfs for extraction. See
@@ -210,16 +211,16 @@ Marketplace upload is disabled by design.
 - Gateway does not execute FMUs in-process. Run, stream and realtime requests
   are forwarded to the configured remote Executor; AAS parsing remains in the
   Gateway facade.
-- `cancel`, `history` and `result` retain their routes but return `501` until
-  the remote Executor contract supports those operations.
+- Async jobs, batches, status, cancellation, results and history are forwarded
+  to the Station Executor. FMU Executor 0.2.1 or newer is required for these
+  operations; the Executor owns simulation history and stored results.
 
 ## Current limitations and operational contract
 
-- `FMU_BACKEND_MODE=station` forwards catalog, describe, run, stream and
-  realtime session operations to Lab Station. The Station executor is internal
-  and must not be exposed through OpenResty.
-- `cancel`, `history` and `result` return `501` until the remote Executor
-  contract supports them.
+- `FMU_BACKEND_MODE=station` forwards catalog, describe, run, stream, realtime
+  sessions, async jobs, batches, status, cancellation, results and history to
+  Lab Station. Use FMU Executor 0.2.1 or newer for the async job APIs. The
+  Station Executor is internal and must not be exposed through OpenResty.
 - External realtime `session.create` always obtains a reservation-scoped ticket
   and records the durable observation before `session.created`; a bearer or
   `FMU_SESSION` is not a bypass.

@@ -37,7 +37,7 @@ note or remove the duplicated passage.
 | **Standalone backend** | A separately deployed `blockchain-services` instance that can be the issuer and provider control plane, but has no local browser-access plane. |
 | **Control plane** | Credential issuance, provider administration, on-chain transactions, access-code storage, and session evidence authority. |
 | **Access plane** | OpenResty, Guacamole, Ops Worker, and optional FMU services that serve one laboratory network. |
-| **Lab Station** | The Windows-side operational and execution environment. It is private; it is not a public API. |
+| **Lab Station** | The private operational and execution environment: Windows v2 uses WinRM; Linux v3 uses the Station contract over SSH. It is not a public API. |
 
 `ISSUER` selects the control plane. The lab's on-chain `accessURI` selects the
 access plane. Do not assume that the two URLs are the same.
@@ -89,7 +89,8 @@ For the complete design and trust requirements, read
 - Start with the [Lab Manager operator guide](workflows/lab-manager-operator-guide.md)
   for tabs, permissions, Full/Lite boundaries, identifiers, and recommended order.
 - Use [Labs and Operations](workflows/lab-manager-labs-and-operations.md) for
-  publication, host provisioning, WinRM, reservations, and timeline diagnosis.
+  publication, Windows v2 WinRM or Linux v3 SSH host provisioning, reservations,
+  and timeline diagnosis.
 - Use [Notifications](workflows/lab-manager-notifications.md) for Gateway-scoped
   reservation email settings.
 - Use [Energy operations](workflows/lab-manager-energy-operations.md) for
