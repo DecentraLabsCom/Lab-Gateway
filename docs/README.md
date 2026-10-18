@@ -119,6 +119,8 @@ For the complete design and trust requirements, read
 
 - [Operations and health](reference/operations-and-health.md) — safe public
   checks, protected diagnostics, log locations, backups, and triage.
+- For startup failures, see [setup-script troubleshooting](install/install-setup-script.md#troubleshooting)
+  and [first-line deployment triage](reference/operations-and-health.md#first-line-triage).
 - [OpenResty tests](../openresty/tests/README.md) and
   [integration tests](../tests/integration/README.md) — test entry points.
 
