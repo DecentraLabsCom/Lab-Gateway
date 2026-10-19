@@ -839,9 +839,14 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
         (url, "License terms" if url == license_value else f"Documentation {index + 1}", "application/octet-stream")
         for index, url in enumerate(dict.fromkeys(urls))
     ]
-    scene_url = str((extra_info or {}).get("digitalTwinSceneUrl") or "").strip()
-    if scene_url:
-        document_specs.append((scene_url, "Smart Factory Twin scene", "model/gltf-binary"))
+    asset_url = str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
+    if asset_url:
+        app_asset = urlsplit(asset_url).path.startswith("/digital-twin-apps/")
+        document_specs.append((
+            asset_url,
+            "Three.js digital twin application" if app_asset else "Digital twin GLB scene",
+            "text/html" if app_asset else "model/gltf-binary",
+        ))
     if not document_specs:
         return None
     for index, (url, title, content_type) in enumerate(document_specs):
@@ -1060,7 +1065,7 @@ def build_aas_shell(
     if (
         _documentation_urls(extra_info)
         or str((extra_info or {}).get("license") or "").strip().startswith(("http://", "https://"))
-        or str((extra_info or {}).get("digitalTwinSceneUrl") or "").strip()
+        or str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
     ):
         all_sm_ids.append(_submodel_id_for_handover(lab_id))
     all_sm_ids.extend(extra_submodel_ids)

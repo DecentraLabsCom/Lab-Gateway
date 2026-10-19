@@ -788,17 +788,23 @@
                                     <span class="file-picker-name" id="fmuSyncFileName" aria-live="polite">No file chosen</span>
                                 </div>
                             </label>
-                            <div class="field full" id="fmuSyncSceneUrlField" hidden>
-                                <span><label for="fmuSyncSceneUrl">Smart Factory GLB URL</label> <span class="muted-text">(optional)</span></span>
-                                <input type="text" id="fmuSyncSceneUrl" inputmode="url" maxlength="2048" placeholder="https://assets.example.com/twins/factory-cell.glb" autocomplete="url">
-                                <small class="muted-text">The Smart Factory demo imports its prepared scene automatically when you synchronize its AAS. For another FMU, import a same-stem GLB from the active FMU backend or choose a public HTTPS URL.</small>
-                                <button class="btn btn-secondary mt-2" id="fmuSyncImportSceneBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import companion GLB from FMU backend</button>
+                            <div class="field full" id="fmuSyncAssetField" hidden>
+                                <span><label for="fmuSyncAssetType">Visualisation</label> <span class="muted-text">(optional)</span></span>
+                                <select id="fmuSyncAssetType">
+                                    <option value="">No visual asset</option>
+                                    <option value="glb">GLB scene · generic Marketplace viewer</option>
+                                    <option value="threejs-app">Three.js application · provider presentation</option>
+                                </select>
+                                <span class="mt-2"><label for="fmuSyncAssetUrl">Asset URL</label> <span class="muted-text">(optional)</span></span>
+                                <input type="text" id="fmuSyncAssetUrl" inputmode="url" maxlength="2048" placeholder="Gateway asset path or HTTPS GLB URL" autocomplete="url">
+                                <small class="muted-text">Choose a same-stem companion asset to import from the active FMU backend, upload a GLB or a static Three.js ZIP, or set a public HTTPS URL for a GLB. A static app ZIP must contain a relative-path index.html and bundled assets.</small>
+                                <button class="btn btn-secondary mt-2" id="fmuSyncImportAssetBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import selected companion from FMU backend</button>
                                 <div class="file-picker mt-2">
-                                    <input class="file-picker-input" type="file" id="fmuSyncSceneFile" accept=".glb,model/gltf-binary" aria-label="Upload Smart Factory GLB scene">
-                                    <label class="file-picker-button" for="fmuSyncSceneFile">Choose GLB</label>
-                                    <span class="file-picker-name" id="fmuSyncSceneFileName" aria-live="polite">No file chosen</span>
+                                    <input class="file-picker-input" type="file" id="fmuSyncAssetFile" accept=".glb,model/gltf-binary" aria-label="Upload digital twin asset">
+                                    <label class="file-picker-button" for="fmuSyncAssetFile">Choose asset</label>
+                                    <span class="file-picker-name" id="fmuSyncAssetFileName" aria-live="polite">No file chosen</span>
                                 </div>
-                                <small class="muted-text">Imported and uploaded scenes are stored on this provider Gateway and published as immutable public files; Marketplace write access is not required. An uploaded AASX must carry its own scene reference. Gateway scenes must allow browser CORS and this Gateway's origin must be allowed by Marketplace.</small>
+                                <small class="muted-text">Assets are stored on this provider Gateway and published as immutable public files; Marketplace write access is not required. The AAS File MIME selects the viewer. An uploaded AASX must carry its own visual asset reference.</small>
                             </div>
                             <label class="field full">
                                 <span>Contact Email <span class="muted-text">(optional)</span></span>
@@ -1381,10 +1387,10 @@
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v2"></script>
     <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v2"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
-    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v10"></script>
+    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v11"></script>
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v4"></script>
     <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v3"></script>
-    <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v6"></script>
+    <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v7"></script>
     <script src="../assets/js/lab-manager-power-credentials.js?v=lab-manager-power-credentials-v2"></script>
             <script src="../assets/js/lab-manager-power-renderers.js?v=lab-manager-power-renderers-v12"></script>
         <script src="../assets/js/lab-manager-power-values.js?v=lab-manager-power-values-v6"></script>

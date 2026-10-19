@@ -132,53 +132,75 @@ The endpoint is protected by the existing `lab_manager_access.lua` mechanism (ad
 
 The optional `labId` parameter lets the provider keep a stable AAS identity anchored to a resource ID rather than to an operational FMU `accessKey`. The endpoint returns a disabled result when AAS is intentionally not configured and an upstream error when the configured AAS server cannot be reached.
 
-#### 2.1. Smart Factory GLB scene
+#### 2.1. Optional visual asset for FMU laboratories
 
-To publish a Smart Factory scene, set `digitalTwinSceneUrl` during generated
-FMU sync. The generator places it in the existing IDTA 02004
-`HandoverDocumentation` as a `File` with `contentType=model/gltf-binary` and
-`idShort=DigitalTwinScene`:
+To link an optional visual asset, set `digitalTwinAssetUrl` during generated
+FMU sync. The generator stores it in the existing IDTA 02004
+`HandoverDocumentation` as a `File`; its managed Gateway path determines the
+MIME type and therefore Marketplace's viewer:
 
 ~~~text
-POST /aas-admin/fmu/{accessKey}/sync?labId={labId}&digitalTwinSceneUrl={encoded-Gateway-scene-path}
+POST /aas-admin/fmu/{accessKey}/sync?labId={labId}&digitalTwinAssetUrl={encoded-Gateway-asset-path}
 ~~~
 
-This is an optional discovery field for the Smart Factory viewer. FMU
-simulation continues to work when it is omitted or when AAS is unavailable.
-The Lab Manager `Digital Twin Management` form exposes this optional field for
-generated FMU shells. In Gateway development mode, `fmu-data` carries the demo
-FMU and same-stem GLB together. The Lab Station production package carries the
-FMU and same-stem GLB together. The Windows Station package carries the
-Windows x64 FMU; the Linux Station amd64 package carries the Linux x64 FMU.
-Both include the same GLB. Linux arm64 packages omit the x86_64-only demo.
-When the provider synchronizes the demo AAS, Lab Manager imports the companion
-scene from whichever FMU backend is
-active and stores it in the Gateway asset volume. For other labs, the provider
-can use **Import companion GLB from FMU backend**, paste a public HTTPS URL, or
-upload a `.glb`. The import reads only the GLB matching the selected FMU's
-basename. In Station mode, the Gateway retrieves it over Station's
-token-protected internal endpoint; Station does not publish it publicly. The
-Station endpoint is provided by FMU Executor 0.3.0 or newer. The
-Gateway stores the scene at an immutable, content-addressed path such as
-`/digital-twin-scenes/{labId}/{sha256}.glb` and serves it read-only, so no write
-access to Marketplace is needed. A root-relative scene path is resolved against
-the lab's Gateway origin by Marketplace. Gateway accepts only self-contained
-glTF 2.0 binary files up to 50 MiB. The demo's MIT license ships beside both
-FMU/GLB pairs.
-For browser loading, the Gateway's `CORS_ALLOWED_ORIGINS` must include the
-Marketplace origin and the Marketplace deployment's `CSP_CONNECT_SRC` must
-allow the Gateway origin. The URL must not contain credentials or access
-tokens. When uploading an `.aasx` package, its own Handover Documentation
-remains authoritative and a separate GLB upload cannot be combined with it.
-The File stores only the scene location. FMI remains authoritative for ports;
-each GLB node carries only its optional `extras.fmiBindings` from an FMI output
-name to an allowed visual target/transform. No separate digital-twin manifest
-or duplicate port metadata is generated for this use case because FMI, AAS and
-the GLB together cover the current requirements. If a future requirement needs
-metadata that none of those formats can represent naturally, define only that
-missing information in a complementary manifest and keep FMI/AAS fields out of
-it. The first Marketplace viewer supports public GLB assets; do not publish a
-confidential model until an authorized asset route is available.
+The visual link is optional: FMU simulation and the standard results viewer
+continue to work when it is omitted or AAS is unavailable. Lab Manager lets the
+provider select no visual asset, a GLB, or a static Three.js application. The
+provider can import a same-stem companion from the active FMU backend or upload
+the asset. A public HTTPS URL is supported for GLB scenes only.
+
+Smart Factory demonstrates the GLB path. Smart Warehouse includes both a GLB
+and a companion Three.js application. The canonical FMU, scene, app ZIP and
+license live in FMU-Executor; Gateway development and Windows/Linux amd64
+Station packages carry runtime copies beside the platform-specific FMU. Linux
+arm64 omits this x86_64-only demo. In production, Gateway imports the selected
+companion from Lab Station through its token-protected internal endpoint.
+Station does not publish the asset publicly.
+
+Generated FMU shells use the existing IDTA 02004 `HandoverDocumentation`
+`File` as the single visual-asset link. Its `contentType` selects Marketplace's
+renderer:
+
+| File MIME | Gateway path | Marketplace presentation |
+| --- | --- | --- |
+| `model/gltf-binary` | `/digital-twin-scenes/{labId}/{sha256}.glb` | Generic Three.js GLB viewer; reads node `extras.fmiBindings` |
+| `text/html` | `/digital-twin-apps/{labId}/{sha256}/index.html` | Provider's static Three.js app, sandboxed in an iframe |
+
+Gateway stores each managed asset read-only under an immutable,
+content-addressed path. It accepts self-contained glTF 2.0 binary scenes up to
+50 MiB. Static app ZIPs must contain a root `index.html`, use safe relative
+asset paths and bundled modules, and stay within the configured file-count and
+expanded-size limits. Symlinks, unsupported files and remote asset URLs are
+rejected. Gateway executes no provider server code.
+
+The authenticated Gateway import endpoint is
+`POST /lab-admin/digital-twin-assets/{labId}/from-fmu` with JSON
+`{"accessKey":"...","assetType":"glb|threejs-app"}`. A direct upload uses
+`PUT /lab-admin/digital-twin-assets/{labId}` with `model/gltf-binary` or
+`application/zip`.
+
+Marketplace resolves either managed asset against the lab's on-chain Gateway
+origin, then proxies only that lab's immutable scene or app files through
+same-origin API routes. The GLB route accepts only the lab ID and its
+content-addressed digest; it does not proxy arbitrary URLs. Gateway applies a
+restrictive CSP sandbox to the public app route, and Marketplace serves the app
+entry page in an isolated iframe with its own restrictive CSP and no
+credentials. Marketplace posts only FMI time and declared outputs through the
+versioned `decentralabs:fmi-sample` version 1 message; it never sends the FMU,
+access key or reservation token.
+
+The AAS File stores the visual asset location and MIME only. FMI remains the
+source of model variables and ports; optional GLB `extras.fmiBindings` map FMI
+output names to allowed scene targets, while a Three.js app owns its rendering
+logic. No separate manifest or duplicate FMI/AAS metadata is needed. If a
+future requirement cannot be represented in FMI, AAS, GLB or the app itself,
+any manifest must contain only that missing complementary information. When
+uploading an `.aasx` package, its Handover Documentation remains authoritative
+and cannot be combined with a separate visual-asset upload. Public HTTPS GLB
+URLs must allow browser CORS, use an origin permitted by Marketplace
+`CSP_CONNECT_SRC`, and contain no credentials or access tokens.
+
+#### 2.2. Managing AAS shells in Lab Manager
 
 The lab-manager Digital Twins panel supports generated shell synchronization
 and explicit `.aasx` upload. For an FMU, the selected laboratory automatically

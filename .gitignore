@@ -34,9 +34,6 @@ blockchain-data/
 fmu-access-state/
 fmu-data/*
 !fmu-data/README.md
-!fmu-data/*.fmu
-!fmu-data/*.glb
-!fmu-data/*.LICENSE.txt
 !fmu-data/test-fmus/
 !fmu-data/test-fmus/**
 fmu-executor-state/
@@ -79,6 +76,7 @@ target/
 __pycache__/
 .pytest_cache/
 .pytest-basetemp/
+.pytest-tmp-*/
 .coverage
 .coverage.*
 fmu-runner/coverage.xml
@@ -101,7 +99,7 @@ Thumbs.db
 
 # Development notes and planning (keep local only)
 dev/
-# Local Smart Factory preview support (never part of Gateway deployments)
+# Local Smart Factory and Smart Warehouse preview support (not deployed)
 /docker-compose.local-demo.yml
 /openresty/conf.d/gateway_dev_smart_factory.conf
 /openresty/gateway.local-demo.conf

@@ -241,13 +241,13 @@ if not constant_time_eq(provided, token) then
     return deny(ngx.HTTP_UNAUTHORIZED, "Unauthorized: invalid lab manager token.")
 end
 
--- Scene uploads and companion imports are stored by this Gateway and served
+-- Digital twin uploads and companion imports are stored by this Gateway and served
 -- from its own public read-only asset path. They do not require the remote
 -- publishing backend used for Marketplace/on-chain lab administration in Lite mode.
 local uri = ngx.var.uri or ""
-if ngx.var.digital_twin_scene_upload == "1"
-    or uri:match("^/lab%-admin/digital%-twin%-scenes/%d+$")
-    or uri:match("^/lab%-admin/digital%-twin%-scenes/%d+/from%-fmu$") then
+if ngx.var.digital_twin_asset_upload == "1"
+    or uri:match("^/lab%-admin/digital%-twin%-assets/%d+$")
+    or uri:match("^/lab%-admin/digital%-twin%-assets/%d+/from%-fmu$") then
     ngx.req.clear_header("Authorization")
     ngx.req.clear_header("Cookie")
     ngx.req.clear_header(header_name)

@@ -2,20 +2,24 @@
 
 This directory stores `.fmu` files used by the `fmu-runner` service.
 
-## Included files
+## Local development files
 
-The `.fmu` files at the root of this directory are generated development and
-test copies of the canonical examples in `FMU-Executor/examples`. They are
-included so a freshly cloned or deployed Lab Gateway can be tested end-to-end
-without needing external files. Gateway does not maintain a separate source
-copy for these models.
+The `.fmu` files at the root of this directory are development and test copies
+of the canonical examples in `FMU-Executor/examples`. The reference models,
+Smart Factory and Smart Warehouse FMU/scene/app assets are generated locally by
+the sync script and ignored by Git. FMU-Executor is their only canonical
+repository; Lab Gateway does not vendor copies. To prepare all examples in a
+fresh workspace, run the sync command below.
 
 All example FMUs and their Linux x86_64 builds are canonical in
 `FMU-Executor/examples/reference-fmus`. FMI 2 models use the `linux64` archive
 directory; FMI 3 models use `x86_64-linux`. The Smart Factory Cell demo is
 canonical in `FMU-Executor/examples/smart-factory-cell`; Gateway uses its Linux
-x64 build and companion GLB for local development. To refresh all Gateway
-copies from the workspace root:
+x64 build and companion GLB for local development. Smart Warehouse Cell is
+canonical in `FMU-Executor/examples/smart-warehouse-cell`; Gateway locally
+syncs its Linux x64 FMU, companion GLB, optional Three.js application ZIP and
+license. These local copies remain available to the demo and tests but are not
+committed. To refresh all Gateway copies from the workspace root:
 
 ```powershell
 python "Lab Gateway/scripts/sync_fmu_examples.py" `
@@ -24,11 +28,12 @@ python "Lab Gateway/scripts/sync_fmu_examples.py" `
 
 The sync script checks that every FMU contains a Linux x86_64 binary before
 copying it. It installs `SmartFactoryCell-linux64.fmu` as
-`SmartFactoryCell.fmu`; do not use its Windows Station build in the local
-executor. During development AAS synchronization, Gateway imports the
-companion scene into its public immutable asset volume; this directory itself
+`SmartFactoryCell.fmu` and `SmartWarehouseCell-linux64.fmu` as
+`SmartWarehouseCell.fmu`; do not use their Windows Station builds in the local
+executor. During AAS synchronization, Gateway imports the selected GLB scene
+or Three.js app into its public immutable asset volume; this directory itself
 is not exposed through a public file route. Production mode retrieves the
-same-stem GLB from Lab Station instead.
+selected same-stem asset from Lab Station instead.
 
 Do not use them in a production lab listing — they are not associated with any
 on-chain resource and exist purely for development and integration testing.
@@ -40,6 +45,10 @@ fmu-data/
 ├── SmartFactoryCell.fmu       # Smart Factory Cell demo (Linux x64 for local mode)
 ├── SmartFactoryCell.glb       # Same-stem companion scene
 ├── SmartFactoryCell.LICENSE.txt
+├── SmartWarehouseCell.fmu     # Smart Warehouse demo (Linux x64 for local mode)
+├── SmartWarehouseCell.glb     # Same-stem companion scene
+├── SmartWarehouseCell.webapp.zip # Optional static Three.js app
+├── SmartWarehouseCell.LICENSE.txt
 ├── BinaryClockTest.fmu        # FMI 3 Binary and Clock fixture
 ├── BouncingBall.fmu           # FMI 2 reference model
 ├── Dahlquist.fmu              # FMI 2 reference model

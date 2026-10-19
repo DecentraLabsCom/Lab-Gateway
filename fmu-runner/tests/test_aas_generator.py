@@ -559,6 +559,31 @@ class TestExtraInfoFields:
         ]
         assert files == ["https://example.com/manual.pdf", "https://example.com/guide.html"]
 
+    def test_submodel_extra_info_threejs_app_uses_html_file_mime(self):
+        asset_url = f"/digital-twin-apps/42/{'a' * 64}/index.html"
+        submodel = build_handover_documentation_submodel(
+            "42", {"digitalTwinAssetUrl": asset_url}
+        )
+        files = []
+
+        def collect_files(value):
+            if isinstance(value, dict):
+                if value.get("modelType") == "File":
+                    files.append(value)
+                for child in value.values():
+                    collect_files(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect_files(child)
+
+        collect_files(submodel)
+
+        assert len(files) == 1
+        assert files[0]["idShort"] == "DigitalFile"
+        assert files[0]["modelType"] == "File"
+        assert files[0]["contentType"] == "text/html"
+        assert files[0]["value"] == asset_url
+
     def test_submodel_extra_info_contact_email(self):
         sm = build_contact_information_submodel("42", {"contactEmail": "lab@example.com"})
         email = sm["submodelElements"][0]["value"][0]["value"][0]

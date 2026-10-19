@@ -60,6 +60,32 @@ def test_sync_route_builds_metadata_and_preserves_query_fields():
     )
 
 
+def test_sync_route_accepts_a_managed_threejs_app_asset_url():
+    asset_url = f"/digital-twin-apps/42/{'a' * 64}/index.html"
+    client, _, _, _, sync_fmu_to_basyx, _ = _client()
+
+    response = client.post(
+        "/aas-admin/fmu/demo.fmu/sync",
+        params={"labId": "42", "digitalTwinAssetUrl": asset_url},
+    )
+
+    assert response.status_code == 200
+    assert sync_fmu_to_basyx.await_args is not None
+    assert sync_fmu_to_basyx.await_args.kwargs["extra_info"]["digitalTwinAssetUrl"] == asset_url
+
+
+def test_sync_route_rejects_non_https_external_scene_urls():
+    client, _, _, _, sync_fmu_to_basyx, _ = _client()
+
+    response = client.post(
+        "/aas-admin/fmu/demo.fmu/sync",
+        params={"labId": "42", "digitalTwinAssetUrl": "http://assets.example.test/scene.glb"},
+    )
+
+    assert response.status_code == 400
+    sync_fmu_to_basyx.assert_not_awaited()
+
+
 def test_sync_route_publishes_runtime_status_for_generated_fmu():
     runtime_status = {
         "status": "UP",

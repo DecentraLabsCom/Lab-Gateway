@@ -104,6 +104,27 @@ def sync(examples_root: Path, target: Path) -> None:
     copy_verified(scene, target / "SmartFactoryCell.glb")
     copy_verified(license_file, target / "SmartFactoryCell.LICENSE.txt")
 
+    smart_warehouse_root = examples_root / "smart-warehouse-cell"
+    warehouse_fmu = smart_warehouse_root / "SmartWarehouseCell-linux64.fmu"
+    warehouse_scene = smart_warehouse_root / "smart-warehouse-cell.glb"
+    warehouse_app = smart_warehouse_root / "SmartWarehouseCell.webapp.zip"
+    warehouse_license = smart_warehouse_root / "LICENSE.txt"
+    warehouse_entries = validate_linux_x64_fmu(warehouse_fmu)
+    if "resources/smart-warehouse-cell.glb" not in warehouse_entries:
+        raise ValueError("The Smart Warehouse FMU is missing its embedded GLB scene.")
+    with zipfile.ZipFile(warehouse_fmu) as archive:
+        warehouse_embedded_scene = archive.read("resources/smart-warehouse-cell.glb")
+    if warehouse_embedded_scene != warehouse_scene.read_bytes():
+        raise ValueError("The Smart Warehouse FMU's embedded scene differs from its companion GLB.")
+    with zipfile.ZipFile(warehouse_app) as archive:
+        if archive.read("warehouse.glb") != warehouse_scene.read_bytes():
+            raise ValueError("The Smart Warehouse app bundle uses a different companion GLB.")
+
+    copy_verified(warehouse_fmu, target / "SmartWarehouseCell.fmu")
+    copy_verified(warehouse_scene, target / "SmartWarehouseCell.glb")
+    copy_verified(warehouse_app, target / "SmartWarehouseCell.webapp.zip")
+    copy_verified(warehouse_license, target / "SmartWarehouseCell.LICENSE.txt")
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
