@@ -10,7 +10,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "verify_station_contract_bundle.py"
 SPEC = importlib.util.spec_from_file_location("station_contract_bundle", SCRIPT)
+assert SPEC is not None
 MODULE = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 

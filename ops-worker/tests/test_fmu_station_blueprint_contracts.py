@@ -51,8 +51,10 @@ def test_status_is_safe_and_enrollment_returns_no_secret():
 
     status = client.get("/api/fmu/station")
     assert status.status_code == 200
-    assert status.json["singleStationPerGateway"] is True
-    assert "internalToken" not in status.json
+    status_payload = status.json
+    assert isinstance(status_payload, dict)
+    assert status_payload["singleStationPerGateway"] is True
+    assert "internalToken" not in status_payload
     assert TOKEN not in status.get_data(as_text=True)
 
     enrolled = client.post("/api/fmu/station/enroll", json={"host": "lab-ws-01"})
@@ -87,5 +89,7 @@ def test_enrollment_rejects_unregistered_host_without_remote_call():
     )
 
     assert response.status_code == 404
-    assert response.json["code"] == "FMU_STATION_HOST_NOT_FOUND"
+    response_payload = response.json
+    assert isinstance(response_payload, dict)
+    assert response_payload["code"] == "FMU_STATION_HOST_NOT_FOUND"
     assert calls == []

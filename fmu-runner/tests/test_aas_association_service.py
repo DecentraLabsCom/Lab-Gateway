@@ -108,6 +108,7 @@ async def test_deleting_generated_association_removes_basyx_resources(tmp_path: 
 
     result = await service.delete_association("3")
 
+    assert result is not None
     assert result["deleted"] is True
     assert result["source"] == "generated"
     delete_resources.assert_awaited_once_with(

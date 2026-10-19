@@ -30,7 +30,7 @@ def resolve_host_secret_refs(
     raw: Dict[str, Any],
     *,
     credential_ref_for_host: Callable[[Any], str],
-    credentials_configured: Callable[[str], bool],
+    credentials_configured: Callable[..., bool],
     warn: Callable[..., Any],
 ) -> Dict[str, Any]:
     """Normalize host credential references without copying secret material."""
@@ -41,7 +41,8 @@ def resolve_host_secret_refs(
         host.pop("winrm_pass", None)
         host.pop("labs", None)
         host.pop("validLabIds", None)
-        management = host.get("management") if isinstance(host.get("management"), dict) else {}
+        management_value = host.get("management")
+        management = management_value if isinstance(management_value, dict) else {}
         transport = str(management.get("transport") or host.get("management_transport") or "winrm")
         try:
             configured = credentials_configured(credential_ref_for_host(host), transport)
@@ -182,7 +183,8 @@ def update_dynamic_host(
         else:
             updated.pop("broadcast", None)
 
-    management = current.get("management") if isinstance(current.get("management"), dict) else {}
+    management_value = current.get("management")
+    management = management_value if isinstance(management_value, dict) else {}
     if str(management.get("transport") or current.get("management_transport") or "winrm").lower() == "ssh":
         if "address" in payload:
             address = str(payload.get("address") or "").strip()
@@ -190,8 +192,11 @@ def update_dynamic_host(
                 return None, "address is invalid"
             updated["address"] = address
         if "managementPort" in payload:
+            raw_port = payload.get("managementPort")
+            if raw_port is None:
+                return None, "managementPort must be an integer"
             try:
-                port = int(payload.get("managementPort"))
+                port = int(raw_port)
             except (TypeError, ValueError):
                 return None, "managementPort must be an integer"
             if not 1 <= port <= 65535:

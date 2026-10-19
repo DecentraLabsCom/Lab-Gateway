@@ -369,6 +369,7 @@ class TestBuildExecutionCapabilitiesSubmodel:
             "backendMode": "station",
         })
 
+        assert sm is not None
         assert sm["id"] == "urn:decentralabs:lab:42:sm:executionCapabilities"
         assert sm["idShort"] == "CapabilityDescription"
         capabilities = []
@@ -384,6 +385,7 @@ class TestBuildExecutionCapabilitiesSubmodel:
     def test_realtime_capabilities_are_omitted_without_co_simulation(self):
         metadata = {**SAMPLE_METADATA, "supportsCoSimulation": False, "supportsModelExchange": True}
         sm = build_execution_capabilities_submodel("42", metadata)
+        assert sm is not None
         operation_names = {
             capability["idShort"]
             for container in sm["submodelElements"][0]["value"]
@@ -396,6 +398,7 @@ class TestBuildExecutionCapabilitiesSubmodel:
 class TestStandardSupportSubmodels:
     def test_asset_interfaces_describe_actions(self):
         sm = build_asset_interfaces_description_submodel("42", [("Reset", "/fmu/api/v1/fmu/sessions", "GET", "websocket")])
+        assert sm is not None
         assert sm["semanticId"]["keys"][0]["value"].endswith("AssetInterfacesDescription/1/1/Submodel")
         actions = sm["submodelElements"][0]["value"][2]["value"][0]["value"]
         assert actions[0]["idShort"] == "Reset"
@@ -403,19 +406,11 @@ class TestStandardSupportSubmodels:
 
     def test_contact_and_handover_use_standard_templates(self):
         contact = build_contact_information_submodel("42", {"contactEmail": "lab@example.com"})
+        assert contact is not None
         assert contact["semanticId"]["keys"][0]["value"].endswith("ContactInformations")
         handover = build_handover_documentation_submodel("42", {"documentationUrls": ["https://example.com/doc"]})
+        assert handover is not None
         assert handover["semanticId"]["keys"][0]["value"] == "0173-1#01-AHF578#003"
-
-
-SAMPLE_UNIT_DEFS = [
-    {"name": "rad/s"},
-    {
-        "name": "N\u00b7m",
-        "baseUnit": {"m": 2, "kg": 1, "s": -2},
-        "displayUnits": [{"name": "kN\u00b7m", "factor": 1000.0}],
-    },
-]
 
 
 class TestSanitizeIdShort:
@@ -429,76 +424,6 @@ class TestSanitizeIdShort:
     ])
     def test_sanitize_common_cases(self, name, expected):
         assert _sanitize_idshort(name) == expected
-
-
-@pytest.mark.skip(reason="UnitDefinitions custom submodel was replaced by standard IDTA 02005 unit fields")
-class TestBuildUnitDefinitionsSubmodel:
-    def test_submodel_structure(self):
-        sm = build_unit_definitions_submodel("42", SAMPLE_UNIT_DEFS)
-        assert sm["id"] == "urn:decentralabs:lab:42:sm:unitDefinitions"
-        assert sm["idShort"] == "UnitDefinitions"
-        assert sm["modelType"] == "Submodel"
-        assert len(sm["submodelElements"]) == 2
-
-    def test_unit_idshort_sanitized(self):
-        sm = build_unit_definitions_submodel("42", [{"name": "rad/s"}])
-        elem = sm["submodelElements"][0]
-        assert elem["idShort"] == "rad_s"
-        assert elem["modelType"] == "SubmodelElementCollection"
-        props = {el["idShort"]: el for el in elem["value"]}
-        assert props["Name"]["value"] == "rad/s"
-
-    def test_base_unit_exponents(self):
-        sm = build_unit_definitions_submodel("42", [{"name": "N", "baseUnit": {"kg": 1, "m": 1, "s": -2}}])
-        elem = sm["submodelElements"][0]
-        props = {el["idShort"]: el for el in elem["value"]}
-        assert "BaseUnit" in props
-        bu_props = {el["idShort"]: el for el in props["BaseUnit"]["value"]}
-        assert bu_props["kg"]["value"] == "1"
-        assert bu_props["m"]["value"] == "1"
-        assert bu_props["s"]["value"] == "-2"
-        assert "Factor" not in bu_props
-        assert "Offset" not in bu_props
-
-    def test_base_unit_factor(self):
-        sm = build_unit_definitions_submodel("42", [{"name": "km", "baseUnit": {"m": 1, "factor": 1000.0}}])
-        elem = sm["submodelElements"][0]
-        props = {el["idShort"]: el for el in elem["value"]}
-        bu_props = {el["idShort"]: el for el in props["BaseUnit"]["value"]}
-        assert bu_props["Factor"]["value"] == "1000.0"
-        assert "Offset" not in bu_props
-
-    def test_display_units(self):
-        sm = build_unit_definitions_submodel("42", [{
-            "name": "N",
-            "displayUnits": [{"name": "kN", "factor": 1000.0}, {"name": "mN", "factor": 0.001}],
-        }])
-        elem = sm["submodelElements"][0]
-        props = {el["idShort"]: el for el in elem["value"]}
-        assert "DisplayUnits" in props
-        du_ids = {el["idShort"] for el in props["DisplayUnits"]["value"]}
-        assert "kN" in du_ids
-        assert "mN" in du_ids
-        du_by_id = {el["idShort"]: el for el in props["DisplayUnits"]["value"]}
-        du_kN_props = {el["idShort"]: el for el in du_by_id["kN"]["value"]}
-        assert du_kN_props["Name"]["value"] == "kN"
-        assert du_kN_props["Factor"]["value"] == "1000.0"
-
-    def test_no_base_unit_when_absent(self):
-        sm = build_unit_definitions_submodel("42", [{"name": "count"}])
-        props = {el["idShort"]: el for el in sm["submodelElements"][0]["value"]}
-        assert "BaseUnit" not in props
-        assert "DisplayUnits" not in props
-
-    def test_duplicate_unit_names_get_unique_idshorts(self):
-        # Two units whose sanitized names collide (e.g. "m/s" and "m_s")
-        sm = build_unit_definitions_submodel("42", [{"name": "m/s"}, {"name": "m_s"}])
-        ids = [el["idShort"] for el in sm["submodelElements"]]
-        assert len(ids) == len(set(ids))  # all unique
-
-    def test_empty_unit_defs_produces_empty_submodel(self):
-        sm = build_unit_definitions_submodel("42", [])
-        assert sm["submodelElements"] == []
 
 
 class TestBuildAasShell:
@@ -547,12 +472,14 @@ class TestExtraInfoFields:
 
     def test_submodel_extra_info_documentation_url(self):
         sm = build_handover_documentation_submodel("42", {"documentationUrl": "https://example.com"})
+        assert sm is not None
         assert sm["submodelElements"][0]["value"][0]["value"][1]["value"][0]["value"][3]["value"][0]["value"] == "https://example.com"
 
     def test_submodel_extra_info_documentation_urls_preserves_all_links(self):
         sm = build_handover_documentation_submodel(
             "42", {"documentationUrls": ["https://example.com/manual.pdf", "https://example.com/guide.html"]}
         )
+        assert sm is not None
         files = [
             document["value"][1]["value"][0]["value"][3]["value"][0]["value"]
             for document in sm["submodelElements"][0]["value"]
@@ -586,6 +513,7 @@ class TestExtraInfoFields:
 
     def test_submodel_extra_info_contact_email(self):
         sm = build_contact_information_submodel("42", {"contactEmail": "lab@example.com"})
+        assert sm is not None
         email = sm["submodelElements"][0]["value"][0]["value"][0]
         assert email["idShort"] == "EmailAddress"
         assert email["value"] == "lab@example.com"
@@ -897,11 +825,11 @@ class TestSerializeAasxResources:
             assert result["mediaType"] == "application/asset-administration-shell-package+xml"
             request = mock_client.get.await_args
             assert request.args[0] == "/serialization"
-            assert request.kwargs["params"] == [
+            assert request.kwargs["params"] == (
                 ("aasIds", _encode_id("urn:test:shell:1")),
                 ("includeConceptDescriptions", "true"),
                 ("submodelIds", _encode_id("urn:test:sm:1")),
-            ]
+            )
             assert request.kwargs["headers"]["Accept"] == "application/asset-administration-shell-package+xml"
         finally:
             _aas_mod.BASYX_AAS_URL = original

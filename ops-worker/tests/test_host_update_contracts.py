@@ -144,6 +144,7 @@ def test_update_dynamic_host_contract_updates_all_station_paths_and_keeps_them_c
     )
 
     assert error is None
+    assert updated is not None
     assert updated["labstation_exe"] == r"C:\Lab Station\LabStation.exe"
     assert updated["local_mode_flag_path"] == r"C:\Lab Station\labstation\data\local-mode.flag"
     assert updated["events_path"] == r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"
@@ -161,6 +162,7 @@ def test_update_dynamic_host_contract_derives_all_station_paths_from_installatio
     )
 
     assert error is None
+    assert updated is not None
     assert updated["labstation_exe"] == r"C:\Program Files\Lab Station\LabStation.exe"
     assert updated["local_mode_flag_path"] == r"C:\Program Files\Lab Station\labstation\data\local-mode.flag"
     assert updated["heartbeat_path"] == r"C:\Program Files\Lab Station\labstation\data\telemetry\heartbeat.json"

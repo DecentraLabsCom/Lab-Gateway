@@ -13,10 +13,7 @@ def handle_reservation_start(
     parse_bool: Callable[[Any, bool], bool],
     execute_power_phase: Callable[[str, Optional[str], Mapping[str, Any], str, Dict[str, Any]], Dict[str, Any]],
     perform_wake_step: Callable[[Mapping[str, Any], str, Optional[str], Dict[str, Any]], Tuple[bool, Dict[str, Any]]],
-    perform_command_step: Callable[
-        [Mapping[str, Any], str, Optional[str], str, str, List[str]],
-        Tuple[bool, Dict[str, Any]],
-    ],
+    perform_command_step: Callable[..., Tuple[bool, Dict[str, Any]]],
     normalize_args: Callable[[Any, Optional[List[str]]], List[str]],
     resolve_station_lease_context: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], int]:
@@ -87,7 +84,8 @@ def handle_reservation_start(
             payload.get("prepareArgs"),
             [f"--guard-grace={guard_grace}"],
         )
-        management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+        management_value = host.get("management")
+        management = management_value if isinstance(management_value, Mapping) else {}
         dispatcher_request = None
         dispatcher_request_error = None
         if str(management.get("transport") or host.get("management_transport") or "winrm").lower() in {"ssh", "winrm"}:
@@ -134,10 +132,7 @@ def handle_reservation_end(
     get_mandatory_field: Callable[..., Optional[str]],
     parse_bool: Callable[[Any, bool], bool],
     execute_power_phase: Callable[[str, Optional[str], Mapping[str, Any], str, Dict[str, Any]], Dict[str, Any]],
-    perform_command_step: Callable[
-        [Mapping[str, Any], str, Optional[str], str, str, List[str]],
-        Tuple[bool, Dict[str, Any]],
-    ],
+    perform_command_step: Callable[..., Tuple[bool, Dict[str, Any]]],
     normalize_args: Callable[[Any, Optional[List[str]]], List[str]],
     resolve_station_lease_context: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], int]:
@@ -179,7 +174,8 @@ def handle_reservation_end(
 
     if success and release_enabled:
         release_args = normalize_args(payload.get("releaseArgs"), [])
-        management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+        management_value = host.get("management")
+        management = management_value if isinstance(management_value, Mapping) else {}
         dispatcher_request = None
         dispatcher_request_error = None
         if str(management.get("transport") or host.get("management_transport") or "winrm").lower() in {"ssh", "winrm"}:

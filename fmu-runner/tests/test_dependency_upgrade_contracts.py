@@ -146,30 +146,6 @@ def test_simulation_submodel_renders_embedded_capabilities_and_provider_metadata
     assert model_version["DigitalFile"]["extensions"][0]["value"] == hashlib.sha256(b"model").hexdigest()
 
 
-@pytest.mark.skip(reason="custom UnitDefinitions submodel removed in favor of standard IDTA 02005 ports")
-def test_unit_definitions_render_offsets_and_duplicate_display_names():
-    submodel = aas.build_unit_definitions_submodel(
-        "lab-42",
-        [
-            {
-                "name": "temperature",
-                "baseUnit": {"K": 1, "factor": 1.0, "offset": 273.15},
-                "displayUnits": [
-                    {"name": "degC", "offset": 273.15},
-                    {"name": "degC", "factor": 2.0, "offset": 1.0},
-                ],
-            }
-        ],
-    )
-    unit = submodel["submodelElements"][0]
-    properties = {element["idShort"]: element for element in unit["value"]}
-    base = {element["idShort"]: element for element in properties["BaseUnit"]["value"]}
-    assert base["Offset"]["value"] == "273.15"
-    displays = properties["DisplayUnits"]["value"]
-    assert [display["idShort"] for display in displays] == ["degC", "degC_1"]
-    assert {element["idShort"] for element in displays[1]["value"]} == {"Name", "Factor", "Offset"}
-
-
 def test_auth_rejects_malformed_issuer_and_accepts_private_http_hosts():
     assert auth._is_loopback_or_private_host("10.0.0.4:8080") is True
     assert auth._is_loopback_or_private_host("172.16.0.4") is True

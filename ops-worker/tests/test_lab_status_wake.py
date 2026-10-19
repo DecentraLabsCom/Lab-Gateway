@@ -41,5 +41,6 @@ def test_fetch_latest_wake_operations_returns_one_newest_row_per_lab_without_sec
         "7": {"status": "completed", "success": True, "created_at": "new"},
         "8": {"status": "failed", "success": False, "created_at": "new"},
     }
+    assert connection.statement is not None
     assert "payload" not in connection.statement
     assert connection.params == {"wake_action": "wake", "lab_id_0": "7", "lab_id_1": "8"}

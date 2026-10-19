@@ -60,6 +60,7 @@ def test_host_provisioning_values_derives_coherent_paths_from_discovered_heartbe
     })
 
     assert error is None
+    assert host is not None
     assert host["labstation_exe"] == r"C:\Lab Station\LabStation.exe"
     assert host["local_mode_flag_path"] == r"C:\Lab Station\labstation\data\local-mode.flag"
     assert host["heartbeat_path"] == r"C:\Lab Station\labstation\data\telemetry\heartbeat.json"
@@ -73,6 +74,7 @@ def test_host_provisioning_values_derives_all_paths_from_installation_root():
     })
 
     assert error is None
+    assert host is not None
     assert host["labstation_exe"] == r"C:\Program Files\Lab Station\LabStation.exe"
     assert host["local_mode_flag_path"] == r"C:\Program Files\Lab Station\labstation\data\local-mode.flag"
     assert host["heartbeat_path"] == r"C:\Program Files\Lab Station\labstation\data\telemetry\heartbeat.json"

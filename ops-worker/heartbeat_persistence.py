@@ -40,22 +40,30 @@ def persist_heartbeat(
 ) -> None:
     """Upsert a host and persist its heartbeat plus the optional last event."""
     ts = to_utc(heartbeat.get("timestamp")) or now()
-    ready = heartbeat.get("summary", {}).get("ready")
-    status = heartbeat.get("status", {})
-    if not isinstance(status, Mapping):
-        status = {}
-    operations = heartbeat.get("operations", {})
+    summary_value = heartbeat.get("summary")
+    summary = summary_value if isinstance(summary_value, Mapping) else {}
+    ready = summary.get("ready")
+    status_value = heartbeat.get("status")
+    status = status_value if isinstance(status_value, Mapping) else {}
+    operations_value = heartbeat.get("operations")
+    operations = operations_value if isinstance(operations_value, Mapping) else {}
 
-    last_forced = operations.get("lastForcedLogoff") or {}
-    last_power = operations.get("lastPowerAction") or {}
+    last_forced_value = operations.get("lastForcedLogoff")
+    last_forced = last_forced_value if isinstance(last_forced_value, Mapping) else {}
+    last_power_value = operations.get("lastPowerAction")
+    last_power = last_power_value if isinstance(last_power_value, Mapping) else {}
     station = dict(normalized or {})
-    platform = station.get("platform") if isinstance(station.get("platform"), Mapping) else {}
-    management = station.get("management") if isinstance(station.get("management"), Mapping) else {}
+    platform_value = station.get("platform")
+    platform = platform_value if isinstance(platform_value, Mapping) else {}
+    management_value = station.get("management")
+    management = management_value if isinstance(management_value, Mapping) else {}
     local_mode = status.get("localModeEnabled", station.get("localModeEnabled"))
-    sessions = station.get("sessions") if isinstance(station.get("sessions"), Mapping) else {}
+    sessions_value = station.get("sessions")
+    sessions = sessions_value if isinstance(sessions_value, Mapping) else {}
     local_session = status.get("localSessionActive", sessions.get("localSessionActive"))
-    if ready is None and isinstance(station.get("summary"), Mapping):
-        ready = station["summary"].get("ready")
+    station_summary = station.get("summary")
+    if ready is None and isinstance(station_summary, Mapping):
+        ready = station_summary.get("ready")
 
     last_forced_ts = to_utc(last_forced.get("timestamp"))
     last_power_ts = to_utc(last_power.get("timestamp"))

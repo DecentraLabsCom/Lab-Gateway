@@ -40,7 +40,7 @@ class HeartbeatRuntime:
         normalized: Optional[Dict[str, Any]] = None,
     ) -> None:
         context = self._context
-        options = dict(
+        options: dict[str, Any] = dict(
             to_utc=self.to_utc,
             now=context.now,
             sql_text=context.sql_text,

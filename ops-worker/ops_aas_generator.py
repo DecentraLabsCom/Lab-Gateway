@@ -194,24 +194,29 @@ def build_technical_data_submodel(
     now_iso = datetime.now(timezone.utc).isoformat()
     hb = heartbeat or {}
 
-    station = hb.get("station") if isinstance(hb.get("station"), dict) else hb
-    status = hb.get("status", {})
-    if not isinstance(status, dict):
-        status = {}
-    operations = station.get("operations") if isinstance(station.get("operations"), dict) else {}
+    station_value = hb.get("station")
+    station = station_value if isinstance(station_value, dict) else hb
+    status_value = hb.get("status")
+    status = status_value if isinstance(status_value, dict) else {}
+    operations_value = station.get("operations")
+    operations = operations_value if isinstance(operations_value, dict) else {}
 
     ready = capability_ready(station, "physicalLab")
     local_mode = station.get("localModeEnabled", status.get("localModeEnabled"))
-    sessions = station.get("sessions") if isinstance(station.get("sessions"), dict) else {}
+    sessions_value = station.get("sessions")
+    sessions = sessions_value if isinstance(sessions_value, dict) else {}
     local_session = sessions.get("localSessionActive", status.get("localSessionActive"))
     hb_timestamp = station.get("timestamp", hb.get("timestamp", ""))
-    platform = station.get("platform") if isinstance(station.get("platform"), dict) else {}
+    platform_value = station.get("platform")
+    platform = platform_value if isinstance(platform_value, dict) else {}
 
-    last_power = operations.get("lastPowerAction") or {}
+    last_power_value = operations.get("lastPowerAction")
+    last_power = last_power_value if isinstance(last_power_value, dict) else {}
     last_power_ts = last_power.get("timestamp", "")
     last_power_mode = last_power.get("mode", "")
 
-    last_logoff = operations.get("lastForcedLogoff") or {}
+    last_logoff_value = operations.get("lastForcedLogoff")
+    last_logoff = last_logoff_value if isinstance(last_logoff_value, dict) else {}
     last_logoff_ts = last_logoff.get("timestamp", "")
     last_logoff_user = last_logoff.get("user", "")
 

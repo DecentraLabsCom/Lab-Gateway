@@ -327,6 +327,7 @@ class TestBuildAasShell:
         )
         assert submodel["idShort"] == "Nameplate"
         contact = _mod.build_contact_information_submodel("42", {"contactEmail": "lab@example.test"})
+        assert contact is not None
         assert contact["submodelElements"][0]["value"][0]["value"][0]["value"] == "lab@example.test"
         handover = _mod.build_handover_documentation_submodel(
             "42",
@@ -338,6 +339,7 @@ class TestBuildAasShell:
                 ],
             },
         )
+        assert handover is not None
         files = [
             document["value"][1]["value"][0]["value"][3]["value"][0]["value"]
             for document in handover["submodelElements"][0]["value"]

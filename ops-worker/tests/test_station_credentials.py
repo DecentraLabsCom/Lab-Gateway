@@ -18,6 +18,7 @@ def test_ssh_credential_round_trip_keeps_private_key_encrypted_and_private(crede
     public = credentials.generate_ssh_credential("Station-Linux_1")
     persisted = json.loads(credential_store.read_text(encoding="utf-8"))
     stored = persisted["credentials"]["station-linux_1"]
+    loaded = credentials.load_ssh_credential("station-linux_1")
 
     assert public["type"] == "ssh-ed25519"
     assert public["username"] == "labstation-ops"
@@ -25,7 +26,8 @@ def test_ssh_credential_round_trip_keeps_private_key_encrypted_and_private(crede
     assert "privateKey" not in public
     assert "PRIVATE KEY" not in credential_store.read_text(encoding="utf-8")
     assert stored["token"] != public["publicKey"]
-    assert credentials.load_ssh_credential("station-linux_1")["privateKey"].startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
+    assert loaded is not None
+    assert loaded["privateKey"].startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
 
 
 def test_public_credential_never_returns_the_private_half(credential_store):
@@ -33,6 +35,7 @@ def test_public_credential_never_returns_the_private_half(credential_store):
 
     public = credentials.public_ssh_credential("station-2")
 
+    assert public is not None
     assert set(public) == {"credentialRef", "username", "publicKey", "type"}
     assert public["credentialRef"] == "station-2"
 

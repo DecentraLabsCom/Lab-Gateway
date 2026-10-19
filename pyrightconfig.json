@@ -1,0 +1,15 @@
+{
+  "include": [
+    "fmu-runner",
+    "ops-worker",
+    "scripts",
+    "tests",
+    "fmu-data"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "tests/integration/station-ssh-e2e",
+      "extraPaths": ["ops-worker"]
+    }
+  ]
+}

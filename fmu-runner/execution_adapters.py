@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import NoReturn, Optional
 
 from fastapi import HTTPException
 
@@ -22,7 +22,7 @@ def simulation_request_payload(
     return payload
 
 
-def reject_unsupported_remote_operation(feature_name: str, backend_mode: str) -> None:
+def reject_unsupported_remote_operation(feature_name: str, backend_mode: str) -> NoReturn:
     raise HTTPException(
         status_code=501,
         detail=(

@@ -54,5 +54,6 @@ def test_latest_wake_operation_is_scoped_to_the_host(db_engine):
         sql_text=text,
     )
 
+    assert result is not None
     assert result["success"] is True
     assert result["status"] == "completed"

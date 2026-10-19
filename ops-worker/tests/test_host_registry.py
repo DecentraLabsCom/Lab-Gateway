@@ -57,6 +57,7 @@ def test_host_registry_repairs_mixed_installation_roots_from_heartbeat():
     })
 
     host = registry.get("PC-Siemens")
+    assert host is not None
     assert host["labstation_exe"] == r"C:\Lab Station\LabStation.exe"
     assert host["local_mode_flag_path"] == r"C:\Lab Station\labstation\data\local-mode.flag"
     assert host["events_path"] == r"C:\Lab Station\labstation\data\telemetry\session-guard-events.jsonl"

@@ -121,6 +121,8 @@ def is_schedule_due(
     if not bool(schedule.get("enabled", True)):
         return False
     current = _aware_utc(now)
+    if current is None:
+        raise WakeOpsValidationError("now must be a datetime")
     occurrence = scheduled_occurrence(current, schedule)
     last = _aware_utc(last_scheduled_at)
     if last is None:

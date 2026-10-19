@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Mapping, Optional
 import paramiko
 
 from station_credentials import load_ssh_credential
-from station_errors import StationAuthenticationFailed, StationTrustMismatch, StationUnreachable
+from station_errors import StationAuthenticationFailed, StationCommandRejected, StationTrustMismatch, StationUnreachable
 from station_ssh_trust import load_confirmed_ssh_host_key
 from station_transport import normalize_command_result, validate_station_command
 
@@ -295,8 +295,8 @@ class SshTransport:
             if (
                 issued.tzinfo is None
                 or deadline.tzinfo is None
-                or issued.utcoffset().total_seconds() != 0
-                or deadline.utcoffset().total_seconds() != 0
+                or issued.utcoffset() != timedelta(0)
+                or deadline.utcoffset() != timedelta(0)
                 or deadline <= issued
                 or deadline - issued > timedelta(minutes=5)
                 or not 1 <= timeout_seconds <= 300

@@ -15,7 +15,7 @@ import logging
 import asyncio
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 from uuid import uuid4
 
 import httpx
@@ -566,7 +566,7 @@ def _simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = 
     )
 
 
-def _reject_unsupported_remote_operation(feature_name: str):
+def _reject_unsupported_remote_operation(feature_name: str) -> NoReturn:
     return _reject_unsupported_remote_operation_adapter(feature_name, _runner_runtime.backend.mode)
 
 

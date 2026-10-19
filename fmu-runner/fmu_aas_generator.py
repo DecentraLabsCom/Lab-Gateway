@@ -1280,7 +1280,7 @@ async def serialize_aasx_resources(
         ) as client:
             response = await client.get(
                 "/serialization",
-                params=params,
+                params=tuple(params),
                 headers={"Accept": _AASX_MEDIA_TYPE},
             )
             if response.status_code != 200:

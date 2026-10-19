@@ -226,7 +226,9 @@ def resolve_lab_associations(
             parse_selector=parse_selector,
             normalize_key=normalize_key,
         )
-        host_name = str(host.get("name") or "").strip() if host else ""
+        if not host:
+            continue
+        host_name = str(host.get("name") or "").strip()
         if lab_id and host_name:
             ping_target = host.get("ping_target") or host.get("address")
             associations.append({

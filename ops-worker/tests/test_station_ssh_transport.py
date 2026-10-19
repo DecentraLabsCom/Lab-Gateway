@@ -6,6 +6,12 @@ import time
 from io import StringIO
 
 import paramiko
+from paramiko.common import (
+    AUTH_FAILED,
+    AUTH_SUCCESSFUL,
+    OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED,
+    OPEN_SUCCEEDED,
+)
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -28,11 +34,11 @@ class _GatewayClient(paramiko.ServerInterface):
 
     def check_auth_publickey(self, username, key):
         if username == self.expected_username and key.asbytes() == self.expected_key.asbytes():
-            return paramiko.AUTH_SUCCESSFUL
-        return paramiko.AUTH_FAILED
+            return AUTH_SUCCESSFUL
+        return AUTH_FAILED
 
     def check_channel_request(self, kind, chanid):
-        return paramiko.OPEN_SUCCEEDED if kind == "session" else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+        return OPEN_SUCCEEDED if kind == "session" else OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
 
     def check_channel_exec_request(self, channel, command):
         self.exec_command = command.decode("utf-8") if isinstance(command, bytes) else command

@@ -66,7 +66,8 @@ def perform_wake_step(
     )
     broadcast = options.get("broadcast") or host.get("broadcast")
     port = int(options.get("port", host.get("wol_port", 9)))
-    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+    management_value = host.get("management")
+    management = management_value if isinstance(management_value, Mapping) else {}
     configured_probe_port = management.get("port", host.get("management_port", host.get("winrm_port")))
     try:
         probe_port = int(configured_probe_port) if configured_probe_port not in (None, "") else None
@@ -184,8 +185,10 @@ def perform_command_step(
         outcome = "failure"
     duration_ms = result.get("durationMs", result.get("duration_ms", int((current_epoch() - start) * 1000)))
     status = "completed" if success and exit_code == 0 else "warning" if success else "failed"
-    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
-    contract = host.get("contract") if isinstance(host.get("contract"), Mapping) else {}
+    management_value = host.get("management")
+    management = management_value if isinstance(management_value, Mapping) else {}
+    contract_value = host.get("contract")
+    contract = contract_value if isinstance(contract_value, Mapping) else {}
     summarized = {
         "exitCode": result.get("exitCode", result.get("exit_code")),
         "outcome": result.get("outcome", outcome),

@@ -37,8 +37,10 @@ def handle_local_mode(
 
     flag_path = get_flag_path(host)
     try:
-        management = host.get("management") if isinstance(host.get("management"), dict) else {}
-        contract = host.get("contract") if isinstance(host.get("contract"), dict) else {}
+        management_value = host.get("management")
+        management = management_value if isinstance(management_value, dict) else {}
+        contract_value = host.get("contract")
+        contract = contract_value if isinstance(contract_value, dict) else {}
         if run_station_command and (
             str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh"
             or int(contract.get("major") or 0) >= 3

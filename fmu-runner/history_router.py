@@ -1,6 +1,6 @@
 """Reservation-scoped simulation status, history, and result routes."""
 
-from typing import Any, Optional
+from typing import Any, Callable, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -9,8 +9,8 @@ def create_history_router(
     *,
     verify_jwt: Any,
     enforce_fmu_claim: Any,
-    reject_unsupported_operation: Any,
-    get_station_backend: Any = None,
+    reject_unsupported_operation: Callable[[str], NoReturn],
+    get_station_backend: Optional[Callable[..., Any]] = None,
 ) -> APIRouter:
     router = APIRouter()
 

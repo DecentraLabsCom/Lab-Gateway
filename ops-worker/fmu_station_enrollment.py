@@ -100,7 +100,8 @@ def public_station_status(
         base_url=config.base_url,
     )
     health = runner_health if isinstance(runner_health, Mapping) else {}
-    checks = health.get("checks") if isinstance(health.get("checks"), Mapping) else {}
+    raw_checks = health.get("checks")
+    checks = raw_checks if isinstance(raw_checks, Mapping) else {}
     station_authenticated = checks.get("stationAuthentication") is True
     link_status = (
         "linked"
@@ -282,8 +283,10 @@ def enroll_fmu_station(
         require_token=True,
     )
 
-    management = selected.get("management") if isinstance(selected.get("management"), Mapping) else {}
-    contract = selected.get("contract") if isinstance(selected.get("contract"), Mapping) else {}
+    raw_management = selected.get("management")
+    management = raw_management if isinstance(raw_management, Mapping) else {}
+    raw_contract = selected.get("contract")
+    contract = raw_contract if isinstance(raw_contract, Mapping) else {}
     use_secure_operation = management.get("transport") == "ssh" or int(contract.get("major") or 0) >= 3
     if use_secure_operation:
         if not write_station_secret:
@@ -326,8 +329,10 @@ def release_fmu_station(
         hosts=hosts,
         require_token=False,
     )
-    management = selected.get("management") if isinstance(selected.get("management"), Mapping) else {}
-    contract = selected.get("contract") if isinstance(selected.get("contract"), Mapping) else {}
+    raw_management = selected.get("management")
+    management = raw_management if isinstance(raw_management, Mapping) else {}
+    raw_contract = selected.get("contract")
+    contract = raw_contract if isinstance(raw_contract, Mapping) else {}
     use_secure_operation = management.get("transport") == "ssh" or int(contract.get("major") or 0) >= 3
     if use_secure_operation:
         if not clear_station_secret:

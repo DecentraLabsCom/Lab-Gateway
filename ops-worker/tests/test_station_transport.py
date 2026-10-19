@@ -1,11 +1,19 @@
 import json
 from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 
 from station_errors import StationCommandRejected, StationUnreachable
 from station_transport import normalize_command_result, validate_station_command
 from station_transport_factory import StationTransportRuntime
+from transports.ssh import SshTransport
+
+
+class _FakeSshTransport(SshTransport):
+    def read_artifact(self, host: Mapping[str, Any], artifact_id: str) -> str:
+        return artifact_id
 
 
 @pytest.mark.parametrize(
@@ -245,7 +253,7 @@ def test_ssh_artifact_aliases_map_only_known_logical_names(monkeypatch):
         read_winrm_file=lambda *args: "",
         write_winrm_file=lambda *args: None,
         remove_winrm_file=lambda *args: None,
-        ssh_transport=type("Ssh", (), {"read_artifact": lambda self, host, name: name})(),
+        ssh_transport=_FakeSshTransport(),
     )
     host = {"management": {"transport": "ssh"}}
 

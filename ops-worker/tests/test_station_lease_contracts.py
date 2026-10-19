@@ -25,15 +25,21 @@ def _reservation(**overrides):
 
 
 def test_reservation_prepare_envelope_is_deterministic_and_server_bounded():
-    args = dict(
+    reservation = _reservation()
+    first = build_station_dispatch_request(
         reservation_id="0xabc123",
         lab_id="42",
         host_name="station-1",
         command="prepare-session",
-        reservation=_reservation(),
+        reservation=reservation,
     )
-    first = build_station_dispatch_request(**args)
-    second = build_station_dispatch_request(**args)
+    second = build_station_dispatch_request(
+        reservation_id="0xabc123",
+        lab_id="42",
+        host_name="station-1",
+        command="prepare-session",
+        reservation=reservation,
+    )
 
     assert first == second
     assert first["context"]["kind"] == "reservation"
@@ -45,22 +51,36 @@ def test_reservation_prepare_envelope_is_deterministic_and_server_bounded():
 
 
 def test_reservation_release_requires_generation_and_keeps_stable_identity():
-    args = dict(
+    reservation = _reservation()
+    first = build_station_dispatch_request(
         reservation_id="0xabc123",
         lab_id="42",
         host_name="station-1",
         command="release-session",
-        reservation=_reservation(),
+        reservation=reservation,
         prepare_generation=7,
     )
-    first = build_station_dispatch_request(**args)
-    second = build_station_dispatch_request(**args)
+    second = build_station_dispatch_request(
+        reservation_id="0xabc123",
+        lab_id="42",
+        host_name="station-1",
+        command="release-session",
+        reservation=reservation,
+        prepare_generation=7,
+    )
 
     assert first == second
     assert first["context"]["generation"] == 7
     assert first["timeoutSeconds"] == 90
     with pytest.raises(StationLeaseContextError, match="generation"):
-        build_station_dispatch_request(**{**args, "prepare_generation": None})
+        build_station_dispatch_request(
+            reservation_id="0xabc123",
+            lab_id="42",
+            host_name="station-1",
+            command="release-session",
+            reservation=reservation,
+            prepare_generation=None,
+        )
 
 
 @pytest.mark.parametrize(

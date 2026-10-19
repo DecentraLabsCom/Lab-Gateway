@@ -19,7 +19,8 @@ _REF = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 
 
 def _trust_ref(host: Mapping[str, Any]) -> str:
-    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+    management_value = host.get("management")
+    management = management_value if isinstance(management_value, Mapping) else {}
     ref = str(management.get("trustRef") or host.get("ssh_trust_ref") or host.get("name") or host.get("address") or "").strip().lower()
     if not _REF.fullmatch(ref) or ".." in ref:
         raise ValueError("station trust reference is invalid")
@@ -45,7 +46,8 @@ def _fingerprint(key: paramiko.PKey) -> str:
 
 
 def _address_port(host: Mapping[str, Any]) -> Tuple[str, int]:
-    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+    management_value = host.get("management")
+    management = management_value if isinstance(management_value, Mapping) else {}
     address = str(host.get("address") or "").strip()
     try:
         port = int(management.get("port") or host.get("management_port") or 22)

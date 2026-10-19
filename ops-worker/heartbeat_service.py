@@ -30,7 +30,8 @@ def poll_heartbeat(
     default_events_path: str,
 ) -> Dict[str, Any]:
     """Read a Station heartbeat and perform best-effort side effects."""
-    management = host.get("management") if isinstance(host.get("management"), Mapping) else {}
+    management_value = host.get("management")
+    management = management_value if isinstance(management_value, Mapping) else {}
     is_ssh = str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh"
     hb_path = "heartbeat" if is_ssh else host.get("heartbeat_path", default_heartbeat_path)
     events_path = "session-events" if is_ssh else host.get("events_path", default_events_path)

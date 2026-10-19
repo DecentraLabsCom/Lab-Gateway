@@ -1,4 +1,4 @@
-"""Provider-managed public GLB storage for Smart Factory scenes."""
+"""Provider-managed immutable storage for GLB scenes and Three.js applications."""
 
 import hashlib
 import hmac
@@ -68,7 +68,10 @@ def _validate_glb(content: bytes) -> dict[str, Any]:
         cursor = chunk_end
         chunk_index += 1
 
-    asset = document.get("asset") if isinstance(document, dict) else None
+    if document is None:
+        raise HTTPException(status_code=400, detail="GLB JSON chunk is missing")
+
+    asset = document.get("asset")
     if not isinstance(asset, dict) or asset.get("version") != "2.0":
         raise HTTPException(status_code=400, detail="Only glTF 2.0 binary scenes are accepted")
 

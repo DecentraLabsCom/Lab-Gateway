@@ -9,7 +9,7 @@ from basyx.aas.adapter.aasx import (
     AASXWriter,
     DictSupplementaryFileContainer,
 )
-from basyx.aas.adapter.json import read_aas_json_file
+from basyx.aas.adapter.json.json_deserialization import read_aas_json_file
 
 import ops_aas_generator as generator
 

@@ -33,7 +33,7 @@ class EchoHandler(BaseHTTPRequestHandler):
         if include_body:
             self.wfile.write(body)
 
-    def log_message(self, _format, *_args):
+    def log_message(self, format, *_args):
         pass
 
 

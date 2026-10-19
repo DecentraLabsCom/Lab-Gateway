@@ -18,10 +18,14 @@ def safe_host_inventory_entry(
 ) -> Dict[str, Any]:
     """Return only the host fields intended for inventory API responses."""
     credential_ref = credential_ref_for_host(host)
-    management = host.get("management") if isinstance(host.get("management"), dict) else {}
+    management_value = host.get("management")
+    management = management_value if isinstance(management_value, dict) else {}
     transport = str(management.get("transport") or host.get("management_transport") or "winrm").lower()
     platform = str(host.get("platform") or ("linux" if transport == "ssh" else "windows")).lower()
-    contract = host.get("contract") if isinstance(host.get("contract"), dict) else {}
+    contract_value = host.get("contract")
+    contract = contract_value if isinstance(contract_value, dict) else {}
+    station_value = host.get("station")
+    station = station_value if isinstance(station_value, dict) else {}
     if transport == "ssh":
         trust = inspect_ssh_trust(host)
         paths = {"labstation_exe": None, "local_mode_flag_path": None,
@@ -63,7 +67,7 @@ def safe_host_inventory_entry(
         "profile": host.get("profile"),
         "managementCredentials": {"configured": configured, "credentialRef": credential_ref, "type": "ssh-ed25519" if transport == "ssh" else "winrm-password"},
         "managementTrust": trust_projection,
-        "stationCommand": (host.get("station") or {}).get("command") if transport == "ssh" else None,
+        "stationCommand": station.get("command") if transport == "ssh" else None,
         "winrmTrustRef": trust.get("trustRef"),
         "winrmTrustConfigured": trust.get("configured", False),
         "winrmTrustStatus": trust.get("status"),

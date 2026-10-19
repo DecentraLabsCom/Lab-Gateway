@@ -1404,7 +1404,10 @@ _TIMELINE_CONTEXT = TimelineContext(
     get_db_engine=lambda: DB_ENGINE,
     get_host_by_lab=lambda: resolve_host_by_lab,
     get_sql_text=lambda: text,
-    get_rows_to_operations=lambda: _rows_to_operations,
+    get_rows_to_operations=lambda: cast(
+        Callable[[Sequence[Mapping[str, Any]]], List[Dict[str, Any]]],
+        _rows_to_operations,
+    ),
     get_phase_lookback=lambda: TIMELINE_PHASE_LOOKBACK,
     get_fetch_latest_heartbeat=lambda: _fetch_latest_heartbeat,
     get_summarize_phases=lambda: _summarize_phases,
