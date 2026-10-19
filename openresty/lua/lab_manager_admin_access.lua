@@ -241,6 +241,34 @@ if not constant_time_eq(provided, token) then
     return deny(ngx.HTTP_UNAUTHORIZED, "Unauthorized: invalid lab manager token.")
 end
 
+-- Scene uploads and companion imports are stored by this Gateway and served
+-- from its own public read-only asset path. They do not require the remote
+-- publishing backend used for Marketplace/on-chain lab administration in Lite mode.
+local uri = ngx.var.uri or ""
+if ngx.var.digital_twin_scene_upload == "1"
+    or uri:match("^/lab%-admin/digital%-twin%-scenes/%d+$")
+    or uri:match("^/lab%-admin/digital%-twin%-scenes/%d+/from%-fmu$") then
+    ngx.req.clear_header("Authorization")
+    ngx.req.clear_header("Cookie")
+    ngx.req.clear_header(header_name)
+    ngx.req.clear_header("X-Digital-Twin-Admin-Token")
+    ngx.req.set_header("X-Digital-Twin-Admin-Token", token)
+    return
+end
+
+-- Generated FMU AAS sync and metadata hints are local Gateway operations.
+-- Lite mode may use them with an external AAS even when lab publishing is
+-- delegated to another backend, so they need Lab Manager auth but no remote
+-- LAB_ADMIN_BACKEND_URL/token.
+if uri:match("^/aas%-admin/fmu/[^/]+/(sync|hints)$") then
+    ngx.req.clear_header("Authorization")
+    ngx.req.clear_header("Cookie")
+    ngx.req.clear_header(header_name)
+    ngx.req.clear_header("X-Gateway-ID")
+    ngx.req.clear_header("X-Digital-Twin-Admin-Token")
+    return
+end
+
 local backend_url, backend_error = resolve_backend_url()
 if not backend_url then
     local status = ngx.HTTP_SERVICE_UNAVAILABLE
@@ -281,7 +309,6 @@ ngx.req.set_header(backend_header_name, backend_token)
 -- `/aas-admin/lab/<labId>/sync` is served by ops-worker.  Use the dedicated
 -- service credential only for that route; generic AAS-link routes under the
 -- same prefix are served by fmu-runner and must retain the FMU-side contract.
-local uri = ngx.var.uri or ""
 if uri:match("^/aas%-admin/lab/[^/]+/sync$") then
     local ops_internal_token = os.getenv("OPS_INTERNAL_AUTH_TOKEN") or ""
     local ops_internal_header = os.getenv("OPS_INTERNAL_AUTH_HEADER") or "X-Ops-Internal-Token"

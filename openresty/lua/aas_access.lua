@@ -8,12 +8,12 @@
 local config = ngx.shared.config
 local bundled_url = "http://basyx-aas-server:8081"
 
-local lite_mode = config and config:get("lite_mode")
-if lite_mode == 1 or lite_mode == true or lite_mode == "1" then
-    ngx.status = ngx.HTTP_FORBIDDEN
+local aas_enabled = config and config:get("aas_enabled")
+if aas_enabled ~= 1 and aas_enabled ~= true and aas_enabled ~= "1" then
+    ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
     ngx.header["Content-Type"] = "text/plain"
-    ngx.say("Forbidden: AAS endpoints are not available in Lite mode.")
-    return ngx.exit(ngx.HTTP_FORBIDDEN)
+    ngx.say("Service unavailable: AAS is not enabled on this gateway.")
+    return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
 
 local upstream = (config and config:get("basyx_aas_url")) or bundled_url

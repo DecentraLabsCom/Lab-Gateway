@@ -52,6 +52,8 @@ def _flag(values: Mapping[str, str], name: str, default: str = "false") -> bool:
 @dataclass(frozen=True)
 class FmuRunnerConfig:
     fmu_data_path: str
+    digital_twin_assets_path: Path
+    lab_manager_token: str
     aas_link_data_path: Path
     aas_catalog_path: Path
     ws_cleanup_seconds: float
@@ -95,6 +97,8 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
         raise ValueError("FMU_PROXY_PLAYBACK_SPEED must be between 0.1 and 100")
     return FmuRunnerConfig(
         fmu_data_path=values.get("FMU_DATA_PATH", "/app/fmu-data"),
+        digital_twin_assets_path=Path(values.get("DIGITAL_TWIN_ASSETS_PATH", "/app/digital-twin-assets")),
+        lab_manager_token=_env_or_secret_file("LAB_MANAGER_TOKEN", environ=values),
         aas_link_data_path=Path(values.get("AAS_LINK_DATA_PATH", "/app/data/aas-links")),
         aas_catalog_path=Path(values.get("AAS_CATALOG_PATH", "/app/data/aasx")),
         ws_cleanup_seconds=float(values.get("WS_CLEANUP_SECONDS", "15")),

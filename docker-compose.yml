@@ -233,6 +233,7 @@ services:
       - ./openresty/lua:/etc/openresty/lua:ro
       - ./web:/var/www/html:ro
       - ./lab-content:/var/www/lab-content:ro
+      - fmu-digital-twin-assets:/var/www/digital-twin-assets:ro
       # Full mode: expose blockchain-services JWT public key to OpenResty.
       # Lite mode may still have a stale file here, but mode-specific Lua
       # selection never reads it; Lite uses only certs/public_key.pem.
@@ -851,6 +852,9 @@ services:
       # profile below uses a local FMU Executor sidecar.
       - FMU_BACKEND_MODE=station
       - FMU_DATA_PATH=/app/fmu-data
+      - DIGITAL_TWIN_ASSETS_PATH=/app/digital-twin-assets
+      - LAB_MANAGER_TOKEN_FILE=/run/secrets/lab_manager_token
+      - LAB_MANAGER_TOKEN=
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
       - FMU_STATION_BASE_URL=${FMU_STATION_BASE_URL:-}
       - FMU_STATION_INTERNAL_TOKEN_FILE=/run/secrets/fmu_station_internal_token
@@ -882,12 +886,15 @@ services:
     volumes:
       - ./fmu-data:/app/fmu-data:ro
       - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
+      - fmu-digital-twin-assets:/app/digital-twin-assets
       # Existing volume IDs also hold Gateway-managed AAS catalogs and links.
       - fmu-history:/app/data
     tmpfs:
       - /tmp:size=64M,mode=1777
     read_only: true
     depends_on:
+      fmu-digital-twin-assets-init:
+        condition: service_completed_successfully
       blockchain-services:
         condition: service_healthy
     secrets:
@@ -896,6 +903,7 @@ services:
       - session_observer_signing_secret
       - fmu_proxy_signing_key
       - aas_service_token
+      - lab_manager_token
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
       interval: 30s
@@ -1001,6 +1009,8 @@ services:
     build:
       context: ./fmu-runner
       dockerfile: Dockerfile
+    group_add:
+      - "${HOST_GID:-1000}"
     environment:
       - FMU_BACKEND_MODE=local
       - FMU_LOCAL_DEV_MODE=true
@@ -1008,6 +1018,9 @@ services:
       - FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN_FILE=/run/secrets/fmu_local_executor_token
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
+      - DIGITAL_TWIN_ASSETS_PATH=/app/digital-twin-assets
+      - LAB_MANAGER_TOKEN_FILE=/run/secrets/lab_manager_token
+      - LAB_MANAGER_TOKEN=
       - ISSUER=${ISSUER:-}
       - JWT_ISSUER=${JWT_ISSUER:-}
       - AUTH_JWKS_URL=${AUTH_JWKS_URL:-}
@@ -1030,6 +1043,7 @@ services:
     volumes:
       - ./fmu-data:/app/fmu-data:ro
       - ./fmu-proxy-runtime:/app/fmu-proxy-runtime:ro
+      - fmu-digital-twin-assets:/app/digital-twin-assets
       # Existing volume IDs also hold Gateway-managed AAS catalogs and links.
       - fmu-local-history:/app/data
     tmpfs:
@@ -1038,7 +1052,10 @@ services:
     secrets:
       - session_observer_signing_secret
       - fmu_local_executor_token
+      - lab_manager_token
     depends_on:
+      fmu-digital-twin-assets-init:
+        condition: service_completed_successfully
       blockchain-services:
         condition: service_healthy
       fmu-executor-local:
@@ -1083,6 +1100,20 @@ services:
       # without joining the broader control-plane networks.
       fmu_auth:
       fmu_aas:
+
+  # Ensure the shared scene volume is writable by the non-root FMU Runner,
+  # even if OpenResty created the empty named volume first for its read-only
+  # public file mount.
+  fmu-digital-twin-assets-init:
+    profiles: ["fmu-runner", "fmu-local-dev"]
+    build:
+      context: ./fmu-runner
+      dockerfile: Dockerfile
+    user: "0:0"
+    command: ["sh", "-c", "chown fmurunner:fmurunner /app/digital-twin-assets"]
+    volumes:
+      - fmu-digital-twin-assets:/app/digital-twin-assets
+    restart: "no"
 
   # BaSyx AAS Server - Asset Administration Shell registry & repository
   # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_admin_access.lua)
@@ -1273,5 +1304,6 @@ volumes:
   mysql_data:
   fmu-history:
   fmu-local-history:
+  fmu-digital-twin-assets:
   basyx_mongo_data:
   basyx_aas_data:

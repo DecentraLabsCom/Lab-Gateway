@@ -101,6 +101,11 @@
                 keyInput: $('#fmuSyncKey'),
                 fileInput: $('#fmuSyncFile'),
                 fileName: $('#fmuSyncFileName'),
+                sceneUrlField: $('#fmuSyncSceneUrlField'),
+                sceneUrl: $('#fmuSyncSceneUrl'),
+                sceneFileInput: $('#fmuSyncSceneFile'),
+                sceneFileName: $('#fmuSyncSceneFileName'),
+                importSceneButton: $('#fmuSyncImportSceneBtn'),
                 contactEmail: $('#fmuSyncContactEmail'),
             },
             aasLink: {

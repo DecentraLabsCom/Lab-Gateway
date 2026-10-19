@@ -835,11 +835,16 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
     license_value = str((extra_info or {}).get("license") or "").strip()
     if license_value and (license_value.startswith("http://") or license_value.startswith("https://")):
         urls.insert(0, license_value)
-    document_specs = [(url, "License terms" if url == license_value else f"Documentation {index + 1}")
-                      for index, url in enumerate(dict.fromkeys(urls))]
+    document_specs = [
+        (url, "License terms" if url == license_value else f"Documentation {index + 1}", "application/octet-stream")
+        for index, url in enumerate(dict.fromkeys(urls))
+    ]
+    scene_url = str((extra_info or {}).get("digitalTwinSceneUrl") or "").strip()
+    if scene_url:
+        document_specs.append((scene_url, "Smart Factory Twin scene", "model/gltf-binary"))
     if not document_specs:
         return None
-    for index, (url, title) in enumerate(document_specs):
+    for index, (url, title, content_type) in enumerate(document_specs):
         identifier = url or f"license:{license_value}"
         document_ids = {
             "idShort": "DocumentIds",
@@ -895,10 +900,10 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
                             "modelType": "SubmodelElementList",
                             "typeValueListElement": "File",
                             "value": [{
-                                "idShort": "DigitalFile",
+                                "idShort": "DigitalTwinScene" if content_type == "model/gltf-binary" else "DigitalFile",
                                 "semanticId": _semantic_id("0173-1#02-ABK126#002"),
                                 "modelType": "File",
-                                "contentType": "application/octet-stream",
+                                "contentType": content_type,
                                 "value": url,
                             }],
                         },
@@ -1052,7 +1057,11 @@ def build_aas_shell(
         all_sm_ids.append(_submodel_id_for_interfaces(lab_id))
     if str((extra_info or {}).get("contactEmail") or "").strip():
         all_sm_ids.append(_submodel_id_for_contact(lab_id))
-    if _documentation_urls(extra_info) or str((extra_info or {}).get("license") or "").strip().startswith(("http://", "https://")):
+    if (
+        _documentation_urls(extra_info)
+        or str((extra_info or {}).get("license") or "").strip().startswith(("http://", "https://"))
+        or str((extra_info or {}).get("digitalTwinSceneUrl") or "").strip()
+    ):
         all_sm_ids.append(_submodel_id_for_handover(lab_id))
     all_sm_ids.extend(extra_submodel_ids)
 
@@ -1409,15 +1418,15 @@ async def discover_basyx_shells() -> dict[str, Any]:
                 shell_id = shell.get("id")
                 if not isinstance(shell_id, str) or not shell_id.startswith("urn:decentralabs:lab:"):
                     continue
-                submodel_ids = [
-                    value.strip()
-                    for value in (
-                        shell.get("submodelIds")
-                        if isinstance(shell.get("submodelIds"), list)
-                        else _shell_submodel_ids(shell)
-                    )
-                    if isinstance(value, str) and value.strip()
-                ]
+                raw_submodel_ids = shell.get("submodelIds")
+                if isinstance(raw_submodel_ids, list):
+                    submodel_ids = [
+                        value.strip()
+                        for value in raw_submodel_ids
+                        if isinstance(value, str) and value.strip()
+                    ]
+                else:
+                    submodel_ids = _shell_submodel_ids(shell)
                 if not submodel_ids:
                     encoded_id = _encode_id(shell_id)
                     detail = await client.get(f"/shells/{encoded_id}")

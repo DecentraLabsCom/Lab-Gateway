@@ -108,8 +108,11 @@ from aasx_router import create_aasx_router
 from aasx_catalog import AasxPackageCatalog
 from aas_association_service import AasAssociationService
 from proxy_router import create_proxy_router
+from digital_twin_assets_router import create_digital_twin_assets_router
 
 FMU_DATA_PATH = CONFIG.fmu_data_path
+_DIGITAL_TWIN_ASSETS_PATH = CONFIG.digital_twin_assets_path
+_LAB_MANAGER_TOKEN = CONFIG.lab_manager_token
 _AAS_LINK_DATA_PATH = CONFIG.aas_link_data_path
 _AAS_CATALOG_PATH = CONFIG.aas_catalog_path
 WS_CLEANUP_SECONDS = CONFIG.ws_cleanup_seconds
@@ -260,6 +263,13 @@ def _aas_hints_read_model_description(fmu_path):
     return read_model_description(str(fmu_path))
 
 
+async def _aas_fmu_model_metadata(access_key: str):
+    return await _runner_runtime.backend.get_authorized_model_metadata(
+        claims={"accessKey": access_key},
+        requested_fmu_filename=access_key,
+    )
+
+
 def _aas_sync_resolve_fmu_path(access_key: str):
     return _resolve_fmu_path(access_key)
 
@@ -320,11 +330,13 @@ _aas_hints_router = create_aas_hints_router(
     read_model_description=_aas_hints_read_model_description,
     normalize_xml_value=_normalize_xml_value,
     logger=logger,
+    get_model_metadata=_aas_fmu_model_metadata,
 )
 _aas_sync_router = create_aas_sync_router(
     resolve_fmu_path=_aas_sync_resolve_fmu_path,
     read_model_description=_aas_sync_read_model_description,
     metadata_builder=_aas_sync_metadata_builder,
+    get_model_metadata=_aas_fmu_model_metadata,
     sync_fmu_to_basyx=_aas_sync_to_basyx,
     get_runtime_status=_aas_sync_runtime_status,
     logger=logger,
@@ -338,6 +350,16 @@ _aasx_router = create_aasx_router(
         delete_resources=_aas_delete_resources,
     ),
     serialize_resources=_aas_serialize_resources,
+)
+_digital_twin_assets_router = create_digital_twin_assets_router(
+    asset_root=_DIGITAL_TWIN_ASSETS_PATH,
+    lab_manager_token=_LAB_MANAGER_TOKEN,
+    fmu_backend_mode=FMU_BACKEND_MODE,
+    fmu_data_root=Path(FMU_DATA_PATH),
+    resolve_local_fmu_path=lambda access_key: _resolve_fmu_path(access_key),
+    station_base_url=FMU_STATION_BASE_URL,
+    station_internal_token=FMU_STATION_INTERNAL_TOKEN,
+    station_request_timeout=FMU_STATION_REQUEST_TIMEOUT,
 )
 
 
@@ -1003,6 +1025,7 @@ app = create_app(
         _aas_hints_router,
         _aas_sync_router,
         _aasx_router,
+        _digital_twin_assets_router,
         _realtime_router,
         _proxy_router,
         _run_router,

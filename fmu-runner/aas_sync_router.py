@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.datastructures import UploadFile
@@ -22,11 +23,45 @@ def _parse_documentation_urls(raw_value: Any) -> list[str]:
     ))
 
 
+def _validated_scene_url(raw_value: Any) -> str:
+    """Accept an HTTPS asset URL or a root-relative Gateway scene path."""
+    value = str(raw_value or "").strip()
+    if not value:
+        return ""
+    if len(value) > 2048 or "\\" in value or any(ord(char) < 32 for char in value):
+        raise HTTPException(status_code=400, detail="Invalid digital twin scene URL")
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port  # Accessing this validates malformed port values.
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid digital twin scene URL") from exc
+    if parsed.scheme:
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+        ):
+            raise HTTPException(status_code=400, detail="Digital twin scene URL must use HTTPS")
+        return value
+    if (
+        not value.startswith("/")
+        or value.startswith("//")
+        or not parsed.path.startswith("/digital-twin-scenes/")
+        or not parsed.path.lower().endswith(".glb")
+        or any(part == ".." for part in parsed.path.split("/"))
+    ):
+        raise HTTPException(status_code=400, detail="Relative scene URL must reference a Gateway /digital-twin-scenes/*.glb asset")
+    return value
+
+
 def create_aas_sync_router(
     *,
     resolve_fmu_path: Any,
     read_model_description: Any,
     metadata_builder: Any,
+    get_model_metadata: Any = None,
     sync_fmu_to_basyx: Any,
     logger: Any,
     get_runtime_status: Any = None,
@@ -55,6 +90,9 @@ def create_aas_sync_router(
                 value = str(form.get(field) or request.query_params.get(field, "")).strip()
                 if value:
                     extra_info[field] = value
+            scene_url = _validated_scene_url(form.get("digitalTwinSceneUrl") or request.query_params.get("digitalTwinSceneUrl"))
+            if scene_url:
+                extra_info["digitalTwinSceneUrl"] = scene_url
             documentation_urls = _parse_documentation_urls(
                 form.get("documentationUrls") or request.query_params.get("documentationUrls")
             )
@@ -69,6 +107,9 @@ def create_aas_sync_router(
                 value = request.query_params.get(field, "").strip()
                 if value:
                     extra_info[field] = value
+            scene_url = _validated_scene_url(request.query_params.get("digitalTwinSceneUrl"))
+            if scene_url:
+                extra_info["digitalTwinSceneUrl"] = scene_url
             documentation_urls = _parse_documentation_urls(request.query_params.get("documentationUrls"))
             if documentation_urls:
                 extra_info["documentationUrls"] = documentation_urls
@@ -76,17 +117,32 @@ def create_aas_sync_router(
         metadata: dict = {}
         fmu_path: Optional[Path] = None
         if not aasx_bytes:
-            fmu_path = resolve_fmu_path(access_key)
-            try:
-                model_description = read_model_description(str(fmu_path))
-            except Exception as exc:
-                logger.error(
-                    "AAS sync: cannot read FMU %s: %s",
-                    str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
-                    type(exc).__name__,
-                )
-                raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
-            metadata = metadata_builder(model_description)
+            if get_model_metadata is not None:
+                try:
+                    metadata = await get_model_metadata(access_key)
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    logger.error(
+                        "AAS sync: cannot read FMU metadata for %s: %s",
+                        str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
+                        type(exc).__name__,
+                    )
+                    raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
+                if not isinstance(metadata, dict):
+                    raise HTTPException(status_code=422, detail="FMU metadata response is invalid")
+            else:
+                fmu_path = resolve_fmu_path(access_key)
+                try:
+                    model_description = read_model_description(str(fmu_path))
+                except Exception as exc:
+                    logger.error(
+                        "AAS sync: cannot read FMU %s: %s",
+                        str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
+                        type(exc).__name__,
+                    )
+                    raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
+                metadata = metadata_builder(model_description)
             auto_fallback = {
                 key: metadata.get(key, "")
                 for key in ("description", "license")
@@ -153,6 +209,9 @@ def create_aas_sync_router(
             value = str(form.get(field) or request.query_params.get(field, "")).strip()
             if value:
                 extra_info[field] = value
+        scene_url = _validated_scene_url(form.get("digitalTwinSceneUrl") or request.query_params.get("digitalTwinSceneUrl"))
+        if scene_url:
+            extra_info["digitalTwinSceneUrl"] = scene_url
         documentation_urls = _parse_documentation_urls(form.get("documentationUrls"))
         if documentation_urls:
             extra_info["documentationUrls"] = documentation_urls

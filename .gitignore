@@ -35,6 +35,8 @@ fmu-access-state/
 fmu-data/*
 !fmu-data/README.md
 !fmu-data/*.fmu
+!fmu-data/*.glb
+!fmu-data/*.LICENSE.txt
 !fmu-data/test-fmus/
 !fmu-data/test-fmus/**
 fmu-executor-state/

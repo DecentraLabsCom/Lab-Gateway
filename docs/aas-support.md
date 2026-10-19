@@ -94,7 +94,7 @@ exposed to the development profile.
 
 ### Lite Gateway
 
-Lite Gateways delegate identity and control-plane responsibilities to a Full Gateway. AAS and AAS administration endpoints are disabled in Lite mode. A Lite deployment may still serve FMU and physical-lab access, but it is not the provider AAS authority.
+Lite Gateways delegate identity and control-plane responsibilities to a Full Gateway. AAS remains opt-in: set `BASYX_AAS_URL` to a provider-managed HTTPS AAS, allowlist its exact hostname in `AAS_ALLOWED_HOSTS`, and configure its dedicated service token. With `FMU_RUNNER_ENABLED=true`, the Digital Twins panel can synchronize generated FMU shells to that external AAS. Bundled BaSyx and AASX import/administration remain Full-mode features.
 
 ### External AAS server
 
@@ -131,6 +131,54 @@ The endpoint is protected by the existing `lab_manager_access.lua` mechanism (ad
 4. creates or replaces the shell and submodels in BaSyx.
 
 The optional `labId` parameter lets the provider keep a stable AAS identity anchored to a resource ID rather than to an operational FMU `accessKey`. The endpoint returns a disabled result when AAS is intentionally not configured and an upstream error when the configured AAS server cannot be reached.
+
+#### 2.1. Smart Factory GLB scene
+
+To publish a Smart Factory scene, set `digitalTwinSceneUrl` during generated
+FMU sync. The generator places it in the existing IDTA 02004
+`HandoverDocumentation` as a `File` with `contentType=model/gltf-binary` and
+`idShort=DigitalTwinScene`:
+
+~~~text
+POST /aas-admin/fmu/{accessKey}/sync?labId={labId}&digitalTwinSceneUrl={encoded-Gateway-scene-path}
+~~~
+
+This is an optional discovery field for the Smart Factory viewer. FMU
+simulation continues to work when it is omitted or when AAS is unavailable.
+The Lab Manager `Digital Twin Management` form exposes this optional field for
+generated FMU shells. In Gateway development mode, `fmu-data` carries the demo
+FMU and same-stem GLB together. The Lab Station production package carries the
+FMU and same-stem GLB together. The Windows Station package carries the
+Windows x64 FMU; the Linux Station amd64 package carries the Linux x64 FMU.
+Both include the same GLB. Linux arm64 packages omit the x86_64-only demo.
+When the provider synchronizes the demo AAS, Lab Manager imports the companion
+scene from whichever FMU backend is
+active and stores it in the Gateway asset volume. For other labs, the provider
+can use **Import companion GLB from FMU backend**, paste a public HTTPS URL, or
+upload a `.glb`. The import reads only the GLB matching the selected FMU's
+basename. In Station mode, the Gateway retrieves it over Station's
+token-protected internal endpoint; Station does not publish it publicly. The
+Station endpoint is provided by FMU Executor 0.3.0 or newer. The
+Gateway stores the scene at an immutable, content-addressed path such as
+`/digital-twin-scenes/{labId}/{sha256}.glb` and serves it read-only, so no write
+access to Marketplace is needed. A root-relative scene path is resolved against
+the lab's Gateway origin by Marketplace. Gateway accepts only self-contained
+glTF 2.0 binary files up to 50 MiB. The demo's MIT license ships beside both
+FMU/GLB pairs.
+For browser loading, the Gateway's `CORS_ALLOWED_ORIGINS` must include the
+Marketplace origin and the Marketplace deployment's `CSP_CONNECT_SRC` must
+allow the Gateway origin. The URL must not contain credentials or access
+tokens. When uploading an `.aasx` package, its own Handover Documentation
+remains authoritative and a separate GLB upload cannot be combined with it.
+The File stores only the scene location. FMI remains authoritative for ports;
+each GLB node carries only its optional `extras.fmiBindings` from an FMI output
+name to an allowed visual target/transform. No separate digital-twin manifest
+or duplicate port metadata is generated for this use case because FMI, AAS and
+the GLB together cover the current requirements. If a future requirement needs
+metadata that none of those formats can represent naturally, define only that
+missing information in a complementary manifest and keep FMI/AAS fields out of
+it. The first Marketplace viewer supports public GLB assets; do not publish a
+confidential model until an authorized asset route is available.
 
 The lab-manager Digital Twins panel supports generated shell synchronization
 and explicit `.aasx` upload. For an FMU, the selected laboratory automatically

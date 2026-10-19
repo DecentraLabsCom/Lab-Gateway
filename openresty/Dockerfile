@@ -38,8 +38,10 @@ RUN set -eux; \
 
 # Directory for custom scripts and SSL certificates
 RUN mkdir -p /etc/openresty/lua /etc/openresty/jwt-keys /etc/ssl/private /var/lib/openresty/fmu-access \
+    /var/www/digital-twin-assets \
     && chown nobody:nobody /var/lib/openresty/fmu-access \
-    && chmod 700 /var/lib/openresty/fmu-access
+    && chmod 700 /var/lib/openresty/fmu-access \
+    && chmod 0755 /var/www/digital-twin-assets
 
 # Copy SSL initialization script
 COPY init-ssl.sh /usr/local/bin/init-ssl.sh

@@ -19,7 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN useradd -r -s /bin/false fmurunner
 
 # Create writable directory for AAS association metadata
-RUN mkdir -p /app/data && chown -R fmurunner:fmurunner /app/data
+RUN mkdir -p /app/data /app/digital-twin-assets \
+    && chown -R fmurunner:fmurunner /app/data /app/digital-twin-assets
 
 COPY . .
 

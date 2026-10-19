@@ -43,7 +43,7 @@
                     <i class="fas fa-coins" aria-hidden="true"></i> Income
                 </button>
                 <button class="lm-tab" id="lm-tab-digital-twins" role="tab" type="button"
-                    data-lm-tab="digital-twins" data-full-only="true" aria-controls="lm-panel-digital-twins" aria-selected="false" tabindex="-1">
+                    data-lm-tab="digital-twins" data-full-only="true" data-lite-aas-enabled-only="true" aria-controls="lm-panel-digital-twins" aria-selected="false" tabindex="-1">
                     <i class="fas fa-cubes" aria-hidden="true"></i> Digital Twins
                 </button>
                 <button class="lm-tab" id="lm-tab-notifications" role="tab" type="button"
@@ -788,6 +788,18 @@
                                     <span class="file-picker-name" id="fmuSyncFileName" aria-live="polite">No file chosen</span>
                                 </div>
                             </label>
+                            <div class="field full" id="fmuSyncSceneUrlField" hidden>
+                                <span><label for="fmuSyncSceneUrl">Smart Factory GLB URL</label> <span class="muted-text">(optional)</span></span>
+                                <input type="text" id="fmuSyncSceneUrl" inputmode="url" maxlength="2048" placeholder="https://assets.example.com/twins/factory-cell.glb" autocomplete="url">
+                                <small class="muted-text">The Smart Factory demo imports its prepared scene automatically when you synchronize its AAS. For another FMU, import a same-stem GLB from the active FMU backend or choose a public HTTPS URL.</small>
+                                <button class="btn btn-secondary mt-2" id="fmuSyncImportSceneBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import companion GLB from FMU backend</button>
+                                <div class="file-picker mt-2">
+                                    <input class="file-picker-input" type="file" id="fmuSyncSceneFile" accept=".glb,model/gltf-binary" aria-label="Upload Smart Factory GLB scene">
+                                    <label class="file-picker-button" for="fmuSyncSceneFile">Choose GLB</label>
+                                    <span class="file-picker-name" id="fmuSyncSceneFileName" aria-live="polite">No file chosen</span>
+                                </div>
+                                <small class="muted-text">Imported and uploaded scenes are stored on this provider Gateway and published as immutable public files; Marketplace write access is not required. An uploaded AASX must carry its own scene reference. Gateway scenes must allow browser CORS and this Gateway's origin must be allowed by Marketplace.</small>
+                            </div>
                             <label class="field full">
                                 <span>Contact Email <span class="muted-text">(optional)</span></span>
                                 <input type="email" id="fmuSyncContactEmail" placeholder="contact@example.com">
@@ -1334,7 +1346,7 @@
     <div id="toast" class="toast"></div>
 
     <script src="../assets/js/auth-token-handler.js?v=auth-token-scopes-v3"></script>
-    <script src="../assets/js/lab-manager-tabs.js?v=lab-manager-tabs-v2"></script>
+    <script src="../assets/js/lab-manager-tabs.js?v=lab-manager-tabs-v3"></script>
     <script src="../assets/js/lab-manager-income.js?v=lab-manager-income-v1"></script>
     <script src="../assets/js/core/state.js?v=lab-manager-state-v1"></script>
     <script src="../assets/js/core/api-client.js?v=lab-manager-api-client-v1"></script>
@@ -1369,7 +1381,7 @@
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v2"></script>
     <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v2"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
-    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v6"></script>
+    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v10"></script>
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v4"></script>
     <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v3"></script>
     <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v6"></script>
@@ -1380,7 +1392,7 @@
     <script src="../assets/js/lab-manager-power-status.js?v=lab-manager-power-status-v2"></script>
     <script src="../assets/js/lab-manager-power-controllers.js?v=lab-manager-power-controllers-v6"></script>
         <script src="../assets/js/lab-manager-power-policies.js?v=lab-manager-power-policies-v5"></script>
-        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v5"></script>
+        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v6"></script>
     <script src="../assets/js/lab-manager-reservations-feature.js?v=lab-manager-reservations-feature-v1"></script>
     <script src="../assets/js/lab-manager.js?v=workflow-tabs-v23"></script>
     <script src="../assets/js/lab-publisher-values.js?v=publisher-values-v1"></script>

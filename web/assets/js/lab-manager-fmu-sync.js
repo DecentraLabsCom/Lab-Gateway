@@ -12,6 +12,13 @@
     }) {
         let fmuDescription = '';
         let fmuDescriptionAccessKey = '';
+        let gatewayUploadedSceneUrl = '';
+        let gatewayUploadedSceneAccessKey = '';
+        const smartFactoryDemoAccessKey = 'SmartFactoryCell.fmu';
+
+        function isGatewaySceneAssetPath(path) {
+            return /^\/digital-twin-scenes\/\d+\/[a-f0-9]{64}\.glb$/i.test(String(path || ''));
+        }
 
         function parseDatasetList(value) {
             if (Array.isArray(value)) return value.map(item => String(item).trim()).filter(Boolean);
@@ -36,7 +43,7 @@
             return {
                 labId: String(option?.dataset?.labId || selectedValue).trim(),
                 accessKey: String(option?.dataset?.accessKey || (resourceType === 0 ? '' : selectedValue)).trim(),
-                resourceType: Number.isFinite(resourceType) ? resourceType : 1,
+                resourceType: Number.isFinite(resourceType) ? resourceType : selectedValue ? 1 : null,
                 labDescription: String(option?.dataset?.labDescription || '').trim(),
                 labDocumentation: parseDatasetList(option?.dataset?.labDocumentation),
                 labLicense: String(option?.dataset?.labLicense || '').trim(),
@@ -86,7 +93,46 @@
                 license: String(extraInfo.labLicense || '').trim(),
                 documentationUrls: parseDatasetList(extraInfo.labDocumentation),
                 contactEmail: String(extraInfo.contactEmail || '').trim(),
+                digitalTwinSceneUrl: String(extraInfo.digitalTwinSceneUrl || '').trim(),
             };
+        }
+
+        function updateSceneUrlVisibility() {
+            if (!fields.sceneUrlField) return;
+            const laboratory = selectedLaboratory();
+            fields.sceneUrlField.hidden = laboratory.resourceType !== 1;
+            if (!fields.sceneUrl || laboratory.resourceType !== 1) return;
+
+            const currentUrl = String(fields.sceneUrl.value || '').trim();
+            if (
+                gatewayUploadedSceneUrl
+                && currentUrl === gatewayUploadedSceneUrl
+                && laboratory.accessKey !== gatewayUploadedSceneAccessKey
+            ) {
+                fields.sceneUrl.value = '';
+            }
+        }
+
+        async function importCompanionScene(labId, accessKey) {
+            const response = await fetchImpl(
+                `/lab-admin/digital-twin-scenes/${encodeURIComponentImpl(labId)}/from-fmu`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accessKey }),
+                },
+            );
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.detail || `Companion GLB import failed (HTTP ${response.status})`);
+            }
+            if (!isGatewaySceneAssetPath(body.path)) {
+                throw new Error('Gateway returned an invalid GLB asset path');
+            }
+            if (fields.sceneUrl) fields.sceneUrl.value = body.path;
+            gatewayUploadedSceneUrl = body.path;
+            gatewayUploadedSceneAccessKey = accessKey;
+            return body;
         }
 
         function appendMetadataToForm(form, metadata) {
@@ -98,7 +144,7 @@
             if (metadata.contactEmail) form.append('contactEmail', metadata.contactEmail);
         }
 
-        async function syncAasResource(laboratory, aasxFile, extraInfo = {}) {
+        async function syncAasResource(laboratory, aasxFile, sceneFile, extraInfo = {}) {
             const { accessKey, labId, resourceType } = laboratory;
             const isFmu = resourceType === 1;
             if (!labId) {
@@ -109,12 +155,58 @@
                 showToast('Select an FMU laboratory', 'error');
                 return;
             }
+            if (aasxFile && sceneFile) {
+                showToast('Choose either an AASX package or a GLB for generated FMU metadata', 'error');
+                return;
+            }
+            if (sceneFile && !isFmu) {
+                showToast('A GLB companion can only be attached to an FMU laboratory', 'error');
+                return;
+            }
             if (fields.syncButton) fields.syncButton.disabled = true;
             try {
                 const description = isFmu
                     ? await resolveDescription(accessKey, extraInfo.labDescription)
                     : String(extraInfo.labDescription || '').trim();
                 const syncInfo = { ...buildMetadata(extraInfo), description };
+                if (sceneFile) {
+                    if (!/\.glb$/i.test(String(sceneFile.name || '')) || sceneFile.size <= 0) {
+                        throw new Error('Choose a non-empty .glb scene file');
+                    }
+                    if (sceneFile.size > 50 * 1024 * 1024) {
+                        throw new Error('GLB scenes must be 50 MiB or smaller');
+                    }
+                    const uploadResponse = await fetchImpl(
+                        `/lab-admin/digital-twin-scenes/${encodeURIComponentImpl(labId)}`,
+                        {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'model/gltf-binary' },
+                            body: sceneFile,
+                        },
+                    );
+                    if (!uploadResponse.ok) {
+                        const body = await uploadResponse.json().catch(() => ({}));
+                        throw new Error(body.detail || `GLB upload failed (HTTP ${uploadResponse.status})`);
+                    }
+                    const uploadedScene = await uploadResponse.json();
+                    if (!isGatewaySceneAssetPath(uploadedScene.path)) {
+                        throw new Error('Gateway returned an invalid GLB asset path');
+                    }
+                    syncInfo.digitalTwinSceneUrl = uploadedScene.path;
+                    if (fields.sceneUrl) fields.sceneUrl.value = syncInfo.digitalTwinSceneUrl;
+                    gatewayUploadedSceneUrl = syncInfo.digitalTwinSceneUrl;
+                    gatewayUploadedSceneAccessKey = accessKey;
+                }
+                if (
+                    isFmu
+                    && !sceneFile
+                    && !aasxFile
+                    && accessKey === smartFactoryDemoAccessKey
+                    && !syncInfo.digitalTwinSceneUrl
+                ) {
+                    const importedScene = await importCompanionScene(labId, accessKey);
+                    syncInfo.digitalTwinSceneUrl = importedScene.path;
+                }
                 let response;
                 const url = isFmu
                     ? `/aas-admin/fmu/${encodeURIComponentImpl(accessKey)}/sync`
@@ -129,8 +221,9 @@
                     response = await fetchImpl(url, { method: 'POST', body: form });
                 } else if (!isFmu) {
                     const metadata = Object.fromEntries(
-                        Object.entries(syncInfo).filter(([, value]) => (
-                            Array.isArray(value) ? value.length > 0 : Boolean(value)
+                        Object.entries(syncInfo).filter(([key, value]) => (
+                            key !== 'digitalTwinSceneUrl'
+                            && (Array.isArray(value) ? value.length > 0 : Boolean(value))
                         )),
                     );
                     response = await fetchImpl(url, {
@@ -147,6 +240,9 @@
                         params.set('documentationUrls', JSON.stringify(syncInfo.documentationUrls));
                     }
                     if (syncInfo.contactEmail) params.set('contactEmail', syncInfo.contactEmail);
+                    if (syncInfo.digitalTwinSceneUrl && !aasxFile) {
+                        params.set('digitalTwinSceneUrl', syncInfo.digitalTwinSceneUrl);
+                    }
                     const query = params.toString() ? `?${params.toString()}` : '';
                     response = await fetchImpl(url + query, { method: 'POST' });
                 }
@@ -180,9 +276,11 @@
             if (fields.keyInput) {
                 fields.keyInput.addEventListener('input', () => {
                     clearAllFmuHints();
+                    updateSceneUrlVisibility();
                 });
                 fields.keyInput.addEventListener('change', () => {
                     const laboratory = selectedLaboratory();
+                    updateSceneUrlVisibility();
                     if (!laboratory.accessKey || laboratory.resourceType !== 1) {
                         clearAllFmuHints();
                         return;
@@ -196,19 +294,47 @@
                     if (fields.fileName) fields.fileName.textContent = file ? file.name : 'No file chosen';
                 });
             }
+            if (fields.sceneFileInput) {
+                fields.sceneFileInput.addEventListener('change', () => {
+                    const file = fields.sceneFileInput.files && fields.sceneFileInput.files[0];
+                    if (fields.sceneFileName) fields.sceneFileName.textContent = file ? file.name : 'No file chosen';
+                });
+            }
+            if (fields.importSceneButton) {
+                fields.importSceneButton.addEventListener('click', async () => {
+                    const laboratory = selectedLaboratory();
+                    if (laboratory.resourceType !== 1 || !laboratory.accessKey) {
+                        showToast('Select an FMU laboratory first', 'error');
+                        return;
+                    }
+                    fields.importSceneButton.disabled = true;
+                    try {
+                        const scene = await importCompanionScene(laboratory.labId, laboratory.accessKey);
+                        showToast(`Companion GLB imported from ${scene.source || 'FMU backend'}`, 'success');
+                    } catch (error) {
+                        logger.error(error);
+                        showToast(`Companion GLB import failed: ${error.message}`, 'error');
+                    } finally {
+                        fields.importSceneButton.disabled = false;
+                    }
+                });
+            }
             if (fields.syncButton) {
                 fields.syncButton.addEventListener('click', () => {
                     const laboratory = selectedLaboratory();
                     const file = fields.fileInput && fields.fileInput.files && fields.fileInput.files[0];
+                    const sceneFile = fields.sceneFileInput && fields.sceneFileInput.files && fields.sceneFileInput.files[0];
                     const extraInfo = {
                         labDescription: laboratory.labDescription,
                         labDocumentation: laboratory.labDocumentation,
                         labLicense: laboratory.labLicense,
+                        digitalTwinSceneUrl: (fields.sceneUrl && fields.sceneUrl.value || '').trim(),
                         contactEmail: (fields.contactEmail && fields.contactEmail.value || '').trim(),
                     };
-                    void syncAasResource(laboratory, file || null, extraInfo);
+                    void syncAasResource(laboratory, file || null, sceneFile || null, extraInfo);
                 });
             }
+            updateSceneUrlVisibility();
         }
 
         return Object.freeze({

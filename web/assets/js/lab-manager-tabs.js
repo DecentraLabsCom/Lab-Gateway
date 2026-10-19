@@ -76,7 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (options.focus === true) tab.focus();
         if (status && requestedTab?.disabled) {
-            status.textContent = 'Digital twins are available only in Full Gateway mode.';
+            status.textContent = requestedTab.dataset.liteAasEnabledOnly === 'true'
+                ? 'Configure an external AAS server and enable FMU integration to use Digital Twins in Lite mode.'
+                : 'Digital twins are available only in Full Gateway mode.';
         } else if (status) {
             status.textContent = '';
         }
@@ -134,6 +136,16 @@ document.addEventListener('DOMContentLoaded', () => {
             tabs
                 .filter(tab => tab.matches('[data-full-only="true"]'))
                 .forEach(tab => {
+                    if (
+                        tab.dataset.liteAasEnabledOnly === 'true'
+                        && mode.aasEnabled === true
+                        && mode.fmuRunnerEnabled === true
+                    ) {
+                        tab.disabled = false;
+                        tab.removeAttribute('aria-disabled');
+                        tab.title = 'AAS and FMU integration are enabled on this Lite Gateway';
+                        return;
+                    }
                     tab.disabled = true;
                     tab.setAttribute('aria-disabled', 'true');
                     tab.title = 'Available only in Full Gateway mode';
@@ -147,7 +159,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     tab.title = 'Read-only income for this Lite Gateway';
                 });
             if (status) {
-                status.textContent = 'Lite mode: Digital Twins are unavailable.';
+                const digitalTwins = getTab('digital-twins');
+                status.textContent = digitalTwins && !digitalTwins.disabled
+                    ? ''
+                    : 'Lite mode: configure an external AAS server and enable FMU integration to use Digital Twins.';
             }
         } catch (error) {
             console.warn('Gateway mode could not be determined; endpoint guards remain active.', error);

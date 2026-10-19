@@ -145,6 +145,8 @@ Set `FMU_EXECUTOR_IMAGE` in `.env` to select another released image tag. No
 FMU-Executor source checkout is required. Station mode and the local profile
 require FMU Executor 0.2.1 or newer for the asynchronous job, batch, status,
 cancellation, result, and history APIs.
+When the backend is a Lab Station, retrieving a companion GLB also requires
+FMU Executor 0.3.0 or newer for the authenticated scene endpoint.
 
 FMU files are mounted read-only in both containers. The local Executor uses a
 private executable tmpfs for extraction. See
