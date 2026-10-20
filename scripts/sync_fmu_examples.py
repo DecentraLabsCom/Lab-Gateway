@@ -15,7 +15,6 @@ DEFAULT_EXAMPLES_ROOT = GATEWAY_ROOT.parent / "FMU-Executor" / "examples"
 REFERENCE_FMU_NAMES = {
     "BinaryClockTest.fmu",
     "BouncingBall.fmu",
-    "Dahlquist.fmu",
     "Feedthrough.fmu",
     "Stair.fmu",
     "StateSpace.fmu",
@@ -72,6 +71,14 @@ def sync(examples_root: Path, target: Path) -> None:
         )
 
     target.mkdir(parents=True, exist_ok=True)
+    # Remove stale local copies of retired examples from existing workspaces.
+    for obsolete_name in (
+        "SmartFactoryCell.fmu",
+        "SmartFactoryCell.glb",
+        "SmartFactoryCell.LICENSE.txt",
+        "Dahlquist.fmu",
+    ):
+        (target / obsolete_name).unlink(missing_ok=True)
     for name in sorted(REFERENCE_FMU_NAMES):
         source = canonical_reference_fmus[name]
         names = validate_linux_x64_fmu(source)
@@ -89,20 +96,6 @@ def sync(examples_root: Path, target: Path) -> None:
         copy_verified(source, target / name)
 
     copy_verified(reference_root / "LICENSE.txt", target / "Reference-FMUs.LICENSE.txt")
-
-    smart_factory_root = examples_root / "smart-factory-cell"
-    linux_fmu = smart_factory_root / "SmartFactoryCell-linux64.fmu"
-    scene = smart_factory_root / "smart-factory-cell.glb"
-    license_file = smart_factory_root / "LICENSE.txt"
-    validate_linux_x64_fmu(linux_fmu)
-    with zipfile.ZipFile(linux_fmu) as archive:
-        embedded_scene = archive.read("resources/smart-factory-cell.glb")
-    if embedded_scene != scene.read_bytes():
-        raise ValueError("The Smart Factory FMU's embedded scene differs from its companion GLB.")
-
-    copy_verified(linux_fmu, target / "SmartFactoryCell.fmu")
-    copy_verified(scene, target / "SmartFactoryCell.glb")
-    copy_verified(license_file, target / "SmartFactoryCell.LICENSE.txt")
 
     smart_warehouse_root = examples_root / "smart-warehouse-cell"
     warehouse_fmu = smart_warehouse_root / "SmartWarehouseCell-linux64.fmu"

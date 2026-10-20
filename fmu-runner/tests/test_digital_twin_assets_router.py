@@ -13,7 +13,7 @@ from digital_twin_assets_router import create_digital_twin_assets_router
 
 
 _ADMIN_TOKEN = "test-admin-token"
-_FMU_ACCESS_KEY = "smart-factory/SmartFactoryCell.fmu"
+_FMU_ACCESS_KEY = "SmartWarehouseCell.fmu"
 
 
 def _glb(document: dict | None = None) -> bytes:
@@ -244,7 +244,7 @@ def test_threejs_app_upload_rejects_paths_deeper_than_marketplace_supports(tmp_p
 
 def test_import_from_local_gateway_uses_companion_glb_and_auth(tmp_path):
     data_root = tmp_path / "fmu-data"
-    fmu_path = data_root / "smart-factory" / "SmartFactoryCell.fmu"
+    fmu_path = data_root / "SmartWarehouseCell.fmu"
     scene_path = fmu_path.with_suffix(".glb")
     fmu_path.parent.mkdir(parents=True)
     fmu_path.write_bytes(b"FMU placeholder")

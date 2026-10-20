@@ -149,13 +149,13 @@ provider select no visual asset, a GLB, or a static Three.js application. The
 provider can import a same-stem companion from the active FMU backend or upload
 the asset. A public HTTPS URL is supported for GLB scenes only.
 
-Smart Factory demonstrates the GLB path. Smart Warehouse includes both a GLB
-and a companion Three.js application. The canonical FMU, scene, app ZIP and
-license live in FMU-Executor; Gateway development and Windows/Linux amd64
-Station packages carry runtime copies beside the platform-specific FMU. Linux
-arm64 omits this x86_64-only demo. In production, Gateway imports the selected
-companion from Lab Station through its token-protected internal endpoint.
-Station does not publish the asset publicly.
+Smart Warehouse includes both a GLB scene and a companion Three.js application.
+The canonical FMU, scene, app ZIP and license live in FMU-Executor; Gateway
+development and Windows/Linux amd64 Station packages carry runtime copies
+beside the platform-specific FMU. Linux arm64 omits this x86_64-only demo. In
+production, Gateway imports the selected companion from Lab Station through
+its token-protected internal endpoint. Station does not publish the asset
+publicly.
 
 Generated FMU shells use the existing IDTA 02004 `HandoverDocumentation`
 `File` as the single visual-asset link. Its `contentType` selects Marketplace's

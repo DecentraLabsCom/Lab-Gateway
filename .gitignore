@@ -99,9 +99,9 @@ Thumbs.db
 
 # Development notes and planning (keep local only)
 dev/
-# Local Smart Factory and Smart Warehouse preview support (not deployed)
+# Local Smart Warehouse preview support (not deployed)
 /docker-compose.local-demo.yml
-/openresty/conf.d/gateway_dev_smart_factory.conf
+/openresty/conf.d/gateway_dev_smart_warehouse.conf
 /openresty/gateway.local-demo.conf
 ops-worker/hosts.json
 ops-data/winrm-credentials.json
