@@ -20,6 +20,15 @@ REFERENCE_FMU_NAMES = {
     "StateSpace.fmu",
     "VanDerPol.fmu",
 }
+REQUIRED_APP_PROTOCOL_MESSAGES = {
+    "decentralabs:digital-twin-host-ready",
+    "decentralabs:digital-twin-ready",
+    "decentralabs:digital-twin-error",
+    "decentralabs:fmi-sample",
+    "decentralabs:fmi-reset",
+    "decentralabs:fmi-simulation-state",
+    "decentralabs:fmi-samples",
+}
 
 
 def sha256(path: Path) -> str:
@@ -110,8 +119,16 @@ def sync(examples_root: Path, target: Path) -> None:
     if warehouse_embedded_scene != warehouse_scene.read_bytes():
         raise ValueError("The Smart Warehouse FMU's embedded scene differs from its companion GLB.")
     with zipfile.ZipFile(warehouse_app) as archive:
-        if archive.read("warehouse.glb") != warehouse_scene.read_bytes():
-            raise ValueError("The Smart Warehouse app bundle uses a different companion GLB.")
+        app_names = set(archive.namelist())
+        if not {"index.html", "app.js", "scene.js"}.issubset(app_names):
+            raise ValueError("The Smart Warehouse app bundle is missing its procedural scene modules.")
+        if "warehouse.glb" in app_names or "vendor/GLTFLoader.js" in app_names:
+            raise ValueError("The Smart Warehouse Three.js app must build its scene independently from the GLB.")
+        app_script = archive.read("app.js").decode("utf-8")
+        if "createSmartWarehouseScene" not in app_script or "scene.js" not in app_script:
+            raise ValueError("The Smart Warehouse app bundle does not load its procedural scene module.")
+        if any(message not in app_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
+            raise ValueError("The Smart Warehouse app bundle is missing the Marketplace host protocol.")
 
     copy_verified(warehouse_fmu, target / "SmartWarehouseCell.fmu")
     copy_verified(warehouse_scene, target / "SmartWarehouseCell.glb")
