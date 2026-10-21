@@ -360,6 +360,7 @@ _digital_twin_assets_router = create_digital_twin_assets_router(
     station_base_url=FMU_STATION_BASE_URL,
     station_internal_token=FMU_STATION_INTERNAL_TOKEN,
     station_request_timeout=FMU_STATION_REQUEST_TIMEOUT,
+    get_model_metadata=_aas_fmu_model_metadata,
 )
 
 

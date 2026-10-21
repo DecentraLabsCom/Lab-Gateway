@@ -28,6 +28,12 @@ _CHUNK_HEADER = struct.Struct("<II")
 _GLB_MAGIC = b"glTF"
 _JSON_CHUNK = 0x4E4F534A
 _BIN_CHUNK = 0x004E4942
+_FMI_BINDING_TARGETS = {
+    "position.x", "position.y", "position.z",
+    "rotation.x", "rotation.y", "rotation.z",
+    "scale.x", "scale.y", "scale.z",
+    "visible", "material.color",
+}
 
 
 def _validate_glb(content: bytes) -> dict[str, Any]:
@@ -86,6 +92,159 @@ def _validate_glb(content: bytes) -> dict[str, Any]:
             if uri is not None and (not isinstance(uri, str) or not uri.startswith("data:")):
                 raise HTTPException(status_code=400, detail="GLB must not reference external resources")
     return document
+
+
+def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dict[str, Any]:
+    model_variables = model_metadata.get("modelVariables") if isinstance(model_metadata, dict) else None
+    if not isinstance(model_variables, list):
+        return {
+            "assetType": "glb",
+            "status": "not_checked",
+            "bindingCount": 0,
+            "validBindingCount": 0,
+            "issueCount": 0,
+            "issues": [],
+            "message": "FMU output metadata was unavailable, so scene bindings could not be checked.",
+        }
+
+    output_names: set[str] = set()
+    for variable in model_variables:
+        if not isinstance(variable, dict):
+            continue
+        variable_name = variable.get("name")
+        if not isinstance(variable_name, str):
+            continue
+        if str(variable.get("causality", "")).lower() == "output":
+            output_names.add(variable_name)
+    issues: list[dict[str, Any]] = []
+    issue_count = 0
+    binding_count = 0
+    valid_binding_count = 0
+
+    def add_issue(
+        code: str,
+        message: str,
+        node_name: str,
+        binding_index: int | None = None,
+        variable: Any = None,
+    ) -> None:
+        nonlocal issue_count
+        issue_count += 1
+        if len(issues) < 50:
+            issue: dict[str, Any] = {
+                "code": code,
+                "message": message,
+                "node": node_name[:120],
+            }
+            if binding_index is not None:
+                issue["bindingIndex"] = binding_index
+            if isinstance(variable, str):
+                issue["variable"] = variable[:160]
+            issues.append(issue)
+
+    nodes = document.get("nodes", [])
+    if not isinstance(nodes, list):
+        add_issue("invalid_nodes", "The GLB scene node list is invalid.", "Scene")
+        nodes = []
+
+    for node_index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            continue
+        extras = node.get("extras")
+        if not isinstance(extras, dict) or "fmiBindings" not in extras:
+            continue
+        raw_node_name = node.get("name")
+        node_name = raw_node_name if isinstance(raw_node_name, str) else f"Node {node_index + 1}"
+        bindings = extras.get("fmiBindings")
+        if not isinstance(bindings, list):
+            add_issue("invalid_binding_list", "fmiBindings must be an array.", node_name)
+            continue
+
+        for binding_index, binding in enumerate(bindings):
+            binding_count += 1
+            if not isinstance(binding, dict):
+                add_issue("invalid_binding", "The binding must be an object.", node_name, binding_index)
+                continue
+
+            variable_name = binding.get("variable")
+            target = binding.get("target")
+            valid = True
+            if not isinstance(variable_name, str) or not variable_name:
+                add_issue("missing_variable", "The binding must name an FMI output variable.", node_name, binding_index)
+                valid = False
+            elif variable_name not in output_names:
+                add_issue(
+                    "unknown_output",
+                    "The variable is not declared as an output by this FMU.",
+                    node_name,
+                    binding_index,
+                    variable_name,
+                )
+                valid = False
+
+            if not isinstance(target, str) or target not in _FMI_BINDING_TARGETS:
+                add_issue(
+                    "unsupported_target",
+                    "The binding target is not supported by the Marketplace GLB viewer.",
+                    node_name,
+                    binding_index,
+                    variable_name,
+                )
+                valid = False
+
+            if valid:
+                valid_binding_count += 1
+
+    if binding_count == 0:
+        add_issue("no_fmi_bindings", "This scene has no FMI bindings and will remain static.", "Scene")
+
+    return {
+        "assetType": "glb",
+        "status": "passed" if issue_count == 0 else "warning",
+        "bindingCount": binding_count,
+        "validBindingCount": valid_binding_count,
+        "issueCount": issue_count,
+        "issues": issues,
+        "message": "Scene bindings match this FMU's declared outputs." if issue_count == 0 else "Review the scene binding findings before publishing.",
+    }
+
+
+async def _asset_validation_report(
+    asset_type: str,
+    *,
+    access_key: str,
+    document: dict[str, Any] | None = None,
+    get_model_metadata=None,
+) -> dict[str, Any]:
+    if asset_type == "threejs-app":
+        return {
+            "assetType": asset_type,
+            "status": "passed",
+            "message": "The application bundle structure is valid. Marketplace will confirm app startup when the viewer opens it.",
+        }
+    if not access_key or get_model_metadata is None or document is None:
+        return {
+            "assetType": "glb",
+            "status": "not_checked",
+            "bindingCount": 0,
+            "validBindingCount": 0,
+            "issueCount": 0,
+            "issues": [],
+            "message": "FMU output metadata was unavailable, so scene bindings could not be checked.",
+        }
+    try:
+        model_metadata = await get_model_metadata(access_key)
+    except Exception:
+        return {
+            "assetType": "glb",
+            "status": "not_checked",
+            "bindingCount": 0,
+            "validBindingCount": 0,
+            "issueCount": 0,
+            "issues": [],
+            "message": "FMU output metadata could not be read, so scene bindings were not checked.",
+        }
+    return _validate_glb_bindings(document, model_metadata)
 
 
 def _validate_webapp_archive(content: bytes) -> dict[str, bytes]:
@@ -158,8 +317,15 @@ def _validate_webapp_archive(content: bytes) -> dict[str, bytes]:
     return files
 
 
-def _store_scene(root: Path, lab_id: str, content: bytes) -> dict[str, Any]:
-    _validate_glb(content)
+def _store_scene(
+    root: Path,
+    lab_id: str,
+    content: bytes,
+    *,
+    validated_document: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if validated_document is None:
+        _validate_glb(content)
     digest = hashlib.sha256(content).hexdigest()
     try:
         root.mkdir(parents=True, exist_ok=True)
@@ -314,6 +480,7 @@ def create_digital_twin_assets_router(
     station_base_url: str = "",
     station_internal_token: str = "",
     station_request_timeout: float = 10,
+    get_model_metadata=None,
 ) -> APIRouter:
     router = APIRouter()
     root = Path(asset_root).expanduser().resolve()
@@ -331,12 +498,24 @@ def create_digital_twin_assets_router(
         content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         if content_type == "model/gltf-binary":
             content = await _read_limited_request(request, _MAX_SCENE_BYTES, label="GLB")
-            result = _store_scene(root, lab_id, content)
+            access_key = request.headers.get("x-fmu-access-key", "").strip()
+            if access_key:
+                access_key = _validate_access_key(access_key)
+            document = _validate_glb(content)
+            result = _store_scene(root, lab_id, content, validated_document=document)
             result["contentType"] = "model/gltf-binary"
+            result["validation"] = await _asset_validation_report(
+                "glb",
+                access_key=access_key,
+                document=document,
+                get_model_metadata=get_model_metadata,
+            )
             return result
         if content_type == "application/zip":
             content = await _read_limited_request(request, _MAX_WEBAPP_ARCHIVE_BYTES, label="Three.js application")
-            return _store_webapp(root, lab_id, content)
+            result = _store_webapp(root, lab_id, content)
+            result["validation"] = await _asset_validation_report("threejs-app", access_key="")
+            return result
         raise HTTPException(status_code=415, detail="Content-Type must be model/gltf-binary or application/zip")
 
     @router.post("/admin/digital-twin-assets/{lab_id}/from-fmu")
@@ -420,9 +599,20 @@ def create_digital_twin_assets_router(
         else:
             raise HTTPException(status_code=503, detail="Digital twin FMU backend mode is unsupported")
 
-        stored = _store_scene(root, lab_id, content) if is_glb else _store_webapp(root, lab_id, content)
+        document = _validate_glb(content) if is_glb else None
+        stored = (
+            _store_scene(root, lab_id, content, validated_document=document)
+            if is_glb
+            else _store_webapp(root, lab_id, content)
+        )
         stored["source"] = source
         stored["accessKey"] = access_key
+        stored["validation"] = await _asset_validation_report(
+            asset_type,
+            access_key=access_key,
+            document=document,
+            get_model_metadata=get_model_metadata,
+        )
         return stored
 
     return router

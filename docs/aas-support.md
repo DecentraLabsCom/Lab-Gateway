@@ -179,6 +179,17 @@ The authenticated Gateway import endpoint is
 `PUT /lab-admin/digital-twin-assets/{labId}` with `model/gltf-binary` or
 `application/zip`.
 
+For a GLB upload or FMU companion import, Gateway compares each
+`extras.fmiBindings` entry with the selected FMU's declared outputs and the
+targets supported by Marketplace. The response includes a transient
+`validation` report with the binding counts and any findings; it is derived
+from the FMU and GLB and is not stored in the AAS. A scene with warnings can
+still be stored, but Lab Manager shows the findings and asks the provider to
+review them before synchronizing. Public HTTPS GLBs cannot be inspected by
+Gateway and are labelled unchecked. Three.js ZIP validation checks the
+package structure and bundled paths; Marketplace checks the app's startup
+handshake when it is opened.
+
 Marketplace resolves either managed asset against the lab's on-chain Gateway
 origin, then proxies only that lab's immutable scene or app files through
 same-origin API routes. The GLB route accepts only the lab ID and its
@@ -187,7 +198,22 @@ restrictive CSP sandbox to the public app route, and Marketplace serves the app
 entry page in an isolated iframe with its own restrictive CSP and no
 credentials. Marketplace posts only FMI time and declared outputs through the
 versioned `decentralabs:fmi-sample` version 1 message; it never sends the FMU,
-access key or reservation token.
+access key or reservation token. The provider app owns the complete
+presentation inside its viewer area, including its scene controls and output
+display. Marketplace keeps FMU execution and parameter controls outside the
+iframe and does not add its GLB viewer's output panel, replay timeline, charts
+or output table around the app.
+
+The host sends `decentralabs:digital-twin-host-ready` version 1 after the app
+document loads. The app responds only after its scene is initialized with
+`decentralabs:digital-twin-ready` version 1. It may report
+`decentralabs:digital-twin-error` version 1 with a short error code if startup
+fails. Marketplace accepts these status messages only from the selected
+iframe's `contentWindow`; the sandbox keeps the app on an opaque origin. If the
+app does not become ready within 30 seconds, Marketplace shows a startup error
+and lets the user retry. The app should register its message handler before
+loading the scene and retain the status until it receives the host-ready
+message.
 
 The AAS File stores the visual asset location and MIME only. FMI remains the
 source of model variables and ports; optional GLB `extras.fmiBindings` map FMI

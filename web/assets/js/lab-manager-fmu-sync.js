@@ -7,6 +7,7 @@
         showToast,
         formDataCtor = root.FormData,
         urlSearchParamsCtor = root.URLSearchParams,
+        documentImpl = typeof document === 'undefined' ? root.document : document,
         encodeURIComponentImpl = encodeURIComponent,
         logger = console,
     }) {
@@ -14,6 +15,8 @@
         let fmuDescriptionAccessKey = '';
         let gatewayUploadedAssetUrl = '';
         let gatewayUploadedAssetAccessKey = '';
+        let acknowledgedAssetValidationKey = '';
+        let lastAssetValidation = null;
 
         function isGatewaySceneAssetPath(path) {
             return /^\/digital-twin-scenes\/\d+\/[a-f0-9]{64}\.glb$/i.test(String(path || ''));
@@ -25,6 +28,87 @@
 
         function isGatewayAssetPath(path, assetType) {
             return assetType === 'glb' ? isGatewaySceneAssetPath(path) : isGatewayApplicationAssetPath(path);
+        }
+
+        function assetValidationKey(labId, accessKey, assetType, assetFile, assetUrl) {
+            const assetIdentity = assetFile
+                ? `file:${assetFile.name}:${assetFile.size}:${assetFile.lastModified}`
+                : `url:${String(assetUrl || '').trim()}`;
+            return [labId, accessKey, assetType, assetIdentity].join('|');
+        }
+
+        function clearAssetValidation() {
+            acknowledgedAssetValidationKey = '';
+            lastAssetValidation = null;
+            const panel = fields.assetValidation;
+            if (!panel) return;
+            panel.hidden = true;
+            panel.replaceChildren?.();
+            panel.textContent = '';
+            delete panel.dataset.status;
+        }
+
+        function renderAssetValidation(report) {
+            const panel = fields.assetValidation;
+            if (!panel) return;
+            panel.replaceChildren?.();
+            panel.textContent = '';
+            if (!report || typeof report !== 'object') {
+                panel.hidden = true;
+                delete panel.dataset.status;
+                return;
+            }
+
+            panel.hidden = false;
+            panel.dataset.status = String(report.status || 'not_checked');
+            const summary = documentImpl.createElement('p');
+            summary.textContent = String(report.message || 'Asset validation is incomplete.');
+            panel.appendChild(summary);
+
+            if (Number.isFinite(Number(report.bindingCount))) {
+                const counts = documentImpl.createElement('p');
+                counts.textContent = `FMI bindings checked: ${Number(report.validBindingCount || 0)} of ${Number(report.bindingCount)}.`;
+                panel.appendChild(counts);
+            }
+
+            const issues = Array.isArray(report.issues) ? report.issues.slice(0, 20) : [];
+            if (issues.length) {
+                const list = documentImpl.createElement('ul');
+                issues.forEach(issue => {
+                    const item = documentImpl.createElement('li');
+                    const node = String(issue?.node || 'Scene');
+                    const variable = typeof issue?.variable === 'string' ? ` · ${issue.variable}` : '';
+                    item.textContent = `${node}${variable}: ${String(issue?.message || 'Binding issue')}`;
+                    list.appendChild(item);
+                });
+                panel.appendChild(list);
+            }
+            if (Number(report.issueCount) > issues.length) {
+                const remainder = documentImpl.createElement('p');
+                remainder.textContent = `${Number(report.issueCount) - issues.length} additional findings are not shown.`;
+                panel.appendChild(remainder);
+            }
+        }
+
+        function needsAssetValidationAcknowledgement(report) {
+            return ['warning', 'not_checked', 'unavailable'].includes(String(report?.status || ''));
+        }
+
+        function reviewAssetValidation(report, key) {
+            if (!report || typeof report !== 'object') {
+                report = {
+                    status: 'not_checked',
+                    message: 'The Gateway did not return an asset validation report.',
+                    issueCount: 0,
+                    issues: [],
+                };
+            }
+            lastAssetValidation = { key, report };
+            renderAssetValidation(report);
+            if (!needsAssetValidationAcknowledgement(report) || acknowledgedAssetValidationKey === key) return true;
+            acknowledgedAssetValidationKey = key;
+            showToast('Review the digital twin validation findings, then select Sync AAS again to publish.', 'info');
+            return false;
         }
 
         function parseDatasetList(value) {
@@ -153,6 +237,11 @@
             if (fields.assetUrl) fields.assetUrl.value = body.path;
             gatewayUploadedAssetUrl = body.path;
             gatewayUploadedAssetAccessKey = accessKey;
+            lastAssetValidation = {
+                key: assetValidationKey(labId, accessKey, assetType, null, body.path),
+                report: body.validation,
+            };
+            renderAssetValidation(body.validation);
             return body;
         }
 
@@ -215,7 +304,10 @@
                         `/lab-admin/digital-twin-assets/${encodeURIComponentImpl(labId)}`,
                         {
                             method: 'PUT',
-                            headers: { 'Content-Type': isGlb ? 'model/gltf-binary' : 'application/zip' },
+                            headers: {
+                                'Content-Type': isGlb ? 'model/gltf-binary' : 'application/zip',
+                                'X-FMU-Access-Key': accessKey,
+                            },
                             body: assetFile,
                         },
                     );
@@ -227,6 +319,8 @@
                     if (!isGatewayAssetPath(uploadedAsset.path, assetType)) {
                         throw new Error('Gateway returned an invalid digital twin asset path');
                     }
+                    const validationKey = assetValidationKey(labId, accessKey, assetType, assetFile, '');
+                    if (!reviewAssetValidation(uploadedAsset.validation, validationKey)) return;
                     syncInfo.digitalTwinAssetUrl = uploadedAsset.path;
                     if (fields.assetUrl) fields.assetUrl.value = syncInfo.digitalTwinAssetUrl;
                     gatewayUploadedAssetUrl = syncInfo.digitalTwinAssetUrl;
@@ -241,6 +335,25 @@
                 ) {
                     const importedAsset = await importCompanionAsset(labId, accessKey, assetType);
                     syncInfo.digitalTwinAssetUrl = importedAsset.path;
+                    const validationKey = assetValidationKey(labId, accessKey, assetType, null, importedAsset.path);
+                    if (!reviewAssetValidation(importedAsset.validation, validationKey)) return;
+                } else if (!assetFile && assetType && !aasxFile && syncInfo.digitalTwinAssetUrl) {
+                    const validationKey = assetValidationKey(labId, accessKey, assetType, null, syncInfo.digitalTwinAssetUrl);
+                    const knownValidation = lastAssetValidation?.key === validationKey
+                        ? lastAssetValidation.report
+                        : null;
+                    const report = knownValidation || {
+                        assetType,
+                        status: 'not_checked',
+                        message: assetType === 'glb'
+                            ? 'This external GLB was not inspected by the Gateway. Marketplace will try to load it when the viewer opens.'
+                            : 'The application package was not inspected by the Gateway.',
+                        bindingCount: 0,
+                        validBindingCount: 0,
+                        issueCount: 0,
+                        issues: [],
+                    };
+                    if (!reviewAssetValidation(report, validationKey)) return;
                 }
                 let response;
                 const url = isFmu
@@ -312,6 +425,7 @@
             if (fields.keyInput) {
                 fields.keyInput.addEventListener('input', () => {
                     clearAllFmuHints();
+                    clearAssetValidation();
                     updateAssetVisibility();
                 });
                 fields.keyInput.addEventListener('change', () => {
@@ -337,6 +451,7 @@
                         : fields.assetType.value === 'threejs-app' ? '.zip,application/zip' : '';
                 }
                 fields.assetType.addEventListener('change', () => {
+                    clearAssetValidation();
                     if (fields.assetUrl) fields.assetUrl.value = '';
                     if (fields.assetFileInput) fields.assetFileInput.value = '';
                     if (fields.assetFileName) fields.assetFileName.textContent = 'No file chosen';
@@ -351,9 +466,13 @@
             }
             if (fields.assetFileInput) {
                 fields.assetFileInput.addEventListener('change', () => {
+                    clearAssetValidation();
                     const file = fields.assetFileInput.files && fields.assetFileInput.files[0];
                     if (fields.assetFileName) fields.assetFileName.textContent = file ? file.name : 'No file chosen';
                 });
+            }
+            if (fields.assetUrl) {
+                fields.assetUrl.addEventListener('input', clearAssetValidation);
             }
             if (fields.importAssetButton) {
                 fields.importAssetButton.addEventListener('click', async () => {
@@ -370,7 +489,13 @@
                     fields.importAssetButton.disabled = true;
                     try {
                         const asset = await importCompanionAsset(laboratory.labId, laboratory.accessKey, assetType);
-                        showToast(`Companion asset imported from ${asset.source || 'FMU backend'}`, 'success');
+                        const validationKey = assetValidationKey(laboratory.labId, laboratory.accessKey, assetType, null, asset.path);
+                        if (needsAssetValidationAcknowledgement(asset.validation)) {
+                            acknowledgedAssetValidationKey = validationKey;
+                            showToast('Review the validation findings before synchronizing the AAS.', 'info');
+                        } else {
+                            showToast(`Companion asset imported from ${asset.source || 'FMU backend'}`, 'success');
+                        }
                     } catch (error) {
                         logger.error(error);
                         showToast(`Companion asset import failed: ${error.message}`, 'error');

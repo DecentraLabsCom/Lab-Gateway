@@ -106,6 +106,7 @@
                 assetUrl: $('#fmuSyncAssetUrl'),
                 assetFileInput: $('#fmuSyncAssetFile'),
                 assetFileName: $('#fmuSyncAssetFileName'),
+                assetValidation: $('#fmuSyncAssetValidation'),
                 importAssetButton: $('#fmuSyncImportAssetBtn'),
                 contactEmail: $('#fmuSyncContactEmail'),
             },
