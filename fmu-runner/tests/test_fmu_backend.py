@@ -9,7 +9,7 @@ from fmu_backend import LocalFmuMetadataBackend, StationFmuBackend
 async def test_local_backend_delegates_to_loaders():
     backend = LocalFmuMetadataBackend(
         health_loader=lambda: {"status": "UP", "checks": {"fmuDataPath": True}, "fmuCount": 1},
-        model_metadata_loader=lambda filename: {"modelName": filename, "modelVariables": []},
+        model_metadata_loader=lambda filename, **_kwargs: {"modelName": filename, "modelVariables": []},
         list_loader=lambda access_key: {"fmus": [{"filename": access_key}]},
     )
 
@@ -35,7 +35,7 @@ async def test_local_backend_passes_lab_id_to_health_loader():
 
     backend = LocalFmuMetadataBackend(
         health_loader=_health_loader,
-        model_metadata_loader=lambda filename: {"modelName": filename, "modelVariables": []},
+        model_metadata_loader=lambda filename, **_kwargs: {"modelName": filename, "modelVariables": []},
         list_loader=lambda access_key: {"fmus": [{"filename": access_key}]},
     )
 

@@ -24,6 +24,7 @@ def _load_local_model_metadata(
     model_description_reader,
     model_metadata_builder,
     logger,
+    include_internal_variables: bool = True,
 ) -> dict:
     fmu_path = resolve_fmu_path(fmu_filename)
     try:
@@ -31,7 +32,10 @@ def _load_local_model_metadata(
     except Exception as exc:
         logger.error("Failed to read model description for %s: %s", fmu_filename, exc)
         raise HTTPException(status_code=422, detail="Cannot parse FMU") from exc
-    return model_metadata_builder(model_description)
+    return model_metadata_builder(
+        model_description,
+        include_internal_variables=include_internal_variables,
+    )
 
 
 def _list_local_fmus_payload(

@@ -95,7 +95,13 @@ class BaseFmuBackend:
     async def health(self, *, lab_id: Optional[str] = None) -> dict:
         raise NotImplementedError
 
-    async def get_authorized_model_metadata(self, *, claims: dict, requested_fmu_filename: Optional[str] = None) -> ModelMetadata:
+    async def get_authorized_model_metadata(
+        self,
+        *,
+        claims: dict,
+        requested_fmu_filename: Optional[str] = None,
+        include_internal_variables: bool = True,
+    ) -> ModelMetadata:
         raise NotImplementedError
 
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
@@ -105,7 +111,7 @@ class BaseFmuBackend:
 @dataclass
 class LocalFmuMetadataBackend(BaseFmuBackend):
     health_loader: Callable[..., dict]
-    model_metadata_loader: Callable[[str], ModelMetadata]
+    model_metadata_loader: Callable[..., ModelMetadata]
     list_loader: Callable[[str], dict]
 
     mode = "local"
@@ -117,9 +123,18 @@ class LocalFmuMetadataBackend(BaseFmuBackend):
             else self.health_loader(lab_id=lab_id)
         )
 
-    async def get_authorized_model_metadata(self, *, claims: dict, requested_fmu_filename: Optional[str] = None) -> ModelMetadata:
+    async def get_authorized_model_metadata(
+        self,
+        *,
+        claims: dict,
+        requested_fmu_filename: Optional[str] = None,
+        include_internal_variables: bool = True,
+    ) -> ModelMetadata:
         fmu_filename = self.ensure_requested_access_key(claims, requested_fmu_filename)
-        return self.model_metadata_loader(fmu_filename)
+        return self.model_metadata_loader(
+            fmu_filename,
+            include_internal_variables=include_internal_variables,
+        )
 
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
         return self.list_loader(self.authorized_access_key(claims))
@@ -304,7 +319,13 @@ class StationFmuBackend(BaseFmuBackend):
         path = f"{base_path}/internal/fmu/sessions" if base_path else "/internal/fmu/sessions"
         return urlunparse((ws_scheme, parsed.netloc, path, "", "", ""))
 
-    async def _request_json(self, operation: str, *, access_key: Optional[str] = None) -> dict[str, Any]:
+    async def _request_json(
+        self,
+        operation: str,
+        *,
+        access_key: Optional[str] = None,
+        public_only: bool = False,
+    ) -> dict[str, Any]:
         if not self.base_url:
             raise HTTPException(status_code=503, detail="Station backend is not configured")
 
@@ -332,6 +353,8 @@ class StationFmuBackend(BaseFmuBackend):
                 request_kwargs: dict[str, Any] = {"headers": self._headers()}
                 if operation in {"describe", "catalog"}:
                     request_kwargs["headers"]["X-FMU-Access-Key"] = key
+                if operation == "describe" and public_only:
+                    request_kwargs["params"] = {"publicOnly": "true"}
                 response = await client.get(path, **request_kwargs)
         except httpx.HTTPError as exc:
             logger.warning("Station backend GET failed: %s", exc)
@@ -779,9 +802,18 @@ class StationFmuBackend(BaseFmuBackend):
                 result["availableCapacity"] = available
         return result
 
-    async def get_authorized_model_metadata(self, *, claims: dict, requested_fmu_filename: Optional[str] = None) -> ModelMetadata:
+    async def get_authorized_model_metadata(
+        self,
+        *,
+        claims: dict,
+        requested_fmu_filename: Optional[str] = None,
+        include_internal_variables: bool = True,
+    ) -> ModelMetadata:
         access_key = self.ensure_requested_access_key(claims, requested_fmu_filename)
-        payload = await self._request_json("describe", access_key=access_key)
+        if include_internal_variables:
+            payload = await self._request_json("describe", access_key=access_key)
+        else:
+            payload = await self._request_json("describe", access_key=access_key, public_only=True)
         return self._normalize_model_metadata(payload)
 
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
@@ -791,7 +823,11 @@ class StationFmuBackend(BaseFmuBackend):
         except HTTPException as exc:
             if exc.status_code != 404:
                 raise
-            metadata = await self.get_authorized_model_metadata(claims=claims, requested_fmu_filename=access_key)
+            metadata = await self.get_authorized_model_metadata(
+                claims=claims,
+                requested_fmu_filename=access_key,
+                include_internal_variables=False,
+            )
             return {
                 "fmus": [{
                     "filename": access_key,

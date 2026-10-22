@@ -60,7 +60,7 @@ def test_load_local_model_metadata_translates_parser_errors():
             "model.fmu",
             resolve_fmu_path=lambda _filename: "C:/model.fmu",
             model_description_reader=failing_reader,
-            model_metadata_builder=lambda model_description: model_description,
+            model_metadata_builder=lambda model_description, **_kwargs: model_description,
             logger=logger,
         )
 
@@ -75,7 +75,7 @@ def test_load_local_model_metadata_builds_public_metadata():
         "model.fmu",
         resolve_fmu_path=lambda _filename: "C:/model.fmu",
         model_description_reader=lambda _path: model_description,
-        model_metadata_builder=lambda parsed: {"modelName": parsed.modelName},
+        model_metadata_builder=lambda parsed, **_kwargs: {"modelName": parsed.modelName},
         logger=logging.getLogger("test-local-fmu-catalog"),
     )
 

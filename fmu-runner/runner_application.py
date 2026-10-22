@@ -221,10 +221,16 @@ def _catalog_enforce_fmu_claim(claims: dict, *, allow_provider_describe: bool = 
     return _enforce_fmu_claim(claims, allow_provider_describe=allow_provider_describe)
 
 
-async def _catalog_get_authorized_model_metadata(*, claims: dict, requested_fmu_filename: Optional[str] = None):
+async def _catalog_get_authorized_model_metadata(
+    *,
+    claims: dict,
+    requested_fmu_filename: Optional[str] = None,
+    include_internal_variables: bool = True,
+):
     return await _runner_runtime.backend.get_authorized_model_metadata(
         claims=claims,
         requested_fmu_filename=requested_fmu_filename,
+        include_internal_variables=include_internal_variables,
     )
 
 
@@ -267,6 +273,7 @@ async def _aas_fmu_model_metadata(access_key: str):
     return await _runner_runtime.backend.get_authorized_model_metadata(
         claims={"accessKey": access_key},
         requested_fmu_filename=access_key,
+        include_internal_variables=False,
     )
 
 
@@ -279,7 +286,10 @@ def _aas_sync_read_model_description(fmu_path):
 
 
 def _aas_sync_metadata_builder(model_description):
-    return _model_metadata_from_model_description(model_description)
+    return _model_metadata_from_model_description(
+        model_description,
+        include_internal_variables=False,
+    )
 
 
 async def _aas_sync_to_basyx(**kwargs):
@@ -514,13 +524,18 @@ def _local_metadata_backend_health_payload(lab_id: Optional[str] = None) -> dict
     )
 
 
-def _load_local_model_metadata(fmu_filename: str) -> dict:
+def _load_local_model_metadata(
+    fmu_filename: str,
+    *,
+    include_internal_variables: bool = True,
+) -> dict:
     return _catalog_load_local_model_metadata(
         fmu_filename,
         resolve_fmu_path=_resolve_fmu_path,
         model_description_reader=read_model_description,
         model_metadata_builder=_model_metadata_from_model_description,
         logger=logger,
+        include_internal_variables=include_internal_variables,
     )
 
 
@@ -902,6 +917,7 @@ async def _proxy_issue_session_ticket(*args, **kwargs):
 
 
 async def _proxy_get_authorized_model_metadata(**kwargs):
+    kwargs.setdefault("include_internal_variables", False)
     return await _runner_runtime.backend.get_authorized_model_metadata(**kwargs)
 
 

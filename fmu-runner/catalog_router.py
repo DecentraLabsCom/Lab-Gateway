@@ -22,6 +22,7 @@ def create_catalog_router(
         metadata = await get_authorized_model_metadata(
             claims=claims,
             requested_fmu_filename=fmuFileName,
+            include_internal_variables=False,
         )
         return public_model_metadata(metadata)
 

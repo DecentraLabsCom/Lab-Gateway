@@ -4,36 +4,40 @@ This directory stores `.fmu` files used by the `fmu-runner` service.
 
 ## Local development files
 
-The `.fmu` files at the root of this directory are development and test copies
-of the canonical examples in `FMU-Executor/examples`. The reference models and
-Smart Warehouse FMU/scene/app assets are generated locally by the sync script
-and ignored by Git. FMU-Executor is their only canonical repository; Lab
-Gateway does not vendor copies. To prepare all examples in a fresh workspace,
-run the sync command below.
+The files at the root of this directory are ignored local development/test
+copies from `FMU-Executor/examples`. The six reference FMUs and Smart Warehouse
+are included by the normal local sync. Lab Gateway does not vendor these demo
+artifacts.
 
 Reference FMUs and their Linux x86_64 builds are canonical in
-`FMU-Executor/examples/reference-fmus`. FMI 2 models use the `linux64` archive
-directory; FMI 3 models use `x86_64-linux`. Smart Warehouse Cell is canonical
-in `FMU-Executor/examples/smart-warehouse-cell`; Gateway locally syncs its
-Linux x64 FMU, companion GLB, Three.js application ZIP and license. These
-local copies remain available to the demo and tests but are not committed. To
-refresh all Gateway copies from the workspace root:
+`FMU-Executor/examples/reference-fmus`; the six tracked archives are copied by
+the normal local sync. FMI 2 models use the `linux64` archive directory; FMI 3
+models use `x86_64-linux`. Smart Warehouse Cell is canonical in
+`FMU-Executor/examples/smart-warehouse-cell`; Gateway locally syncs its
+Linux x64 FMU, companion GLB, Three.js application ZIP and license by default.
+These local copies remain available for previews and tests but are not
+committed. To refresh the reference examples and Smart Warehouse in Gateway's
+local development folder:
 
 ```powershell
 python "Lab Gateway/scripts/sync_fmu_examples.py" `
   --examples-root "FMU-Executor/examples"
 ```
 
-The sync script checks that every FMU contains a Linux x86_64 binary before
-copying it. It installs `SmartWarehouseCell-linux64.fmu` as
-`SmartWarehouseCell.fmu`; do not use its Windows Station build in the local
-executor. During AAS synchronization, Gateway imports the selected GLB scene
+The default sync validates and copies the reference FMUs and Smart Warehouse.
+It installs `SmartWarehouseCell-linux64.fmu` as `SmartWarehouseCell.fmu`; do
+not use its Windows Station build in the local executor. During AAS
+synchronization, Gateway imports the selected GLB scene
 or Three.js app into its public immutable asset volume; this directory itself
 is not exposed through a public file route. Production mode retrieves the
 selected same-stem asset from Lab Station instead.
 
-Do not use them in a production lab listing — they are not associated with any
-on-chain resource and exist purely for development and integration testing.
+These Gateway copies are development data only. They are ignored by Git and
+are not included in Gateway images or release packages. The six reference FMUs
+remain part of the FMU-Executor examples and are included in Lab Station
+Windows and Linux x86_64 releases; the Linux arm64 release includes the three
+examples that have arm64 binaries. Providers can also provision compatible
+FMUs on a Station when creating their own labs.
 
 ## Structure
 
@@ -43,13 +47,13 @@ fmu-data/
 ├── SmartWarehouseCell.glb     # Same-stem companion scene
 ├── SmartWarehouseCell.webapp.zip # Static Three.js app
 ├── SmartWarehouseCell.LICENSE.txt
-├── BinaryClockTest.fmu        # FMI 3 Binary and Clock fixture
-├── BouncingBall.fmu           # FMI 2 reference model
-├── Feedthrough.fmu            # FMI 2 reference model
-├── Stair.fmu                  # FMI 3 reference model
-├── StateSpace.fmu             # FMI 3 reference model
-├── VanDerPol.fmu              # FMI 3 reference model
-├── Reference-FMUs.LICENSE.txt # License for the upstream reference models
+├── BinaryClockTest.fmu        # FMI 3 reference fixture (default sync)
+├── BouncingBall.fmu           # FMI 2 reference model (default sync)
+├── Feedthrough.fmu            # FMI 2 reference model (default sync)
+├── Stair.fmu                  # FMI 3 reference model (default sync)
+├── StateSpace.fmu             # FMI 3 reference model (default sync)
+├── VanDerPol.fmu              # FMI 3 reference model (default sync)
+├── Reference-FMUs.LICENSE.txt # reference examples license
 ├── test-fmus/                 # Local validation helper for BinaryClockTest
 └── provider-0xABC123/        # Runtime: per-provider sub-directory (git-ignored)
     └── spring-damper.fmu     #   Placed by the provider at deployment time

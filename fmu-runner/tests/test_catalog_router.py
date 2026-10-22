@@ -38,6 +38,7 @@ def test_describe_route_enforces_provider_describe_and_returns_public_metadata()
     get_metadata.assert_awaited_once_with(
         claims={"accessKey": "demo.fmu"},
         requested_fmu_filename="demo.fmu",
+        include_internal_variables=False,
     )
     public_metadata.assert_called_once_with({"internal": "metadata"})
 

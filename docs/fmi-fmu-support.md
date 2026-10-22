@@ -173,6 +173,11 @@ DELETE /internal/fmu/quarantine/{accessKey}
 ~~~
 
 These endpoints are internal. The public user does not call them directly.
+The describe endpoint accepts `publicOnly=true` for consumers that need the
+exchange interface without the FMU's local implementation variables. Gateway
+public describe and proxy metadata requests use this reduced form for large
+FMUs; it still parses the complete model description through FMPy, and does
+not suppress validation errors.
 
 ### 2. Publish the resource
 

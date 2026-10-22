@@ -97,7 +97,7 @@ def _collect_variable_dimensions(var) -> list[dict]:
     return dimensions
 
 
-def _model_metadata_from_model_description(md) -> dict:
+def _model_metadata_from_model_description(md, *, include_internal_variables: bool = True) -> dict:
     supports_cs = bool(getattr(md, "coSimulation", None))
     supports_me = bool(getattr(md, "modelExchange", None))
     simulation_kind = "coSimulation" if supports_cs else ("modelExchange" if supports_me else "unknown")
@@ -115,6 +115,11 @@ def _model_metadata_from_model_description(md) -> dict:
 
     variables = []
     for index, var in enumerate(getattr(md, "modelVariables", []), start=1):
+        # Local variables describe internal implementation state. They remain
+        # available to internal callers when needed, but are not FMI ports and
+        # should not inflate Gateway describe responses for large models.
+        if not include_internal_variables and getattr(var, "causality", None) == "local":
+            continue
         entry = {
             "name": var.name,
             "causality": var.causality or "local",
@@ -241,6 +246,8 @@ def _model_metadata_from_model_description(md) -> dict:
 def _public_model_metadata(metadata: dict) -> dict:
     variables = []
     for variable in metadata.get("modelVariables", []):
+        if variable.get("causality", "local") == "local":
+            continue
         entry = {
             "name": variable.get("name"),
             "causality": variable.get("causality", "local"),
