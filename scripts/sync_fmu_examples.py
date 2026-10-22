@@ -205,16 +205,21 @@ def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: s
     variables = description.find("{*}ModelVariables")
     if variables is None:
         raise ValueError(f"qFMU has no model variables: {path}")
-    inputs = {
-        variable.attrib.get("name")
-        for variable in variables
-        if variable.attrib.get("causality") == "input"
-    }
-    outputs = {
-        variable.attrib.get("name")
-        for variable in variables
-        if variable.attrib.get("causality") == "output"
-    }
+    inputs: set[str] = set()
+    outputs: set[str] = set()
+    for variable in variables:
+        causality = variable.attrib.get("causality")
+        if causality not in {"input", "output"}:
+            continue
+
+        name = variable.attrib.get("name")
+        if not name:
+            raise ValueError(f"qFMU has an unnamed {causality} variable: {path}")
+
+        if causality == "input":
+            inputs.add(name)
+        else:
+            outputs.add(name)
     if inputs != expected_inputs or outputs != expected_outputs:
         raise ValueError(
             f"Unexpected qFMU variables in {path.name}: inputs={sorted(inputs)}, "

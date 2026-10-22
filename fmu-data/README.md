@@ -32,15 +32,6 @@ or Three.js app into its public immutable asset volume; this directory itself
 is not exposed through a public file route. Production mode retrieves the
 selected same-stem asset from Lab Station instead.
 
-The qFMU linear-systems teaching preview is local-only. Its four Linux x86_64
-FMI 2.0 FMUs are generated and validated in
-`FMU-Executor/examples/local-demos/qfmu/`; they are copied here only when the
-sync script is run with `--include-local-qfmu`. The optional copies live under
-`local-demos/qfmu/linux64/` with the qFMU BSD license. They are not part of the
-default sync or any Gateway/Station image. The local-only OpenResty bridge is
-enabled by `docker-compose.local-demo.yml` for the Marketplace preview at
-`/dev/qfmu`.
-
 These Gateway copies are development data only. They are ignored by Git and
 are not included in Gateway images or release packages. The six reference FMUs
 remain part of the FMU-Executor examples and are included in Lab Station
