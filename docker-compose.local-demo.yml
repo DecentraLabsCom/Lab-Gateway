@@ -1,0 +1,57 @@
+services:
+  openresty:
+    secrets:
+      - fmu_local_executor_token
+    volumes:
+      - ./openresty/gateway.local-demo.conf:/etc/openresty/gateway.conf:ro
+      - ./openresty/conf.d/gateway_dev_smart_warehouse.conf:/etc/openresty/conf.d/gateway_dev_smart_warehouse.conf:ro
+      - ./openresty/conf.d/gateway_dev_boptest_building.conf:/etc/openresty/conf.d/gateway_dev_boptest_building.conf:ro
+      - ./openresty/conf.d/gateway_dev_qfmu.conf:/etc/openresty/conf.d/gateway_dev_qfmu.conf:ro
+      - ./openresty/conf.d/gateway_dev_dc_motor.conf:/etc/openresty/conf.d/gateway_dev_dc_motor.conf:ro
+
+  fmu-executor-local:
+    image: decentralabs/fmu-executor:local-smart-warehouse
+    build:
+      context: ../FMU-Executor
+      dockerfile: Dockerfile
+      args:
+        VERSION: local-smart-warehouse
+        VCS_REF: workspace
+        INSTALL_LOCAL_BOPTEST_RUNTIME: "true"
+    environment:
+      # Run local native demo FMUs in isolated workers, keeping writable runtime
+      # files under the per-run temporary workspace.
+      - FMU_EXECUTION_MODE=process
+      # Complex Air's EnergyPlus initialization needs more address space than
+      # the standard small-FMU worker budget; this override is local-only.
+      - FMU_WORKER_MEMORY_MIB=3072
+      # The demo's 15 zones use two setpoint inputs and two activation flags each.
+      - FMU_MAX_SIMULATION_PARAMETERS=64
+      # qFMU references use a fixed 1 ms communication step, up to 30 seconds.
+      - FMU_MAX_SIMULATION_STEPS=30000
+      # This one local-only FMU launches Spawn. The executor grants child-process
+      # execution only to this access key and the exact configured binary.
+      - FMU_SPAWN_ACCESS_KEYS=BOPTEST-MultizoneOfficeComplexAir.fmu
+      - FMU_SPAWN_EXECUTABLE=/var/lib/fmu-executor/state/local-runtime/Spawn-light-0.4.3-7048a72798-Linux/bin/spawn-0.4.3-7048a72798
+    entrypoint: ["/bin/sh", "/run/local-boptest-entrypoint.sh"]
+    command: ["python", "-m", "app"]
+    volumes:
+      - type: volume
+        source: fmu-executor-local-state
+        target: /var/lib/fmu-executor/state
+      - type: bind
+        source: ../FMU-Executor/examples/boptest-building/runtime/Spawn-light-0.4.3-7048a72798-Linux.tar.gz
+        target: /run/local-boptest-spawn.tar.gz
+        read_only: true
+      - type: bind
+        source: ../FMU-Executor/examples/boptest-building/runtime/local-executor-entrypoint.sh
+        target: /run/local-boptest-entrypoint.sh
+        read_only: true
+    tmpfs:
+      - /tmp:exec,size=1G,mode=1777
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+volumes:
+  fmu-executor-local-state: {}

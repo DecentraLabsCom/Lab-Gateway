@@ -51,6 +51,20 @@ QFMU_MODELS = {
     "qFMU_SISO.fmu": ({"u1"}, {"y1"}),
     "qFMU_MIMO.fmu": ({"u1", "u2"}, {"y1", "y2"}),
 }
+DC_MOTOR_FMU_NAME = "DC_motor.fmu"
+DC_MOTOR_APP_NAME = "DC_motor.webapp.zip"
+DC_MOTOR_REQUIRED_PARAMETERS = {
+    "speedController.k",
+    "speedController.Ti",
+    "damper.d",
+    "spring.k",
+    "torqueStep.stepTorque",
+    "torqueStep.startTime",
+    "torqueStep.offsetTorque",
+    "data.Ja.value",
+    "data.Jm.value",
+}
+DC_MOTOR_REQUIRED_OUTPUTS = {"out_control_err", "out_load_speed", "out_motor_speed"}
 
 
 def sha256(path: Path) -> str:
@@ -227,6 +241,78 @@ def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: s
         )
 
 
+def validate_dc_motor_fmu(path: Path) -> None:
+    names = validate_linux_x64_fmu(path)
+    expected_binary = "binaries/linux64/DC_motor.so"
+    if expected_binary not in names:
+        raise ValueError(f"The DC motor FMU is missing its Linux x86_64 binary {expected_binary}.")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            description = ET.fromstring(archive.read("modelDescription.xml"))
+    except (OSError, zipfile.BadZipFile, ET.ParseError) as error:
+        raise ValueError(f"Invalid DC motor model description: {error}") from error
+
+    if description.attrib.get("fmiVersion") != "2.0":
+        raise ValueError("The DC motor FMU must use FMI 2.0.")
+    co_simulation = description.find("{*}CoSimulation")
+    if co_simulation is None or co_simulation.attrib.get("modelIdentifier") != "DC_motor":
+        raise ValueError("The DC motor FMU must expose FMI Co-Simulation with modelIdentifier DC_motor.")
+    variables = description.find("{*}ModelVariables")
+    if variables is None:
+        raise ValueError("The DC motor FMU has no model variables.")
+
+    inputs: set[str] = set()
+    outputs: set[str] = set()
+    parameters: set[str] = set()
+    for variable in variables:
+        name = variable.attrib.get("name")
+        causality = variable.attrib.get("causality")
+        if not name:
+            continue
+        if causality == "input":
+            inputs.add(name)
+        elif causality == "output":
+            outputs.add(name)
+        elif causality == "parameter" and variable.attrib.get("variability") != "constant":
+            parameters.add(name)
+    if inputs != {"in_torque"}:
+        raise ValueError(f"Unexpected DC motor FMU inputs: {sorted(inputs)}")
+    missing_outputs = DC_MOTOR_REQUIRED_OUTPUTS - outputs
+    if missing_outputs:
+        raise ValueError("The DC motor FMU is missing output signals: " + ", ".join(sorted(missing_outputs)))
+    missing_parameters = DC_MOTOR_REQUIRED_PARAMETERS - parameters
+    if missing_parameters:
+        raise ValueError("The DC motor FMU is missing tunable parameters: " + ", ".join(sorted(missing_parameters)))
+
+
+def validate_dc_motor_app(path: Path) -> None:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            files = set(archive.namelist())
+            required = {
+                "index.html",
+                "app.js",
+                "scene.js",
+                "styles.css",
+                "vendor/three.module.js",
+                "vendor/three.core.js",
+                "vendor/OrbitControls.js",
+                "vendor/THREE-LICENSE.txt",
+            }
+            missing = required - files
+            if missing:
+                raise ValueError("The DC motor web app is incomplete: " + ", ".join(sorted(missing)))
+            app = archive.read("app.js").decode("utf-8")
+            index = archive.read("index.html").decode("utf-8")
+    except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as error:
+        raise ValueError(f"Invalid DC motor app bundle: {error}") from error
+    missing_protocol = REQUIRED_APP_PROTOCOL_MESSAGES - {message for message in REQUIRED_APP_PROTOCOL_MESSAGES if message in app}
+    if missing_protocol:
+        raise ValueError("The DC motor app is missing host messages: " + ", ".join(sorted(missing_protocol)))
+    if "https://" in index or "http://" in index or "https://" in app or "http://" in app:
+        raise ValueError("The DC motor app must not depend on external runtime services.")
+
+
 def validate_boptest_complex_air_fmu(path: Path) -> set[str]:
     names = validate_linux_x64_fmu(path)
     required_binaries = {"binaries/linux64/wrapped.so"}
@@ -324,6 +410,7 @@ def sync(
     *,
     include_local_boptest: bool = False,
     include_local_qfmu: bool = False,
+    include_local_dc_motor: bool = False,
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     # Remove stale local copies of retired examples from existing workspaces.
@@ -471,6 +558,25 @@ def sync(
             copy_verified(source, qfmu_target / filename)
         copy_verified(qfmu_license, qfmu_target / QFMU_LICENSE_NAME)
 
+    if include_local_dc_motor:
+        motor_root = examples_root / "local-demos" / "dc-motor"
+        motor_fmu = motor_root / DC_MOTOR_FMU_NAME
+        motor_app = motor_root / DC_MOTOR_APP_NAME
+        fmugym_license = motor_root / "FMUGym-LICENSE"
+        credibility_license = motor_root / "Credibility-LICENSE.md"
+        validate_dc_motor_fmu(motor_fmu)
+        validate_dc_motor_app(motor_app)
+        if not fmugym_license.is_file() or "MIT License" not in fmugym_license.read_text(encoding="utf-8"):
+            raise ValueError("The DC motor FMU must include the upstream FMUGym MIT license.")
+        if not credibility_license.is_file() or "BSD 3-Clause License" not in credibility_license.read_text(encoding="utf-8"):
+            raise ValueError("The DC motor model must include the upstream Credibility BSD license.")
+        motor_target = target / "local-demos" / "dc-motor" / "linux64"
+        motor_target.mkdir(parents=True, exist_ok=True)
+        copy_verified(motor_fmu, motor_target / DC_MOTOR_FMU_NAME)
+        copy_verified(motor_app, motor_target / DC_MOTOR_APP_NAME)
+        copy_verified(fmugym_license, motor_target / "DC_motor.FMUGym-LICENSE.txt")
+        copy_verified(credibility_license, motor_target / "DC_motor.Credibility-LICENSE.md")
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -496,6 +602,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also copy the four local-only qFMU linear-systems examples",
     )
+    parser.add_argument(
+        "--include-local-dc-motor",
+        action="store_true",
+        help="Also copy the local-only DC motor teaching demo and its app bundle",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -504,6 +615,7 @@ def main(argv: list[str] | None = None) -> int:
             args.target.resolve(),
             include_local_boptest=args.include_local_boptest,
             include_local_qfmu=args.include_local_qfmu,
+            include_local_dc_motor=args.include_local_dc_motor,
         )
     except (FileNotFoundError, OSError, ValueError) as error:
         print(error, file=sys.stderr)
