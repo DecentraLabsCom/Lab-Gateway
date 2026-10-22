@@ -101,6 +101,7 @@ Thumbs.db
 dev/
 # Local demo preview support (not deployed)
 /docker-compose.local-demo.yml
+/openresty/conf.d/gateway_dev_qfmu.conf
 /openresty/conf.d/gateway_dev_smart_warehouse.conf
 /openresty/conf.d/gateway_dev_boptest_building.conf
 /openresty/gateway.local-demo.conf
