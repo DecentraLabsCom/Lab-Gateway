@@ -31,7 +31,7 @@ services:
       - FMU_MAX_SIMULATION_STEPS=30000
       # This one local-only FMU launches Spawn. The executor grants child-process
       # execution only to this access key and the exact configured binary.
-      - FMU_SPAWN_ACCESS_KEYS=BOPTEST-MultizoneOfficeComplexAir.fmu
+      - FMU_SPAWN_ACCESS_KEYS=local-demos/boptest-building-complex/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
       - FMU_SPAWN_EXECUTABLE=/var/lib/fmu-executor/state/local-runtime/Spawn-light-0.4.3-7048a72798-Linux/bin/spawn-0.4.3-7048a72798
     entrypoint: ["/bin/sh", "/run/local-boptest-entrypoint.sh"]
     command: ["python", "-m", "app"]
@@ -40,11 +40,11 @@ services:
         source: fmu-executor-local-state
         target: /var/lib/fmu-executor/state
       - type: bind
-        source: ../FMU-Executor/examples/boptest-building/runtime/Spawn-light-0.4.3-7048a72798-Linux.tar.gz
+        source: ../FMU-Executor/examples/local-demos/boptest-building/runtime/Spawn-light-0.4.3-7048a72798-Linux.tar.gz
         target: /run/local-boptest-spawn.tar.gz
         read_only: true
       - type: bind
-        source: ../FMU-Executor/examples/boptest-building/runtime/local-executor-entrypoint.sh
+        source: ../FMU-Executor/examples/local-demos/boptest-building/runtime/local-executor-entrypoint.sh
         target: /run/local-boptest-entrypoint.sh
         read_only: true
     tmpfs:

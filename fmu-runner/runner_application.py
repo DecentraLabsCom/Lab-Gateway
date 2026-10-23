@@ -437,13 +437,46 @@ def _coerce_epoch_seconds(value) -> Optional[int]:
 
 
 def _resolve_fmu_path(fmu_filename: str) -> Path:
-    """Search *FMU_DATA_PATH* for a .fmu file matching *fmu_filename*."""
-    fmu_filename = _validate_storage_key(fmu_filename, "FMU filename")
-    if not fmu_filename.lower().endswith(".fmu"):
-        raise HTTPException(status_code=400, detail="Only .fmu files are accepted")
+    """Resolve an authorised FMU access key within *FMU_DATA_PATH*."""
+    if len(str(fmu_filename)) > 255:
+        raise HTTPException(status_code=400, detail="Invalid FMU file key")
+    fmu_filename = StationFmuBackend.validate_access_key(fmu_filename)
     base = Path(FMU_DATA_PATH).resolve()
     if not base.is_dir():
         raise HTTPException(status_code=503, detail="FMU data directory is unavailable")
+
+    segments = fmu_filename.split("/")
+    if len(segments) > 1:
+        # Explicit access keys may address files nested below fmu-data (for
+        # example, local-demos/<demo>/linux64/model.fmu). Walk directory
+        # entries instead of joining untrusted input, and reject symlinks that
+        # resolve outside the configured FMU root.
+        current = base
+        for index, segment in enumerate(segments):
+            try:
+                entry = next(
+                    (
+                        candidate
+                        for candidate in current.iterdir()
+                        if os.path.normcase(candidate.name) == os.path.normcase(segment)
+                    ),
+                    None,
+                )
+            except OSError:
+                entry = None
+            if entry is None:
+                raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
+            try:
+                current = entry.resolve(strict=True)
+            except OSError:
+                raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
+            if not _is_within_base(base, current):
+                raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
+            if index < len(segments) - 1 and not current.is_dir():
+                raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
+        if current.is_file():
+            return current
+        raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
 
     def _trusted_match(directory: Path) -> Optional[Path]:
         """Return a matching file already discovered under the trusted root."""

@@ -319,6 +319,7 @@ def sync(
     include_local_dc_motor: bool = False,
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
+    boptest_target = target / "local-demos" / "boptest-building-complex" / "linux64"
     # Remove stale local copies of retired examples from existing workspaces.
     for obsolete_name in (
         "SmartFactoryCell.fmu",
@@ -328,6 +329,7 @@ def sync(
         "BOPTEST-MultizoneOfficeComplexAir.fmu",
         "BOPTEST-MultizoneOfficeComplexAir.webapp.zip",
         "BOPTEST-MultizoneOfficeComplexAir.LICENSE.txt",
+        "BOPTEST-ComplexAir.LICENSE.txt",
         "BOPTEST-MultizoneOfficeSimpleHydronic.fmu",
         "BOPTEST-MultizoneOfficeSimpleHydronic.webapp.zip",
         "BOPTEST-MultizoneOfficeSimpleHydronic.LICENSE.txt",
@@ -337,6 +339,13 @@ def sync(
         "BOPTEST-SimpleAir-TestPatch2.fmu",
     ):
         (target / obsolete_name).unlink(missing_ok=True)
+    if boptest_target.is_dir():
+        for local_boptest_name in (
+            BOPTEST_COMPLEX_FMU_NAME,
+            BOPTEST_COMPLEX_APP_NAME,
+            "BOPTEST-MultizoneOfficeComplexAir.LICENSE.txt",
+        ):
+            (boptest_target / local_boptest_name).unlink(missing_ok=True)
     reference_root = examples_root / "reference-fmus"
     canonical_reference_fmus = {
         path.name: path for path in reference_root.glob("*.fmu") if path.is_file()
@@ -395,7 +404,7 @@ def sync(
     copy_verified(warehouse_license, target / "SmartWarehouseCell.LICENSE.txt")
 
     if include_local_boptest:
-        boptest_root = examples_root / "boptest-building"
+        boptest_root = examples_root / "local-demos" / "boptest-building"
         complex_fmu = boptest_root / BOPTEST_COMPLEX_FMU_NAME
         complex_app = boptest_root / BOPTEST_COMPLEX_APP_NAME
         complex_license = boptest_root / BOPTEST_COMPLEX_LICENSE_NAME
@@ -421,9 +430,10 @@ def sync(
                 raise ValueError("The local BOPTEST Complex Air app must create its Three.js scene without a GLB.")
             if any(message not in app_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
                 raise ValueError("The local BOPTEST Complex Air app is missing the Marketplace host protocol.")
-        copy_verified(complex_fmu, target / BOPTEST_COMPLEX_FMU_NAME)
-        copy_verified(complex_app, target / BOPTEST_COMPLEX_APP_NAME)
-        copy_verified(complex_license, target / "BOPTEST-MultizoneOfficeComplexAir.LICENSE.txt")
+        boptest_target.mkdir(parents=True, exist_ok=True)
+        copy_verified(complex_fmu, boptest_target / BOPTEST_COMPLEX_FMU_NAME)
+        copy_verified(complex_app, boptest_target / BOPTEST_COMPLEX_APP_NAME)
+        copy_verified(complex_license, boptest_target / "BOPTEST-MultizoneOfficeComplexAir.LICENSE.txt")
 
     if include_local_qfmu:
         qfmu_root = examples_root / "local-demos" / "qfmu"
