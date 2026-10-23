@@ -8,6 +8,7 @@ services:
       - ./openresty/conf.d/gateway_dev_boptest_building.conf:/etc/openresty/conf.d/gateway_dev_boptest_building.conf:ro
       - ./openresty/conf.d/gateway_dev_qfmu.conf:/etc/openresty/conf.d/gateway_dev_qfmu.conf:ro
       - ./openresty/conf.d/gateway_dev_dc_motor.conf:/etc/openresty/conf.d/gateway_dev_dc_motor.conf:ro
+      - ./openresty/conf.d/gateway_dev_water_tank.conf:/etc/openresty/conf.d/gateway_dev_water_tank.conf:ro
 
   fmu-executor-local:
     image: decentralabs/fmu-executor:local-smart-warehouse
@@ -31,7 +32,7 @@ services:
       - FMU_MAX_SIMULATION_STEPS=30000
       # This one local-only FMU launches Spawn. The executor grants child-process
       # execution only to this access key and the exact configured binary.
-      - FMU_SPAWN_ACCESS_KEYS=local-demos/boptest-building-complex/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
+      - FMU_SPAWN_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
       - FMU_SPAWN_EXECUTABLE=/var/lib/fmu-executor/state/local-runtime/Spawn-light-0.4.3-7048a72798-Linux/bin/spawn-0.4.3-7048a72798
     entrypoint: ["/bin/sh", "/run/local-boptest-entrypoint.sh"]
     command: ["python", "-m", "app"]

@@ -319,7 +319,8 @@ def sync(
     include_local_dc_motor: bool = False,
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
-    boptest_target = target / "local-demos" / "boptest-building-complex" / "linux64"
+    boptest_target = target / "local-demos" / "boptest-building" / "linux64"
+    legacy_boptest_root = target / "local-demos" / "boptest-building-complex"
     # Remove stale local copies of retired examples from existing workspaces.
     for obsolete_name in (
         "SmartFactoryCell.fmu",
@@ -346,6 +347,12 @@ def sync(
             "BOPTEST-MultizoneOfficeComplexAir.LICENSE.txt",
         ):
             (boptest_target / local_boptest_name).unlink(missing_ok=True)
+    if legacy_boptest_root.exists():
+        resolved_legacy_root = legacy_boptest_root.resolve()
+        resolved_local_demos = (target / "local-demos").resolve()
+        if legacy_boptest_root.is_symlink() or resolved_legacy_root.parent != resolved_local_demos:
+            raise ValueError(f"Refusing to remove unexpected legacy BOPTEST path: {legacy_boptest_root}")
+        shutil.rmtree(legacy_boptest_root)
     reference_root = examples_root / "reference-fmus"
     canonical_reference_fmus = {
         path.name: path for path in reference_root.glob("*.fmu") if path.is_file()
