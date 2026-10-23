@@ -196,24 +196,16 @@ same-origin API routes. The GLB route accepts only the lab ID and its
 content-addressed digest; it does not proxy arbitrary URLs. Gateway applies a
 restrictive CSP sandbox to the public app route, and Marketplace serves the app
 entry page in an isolated iframe with its own restrictive CSP and no
-credentials. Marketplace posts only FMI time and declared outputs through the
-versioned `decentralabs:fmi-sample` version 1 message; it never sends the FMU,
-access key or reservation token. The provider app owns the complete
-presentation inside its viewer area, including its scene controls and output
-display. Marketplace keeps FMU execution and parameter controls outside the
-iframe and does not add its GLB viewer's output panel, replay timeline, charts
-or output table around the app.
-
-The host sends `decentralabs:digital-twin-host-ready` version 1 after the app
-document loads. The app responds only after its scene is initialized with
-`decentralabs:digital-twin-ready` version 1. It may report
-`decentralabs:digital-twin-error` version 1 with a short error code if startup
-fails. Marketplace accepts these status messages only from the selected
-iframe's `contentWindow`; the sandbox keeps the app on an opaque origin. If the
-app does not become ready within 30 seconds, Marketplace shows a startup error
-and lets the user retry. The app should register its message handler before
-loading the scene and retain the status until it receives the host-ready
-message.
+credentials. Marketplace sends FMI time and declared outputs through the
+postMessage protocol; it never sends the FMU, access key or reservation token.
+Marketplace owns that application protocol, including iframe startup,
+simulation requests, streamed FMI samples and optional shared controls. This
+section documents the AAS asset reference and Gateway storage, validation and
+delivery responsibilities; the message names, payloads and lifecycle belong
+in Marketplace's **Three.js digital twin app contract**. The app owns the
+complete presentation inside its viewer area. Marketplace does not wrap it in
+the GLB viewer or add that viewer's charts or output table, though it may show
+shared input-schedule and capability-gated playback controls as overlays.
 
 The AAS File stores the visual asset location and MIME only. FMI remains the
 source of model variables and ports; optional GLB `extras.fmiBindings` map FMI
