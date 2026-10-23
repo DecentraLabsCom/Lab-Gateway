@@ -1,9 +1,8 @@
 """Sync canonical FMU examples into Gateway's ignored development data directory.
 
-The six reference FMUs and Smart Warehouse are synced by default. BOPTEST,
-qFMU and other new demo artifacts remain local-only; the optional BOPTEST and
-qFMU previews require explicit flags. This script never adds demo files to
-Gateway images or release packages.
+The six reference FMUs and Smart Warehouse are synced by default. The local
+BOPTEST building preview, qFMU and other new demo artifacts require explicit
+flags. This script never adds demo files to Gateway images or release packages.
 """
 
 from __future__ import annotations
@@ -36,10 +35,6 @@ REQUIRED_APP_PROTOCOL_MESSAGES = {
     "decentralabs:fmi-simulation-state",
     "decentralabs:fmi-samples",
 }
-BOPTEST_FMU_NAME = "BOPTEST-MultizoneOfficeSimpleHydronic.fmu"
-BOPTEST_APP_NAME = "BOPTEST-MultizoneOfficeSimpleHydronic.webapp.zip"
-BOPTEST_LICENSE_NAME = "BOPTEST.LICENSE.txt"
-BOPTEST_ZONES = ("Nz", "Sz")
 BOPTEST_COMPLEX_FMU_NAME = "BOPTEST-MultizoneOfficeComplexAir.fmu"
 BOPTEST_COMPLEX_APP_NAME = "BOPTEST-MultizoneOfficeComplexAir.webapp.zip"
 BOPTEST_COMPLEX_LICENSE_NAME = "BOPTEST-ComplexAir.LICENSE.txt"
@@ -102,95 +97,6 @@ def copy_verified(origin: Path, destination: Path) -> None:
     if sha256(origin) != sha256(destination):
         raise OSError(f"Copy verification failed for {destination}")
     print(f"Synced {origin.name} -> {destination}")
-
-
-def validate_boptest_fmu(path: Path) -> set[str]:
-    names = validate_linux_x64_fmu(path)
-    required_binaries = {"binaries/linux64/wrapped.so"}
-    missing_binaries = required_binaries - names
-    if missing_binaries:
-        raise ValueError(
-            f"BOPTEST office FMU is missing its Linux x86_64 runtime libraries: {', '.join(sorted(missing_binaries))}"
-        )
-
-    try:
-        with zipfile.ZipFile(path) as archive:
-            description = ET.fromstring(archive.read("modelDescription.xml"))
-    except (OSError, zipfile.BadZipFile, ET.ParseError) as error:
-        raise ValueError(f"Invalid BOPTEST office FMU model description: {error}") from error
-
-    if description.attrib.get("fmiVersion") != "2.0":
-        raise ValueError("BOPTEST office FMU must use FMI 2.0.")
-    if description.find("{*}CoSimulation") is None:
-        raise ValueError("BOPTEST office FMU must expose FMI Co-Simulation.")
-
-    variables = description.find("{*}ModelVariables")
-    if variables is None:
-        raise ValueError("BOPTEST office FMU has no model variables.")
-    variable_names = {
-        element.attrib.get("name")
-        for element in variables
-        if element.attrib.get("causality") == "output"
-    }
-    required_outputs = {
-        f"structure_reaTZon{zone}_y" for zone in BOPTEST_ZONES
-    } | {
-        f"structure_reaCO2Zon{zone}_y" for zone in BOPTEST_ZONES
-    } | {
-        f"heating_cooling_reaPFcu{zone}_y" for zone in BOPTEST_ZONES
-    } | {
-        f"ventilation_reaPAhuSup{zone}_y" for zone in BOPTEST_ZONES
-    }
-    required_outputs.update(
-        {
-            "heating_cooling_reaPProHea_y",
-            "heating_cooling_reaPProCoo_y",
-            "heating_cooling_reaPPumProHea_y",
-            "heating_cooling_reaPPumProCoo_y",
-            "weaSta_reaWeaTDryBul_y",
-            "weaSta_reaWeaHGloHor_y",
-        }
-    )
-    missing_outputs = required_outputs - variable_names
-    if missing_outputs:
-        raise ValueError(
-            "BOPTEST office FMU is missing required scene signals: "
-            + ", ".join(sorted(missing_outputs))
-        )
-
-    required_inputs = {
-        f"bms_oveTZonSet{boundary}{zone}_{suffix}"
-        for zone in BOPTEST_ZONES
-        for boundary in ("Min", "Max")
-        for suffix in ("u", "activate")
-    }
-    input_names = {
-        element.attrib.get("name")
-        for element in variables
-        if element.attrib.get("causality") == "input"
-    }
-    missing_inputs = required_inputs - input_names
-    if missing_inputs:
-        raise ValueError(
-            "BOPTEST office FMU is missing its zone setpoint controls: "
-            + ", ".join(sorted(missing_inputs))
-        )
-
-    required_resources = {
-        "resources/weather.csv",
-        "resources/setpoints.csv",
-        "resources/internalGains.csv",
-        "resources/occupancy.csv",
-        "resources/prices.csv",
-        "resources/emissions.csv",
-    }
-    missing_resources = required_resources - names
-    if missing_resources:
-        raise ValueError(
-            "BOPTEST office FMU is missing its self-contained scenario resources: "
-            + ", ".join(sorted(missing_resources))
-        )
-    return names
 
 
 def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: set[str]) -> None:
@@ -422,6 +328,10 @@ def sync(
         "BOPTEST-MultizoneOfficeComplexAir.fmu",
         "BOPTEST-MultizoneOfficeComplexAir.webapp.zip",
         "BOPTEST-MultizoneOfficeComplexAir.LICENSE.txt",
+        "BOPTEST-MultizoneOfficeSimpleHydronic.fmu",
+        "BOPTEST-MultizoneOfficeSimpleHydronic.webapp.zip",
+        "BOPTEST-MultizoneOfficeSimpleHydronic.LICENSE.txt",
+        "BOPTEST.LICENSE.txt",
         "BOPTEST-MultizoneOfficeSimpleAir.fmu",
         "BOPTEST-SimpleAir-TestPatch.fmu",
         "BOPTEST-SimpleAir-TestPatch2.fmu",
@@ -486,34 +396,6 @@ def sync(
 
     if include_local_boptest:
         boptest_root = examples_root / "boptest-building"
-        boptest_fmu = boptest_root / BOPTEST_FMU_NAME
-        boptest_app = boptest_root / BOPTEST_APP_NAME
-        boptest_license = boptest_root / BOPTEST_LICENSE_NAME
-        validate_boptest_fmu(boptest_fmu)
-        if not boptest_license.is_file() or "International Building Performance Simulation Association" not in boptest_license.read_text(encoding="utf-8"):
-            raise ValueError("The local BOPTEST FMU must include the upstream v0.9.0 redistribution license.")
-        with zipfile.ZipFile(boptest_app) as archive:
-            app_names = set(archive.namelist())
-            required_app_files = {
-                "index.html",
-                "app.js",
-                "scene.js",
-                "styles.css",
-                "vendor/three.module.js",
-                "vendor/OrbitControls.js",
-            }
-            missing_app_files = required_app_files - app_names
-            if missing_app_files:
-                raise ValueError("The local BOPTEST Three.js app is incomplete: " + ", ".join(sorted(missing_app_files)))
-            app_script = archive.read("app.js").decode("utf-8")
-            if "createBuildingScene" not in app_script or "GLTFLoader" in app_script:
-                raise ValueError("The local BOPTEST app must build its own scene with Three.js and not load a GLB.")
-            if any(message not in app_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
-                raise ValueError("The local BOPTEST app bundle is missing the Marketplace host protocol.")
-        copy_verified(boptest_fmu, target / BOPTEST_FMU_NAME)
-        copy_verified(boptest_app, target / BOPTEST_APP_NAME)
-        copy_verified(boptest_license, target / "BOPTEST-MultizoneOfficeSimpleHydronic.LICENSE.txt")
-
         complex_fmu = boptest_root / BOPTEST_COMPLEX_FMU_NAME
         complex_app = boptest_root / BOPTEST_COMPLEX_APP_NAME
         complex_license = boptest_root / BOPTEST_COMPLEX_LICENSE_NAME
