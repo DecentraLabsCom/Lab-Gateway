@@ -64,6 +64,13 @@ does not change between these topologies.
 | WS | `/api/v1/fmu/sessions` | Realtime FMU session API (`requestId`, `model.describe`, control, subscribe/unsubscribe, ping/pong) |
 | WS (internal) | `/internal/fmu/sessions` | Internal realtime channel for Lab Station integration |
 
+The simulation description includes FMI variable descriptions, inherited type
+bounds, and enumeration items when present. `displayUnit` is emitted as
+`{ name, factor, offset, inverse? }`, normalized for direct and inverse FMI
+display-unit conversions; execution requests still use the FMU's native value.
+`min` and `max` describe the model's operating range and do not declare a
+control resolution.
+
 When the AAS admin integration is enabled, the Lab Manager exposes a unified
 AAS association catalog. BaSyx is the source of truth for generated and
 imported shells; the lightweight catalog under `AAS_CATALOG_PATH` (default

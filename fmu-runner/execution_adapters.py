@@ -9,6 +9,7 @@ def simulation_request_payload(
     lab_id: Optional[str],
     parameters: dict,
     options: dict,
+    input_schedule: Optional[list[dict]] = None,
     sim_id: Optional[str] = None,
 ) -> dict:
     payload = {
@@ -17,6 +18,8 @@ def simulation_request_payload(
         "parameters": parameters,
         "options": options,
     }
+    if input_schedule:
+        payload["inputSchedule"] = input_schedule
     if sim_id:
         payload["simId"] = sim_id
     return payload

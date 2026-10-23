@@ -4,6 +4,7 @@ import base64
 from dataclasses import dataclass
 import json
 import logging
+import math
 import re
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse, urlunparse
@@ -184,6 +185,7 @@ class StationFmuBackend(BaseFmuBackend):
         batch_id: Optional[str] = None,
         parameters: Optional[dict[str, Any]] = None,
         options: Optional[dict[str, Any]] = None,
+        input_schedule: Optional[list[dict[str, Any]]] = None,
         scenarios: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         gateway_context = {
@@ -214,6 +216,8 @@ class StationFmuBackend(BaseFmuBackend):
             payload["batchId"] = batch_id
         if scenarios is not None:
             payload["scenarios"] = scenarios
+        if input_schedule:
+            payload["inputSchedule"] = input_schedule
         if lab_id:
             payload["labId"] = lab_id
         if reservation_key:
@@ -449,6 +453,7 @@ class StationFmuBackend(BaseFmuBackend):
             sim_id=request_payload.get("simId"),
             parameters=request_payload.get("parameters"),
             options=request_payload.get("options"),
+            input_schedule=request_payload.get("inputSchedule"),
         )
         key = str(access_key)
         if not re.fullmatch(
@@ -501,6 +506,7 @@ class StationFmuBackend(BaseFmuBackend):
             sim_id=request_payload.get("simId"),
             parameters=request_payload.get("parameters"),
             options=request_payload.get("options"),
+            input_schedule=request_payload.get("inputSchedule"),
         )
         return await self._post_json(
             "run",
@@ -686,10 +692,83 @@ class StationFmuBackend(BaseFmuBackend):
             entry["unit"] = raw.get("unit")
         if raw.get("start") is not None:
             entry["start"] = raw.get("start")
-        if raw.get("min") is not None:
-            entry["min"] = raw.get("min")
-        if raw.get("max") is not None:
-            entry["max"] = raw.get("max")
+        integer_type = entry["type"] in {
+            "Integer", "Enumeration", "Int8", "UInt8", "Int16", "UInt16",
+            "Int32", "UInt32", "Int64", "UInt64",
+        }
+        for bound in ("min", "max"):
+            raw_bound = raw.get(bound)
+            if raw_bound is None:
+                continue
+            try:
+                value = float(raw_bound)
+                if not math.isfinite(value) or (integer_type and not value.is_integer()):
+                    continue
+                entry[bound] = int(value) if integer_type else value
+            except (TypeError, ValueError, OverflowError):
+                continue
+        description = raw.get("description")
+        if isinstance(description, str) and description.strip():
+            entry["description"] = description.strip()[:4096]
+        display_name = raw.get("displayName")
+        if isinstance(display_name, str) and display_name.strip():
+            entry["displayName"] = display_name.strip()[:256]
+        quantity = raw.get("quantity")
+        if isinstance(quantity, str) and quantity.strip():
+            entry["quantity"] = quantity.strip()[:256]
+        display_unit = raw.get("displayUnit")
+        if isinstance(display_unit, str) and display_unit.strip():
+            entry["displayUnit"] = display_unit.strip()[:64]
+        elif isinstance(display_unit, dict):
+            name = display_unit.get("name")
+            try:
+                factor = float(display_unit.get("factor", 1.0))
+                offset = float(display_unit.get("offset", 0.0))
+            except (TypeError, ValueError, OverflowError):
+                factor = 0.0
+                offset = 0.0
+            raw_inverse = display_unit.get("inverse", False)
+            inverse = raw_inverse is True or str(raw_inverse).strip().lower() in {"true", "1"}
+            if (
+                isinstance(name, str)
+                and name.strip()
+                and math.isfinite(factor)
+                and factor != 0
+                and math.isfinite(offset)
+                and (not inverse or offset == 0)
+            ):
+                normalized_display_unit: dict[str, Any] = {
+                    "name": name.strip()[:64],
+                    "factor": factor,
+                    "offset": offset,
+                }
+                if inverse:
+                    normalized_display_unit["inverse"] = True
+                entry["displayUnit"] = normalized_display_unit
+        enum_items = raw.get("enumItems")
+        if entry["type"] == "Enumeration" and isinstance(enum_items, list) and len(enum_items) <= 256:
+            normalized_items = []
+            for item in enum_items:
+                if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                    continue
+                raw_value = item.get("value")
+                if raw_value is None or isinstance(raw_value, bool) or not isinstance(raw_value, (str, int, float)):
+                    continue
+                try:
+                    numeric_value = float(raw_value)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(numeric_value) or not numeric_value.is_integer():
+                    continue
+                value = int(numeric_value)
+                normalized_item = {"value": value, "name": item["name"].strip()[:256]}
+                item_description = item.get("description")
+                if isinstance(item_description, str) and item_description.strip():
+                    normalized_item["description"] = item_description.strip()[:1024]
+                if normalized_item["name"]:
+                    normalized_items.append(normalized_item)
+            if normalized_items:
+                entry["enumItems"] = normalized_items
         return entry
 
     def _normalize_model_metadata(self, payload: dict[str, Any]) -> ModelMetadata:
@@ -717,6 +796,10 @@ class StationFmuBackend(BaseFmuBackend):
                 "ModelExchange" if simulation_kind == "modelExchange" else "Unknown"
             )
 
+        def optional_number(name: str) -> Optional[float]:
+            value = payload.get(name)
+            return float(value) if value is not None else None
+
         normalized = {
             "modelName": str(payload.get("modelName") or "DecentraLabsProxy"),
             "guid": payload.get("guid"),
@@ -725,9 +808,9 @@ class StationFmuBackend(BaseFmuBackend):
             "simulationType": str(simulation_type),
             "supportsCoSimulation": bool(supports_cs if supports_cs is not None else simulation_kind == "coSimulation"),
             "supportsModelExchange": bool(supports_me if supports_me is not None else simulation_kind == "modelExchange"),
-            "defaultStartTime": float(payload.get("defaultStartTime", 0.0)),
-            "defaultStopTime": float(payload.get("defaultStopTime", 1.0)),
-            "defaultStepSize": float(payload.get("defaultStepSize", 0.01)),
+            "defaultStartTime": optional_number("defaultStartTime"),
+            "defaultStopTime": optional_number("defaultStopTime"),
+            "defaultStepSize": optional_number("defaultStepSize"),
             "modelVariables": [],
         }
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -24,6 +25,7 @@ def _load_local_model_metadata(
     model_description_reader,
     model_metadata_builder,
     logger,
+    display_unit_inverse_reader=None,
     include_internal_variables: bool = True,
 ) -> dict:
     fmu_path = resolve_fmu_path(fmu_filename)
@@ -32,9 +34,14 @@ def _load_local_model_metadata(
     except Exception as exc:
         logger.error("Failed to read model description for %s: %s", fmu_filename, exc)
         raise HTTPException(status_code=422, detail="Cannot parse FMU") from exc
+    build_options: dict[str, Any] = {
+        "include_internal_variables": include_internal_variables,
+    }
+    if display_unit_inverse_reader is not None:
+        build_options["display_unit_inverses"] = display_unit_inverse_reader(fmu_path)
     return model_metadata_builder(
         model_description,
-        include_internal_variables=include_internal_variables,
+        **build_options,
     )
 
 

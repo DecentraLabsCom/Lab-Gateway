@@ -347,7 +347,10 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
             variable_value.append(
                 _standard_property("UnitList", "xs:string", unit or "others", _SIMULATION_SEMANTICS["unit_list"])
             )
-            unit_description = var.get("displayUnit") or var.get("quantity")
+            display_unit = var.get("displayUnit")
+            if isinstance(display_unit, dict):
+                display_unit = display_unit.get("name")
+            unit_description = display_unit or var.get("quantity")
             if unit_description:
                 variable_value.append(
                     _standard_mlp(
@@ -465,20 +468,20 @@ def build_simulation_submodel(
         "value": model_file_value,
     })
 
-    default_start = float(metadata.get("defaultStartTime", 0.0) or 0.0)
-    default_stop = float(metadata.get("defaultStopTime", 1.0) or 1.0)
-    if default_stop >= default_start:
-        sim_model_elements.append(
-            _standard_property("DefaultSimTime", "xs:double", default_stop - default_start, _SIMULATION_SEMANTICS["default_sim_time"])
-        )
+    raw_default_stop = metadata.get("defaultStopTime")
+    if raw_default_stop is not None:
+        default_start = float(metadata.get("defaultStartTime") or 0.0)
+        default_stop = float(raw_default_stop)
+        if default_stop > default_start:
+            sim_model_elements.append(
+                _standard_property("DefaultSimTime", "xs:double", default_stop - default_start, _SIMULATION_SEMANTICS["default_sim_time"])
+            )
 
     # FMU tool and solver metadata have direct IDTA 02005 homes.
     _gen_tool = str(metadata.get("generationTool") or metadata.get("simulationTool") or "").strip()
     tolerance = metadata.get("defaultTolerance")
     fmi_capabilities = metadata.get("capabilities") or {}
     fixed_step = fmi_capabilities.get("fixedInternalStepSize")
-    if fixed_step is None:
-        fixed_step = metadata.get("defaultStepSize")
     has_solver_metadata = (
         tolerance is not None
         or fixed_step is not None

@@ -43,6 +43,7 @@ from local_fmu_catalog import (
     _local_metadata_backend_health_payload as _catalog_local_metadata_backend_health_payload,
 )
 from metadata import (
+    _display_unit_inverse_map_from_fmu,
     _model_metadata_from_model_description,
     _normalize_xml_value,
     _parse_fmi_major_version,
@@ -535,6 +536,7 @@ def _load_local_model_metadata(
         model_description_reader=read_model_description,
         model_metadata_builder=_model_metadata_from_model_description,
         logger=logger,
+        display_unit_inverse_reader=_display_unit_inverse_map_from_fmu,
         include_internal_variables=include_internal_variables,
     )
 
@@ -578,6 +580,7 @@ def _simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = 
         lab_id=req.labId,
         parameters=req.parameters,
         options=req.options,
+        input_schedule=req.inputSchedule,
         sim_id=sim_id,
     )
 

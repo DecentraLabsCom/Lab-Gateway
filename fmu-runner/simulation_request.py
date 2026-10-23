@@ -1,6 +1,7 @@
 """Bounded public request models for reservation-scoped FMU simulations."""
 
 import json
+import math
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -34,11 +35,41 @@ def _validate_parameters(value: dict) -> dict:
     return value
 
 
+def _validate_input_schedule(value: list) -> list:
+    if not isinstance(value, list) or len(value) > 128:
+        raise ValueError("A simulation can contain at most 128 scheduled input changes")
+    normalized_events = []
+    seen_values: set[tuple[float, str]] = set()
+    for event in value:
+        if not isinstance(event, dict) or set(event) != {"time", "values"}:
+            raise ValueError("Each scheduled input change must contain only time and values")
+        time_value = event["time"]
+        if isinstance(time_value, bool) or not isinstance(time_value, (int, float)) or not math.isfinite(float(time_value)):
+            raise ValueError("Scheduled input times must be finite numbers")
+        values = _validate_parameters(event["values"])
+        if not values:
+            raise ValueError("Each scheduled input change must contain at least one value")
+        for name in values:
+            identity = (float(time_value), name)
+            if identity in seen_values:
+                raise ValueError("A scheduled input may only be assigned once at the same simulation time")
+            seen_values.add(identity)
+        normalized_events.append({"time": float(time_value), "values": values})
+    try:
+        encoded = json.dumps(normalized_events, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Scheduled input changes must contain finite JSON values") from exc
+    if len(encoded.encode("utf-8")) > 16 * 1024:
+        raise ValueError("Scheduled input changes exceed 16 KiB")
+    return normalized_events
+
+
 class SimulationRequest(BaseModel):
     reservationKey: Optional[str] = None
     labId: Optional[str] = None
     parameters: dict = Field(default_factory=dict)
     options: dict = Field(default_factory=dict)
+    inputSchedule: list[dict] = Field(default_factory=list, max_length=128)
 
     @field_validator("labId", mode="before")
     @classmethod
@@ -51,6 +82,11 @@ class SimulationRequest(BaseModel):
     @classmethod
     def _bounded_parameters(cls, value):
         return _validate_parameters(value)
+
+    @field_validator("inputSchedule")
+    @classmethod
+    def _bounded_input_schedule(cls, value):
+        return _validate_input_schedule(value)
 
 
 class BatchScenarioRequest(BaseModel):
