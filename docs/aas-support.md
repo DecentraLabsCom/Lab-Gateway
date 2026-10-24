@@ -67,7 +67,7 @@ Each provider Gateway owns its AAS stack. Marketplace does not maintain an AAS d
 
 ~~~mermaid
 flowchart LR
-    Marketplace["Marketplace"] -->|GET provider-gateway/aas/shells/{id}| Gateway["Provider Lab Gateway"]
+    Marketplace["Marketplace"] -->|GET AAS shell by ID|Gateway["Provider Lab Gateway"]
     Gateway --> OpenResty["OpenResty /aas"]
     OpenResty --> BaSyx["Bundled BaSyx or external AAS server"]
     LabManager["Provider lab-manager"] -->|admin sync| Gateway
@@ -191,6 +191,11 @@ Gateway and are labelled unchecked. Three.js ZIP validation checks the
 package structure and bundled paths; Marketplace checks the app's startup
 handshake when it is opened.
 
+For an FMU-driven GLB scene, the provider must author the `extras.fmiBindings`
+that connect its visual elements to the relevant FMU outputs. A GLB without
+bindings may render as static geometry, but it cannot behave as an
+output-driven digital twin.
+
 Marketplace resolves either managed asset against the lab's on-chain Gateway
 origin, then proxies only that lab's immutable scene or app files through
 same-origin API routes. The GLB route accepts only the lab ID and its
@@ -211,10 +216,45 @@ presentation inside its viewer area. Marketplace does not wrap it in the GLB
 viewer or add that viewer's charts or output table, though it may show shared
 input-schedule and capability-gated playback controls as overlays.
 
+The GLB path keeps simulation execution in Marketplace's generated interface.
+This sequence includes both the provider's asset setup and the consumer's
+runtime flow:
+
+~~~mermaid
+sequenceDiagram
+    autonumber
+    participant P as Provider in Lab Manager
+    participant G as Provider Gateway
+    participant A as Provider AAS
+    participant U as Consumer browser
+    participant M as Marketplace UI and API
+    participant S as Lab Station FMU Executor
+    P->>G: Upload or import GLB companion
+    G->>G: Validate bindings and store immutable asset
+    P->>G: Synchronize FMU shell with selected visual asset
+    G->>A: Write HandoverDocumentation File reference and MIME type
+    A-->>G: Shell synchronized
+    U->>M: Open the reserved FMU lab
+    M->>A: Read the lab's AAS shell
+    A-->>M: Return GLB path and content type
+    M->>G: Fetch GLB through Marketplace's same-origin asset proxy
+    G-->>M: Return immutable GLB file
+    M-->>U: Render generated controls and GLB viewer
+    U->>M: Set inputs and run simulation
+    M->>G: POST /fmu/api/v1/simulations/stream with reservation authorization
+    G->>S: Forward execution through the private Station connection
+    S-->>G: Stream FMU output samples
+    G-->>M: Return output stream
+    M->>M: Apply output values using GLB extras.fmiBindings
+    M-->>U: Update the scene, timeline and output indicators
+    Note over M,S: The generated GLB route uses Marketplace's authorized simulation API; only complete Three.js apps open the direct session WebSocket.
+~~~
+
 The AAS File stores the visual asset location and MIME only. FMI remains the
-source of model variables and ports; optional GLB `extras.fmiBindings` map FMI
-output names to allowed scene targets, while a Three.js app owns its rendering
-logic. No separate manifest or duplicate FMI/AAS metadata is needed. If a
+source of model variables and ports; provider-authored GLB `extras.fmiBindings`
+map FMI output names to allowed scene targets and are required for
+output-driven scene behavior, while a Three.js app owns its rendering logic. No
+separate manifest or duplicate FMI/AAS metadata is needed. If a
 future requirement cannot be represented in FMI, AAS, GLB or the app itself,
 any manifest must contain only that missing complementary information. When
 uploading an `.aasx` package, its Handover Documentation remains authoritative
