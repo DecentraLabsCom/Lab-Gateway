@@ -384,6 +384,70 @@ day, 30 updates per 10-second window, 64 KiB per update by default). Operators
 can tune the Station limits with the `FMU_MAX_INPUT_*` and
 `FMU_INPUT_UPDATE_WINDOW_SECONDS` environment variables.
 
+## Complete provider web apps
+
+A provider app can use the same reservation-scoped session as `proxy.fmu`.
+Marketplace embeds the app in a sandboxed iframe and requests a one-use
+connection capability. Simulation data then travels directly from the browser
+to Gateway and the private Station Executor.
+
+```text
+POST /fmu/api/v1/fmu/connection/{labId}?reservationKey=...
+```
+
+This protected endpoint uses the same authorization, rate bucket, ticket
+issuance, issuer routing and WS URL derivation as the proxy download. It
+returns `protocolVersion`, `gatewayWsUrl`, `labId`, `reservationKey`,
+`sessionTicket` and `ticketExpiresAt`, with `Cache-Control: no-store`.
+Marketplace keeps its resource credential server-side and delivers only this
+temporary grant to the requesting iframe. No model binary or runtime secret
+is exposed.
+
+Browser clients send the ticket in their first `session.create` frame on
+`WSS /fmu/api/v1/fmu/sessions`. They use the existing redemption, on-chain
+reservation checks, session evidence, revocation and Station expiry path.
+The WS route accepts an opaque iframe `Origin: null`, but does not translate
+cookies to bearer credentials. Such a browser therefore needs its one-use
+ticket. This exception is limited to the WS endpoint; it does not relax HTTP
+CORS. Native proxy clients retain their existing ticket flow.
+
+FMU Executor 0.3.2 adds `sim.advance` for dense timelines:
+
+```json
+{"type":"sim.advance","requestId":"batch:1","sessionId":"...","targetTime":60,"maxSamples":256,"stepSize":0.05}
+```
+
+It responds with `sim.samples`, the same request/session IDs, `samples` (each
+containing `time` and `outputs`), `simTime`, `finished` and `finishReason`.
+A batch advances at most 256 steps and has a conservative encoded frame
+budget below 1 MB. It includes every intermediate sample; the client requests
+the next batch after processing the current one. The session advertises
+`capabilities.advanceSamples` and `capabilities.maxOutputHz`; the same output
+read budget, model process isolation, step budget and reservation limits apply.
+
+`model.describe` accepts `includeVariables: false` to return defaults and
+model metadata without a potentially large variable catalogue. Descriptions
+come from the session's immutable FMU snapshot. Apps requiring raw step control
+can continue using `sim.step`, `sim.setInputs` and other existing operations.
+The current WS executor supports FMI 2/3 Co-Simulation.
+
+The browser SDK and its host v2 schema live in Marketplace's
+`packages/digital-twin-app-protocol`. The optional `/fmu-client` entry has no
+Marketplace dependency. The `/client` entry composes it with host startup,
+authorization and visualization controls. The host protocol carries no run
+parameters or output sample stream. GLB and generated interfaces keep their
+existing Marketplace execution path. Providers may implement either contract
+directly; bundles are not required to include the SDK.
+
+Local-only demos use the `fmu-local-dev` Executor and the same WS manager. An
+additional private preview route is registered only when `FMU_LOCAL_DEV_MODE`
+is enabled, and requires the local Executor bridge secret. It issues bounded,
+one-use preview tickets for virtual local reservations; it never grants real
+reservation access or emits on-chain session evidence. The loopback-only demo
+Nginx overlay serves WS on port 8081 so a development certificate is not needed
+in the browser. These preview routes are not enabled by production Full/Lite
+configuration.
+
 ## Gateway-to-Station contract
 
 The private Station API includes:

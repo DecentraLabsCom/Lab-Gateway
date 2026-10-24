@@ -109,6 +109,7 @@ from aasx_router import create_aasx_router
 from aasx_catalog import AasxPackageCatalog
 from aas_association_service import AasAssociationService
 from proxy_router import create_proxy_router
+from local_preview import PreviewTickets, create_preview_router
 from digital_twin_assets_router import create_digital_twin_assets_router
 
 FMU_DATA_PATH = CONFIG.fmu_data_path
@@ -133,6 +134,7 @@ FMU_BACKEND_MODE = CONFIG.fmu_backend_mode
 FMU_LOCAL_DEV_MODE = CONFIG.fmu_local_dev_mode
 FMU_LOCAL_EXECUTOR_BASE_URL = CONFIG.fmu_local_executor_base_url
 FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN = CONFIG.fmu_local_executor_internal_token
+_preview_tickets = PreviewTickets() if FMU_LOCAL_DEV_MODE else None
 FMU_STATION_BASE_URL = CONFIG.fmu_station_base_url
 FMU_STATION_INTERNAL_TOKEN = CONFIG.fmu_station_internal_token
 FMU_STATION_REQUEST_TIMEOUT = CONFIG.fmu_station_request_timeout
@@ -698,6 +700,8 @@ async def _redeem_session_ticket(
     session_id: Optional[str] = None,
     request_id: Optional[str] = None,
 ) -> dict:
+    if _preview_tickets is not None and session_ticket.startswith("preview_"):
+        return _preview_tickets.redeem(session_ticket, lab_id, reservation_key)
     return await _redeem_session_ticket_service(
         session_ticket=session_ticket,
         lab_id=lab_id,
@@ -761,6 +765,8 @@ async def _confirm_fmu_session_started(
     reservation_key: Optional[str] = None,
     request_id: Optional[str] = None,
 ) -> bool:
+    if _preview_tickets is not None and session_ticket.startswith("preview_") and claims.get("sub") == "local-preview":
+        return True
     return await _confirm_session_started_service(
         session_ticket=session_ticket,
         claims=claims,
@@ -1086,3 +1092,6 @@ app = create_app(
         _stream_router,
     ),
 )
+
+if _preview_tickets is not None:
+    app.include_router(create_preview_router(_preview_tickets, FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN))

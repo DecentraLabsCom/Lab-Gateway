@@ -197,16 +197,19 @@ same-origin API routes. The GLB route accepts only the lab ID and its
 content-addressed digest; it does not proxy arbitrary URLs. Gateway applies a
 restrictive CSP sandbox to the public app route, and Marketplace serves the app
 entry page in an isolated iframe with its own restrictive CSP and no
-credentials. Marketplace sends FMI time and declared outputs through the
-postMessage protocol; it never sends the FMU, access key or reservation token.
-Marketplace owns that application protocol, including iframe startup,
-simulation requests, streamed FMI samples and optional shared controls. This
-section documents the AAS asset reference and Gateway storage, validation and
-delivery responsibilities; the message names, payloads and lifecycle belong
-in Marketplace's **Three.js digital twin app contract**. The app owns the
-complete presentation inside its viewer area. Marketplace does not wrap it in
-the GLB viewer or add that viewer's charts or output table, though it may show
-shared input-schedule and capability-gated playback controls as overlays.
+credentials. For a Three.js app, Marketplace's postMessage integration handles
+iframe startup, the one-use connection grant and optional shared HMI controls.
+The app opens the provider Gateway's FMU session WebSocket; FMU requests and
+simulation samples travel directly between the app and Gateway, then to the
+private Station Executor. Marketplace never relays simulation requests or
+samples, and never sends the FMU, access key or reservation token. GLB scenes
+and generated interfaces retain their existing Marketplace execution path.
+This section documents the AAS asset reference and Gateway storage, validation
+and delivery responsibilities; message names, payloads and lifecycle belong in
+Marketplace's **Three.js digital twin app contract**. The app owns the complete
+presentation inside its viewer area. Marketplace does not wrap it in the GLB
+viewer or add that viewer's charts or output table, though it may show shared
+input-schedule and capability-gated playback controls as overlays.
 
 The AAS File stores the visual asset location and MIME only. FMI remains the
 source of model variables and ports; optional GLB `extras.fmiBindings` map FMI

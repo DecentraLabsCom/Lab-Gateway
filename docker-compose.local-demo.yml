@@ -4,6 +4,8 @@ services:
       - fmu_local_executor_token
     volumes:
       - ./openresty/gateway.local-demo.conf:/etc/openresty/gateway.conf:ro
+      - ./openresty/conf.d/gateway_dev_fmu_sessions.conf:/etc/openresty/conf.d/gateway_dev_fmu_sessions.conf:ro
+      - ./openresty/conf.d/gateway_fmu.conf:/etc/openresty/conf.d/gateway_fmu.conf:ro
       - ./openresty/conf.d/gateway_dev_smart_warehouse.conf:/etc/openresty/conf.d/gateway_dev_smart_warehouse.conf:ro
       - ./openresty/conf.d/gateway_dev_boptest_building.conf:/etc/openresty/conf.d/gateway_dev_boptest_building.conf:ro
       - ./openresty/conf.d/gateway_dev_qfmu.conf:/etc/openresty/conf.d/gateway_dev_qfmu.conf:ro

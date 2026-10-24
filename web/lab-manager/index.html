@@ -797,7 +797,7 @@
                                 </select>
                                 <span class="mt-2"><label for="fmuSyncAssetUrl">Asset URL</label> <span class="muted-text">(optional)</span></span>
                                 <input type="text" id="fmuSyncAssetUrl" inputmode="url" maxlength="2048" placeholder="Gateway asset path or HTTPS GLB URL" autocomplete="url">
-                                <small class="muted-text">Import a same-stem companion from the active FMU backend, upload an asset, or set a public HTTPS URL for a GLB. Marketplace supplies simulation execution and parameter controls outside the Three.js app; the app owns its complete presentation and receives FMU output samples.</small>
+                                <small class="muted-text">Import a same-stem companion from the active FMU backend, upload an asset, or set a public HTTPS URL for a GLB. The Three.js app owns its controls and presentation. Marketplace authorizes a reservation-bound connection, then the app executes the FMU directly over the provider Gateway WebSocket. Marketplace may add optional shared controls.</small>
                                 <button class="btn btn-secondary mt-2" id="fmuSyncImportAssetBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import selected companion from FMU backend</button>
                                 <div class="file-picker mt-2">
                                     <input class="file-picker-input" type="file" id="fmuSyncAssetFile" accept=".glb,model/gltf-binary" aria-label="Upload digital twin asset">

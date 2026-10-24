@@ -36,14 +36,13 @@ def create_proxy_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    @router.get("/api/v1/fmu/proxy/{lab_id}")
-    async def download_proxy_fmu(
+    async def authorized_connection(
         lab_id: str,
         request: Request,
         reservationKey: Optional[str] = Query(None),
         claims: dict = Depends(verify_jwt),
     ):
-        """Generate and download a reservation-scoped FMU proxy artifact."""
+        """Shared authorization and one-use ticket for browser and native clients."""
         enforce_fmu_claim(claims)
 
         claim_lab_id = get_claim_lab_id(claims)
@@ -76,6 +75,29 @@ def create_proxy_router(
             request_id=new_request_id(),
         )
         gateway_ws_url = derive_gateway_ws_url(claims)
+        return claims, {
+            "protocolVersion": "1.0", "gatewayWsUrl": gateway_ws_url,
+            "labId": str(lab_id), "reservationKey": effective_reservation_key,
+            "sessionTicket": session_ticket, "ticketExpiresAt": ticket_expiry,
+        }
+
+    @router.post("/api/v1/fmu/connection/{lab_id}")
+    async def browser_connection(connection=Depends(authorized_connection)):
+        """Give an authorized browser client the same capability as proxy.fmu."""
+        from fastapi.responses import JSONResponse
+        _, config = connection
+        return JSONResponse(config, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+    @router.get("/api/v1/fmu/proxy/{lab_id}")
+    async def download_proxy_fmu(connection=Depends(authorized_connection)):
+        """Generate and download a reservation-scoped FMU proxy artifact."""
+        claims, connection_config = connection
+        lab_id = connection_config["labId"]
+        effective_reservation_key = connection_config["reservationKey"]
+        session_ticket = connection_config["sessionTicket"]
+        ticket_expiry = connection_config["ticketExpiresAt"]
+        gateway_ws_url = connection_config["gatewayWsUrl"]
+        fmu_filename = claims.get("accessKey") or claims.get("fmuFileName")
         model_metadata = await get_authorized_model_metadata(
             claims=claims,
             requested_fmu_filename=str(fmu_filename),

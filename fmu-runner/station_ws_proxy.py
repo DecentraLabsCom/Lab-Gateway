@@ -242,6 +242,22 @@ class StationRealtimeWsProxyManager:
         await websocket.accept()
         send_lock = asyncio.Lock()
         local_request_cache: dict[str, dict] = {}
+        response_sizes: dict[str, int] = {}
+        response_bytes = 0
+
+        def cache_response(request_id, payload):
+            nonlocal response_bytes
+            response_bytes -= response_sizes.pop(request_id, 0)
+            local_request_cache.pop(request_id, None)
+            size = len(json.dumps(payload).encode("utf-8"))
+            local_request_cache[request_id] = payload
+            response_sizes[request_id] = size
+            response_bytes += size
+            while len(local_request_cache) > 32 or response_bytes > 2_000_000:
+                oldest = next(iter(local_request_cache))
+                local_request_cache.pop(oldest)
+                response_bytes -= response_sizes.pop(oldest)
+
         pending_creates: dict[str, dict] = {}
         current_session_id: Optional[str] = None
         station_ws: Optional[_StationWebSocket] = None
@@ -249,6 +265,7 @@ class StationRealtimeWsProxyManager:
 
         authorization = websocket.headers.get("authorization", "")
         claims: Optional[dict] = None
+        authorization_deadline = time.monotonic() + 30
 
         async def _close_station():
             nonlocal station_ws, station_reader_task
@@ -364,7 +381,7 @@ class StationRealtimeWsProxyManager:
                                         session_id=session_id,
                                     )
                                     if request_id:
-                                        local_request_cache[request_id] = payload
+                                        cache_response(request_id, payload)
                                     await self._send_json(websocket, send_lock, payload)
                                     continue
                             exp = self.coerce_epoch_seconds(payload.get("expiresAt"))
@@ -401,7 +418,7 @@ class StationRealtimeWsProxyManager:
                             close_public_on_expiry = True
 
                     if request_id:
-                        local_request_cache[request_id] = payload
+                        cache_response(request_id, payload)
                     await self._send_json(websocket, send_lock, payload)
                     if close_public_on_expiry:
                         try:
@@ -455,13 +472,23 @@ class StationRealtimeWsProxyManager:
                     raise
 
             while True:
-                raw_message = await websocket.receive_text()
+                try:
+                    raw_message = await asyncio.wait_for(websocket.receive_text(), timeout=max(0.001, authorization_deadline - time.monotonic()) if claims is None else None)
+                except asyncio.TimeoutError:
+                    await websocket.close(code=1008)
+                    return
+                if len(raw_message) > 1_000_000:
+                    await websocket.close(code=1009)
+                    return
                 try:
                     message = json.loads(raw_message)
                 except json.JSONDecodeError:
                     await self._send_json(websocket, send_lock, self.error_payload(code="INVALID_COMMAND", message="Invalid JSON payload"))
                     continue
 
+                if not isinstance(message, dict):
+                    await websocket.close(code=1008)
+                    return
                 msg_type = str(message.get("type") or "").strip()
                 request_id = str(message.get("requestId") or "").strip()
                 if not msg_type:
@@ -484,7 +511,7 @@ class StationRealtimeWsProxyManager:
                     create_key = (
                         f"sub:{create_claims.get('sub')}:{req_lab_id or '-'}"
                         if create_claims is not None
-                        else f"ticket:{self._normalize_ticket_id(session_ticket) or '-'}:{client_host}"
+                        else f"anonymous:{client_host}"
                     )
                     if not self._allow_session_create(create_key):
                         response = self.error_payload(
@@ -494,7 +521,7 @@ class StationRealtimeWsProxyManager:
                             retryable=True,
                         )
                         await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
+                        cache_response(request_id, response)
                         continue
 
                     if create_claims is None:
@@ -506,7 +533,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=False,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
 
                     if not internal and not session_ticket:
@@ -520,7 +547,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=False,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
                         claim_reservation_key = str(authenticated_claims.get("reservationKey") or "").strip()
                         if reservation_key and claim_reservation_key and reservation_key.lower() != claim_reservation_key.lower():
@@ -531,7 +558,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=False,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
                         if not (authenticated_claims.get("accessKey") or authenticated_claims.get("fmuFileName")):
                             response = self.error_payload(
@@ -541,7 +568,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=False,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
                         if self.issue_session_ticket is None:
                             response = self.error_payload(
@@ -551,7 +578,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=False,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
                         try:
                             session_ticket, _ticket_expiry = await self.issue_session_ticket(
@@ -572,7 +599,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=exc.status_code >= 500,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
                         except Exception as exc:
                             response = self.error_payload(
@@ -587,7 +614,7 @@ class StationRealtimeWsProxyManager:
                                 type(exc).__name__,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
 
                     if not internal and session_ticket:
@@ -599,7 +626,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=False,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
                         try:
                             create_claims = await self.redeem_session_ticket(
@@ -620,7 +647,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=exc.status_code >= 500,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
                         except Exception:
                             response = self.error_payload(
@@ -630,7 +657,7 @@ class StationRealtimeWsProxyManager:
                                 retryable=True,
                             )
                             await self._send_json(websocket, send_lock, response)
-                            local_request_cache[request_id] = response
+                            cache_response(request_id, response)
                             continue
                     try:
                         self.station_backend.build_authorized_context(
@@ -650,7 +677,7 @@ class StationRealtimeWsProxyManager:
                             retryable=exc.status_code >= 500,
                         )
                         await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
+                        cache_response(request_id, response)
                         continue
 
                     try:
@@ -677,7 +704,7 @@ class StationRealtimeWsProxyManager:
                             retryable=exc.status_code >= 500,
                         )
                         await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
+                        cache_response(request_id, response)
                         continue
 
                 if msg_type == "session.attach":
@@ -689,14 +716,14 @@ class StationRealtimeWsProxyManager:
                             retryable=False,
                         )
                         await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
+                        cache_response(request_id, response)
                         continue
 
                     session_id = str(message.get("sessionId") or "").strip()
                     if not session_id:
                         response = self.error_payload(code="INVALID_COMMAND", message="Missing sessionId", request_id=request_id)
                         await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
+                        cache_response(request_id, response)
                         continue
 
                     async with self._sessions_lock:
@@ -705,7 +732,7 @@ class StationRealtimeWsProxyManager:
                     if not session:
                         response = self.error_payload(code="FORBIDDEN", message="Session not found", request_id=request_id, retryable=False)
                         await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
+                        cache_response(request_id, response)
                         continue
                     if session.exp is not None and int(time.time()) >= session.exp:
                         await _close_expired_session(session_id, request_id=request_id)
@@ -713,7 +740,7 @@ class StationRealtimeWsProxyManager:
                     if not session.matches_claims(claims, self.get_claim_lab_id):
                         response = self.error_payload(code="FORBIDDEN", message="Session ownership mismatch", request_id=request_id)
                         await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
+                        cache_response(request_id, response)
                         continue
 
                     try:
@@ -729,13 +756,13 @@ class StationRealtimeWsProxyManager:
                             retryable=exc.status_code >= 500,
                         )
                         await self._send_json(websocket, send_lock, response)
-                        local_request_cache[request_id] = response
+                        cache_response(request_id, response)
                         continue
 
                 if current_session_id is None:
                     response = self.error_payload(code="FORBIDDEN", message="Create or attach a session first", request_id=request_id)
                     await self._send_json(websocket, send_lock, response)
-                    local_request_cache[request_id] = response
+                    cache_response(request_id, response)
                     continue
 
                 if station_ws is None:
@@ -747,7 +774,7 @@ class StationRealtimeWsProxyManager:
                         session_id=current_session_id,
                     )
                     await self._send_json(websocket, send_lock, response)
-                    local_request_cache[request_id] = response
+                    cache_response(request_id, response)
                     continue
 
                 async with self._sessions_lock:

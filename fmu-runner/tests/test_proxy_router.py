@@ -87,3 +87,21 @@ def test_proxy_router_requires_authorization_before_issuing_ticket():
     assert response.status_code == 401
     assert response.json()["detail"] == "Missing bearer token required to issue session ticket"
     issue_ticket.assert_not_awaited()
+
+
+def test_browser_connection_uses_the_same_reservation_ticket_without_building_an_fmu():
+    app, issue_ticket, _, enforce_reservation, rate_limit = _build_test_app(
+        claims={"sub": "user-1", "labId": "42", "accessKey": "model.fmu", "reservationKey": "0xabc"}
+    )
+    response = TestClient(app).post(
+        "/api/v1/fmu/connection/42?reservationKey=0xabc", headers={"Authorization": "Bearer booking-token"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "protocolVersion": "1.0", "gatewayWsUrl": "wss://gateway.example/fmu/api/v1/fmu/sessions",
+        "labId": "42", "reservationKey": "0xabc", "sessionTicket": "st_ticket_1", "ticketExpiresAt": 4102444800,
+    }
+    assert response.headers["cache-control"] == "no-store"
+    issue_ticket.assert_awaited_once()
+    enforce_reservation.assert_called_once()
+    rate_limit.assert_called_once_with("user-1:42")

@@ -56,7 +56,7 @@ def test_webapp_bundle_validator_rejects_external_runtime_dependencies(tmp_path)
 def test_webapp_bundle_validator_accepts_direct_messages_without_an_sdk(tmp_path):
     archive = write_webapp(tmp_path / "messages-only.webapp.zip", {
         "index.html": '<script type="module" src="./viewer.js"></script>',
-        "viewer.js": "window.parent.postMessage({type: 'decentralabs:digital-twin-ready', version: 1}, '*');",
+        "viewer.js": "window.parent.postMessage({type: 'decentralabs:digital-twin-ready', version: 2}, '*');",
     })
 
     assert sync_fmu_examples.validate_webapp_bundle(archive) == {"index.html", "viewer.js"}
