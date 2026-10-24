@@ -1,4 +1,3 @@
-import json
 import sys
 import zipfile
 from pathlib import Path
@@ -53,35 +52,21 @@ def test_webapp_bundle_validator_rejects_external_runtime_dependencies(tmp_path)
         sync_fmu_examples.validate_webapp_bundle(archive)
 
 
-def test_webapp_bundle_validator_accepts_the_canonical_sdk_copy(tmp_path, monkeypatch):
-    sdk_directory = tmp_path / "digital-twin-app-protocol"
-    sdk_directory.mkdir()
-    sdk_source = "export function postToHost() {}"
-    (sdk_directory / "package.json").write_text(json.dumps({"browserBundleFile": "digitalTwinAppProtocol.js"}), encoding="utf-8")
-    (sdk_directory / "index.js").write_text(sdk_source, encoding="utf-8")
-    monkeypatch.setattr(sync_fmu_examples, "MARKETPLACE_PROTOCOL_PACKAGE", sdk_directory)
-    archive = write_webapp(tmp_path / "canonical-sdk.webapp.zip", {
-        "index.html": '<script type="module" src="./app.js"></script>',
-        "app.js": "import { postToHost } from './digitalTwinAppProtocol.js';",
-        "digitalTwinAppProtocol.js": sdk_source,
+
+def test_webapp_bundle_validator_accepts_direct_messages_without_an_sdk(tmp_path):
+    archive = write_webapp(tmp_path / "messages-only.webapp.zip", {
+        "index.html": '<script type="module" src="./viewer.js"></script>',
+        "viewer.js": "window.parent.postMessage({type: 'decentralabs:digital-twin-ready', version: 1}, '*');",
     })
 
-    files = sync_fmu_examples.validate_webapp_bundle(archive, verify_protocol_sdk=True)
-
-    assert "digitalTwinAppProtocol.js" in files
+    assert sync_fmu_examples.validate_webapp_bundle(archive) == {"index.html", "viewer.js"}
 
 
-def test_webapp_bundle_validator_rejects_a_stale_sdk_copy(tmp_path, monkeypatch):
-    sdk_directory = tmp_path / "digital-twin-app-protocol"
-    sdk_directory.mkdir()
-    (sdk_directory / "package.json").write_text(json.dumps({"browserBundleFile": "digitalTwinAppProtocol.js"}), encoding="utf-8")
-    (sdk_directory / "index.js").write_text("export const protocolVersion = 1", encoding="utf-8")
-    monkeypatch.setattr(sync_fmu_examples, "MARKETPLACE_PROTOCOL_PACKAGE", sdk_directory)
-    archive = write_webapp(tmp_path / "stale-sdk.webapp.zip", {
-        "index.html": '<script type="module" src="./app.js"></script>',
-        "app.js": "import { protocolVersion } from './digitalTwinAppProtocol.js';",
-        "digitalTwinAppProtocol.js": "export const protocolVersion = 0",
+def test_webapp_bundle_validator_accepts_a_separately_bundled_client(tmp_path):
+    archive = write_webapp(tmp_path / "optional-client.webapp.zip", {
+        "index.html": '<script type="module" src="./viewer.js"></script>',
+        "viewer.js": "import { connect } from './custom/client.js'; connect();",
+        "custom/client.js": "export function connect() {}",
     })
 
-    with pytest.raises(ValueError, match="stale Marketplace SDK module"):
-        sync_fmu_examples.validate_webapp_bundle(archive, verify_protocol_sdk=True)
+    assert "custom/client.js" in sync_fmu_examples.validate_webapp_bundle(archive)

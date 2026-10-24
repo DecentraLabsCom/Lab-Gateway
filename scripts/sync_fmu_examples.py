@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import posixpath
 import re
 import shutil
@@ -23,7 +22,6 @@ from urllib.parse import urlsplit
 
 GATEWAY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXAMPLES_ROOT = GATEWAY_ROOT.parent / "FMU-Executor" / "examples"
-MARKETPLACE_PROTOCOL_PACKAGE = GATEWAY_ROOT.parent / "Marketplace" / "packages" / "digital-twin-app-protocol"
 REFERENCE_FMU_NAMES = {
     "BinaryClockTest.fmu",
     "BouncingBall.fmu",
@@ -39,39 +37,6 @@ STATIC_IMPORT_PATTERNS = (
     re.compile(r"\bimport\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"),
 )
 CSS_URL_PATTERN = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE)
-REQUIRED_APP_PROTOCOL_MESSAGES = {
-    "decentralabs:digital-twin-host-ready",
-    "decentralabs:digital-twin-ready",
-    "decentralabs:digital-twin-error",
-    "decentralabs:fmi-sample",
-    "decentralabs:fmi-reset",
-    "decentralabs:fmi-simulation-state",
-    "decentralabs:fmi-samples",
-    "decentralabs:fmi-playback-control",
-    "decentralabs:fmi-run-request",
-    "decentralabs:fmi-run-accepted",
-    "decentralabs:fmi-run-rejected",
-    "decentralabs:fmi-run-cancel",
-    "decentralabs:fmi-run-cancelled",
-    "decentralabs:fmi-samples-ack",
-    "playback-rate",
-    "sample-acknowledgement",
-    "MAX_SAMPLE_BATCH_JSON_CHARS",
-    "isHostMessageEvent",
-}
-QFMU_REQUIRED_APP_PROTOCOL_MESSAGES = {
-    "decentralabs:digital-twin-host-ready",
-    "decentralabs:digital-twin-ready",
-    "decentralabs:fmi-run-request",
-    "decentralabs:fmi-run-accepted",
-    "decentralabs:fmi-run-rejected",
-    "decentralabs:fmi-samples",
-    "decentralabs:fmi-samples-ack",
-    "decentralabs:fmi-reset",
-    "decentralabs:fmi-simulation-state",
-    "decentralabs:digital-twin-model-change",
-    "sample-acknowledgement",
-}
 BOPTEST_COMPLEX_FMU_NAME = "BOPTEST-MultizoneOfficeComplexAir.fmu"
 BOPTEST_COMPLEX_APP_NAME = "BOPTEST-MultizoneOfficeComplexAir.webapp.zip"
 BOPTEST_COMPLEX_LICENSE_NAME = "BOPTEST-ComplexAir.LICENSE.txt"
@@ -183,26 +148,7 @@ def _resolve_webapp_asset_reference(source: str, reference: str, files: set[str]
     return target
 
 
-def _marketplace_protocol_sdk() -> tuple[str, bytes] | None:
-    package_path = MARKETPLACE_PROTOCOL_PACKAGE / "package.json"
-    if not package_path.is_file():
-        return None
-    try:
-        package_metadata = json.loads(package_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError(f"Invalid Marketplace protocol SDK metadata: {error}") from error
-
-    filename = package_metadata.get("browserBundleFile")
-    source_path = MARKETPLACE_PROTOCOL_PACKAGE / "index.js"
-    if not isinstance(filename, str) or Path(filename).name != filename or not filename.endswith(".js"):
-        raise ValueError("Marketplace protocol SDK has an invalid browser bundle filename")
-    try:
-        return filename, source_path.read_bytes()
-    except OSError as error:
-        raise ValueError(f"Marketplace protocol SDK source is unavailable: {error}") from error
-
-
-def validate_webapp_bundle(path: Path, *, verify_protocol_sdk: bool = False) -> set[str]:
+def validate_webapp_bundle(path: Path) -> set[str]:
     """Check that a static web app archive contains its full local asset graph."""
     try:
         with zipfile.ZipFile(path) as archive:
@@ -221,15 +167,6 @@ def validate_webapp_bundle(path: Path, *, verify_protocol_sdk: bool = False) -> 
                     or any(part in {".", ".."} for part in pure_path.parts)
                 ):
                     raise ValueError(f"The web app archive contains an unsafe path: {name}")
-
-            if verify_protocol_sdk:
-                marketplace_sdk = _marketplace_protocol_sdk()
-                if marketplace_sdk:
-                    sdk_filename, sdk_source = marketplace_sdk
-                    if sdk_filename not in files:
-                        raise ValueError(f"The web app archive is missing the Marketplace SDK module: {sdk_filename}")
-                    if archive.read(sdk_filename) != sdk_source:
-                        raise ValueError(f"The web app archive has a stale Marketplace SDK module: {sdk_filename}")
 
             for name in sorted(files):
                 suffix = PurePosixPath(name).suffix.lower()
@@ -314,22 +251,13 @@ def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: s
 
 
 def validate_qfmu_webapp(path: Path) -> None:
+    validate_webapp_bundle(path)
     try:
         with zipfile.ZipFile(path) as archive:
             names = set(archive.namelist())
             missing = QFMU_WEBAPP_REQUIRED_FILES - names
             if missing:
                 raise ValueError(f"qFMU app is missing files: {', '.join(sorted(missing))}")
-            app_script = archive.read("app.js").decode("utf-8")
-            if "decentralabs:fmi-run-request" not in app_script:
-                raise ValueError("The qFMU app does not use the Marketplace FMI execution bridge.")
-            if "decentralabs:digital-twin-model-change" not in app_script:
-                raise ValueError("The qFMU app does not request model changes through its host.")
-            missing_protocol = QFMU_REQUIRED_APP_PROTOCOL_MESSAGES - {
-                message for message in QFMU_REQUIRED_APP_PROTOCOL_MESSAGES if message in app_script
-            }
-            if missing_protocol:
-                raise ValueError("The qFMU app is missing host protocol messages: " + ", ".join(sorted(missing_protocol)))
     except (OSError, UnicodeDecodeError, zipfile.BadZipFile) as error:
         raise ValueError(f"Invalid qFMU companion app {path}: {error}") from error
 
@@ -379,14 +307,13 @@ def validate_dc_motor_fmu(path: Path) -> None:
 
 
 def validate_dc_motor_app(path: Path) -> None:
-    validate_webapp_bundle(path, verify_protocol_sdk=True)
+    validate_webapp_bundle(path)
     try:
         with zipfile.ZipFile(path) as archive:
             files = set(archive.namelist())
             required = {
                 "index.html",
                 "app.js",
-                "digitalTwinAppProtocol.js",
                 "scene.js",
                 "styles.css",
                 "vendor/three.module.js",
@@ -398,26 +325,18 @@ def validate_dc_motor_app(path: Path) -> None:
             if missing:
                 raise ValueError("The DC motor web app is incomplete: " + ", ".join(sorted(missing)))
             app = archive.read("app.js").decode("utf-8")
-            protocol = archive.read("digitalTwinAppProtocol.js").decode("utf-8")
             index = archive.read("index.html").decode("utf-8")
     except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as error:
         raise ValueError(f"Invalid DC motor app bundle: {error}") from error
-    protocol_surface = app + protocol
-    missing_protocol = REQUIRED_APP_PROTOCOL_MESSAGES - {message for message in REQUIRED_APP_PROTOCOL_MESSAGES if message in protocol_surface}
-    if missing_protocol:
-        raise ValueError("The DC motor app is missing host messages: " + ", ".join(sorted(missing_protocol)))
-    if "isHostMessageEvent(event)" not in app:
-        raise ValueError("The DC motor app must validate its host message source.")
     if "https://" in index or "http://" in index or "https://" in app or "http://" in app:
         raise ValueError("The DC motor app must not depend on external runtime services.")
 
 
 def validate_water_tank_app(path: Path) -> None:
-    validate_webapp_bundle(path, verify_protocol_sdk=True)
+    validate_webapp_bundle(path)
     required_files = {
         "index.html",
         "app.js",
-        "digitalTwinAppProtocol.js",
         "scene.js",
         "styles.css",
         "vendor/three.module.js",
@@ -432,17 +351,10 @@ def validate_water_tank_app(path: Path) -> None:
             if missing:
                 raise ValueError("The water-tank web app is incomplete: " + ", ".join(sorted(missing)))
             app = archive.read("app.js").decode("utf-8")
-            protocol = archive.read("digitalTwinAppProtocol.js").decode("utf-8")
             index = archive.read("index.html").decode("utf-8")
     except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as error:
         raise ValueError(f"Invalid water-tank app bundle: {error}") from error
-    protocol_surface = app + protocol
-    missing_protocol = REQUIRED_APP_PROTOCOL_MESSAGES - {message for message in REQUIRED_APP_PROTOCOL_MESSAGES if message in protocol_surface}
-    if missing_protocol:
-        raise ValueError("The water-tank app is missing host protocol messages: " + ", ".join(sorted(missing_protocol)))
-    if "isHostMessageEvent(event)" not in app:
-        raise ValueError("The water-tank app must validate its host message source.")
-    if any("http://" in source or "https://" in source for source in (app, protocol, index)):
+    if any("http://" in source or "https://" in source for source in (app, index)):
         raise ValueError("The water-tank app must not depend on external runtime services.")
 
 
@@ -621,21 +533,16 @@ def sync(
         warehouse_embedded_scene = archive.read("resources/smart-warehouse-cell.glb")
     if warehouse_embedded_scene != warehouse_scene.read_bytes():
         raise ValueError("The Smart Warehouse FMU's embedded scene differs from its companion GLB.")
-    validate_webapp_bundle(warehouse_app, verify_protocol_sdk=True)
+    validate_webapp_bundle(warehouse_app)
     with zipfile.ZipFile(warehouse_app) as archive:
         app_names = set(archive.namelist())
-        if not {"index.html", "app.js", "digitalTwinAppProtocol.js", "scene.js"}.issubset(app_names):
+        if not {"index.html", "app.js", "scene.js"}.issubset(app_names):
             raise ValueError("The Smart Warehouse app bundle is missing its procedural scene modules.")
         if "warehouse.glb" in app_names or "vendor/GLTFLoader.js" in app_names:
             raise ValueError("The Smart Warehouse Three.js app must build its scene independently from the GLB.")
         app_script = archive.read("app.js").decode("utf-8")
-        protocol_script = archive.read("digitalTwinAppProtocol.js").decode("utf-8")
         if "createSmartWarehouseScene" not in app_script or "scene.js" not in app_script:
             raise ValueError("The Smart Warehouse app bundle does not load its procedural scene module.")
-        if any(message not in app_script + protocol_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
-            raise ValueError("The Smart Warehouse app bundle is missing the Marketplace host protocol.")
-        if "isHostMessageEvent(event)" not in app_script:
-            raise ValueError("The Smart Warehouse app must validate its host message source.")
         if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
             raise ValueError("The Smart Warehouse app must request the bottom-right playback control position.")
 
@@ -665,13 +572,12 @@ def sync(
         validate_boptest_complex_air_fmu(complex_fmu)
         if not complex_license.is_file() or "International Building Performance Simulation Association" not in complex_license.read_text(encoding="utf-8"):
             raise ValueError("The local BOPTEST Complex Air FMU must include its upstream redistribution license.")
-        validate_webapp_bundle(complex_app, verify_protocol_sdk=True)
+        validate_webapp_bundle(complex_app)
         with zipfile.ZipFile(complex_app) as archive:
             app_names = set(archive.namelist())
             required_app_files = {
                 "index.html",
                 "app.js",
-                "digitalTwinAppProtocol.js",
                 "scene.js",
                 "styles.css",
                 "vendor/three.module.js",
@@ -694,13 +600,8 @@ def sync(
             if any(marker not in app_index for marker in required_interface_markers):
                 raise ValueError("The local BOPTEST Complex Air app is missing its complete demo interface.")
             app_script = archive.read("app.js").decode("utf-8")
-            protocol_script = archive.read("digitalTwinAppProtocol.js").decode("utf-8")
             if "createComplexOfficeScene" not in app_script or "GLTFLoader" in app_script or ".glb" in app_script.lower():
                 raise ValueError("The local BOPTEST Complex Air app must create its Three.js scene without a GLB.")
-            if any(message not in app_script + protocol_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
-                raise ValueError("The local BOPTEST Complex Air app is missing the Marketplace host protocol.")
-            if "isHostMessageEvent(event)" not in app_script:
-                raise ValueError("The local BOPTEST Complex Air app must validate its host message source.")
             if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
                 raise ValueError("The local BOPTEST Complex Air app must request the bottom-right playback control position.")
         boptest_target.mkdir(parents=True, exist_ok=True)
