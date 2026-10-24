@@ -48,6 +48,15 @@ QFMU_MODELS = {
     "qFMU_SISO.fmu": ({"u1"}, {"y1"}),
     "qFMU_MIMO.fmu": ({"u1", "u2"}, {"y1", "y2"}),
 }
+QFMU_WEBAPP_REQUIRED_FILES = {
+    "index.html",
+    "app.js",
+    "styles.css",
+    "app-config.json",
+    "models.json",
+    "qfmuModelUtils.js",
+    "components/QfmuResponseChart.js",
+}
 DC_MOTOR_FMU_NAME = "DC_motor.fmu"
 DC_MOTOR_APP_NAME = "DC_motor.webapp.zip"
 DC_MOTOR_REQUIRED_PARAMETERS = {
@@ -147,6 +156,22 @@ def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: s
             f"Unexpected qFMU variables in {path.name}: inputs={sorted(inputs)}, "
             f"outputs={sorted(outputs)}"
         )
+
+
+def validate_qfmu_webapp(path: Path) -> None:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            missing = QFMU_WEBAPP_REQUIRED_FILES - names
+            if missing:
+                raise ValueError(f"qFMU app is missing files: {', '.join(sorted(missing))}")
+            app_script = archive.read("app.js").decode("utf-8")
+            if "decentralabs:fmi-run-request" not in app_script:
+                raise ValueError("The qFMU app does not use the Marketplace FMI execution bridge.")
+            if "decentralabs:digital-twin-model-change" not in app_script:
+                raise ValueError("The qFMU app does not request model changes through its host.")
+    except (OSError, UnicodeDecodeError, zipfile.BadZipFile) as error:
+        raise ValueError(f"Invalid qFMU companion app {path}: {error}") from error
 
 
 def validate_dc_motor_fmu(path: Path) -> None:
@@ -440,9 +465,11 @@ def sync(
             required_interface_markers = (
                 "Interactive building simulation",
                 "BOPTEST · DOE Large Office",
-                'id="simulation-form"',
+                'class="page-intro"',
+                'class="experiment-controls"',
                 'id="simulation-days"',
                 'id="run-simulation"',
+                'id="scene"',
             )
             if any(marker not in app_index for marker in required_interface_markers):
                 raise ValueError("The local BOPTEST Complex Air app is missing its complete demo interface.")
@@ -471,6 +498,10 @@ def sync(
             source = qfmu_artifacts / filename
             validate_qfmu_fmu(source, expected_inputs, expected_outputs)
             copy_verified(source, qfmu_target / filename)
+            webapp_name = f"{Path(filename).stem}.webapp.zip"
+            webapp = qfmu_artifacts / "webapps" / webapp_name
+            validate_qfmu_webapp(webapp)
+            copy_verified(webapp, qfmu_target / webapp_name)
         copy_verified(qfmu_license, qfmu_target / QFMU_LICENSE_NAME)
 
     if include_local_dc_motor:
@@ -515,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--include-local-qfmu",
         action="store_true",
-        help="Also copy the four local-only qFMU linear-systems examples",
+        help="Also copy the four local-only qFMU linear-systems FMUs and companion apps",
     )
     parser.add_argument(
         "--include-local-dc-motor",
