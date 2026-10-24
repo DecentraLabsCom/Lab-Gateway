@@ -93,6 +93,15 @@ def test_upload_valid_glb_is_stored_by_content_hash(tmp_path):
         "contentType": "model/gltf-binary",
         "sha256": digest,
         "size": len(content),
+        "validation": {
+            "assetType": "glb",
+            "status": "not_checked",
+            "bindingCount": 0,
+            "validBindingCount": 0,
+            "issueCount": 0,
+            "issues": [],
+            "message": "FMU output metadata was unavailable, so scene bindings could not be checked.",
+        },
     }
     assert (tmp_path / "scenes" / "42" / f"{digest}.glb").read_bytes() == content
 
@@ -118,9 +127,58 @@ def test_upload_valid_threejs_app_is_unpacked_by_archive_hash(tmp_path):
         "sha256": digest,
         "size": len(content),
         "files": 2,
+        "validation": {
+            "assetType": "threejs-app",
+            "status": "passed",
+            "message": "The application bundle structure is valid. Marketplace will confirm app startup when the viewer opens it.",
+        },
     }
     assert (app_root / "index.html").read_bytes().startswith(b"<!doctype html>")
     assert (app_root / "app.js").read_bytes() == b"window.ready = true;"
+
+
+def test_threejs_app_upload_accepts_provider_defined_static_asset_extensions(tmp_path):
+    content = _webapp_archive({
+        "index.html": b"<!doctype html><html><script type=module src='./app.js'></script></html>",
+        "app.js": b"window.ready = true;",
+        "textures/warehouse.ktx2": b"texture-bytes",
+        "shaders/warehouse.glsl": b"void main() {}",
+    })
+
+    response = _client(tmp_path).put(
+        "/admin/digital-twin-assets/42",
+        content=content,
+        headers={
+            "Content-Type": "application/zip",
+            "X-Digital-Twin-Admin-Token": _ADMIN_TOKEN,
+        },
+    )
+    digest = hashlib.sha256(content).hexdigest()
+    app_root = tmp_path / "scenes" / "42" / digest
+
+    assert response.status_code == 200
+    assert response.json()["files"] == 4
+    assert (app_root / "textures" / "warehouse.ktx2").read_bytes() == b"texture-bytes"
+    assert (app_root / "shaders" / "warehouse.glsl").read_bytes() == b"void main() {}"
+
+
+def test_threejs_app_upload_rejects_native_executable_assets(tmp_path):
+    content = _webapp_archive({
+        "index.html": b"<!doctype html><html></html>",
+        "assets/tool.exe": b"executable-bytes",
+    })
+
+    response = _client(tmp_path).put(
+        "/admin/digital-twin-assets/42",
+        content=content,
+        headers={
+            "Content-Type": "application/zip",
+            "X-Digital-Twin-Admin-Token": _ADMIN_TOKEN,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "must not contain executable files" in response.json()["detail"]
 
 
 def test_threejs_app_root_is_traversable_by_read_only_openresty(tmp_path, monkeypatch):

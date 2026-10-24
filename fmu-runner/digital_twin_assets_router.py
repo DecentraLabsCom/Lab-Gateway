@@ -23,6 +23,10 @@ _MAX_WEBAPP_ARCHIVE_BYTES = 50 * 1024 * 1024
 _MAX_WEBAPP_ASSET_BYTES = 50 * 1024 * 1024
 _MAX_WEBAPP_UNPACKED_BYTES = 120 * 1024 * 1024
 _MAX_WEBAPP_FILES = 300
+_EXECUTABLE_WEBAPP_EXTENSIONS = {
+    ".app", ".bat", ".class", ".cmd", ".com", ".dll", ".dylib", ".exe",
+    ".jar", ".msi", ".ps1", ".sh", ".so",
+}
 _GLB_HEADER = struct.Struct("<4sII")
 _CHUNK_HEADER = struct.Struct("<II")
 _GLB_MAGIC = b"glTF"
@@ -284,12 +288,8 @@ def _validate_webapp_archive(content: bytes) -> dict[str, bytes]:
                 if folded_name in normalized_names:
                     raise HTTPException(status_code=400, detail="Application archive contains duplicate paths")
                 normalized_names.add(folded_name)
-                if path.suffix.lower() not in {
-                    ".html", ".js", ".mjs", ".css", ".json", ".wasm", ".glb", ".gltf",
-                    ".bin", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2",
-                    ".ttf", ".ico", ".txt",
-                }:
-                    raise HTTPException(status_code=400, detail="Application archive contains an unsupported file type")
+                if path.suffix.lower() in _EXECUTABLE_WEBAPP_EXTENSIONS:
+                    raise HTTPException(status_code=400, detail="Application archive must not contain executable files")
                 if entry.file_size > _MAX_WEBAPP_ASSET_BYTES:
                     raise HTTPException(status_code=413, detail="A Three.js application asset exceeds 50 MiB")
                 unpacked_size += entry.file_size

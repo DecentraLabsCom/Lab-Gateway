@@ -9,15 +9,21 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import posixpath
+import re
 import shutil
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
-from pathlib import Path
+from html.parser import HTMLParser
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 
 GATEWAY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXAMPLES_ROOT = GATEWAY_ROOT.parent / "FMU-Executor" / "examples"
+MARKETPLACE_PROTOCOL_PACKAGE = GATEWAY_ROOT.parent / "Marketplace" / "packages" / "digital-twin-app-protocol"
 REFERENCE_FMU_NAMES = {
     "BinaryClockTest.fmu",
     "BouncingBall.fmu",
@@ -26,6 +32,13 @@ REFERENCE_FMU_NAMES = {
     "StateSpace.fmu",
     "VanDerPol.fmu",
 }
+STATIC_IMPORT_PATTERNS = (
+    re.compile(r"(?m)^\s*import\s*['\"]([^'\"]+)['\"]"),
+    re.compile(r"(?m)^\s*import\s+(?!['\"])[\s\S]*?\bfrom\s*['\"]([^'\"]+)['\"]"),
+    re.compile(r"(?m)^\s*export\s+[\s\S]*?\bfrom\s*['\"]([^'\"]+)['\"]"),
+    re.compile(r"\bimport\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"),
+)
+CSS_URL_PATTERN = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE)
 REQUIRED_APP_PROTOCOL_MESSAGES = {
     "decentralabs:digital-twin-host-ready",
     "decentralabs:digital-twin-ready",
@@ -132,6 +145,124 @@ def copy_verified(origin: Path, destination: Path) -> None:
     if sha256(origin) != sha256(destination):
         raise OSError(f"Copy verification failed for {destination}")
     print(f"Synced {origin.name} -> {destination}")
+
+
+class _WebAppAssetParser(HTMLParser):
+    """Collect runtime assets referenced directly from static HTML."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.references: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        for name in ("src", "poster", "data"):
+            reference = attributes.get(name)
+            if reference:
+                self.references.append(reference)
+
+        href = attributes.get("href")
+        if tag == "link" and href:
+            relationships = set((attributes.get("rel") or "").lower().split())
+            if relationships & {"stylesheet", "icon", "modulepreload", "preload", "manifest"}:
+                self.references.append(href)
+
+
+def _resolve_webapp_asset_reference(source: str, reference: str, files: set[str]) -> str | None:
+    if reference.startswith(("data:", "blob:", "#")):
+        return None
+    parsed = urlsplit(reference)
+    if parsed.scheme or parsed.netloc or reference.startswith("/"):
+        raise ValueError(f"Web app has an external or root-relative runtime asset: {source}: {reference}")
+    if not parsed.path or "\\" in parsed.path:
+        raise ValueError(f"Web app has an invalid runtime asset path: {source}: {reference}")
+
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(source), parsed.path))
+    if target in {".", ".."} or target.startswith("../") or target not in files:
+        raise ValueError(f"Web app asset is missing from the bundle: {source}: {reference}")
+    return target
+
+
+def _marketplace_protocol_sdk() -> tuple[str, bytes] | None:
+    package_path = MARKETPLACE_PROTOCOL_PACKAGE / "package.json"
+    if not package_path.is_file():
+        return None
+    try:
+        package_metadata = json.loads(package_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid Marketplace protocol SDK metadata: {error}") from error
+
+    filename = package_metadata.get("browserBundleFile")
+    source_path = MARKETPLACE_PROTOCOL_PACKAGE / "index.js"
+    if not isinstance(filename, str) or Path(filename).name != filename or not filename.endswith(".js"):
+        raise ValueError("Marketplace protocol SDK has an invalid browser bundle filename")
+    try:
+        return filename, source_path.read_bytes()
+    except OSError as error:
+        raise ValueError(f"Marketplace protocol SDK source is unavailable: {error}") from error
+
+
+def validate_webapp_bundle(path: Path, *, verify_protocol_sdk: bool = False) -> set[str]:
+    """Check that a static web app archive contains its full local asset graph."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = archive.namelist()
+            files = {name for name in names if not name.endswith("/")}
+            if len(files) != sum(not name.endswith("/") for name in names):
+                raise ValueError(f"The web app archive contains duplicate file paths: {path}")
+            if "index.html" not in files:
+                raise ValueError(f"The web app archive has no root index.html: {path}")
+
+            for name in sorted(files):
+                pure_path = PurePosixPath(name)
+                if (
+                    "\\" in name
+                    or pure_path.is_absolute()
+                    or any(part in {".", ".."} for part in pure_path.parts)
+                ):
+                    raise ValueError(f"The web app archive contains an unsafe path: {name}")
+
+            if verify_protocol_sdk:
+                marketplace_sdk = _marketplace_protocol_sdk()
+                if marketplace_sdk:
+                    sdk_filename, sdk_source = marketplace_sdk
+                    if sdk_filename not in files:
+                        raise ValueError(f"The web app archive is missing the Marketplace SDK module: {sdk_filename}")
+                    if archive.read(sdk_filename) != sdk_source:
+                        raise ValueError(f"The web app archive has a stale Marketplace SDK module: {sdk_filename}")
+
+            for name in sorted(files):
+                suffix = PurePosixPath(name).suffix.lower()
+                if suffix in {".js", ".mjs"}:
+                    source = archive.read(name).decode("utf-8")
+                    references = {
+                        match.group(1)
+                        for pattern in STATIC_IMPORT_PATTERNS
+                        for match in pattern.finditer(source)
+                    }
+                elif suffix == ".html":
+                    source = archive.read(name).decode("utf-8")
+                    parser = _WebAppAssetParser()
+                    parser.feed(source)
+                    references = set(parser.references)
+                    references.update(match.group(2).strip() for match in CSS_URL_PATTERN.finditer(source))
+                elif suffix == ".css":
+                    source = archive.read(name).decode("utf-8")
+                    references = {match.group(2).strip() for match in CSS_URL_PATTERN.finditer(source)}
+                    references.update(match.group(1) for match in re.finditer(
+                        r"@import\s+(?:url\(\s*)?['\"]?([^'\"\s)]+)", source, re.IGNORECASE,
+                    ))
+                else:
+                    continue
+
+                for reference in sorted(references):
+                    if suffix in {".js", ".mjs"} and not reference.startswith(("./", "../")):
+                        raise ValueError(f"Web app has an unbundled module import: {name}: {reference}")
+                    _resolve_webapp_asset_reference(name, reference, files)
+    except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as error:
+        raise ValueError(f"Invalid static web app bundle {path}: {error}") from error
+
+    return files
 
 
 def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: set[str]) -> None:
@@ -248,6 +379,7 @@ def validate_dc_motor_fmu(path: Path) -> None:
 
 
 def validate_dc_motor_app(path: Path) -> None:
+    validate_webapp_bundle(path, verify_protocol_sdk=True)
     try:
         with zipfile.ZipFile(path) as archive:
             files = set(archive.namelist())
@@ -281,6 +413,7 @@ def validate_dc_motor_app(path: Path) -> None:
 
 
 def validate_water_tank_app(path: Path) -> None:
+    validate_webapp_bundle(path, verify_protocol_sdk=True)
     required_files = {
         "index.html",
         "app.js",
@@ -488,6 +621,7 @@ def sync(
         warehouse_embedded_scene = archive.read("resources/smart-warehouse-cell.glb")
     if warehouse_embedded_scene != warehouse_scene.read_bytes():
         raise ValueError("The Smart Warehouse FMU's embedded scene differs from its companion GLB.")
+    validate_webapp_bundle(warehouse_app, verify_protocol_sdk=True)
     with zipfile.ZipFile(warehouse_app) as archive:
         app_names = set(archive.namelist())
         if not {"index.html", "app.js", "digitalTwinAppProtocol.js", "scene.js"}.issubset(app_names):
@@ -531,6 +665,7 @@ def sync(
         validate_boptest_complex_air_fmu(complex_fmu)
         if not complex_license.is_file() or "International Building Performance Simulation Association" not in complex_license.read_text(encoding="utf-8"):
             raise ValueError("The local BOPTEST Complex Air FMU must include its upstream redistribution license.")
+        validate_webapp_bundle(complex_app, verify_protocol_sdk=True)
         with zipfile.ZipFile(complex_app) as archive:
             app_names = set(archive.namelist())
             required_app_files = {

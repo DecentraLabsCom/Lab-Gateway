@@ -170,8 +170,9 @@ Gateway stores each managed asset read-only under an immutable,
 content-addressed path. It accepts self-contained glTF 2.0 binary scenes up to
 50 MiB. Static app ZIPs must contain a root `index.html`, use safe relative
 asset paths and bundled modules, and stay within the configured file-count and
-expanded-size limits. Symlinks, unsupported files and remote asset URLs are
-rejected. Gateway executes no provider server code.
+expanded-size limits. Assets are served as static files; there is no per-app
+filename or file-format allowlist. Native executable files, symlinks, special
+files and unsafe paths are rejected. Gateway executes no provider server code.
 
 The authenticated Gateway import endpoint is
 `POST /lab-admin/digital-twin-assets/{labId}/from-fmu` with JSON
