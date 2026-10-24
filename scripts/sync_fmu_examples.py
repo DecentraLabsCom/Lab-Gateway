@@ -34,6 +34,8 @@ REQUIRED_APP_PROTOCOL_MESSAGES = {
     "decentralabs:fmi-reset",
     "decentralabs:fmi-simulation-state",
     "decentralabs:fmi-samples",
+    "decentralabs:fmi-playback-control",
+    "playback-rate",
 }
 BOPTEST_COMPLEX_FMU_NAME = "BOPTEST-MultizoneOfficeComplexAir.fmu"
 BOPTEST_COMPLEX_APP_NAME = "BOPTEST-MultizoneOfficeComplexAir.webapp.zip"
@@ -404,6 +406,8 @@ def sync(
             raise ValueError("The Smart Warehouse app bundle does not load its procedural scene module.")
         if any(message not in app_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
             raise ValueError("The Smart Warehouse app bundle is missing the Marketplace host protocol.")
+        if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
+            raise ValueError("The Smart Warehouse app must request the bottom-right playback control position.")
 
     copy_verified(warehouse_fmu, target / "SmartWarehouseCell.fmu")
     copy_verified(warehouse_scene, target / "SmartWarehouseCell.glb")
@@ -432,11 +436,23 @@ def sync(
             missing_app_files = required_app_files - app_names
             if missing_app_files:
                 raise ValueError("The local BOPTEST Complex Air app is incomplete: " + ", ".join(sorted(missing_app_files)))
+            app_index = archive.read("index.html").decode("utf-8")
+            required_interface_markers = (
+                "Interactive building simulation",
+                "BOPTEST · DOE Large Office",
+                'id="simulation-form"',
+                'id="simulation-days"',
+                'id="run-simulation"',
+            )
+            if any(marker not in app_index for marker in required_interface_markers):
+                raise ValueError("The local BOPTEST Complex Air app is missing its complete demo interface.")
             app_script = archive.read("app.js").decode("utf-8")
             if "createComplexOfficeScene" not in app_script or "GLTFLoader" in app_script or ".glb" in app_script.lower():
                 raise ValueError("The local BOPTEST Complex Air app must create its Three.js scene without a GLB.")
             if any(message not in app_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
                 raise ValueError("The local BOPTEST Complex Air app is missing the Marketplace host protocol.")
+            if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
+                raise ValueError("The local BOPTEST Complex Air app must request the bottom-right playback control position.")
         boptest_target.mkdir(parents=True, exist_ok=True)
         copy_verified(complex_fmu, boptest_target / BOPTEST_COMPLEX_FMU_NAME)
         copy_verified(complex_app, boptest_target / BOPTEST_COMPLEX_APP_NAME)
