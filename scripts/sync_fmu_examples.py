@@ -340,7 +340,7 @@ def sync(
         "BOPTEST-SimpleAir-TestPatch2.fmu",
     ):
         (target / obsolete_name).unlink(missing_ok=True)
-    if boptest_target.is_dir():
+    if include_local_boptest and boptest_target.is_dir():
         for local_boptest_name in (
             BOPTEST_COMPLEX_FMU_NAME,
             BOPTEST_COMPLEX_APP_NAME,
