@@ -1,8 +1,8 @@
 """Sync canonical FMU examples into Gateway's ignored development data directory.
 
-The six reference FMUs and Smart Warehouse are synced by default. The local
-BOPTEST building preview, qFMU and other new demo artifacts require explicit
-flags. This script never adds demo files to Gateway images or release packages.
+The six reference FMUs and Smart Warehouse are synced by default. Local
+BOPTEST, qFMU, water-tank and DC-motor demos require explicit flags. This
+script never adds demo files to Gateway images or release packages.
 """
 
 from __future__ import annotations
@@ -35,7 +35,29 @@ REQUIRED_APP_PROTOCOL_MESSAGES = {
     "decentralabs:fmi-simulation-state",
     "decentralabs:fmi-samples",
     "decentralabs:fmi-playback-control",
+    "decentralabs:fmi-run-request",
+    "decentralabs:fmi-run-accepted",
+    "decentralabs:fmi-run-rejected",
+    "decentralabs:fmi-run-cancel",
+    "decentralabs:fmi-run-cancelled",
+    "decentralabs:fmi-samples-ack",
     "playback-rate",
+    "sample-acknowledgement",
+    "MAX_SAMPLE_BATCH_JSON_CHARS",
+    "isHostMessageEvent",
+}
+QFMU_REQUIRED_APP_PROTOCOL_MESSAGES = {
+    "decentralabs:digital-twin-host-ready",
+    "decentralabs:digital-twin-ready",
+    "decentralabs:fmi-run-request",
+    "decentralabs:fmi-run-accepted",
+    "decentralabs:fmi-run-rejected",
+    "decentralabs:fmi-samples",
+    "decentralabs:fmi-samples-ack",
+    "decentralabs:fmi-reset",
+    "decentralabs:fmi-simulation-state",
+    "decentralabs:digital-twin-model-change",
+    "sample-acknowledgement",
 }
 BOPTEST_COMPLEX_FMU_NAME = "BOPTEST-MultizoneOfficeComplexAir.fmu"
 BOPTEST_COMPLEX_APP_NAME = "BOPTEST-MultizoneOfficeComplexAir.webapp.zip"
@@ -59,6 +81,8 @@ QFMU_WEBAPP_REQUIRED_FILES = {
 }
 DC_MOTOR_FMU_NAME = "DC_motor.fmu"
 DC_MOTOR_APP_NAME = "DC_motor.webapp.zip"
+WATER_TANK_FMU_NAME = "singlewatertank-20sim.fmu"
+WATER_TANK_APP_NAME = "singlewatertank-20sim.webapp.zip"
 DC_MOTOR_REQUIRED_PARAMETERS = {
     "speedController.k",
     "speedController.Ti",
@@ -170,6 +194,11 @@ def validate_qfmu_webapp(path: Path) -> None:
                 raise ValueError("The qFMU app does not use the Marketplace FMI execution bridge.")
             if "decentralabs:digital-twin-model-change" not in app_script:
                 raise ValueError("The qFMU app does not request model changes through its host.")
+            missing_protocol = QFMU_REQUIRED_APP_PROTOCOL_MESSAGES - {
+                message for message in QFMU_REQUIRED_APP_PROTOCOL_MESSAGES if message in app_script
+            }
+            if missing_protocol:
+                raise ValueError("The qFMU app is missing host protocol messages: " + ", ".join(sorted(missing_protocol)))
     except (OSError, UnicodeDecodeError, zipfile.BadZipFile) as error:
         raise ValueError(f"Invalid qFMU companion app {path}: {error}") from error
 
@@ -225,6 +254,7 @@ def validate_dc_motor_app(path: Path) -> None:
             required = {
                 "index.html",
                 "app.js",
+                "digitalTwinAppProtocol.js",
                 "scene.js",
                 "styles.css",
                 "vendor/three.module.js",
@@ -236,14 +266,51 @@ def validate_dc_motor_app(path: Path) -> None:
             if missing:
                 raise ValueError("The DC motor web app is incomplete: " + ", ".join(sorted(missing)))
             app = archive.read("app.js").decode("utf-8")
+            protocol = archive.read("digitalTwinAppProtocol.js").decode("utf-8")
             index = archive.read("index.html").decode("utf-8")
     except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as error:
         raise ValueError(f"Invalid DC motor app bundle: {error}") from error
-    missing_protocol = REQUIRED_APP_PROTOCOL_MESSAGES - {message for message in REQUIRED_APP_PROTOCOL_MESSAGES if message in app}
+    protocol_surface = app + protocol
+    missing_protocol = REQUIRED_APP_PROTOCOL_MESSAGES - {message for message in REQUIRED_APP_PROTOCOL_MESSAGES if message in protocol_surface}
     if missing_protocol:
         raise ValueError("The DC motor app is missing host messages: " + ", ".join(sorted(missing_protocol)))
+    if "isHostMessageEvent(event)" not in app:
+        raise ValueError("The DC motor app must validate its host message source.")
     if "https://" in index or "http://" in index or "https://" in app or "http://" in app:
         raise ValueError("The DC motor app must not depend on external runtime services.")
+
+
+def validate_water_tank_app(path: Path) -> None:
+    required_files = {
+        "index.html",
+        "app.js",
+        "digitalTwinAppProtocol.js",
+        "scene.js",
+        "styles.css",
+        "vendor/three.module.js",
+        "vendor/three.core.js",
+        "vendor/OrbitControls.js",
+        "vendor/THREE-LICENSE.txt",
+    }
+    try:
+        with zipfile.ZipFile(path) as archive:
+            files = set(archive.namelist())
+            missing = required_files - files
+            if missing:
+                raise ValueError("The water-tank web app is incomplete: " + ", ".join(sorted(missing)))
+            app = archive.read("app.js").decode("utf-8")
+            protocol = archive.read("digitalTwinAppProtocol.js").decode("utf-8")
+            index = archive.read("index.html").decode("utf-8")
+    except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as error:
+        raise ValueError(f"Invalid water-tank app bundle: {error}") from error
+    protocol_surface = app + protocol
+    missing_protocol = REQUIRED_APP_PROTOCOL_MESSAGES - {message for message in REQUIRED_APP_PROTOCOL_MESSAGES if message in protocol_surface}
+    if missing_protocol:
+        raise ValueError("The water-tank app is missing host protocol messages: " + ", ".join(sorted(missing_protocol)))
+    if "isHostMessageEvent(event)" not in app:
+        raise ValueError("The water-tank app must validate its host message source.")
+    if any("http://" in source or "https://" in source for source in (app, protocol, index)):
+        raise ValueError("The water-tank app must not depend on external runtime services.")
 
 
 def validate_boptest_complex_air_fmu(path: Path) -> set[str]:
@@ -344,6 +411,7 @@ def sync(
     include_local_boptest: bool = False,
     include_local_qfmu: bool = False,
     include_local_dc_motor: bool = False,
+    include_local_water_tank: bool = False,
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     boptest_target = target / "local-demos" / "boptest-building" / "linux64"
@@ -422,15 +490,18 @@ def sync(
         raise ValueError("The Smart Warehouse FMU's embedded scene differs from its companion GLB.")
     with zipfile.ZipFile(warehouse_app) as archive:
         app_names = set(archive.namelist())
-        if not {"index.html", "app.js", "scene.js"}.issubset(app_names):
+        if not {"index.html", "app.js", "digitalTwinAppProtocol.js", "scene.js"}.issubset(app_names):
             raise ValueError("The Smart Warehouse app bundle is missing its procedural scene modules.")
         if "warehouse.glb" in app_names or "vendor/GLTFLoader.js" in app_names:
             raise ValueError("The Smart Warehouse Three.js app must build its scene independently from the GLB.")
         app_script = archive.read("app.js").decode("utf-8")
+        protocol_script = archive.read("digitalTwinAppProtocol.js").decode("utf-8")
         if "createSmartWarehouseScene" not in app_script or "scene.js" not in app_script:
             raise ValueError("The Smart Warehouse app bundle does not load its procedural scene module.")
-        if any(message not in app_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
+        if any(message not in app_script + protocol_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
             raise ValueError("The Smart Warehouse app bundle is missing the Marketplace host protocol.")
+        if "isHostMessageEvent(event)" not in app_script:
+            raise ValueError("The Smart Warehouse app must validate its host message source.")
         if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
             raise ValueError("The Smart Warehouse app must request the bottom-right playback control position.")
 
@@ -438,6 +509,19 @@ def sync(
     copy_verified(warehouse_scene, target / "SmartWarehouseCell.glb")
     copy_verified(warehouse_app, target / "SmartWarehouseCell.webapp.zip")
     copy_verified(warehouse_license, target / "SmartWarehouseCell.LICENSE.txt")
+
+    if include_local_water_tank:
+        water_tank_root = examples_root / "local-demos" / "into-cps-water-tank" / "linux64"
+        water_tank_fmu = water_tank_root / WATER_TANK_FMU_NAME
+        water_tank_app = water_tank_root / WATER_TANK_APP_NAME
+        water_tank_entries = validate_linux_x64_fmu(water_tank_fmu)
+        if "binaries/linux64/SingleWatertank.so" not in water_tank_entries:
+            raise ValueError("The water-tank FMU is missing its Linux x86_64 model binary.")
+        validate_water_tank_app(water_tank_app)
+        water_tank_target = target / "local-demos" / "into-cps-water-tank" / "linux64"
+        water_tank_target.mkdir(parents=True, exist_ok=True)
+        copy_verified(water_tank_fmu, water_tank_target / WATER_TANK_FMU_NAME)
+        copy_verified(water_tank_app, water_tank_target / WATER_TANK_APP_NAME)
 
     if include_local_boptest:
         boptest_root = examples_root / "local-demos" / "boptest-building"
@@ -452,6 +536,7 @@ def sync(
             required_app_files = {
                 "index.html",
                 "app.js",
+                "digitalTwinAppProtocol.js",
                 "scene.js",
                 "styles.css",
                 "vendor/three.module.js",
@@ -463,8 +548,8 @@ def sync(
                 raise ValueError("The local BOPTEST Complex Air app is incomplete: " + ", ".join(sorted(missing_app_files)))
             app_index = archive.read("index.html").decode("utf-8")
             required_interface_markers = (
-                "Interactive building simulation",
-                "BOPTEST · DOE Large Office",
+                '<main class="app-shell">',
+                'id="page-title"',
                 'class="page-intro"',
                 'class="experiment-controls"',
                 'id="simulation-days"',
@@ -474,10 +559,13 @@ def sync(
             if any(marker not in app_index for marker in required_interface_markers):
                 raise ValueError("The local BOPTEST Complex Air app is missing its complete demo interface.")
             app_script = archive.read("app.js").decode("utf-8")
+            protocol_script = archive.read("digitalTwinAppProtocol.js").decode("utf-8")
             if "createComplexOfficeScene" not in app_script or "GLTFLoader" in app_script or ".glb" in app_script.lower():
                 raise ValueError("The local BOPTEST Complex Air app must create its Three.js scene without a GLB.")
-            if any(message not in app_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
+            if any(message not in app_script + protocol_script for message in REQUIRED_APP_PROTOCOL_MESSAGES):
                 raise ValueError("The local BOPTEST Complex Air app is missing the Marketplace host protocol.")
+            if "isHostMessageEvent(event)" not in app_script:
+                raise ValueError("The local BOPTEST Complex Air app must validate its host message source.")
             if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
                 raise ValueError("The local BOPTEST Complex Air app must request the bottom-right playback control position.")
         boptest_target.mkdir(parents=True, exist_ok=True)
@@ -553,6 +641,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also copy the local-only DC motor teaching demo and its app bundle",
     )
+    parser.add_argument(
+        "--include-local-water-tank",
+        action="store_true",
+        help="Also copy the local-only INTO-CPS water-tank demo and its app bundle",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -562,6 +655,7 @@ def main(argv: list[str] | None = None) -> int:
             include_local_boptest=args.include_local_boptest,
             include_local_qfmu=args.include_local_qfmu,
             include_local_dc_motor=args.include_local_dc_motor,
+            include_local_water_tank=args.include_local_water_tank,
         )
     except (FileNotFoundError, OSError, ValueError) as error:
         print(error, file=sys.stderr)
