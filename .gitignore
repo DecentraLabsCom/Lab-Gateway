@@ -104,6 +104,7 @@ dev/
 /openresty/conf.d/gateway_dev_qfmu.conf
 /openresty/conf.d/gateway_dev_smart_warehouse.conf
 /openresty/conf.d/gateway_dev_boptest_building.conf
+/openresty/conf.d/gateway_dev_lateral_motion.conf
 /openresty/gateway.local-demo.conf
 ops-worker/hosts.json
 ops-data/winrm-credentials.json

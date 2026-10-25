@@ -1,8 +1,9 @@
 """Sync canonical FMU examples into Gateway's ignored development data directory.
 
 The six reference FMUs and Smart Warehouse are synced by default. Local
-BOPTEST, qFMU, water-tank and DC-motor demos require explicit flags. This
-script never adds demo files to Gateway images or release packages.
+BOPTEST, qFMU, water-tank, DC-motor and inverted-pendulum demos require
+explicit flags. This script never adds demo files to Gateway images or release
+packages.
 """
 
 from __future__ import annotations
@@ -57,8 +58,14 @@ QFMU_WEBAPP_REQUIRED_FILES = {
     "qfmuModelUtils.js",
     "components/QfmuResponseChart.js",
 }
+FMU_SESSION_APP_MARKERS = (
+    "decentralabs:digital-twin-connect",
+    "decentralabs:fmu-connection-request",
+    "decentralabs:fmu-connection-ready",
+)
 DC_MOTOR_FMU_NAME = "DC_motor.fmu"
 DC_MOTOR_APP_NAME = "DC_motor.webapp.zip"
+INVERTED_PENDULUM_FMU_NAME = "InvertedPendulum.fmu"
 WATER_TANK_FMU_NAME = "singlewatertank-20sim.fmu"
 WATER_TANK_APP_NAME = "singlewatertank-20sim.webapp.zip"
 DC_MOTOR_REQUIRED_PARAMETERS = {
@@ -73,6 +80,10 @@ DC_MOTOR_REQUIRED_PARAMETERS = {
     "data.Jm.value",
 }
 DC_MOTOR_REQUIRED_OUTPUTS = {"out_control_err", "out_load_speed", "out_motor_speed"}
+EXTERNAL_ANCHOR_HREF_PATTERN = re.compile(
+    r'(<a\b[^>]*?\bhref\s*=\s*)(["\'])https?://[^"\']*\2',
+    re.IGNORECASE,
+)
 
 
 def sha256(path: Path) -> str:
@@ -202,6 +213,29 @@ def validate_webapp_bundle(path: Path) -> set[str]:
     return files
 
 
+def validate_fmu_session_app(path: Path) -> None:
+    """Require companion apps to use the host grant and generic FMI session protocol."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            sources = "\n".join(
+                archive.read(name).decode("utf-8")
+                for name in archive.namelist()
+                if PurePosixPath(name).suffix.lower() in {".js", ".mjs"}
+            )
+    except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as error:
+        raise ValueError(f"Invalid companion app source in {path}: {error}") from error
+
+    missing_markers = [marker for marker in FMU_SESSION_APP_MARKERS if marker not in sources]
+    if missing_markers:
+        raise ValueError(
+            f"The companion app does not implement the generic FMU session handshake: {path}"
+        )
+    if "/api/dev/" in sources or "simulations/stream" in sources:
+        raise ValueError(
+            f"The companion app must run the FMU through the generic Gateway session, not a demo endpoint: {path}"
+        )
+
+
 def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: set[str]) -> None:
     names = validate_linux_x64_fmu(path)
     identifier = path.stem
@@ -252,6 +286,7 @@ def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: s
 
 def validate_qfmu_webapp(path: Path) -> None:
     validate_webapp_bundle(path)
+    validate_fmu_session_app(path)
     try:
         with zipfile.ZipFile(path) as archive:
             names = set(archive.namelist())
@@ -306,8 +341,42 @@ def validate_dc_motor_fmu(path: Path) -> None:
         raise ValueError("The DC motor FMU is missing tunable parameters: " + ", ".join(sorted(missing_parameters)))
 
 
+def validate_inverted_pendulum_fmu(path: Path) -> None:
+    names = validate_linux_x64_fmu(path)
+    if "binaries/linux64/InvertedPendulum.so" not in names:
+        raise ValueError("The inverted-pendulum FMU is missing its Linux x86_64 model binary.")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            description = ET.fromstring(archive.read("modelDescription.xml"))
+    except (OSError, zipfile.BadZipFile, ET.ParseError) as error:
+        raise ValueError(f"Invalid inverted-pendulum model description: {error}") from error
+
+    if description.attrib.get("fmiVersion") != "2.0":
+        raise ValueError("The inverted-pendulum FMU must use FMI 2.0.")
+    co_simulation = description.find("{*}CoSimulation")
+    if co_simulation is None or co_simulation.attrib.get("modelIdentifier") != "InvertedPendulum":
+        raise ValueError("The inverted-pendulum FMU must expose FMI Co-Simulation as InvertedPendulum.")
+    variables = description.find("{*}ModelVariables")
+    if variables is None:
+        raise ValueError("The inverted-pendulum FMU has no model variables.")
+
+    interface: dict[str, set[str]] = {"input": set(), "output": set(), "parameter": set()}
+    for variable in variables:
+        name = variable.attrib.get("name")
+        causality = variable.attrib.get("causality")
+        if name and causality in interface:
+            interface[causality].add(name)
+    if "inputForce" not in interface["input"]:
+        raise ValueError("The inverted-pendulum FMU is missing inputForce.")
+    if not {"displacement", "velocity", "angle", "angularvelocity"} <= interface["output"]:
+        raise ValueError("The inverted-pendulum FMU is missing cart-pole state outputs.")
+    if not {"phi_start", "disp_start", "velo_start", "w_start"} <= interface["parameter"]:
+        raise ValueError("The inverted-pendulum FMU is missing its initial-state parameters.")
+
+
 def validate_dc_motor_app(path: Path) -> None:
     validate_webapp_bundle(path)
+    validate_fmu_session_app(path)
     try:
         with zipfile.ZipFile(path) as archive:
             files = set(archive.namelist())
@@ -328,12 +397,14 @@ def validate_dc_motor_app(path: Path) -> None:
             index = archive.read("index.html").decode("utf-8")
     except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as error:
         raise ValueError(f"Invalid DC motor app bundle: {error}") from error
-    if "https://" in index or "http://" in index or "https://" in app or "http://" in app:
+    index_without_source_links = EXTERNAL_ANCHOR_HREF_PATTERN.sub(r"\1\2\2", index)
+    if any(re.search(r"https?://", source, re.IGNORECASE) for source in (index_without_source_links, app)):
         raise ValueError("The DC motor app must not depend on external runtime services.")
 
 
 def validate_water_tank_app(path: Path) -> None:
     validate_webapp_bundle(path)
+    validate_fmu_session_app(path)
     required_files = {
         "index.html",
         "app.js",
@@ -457,6 +528,7 @@ def sync(
     include_local_qfmu: bool = False,
     include_local_dc_motor: bool = False,
     include_local_water_tank: bool = False,
+    include_local_inverted_pendulum: bool = False,
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     boptest_target = target / "local-demos" / "boptest-building" / "linux64"
@@ -550,6 +622,13 @@ def sync(
     copy_verified(warehouse_scene, target / "SmartWarehouseCell.glb")
     copy_verified(warehouse_app, target / "SmartWarehouseCell.webapp.zip")
     copy_verified(warehouse_license, target / "SmartWarehouseCell.LICENSE.txt")
+
+    if include_local_inverted_pendulum:
+        pendulum_fmu = examples_root / "local-demos" / "inverted-pendulum" / INVERTED_PENDULUM_FMU_NAME
+        validate_inverted_pendulum_fmu(pendulum_fmu)
+        pendulum_target = target / "local-demos" / "inverted-pendulum" / "linux64"
+        pendulum_target.mkdir(parents=True, exist_ok=True)
+        copy_verified(pendulum_fmu, pendulum_target / INVERTED_PENDULUM_FMU_NAME)
 
     if include_local_water_tank:
         water_tank_root = examples_root / "local-demos" / "into-cps-water-tank" / "linux64"
@@ -682,6 +761,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also copy the local-only INTO-CPS water-tank demo and its app bundle",
     )
+    parser.add_argument(
+        "--include-local-inverted-pendulum",
+        action="store_true",
+        help="Also copy the local-only Linux inverted-pendulum FMU",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -692,6 +776,7 @@ def main(argv: list[str] | None = None) -> int:
             include_local_qfmu=args.include_local_qfmu,
             include_local_dc_motor=args.include_local_dc_motor,
             include_local_water_tank=args.include_local_water_tank,
+            include_local_inverted_pendulum=args.include_local_inverted_pendulum,
         )
     except (FileNotFoundError, OSError, ValueError) as error:
         print(error, file=sys.stderr)

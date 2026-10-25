@@ -11,7 +11,11 @@ services:
       - ./openresty/conf.d/gateway_dev_qfmu.conf:/etc/openresty/conf.d/gateway_dev_qfmu.conf:ro
       - ./openresty/conf.d/gateway_dev_dc_motor.conf:/etc/openresty/conf.d/gateway_dev_dc_motor.conf:ro
       - ./openresty/conf.d/gateway_dev_water_tank.conf:/etc/openresty/conf.d/gateway_dev_water_tank.conf:ro
+      - ./openresty/conf.d/gateway_dev_lateral_motion.conf:/etc/openresty/conf.d/gateway_dev_lateral_motion.conf:ro
 
+  # qFMU, DC motor, water tank and inverted-pendulum runs share this generic
+  # Executor/session runtime. Their per-demo OpenResty routes only serve app
+  # assets; the other local demos may have additional preview routes.
   fmu-executor-local:
     image: decentralabs/fmu-executor:local-smart-warehouse
     build:
@@ -30,8 +34,18 @@ services:
       - FMU_WORKER_MEMORY_MIB=3072
       # The demo's 15 zones use two setpoint inputs and two activation flags each.
       - FMU_MAX_SIMULATION_PARAMETERS=64
-      # qFMU references use a fixed 1 ms communication step, up to 30 seconds.
-      - FMU_MAX_SIMULATION_STEPS=30000
+      # Local demos may use denser fixed-step models than published labs.
+      # Keep the limit finite: 600,000 steps covers sixty seconds at 0.1 ms.
+      - FMU_MAX_SIMULATION_STEPS=600000
+      # The pendulum's external controller can send one FMI input update every
+      # 10 ms. Raise the local-only bounded caps so a complete 100 Hz feedback
+      # run fits the normal FMI session protocol.
+      - FMU_MAX_INPUT_UPDATES_PER_WINDOW=10000
+      - FMU_MAX_OUTPUT_SUBSCRIPTION_HZ=1000
+      # Bosch Lateral Motion uses a deterministic trigger schedule at 0.1 ms
+      # resolution. These raised caps apply only to this local-demo executor.
+      - FMU_MAX_INPUT_SCHEDULE_EVENTS=120000
+      - FMU_MAX_INPUT_SCHEDULE_BYTES=16777216
       # This one local-only FMU launches Spawn. The executor grants child-process
       # execution only to this access key and the exact configured binary.
       - FMU_SPAWN_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu

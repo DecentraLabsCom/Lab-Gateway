@@ -108,6 +108,13 @@ JSON. The signed Gateway context may also carry an `fmuExecutionPolicy` with
 lower per-model limits for daily scenarios, steps, CPU seconds, memory and
 result bytes; Station hard limits still apply.
 
+Scheduled input changes are bounded by the Gateway request limits
+`FMU_MAX_INPUT_SCHEDULE_EVENTS` and `FMU_MAX_INPUT_SCHEDULE_BYTES` (Compose
+defaults: 120,000 events and 16 MiB). OpenResty accepts up to 20 MiB for the
+FMU API body so the configured schedule payload can reach the runner. The
+Station Executor independently enforces its own ceilings; its deployed source
+version must support the configured schedule limits for large schedules to run.
+
 Admission is immediate across interactive sessions, runs, streams, jobs and
 validation probes. When no shared Station slot is available, the request gets
 HTTP 429 `STATION_CAPACITY_EXHAUSTED` before its scenario quota is charged.

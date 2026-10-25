@@ -6,6 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from config import CONFIG
+
 
 def _validate_parameters(value: dict) -> dict:
     if not isinstance(value, dict) or len(value) > 32:
@@ -36,8 +38,11 @@ def _validate_parameters(value: dict) -> dict:
 
 
 def _validate_input_schedule(value: list) -> list:
-    if not isinstance(value, list) or len(value) > 128:
-        raise ValueError("A simulation can contain at most 128 scheduled input changes")
+    if not isinstance(value, list) or len(value) > CONFIG.max_input_schedule_events:
+        raise ValueError(
+            "A simulation can contain at most "
+            f"{CONFIG.max_input_schedule_events} scheduled input changes"
+        )
     normalized_events = []
     seen_values: set[tuple[float, str]] = set()
     for event in value:
@@ -59,8 +64,8 @@ def _validate_input_schedule(value: list) -> list:
         encoded = json.dumps(normalized_events, separators=(",", ":"), allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError("Scheduled input changes must contain finite JSON values") from exc
-    if len(encoded.encode("utf-8")) > 16 * 1024:
-        raise ValueError("Scheduled input changes exceed 16 KiB")
+    if len(encoded.encode("utf-8")) > CONFIG.max_input_schedule_bytes:
+        raise ValueError("Scheduled input changes exceed the configured size limit")
     return normalized_events
 
 
@@ -69,7 +74,10 @@ class SimulationRequest(BaseModel):
     labId: Optional[str] = None
     parameters: dict = Field(default_factory=dict)
     options: dict = Field(default_factory=dict)
-    inputSchedule: list[dict] = Field(default_factory=list, max_length=128)
+    inputSchedule: list[dict] = Field(
+        default_factory=list,
+        max_length=CONFIG.max_input_schedule_events,
+    )
 
     @field_validator("labId", mode="before")
     @classmethod
