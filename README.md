@@ -203,9 +203,10 @@ maintainer-only verification notes remain under `dev/` and are not part of the
 GitBook documentation.
 
 ```bash
-# Lua unit tests in a container; no local Lua installation is required
-docker run --rm -v "$(pwd):/workspace" -w /workspace openresty/openresty:alpine-fat \
-  luajit openresty/tests/run.lua
+# Lua unit tests in a dependency-complete container; no local Lua installation is required
+./openresty/tests/run-lua-tests.sh
+# Windows PowerShell:
+.\openresty\tests\run-lua-tests.ps1
 ```
 
 Use `docker compose config --services` and `docker compose config --profiles`

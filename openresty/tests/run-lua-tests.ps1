@@ -45,7 +45,8 @@ ENV LUA_PATH="`$TREE/share/lua/5.1/?.lua;`$TREE/share/lua/5.1/?/init.lua;;"
 ENV LUA_CPATH="`$TREE/lib/lua/5.1/?.so;;"
 RUN apk add --no-cache build-base openssl openssl-dev git luarocks && \
     luarocks --tree=`$TREE install lua-cjson && \
-    luarocks --tree=`$TREE install lua-resty-openssl
+    luarocks --tree=`$TREE install lua-resty-openssl 1.9.0-1 && \
+    luajit -e 'assert(require("resty.openssl.cipher"))'
 
 WORKDIR /app
 "@

@@ -10,7 +10,8 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from typing import cast
 
 from fmu_backend import StationFmuBackend
-from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession
+from simulation_access_policy import build_effective_policy
+from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession, _public_http_detail
 
 
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu", "reservationKey": "res-1", "pucHash": "puc-user-1"}):
@@ -19,6 +20,10 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "a
 
 
 client = TestClient(app)
+
+
+def test_public_http_detail_uses_fallback_for_non_http_exceptions():
+    assert _public_http_detail(ValueError("private details"), "Safe fallback") == "Safe fallback"
 
 
 def _claims():
@@ -209,6 +214,197 @@ def test_station_session_matches_reservation_puc_and_gateway_claims():
     assert session.matches_claims(_claims_with(reservationKey="res-other"), manager.get_claim_lab_id) is False
     assert session.matches_claims(_claims_with(pucHash="puc-other"), manager.get_claim_lab_id) is False
     assert session.matches_claims(_claims_with(targetGatewayId="gateway-other"), manager.get_claim_lab_id) is False
+
+
+def test_station_realtime_rejects_denied_writes_and_reads_and_filters_responses(monkeypatch):
+    manager = _build_manager()
+    fake_station = _FakeStationConnection()
+
+    async def _get_policy(_claims):
+        policy = build_effective_policy(
+            {
+                "modelVariables": [
+                    {"name": "command", "valueReference": 1, "causality": "input", "variability": "continuous"},
+                    {"name": "speed", "valueReference": 2, "causality": "output", "variability": "continuous"},
+                    {"name": "secret", "valueReference": 3, "causality": "output", "variability": "continuous"},
+                ],
+            },
+            overrides={"command": {"read": False}, "secret": {"read": False}},
+        )
+        policy["modelVariables"] = [
+            {"name": "command", "valueReference": 1, "causality": "input"},
+            {"name": "speed", "valueReference": 2, "causality": "output"},
+            {"name": "secret", "valueReference": 3, "causality": "output"},
+        ]
+        return policy
+
+    manager.get_effective_policy = _get_policy
+    original_send = fake_station.send
+
+    async def _send_with_outputs(raw_message: str, text=None):
+        await original_send(raw_message)
+        message = json.loads(raw_message)
+        if message.get("type") == "sim.getOutputs":
+            await fake_station._queue.put(json.dumps({
+                "type": "sim.outputs",
+                "requestId": message["requestId"],
+                "sessionId": "sess_station_1",
+                "outputs": {"speed": 12.5, "secret": 99},
+            }))
+
+    fake_station.send = _send_with_outputs
+
+    async def _fake_connect(_headers):
+        return fake_station
+
+    monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    monkeypatch.setattr(application._runner_runtime, "realtime_manager", manager)
+
+    with client.websocket_connect(
+        "/api/v1/fmu/sessions",
+        headers={"Authorization": "Bearer test-token"},
+    ) as websocket:
+        websocket.send_json({
+            "type": "session.create",
+            "requestId": "access-create",
+            "labId": "1",
+            "reservationKey": "res-1",
+            "sessionTicket": "st_valid",
+        })
+        assert websocket.receive_json()["type"] == "session.created"
+
+        websocket.send_json({
+            "type": "sim.setInputs",
+            "requestId": "denied-write",
+            "values": {"speed": 80},
+        })
+        denied_write = websocket.receive_json()
+        assert denied_write["code"] == "VARIABLE_ACCESS_DENIED"
+
+        websocket.send_json({
+            "type": "sim.getOutputs",
+            "requestId": "denied-read",
+            "variables": ["secret"],
+        })
+        denied_read = websocket.receive_json()
+        assert denied_read["code"] == "VARIABLE_ACCESS_DENIED"
+
+        websocket.send_json({
+            "type": "sim.getOutputs",
+            "requestId": "denied-read-reference",
+            "valueReferences": [3],
+        })
+        denied_reference = websocket.receive_json()
+        assert denied_reference["code"] == "VARIABLE_ACCESS_DENIED"
+
+        websocket.send_json({
+            "type": "sim.getOutputs",
+            "requestId": "denied-write-only-reference",
+            "valueReferences": [1],
+        })
+        denied_write_only_reference = websocket.receive_json()
+        assert denied_write_only_reference["code"] == "VARIABLE_ACCESS_DENIED"
+
+        websocket.send_json({
+            "type": "sim.getOutputs",
+            "requestId": "denied-read-reference-alias",
+            "variables": ["speed"],
+            "valueReferences": [2],
+        })
+        denied_reference_alias = websocket.receive_json()
+        assert denied_reference_alias["code"] == "VARIABLE_ACCESS_DENIED"
+
+        websocket.send_json({
+            "type": "sim.getOutputs",
+            "requestId": "allowed-read",
+            "variables": ["speed"],
+        })
+        outputs = websocket.receive_json()
+        assert outputs["outputs"] == {"speed": 12.5}
+
+        websocket.send_json({
+            "type": "sim.getOutputs",
+            "requestId": "allowed-read-reference",
+            "valueReferences": [2],
+        })
+        outputs_by_reference = websocket.receive_json()
+        assert outputs_by_reference["outputs"] == {"speed": 12.5}
+
+    assert [message["type"] for message in fake_station.sent_messages] == [
+        "session.create",
+        "sim.getOutputs",
+        "sim.getOutputs",
+    ]
+
+
+def test_station_realtime_refreshes_policy_for_an_active_session(monkeypatch):
+    manager = _build_manager()
+    fake_station = _FakeStationConnection()
+    policy_state = {"restrict_speed": False, "restrict_command": False}
+
+    async def _get_policy(_claims):
+        policy = build_effective_policy(
+            {
+                "modelVariables": [
+                    {"name": "command", "valueReference": 1, "causality": "input", "variability": "continuous"},
+                    {"name": "speed", "valueReference": 2, "causality": "output", "variability": "continuous"},
+                ],
+            },
+            overrides={
+                "speed": {"read": not policy_state["restrict_speed"]},
+                "command": {
+                    "writeAt": [] if policy_state["restrict_command"] else ["initialization", "runtime"],
+                },
+            },
+        )
+        policy["modelVariables"] = [
+            {"name": "command", "valueReference": 1, "causality": "input"},
+            {"name": "speed", "valueReference": 2, "causality": "output"},
+        ]
+        return policy
+
+    manager.get_effective_policy = _get_policy
+
+    async def _fake_connect(_headers):
+        return fake_station
+
+    monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    monkeypatch.setattr(application._runner_runtime, "realtime_manager", manager)
+
+    with client.websocket_connect(
+        "/api/v1/fmu/sessions",
+        headers={"Authorization": "Bearer test-token"},
+    ) as websocket:
+        websocket.send_json({
+            "type": "session.create",
+            "requestId": "refresh-create",
+            "labId": "1",
+            "reservationKey": "res-1",
+            "sessionTicket": "st_valid",
+        })
+        assert websocket.receive_json()["type"] == "session.created"
+
+        policy_state["restrict_speed"] = True
+        policy_state["restrict_command"] = True
+        websocket.send_json({
+            "type": "sim.setInputs",
+            "requestId": "refresh-denied-write",
+            "values": {"command": 1},
+        })
+        denied_write = websocket.receive_json()
+        assert denied_write["code"] == "VARIABLE_ACCESS_DENIED"
+
+        fake_station._queue.put_nowait(json.dumps({
+            "type": "sim.outputs",
+            "requestId": "refresh-output",
+            "sessionId": "sess_station_1",
+            "outputs": {"speed": 12.5},
+        }))
+        refreshed_outputs = websocket.receive_json()
+
+    assert refreshed_outputs["outputs"] == {}
+    assert refreshed_outputs["requestId"] == "refresh-output"
+    assert [message["type"] for message in fake_station.sent_messages] == ["session.create"]
 
 
 def _claims_with(**updates):

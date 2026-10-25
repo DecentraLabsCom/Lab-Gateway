@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from run_router import create_run_router
 
 
-def _build_app():
+def _build_app(access_policy=None):
     claims = {
         "labId": "lab-1",
         "reservationKey": "res-1",
@@ -17,6 +17,9 @@ def _build_app():
 
     async def verify_jwt():
         return claims
+
+    async def get_effective_policy(_claims):
+        return access_policy
 
     backend = MagicMock()
     backend.run_authorized_simulation = AsyncMock(
@@ -37,6 +40,7 @@ def _build_app():
         extract_authorization_header=extract_authorization,
         record_browser_session_started=observation,
         new_simulation_id=new_simulation_id,
+        get_effective_policy=get_effective_policy if access_policy is not None else None,
     ))
     return {
         "client": TestClient(app),
@@ -75,3 +79,46 @@ def test_run_router_does_not_forward_when_observation_fails():
     assert response.status_code == 503
     assert response.json() == {"detail": "observation unavailable"}
     state["backend"].run_authorized_simulation.assert_not_awaited()
+
+
+def test_run_router_rejects_disallowed_variables_before_forwarding():
+    state = _build_app({
+        "variables": {
+            "speed": {"read": True, "writeAt": []},
+            "secretInput": {"read": False, "writeAt": []},
+        },
+    })
+
+    response = state["client"].post(
+        "/api/v1/simulations/run",
+        json={"labId": "lab-1", "parameters": {"secretInput": 7}},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Variable access denied by the effective FMU policy"}
+    state["backend"].build_authorized_context.assert_not_called()
+    state["backend"].run_authorized_simulation.assert_not_awaited()
+    state["observation"].assert_not_awaited()
+
+
+def test_run_router_filters_unreadable_values_before_returning_results():
+    state = _build_app({
+        "variables": {
+            "speed": {"read": True, "writeAt": []},
+            "internalLoad": {"read": False, "writeAt": []},
+        },
+    })
+    state["backend"].run_authorized_simulation.return_value = {
+        "status": "completed",
+        "outputs": {"speed": 4.5, "internalLoad": 12},
+        "simId": "executor-sim",
+    }
+
+    response = state["client"].post("/api/v1/simulations/run", json={"labId": "lab-1"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "completed",
+        "outputs": {"speed": 4.5},
+        "simId": "gateway-sim",
+    }

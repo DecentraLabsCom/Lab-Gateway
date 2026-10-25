@@ -43,6 +43,54 @@ def test_create_and_resolve_link_use_injected_storage_path(tmp_path):
     }
 
 
+def test_external_link_can_select_a_part4_policy_submodel(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/aas-admin/lab/42/aas-link",
+        json={
+            "aasId": "urn:external:aas:motor",
+            "accessControlSubmodelId": "urn:external:submodel:permissions",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["accessControlSubmodelId"] == "urn:external:submodel:permissions"
+    assert json.loads((tmp_path / "42.aas-link.json").read_text()) == {
+        "aasId": "urn:external:aas:motor",
+        "labId": "42",
+        "accessControlSubmodelId": "urn:external:submodel:permissions",
+    }
+
+
+def test_link_accepts_a_bounded_list_of_submodels(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/aas-admin/lab/42/aas-link",
+        json={
+            "aasId": "urn:external:aas:motor",
+            "submodelIds": ["urn:example:simulation", " urn:example:technical ", "urn:example:simulation"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["submodelIds"] == ["urn:example:simulation", "urn:example:technical"]
+    assert json.loads((tmp_path / "42.aas-link.json").read_text())["submodelIds"] == [
+        "urn:example:simulation",
+        "urn:example:technical",
+    ]
+
+
+def test_link_rejects_invalid_access_policy_submodel_id(tmp_path):
+    response = _client(tmp_path).post(
+        "/aas-admin/lab/42/aas-link",
+        json={"aasId": "urn:external:aas:motor", "accessControlSubmodelId": " "},
+    )
+
+    assert response.status_code == 400
+
+
 def test_get_link_returns_not_found_without_a_configured_file(tmp_path):
     response = _client(tmp_path).get("/aas-admin/fmu/missing.fmu/aas-link")
 

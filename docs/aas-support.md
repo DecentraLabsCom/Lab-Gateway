@@ -300,6 +300,88 @@ when the bundled `aas` profile is active. Without that profile, the local
 runner reports AAS as unavailable rather than silently claiming that a shell
 was updated.
 
+#### 2.3. FMI variable access policy
+
+Generated FMU synchronization creates an initial variable access policy from
+the active FMU's `modelDescription.xml`; providers do not need to enter a rule
+for every port. FMI remains the source for variable names, causalities,
+variability, types and supported write phases. The AAS stores only the access
+rules and a digest of the FMI interface to which those rules apply.
+
+The Gateway stores the rules as an `application/json` Blob containing the
+IDTA 01004 Part 4 `AllAccessPermissionRules` structure in a separate
+`SimulationAccessControl` submodel referenced by the AAS shell. OpenResty
+blocks direct retrieval of generated policy submodels and explicit inclusion
+in public AAS serialization queries. The private Gateway resolver reads the
+policy from BaSyx using provider-side configuration. Its cache is bounded to
+five seconds and is invalidated when AAS synchronization or linking changes the
+association.
+
+The current DecentraLabs profile is based on the IDTA 01004 v3.1 JSON
+serialization and accepts exact `REFERABLE` objects for
+`SimulationModels/Ports`, `READ` and `UPDATE` `ALLOW` rules, reusable Part 4
+`DEFATTRIBUTES`, `DEFACLS`, `DEFOBJECTS` and `DEFFORMULAS` definitions with
+their `USE...` references, and boolean/equality formulas over authenticated
+scalar claims (`$boolean`, `$eq`, `$ne`, `$and`, and `$or`). ACLs may use inline
+attributes and/or reusable attribute groups; rule objects may combine inline
+referables with reusable object groups. Attribute and object groups can refer
+to other groups, subject to cycle, depth, expansion and size limits. An
+explicit `ACCESS: DISABLED` rule is ignored as Part 4 defines. Unsupported
+object kinds, rights, filters, formula operators and malformed definitions are
+rejected. The compiler also fails closed on unknown variables or paths, stale
+interface digests, and any rule that grants more than the FMI/runtime supports.
+A provider can edit the policy through AAS administration tooling. Lab Manager
+shows policy status and allows explicit regeneration of FMI defaults;
+regeneration replaces provider edits and therefore requires confirmation. FMU
+AASX imports preserve and validate one supported policy or create the initial
+default policy when one is missing. The Gateway does not modify a linked
+external AAS; it can consume the supported restricted Part 4 JSON profile when
+the provider has linked it. The Part 4 `UPDATE` right covers the write phases
+supported for that variable by FMI and the runtime; FMI 2.0 and FMI 3.0
+Co-Simulation `tunable` parameters can be changed at initialization and at
+runtime communication points. The Lab Manager link panel checks FMU AAS links
+and displays a warning when the linked shell, policy submodel or
+policy-to-FMU mapping cannot be validated. An external AAS with no compatible
+policy uses FMI-derived defaults and is reported as such; the status check
+never edits the external shell.
+
+The platform defaults are:
+
+- every FMI interface variable with causality other than `local` is readable;
+- `input` variables can be written at initialization and, unless their
+  variability is `constant`, at runtime;
+- `parameter` variables with `fixed` or `tunable` variability can be written
+  during initialization; FMI 2.0 and FMI 3.0 Co-Simulation `tunable`
+  parameters can also be written at runtime communication points; and
+- `local` variables and `structuralParameter` writes are unavailable to the
+  consumer with the current runtime contract. An unrecognized causality grants
+  no access, and an unrecognized variability grants no write permission.
+
+The effective decision is enforced by Gateway for run, stream, job/batch,
+result/history and Station WebSocket paths. Denied writes are rejected before
+forwarding; unreadable values are filtered from results and session messages.
+The realtime session accepts reads by variable name or FMI `valueReference`;
+numeric references are resolved against the authorized FMU description before
+the Gateway forwards the request.
+The reservation-bound proxy FMU and `describe` response expose only permitted
+variables, and hide `start` when a variable is writeable but not readable. The
+protected `GET /fmu/api/v1/simulations/access` endpoint returns the effective
+permissions and authorized variable metadata. Marketplace calls this through
+its same-origin `POST /api/simulations/access` route and uses the result to
+filter the standard form, GLB viewer, results and Three.js app metadata. The
+Gateway remains the enforcement point if a client ignores the UI contract.
+Active Station WebSocket sessions refresh the policy before forwarding commands
+or returning FMI data; the five-second resolver cache bounds how quickly an
+AAS policy edit becomes effective.
+
+This policy governs simulation operations and runtime values. Static interface
+descriptions in public lab metadata and `SimulationModels/Ports` may still be
+visible, including names, ranges and descriptions; it does not make those
+descriptors confidential or retract metadata already published on-chain. That
+privacy boundary needs a separate design if providers need to hide static
+metadata as well as simulation values. No reservation key, JWT, session ticket
+or service credential is stored in the AAS policy.
+
 ### 3. Physical-lab shell synchronization
 
 `ops-worker` is responsible for physical-lab shells because it already owns heartbeat persistence, host information and operational telemetry:
@@ -502,9 +584,11 @@ Implemented in the Gateway ecosystem:
 - IDTA 02005 simulation-model mapping including FMI ports, units and integrity metadata;
 - IDTA 02003/02006 technical-data and nameplate mapping;
 - IDTA 02020 capability and IDTA 02017 interface descriptions for generated FMUs and physical laboratories, without embedding credentials or changing the protected runtime paths;
+- an initial FMI variable access profile generated from FMU metadata, enforced by the Gateway on simulation operations and consumed by the Marketplace viewer;
 
 The following remain future work:
 
+- a Lab Manager editor for detailed provider-authored rules and broader interoperability with arbitrary Part 4 policy submodels;
 - multi-Gateway AAS federation and cross-provider shell aggregation;
 - on-chain registration and verification of AAS IDs; and
 - Verifiable Credentials/DIDs attached to AAS licensing or provenance data.

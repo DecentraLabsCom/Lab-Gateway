@@ -12,6 +12,15 @@ from typing import Any, Awaitable, Callable, Optional, Protocol, cast
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
+from simulation_access_policy import (
+    AccessDenied,
+    filter_fmi_values,
+    filter_model_description,
+    validate_reads,
+    validate_read_value_references,
+    validate_writes,
+)
+
 
 async def _cancel_task(task: Optional[asyncio.Task]) -> None:
     if task is None or task is asyncio.current_task():
@@ -35,7 +44,9 @@ class _StationWebSocket(Protocol):
         raise NotImplementedError
 
 
-def _public_http_detail(exc: HTTPException, fallback: str) -> str:
+def _public_http_detail(exc: Exception, fallback: str) -> str:
+    if not isinstance(exc, HTTPException):
+        return fallback
     if exc.status_code >= 500:
         return fallback
     if isinstance(exc.detail, dict):
@@ -56,6 +67,7 @@ class _GatewayStationSession:
     lab_id: Optional[str]
     access_key: str
     exp: Optional[int]
+    access_policy: Optional[dict] = None
     close_handler: Optional[Callable[[], Awaitable[None]]] = None
 
     def matches_claims(self, claims: dict, get_claim_lab_id) -> bool:
@@ -89,6 +101,7 @@ class StationRealtimeWsProxyManager:
         redeem_session_ticket=None,
         issue_session_ticket=None,
         confirm_session_started=None,
+        get_effective_policy=None,
         ws_cleanup_seconds: float = 15.0,
         internal_ws_token: str = "",
         ws_create_rate_limit_per_minute: int = 30,
@@ -103,6 +116,7 @@ class StationRealtimeWsProxyManager:
         self.redeem_session_ticket = redeem_session_ticket
         self.issue_session_ticket = issue_session_ticket
         self.confirm_session_started = confirm_session_started
+        self.get_effective_policy = get_effective_policy
         self.ws_cleanup_seconds = ws_cleanup_seconds
         self.internal_ws_token = internal_ws_token
         self.ws_create_rate_limit_per_minute = ws_create_rate_limit_per_minute
@@ -170,6 +184,16 @@ class StationRealtimeWsProxyManager:
         bucket.append(now)
         return True
 
+    async def _refresh_session_access_policy(self, session: _GatewayStationSession) -> Optional[dict]:
+        """Refresh an active session's policy before forwarding or exposing FMI data."""
+        if self.get_effective_policy is None:
+            return session.access_policy
+        policy = await self.get_effective_policy(session.claims)
+        if not isinstance(policy, dict) or not isinstance(policy.get("variables"), dict):
+            raise RuntimeError("FMU access policy is unavailable")
+        session.access_policy = policy
+        return policy
+
     @staticmethod
     def _normalize_ticket_id(session_ticket: Optional[str]) -> Optional[str]:
         if not session_ticket:
@@ -178,6 +202,28 @@ class StationRealtimeWsProxyManager:
         if token.startswith("st_"):
             token = token[3:]
         return token[:10] if token else None
+
+    @staticmethod
+    def _validate_session_message(message: dict, access_policy: dict) -> None:
+        """Authorize FMI variable reads/writes before forwarding a command."""
+        msg_type = str(message.get("type") or "").strip()
+        if msg_type == "sim.initialize":
+            parameters = message.get("parameters", {})
+            options = message.get("options", {})
+            if not isinstance(parameters, dict) or not isinstance(options, dict):
+                raise AccessDenied
+            validate_writes(access_policy, parameters, phase="initialization")
+            if "inputs" in options:
+                validate_writes(access_policy, options["inputs"], phase="initialization")
+        elif msg_type == "sim.setInputs":
+            validate_writes(access_policy, message.get("values", {}), phase="runtime")
+        elif msg_type in {"sim.getOutputs", "sim.subscribeOutputs"}:
+            if "variables" in message and "valueReferences" in message:
+                raise AccessDenied
+            if "valueReferences" in message:
+                validate_read_value_references(access_policy, message["valueReferences"])
+            else:
+                validate_reads(access_policy, message.get("variables"))
 
     @classmethod
     def extract_ws_token(cls, websocket: WebSocket) -> str:
@@ -394,6 +440,7 @@ class StationRealtimeWsProxyManager:
                                 lab_id=self.get_claim_lab_id(session_claims),
                                 access_key=access_key,
                                 exp=exp,
+                                access_policy=create_context.get("access_policy"),
                             )
 
                             async def _close_registered_session(session_id=session_id):
@@ -416,6 +463,34 @@ class StationRealtimeWsProxyManager:
                                 current_session_id = None
                         if str(payload.get("reason") or "").strip().lower() == "expired":
                             close_public_on_expiry = True
+
+                    policy_session_id = str(payload.get("sessionId") or current_session_id or "").strip()
+                    if policy_session_id:
+                        async with self._sessions_lock:
+                            policy_session = self._sessions.get(policy_session_id)
+                        try:
+                            access_policy = (
+                                await self._refresh_session_access_policy(policy_session)
+                                if policy_session is not None
+                                else None
+                            )
+                        except Exception:
+                            payload = self.error_payload(
+                                code="ACCESS_POLICY_UNAVAILABLE",
+                                message="Unable to refresh the FMU access policy",
+                                request_id=request_id,
+                                retryable=True,
+                                session_id=policy_session_id,
+                            )
+                            if request_id:
+                                cache_response(request_id, payload)
+                            await self._send_json(websocket, send_lock, payload)
+                            continue
+                        if access_policy is not None:
+                            if msg_type == "model.description":
+                                payload = filter_model_description(access_policy, payload)
+                            else:
+                                payload = filter_fmi_values(access_policy, payload)
 
                     if request_id:
                         cache_response(request_id, payload)
@@ -680,6 +755,47 @@ class StationRealtimeWsProxyManager:
                         cache_response(request_id, response)
                         continue
 
+                    access_policy = None
+                    if self.get_effective_policy is not None:
+                        try:
+                            access_policy = await self.get_effective_policy(create_claims)
+                            if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
+                                raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
+                            self._validate_session_message(message, access_policy)
+                        except AccessDenied:
+                            response = self.error_payload(
+                                code="VARIABLE_ACCESS_DENIED",
+                                message="Variable access denied by the effective FMU policy",
+                                request_id=request_id,
+                                retryable=False,
+                            )
+                            await self._send_json(websocket, send_lock, response)
+                            cache_response(request_id, response)
+                            continue
+                        except Exception as exc:
+                            if isinstance(exc, HTTPException):
+                                if exc.status_code < 500:
+                                    error_message = _public_http_detail(exc, "Not authorized")
+                                    error_code = "FORBIDDEN"
+                                    retryable = False
+                                else:
+                                    error_message = "Unable to resolve FMU access policy"
+                                    error_code = "ACCESS_POLICY_UNAVAILABLE"
+                                    retryable = True
+                            else:
+                                error_message = "Unable to resolve FMU access policy"
+                                error_code = "ACCESS_POLICY_UNAVAILABLE"
+                                retryable = True
+                            response = self.error_payload(
+                                code=error_code,
+                                message=error_message,
+                                request_id=request_id,
+                                retryable=retryable,
+                            )
+                            await self._send_json(websocket, send_lock, response)
+                            cache_response(request_id, response)
+                            continue
+
                     try:
                         await _ensure_station()
                         forward_message = self.station_backend.build_internal_session_message(
@@ -693,6 +809,7 @@ class StationRealtimeWsProxyManager:
                             "claims": create_claims,
                             "session_ticket": session_ticket,
                             "reservation_key": reservation_key,
+                            "access_policy": access_policy,
                         }
                         await _send_station(json.dumps(forward_message))
                         continue
@@ -779,9 +896,50 @@ class StationRealtimeWsProxyManager:
 
                 async with self._sessions_lock:
                     active_session = self._sessions.get(current_session_id)
+                if self.get_effective_policy is not None and active_session is None:
+                    response = self.error_payload(
+                        code="FORBIDDEN",
+                        message="Session is no longer available",
+                        request_id=request_id,
+                        retryable=False,
+                        session_id=current_session_id,
+                    )
+                    await self._send_json(websocket, send_lock, response)
+                    cache_response(request_id, response)
+                    continue
                 if active_session and active_session.exp is not None and int(time.time()) >= active_session.exp:
                     await _close_expired_session(current_session_id, request_id=request_id)
                     return
+
+                if active_session and self.get_effective_policy is not None:
+                    try:
+                        await self._refresh_session_access_policy(active_session)
+                    except Exception:
+                        response = self.error_payload(
+                            code="ACCESS_POLICY_UNAVAILABLE",
+                            message="Unable to refresh the FMU access policy",
+                            request_id=request_id,
+                            retryable=True,
+                            session_id=current_session_id,
+                        )
+                        await self._send_json(websocket, send_lock, response)
+                        cache_response(request_id, response)
+                        continue
+
+                if active_session and active_session.access_policy is not None:
+                    try:
+                        self._validate_session_message(message, active_session.access_policy)
+                    except AccessDenied:
+                        response = self.error_payload(
+                            code="VARIABLE_ACCESS_DENIED",
+                            message="Variable access denied by the effective FMU policy",
+                            request_id=request_id,
+                            retryable=False,
+                            session_id=current_session_id,
+                        )
+                        await self._send_json(websocket, send_lock, response)
+                        cache_response(request_id, response)
+                        continue
 
                 await _send_station(json.dumps(message))
         except WebSocketDisconnect:

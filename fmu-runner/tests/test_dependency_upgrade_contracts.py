@@ -94,7 +94,8 @@ def test_simulation_ports_render_all_optional_metadata():
     )
     values = {element["idShort"]: element["value"] for element in ports[0]["value"][1]["value"]}
     assert values["VariableType"] == "Real"
-    assert values["UnitList"] == "N"
+    assert values["UnitList"] == "others"
+    assert values["UnitDescription"][0]["text"] == "N"
     assert values["VariableDescription"][0]["text"] == "Applied force"
 
 

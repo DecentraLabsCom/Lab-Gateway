@@ -89,6 +89,7 @@ from session_observation_service import (
 )
 from runner_runtime import create_fmu_runner_runtime
 from simulation_request import SimulationRequest
+from simulation_access_policy import filter_fmi_values, filter_model_description
 from config import (
     _default_access_audit_url as _default_access_audit_url_value,
     CONFIG,
@@ -108,6 +109,7 @@ from aas_sync_router import create_aas_sync_router
 from aasx_router import create_aasx_router
 from aasx_catalog import AasxPackageCatalog
 from aas_association_service import AasAssociationService
+from aas_access_policy_resolver import AasAccessPolicyResolver
 from proxy_router import create_proxy_router
 from local_preview import PreviewTickets, create_preview_router
 from digital_twin_assets_router import create_digital_twin_assets_router
@@ -137,7 +139,7 @@ FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN = CONFIG.fmu_local_executor_internal_token
 _preview_tickets = PreviewTickets() if FMU_LOCAL_DEV_MODE else None
 FMU_STATION_BASE_URL = CONFIG.fmu_station_base_url
 FMU_STATION_INTERNAL_TOKEN = CONFIG.fmu_station_internal_token
-FMU_STATION_REQUEST_TIMEOUT = CONFIG.fmu_station_request_timeout
+FMU_STATION_REQUEST_TIMEOUT: float = CONFIG.fmu_station_request_timeout
 FMU_SESSION_OBSERVATION_MAX_ATTEMPTS = CONFIG.fmu_session_observation_max_attempts
 PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE = CONFIG.proxy_download_rate_limit_per_minute
 WS_CREATE_RATE_LIMIT_PER_MINUTE = CONFIG.ws_create_rate_limit_per_minute
@@ -237,6 +239,32 @@ async def _catalog_get_authorized_model_metadata(
     )
 
 
+async def _simulation_effective_access_policy(claims: dict) -> dict:
+    """Resolve the Gateway-enforced policy from the authorized FMU metadata.
+
+    The initial source is the conservative FMI default. AAS overrides are
+    resolved by the policy service before this callback is exposed to routes.
+    """
+    filename = str(claims.get("accessKey") or claims.get("fmuFileName") or "").strip()
+    if not filename:
+        raise HTTPException(status_code=403, detail="Token has no authorised FMU file")
+    try:
+        metadata = await _runner_runtime.backend.get_authorized_model_metadata(
+            claims=claims,
+            requested_fmu_filename=filename,
+            include_internal_variables=True,
+        )
+        policy = await _get_aas_access_policy_resolver().resolve(claims, metadata)
+        public_metadata = _public_model_metadata(metadata)
+        policy["modelVariables"] = filter_model_description(policy, public_metadata).get("modelVariables", [])
+        return policy
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("FMU access policy could not be resolved: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="FMU access policy is unavailable") from exc
+
+
 def _catalog_public_model_metadata(metadata: dict):
     return _public_model_metadata(metadata)
 
@@ -276,7 +304,15 @@ async def _aas_fmu_model_metadata(access_key: str):
     return await _runner_runtime.backend.get_authorized_model_metadata(
         claims={"accessKey": access_key},
         requested_fmu_filename=access_key,
-        include_internal_variables=False,
+        include_internal_variables=True,
+    )
+
+
+async def _aas_sync_access_policy_status(lab_id: str, access_key: str) -> dict:
+    metadata = await _aas_fmu_model_metadata(access_key)
+    return await _get_aas_access_policy_resolver().inspect(
+        {"labId": str(lab_id), "accessKey": access_key},
+        metadata,
     )
 
 
@@ -291,7 +327,7 @@ def _aas_sync_read_model_description(fmu_path):
 def _aas_sync_metadata_builder(model_description):
     return _model_metadata_from_model_description(
         model_description,
-        include_internal_variables=False,
+        include_internal_variables=True,
     )
 
 
@@ -336,8 +372,12 @@ _catalog_router = create_catalog_router(
     get_authorized_model_metadata=_catalog_get_authorized_model_metadata,
     public_model_metadata=_catalog_public_model_metadata,
     list_authorized_fmu=_catalog_list_authorized_fmu,
+    get_effective_policy=_simulation_effective_access_policy,
 )
-_aas_link_router = create_aas_link_router(get_link_path=_aas_link_path_for_router)
+_aas_link_router = create_aas_link_router(
+    get_link_path=_aas_link_path_for_router,
+    invalidate_access_policy=lambda: _invalidate_aas_access_policy(),
+)
 _aas_hints_router = create_aas_hints_router(
     resolve_fmu_path=_aas_hints_resolve_fmu_path,
     read_model_description=_aas_hints_read_model_description,
@@ -354,6 +394,8 @@ _aas_sync_router = create_aas_sync_router(
     get_runtime_status=_aas_sync_runtime_status,
     logger=logger,
     record_aasx=_record_aasx_association,
+    invalidate_access_policy=lambda lab_id=None: _invalidate_aas_access_policy(lab_id),
+    get_access_policy_status=_aas_sync_access_policy_status,
 )
 _aasx_router = create_aasx_router(
     association_service=AasAssociationService(
@@ -630,7 +672,12 @@ def _get_scoped_station_backend(feature_name: str) -> StationFmuBackend:
     _reject_unsupported_remote_operation(feature_name)
 
 
-async def _stream_station_simulation(request: Request, req: SimulationRequest, claims: dict):
+async def _stream_station_simulation(
+    request: Request,
+    req: SimulationRequest,
+    claims: dict,
+    access_policy: Optional[dict] = None,
+):
     station_backend = _get_station_backend()
     authorization = _extract_authorization_header(request)
     station_backend.build_authorized_context(
@@ -649,12 +696,34 @@ async def _stream_station_simulation(request: Request, req: SimulationRequest, c
         authorization=authorization,
     )
     media_type = response.headers.get("content-type") or "application/x-ndjson"
+    normalized_media_type = media_type.split(";", 1)[0].strip().lower()
+    is_ndjson = normalized_media_type in {"application/x-ndjson", "application/ndjson"}
+    if access_policy is not None and not is_ndjson and normalized_media_type != "application/json":
+        await response.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=502, detail="FMU stream format cannot be safely filtered")
 
     async def _forward_stream():
         try:
-            async for chunk in response.aiter_bytes():
-                if chunk:
-                    yield chunk
+            if access_policy is None:
+                async for chunk in response.aiter_bytes():
+                    if chunk:
+                        yield chunk
+                return
+
+            async for line in response.aiter_lines():
+                if not line:
+                    if is_ndjson:
+                        yield b"\n"
+                    continue
+                try:
+                    payload = json.loads(line)
+                except (TypeError, ValueError):
+                    logger.warning("FMU stream contained a non-JSON line; closing protected stream")
+                    return
+                filtered = filter_fmi_values(access_policy, payload)
+                suffix = b"\n" if is_ndjson else b""
+                yield json.dumps(filtered, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + suffix
         finally:
             await response.aclose()
             await client.aclose()
@@ -880,6 +949,7 @@ _runner_runtime.bind_realtime_manager(_build_realtime_manager_impl(
     redeem_session_ticket=_redeem_session_ticket,
     issue_session_ticket=_issue_session_ticket,
     confirm_session_started=_confirm_fmu_session_started,
+    get_effective_policy=_simulation_effective_access_policy,
     ws_cleanup_seconds=WS_CLEANUP_SECONDS,
     internal_ws_token=INTERNAL_WS_TOKEN,
     ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
@@ -923,6 +993,27 @@ def _aas_link_path(access_key: str) -> Path:
     if not _is_within_base(base, candidate):
         raise HTTPException(status_code=400, detail="Invalid AAS link key")
     return candidate
+
+
+_AAS_ACCESS_POLICY_RESOLVER: Optional[AasAccessPolicyResolver] = None
+
+
+def _get_aas_access_policy_resolver() -> AasAccessPolicyResolver:
+    global _AAS_ACCESS_POLICY_RESOLVER
+    if _AAS_ACCESS_POLICY_RESOLVER is None:
+        import fmu_aas_generator
+
+        _AAS_ACCESS_POLICY_RESOLVER = AasAccessPolicyResolver(
+            get_basyx_url=lambda: fmu_aas_generator.BASYX_AAS_URL,
+            get_request_headers=fmu_aas_generator._aas_request_headers,
+            get_link_path=_aas_link_path,
+        )
+    return _AAS_ACCESS_POLICY_RESOLVER
+
+
+def _invalidate_aas_access_policy(lab_id: Optional[str] = None) -> None:
+    resolver = _get_aas_access_policy_resolver()
+    resolver.invalidate(lab_id)
 
 
 def _get_realtime_manager_for_route():
@@ -1014,6 +1105,7 @@ _proxy_router = create_proxy_router(
     issue_session_ticket=_proxy_issue_session_ticket,
     derive_gateway_ws_url=_proxy_derive_gateway_ws_url,
     get_authorized_model_metadata=_proxy_get_authorized_model_metadata,
+    get_effective_policy=_simulation_effective_access_policy,
     build_proxy_model_description_xml=_proxy_build_model_description_xml,
     parse_fmi_major_version=_proxy_parse_fmi_major_version,
     proxy_model_identifier=_proxy_model_identifier_for_route,
@@ -1037,6 +1129,7 @@ _run_router = create_run_router(
         request, claims, sim_id
     ),
     new_simulation_id=lambda: uuid4().hex,
+    get_effective_policy=_simulation_effective_access_policy,
     reject_unsupported_operation=_reject_unsupported_remote_operation,
 )
 
@@ -1045,6 +1138,7 @@ _history_router = create_history_router(
     enforce_fmu_claim=_history_enforce_fmu_claim,
     reject_unsupported_operation=_history_reject_unsupported_remote_operation,
     get_station_backend=_get_scoped_station_backend,
+    get_effective_policy=_simulation_effective_access_policy,
 )
 
 
@@ -1064,6 +1158,7 @@ _stream_router = create_stream_router(
     verify_jwt=verify_jwt,
     enforce_fmu_claim=_enforce_fmu_claim,
     stream_station_simulation=_stream_station_simulation,
+    get_effective_policy=_simulation_effective_access_policy,
 )
 
 _lifespan = create_lifespan(

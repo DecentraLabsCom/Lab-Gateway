@@ -27,6 +27,49 @@ local function reject(message)
     return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
 
+local function decode_aas_resource_id(encoded)
+    if not encoded or not encoded:match("^[A-Za-z0-9_-]+$") then
+        return nil
+    end
+    local value = encoded:gsub("-", "+"):gsub("_", "/")
+    local remainder = #value % 4
+    if remainder == 2 then
+        value = value .. "=="
+    elseif remainder == 3 then
+        value = value .. "="
+    elseif remainder == 1 then
+        return nil
+    end
+    return ngx.decode_base64(value)
+end
+
+local function is_private_access_policy_id(value)
+    return type(value) == "string"
+        and value:match(":sm:simulationAccessControl$") ~= nil
+end
+
+local uri = ngx.var.uri or ""
+local requested_submodel = uri:match("^/aas/submodels/([^/]+)")
+if requested_submodel and is_private_access_policy_id(decode_aas_resource_id(requested_submodel)) then
+    return ngx.exit(ngx.HTTP_NOT_FOUND)
+end
+
+-- Generated access-control submodels may be referenced by the public shell,
+-- but their contents are reserved for the Gateway's policy resolver. Do not
+-- let callers retrieve them directly or add them to an AASX serialization query.
+if uri == "/aas/serialization" then
+    local args = ngx.req.get_uri_args()
+    local requested_ids = args.submodelIds
+    if type(requested_ids) ~= "table" then
+        requested_ids = { requested_ids }
+    end
+    for _, encoded_id in ipairs(requested_ids) do
+        if is_private_access_policy_id(decode_aas_resource_id(encoded_id)) then
+            return ngx.exit(ngx.HTTP_NOT_FOUND)
+        end
+    end
+end
+
 local function parse_origin(url)
     local scheme, authority = url:match("^(https?)://([^/%?#]+)")
     if not scheme or not authority or authority == "" then

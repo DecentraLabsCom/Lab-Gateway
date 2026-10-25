@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from simulation_access_policy import AccessDenied, filter_fmi_values, validate_writes
 from simulation_request import BatchSimulationRequest, SimulationRequest
 
 
@@ -16,10 +17,30 @@ def create_run_router(
     extract_authorization_header: Any,
     record_browser_session_started: Any,
     new_simulation_id: Any,
+    get_effective_policy: Any = None,
     reject_unsupported_operation: Any = None,
 ) -> APIRouter:
     """Build the run route; the Gateway authorizes and forwards the request."""
     router = APIRouter()
+
+    async def _policy(claims: dict):
+        if get_effective_policy is None:
+            return None
+        policy = await get_effective_policy(claims)
+        if not isinstance(policy, dict) or not isinstance(policy.get("variables"), dict):
+            raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
+        return policy
+
+    def _authorize_values(policy, values, *, phase: str):
+        if policy is None:
+            return
+        try:
+            validate_writes(policy, values, phase=phase)
+        except AccessDenied as exc:
+            raise HTTPException(status_code=403, detail="Variable access denied by the effective FMU policy") from exc
+
+    def _filter_result(policy, result):
+        return filter_fmi_values(policy, result) if policy is not None else result
 
     @router.post("/api/v1/simulations/run")
     async def run_simulation(
@@ -28,6 +49,10 @@ def create_run_router(
         claims: dict = Depends(verify_jwt),
     ):
         enforce_fmu_claim(claims)
+        access_policy = await _policy(claims)
+        _authorize_values(access_policy, req.parameters, phase="initialization")
+        for event in req.inputSchedule:
+            _authorize_values(access_policy, event.get("values", {}), phase="runtime")
         station_backend = get_station_backend()
         station_backend.build_authorized_context(
             claims=claims,
@@ -45,7 +70,7 @@ def create_run_router(
             result = dict(result)
             # The Gateway id is the durable observation key.
             result["simId"] = sim_id
-        return result
+        return _filter_result(access_policy, result)
 
     @router.post("/api/v1/simulations/jobs", status_code=202)
     async def submit_simulation_job(
@@ -54,6 +79,8 @@ def create_run_router(
         claims: dict = Depends(verify_jwt),
     ):
         enforce_fmu_claim(claims)
+        access_policy = await _policy(claims)
+        _authorize_values(access_policy, req.parameters, phase="initialization")
         station_backend = get_station_backend()
         station_backend.build_authorized_context(
             claims=claims,
@@ -72,7 +99,7 @@ def create_run_router(
             request_payload=simulation_request_payload(req, sim_id),
             authorization=extract_authorization_header(request),
         )
-        return _public_job_response(result, sim_id)
+        return _filter_result(access_policy, _public_job_response(result, sim_id))
 
     @router.post("/api/v1/simulations/batches", status_code=202)
     async def submit_simulation_batch(
@@ -81,6 +108,9 @@ def create_run_router(
         claims: dict = Depends(verify_jwt),
     ):
         enforce_fmu_claim(claims)
+        access_policy = await _policy(claims)
+        for scenario in req.scenarios:
+            _authorize_values(access_policy, scenario.parameters, phase="initialization")
         station_backend = get_station_backend()
         station_backend.build_authorized_context(
             claims=claims,
@@ -105,7 +135,7 @@ def create_run_router(
             },
             authorization=extract_authorization_header(request),
         )
-        return _public_job_response(result, batch_id)
+        return _filter_result(access_policy, _public_job_response(result, batch_id))
 
     return router
 

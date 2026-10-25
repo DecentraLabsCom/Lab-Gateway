@@ -54,7 +54,7 @@ end
 local function new(opts)
     opts = opts or {}
     local logs = {}
-    local req_headers = {}
+    local req_headers = opts.headers or {}
     local now = opts.now or 0
 
     local timer_calls = {

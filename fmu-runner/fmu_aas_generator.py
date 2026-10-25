@@ -21,6 +21,11 @@ from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
 
 import httpx
+from simulation_access_policy import (
+    build_part4_access_rules,
+    compile_part4_access_rules,
+    fmi_interface_digest,
+)
 
 logger = logging.getLogger("fmu-runner.aas")
 
@@ -66,6 +71,9 @@ _SEMANTIC_ID_ASSET_INTERFACES = "https://admin-shell.io/idta/AssetInterfacesDesc
 _SEMANTIC_ID_CONTACT_INFORMATION = "https://admin-shell.io/zvei/nameplate/1/0/ContactInformations"
 _SEMANTIC_ID_HANDOVER_DOCUMENTATION = "0173-1#01-AHF578#003"
 _SEMANTIC_ID_ARBITRARY = "https://admin-shell.io/SMT/General/Arbitrary"
+_SEMANTIC_ID_SIMULATION_ACCESS_CONTROL = "urn:decentralabs:aas:SimulationAccessControl:1"
+_SEMANTIC_ID_ACCESS_INTERFACE_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:InterfaceDigest:1"
+_SEMANTIC_ID_ACCESS_GENERATED_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:GeneratedPolicyDigest:1"
 
 _SIMULATION_SEMANTICS = {
     "summary": "https://admin-shell.io/idta/SimulationModels/Summary/1/0",
@@ -179,6 +187,10 @@ def _submodel_id_for_contact(lab_id: str) -> str:
 
 def _submodel_id_for_handover(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:handoverDocumentation"
+
+
+def _submodel_id_for_access_control(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:simulationAccessControl"
 
 
 def _fmu_digest(fmu_path: Path) -> str:
@@ -440,6 +452,49 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
             ],
         })
     return connectors
+
+
+def build_simulation_access_control_submodel(
+    lab_id: str,
+    metadata: dict,
+    *,
+    simulation_model_submodel_id: str | None = None,
+) -> dict:
+    """Build the Gateway's IDTA Part 4 JSON access-rule profile for an FMU."""
+    access_rules = build_part4_access_rules(
+        metadata,
+        simulation_model_submodel_id or _submodel_id_for_fmu(lab_id),
+    )
+    encoded_rules = json.dumps(
+        access_rules,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    digest = fmi_interface_digest(metadata)
+    generated_digest = hashlib.sha256(encoded_rules).hexdigest()
+    return {
+        "id": _submodel_id_for_access_control(lab_id),
+        "idShort": "SimulationAccessControl",
+        "semanticId": _semantic_id(_SEMANTIC_ID_SIMULATION_ACCESS_CONTROL),
+        "modelType": "Submodel",
+        "submodelElements": [
+            _standard_property(
+                "InterfaceDigest", "xs:string", digest,
+                _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST,
+            ),
+            _standard_property(
+                "GeneratedPolicyDigest", "xs:string", generated_digest,
+                _SEMANTIC_ID_ACCESS_GENERATED_DIGEST,
+            ),
+            {
+                "idShort": "AllAccessPermissionRules",
+                "modelType": "Blob",
+                "contentType": "application/json",
+                "value": base64.b64encode(encoded_rules).decode("ascii"),
+            },
+        ],
+    }
 
 
 def build_simulation_submodel(
@@ -1113,6 +1168,8 @@ def build_aas_shell(
         all_sm_ids.append(_submodel_id_for_execution(lab_id))
     if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
         all_sm_ids.append(_submodel_id_for_interfaces(lab_id))
+    if isinstance(metadata.get("modelVariables"), list):
+        all_sm_ids.append(_submodel_id_for_access_control(lab_id))
     if str((extra_info or {}).get("contactEmail") or "").strip():
         all_sm_ids.append(_submodel_id_for_contact(lab_id))
     if (
@@ -1410,6 +1467,46 @@ def _shell_submodel_ids(shell: dict[str, Any]) -> list[str]:
     return result
 
 
+def _decode_part4_access_rules_blob(element: Any) -> dict[str, Any] | None:
+    if (
+        not isinstance(element, dict)
+        or element.get("modelType") != "Blob"
+        or str(element.get("contentType") or "").lower() != "application/json"
+    ):
+        return None
+    encoded = element.get("value")
+    if not isinstance(encoded, str) or len(encoded) > 2 * 1_048_576:
+        return None
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        if len(raw) > 1_048_576:
+            return None
+        payload = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) and set(payload) == {"AllAccessPermissionRules"} else None
+
+
+def _is_simulation_access_control_submodel(submodel: Any) -> bool:
+    if not isinstance(submodel, dict):
+        return False
+    if submodel.get("idShort") == "SimulationAccessControl":
+        return True
+    semantic_id = submodel.get("semanticId")
+    if isinstance(semantic_id, dict):
+        keys = semantic_id.get("keys")
+        if isinstance(keys, list) and any(
+            isinstance(key, dict) and key.get("value") == _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL
+            for key in keys
+        ):
+            return True
+    elements = submodel.get("submodelElements")
+    return isinstance(elements, list) and any(
+        _decode_part4_access_rules_blob(element) is not None
+        for element in elements
+    )
+
+
 def _find_property_value(payload: Any, id_short: str) -> Optional[str]:
     """Find a scalar Property value in a nested AAS element payload."""
     if isinstance(payload, dict):
@@ -1430,6 +1527,93 @@ def _find_property_value(payload: Any, id_short: str) -> Optional[str]:
             if found:
                 return found
     return None
+
+
+async def _sync_simulation_access_control(
+    client: httpx.AsyncClient,
+    lab_id: str,
+    metadata: dict,
+    *,
+    simulation_model_submodel_id: str | None = None,
+    force_regenerate: bool = False,
+) -> dict[str, Any]:
+    """Upsert generated rules without overwriting provider-edited rules."""
+    submodel_id = _submodel_id_for_access_control(lab_id)
+    encoded_id = _encode_id(submodel_id)
+    if _AAS_ENCODED_ID_RE.fullmatch(encoded_id) is None:
+        return {"error": "AAS access control resource ID is invalid"}
+
+    payload = build_simulation_access_control_submodel(
+        lab_id,
+        metadata,
+        simulation_model_submodel_id=simulation_model_submodel_id,
+    )
+    current = await client.get(f"/submodels/{encoded_id}")
+    if current.status_code == 200:
+        try:
+            existing = current.json()
+        except (TypeError, ValueError):
+            return {"error": "AAS access control resource is invalid"}
+        if not isinstance(existing, dict):
+            return {"error": "AAS access control resource is invalid"}
+        old_generated_digest = _find_property_value(existing, "GeneratedPolicyDigest")
+        old_interface_digest = _find_property_value(existing, "InterfaceDigest")
+        old_blob = next((
+            element for element in existing.get("submodelElements", [])
+            if isinstance(element, dict)
+            and element.get("idShort") == "AllAccessPermissionRules"
+            and element.get("modelType") == "Blob"
+        ), None)
+        blob_digest = None
+        if isinstance(old_blob, dict) and isinstance(old_blob.get("value"), str):
+            try:
+                blob_digest = hashlib.sha256(base64.b64decode(old_blob["value"], validate=True)).hexdigest()
+            except (ValueError, TypeError):
+                blob_digest = "invalid"
+        if not force_regenerate and (not old_generated_digest or blob_digest != old_generated_digest):
+            # A changed or externally authored policy is provider-owned. Its
+            # old interface digest intentionally remains, making it stale and
+            # unusable after an incompatible FMU update until reviewed.
+            payload = existing
+            new_digest = _find_property_value(
+                build_simulation_access_control_submodel(
+                    lab_id,
+                    metadata,
+                    simulation_model_submodel_id=simulation_model_submodel_id,
+                ),
+                "InterfaceDigest",
+            )
+            return_flags = {
+                "accessPolicyPreserved": True,
+                "accessPolicyStale": old_interface_digest != new_digest,
+            }
+        else:
+            return_flags = {"accessPolicyRegenerated": True} if force_regenerate else {}
+    elif current.status_code == 404:
+        return_flags = {}
+    else:
+        return {"error": f"access policy lookup failed: {current.status_code}"}
+
+    response = await client.put(
+        f"/submodels/{encoded_id}",
+        json=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    if response.status_code in (200, 201, 204):
+        return {
+            "created": response.status_code == 201,
+            "updated": response.status_code != 201,
+            **return_flags,
+        }
+    if response.status_code == 404:
+        response = await client.post(
+            "/submodels",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        if response.status_code in (200, 201):
+            return {"created": True, **return_flags}
+    return {"error": f"access policy sync failed: {response.status_code}"}
 
 
 async def _generated_updated_at(
@@ -1507,6 +1691,13 @@ async def discover_basyx_shells() -> dict[str, Any]:
                 )
                 if updated_at:
                     generated_shell["updatedAt"] = updated_at
+                access_policy_id = _submodel_id_for_access_control(lab_id)
+                if access_policy_id not in generated_shell["submodelIds"]:
+                    access_policy = await client.get(
+                        f"/submodels/{_encode_id(access_policy_id)}"
+                    )
+                    if access_policy.status_code == 200:
+                        generated_shell["submodelIds"].append(access_policy_id)
                 discovered.append(generated_shell)
             return {"shells": discovered}
     except httpx.RequestError as exc:
@@ -1535,6 +1726,7 @@ async def sync_fmu_to_basyx(
     unit_definitions: Sequence[dict] = (),
     required_aas_id: Optional[str] = None,
     runtime_info: Optional[dict] = None,
+    force_regenerate_access_policy: bool = False,
 ) -> dict:
     """
     Create or update the AAS shell and generated FMU submodels in BaSyx.
@@ -1554,6 +1746,7 @@ async def sync_fmu_to_basyx(
     aas_id = _aas_id_for_lab(lab_id)
     submodel_id = _submodel_id_for_fmu(lab_id)
     technical_data_id = _submodel_id_for_technical(lab_id)
+    access_control_id = _submodel_id_for_access_control(lab_id)
     execution_capabilities_id = _submodel_id_for_execution(lab_id)
     interfaces_id = _submodel_id_for_interfaces(lab_id)
     contact_id = _submodel_id_for_contact(lab_id)
@@ -1563,6 +1756,7 @@ async def sync_fmu_to_basyx(
         "aasId": aas_id,
         "submodelId": submodel_id,
         "technicalDataSubmodelId": technical_data_id,
+        "accessControlSubmodelId": access_control_id,
         "executionSubmodelId": execution_capabilities_id,
         "interfacesSubmodelId": interfaces_id,
         "contactSubmodelId": contact_id,
@@ -1599,6 +1793,120 @@ async def sync_fmu_to_basyx(
                 ):
                     result["error"] = f"AASX must contain shell {required_shell_id}"
                     return result
+
+                aasx_simulation_model_id: str | None = None
+                generate_access_policy = False
+                if isinstance(metadata.get("modelVariables"), list):
+                    if force_regenerate_access_policy:
+                        result["error"] = "Access policy defaults cannot be regenerated while importing AASX"
+                        return result
+                    if not required_shell_id:
+                        result["error"] = "FMU AASX import requires its stable laboratory shell ID"
+                        return result
+                    target_shells = [
+                        shell for shell in all_shells
+                        if isinstance(shell, dict) and shell.get("id") == required_shell_id
+                    ]
+                    if len(target_shells) != 1:
+                        result["error"] = "FMU AASX must contain exactly one stable laboratory shell"
+                        return result
+                    target_shell = target_shells[0]
+
+                    simulation_models = [
+                        submodel for submodel in all_submodels
+                        if isinstance(submodel, dict) and submodel.get("idShort") == "SimulationModels"
+                    ]
+                    if len(simulation_models) > 1:
+                        result["error"] = "FMU AASX contains ambiguous SimulationModels submodels"
+                        return result
+                    if simulation_models:
+                        aasx_simulation_model_id = simulation_models[0].get("id")
+                        if not isinstance(aasx_simulation_model_id, str) or not aasx_simulation_model_id.strip():
+                            result["error"] = "FMU AASX SimulationModels submodel has no valid ID"
+                            return result
+                    else:
+                        generated_simulation_model = build_simulation_submodel(
+                            lab_id,
+                            access_key,
+                            metadata,
+                            extra_info,
+                            fmu_path=fmu_path,
+                        )
+                        aasx_simulation_model_id = generated_simulation_model["id"]
+                        all_submodels.append(generated_simulation_model)
+
+                    shell_refs = target_shell.get("submodels")
+                    if not isinstance(shell_refs, list):
+                        shell_refs = []
+                        target_shell["submodels"] = shell_refs
+                    if aasx_simulation_model_id not in _shell_submodel_ids(target_shell):
+                        shell_refs.append({
+                            "type": "ModelReference",
+                            "keys": [{"type": "Submodel", "value": aasx_simulation_model_id}],
+                        })
+
+                    imported_access_policies = [
+                        submodel for submodel in all_submodels
+                        if _is_simulation_access_control_submodel(submodel)
+                    ]
+                    if len(imported_access_policies) > 1:
+                        result["error"] = "FMU AASX contains ambiguous simulation access policies"
+                        return result
+                    if imported_access_policies:
+                        policy_submodel = imported_access_policies[0]
+                        policy_submodel_id = policy_submodel.get("id")
+                        shell_submodel_ids = set(_shell_submodel_ids(target_shell))
+                        if not isinstance(policy_submodel_id, str) or policy_submodel_id not in shell_submodel_ids:
+                            result["error"] = "FMU AASX access policy must be referenced by its laboratory shell"
+                            return result
+                        policy_elements = policy_submodel.get("submodelElements", [])
+                        policy_blobs = [
+                            element for element in policy_elements
+                            if isinstance(element, dict)
+                            and (
+                                element.get("idShort") == "AllAccessPermissionRules"
+                                or _decode_part4_access_rules_blob(element) is not None
+                            )
+                        ] if isinstance(policy_elements, list) else []
+                        if len(policy_blobs) != 1:
+                            result["error"] = "FMU AASX access policy must contain one Part 4 JSON Blob"
+                            return result
+                        rules_blob = policy_blobs[0]
+                        rules_document = _decode_part4_access_rules_blob(rules_blob)
+                        if rules_document is None:
+                            result["error"] = "FMU AASX access policy Blob is invalid"
+                            return result
+                        raw_rules = base64.b64decode(rules_blob["value"], validate=True)
+                        generated_digest = _find_property_value(policy_submodel, "GeneratedPolicyDigest")
+                        interface_digest = _find_property_value(policy_submodel, "InterfaceDigest")
+                        source = "aas-generated" if (
+                            generated_digest
+                            and generated_digest == hashlib.sha256(raw_rules).hexdigest()
+                        ) else "aas-provider"
+                        try:
+                            compile_part4_access_rules(
+                                rules_document,
+                                metadata,
+                                aasx_simulation_model_id,
+                                declared_interface_digest=interface_digest,
+                                claims={},
+                                source=source,
+                                allowed_submodel_ids=shell_submodel_ids,
+                            )
+                        except (TypeError, ValueError) as exc:
+                            logger.warning("Imported FMU AASX access policy is invalid: %s", type(exc).__name__)
+                            result["error"] = "FMU AASX access policy does not match its FMU or AAS shell"
+                            return result
+                        result["accessPolicyPreserved"] = True
+                        result["accessControlSubmodelId"] = policy_submodel_id
+                    else:
+                        generate_access_policy = True
+                        generated_policy_id = _submodel_id_for_access_control(lab_id)
+                        if generated_policy_id not in _shell_submodel_ids(target_shell):
+                            shell_refs.append({
+                                "type": "ModelReference",
+                                "keys": [{"type": "Submodel", "value": generated_policy_id}],
+                            })
 
                 uploaded_aas_ids: list = []
                 uploaded_sm_ids: list = []
@@ -1646,6 +1954,25 @@ async def sync_fmu_to_basyx(
                             logger.error("AASX submodel upload failed: %s %s", r2.status_code, r2.text[:300])
                             result["error"] = f"submodel upload failed: {r2.status_code}"
                             return result
+
+                if generate_access_policy:
+                    access_policy_result = await _sync_simulation_access_control(
+                        client,
+                        lab_id,
+                        metadata,
+                        simulation_model_submodel_id=aasx_simulation_model_id,
+                        force_regenerate=force_regenerate_access_policy,
+                    )
+                    if access_policy_result.get("error"):
+                        result["error"] = access_policy_result["error"]
+                        return result
+                    result["created"] = bool(result["created"] or access_policy_result.get("created"))
+                    result["updated"] = bool(result["updated"] or access_policy_result.get("updated"))
+                    result["accessControlSubmodelId"] = _submodel_id_for_access_control(lab_id)
+                    result["accessPolicyGenerated"] = True
+                    for flag in ("accessPolicyPreserved", "accessPolicyStale", "accessPolicyRegenerated"):
+                        if flag in access_policy_result:
+                            result[flag] = access_policy_result[flag]
 
                 result["aasxUpload"] = True
                 result["uploadedAasIds"] = uploaded_aas_ids
@@ -1752,6 +2079,23 @@ async def sync_fmu_to_basyx(
                     logger.error("Failed to update TechnicalData submodel: status=%s", td_resp.status_code)
                     result["error"] = f"technical data sync failed: {td_resp.status_code}"
                     return result
+
+                if isinstance(metadata.get("modelVariables"), list):
+                    result["accessControlSubmodelId"] = access_control_id
+                    access_policy_result = await _sync_simulation_access_control(
+                        client,
+                        lab_id,
+                        metadata,
+                        force_regenerate=force_regenerate_access_policy,
+                    )
+                    if access_policy_result.get("error"):
+                        result["error"] = access_policy_result["error"]
+                        return result
+                    result["created"] = bool(result["created"] or access_policy_result.get("created"))
+                    result["updated"] = bool(result["updated"] or access_policy_result.get("updated"))
+                    for flag in ("accessPolicyPreserved", "accessPolicyStale", "accessPolicyRegenerated"):
+                        if flag in access_policy_result:
+                            result[flag] = access_policy_result[flag]
 
                 # --- CapabilityDescription submodel ---
                 if execution_capabilities_payload is not None:

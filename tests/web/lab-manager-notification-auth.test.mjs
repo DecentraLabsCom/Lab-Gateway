@@ -566,9 +566,9 @@ test('reuses the existing Lab Manager session without prompting on Operations en
 
 test('loads the activity controller before the Lab Manager bootstrap', () => {
   const html = fs.readFileSync(indexPath, 'utf8');
-  if (html.includes('lab-manager-fmu-sync-v11')) {
-    assert.match(html, /lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v11/);
-    assert.match(html, /lab-manager-aas-link\.js\?v=lab-manager-aas-link-v4/);
+  if (html.includes('lab-manager-fmu-sync-v13')) {
+    assert.match(html, /lab-manager-fmu-sync\.js\?v=lab-manager-fmu-sync-v13/);
+    assert.match(html, /lab-manager-aas-link\.js\?v=lab-manager-aas-link-v7/);
     assert.match(html, /lab-manager-aasx\.js\?v=lab-manager-aasx-v3/);
     assert.match(html, /lab-manager-digital-twins\.js\?v=lab-manager-digital-twins-v7/);
     assert.match(html, /lab-manager-energy-feature\.js\?v=lab-manager-energy-feature-v6/);

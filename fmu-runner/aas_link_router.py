@@ -16,7 +16,7 @@ def _read_aas_target(path: Any) -> str | None:
     return target.strip() if isinstance(target, str) and target.strip() else None
 
 
-def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
+def create_aas_link_router(*, get_link_path: Any, invalidate_access_policy: Any = None) -> APIRouter:
     router = APIRouter()
 
     async def read_link_request(request: Request) -> dict:
@@ -30,7 +30,40 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
         aas_id = raw_aas_id.strip() if isinstance(raw_aas_id, str) else ""
         if not aas_id or len(aas_id) > 2048:
             raise HTTPException(status_code=400, detail="aasId is required")
-        return {"aasId": aas_id}
+        result: dict[str, Any] = {"aasId": aas_id}
+        raw_submodel_ids = body.get("submodelIds")
+        if raw_submodel_ids is not None:
+            if not isinstance(raw_submodel_ids, list) or len(raw_submodel_ids) > 128:
+                raise HTTPException(status_code=400, detail="submodelIds must be a bounded list")
+            submodel_ids: list[str] = []
+            for value in raw_submodel_ids:
+                if not isinstance(value, str) or not value.strip() or len(value) > 2048:
+                    raise HTTPException(status_code=400, detail="submodelIds contains an invalid ID")
+                if value.strip() not in submodel_ids:
+                    submodel_ids.append(value.strip())
+            result["submodelIds"] = submodel_ids
+        raw_access_control_submodel_id = body.get("accessControlSubmodelId")
+        if raw_access_control_submodel_id is not None:
+            if (
+                not isinstance(raw_access_control_submodel_id, str)
+                or not raw_access_control_submodel_id.strip()
+                or len(raw_access_control_submodel_id) > 2048
+            ):
+                raise HTTPException(status_code=400, detail="accessControlSubmodelId is invalid")
+            result["accessControlSubmodelId"] = raw_access_control_submodel_id.strip()
+        raw_lab_id = body.get("labId")
+        if raw_lab_id is not None:
+            if (
+                not isinstance(raw_lab_id, str)
+                or not raw_lab_id.strip()
+                or len(raw_lab_id) > 128
+                or any(ord(char) < 32 for char in raw_lab_id)
+                or "/" in raw_lab_id
+                or "\\" in raw_lab_id
+            ):
+                raise HTTPException(status_code=400, detail="labId is invalid")
+            result["labId"] = raw_lab_id.strip()
+        return result
 
     @router.post("/aas-admin/lab/{lab_id}/aas-link")
     async def create_lab_aas_link(lab_id: str, request: Request):
@@ -43,6 +76,8 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
         fp = get_link_path(lab_key)
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(json.dumps(link, indent=2), encoding="utf-8")
+        if callable(invalidate_access_policy):
+            invalidate_access_policy()
         return {"linked": True, **link}
 
     @router.get("/aas-admin/lab/{lab_id}/aas-link")
@@ -66,6 +101,8 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
         if not fp.is_file():
             raise HTTPException(status_code=404, detail="No AAS link configured for this laboratory")
         fp.unlink()
+        if callable(invalidate_access_policy):
+            invalidate_access_policy()
         return {"unlinked": True, "labId": lab_key}
 
     @router.post("/aas-admin/fmu/{access_key}/aas-link")
@@ -85,26 +122,18 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
         ``urn:decentralabs:lab:{labId}`` to the linked AAS ID transparently —
         Marketplace consumers need no changes.
         """
-        try:
-            body = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid JSON body")
-        aas_id = (body.get("aasId") or "").strip()
-        if not aas_id:
-            raise HTTPException(status_code=400, detail="aasId is required")
-        lab_id = str(body.get("labId") or "").strip() or None
-        link: dict = {"aasId": aas_id}
+        link = await read_link_request(request)
+        lab_id = link.get("labId")
         if lab_id:
             link["labId"] = lab_id
-        submodel_ids = body.get("submodelIds")
-        if submodel_ids and isinstance(submodel_ids, list):
-            link["submodelIds"] = [s.strip() for s in submodel_ids if isinstance(s, str) and s.strip()]
         fp = get_link_path(access_key)
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(json.dumps(link, indent=2), encoding="utf-8")
         if lab_id and lab_id != access_key:
             fp_lab = get_link_path(lab_id)
             fp_lab.write_text(json.dumps(link, indent=2), encoding="utf-8")
+        if callable(invalidate_access_policy):
+            invalidate_access_policy()
         return {"linked": True, "accessKey": access_key, **link}
 
     @router.get("/aas-admin/fmu/{access_key}/aas-link")
@@ -135,6 +164,8 @@ def create_aas_link_router(*, get_link_path: Any) -> APIRouter:
             fp_lab = get_link_path(lab_id)
             if fp_lab.is_file():
                 fp_lab.unlink()
+        if callable(invalidate_access_policy):
+            invalidate_access_policy()
         return {"unlinked": True, "accessKey": access_key}
 
     @router.get("/aas-admin/resolve-aas-id")

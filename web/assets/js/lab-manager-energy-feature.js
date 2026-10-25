@@ -98,6 +98,9 @@
             powerPolicyEditorHint: $('#powerPolicyEditorHint'),
             fmuSync: {
                 syncButton: $('#fmuSyncBtn'),
+                accessPolicyStatus: $('#fmuAccessPolicyStatus'),
+                checkAccessPolicyButton: $('#fmuAccessPolicyCheckBtn'),
+                regenerateAccessPolicyButton: $('#fmuAccessPolicyRegenerateBtn'),
                 keyInput: $('#fmuSyncKey'),
                 fileInput: $('#fmuSyncFile'),
                 fileName: $('#fmuSyncFileName'),
@@ -113,6 +116,8 @@
             aasLink: {
                 keyInput: $('#aasLinkKey'),
                 aasIdInput: $('#aasLinkAasId'),
+                accessPolicySubmodelIdInput: $('#aasLinkAccessPolicySubmodelId'),
+                accessPolicyStatus: $('#aasLinkAccessPolicyStatus'),
                 saveButton: $('#aasLinkSaveBtn'),
                 checkButton: $('#aasLinkCheckBtn'),
                 deleteButton: $('#aasLinkDeleteBtn'),

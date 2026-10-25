@@ -18,6 +18,92 @@
         let acknowledgedAssetValidationKey = '';
         let lastAssetValidation = null;
 
+        function renderAccessPolicyStatus(status) {
+            const panel = fields.accessPolicyStatus;
+            const regenerateButton = fields.regenerateAccessPolicyButton;
+            if (!panel) return;
+            const state = String(status?.state || 'unavailable');
+            const labels = {
+                generated: 'Generated defaults are active.',
+                customized: 'Provider-defined access rules are active.',
+                stale: 'Rules no longer match the current FMU interface.',
+                invalid: 'Rules are invalid and are not being applied.',
+                'sync-error': 'AAS synchronization failed. Access rules could not be rechecked; use “Check access rules” before relying on Marketplace controls.',
+                'fmi-default': 'No AAS rules are linked; FMI-derived defaults are active.',
+                unavailable: 'Access rule status is unavailable; simulations fail closed.',
+            };
+            panel.dataset.state = state;
+            panel.dataset.status = ['stale', 'invalid', 'sync-error', 'unavailable'].includes(state)
+                || (state === 'fmi-default' && status?.aasLinked === true)
+                ? 'warning'
+                : 'passed';
+            panel.textContent = labels[state] || labels.unavailable;
+            if (status && Number.isFinite(Number(status.readableVariableCount))) {
+                panel.textContent += ` Readable variables: ${Number(status.readableVariableCount)}; writable variables: ${Number(status.writableVariableCount || 0)}.`;
+            }
+            if (regenerateButton) {
+                regenerateButton.hidden = status?.regenerationAvailable !== true;
+                regenerateButton.disabled = false;
+            }
+        }
+
+        async function loadAccessPolicyStatus(laboratory = selectedLaboratory()) {
+            if (!fields.accessPolicyStatus) return null;
+            if (laboratory.resourceType !== 1 || !laboratory.accessKey || !laboratory.labId) {
+                fields.accessPolicyStatus.textContent = 'Select an FMU to check its variable access rules.';
+                delete fields.accessPolicyStatus.dataset.state;
+                if (fields.regenerateAccessPolicyButton) fields.regenerateAccessPolicyButton.hidden = true;
+                return null;
+            }
+            fields.accessPolicyStatus.textContent = 'Checking FMU access rules…';
+            const query = new urlSearchParamsCtor({ labId: laboratory.labId });
+            try {
+                const response = await fetchImpl(
+                    `/aas-admin/fmu/${encodeURIComponentImpl(laboratory.accessKey)}/access-policy?${query.toString()}`,
+                );
+                const status = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(status.detail || `HTTP ${response.status}`);
+                renderAccessPolicyStatus(status);
+                return status;
+            } catch (_error) {
+                renderAccessPolicyStatus({ state: 'unavailable', regenerationAvailable: false });
+                return null;
+            }
+        }
+
+        async function regenerateAccessPolicy() {
+            const laboratory = selectedLaboratory();
+            if (laboratory.resourceType !== 1 || !laboratory.accessKey || !laboratory.labId) {
+                showToast('Select an FMU laboratory first', 'error');
+                return;
+            }
+            const confirmAction = root.confirm;
+            if (typeof confirmAction !== 'function' || !confirmAction.call(root,
+                'Replace the current variable access rules with FMI-derived defaults? Provider changes will be lost.')) {
+                return;
+            }
+            const button = fields.regenerateAccessPolicyButton;
+            if (button) button.disabled = true;
+            try {
+                const query = new urlSearchParamsCtor({
+                    labId: laboratory.labId,
+                    regenerateAccessPolicy: 'true',
+                });
+                const response = await fetchImpl(
+                    `/aas-admin/fmu/${encodeURIComponentImpl(laboratory.accessKey)}/sync?${query.toString()}`,
+                    { method: 'POST' },
+                );
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+                if (body.disabled === true) throw new Error('AAS access rules are unavailable on this Gateway');
+                showToast('Default FMU access rules regenerated', 'success');
+                await loadAccessPolicyStatus(laboratory);
+            } catch (error) {
+                showToast(`Access rule regeneration failed: ${error.message}`, 'error');
+                if (button) button.disabled = false;
+            }
+        }
+
         function isGatewaySceneAssetPath(path) {
             return /^\/digital-twin-scenes\/\d+\/[a-f0-9]{64}\.glb$/i.test(String(path || ''));
         }
@@ -285,6 +371,7 @@
                 return;
             }
             if (fields.syncButton) fields.syncButton.disabled = true;
+            let syncAttempted = false;
             try {
                 const description = isFmu
                     ? await resolveDescription(accessKey, extraInfo.labDescription)
@@ -366,6 +453,7 @@
                     form.append('file', aasxFile);
                     form.append('labId', labId);
                     appendMetadataToForm(form, syncInfo);
+                    syncAttempted = true;
                     response = await fetchImpl(url, { method: 'POST', body: form });
                 } else if (!isFmu) {
                     const metadata = Object.fromEntries(
@@ -375,6 +463,7 @@
                             && (Array.isArray(value) ? value.length > 0 : Boolean(value))
                         )),
                     );
+                    syncAttempted = true;
                     response = await fetchImpl(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -393,13 +482,16 @@
                         params.set('digitalTwinAssetUrl', syncInfo.digitalTwinAssetUrl);
                     }
                     const query = params.toString() ? `?${params.toString()}` : '';
+                    syncAttempted = true;
                     response = await fetchImpl(url + query, { method: 'POST' });
                 }
                 if (response.status === 403) {
+                    if (isFmu) renderAccessPolicyStatus({ state: 'sync-error' });
                     showToast('AAS admin unavailable in Lite mode or blocked by gateway policy', 'error');
                     return;
                 }
                 if (response.status === 401) {
+                    if (isFmu) renderAccessPolicyStatus({ state: 'sync-error' });
                     showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
                     return;
                 }
@@ -409,12 +501,15 @@
                 }
                 const data = await response.json();
                 if (data.disabled === true) {
+                    if (isFmu) renderAccessPolicyStatus({ state: 'sync-error' });
                     showToast(`${isFmu ? 'FMU' : 'Physical laboratory'} AAS sync disabled: ${labId}`, 'error');
                     return;
                 }
                 showToast(`${isFmu ? 'FMU' : 'Physical laboratory'} AAS sync: ${labId} ok`, 'success');
+                if (isFmu) await loadAccessPolicyStatus(laboratory);
             } catch (error) {
                 logger.error(error);
+                if (isFmu && syncAttempted) renderAccessPolicyStatus({ state: 'sync-error' });
                 showToast(`AAS synchronization failed: ${error.message}`, 'error');
             } finally {
                 if (fields.syncButton) fields.syncButton.disabled = false;
@@ -431,6 +526,7 @@
                 fields.keyInput.addEventListener('change', () => {
                     const laboratory = selectedLaboratory();
                     updateAssetVisibility();
+                    void loadAccessPolicyStatus(laboratory);
                     if (!laboratory.accessKey || laboratory.resourceType !== 1) {
                         clearAllFmuHints();
                         return;
@@ -520,6 +616,12 @@
                     void syncAasResource(laboratory, file || null, assetFile || null, extraInfo);
                 });
             }
+            fields.checkAccessPolicyButton?.addEventListener('click', () => {
+                void loadAccessPolicyStatus();
+            });
+            fields.regenerateAccessPolicyButton?.addEventListener('click', () => {
+                void regenerateAccessPolicy();
+            });
             updateAssetVisibility();
         }
 
@@ -527,6 +629,9 @@
             clearAllFmuHints,
             fetchFmuHints,
             initialize,
+            loadAccessPolicyStatus,
+            regenerateAccessPolicy,
+            renderAccessPolicyStatus,
             syncAasResource,
         });
     }

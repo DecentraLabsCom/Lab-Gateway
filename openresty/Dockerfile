@@ -4,6 +4,7 @@ FROM openresty/openresty:1.31.1.1-4-alpine-fat
 
 # Use the default system tree
 ENV TREE=/usr/local
+ENV LD_LIBRARY_PATH="/usr/local/openresty/openssl3/lib:/usr/lib"
 
 # Configure paths explicitly
 ENV LUA_PATH="$TREE/share/lua/5.1/?.lua;$TREE/share/lua/5.1/?/init.lua;;"
@@ -35,6 +36,10 @@ RUN set -eux; \
     install_luarock lua-resty-http-0.18.0-0.src.rock 9059fb963c1db4a2328b65307f5b09fd0decfa414da7bf842d95795e845d6827; \
     install_luarock lua-resty-jwt-0.3.2-1.src.rock 3facb248244a28357710629b072f7742ab89527a39ce2a825e613a094a640be8; \
     install_luarock lua-resty-mysql-0.15-0.rockspec b23be63861fb7109459e6edd41938415ffb667f7a2361030f65d7e588b0fd474
+
+# Fail the image build if the pinned cipher module cannot load against the
+# OpenSSL libraries shipped in this OpenResty image.
+RUN luajit -e 'assert(require("resty.openssl.cipher"))'
 
 # Directory for custom scripts and SSL certificates
 RUN mkdir -p /etc/openresty/lua /etc/openresty/jwt-keys /etc/ssl/private /var/lib/openresty/fmu-access \

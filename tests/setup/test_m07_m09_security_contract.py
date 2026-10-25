@@ -26,6 +26,9 @@ def test_aas_profile_isolated_and_authenticated():
     assert "AAS_ALLOWED_HOSTS" in aas_access
     assert "AAS_SERVICE_TOKEN" in aas_access
     assert 'ngx.req.set_header("Authorization", nil)' in aas_access
+    assert "decode_aas_resource_id" in aas_access
+    assert ":sm:simulationAccessControl$" in aas_access
+    assert 'uri == "/aas/serialization"' in aas_access
     assert "AAS_ALLOWED_HOSTS=" in env
     assert "AAS_SERVICE_TOKEN_HEADER=Authorization" in env
     assert "AAS_ALLOWED_HOSTS" in setup_sh and "AAS_SERVICE_TOKEN" in setup_sh

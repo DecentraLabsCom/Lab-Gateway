@@ -817,6 +817,15 @@
                         <div class="actions inline-actions mt-4">
                             <button class="primary-btn" id="fmuSyncBtn"><i class="fas fa-sync"></i> Sync AAS</button>
                         </div>
+                        <div class="digital-twin-validation mt-3" id="fmuAccessPolicyStatus" role="status" aria-live="polite">
+                            Select an FMU to check its variable access rules.
+                        </div>
+                        <div class="actions inline-actions mt-2">
+                            <button class="ghost-btn" id="fmuAccessPolicyCheckBtn" type="button">Check access rules</button>
+                            <button class="danger-btn" id="fmuAccessPolicyRegenerateBtn" type="button" hidden>
+                                Regenerate default access rules
+                            </button>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -834,6 +843,9 @@
                             When a link is active, Marketplace requests for the conventional
                             laboratory shell are transparently redirected to the linked external AAS ID.
                         </div>
+                        <div class="digital-twin-validation" id="aasLinkAccessPolicyStatus" role="status" aria-live="polite">
+                            Select or check an FMU link to validate its variable access rules.
+                        </div>
                         <div class="form-grid mt-3">
                             <label class="field">
                                 <span>Laboratory</span>
@@ -844,6 +856,11 @@
                             <label class="field full">
                                 <span>External AAS ID <span class="muted-text">(the shell ID in your external/self-hosted server)</span></span>
                                 <input type="text" id="aasLinkAasId" placeholder="urn:example:aas:my-simulation-model">
+                            </label>
+                            <label class="field full">
+                                <span>FMU access policy submodel ID <span class="muted-text">(optional)</span></span>
+                                <input type="text" id="aasLinkAccessPolicySubmodelId" maxlength="2048" placeholder="urn:example:submodel:simulation-access-rules">
+                                <small class="muted-text">For an external FMU, set this to the shell-referenced submodel containing its Part 4 JSON access rules.</small>
                             </label>
                         </div>
                         <div class="actions inline-actions mt-4">
@@ -1390,8 +1407,8 @@
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v2"></script>
     <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v2"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
-    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v11"></script>
-    <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v4"></script>
+    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v13"></script>
+    <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v7"></script>
     <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v3"></script>
     <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v7"></script>
     <script src="../assets/js/lab-manager-power-credentials.js?v=lab-manager-power-credentials-v2"></script>

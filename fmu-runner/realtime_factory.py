@@ -20,6 +20,7 @@ def build_realtime_manager(
     ws_cleanup_seconds: float,
     internal_ws_token: str,
     ws_create_rate_limit_per_minute: int,
+    get_effective_policy: Any = None,
     station_manager_factory: Any = StationRealtimeWsProxyManager,
     unsupported_manager_factory: Any,
 ) -> Any:
@@ -36,6 +37,7 @@ def build_realtime_manager(
             redeem_session_ticket=redeem_session_ticket,
             issue_session_ticket=issue_session_ticket,
             confirm_session_started=confirm_session_started,
+            get_effective_policy=get_effective_policy,
             ws_cleanup_seconds=ws_cleanup_seconds,
             internal_ws_token=internal_ws_token,
             ws_create_rate_limit_per_minute=ws_create_rate_limit_per_minute,

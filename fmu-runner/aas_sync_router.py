@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile
 
 
@@ -76,6 +77,8 @@ def create_aas_sync_router(
     logger: Any,
     get_runtime_status: Any = None,
     record_aasx: Any = None,
+    invalidate_access_policy: Any = None,
+    get_access_policy_status: Any = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -84,6 +87,7 @@ def create_aas_sync_router(
         aasx_bytes: Optional[bytes] = None
         lab_id: Optional[str] = None
         aasx_filename: Optional[str] = None
+        raw_regenerate_access_policy: Any = request.query_params.get("regenerateAccessPolicy")
 
         content_type = request.headers.get("content-type", "")
         if "multipart/form-data" in content_type:
@@ -91,6 +95,7 @@ def create_aas_sync_router(
             raw_lab_id = form.get("labId") or request.query_params.get("labId")
             if raw_lab_id:
                 lab_id = str(raw_lab_id)
+            raw_regenerate_access_policy = form.get("regenerateAccessPolicy") or raw_regenerate_access_policy
             upload = form.get("file") or form.get("aasx")
             if isinstance(upload, UploadFile):
                 aasx_filename = upload.filename
@@ -124,55 +129,64 @@ def create_aas_sync_router(
             if documentation_urls:
                 extra_info["documentationUrls"] = documentation_urls
 
+        if aasx_bytes and not lab_id:
+            raise HTTPException(status_code=400, detail="FMU AASX import requires labId")
+
+        regenerate_value = str(raw_regenerate_access_policy or "").strip().lower()
+        if regenerate_value not in {"", "0", "1", "false", "true", "no", "yes"}:
+            raise HTTPException(status_code=400, detail="regenerateAccessPolicy must be a boolean")
+        force_regenerate_access_policy = regenerate_value in {"1", "true", "yes"}
+        if aasx_bytes and force_regenerate_access_policy:
+            raise HTTPException(
+                status_code=400,
+                detail="Remove the AASX upload before regenerating default access rules",
+            )
+
         metadata: dict = {}
         fmu_path: Optional[Path] = None
-        if not aasx_bytes:
-            if get_model_metadata is not None:
-                try:
-                    metadata = await get_model_metadata(access_key)
-                except HTTPException:
-                    raise
-                except Exception as exc:
-                    logger.error(
-                        "AAS sync: cannot read FMU metadata for %s: %s",
-                        str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
-                        type(exc).__name__,
-                    )
-                    raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
-                if not isinstance(metadata, dict):
-                    raise HTTPException(status_code=422, detail="FMU metadata response is invalid")
-            else:
-                fmu_path = resolve_fmu_path(access_key)
-                try:
-                    model_description = read_model_description(str(fmu_path))
-                except Exception as exc:
-                    logger.error(
-                        "AAS sync: cannot read FMU %s: %s",
-                        str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
-                        type(exc).__name__,
-                    )
-                    raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
-                metadata = metadata_builder(model_description)
-            auto_fallback = {
-                key: metadata.get(key, "")
-                for key in ("description", "license")
-                if metadata.get(key, "")
-            }
-            merged_extra_info = {**auto_fallback, **(extra_info or {})}
-            merged_extra_info = {key: value for key, value in merged_extra_info.items() if value}
-            runtime_info = None
-            if get_runtime_status is not None:
-                try:
-                    runtime_info = await get_runtime_status(str(lab_id or access_key))
-                except Exception as exc:
-                    logger.warning(
-                        "AAS sync: runtime status unavailable for lab %s: %s",
-                        str(lab_id or access_key).replace("\r", "\\r").replace("\n", "\\n"),
-                        type(exc).__name__,
-                    )
+        if get_model_metadata is not None:
+            try:
+                metadata = await get_model_metadata(access_key)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "AAS sync: cannot read FMU metadata for %s: %s",
+                    str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
+                    type(exc).__name__,
+                )
+                raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
+            if not isinstance(metadata, dict):
+                raise HTTPException(status_code=422, detail="FMU metadata response is invalid")
         else:
-            merged_extra_info = {key: value for key, value in (extra_info or {}).items() if value}
-            runtime_info = None
+            fmu_path = resolve_fmu_path(access_key)
+            try:
+                model_description = read_model_description(str(fmu_path))
+            except Exception as exc:
+                logger.error(
+                    "AAS sync: cannot read FMU %s: %s",
+                    str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
+                    type(exc).__name__,
+                )
+                raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
+            metadata = metadata_builder(model_description)
+        auto_fallback = {
+            key: metadata.get(key, "")
+            for key in ("description", "license")
+            if metadata.get(key, "")
+        }
+        merged_extra_info = {**auto_fallback, **(extra_info or {})}
+        merged_extra_info = {key: value for key, value in merged_extra_info.items() if value}
+        runtime_info = None
+        if get_runtime_status is not None:
+            try:
+                runtime_info = await get_runtime_status(str(lab_id or access_key))
+            except Exception as exc:
+                logger.warning(
+                    "AAS sync: runtime status unavailable for lab %s: %s",
+                    str(lab_id or access_key).replace("\r", "\\r").replace("\n", "\\n"),
+                    type(exc).__name__,
+                )
 
         result = await sync_fmu_to_basyx(
             lab_id=lab_id or access_key,
@@ -182,7 +196,9 @@ def create_aas_sync_router(
             extra_info=merged_extra_info or None,
             fmu_path=fmu_path,
             unit_definitions=metadata.get("unitDefinitions", []),
+            required_aas_id=f"urn:decentralabs:lab:{lab_id}" if aasx_bytes and lab_id else None,
             runtime_info=runtime_info,
+            force_regenerate_access_policy=force_regenerate_access_policy,
         )
         if "error" in result:
             raise HTTPException(status_code=502, detail=result["error"])
@@ -197,7 +213,27 @@ def create_aas_sync_router(
             except Exception as exc:
                 logger.error("AASX association could not be recorded for lab %s: %s", lab_id, type(exc).__name__)
                 raise HTTPException(status_code=500, detail="AASX association could not be recorded") from exc
+        if callable(invalidate_access_policy):
+            invalidate_access_policy(lab_id or access_key)
         return result
+
+    @router.get("/aas-admin/fmu/{access_key}/access-policy")
+    async def inspect_fmu_access_policy(
+        access_key: str,
+        labId: str = Query(..., min_length=1, max_length=128),
+    ):
+        if get_access_policy_status is None:
+            raise HTTPException(status_code=503, detail="FMU access policy status is unavailable")
+        try:
+            status = await get_access_policy_status(labId, access_key)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("FMU access policy status unavailable for lab %s: %s", labId, type(exc).__name__)
+            raise HTTPException(status_code=503, detail="FMU access policy status is unavailable") from exc
+        if not isinstance(status, dict):
+            raise HTTPException(status_code=503, detail="FMU access policy status is unavailable")
+        return JSONResponse(status, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
     @router.post("/aas-admin/aas/{lab_id}/sync")
     async def aas_sync_resource_aasx(lab_id: str, request: Request):
@@ -249,6 +285,8 @@ def create_aas_sync_router(
             except Exception as exc:
                 logger.error("AASX association could not be recorded for lab %s: %s", lab_id, type(exc).__name__)
                 raise HTTPException(status_code=500, detail="AASX association could not be recorded") from exc
+        if callable(invalidate_access_policy):
+            invalidate_access_policy(lab_id)
         return result
 
     return router

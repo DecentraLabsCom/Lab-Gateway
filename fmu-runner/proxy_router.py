@@ -10,6 +10,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
+from simulation_access_policy import filter_model_description
+
 
 def create_proxy_router(
     *,
@@ -23,6 +25,7 @@ def create_proxy_router(
     issue_session_ticket: Any,
     derive_gateway_ws_url: Any,
     get_authorized_model_metadata: Any,
+    get_effective_policy: Any = None,
     build_proxy_model_description_xml: Any,
     parse_fmi_major_version: Any,
     proxy_model_identifier: Any,
@@ -102,6 +105,11 @@ def create_proxy_router(
             claims=claims,
             requested_fmu_filename=str(fmu_filename),
         )
+        if get_effective_policy is not None:
+            access_policy = await get_effective_policy(claims)
+            if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
+                raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
+            model_metadata = filter_model_description(access_policy, model_metadata)
         model_xml = build_proxy_model_description_xml(model_metadata)
         proxy_fmi_version = (
             "3.0" if parse_fmi_major_version(model_metadata.get("fmiVersion")) >= 3 else "2.0.3"

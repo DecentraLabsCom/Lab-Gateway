@@ -44,6 +44,7 @@ def test_realtime_factory_builds_remote_station_proxy():
         redeem_session_ticket=dependencies["redeem_session_ticket"],
         issue_session_ticket=dependencies["issue_session_ticket"],
         confirm_session_started=dependencies["confirm_session_started"],
+        get_effective_policy=None,
         ws_cleanup_seconds=15.0,
         internal_ws_token="internal-token",
         ws_create_rate_limit_per_minute=30,

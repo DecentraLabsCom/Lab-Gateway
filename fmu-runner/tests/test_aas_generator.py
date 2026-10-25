@@ -19,6 +19,7 @@ from fmu_aas_generator import (
     _aas_id_for_lab,
     _submodel_id_for_fmu,
     _submodel_id_for_technical,
+    _submodel_id_for_access_control,
     _submodel_id_for_interfaces,
     _submodel_id_for_contact,
     _submodel_id_for_handover,
@@ -30,6 +31,7 @@ from fmu_aas_generator import (
     _sanitize_idshort,
     build_simulation_ports,
     build_simulation_submodel,
+    build_simulation_access_control_submodel,
     build_technical_data_submodel,
     build_execution_capabilities_submodel,
     build_asset_interfaces_description_submodel,
@@ -479,7 +481,7 @@ class TestBuildAasShell:
     def test_shell_references_submodel(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
         refs = shell["submodels"]
-        assert len(refs) == 4
+        assert len(refs) == 5
         assert refs[0]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:simulationModels"
         assert refs[1]["keys"][0]["value"] == "urn:decentralabs:lab:42:sm:technicalData"
 
@@ -490,15 +492,162 @@ class TestBuildAasShell:
         assert "urn:decentralabs:lab:42:sm:simulationModels" in ref_values
         assert "urn:decentralabs:lab:42:sm:providerExtension" in ref_values
         assert "urn:decentralabs:lab:42:sm:technicalData" in ref_values
-        assert len(shell["submodels"]) == 5
+        assert _submodel_id_for_access_control("42") in ref_values
+        assert len(shell["submodels"]) == 6
 
     def test_shell_no_extra_submodels_by_default(self):
         shell = build_aas_shell("42", "test.fmu", SAMPLE_METADATA)
-        assert len(shell["submodels"]) == 4
+        assert len(shell["submodels"]) == 5
 
     def test_shell_idshort_format(self):
         shell = build_aas_shell("7", "motor.fmu", SAMPLE_METADATA)
         assert shell["idShort"] == "DecentraLabs_Lab_7"
+
+
+class TestAasGeneratorSimulationAccessControl:
+    def test_access_control_submodel_contains_part4_blob_and_fmi_digest(self):
+        import base64
+
+        from simulation_access_policy import build_part4_access_rules, fmi_interface_digest
+
+        submodel = build_simulation_access_control_submodel("42", SAMPLE_METADATA)
+        elements = {element["idShort"]: element for element in submodel["submodelElements"]}
+        assert submodel["id"] == _submodel_id_for_access_control("42")
+        assert elements["InterfaceDigest"]["value"] == fmi_interface_digest(SAMPLE_METADATA)
+        policy_blob = json.loads(base64.b64decode(elements["AllAccessPermissionRules"]["value"]))
+        assert policy_blob == build_part4_access_rules(SAMPLE_METADATA, _submodel_id_for_fmu("42"))
+
+    @pytest.mark.asyncio
+    async def test_generated_sync_attaches_access_control_submodel(self):
+        import base64
+
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "http://basyx-aas-server:8081"
+        try:
+            absent = MagicMock(status_code=404)
+            created = MagicMock(status_code=201)
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=absent)
+            mock_client.put = AsyncMock(return_value=created)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _aas_mod.sync_fmu_to_basyx("42", "motor.fmu", SAMPLE_METADATA)
+
+            assert result["synced"] is True
+            assert result["accessControlSubmodelId"] == _submodel_id_for_access_control("42")
+            shell_call = next(
+                call for call in mock_client.put.await_args_list
+                if call.args[0] == f"/shells/{_encode_id(_aas_id_for_lab('42'))}"
+            )
+            shell_refs = [ref["keys"][0]["value"] for ref in shell_call.kwargs["json"]["submodels"]]
+            assert _submodel_id_for_access_control("42") in shell_refs
+            policy_call = next(
+                call for call in mock_client.put.await_args_list
+                if call.args[0] == f"/submodels/{_encode_id(_submodel_id_for_access_control('42'))}"
+            )
+            policy_payload = policy_call.kwargs["json"]
+            blob = next(item for item in policy_payload["submodelElements"] if item["modelType"] == "Blob")
+            assert json.loads(base64.b64decode(blob["value"]))["AllAccessPermissionRules"]["rules"]
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    async def test_explicit_regeneration_replaces_customized_rules(self):
+        import base64
+
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "http://basyx-aas-server:8081"
+        try:
+            existing = build_simulation_access_control_submodel("42", SAMPLE_METADATA)
+            blob = next(item for item in existing["submodelElements"] if item.get("modelType") == "Blob")
+            document = json.loads(base64.b64decode(blob["value"]))
+            document["AllAccessPermissionRules"]["rules"] = []
+            blob["value"] = base64.b64encode(json.dumps(document).encode()).decode()
+            mock_client = AsyncMock()
+            current = MagicMock(status_code=200)
+            current.json.return_value = existing
+            written = MagicMock(status_code=200)
+            mock_client.get = AsyncMock(return_value=current)
+            mock_client.put = AsyncMock(return_value=written)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _aas_mod._sync_simulation_access_control(
+                    mock_client,
+                    "42",
+                    SAMPLE_METADATA,
+                    force_regenerate=True,
+                )
+
+            assert result["accessPolicyRegenerated"] is True
+            replacement = mock_client.put.await_args.kwargs["json"]
+            replacement_blob = next(
+                item for item in replacement["submodelElements"]
+                if item.get("idShort") == "AllAccessPermissionRules"
+            )
+            replacement_document = json.loads(base64.b64decode(replacement_blob["value"]))
+            assert replacement_document["AllAccessPermissionRules"]["rules"]
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
+
+    @pytest.mark.asyncio
+    async def test_fmu_aasx_import_adds_simulation_model_and_access_policy(self):
+        import base64
+
+        lab_id = "42"
+        shell_id = _aas_id_for_lab(lab_id)
+        pkg = _make_aasx(shells=[{"id": shell_id, "submodels": []}], submodels=[])
+        original = _aas_mod.BASYX_AAS_URL
+        _aas_mod.BASYX_AAS_URL = "http://basyx-aas-server:8081"
+        try:
+            absent = MagicMock(status_code=404)
+            created = MagicMock(status_code=201)
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=absent)
+            mock_client.put = AsyncMock(return_value=created)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _aas_mod.sync_fmu_to_basyx(
+                    lab_id,
+                    "motor.fmu",
+                    SAMPLE_METADATA,
+                    aasx_bytes=pkg,
+                    required_aas_id=shell_id,
+                )
+
+            assert result["aasxUpload"] is True
+            assert result["accessPolicyGenerated"] is True
+            assert result["accessControlSubmodelId"] == _submodel_id_for_access_control(lab_id)
+            shell_call = next(
+                call for call in mock_client.put.await_args_list
+                if call.args[0] == f"/shells/{_encode_id(shell_id)}"
+            )
+            shell_refs = [ref["keys"][0]["value"] for ref in shell_call.kwargs["json"]["submodels"]]
+            sim_id = _submodel_id_for_fmu(lab_id)
+            assert sim_id in shell_refs
+            assert _submodel_id_for_access_control(lab_id) in shell_refs
+            sim_payload = next(
+                call.kwargs["json"] for call in mock_client.put.await_args_list
+                if call.args[0] == f"/submodels/{_encode_id(sim_id)}"
+            )
+            assert sim_payload["idShort"] == "SimulationModels"
+            access_payload = next(
+                call.kwargs["json"] for call in mock_client.put.await_args_list
+                if call.args[0] == f"/submodels/{_encode_id(_submodel_id_for_access_control(lab_id))}"
+            )
+            rules_blob = next(
+                item for item in access_payload["submodelElements"]
+                if item.get("idShort") == "AllAccessPermissionRules"
+            )
+            rules = json.loads(base64.b64decode(rules_blob["value"]))
+            assert rules["AllAccessPermissionRules"]["rules"]
+        finally:
+            _aas_mod.BASYX_AAS_URL = original
 
 
 class TestExtraInfoFields:
@@ -937,10 +1086,11 @@ class TestDiscoverBasyxShells:
                     {"keys": [{"type": "Submodel", "value": "urn:lab:7:sm"}]},
                 ],
             }
+            access_policy_response = MagicMock(status_code=404)
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=[list_response, detail_response])
+            mock_client.get = AsyncMock(side_effect=[list_response, detail_response, access_policy_response])
 
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await discover_basyx_shells()
@@ -954,6 +1104,7 @@ class TestDiscoverBasyxShells:
             assert [call.args[0] for call in mock_client.get.await_args_list] == [
                 "/shells",
                 f"/shells/{_encode_id('urn:decentralabs:lab:7')}",
+                f"/submodels/{_encode_id(_submodel_id_for_access_control('7'))}",
             ]
         finally:
             _aas_mod.BASYX_AAS_URL = original_url
@@ -985,10 +1136,11 @@ class TestDiscoverBasyxShells:
                     }],
                 }],
             }
+            access_policy_response = MagicMock(status_code=404)
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=[list_response, technical_response])
+            mock_client.get = AsyncMock(side_effect=[list_response, technical_response, access_policy_response])
 
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await discover_basyx_shells()
@@ -1003,6 +1155,7 @@ class TestDiscoverBasyxShells:
             assert [call.args[0] for call in mock_client.get.await_args_list] == [
                 "/shells",
                 f"/submodels/{_encode_id(technical_id)}",
+                f"/submodels/{_encode_id(_submodel_id_for_access_control('7'))}",
             ]
         finally:
             _aas_mod.BASYX_AAS_URL = original_url
@@ -1016,6 +1169,7 @@ class TestSyncFmuToBasyxGenerated:
         try:
             mock_response = MagicMock(status_code=201)
             mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=MagicMock(status_code=404))
             mock_client.put = AsyncMock(return_value=mock_response)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -1243,7 +1397,9 @@ class TestAasSyncEndpointMultipart:
 
     @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
     def test_sync_with_aasx_file(self, mock_sync):
-        pkg = _make_aasx(shells=[{"id": "urn:s:1"}], submodels=[{"id": "urn:sm:1"}])
+        lab_id = "77"
+        shell_id = _aas_id_for_lab(lab_id)
+        pkg = _make_aasx(shells=[{"id": shell_id}], submodels=[{"id": "urn:sm:1"}])
         mock_sync.return_value = {
             "aasId": "urn:s:1",
             "submodelId": "urn:sm:1",
@@ -1255,21 +1411,35 @@ class TestAasSyncEndpointMultipart:
         }
 
         from fastapi.testclient import TestClient
-        client = TestClient(_get_app())
-        resp = client.post(
-            "/aas-admin/fmu/test.fmu/sync",
-            files={"file": ("package.aasx", pkg, "application/octet-stream")},
-        )
+        app = _get_app()
+        from runner_application import _runner_runtime
+        with patch.object(
+            _runner_runtime.backend,
+            "get_authorized_model_metadata",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_METADATA,
+        ) as mock_metadata:
+            client = TestClient(app)
+            resp = client.post(
+                "/aas-admin/fmu/test.fmu/sync",
+                data={"labId": lab_id},
+                files={"file": ("package.aasx", pkg, "application/octet-stream")},
+            )
         assert resp.status_code == 200
         body = resp.json()
         assert body["aasxUpload"] is True
-        # sync_fmu_to_basyx should have been called with aasx_bytes, NOT read_model_description
+        # The FMU model description is required to validate or generate AAS access rules.
         call_kwargs = mock_sync.call_args.kwargs
         assert call_kwargs.get("aasx_bytes") is not None
+        assert call_kwargs["required_aas_id"] == shell_id
+        assert call_kwargs["metadata"] == SAMPLE_METADATA
+        mock_metadata.assert_awaited_once()
 
     @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
     def test_sync_with_aasx_and_lab_id_form_field(self, mock_sync):
-        pkg = _make_aasx(shells=[{"id": "urn:s:99"}], submodels=[])
+        lab_id = "99"
+        shell_id = _aas_id_for_lab(lab_id)
+        pkg = _make_aasx(shells=[{"id": shell_id}], submodels=[])
         mock_sync.return_value = {
             "aasId": "urn:s:99", "submodelId": "urn:sm:99",
             "created": True, "aasxUpload": True,
@@ -1278,15 +1448,36 @@ class TestAasSyncEndpointMultipart:
         }
 
         from fastapi.testclient import TestClient
-        client = TestClient(_get_app())
-        resp = client.post(
-            "/aas-admin/fmu/motor.fmu/sync",
-            data={"labId": "99"},
-            files={"file": ("p.aasx", pkg, "application/octet-stream")},
-        )
+        app = _get_app()
+        from runner_application import _runner_runtime
+        with patch.object(
+            _runner_runtime.backend,
+            "get_authorized_model_metadata",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_METADATA,
+        ):
+            client = TestClient(app)
+            resp = client.post(
+                "/aas-admin/fmu/motor.fmu/sync",
+                data={"labId": lab_id},
+                files={"file": ("p.aasx", pkg, "application/octet-stream")},
+            )
         assert resp.status_code == 200
         call_kwargs = mock_sync.call_args.kwargs
-        assert call_kwargs.get("lab_id") == "99"
+        assert call_kwargs.get("lab_id") == lab_id
+        assert call_kwargs.get("required_aas_id") == shell_id
+
+    @patch("fmu_aas_generator.sync_fmu_to_basyx", new_callable=AsyncMock)
+    def test_sync_with_fmu_aasx_requires_lab_id(self, mock_sync):
+        pkg = _make_aasx(shells=[{"id": "urn:external:aas:1"}], submodels=[])
+        from fastapi.testclient import TestClient
+        response = TestClient(_get_app()).post(
+            "/aas-admin/fmu/test.fmu/sync",
+            files={"file": ("package.aasx", pkg, "application/octet-stream")},
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "FMU AASX import requires labId"
+        mock_sync.assert_not_awaited()
 
 
 # ── AAS Link CRUD endpoint tests ─────────────────────────────────────

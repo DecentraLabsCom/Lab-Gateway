@@ -260,7 +260,9 @@ end
 -- Lite mode may use them with an external AAS even when lab publishing is
 -- delegated to another backend, so they need Lab Manager auth but no remote
 -- LAB_ADMIN_BACKEND_URL/token.
-if uri:match("^/aas%-admin/fmu/[^/]+/(sync|hints)$") then
+if uri:match("^/aas%-admin/fmu/[^/]+/sync$")
+    or uri:match("^/aas%-admin/fmu/[^/]+/hints$")
+    or uri:match("^/aas%-admin/fmu/[^/]+/access%-policy$") then
     ngx.req.clear_header("Authorization")
     ngx.req.clear_header("Cookie")
     ngx.req.clear_header(header_name)

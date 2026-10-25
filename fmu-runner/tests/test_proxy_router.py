@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 from proxy_router import create_proxy_router
 
 
-def _build_test_app(*, claims: dict, issue_ticket: AsyncMock | None = None):
+def _build_test_app(
+    *, claims: dict, issue_ticket: AsyncMock | None = None, access_policy=None, model_metadata=None,
+):
     app = FastAPI()
     issue_ticket = issue_ticket or AsyncMock(return_value=("st_ticket_1", 4102444800))
     enforce_fmu_claim = MagicMock()
@@ -20,7 +22,13 @@ def _build_test_app(*, claims: dict, issue_ticket: AsyncMock | None = None):
         return request.headers.get("authorization")
 
     async def get_authorized_model_metadata(**_kwargs):
-        return {"fmiVersion": "2.0"}
+        return model_metadata or {"fmiVersion": "2.0"}
+
+    async def get_effective_policy(_claims):
+        return access_policy
+
+    model_description_builder = MagicMock(return_value=b"<xml />")
+    app.state.model_description_builder = model_description_builder
 
     router = create_proxy_router(
         verify_jwt=verify_jwt,
@@ -33,7 +41,8 @@ def _build_test_app(*, claims: dict, issue_ticket: AsyncMock | None = None):
         issue_session_ticket=issue_ticket,
         derive_gateway_ws_url=MagicMock(return_value="wss://gateway.example/fmu/api/v1/fmu/sessions"),
         get_authorized_model_metadata=get_authorized_model_metadata,
-        build_proxy_model_description_xml=MagicMock(return_value=b"<xml />"),
+        get_effective_policy=get_effective_policy if access_policy is not None else None,
+        build_proxy_model_description_xml=model_description_builder,
         parse_fmi_major_version=MagicMock(return_value=2),
         proxy_model_identifier=MagicMock(return_value="decentralabs_proxy"),
         collect_runtime_files=MagicMock(return_value=[]),
@@ -105,3 +114,35 @@ def test_browser_connection_uses_the_same_reservation_ticket_without_building_an
     issue_ticket.assert_awaited_once()
     enforce_reservation.assert_called_once()
     rate_limit.assert_called_once_with("user-1:42")
+
+
+def test_proxy_model_description_exposes_only_effectively_readable_or_writable_variables():
+    from simulation_access_policy import build_effective_policy
+
+    metadata = {
+        "fmiVersion": "2.0",
+        "modelVariables": [
+            {"name": "command", "causality": "input", "variability": "continuous", "start": 2},
+            {"name": "speed", "causality": "output", "variability": "continuous", "start": 0},
+            {"name": "secret", "causality": "output", "variability": "continuous", "start": 0},
+        ],
+    }
+    policy = build_effective_policy(
+        metadata,
+        overrides={"command": {"read": False}, "secret": {"read": False}},
+    )
+    app, *_ = _build_test_app(
+        claims={"sub": "user-1", "labId": "42", "accessKey": "model.fmu", "reservationKey": "0xabc"},
+        access_policy=policy,
+        model_metadata=metadata,
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/fmu/proxy/42?reservationKey=0xabc",
+        headers={"Authorization": "Bearer booking-token"},
+    )
+
+    assert response.status_code == 200
+    model_description = app.state.model_description_builder.call_args.args[0]
+    assert [variable["name"] for variable in model_description["modelVariables"]] == ["command", "speed"]
+    assert "start" not in model_description["modelVariables"][0]

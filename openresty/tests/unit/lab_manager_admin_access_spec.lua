@@ -52,19 +52,9 @@ local function run_guard(opts)
     local headers = opts.headers or {}
     local ngx = ngx_factory.new({
         var = opts.var or {},
-        config = opts.config or {}
+        config = opts.config or {},
+        headers = headers,
     })
-
-    ngx.req.get_headers = function()
-        return headers
-    end
-    ngx.say = function(message)
-        ngx._body = message
-    end
-    ngx.exit = function(code)
-        ngx._exit = code
-        return code
-    end
 
     _G.ngx = ngx
     with_env(env, function()
@@ -83,7 +73,7 @@ runner.describe("Lab manager strict admin guard", function()
         })
 
         runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx.status)
-        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit)
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit_code)
     end)
 
     runner.it("requires token even on private networks", function()
@@ -97,7 +87,7 @@ runner.describe("Lab manager strict admin guard", function()
         })
 
         runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit_code)
     end)
 
     runner.it("accepts valid header token", function()
@@ -119,6 +109,25 @@ runner.describe("Lab manager strict admin guard", function()
         runner.assert.equals("secret-token", ngx.req.headers["X-Lab-Manager-Token"])
         runner.assert.equals("gateway.example.edu", ngx.req.headers["X-Gateway-ID"])
         runner.assert.equals("http://blockchain-services:8080", ngx.var.backend_lab_admin)
+    end)
+
+    runner.it("keeps FMU access-policy status on the protected local AAS route", function()
+        local ngx = run_guard({
+            env = {
+                LAB_MANAGER_TOKEN = "browser-token",
+                ADMIN_DASHBOARD_ALLOW_PRIVATE = "true",
+                SECURITY_ALLOW_PRIVATE_NETWORKS = "true"
+            },
+            headers = { ["X-Lab-Manager-Token"] = "browser-token" },
+            var = {
+                remote_addr = "172.17.0.2",
+                uri = "/aas-admin/fmu/motor.fmu/access-policy"
+            }
+        })
+
+        runner.assert.equals(nil, ngx.status)
+        runner.assert.equals(nil, ngx.var.backend_lab_admin)
+        runner.assert.equals(nil, ngx.req.headers["X-Lab-Manager-Token"])
     end)
 
     runner.it("forwards the dedicated Ops credential for AAS lab routes", function()
@@ -158,7 +167,7 @@ runner.describe("Lab manager strict admin guard", function()
         })
 
         runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx.status)
-        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit)
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit_code)
     end)
 
     runner.it("does not require the Ops credential for generic AAS links", function()
@@ -192,7 +201,7 @@ runner.describe("Lab manager strict admin guard", function()
         })
 
         runner.assert.equals(403, ngx.status)
-        runner.assert.equals(403, ngx._exit)
+        runner.assert.equals(403, ngx._exit_code)
     end)
 
     runner.it("proxies Lite lab admin to configured HTTPS backend with backend-only token", function()
@@ -249,7 +258,7 @@ runner.describe("Lab manager strict admin guard", function()
         })
 
         runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx.status)
-        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit)
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit_code)
     end)
 
     runner.it("requires distinct backend token for remote lab admin backend", function()
@@ -266,7 +275,7 @@ runner.describe("Lab manager strict admin guard", function()
         })
 
         runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx.status)
-        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit)
+        runner.assert.equals(ngx.HTTP_SERVICE_UNAVAILABLE, ngx._exit_code)
     end)
 
     runner.it("accepts token from cookie", function()
@@ -298,7 +307,7 @@ runner.describe("Lab manager strict admin guard", function()
         })
 
         runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx.status)
-        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit)
+        runner.assert.equals(ngx.HTTP_UNAUTHORIZED, ngx._exit_code)
     end)
 
     runner.it("rejects public token when dashboard policy is localhost only", function()
@@ -309,7 +318,7 @@ runner.describe("Lab manager strict admin guard", function()
         })
 
         runner.assert.equals(403, ngx.status)
-        runner.assert.equals(403, ngx._exit)
+        runner.assert.equals(403, ngx._exit_code)
     end)
 end)
 

@@ -108,7 +108,7 @@ JSON. The signed Gateway context may also carry an `fmuExecutionPolicy` with
 lower per-model limits for daily scenarios, steps, CPU seconds, memory and
 result bytes; Station hard limits still apply.
 
-Scheduled input changes are bounded by the Gateway request limits
+Scheduled variable changes are bounded by the Gateway request limits
 `FMU_MAX_INPUT_SCHEDULE_EVENTS` and `FMU_MAX_INPUT_SCHEDULE_BYTES` (Compose
 defaults: 120,000 events and 16 MiB). OpenResty accepts up to 20 MiB for the
 FMU API body so the configured schedule payload can reach the runner. The
@@ -382,9 +382,11 @@ communication step. Individual step responses include `requestedTime`,
 isolated Station Executor before it returns the step response.
 
 Initialization values are sent in `sim.initialize.options.inputs`. Runtime
-`sim.setInputs` accepts only declared FMU inputs, with strict type, range and
-array-size validation. Invalid variables are rejected before any setter is
-called. Scenario execution and runtime input changes have independent quotas:
+`sim.setInputs` accepts declared FMU inputs and FMI 2.0 or FMI 3.0
+Co-Simulation parameters declared `tunable`, with strict type, range and
+array-size validation. Scheduled changes are applied at communication points.
+Invalid variables are rejected before any setter is called. Scenario execution
+and runtime variable changes have independent quotas:
 the default scenario budget is 100 per reservation per UTC day; input updates
 are tracked separately per reservation and FMU (10,000 updates and 64 MiB per
 day, 30 updates per 10-second window, 64 KiB per update by default). Operators

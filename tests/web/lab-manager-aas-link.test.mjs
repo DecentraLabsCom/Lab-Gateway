@@ -10,6 +10,7 @@ function createField(value = '') {
   const listeners = new Map();
   return {
     disabled: false,
+    dataset: {},
     style: { color: '' },
     textContent: '',
     value,
@@ -32,6 +33,8 @@ function loadController({ responses = [] } = {}) {
   const fields = {
     keyInput: createField(),
     aasIdInput: createField(),
+    accessPolicySubmodelIdInput: createField(),
+    accessPolicyStatus: createField(),
     saveButton: createField(),
     checkButton: createField(),
     deleteButton: createField(),
@@ -69,10 +72,54 @@ test('saves an AAS link by stable lab ID', async () => {
   assert.equal(fields.saveButton.disabled, false);
 });
 
+test('saves an optional external FMU access policy submodel ID', async () => {
+  const { fields, calls } = loadController();
+  fields.keyInput.value = '42';
+  fields.keyInput.options = [{ value: '42', dataset: { labId: '42' } }];
+  fields.aasIdInput.value = 'urn:external:aas:42';
+  fields.accessPolicySubmodelIdInput.value = ' urn:external:sm:access-rules ';
+
+  fields.saveButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    aasId: 'urn:external:aas:42',
+    accessControlSubmodelId: 'urn:external:sm:access-rules',
+  });
+});
+
+test('shows a warning when a linked FMU AAS policy cannot be validated', async () => {
+  const { fields, calls } = loadController({
+    responses: [
+      { ok: true, status: 200, json: async () => ({ aasId: 'urn:external:aas:42' }) },
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          state: 'unavailable',
+          aasLinked: true,
+          message: 'The linked AAS or its access rules could not be read. Check the AAS endpoint and credentials.',
+        }),
+      },
+    ],
+  });
+  fields.keyInput.value = '42';
+  fields.keyInput.options = [{ value: '42', dataset: { labId: '42', accessKey: 'motor.fmu', resourceType: '1' } }];
+  fields.aasIdInput.value = 'urn:external:aas:42';
+
+  fields.saveButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(calls[1].url, '/aas-admin/fmu/motor.fmu/access-policy?labId=42');
+  assert.equal(fields.accessPolicyStatus.dataset.state, 'unavailable');
+  assert.equal(fields.accessPolicyStatus.dataset.status, 'warning');
+  assert.match(fields.accessPolicyStatus.textContent, /Check the AAS endpoint and credentials/);
+});
+
 test('loads an existing link and reports a missing link through the toast', async () => {
   const { fields, calls, toasts } = loadController({
     responses: [
-      { ok: true, status: 200, json: async () => ({ aasId: 'urn:existing', labId: '42' }) },
+      { ok: true, status: 200, json: async () => ({ aasId: 'urn:existing', labId: '42', accessControlSubmodelId: 'urn:rules' }) },
       { ok: false, status: 404, json: async () => ({}) },
     ],
   });
@@ -84,6 +131,7 @@ test('loads an existing link and reports a missing link through the toast', asyn
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls[0].url, '/aas-admin/lab/7/aas-link');
   assert.equal(fields.aasIdInput.value, 'urn:existing');
+  assert.equal(fields.accessPolicySubmodelIdInput.value, 'urn:rules');
   assert.deepEqual(toasts.at(-1), {
     message: 'AAS link checked for laboratory 7: urn:existing',
     type: 'success',
@@ -94,6 +142,7 @@ test('loads an existing link and reports a missing link through the toast', asyn
   fields.checkButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(fields.aasIdInput.value, '');
+  assert.equal(fields.accessPolicySubmodelIdInput.value, '');
   assert.deepEqual(toasts.at(-1), {
     message: 'No AAS link configured for laboratory 7',
     type: 'info',
@@ -121,6 +170,10 @@ test('reports AAS link check failures through the toast', async () => {
     responses: [{ ok: false, status: 503, json: async () => ({}) }],
   });
   fields.keyInput.value = '7';
+  fields.keyInput.options = [{
+    value: '7',
+    dataset: { labId: '7', accessKey: 'motor.fmu', resourceType: '1' },
+  }];
 
   fields.checkButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
@@ -129,4 +182,7 @@ test('reports AAS link check failures through the toast', async () => {
     message: 'AAS link check failed: HTTP 503',
     type: 'error',
   });
+  assert.equal(fields.accessPolicyStatus.dataset.state, 'unavailable');
+  assert.equal(fields.accessPolicyStatus.dataset.status, 'warning');
+  assert.match(fields.accessPolicyStatus.textContent, /access rules were not verified/i);
 });

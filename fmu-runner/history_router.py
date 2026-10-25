@@ -2,7 +2,9 @@
 
 from typing import Any, Callable, NoReturn, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from simulation_access_policy import filter_fmi_values
 
 
 def create_history_router(
@@ -11,8 +13,20 @@ def create_history_router(
     enforce_fmu_claim: Any,
     reject_unsupported_operation: Callable[[str], NoReturn],
     get_station_backend: Optional[Callable[..., Any]] = None,
+    get_effective_policy: Any = None,
 ) -> APIRouter:
     router = APIRouter()
+
+    async def _policy(claims: dict):
+        if get_effective_policy is None:
+            return None
+        policy = await get_effective_policy(claims)
+        if not isinstance(policy, dict) or not isinstance(policy.get("variables"), dict):
+            raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
+        return policy
+
+    def _filter(policy, payload):
+        return filter_fmi_values(policy, payload) if policy is not None else payload
 
     def _backend(operation_name: str):
         if get_station_backend is None:
@@ -28,26 +42,32 @@ def create_history_router(
         claims: dict = Depends(verify_jwt),
     ):
         enforce_fmu_claim(claims)
+        access_policy = await _policy(claims)
         backend = _backend("Simulation history endpoint")
-        return await backend.get_authorized_simulation_history(
+        result = await backend.get_authorized_simulation_history(
             claims=claims,
             requested_lab_id=labId,
             requested_reservation_key=reservationKey,
             limit=limit,
             offset=offset,
         )
+        return _filter(access_policy, result)
 
     @router.get("/api/v1/simulations/{sim_id}/result")
     async def get_simulation_result(sim_id: str, claims: dict = Depends(verify_jwt)):
         enforce_fmu_claim(claims)
+        access_policy = await _policy(claims)
         backend = _backend("Simulation result endpoint")
-        return await backend.get_authorized_simulation_result(claims=claims, sim_id=sim_id)
+        result = await backend.get_authorized_simulation_result(claims=claims, sim_id=sim_id)
+        return _filter(access_policy, result)
 
     @router.get("/api/v1/simulations/{sim_id}")
     async def get_simulation_status(sim_id: str, claims: dict = Depends(verify_jwt)):
         enforce_fmu_claim(claims)
+        access_policy = await _policy(claims)
         backend = _backend("Simulation status endpoint")
-        return await backend.get_authorized_simulation_status(claims=claims, sim_id=sim_id)
+        result = await backend.get_authorized_simulation_status(claims=claims, sim_id=sim_id)
+        return _filter(access_policy, result)
 
     return router
 

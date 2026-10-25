@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from aas_sync_router import create_aas_sync_router
 
 
-def _client(*, metadata=None, sync_result=None, runtime_status=None, record_aasx=None):
+def _client(*, metadata=None, sync_result=None, runtime_status=None, record_aasx=None, access_policy_status=None):
     resolve_fmu_path = MagicMock(return_value=Path("/trusted/demo.fmu"))
     read_model_description = MagicMock(return_value=SimpleNamespace(description="Embedded", license="MIT"))
     metadata_builder = MagicMock(return_value=metadata or {"description": "Embedded", "license": "MIT", "unitDefinitions": []})
@@ -24,6 +24,7 @@ def _client(*, metadata=None, sync_result=None, runtime_status=None, record_aasx
         logger=logger,
         get_runtime_status=get_runtime_status,
         record_aasx=record_aasx,
+        get_access_policy_status=access_policy_status,
     ))
     return TestClient(app), resolve_fmu_path, read_model_description, metadata_builder, sync_fmu_to_basyx, get_runtime_status
 
@@ -56,6 +57,8 @@ def test_sync_route_builds_metadata_and_preserves_query_fields():
         },
         fmu_path=Path("/trusted/demo.fmu"),
         unit_definitions=[],
+        required_aas_id=None,
+        force_regenerate_access_policy=False,
         runtime_info=None,
     )
 
@@ -106,8 +109,8 @@ def test_sync_route_publishes_runtime_status_for_generated_fmu():
     assert sync_fmu_to_basyx.await_args.kwargs["runtime_info"] == runtime_status
 
 
-def test_sync_route_accepts_multipart_aasx_without_reading_fmu_metadata():
-    client, resolve_fmu_path, read_model_description, _, sync_fmu_to_basyx, _ = _client()
+def test_fmu_sync_route_reads_metadata_before_accepting_multipart_aasx():
+    client, resolve_fmu_path, read_model_description, metadata_builder, sync_fmu_to_basyx, _ = _client()
 
     response = client.post(
         "/aas-admin/fmu/demo.fmu/sync",
@@ -116,11 +119,56 @@ def test_sync_route_accepts_multipart_aasx_without_reading_fmu_metadata():
     )
 
     assert response.status_code == 200
-    resolve_fmu_path.assert_not_called()
-    read_model_description.assert_not_called()
-    assert sync_fmu_to_basyx.await_args is not None
-    assert sync_fmu_to_basyx.await_args.kwargs["lab_id"] == "99"
-    assert sync_fmu_to_basyx.await_args.kwargs["aasx_bytes"] == b"aasx-bytes"
+    resolve_fmu_path.assert_called_once_with("demo.fmu")
+    read_model_description.assert_called_once_with(str(Path("/trusted/demo.fmu")))
+    metadata_builder.assert_called_once()
+    sync_call = sync_fmu_to_basyx.await_args
+    assert sync_call is not None
+    assert sync_call.kwargs["lab_id"] == "99"
+    assert sync_call.kwargs["aasx_bytes"] == b"aasx-bytes"
+    assert sync_call.kwargs["required_aas_id"] == "urn:decentralabs:lab:99"
+
+
+def test_sync_route_passes_explicit_access_policy_regeneration():
+    client, _, _, _, sync_fmu_to_basyx, _ = _client()
+    response = client.post(
+        "/aas-admin/fmu/demo.fmu/sync?labId=42&regenerateAccessPolicy=true",
+    )
+    assert response.status_code == 200
+    sync_call = sync_fmu_to_basyx.await_args
+    assert sync_call is not None
+    assert sync_call.kwargs["force_regenerate_access_policy"] is True
+
+
+def test_sync_route_rejects_policy_regeneration_with_aasx_upload():
+    client, _, _, _, sync_fmu_to_basyx, _ = _client()
+    response = client.post(
+        "/aas-admin/fmu/demo.fmu/sync?regenerateAccessPolicy=true",
+        data={"labId": "42"},
+        files={"file": ("demo.aasx", b"aasx-bytes", "application/octet-stream")},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Remove the AASX upload before regenerating default access rules"
+    sync_fmu_to_basyx.assert_not_awaited()
+
+
+def test_access_policy_status_is_admin_safe_and_not_cached():
+    from fastapi import FastAPI
+
+    status = {"state": "generated", "policySource": "aas-generated", "regenerationAvailable": True}
+    get_policy_status = AsyncMock(return_value=status)
+    client, *_ = _client(access_policy_status=get_policy_status)
+    response = client.get("/aas-admin/fmu/motor.fmu/access-policy?labId=42")
+    assert response.status_code == 200
+    assert response.json() == status
+    assert response.headers["cache-control"] == "no-store"
+    get_policy_status.assert_awaited_once_with("42", "motor.fmu")
+
+
+def test_access_policy_status_fails_closed_when_callback_is_unavailable():
+    client, *_ = _client()
+    response = client.get("/aas-admin/fmu/motor.fmu/access-policy?labId=42")
+    assert response.status_code == 503
 
 
 def test_fmu_route_records_aasx_association_when_the_lab_id_is_explicit():

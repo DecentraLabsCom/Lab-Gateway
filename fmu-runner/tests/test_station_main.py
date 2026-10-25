@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from fastapi.testclient import TestClient
+from simulation_access_policy import build_effective_policy
 
 
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu"}):
@@ -36,6 +37,19 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _stub_browser_session_observation(monkeypatch):
     monkeypatch.setattr(application, "_record_browser_session_started", AsyncMock(return_value=True))
+
+    class _PolicyResolver:
+        async def resolve(self, _claims, metadata):
+            return build_effective_policy(metadata)
+
+    monkeypatch.setattr(application, "_get_aas_access_policy_resolver", lambda: _PolicyResolver())
+
+
+class _StationMode:
+    mode = "station"
+
+    async def get_authorized_model_metadata(self, **_kwargs):
+        return {"modelVariables": [{"name": "u", "causality": "input", "variability": "continuous"}]}
 
 
 class _StationBackendStub:
@@ -75,6 +89,10 @@ class _StationBackendStub:
                 yield b'{"type":"started"}\n'
                 yield b'{"type":"completed"}\n'
 
+            async def aiter_lines(self):
+                yield '{"type":"started"}'
+                yield '{"type":"completed"}'
+
             async def aclose(self):
                 self.closed = True
 
@@ -83,7 +101,7 @@ class _StationBackendStub:
 
 def test_run_station_mode_forwards_request(monkeypatch):
     station_backend = _StationBackendStub()
-    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application._runner_runtime, "backend", _StationMode())
     monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
 
     response = client.post(
@@ -116,7 +134,7 @@ def test_run_station_records_observation_before_releasing_job(monkeypatch):
 
     station_backend.run_authorized_simulation = run
     monkeypatch.setattr(application, "_record_browser_session_started", observe)
-    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application._runner_runtime, "backend", _StationMode())
     monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
 
     response = client.post("/api/v1/simulations/run", json={"labId": "1"})
@@ -138,7 +156,7 @@ def test_station_observation_failure_never_releases_job(monkeypatch):
 
     station_backend.run_authorized_simulation = run
     monkeypatch.setattr(application, "_record_browser_session_started", observe)
-    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application._runner_runtime, "backend", _StationMode())
     monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
 
     with pytest.raises(RuntimeError, match="observation unavailable"):
@@ -148,7 +166,7 @@ def test_station_observation_failure_never_releases_job(monkeypatch):
 
 def test_stream_station_mode_forwards_request(monkeypatch):
     station_backend = _StationBackendStub()
-    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application._runner_runtime, "backend", _StationMode())
     monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
 
     response = client.post(
@@ -169,7 +187,7 @@ def test_stream_station_mode_forwards_request(monkeypatch):
 
 
 def test_history_is_blocked_in_station_mode(monkeypatch):
-    monkeypatch.setattr(application._runner_runtime, "backend", type("StationMode", (), {"mode": "station"})())
+    monkeypatch.setattr(application._runner_runtime, "backend", _StationMode())
 
     response = client.get("/api/v1/simulations/history")
 

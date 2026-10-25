@@ -41,31 +41,31 @@ def _validate_input_schedule(value: list) -> list:
     if not isinstance(value, list) or len(value) > CONFIG.max_input_schedule_events:
         raise ValueError(
             "A simulation can contain at most "
-            f"{CONFIG.max_input_schedule_events} scheduled input changes"
+            f"{CONFIG.max_input_schedule_events} scheduled variable changes"
         )
     normalized_events = []
     seen_values: set[tuple[float, str]] = set()
     for event in value:
         if not isinstance(event, dict) or set(event) != {"time", "values"}:
-            raise ValueError("Each scheduled input change must contain only time and values")
+            raise ValueError("Each scheduled variable change must contain only time and values")
         time_value = event["time"]
         if isinstance(time_value, bool) or not isinstance(time_value, (int, float)) or not math.isfinite(float(time_value)):
-            raise ValueError("Scheduled input times must be finite numbers")
+            raise ValueError("Scheduled variable times must be finite numbers")
         values = _validate_parameters(event["values"])
         if not values:
-            raise ValueError("Each scheduled input change must contain at least one value")
+            raise ValueError("Each scheduled variable change must contain at least one value")
         for name in values:
             identity = (float(time_value), name)
             if identity in seen_values:
-                raise ValueError("A scheduled input may only be assigned once at the same simulation time")
+                raise ValueError("A variable may only have one scheduled value at the same simulation time")
             seen_values.add(identity)
         normalized_events.append({"time": float(time_value), "values": values})
     try:
         encoded = json.dumps(normalized_events, separators=(",", ":"), allow_nan=False)
     except (TypeError, ValueError) as exc:
-        raise ValueError("Scheduled input changes must contain finite JSON values") from exc
+        raise ValueError("Scheduled changes must contain finite JSON values") from exc
     if len(encoded.encode("utf-8")) > CONFIG.max_input_schedule_bytes:
-        raise ValueError("Scheduled input changes exceed the configured size limit")
+        raise ValueError("Scheduled changes exceed the configured size limit")
     return normalized_events
 
 

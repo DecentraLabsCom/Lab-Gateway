@@ -10,6 +10,7 @@ function createField(value = '') {
   const listeners = new Map();
   return {
     files: [],
+    dataset: {},
     hidden: true,
     readOnly: false,
     style: { cursor: '', opacity: '' },
@@ -36,7 +37,7 @@ class FakeFormData {
 }
 
 function loadController({ fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({}) }) } = {}) {
-  const context = vm.createContext({ window: {} });
+  const context = vm.createContext({ window: { confirm: () => true } });
   vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {
     filename: 'lab-manager-fmu-sync.js',
   });
@@ -47,6 +48,9 @@ function loadController({ fetchImpl = async () => ({ ok: true, status: 200, json
     fileInput: createField(),
     fileName: createField(),
     contactEmail: createField(),
+    accessPolicyStatus: createField(),
+    checkAccessPolicyButton: createField(),
+    regenerateAccessPolicyButton: createField(),
   };
   const toasts = [];
   const controller = context.window.LabManagerFmuSync.createController({
@@ -171,7 +175,7 @@ test('uses multipart upload when an AASX file is selected', async () => {
   assert.deepEqual(toasts.at(-1), { message: 'FMU AAS sync: 7 ok', type: 'success' });
 });
 
-test('does not request FMU-supplied license metadata', async () => {
+test('loads access rule status and FMU hints when an FMU is selected', async () => {
   const calls = [];
   const { fields } = loadController({
     fetchImpl: async (url) => {
@@ -184,8 +188,46 @@ test('does not request FMU-supplied license metadata', async () => {
   fields.keyInput.options = [{ value: 'spring-damper.fmu', dataset: { labId: '7' } }];
   fields.keyInput.dispatchEvent({ type: 'change' });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls.length, 1);
-  assert.match(calls[0], /\/hints$/);
+  assert.equal(calls.length, 2);
+  assert.ok(calls.some((url) => /\/hints$/.test(url)));
+  assert.ok(calls.some((url) => /\/access-policy\?labId=7$/.test(url)));
+});
+
+test('shows policy status and enables explicit regeneration only when the Gateway allows it', async () => {
+  const calls = [];
+  const { controller, fields } = loadController({
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          state: 'generated',
+          policySource: 'aas-generated',
+          regenerationAvailable: true,
+          readableVariableCount: 3,
+          writableVariableCount: 2,
+        }),
+      };
+    },
+  });
+  fields.keyInput.value = '7';
+  fields.keyInput.options = [{
+    value: '7',
+    dataset: { labId: '7', accessKey: 'motor.fmu', resourceType: '1' },
+  }];
+
+  await controller.loadAccessPolicyStatus();
+  assert.equal(fields.accessPolicyStatus.dataset.state, 'generated');
+  assert.match(fields.accessPolicyStatus.textContent, /Readable variables: 3; writable variables: 2/);
+  assert.equal(fields.regenerateAccessPolicyButton.hidden, false);
+
+  await controller.regenerateAccessPolicy();
+  assert.ok(calls.some(({ url, options }) => (
+    url.includes('/aas-admin/fmu/motor.fmu/sync?')
+    && url.includes('regenerateAccessPolicy=true')
+    && options.method === 'POST'
+  )));
 });
 
 test('reports a disabled AAS deployment instead of treating it as a successful update', async () => {
@@ -306,6 +348,38 @@ test('reports synchronization failures through the toast', async () => {
   fields.syncButton.dispatchEvent({ type: 'click' });
   await new Promise((resolve) => setImmediate(resolve));
 
+  assert.deepEqual(toasts.at(-1), {
+    message: 'AAS synchronization failed: AAS service unavailable',
+    type: 'error',
+  });
+});
+
+test('keeps an access-rule warning visible when FMU AAS synchronization fails', async () => {
+  const { fields, toasts } = loadController({
+    fetchImpl: async (url) => {
+      if (String(url).endsWith('/hints')) {
+        return { ok: true, status: 200, json: async () => ({}) };
+      }
+      return {
+        ok: false,
+        status: 502,
+        json: async () => ({ detail: 'AAS service unavailable' }),
+      };
+    },
+  });
+
+  fields.keyInput.value = 'motor.fmu';
+  fields.keyInput.options = [{
+    value: 'motor.fmu',
+    dataset: { labId: '7', accessKey: 'motor.fmu', resourceType: '1' },
+  }];
+  fields.fileInput.files = [{ name: 'motor.aasx' }];
+  fields.syncButton.dispatchEvent({ type: 'click' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(fields.accessPolicyStatus.dataset.state, 'sync-error');
+  assert.equal(fields.accessPolicyStatus.dataset.status, 'warning');
+  assert.match(fields.accessPolicyStatus.textContent, /access rules could not be rechecked/i);
   assert.deepEqual(toasts.at(-1), {
     message: 'AAS synchronization failed: AAS service unavailable',
     type: 'error',
