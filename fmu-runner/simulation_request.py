@@ -8,10 +8,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from config import CONFIG
 
+_MAX_SIMULATION_PARAMETERS = CONFIG.max_simulation_parameters
+
 
 def _validate_parameters(value: dict) -> dict:
-    if not isinstance(value, dict) or len(value) > 32:
-        raise ValueError("A simulation may set at most 32 parameters")
+    if not isinstance(value, dict) or len(value) > _MAX_SIMULATION_PARAMETERS:
+        raise ValueError(f"A simulation may set at most {_MAX_SIMULATION_PARAMETERS} parameters")
     if any(not isinstance(key, str) or not key or len(key) > 128 for key in value):
         raise ValueError("Simulation parameter names are invalid")
 

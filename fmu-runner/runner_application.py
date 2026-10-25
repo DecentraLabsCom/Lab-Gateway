@@ -101,7 +101,7 @@ from catalog_router import create_catalog_router
 from history_router import create_history_router
 from cancel_router import create_cancel_router
 from run_router import create_run_router
-from stream_router import create_stream_router
+from stream_router import create_stream_router, stream_authorized_simulation
 from realtime_router import create_realtime_router
 from aas_link_router import create_aas_link_router
 from aas_hints_router import create_aas_hints_router
@@ -112,6 +112,7 @@ from aas_association_service import AasAssociationService
 from aas_access_policy_resolver import AasAccessPolicyResolver
 from proxy_router import create_proxy_router
 from local_preview import PreviewTickets, create_preview_router
+from local_preview_aasx import LocalPreviewAasxRegistry
 from digital_twin_assets_router import create_digital_twin_assets_router
 
 FMU_DATA_PATH = CONFIG.fmu_data_path
@@ -137,6 +138,7 @@ FMU_LOCAL_DEV_MODE = CONFIG.fmu_local_dev_mode
 FMU_LOCAL_EXECUTOR_BASE_URL = CONFIG.fmu_local_executor_base_url
 FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN = CONFIG.fmu_local_executor_internal_token
 _preview_tickets = PreviewTickets() if FMU_LOCAL_DEV_MODE else None
+_LOCAL_PREVIEW_AASX_REGISTRY: Optional[LocalPreviewAasxRegistry] = None
 FMU_STATION_BASE_URL = CONFIG.fmu_station_base_url
 FMU_STATION_INTERNAL_TOKEN = CONFIG.fmu_station_internal_token
 FMU_STATION_REQUEST_TIMEOUT: float = CONFIG.fmu_station_request_timeout
@@ -256,7 +258,9 @@ async def _simulation_effective_access_policy(claims: dict) -> dict:
         )
         policy = await _get_aas_access_policy_resolver().resolve(claims, metadata)
         public_metadata = _public_model_metadata(metadata)
-        policy["modelVariables"] = filter_model_description(policy, public_metadata).get("modelVariables", [])
+        visible_description = filter_model_description(policy, public_metadata)
+        policy["modelDescription"] = visible_description
+        policy["modelVariables"] = visible_description.get("modelVariables", [])
         return policy
     except HTTPException:
         raise
@@ -677,6 +681,8 @@ async def _stream_station_simulation(
     req: SimulationRequest,
     claims: dict,
     access_policy: Optional[dict] = None,
+    *,
+    is_local_preview: bool = False,
 ):
     station_backend = _get_station_backend()
     authorization = _extract_authorization_header(request)
@@ -686,10 +692,10 @@ async def _stream_station_simulation(
         requested_reservation_key=req.reservationKey,
     )
     sim_id = uuid4().hex
-    # The gateway records the accepted job before releasing it to the Station.
-    # A failed Station call is therefore an accepted-but-not-released job, not
-    # work that ran without durable evidence.
-    await _record_browser_session_started(request, claims, sim_id)
+    # Only the local-preview route may skip production session observations.
+    # A claim value alone is never sufficient to select this exception.
+    if not is_local_preview:
+        await _record_browser_session_started(request, claims, sim_id)
     client, response = await station_backend.open_authorized_simulation_stream(
         claims=claims,
         request_payload=_simulation_request_payload(req, sim_id),
@@ -770,6 +776,8 @@ async def _redeem_session_ticket(
     request_id: Optional[str] = None,
 ) -> dict:
     if _preview_tickets is not None and session_ticket.startswith("preview_"):
+        if lab_id is None or reservation_key is None:
+            raise HTTPException(status_code=403, detail="Preview reservation mismatch")
         return _preview_tickets.redeem(session_ticket, lab_id, reservation_key)
     return await _redeem_session_ticket_service(
         session_ticket=session_ticket,
@@ -1016,6 +1024,112 @@ def _invalidate_aas_access_policy(lab_id: Optional[str] = None) -> None:
     resolver.invalidate(lab_id)
 
 
+def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
+    global _LOCAL_PREVIEW_AASX_REGISTRY
+    preview_tickets = _preview_tickets
+    if not FMU_LOCAL_DEV_MODE or preview_tickets is None:
+        raise HTTPException(status_code=404, detail="Local FMU preview is disabled")
+    if _LOCAL_PREVIEW_AASX_REGISTRY is None:
+        import fmu_aas_generator
+
+        async def get_preview_model_metadata(access_key: str) -> dict:
+            if preview_tickets is None:
+                raise HTTPException(status_code=404, detail="Local FMU preview is disabled")
+            claims = preview_tickets.claims_for_access_key(access_key)
+            return await _runner_runtime.backend.get_authorized_model_metadata(
+                claims=claims,
+                requested_fmu_filename=access_key,
+                include_internal_variables=True,
+            )
+
+        _LOCAL_PREVIEW_AASX_REGISTRY = LocalPreviewAasxRegistry(
+            get_model_metadata=get_preview_model_metadata,
+            sync_fmu_to_basyx=_aas_sync_to_basyx,
+            serialize_aasx_resources=_aas_serialize_resources,
+            record_aasx=_record_aasx_association,
+            get_aasx_package=_aasx_catalog.get,
+            get_link_path=_aas_link_path,
+            build_aas_shell=fmu_aas_generator.build_aas_shell,
+            get_effective_policy=_simulation_effective_access_policy,
+            invalidate_access_policy=_invalidate_aas_access_policy,
+        )
+    return _LOCAL_PREVIEW_AASX_REGISTRY
+
+
+async def _ensure_local_preview_aas_policy(claims: dict) -> dict:
+    return await _get_local_preview_aasx_registry().ensure(claims)
+
+
+async def _local_preview_access_payload(
+    claims: dict[str, Any],
+    policy: dict[str, Any],
+) -> dict[str, Any]:
+    raw_variables: Any = policy.get("variables")
+    variables: dict[str, Any] = raw_variables if isinstance(raw_variables, dict) else {}
+    visible_permissions = {
+        name: permission
+        for name, permission in variables.items()
+        if isinstance(name, str)
+        and isinstance(permission, dict)
+        and (permission.get("read") is True or bool(permission.get("writeAt")))
+    }
+    model_description = policy.get("modelDescription")
+    if not isinstance(model_description, dict):
+        model_description = {}
+    model_variables = model_description.get("modelVariables", policy.get("modelVariables"))
+    return {
+        **model_description,
+        "policySource": policy.get("policySource", "unavailable"),
+        "policyVersion": policy.get("policyVersion", ""),
+        "labId": claims.get("labId"),
+        "accessKey": claims.get("accessKey"),
+        "variables": visible_permissions,
+        "modelVariables": model_variables if isinstance(model_variables, list) else [],
+    }
+
+
+async def _local_preview_stream_simulation(
+    request: Request,
+    payload: Any,
+    claims: dict,
+    _prepared_policy: dict,
+):
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Simulation request must be a JSON object")
+    normalized = {
+        **payload,
+        "labId": claims["labId"],
+        "reservationKey": claims["reservationKey"],
+    }
+    try:
+        simulation_request = SimulationRequest.model_validate(normalized)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Simulation request is invalid") from exc
+
+    async def stream_local_preview_station_simulation(
+        station_request: Request,
+        station_simulation_request: SimulationRequest,
+        station_claims: dict,
+        access_policy: Optional[dict] = None,
+    ):
+        return await _stream_station_simulation(
+            station_request,
+            station_simulation_request,
+            station_claims,
+            access_policy,
+            is_local_preview=True,
+        )
+
+    return await stream_authorized_simulation(
+        req=simulation_request,
+        request=request,
+        claims=claims,
+        enforce_fmu_claim=_enforce_fmu_claim,
+        stream_station_simulation=stream_local_preview_station_simulation,
+        get_effective_policy=_simulation_effective_access_policy,
+    )
+
+
 def _get_realtime_manager_for_route():
     return _runner_runtime.realtime_manager
 
@@ -1189,4 +1303,10 @@ app = create_app(
 )
 
 if _preview_tickets is not None:
-    app.include_router(create_preview_router(_preview_tickets, FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN))
+    app.include_router(create_preview_router(
+        _preview_tickets,
+        FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN,
+        ensure_aas_policy=_ensure_local_preview_aas_policy,
+        get_access_policy=_local_preview_access_payload,
+        stream_simulation=_local_preview_stream_simulation,
+    ))

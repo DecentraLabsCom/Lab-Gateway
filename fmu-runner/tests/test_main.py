@@ -20,8 +20,10 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
 from starlette.requests import Request
+from types import SimpleNamespace
 from fmpy import read_model_description
 from proxy_fmu import _validate_proxy_generation_supported
+from simulation_request import SimulationRequest
 
 # Patch auth before importing main so the import doesn't fail
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "accessKey": "test.fmu"}):
@@ -139,6 +141,40 @@ def _stub_browser_session_observation(monkeypatch):
     observer = AsyncMock(return_value=True)
     monkeypatch.setattr("runner_application._record_browser_session_started", observer)
     return observer
+
+
+def test_stream_observation_exception_requires_explicit_local_preview_context(monkeypatch):
+    observer = AsyncMock(return_value=True)
+    monkeypatch.setattr("runner_application._record_browser_session_started", observer)
+    monkeypatch.setattr("runner_application._extract_authorization_header", lambda _request: "Bearer test")
+
+    response = SimpleNamespace(
+        headers={"content-type": "application/x-ndjson"},
+        aclose=AsyncMock(),
+        aiter_bytes=AsyncMock(),
+    )
+    client = SimpleNamespace(aclose=AsyncMock())
+    backend = SimpleNamespace(
+        build_authorized_context=MagicMock(),
+        open_authorized_simulation_stream=AsyncMock(return_value=(client, response)),
+    )
+    monkeypatch.setattr("runner_application._get_station_backend", lambda: backend)
+    request = MagicMock()
+    simulation_request = SimulationRequest(labId="demo", reservationKey="reservation")
+    claims = {"sub": "local-preview", "labId": "demo", "reservationKey": "reservation"}
+
+    async def invoke_both_stream_contexts():
+        await runner_application._stream_station_simulation(request, simulation_request, claims)
+        await runner_application._stream_station_simulation(
+            request,
+            simulation_request,
+            claims,
+            is_local_preview=True,
+        )
+
+    asyncio.run(invoke_both_stream_contexts())
+
+    assert observer.await_count == 1
 
 
 class _FakeHttpxResponse:

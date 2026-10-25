@@ -1257,6 +1257,47 @@ class TestParseAasx:
         assert result["shells"] == []
         assert result["submodels"] == []
 
+    def test_rejects_expanded_archive_over_limit(self, monkeypatch):
+        import aasx_limits
+
+        monkeypatch.setattr(aasx_limits, "MAX_AASX_EXPANDED_BYTES", 4)
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("aasx/data.json", b"12345")
+
+        with pytest.raises(aasx_limits.AasxLimitError, match="expanded contents"):
+            _aas_mod._parse_aasx(package.getvalue())
+
+    def test_rejects_too_many_archive_entries(self, monkeypatch):
+        import aasx_limits
+
+        monkeypatch.setattr(aasx_limits, "MAX_AASX_ARCHIVE_ENTRIES", 1)
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("one.txt", "1")
+            archive.writestr("two.txt", "2")
+
+        with pytest.raises(aasx_limits.AasxLimitError, match="too many ZIP entries"):
+            _aas_mod._parse_aasx(package.getvalue())
+
+    def test_rejects_oversized_environment_part(self, monkeypatch):
+        import aasx_limits
+
+        monkeypatch.setattr(_aas_mod, "MAX_AASX_ENVIRONMENT_PART_BYTES", 4)
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("aasx/data.json", b"12345")
+
+        with pytest.raises(aasx_limits.AasxLimitError, match="part aasx/data.json"):
+            _aas_mod._parse_aasx(package.getvalue())
+
+    def test_rejects_xml_entity_declarations(self):
+        import aasx_limits
+
+        xml = b'<!DOCTYPE environment [<!ENTITY x "expanded">]><environment />'
+        with pytest.raises(aasx_limits.AasxInvalidContentError, match="DTD and entity"):
+            _aas_mod._parse_aasx_xml_environment(xml)
+
     def test_fallback_scan_without_rels(self):
         """If _rels/.rels is absent, should still find JSON via filesystem scan."""
         env = {"assetAdministrationShells": [{"id": "urn:scan:1"}], "submodels": []}
@@ -1265,6 +1306,54 @@ class TestParseAasx:
             zf.writestr("aasx/data.json", json.dumps(env))
         result = _aas_mod._parse_aasx(buf.getvalue())
         assert result["shells"] == [{"id": "urn:scan:1"}]
+
+    def test_parse_basyx_xml_aasx_environment_and_access_policy_blob(self):
+        import io
+        import zipfile
+
+        environment = b'''<?xml version="1.0" encoding="UTF-8"?>
+        <aas:environment xmlns:aas="https://admin-shell.io/aas/3/0">
+          <aas:assetAdministrationShells><aas:assetAdministrationShell>
+            <aas:idShort>TestShell</aas:idShort><aas:id>urn:test:shell</aas:id>
+            <aas:assetInformation><aas:assetKind>Instance</aas:assetKind><aas:globalAssetId>urn:test:asset</aas:globalAssetId></aas:assetInformation>
+            <aas:submodels><aas:reference><aas:type>ModelReference</aas:type><aas:keys><aas:key><aas:type>Submodel</aas:type><aas:value>urn:test:models</aas:value></aas:key></aas:keys></aas:reference></aas:submodels>
+          </aas:assetAdministrationShell></aas:assetAdministrationShells>
+          <aas:submodels>
+            <aas:submodel><aas:idShort>SimulationModels</aas:idShort><aas:id>urn:test:models</aas:id><aas:kind>Instance</aas:kind>
+              <aas:submodelElements><aas:submodelElementCollection><aas:idShort>SimulationModel</aas:idShort>
+                <aas:value><aas:submodelElementCollection><aas:idShort>Ports</aas:idShort>
+                  <aas:value><aas:submodelElementCollection><aas:idShort>Input</aas:idShort>
+                    <aas:value><aas:property><aas:idShort>uSpeed</aas:idShort><aas:valueType>xs:double</aas:valueType><aas:value>2.5</aas:value></aas:property></aas:value>
+                  </aas:submodelElementCollection></aas:value>
+                </aas:submodelElementCollection></aas:value>
+              </aas:submodelElementCollection></aas:submodelElements>
+            </aas:submodel>
+            <aas:submodel><aas:idShort>SimulationAccessControl</aas:idShort><aas:id>urn:test:access</aas:id>
+              <aas:submodelElements><aas:property><aas:idShort>InterfaceDigest</aas:idShort><aas:valueType>xs:string</aas:valueType><aas:value>digest</aas:value></aas:property>
+                <aas:blob><aas:idShort>AllAccessPermissionRules</aas:idShort><aas:value>eyJydWxl
+                  cyI6W119</aas:value><aas:contentType>application/json</aas:contentType></aas:blob>
+              </aas:submodelElements>
+            </aas:submodel>
+          </aas:submodels>
+        </aas:environment>'''
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as package:
+            package.writestr("_rels/.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Type="http://admin-shell.io/aasx/relationships/aasx-origin" Target="aasx/aasx-origin" Id="r1"/></Relationships>')
+            package.writestr("aasx/aasx-origin", "Intentionally empty.")
+            package.writestr("aasx/_rels/aasx-origin.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Type="http://admin-shell.io/aasx/relationships/aas-spec" Target="xml/content.xml" Id="r2"/></Relationships>')
+            package.writestr("aasx/xml/content.xml", environment)
+
+        result = _aas_mod._parse_aasx(buffer.getvalue())
+
+        assert result["shells"][0]["submodels"][0]["keys"][0]["value"] == "urn:test:models"
+        model = result["submodels"][0]
+        input_port = model["submodelElements"][0]["value"][0]["value"][0]["value"][0]
+        assert input_port["modelType"] == "Property"
+        assert input_port["idShort"] == "uSpeed"
+        assert input_port["value"] == "2.5"
+        access_policy = result["submodels"][1]["submodelElements"][1]
+        assert access_policy["modelType"] == "Blob"
+        assert access_policy["value"] == "eyJydWxlcyI6W119"
 
 
 class TestSyncFmuToBasyxAasx:

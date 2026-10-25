@@ -501,6 +501,12 @@ substitute for provider validation of the actual model and license metadata.
 
 ### AASX conformance checks
 
+Provider AASX imports are resource-bounded: 50 MiB compressed, 256 MiB total
+expanded ZIP content, at most 10,000 entries, at most 16 MiB for the AAS
+environment part, and 1 MiB per OPC relationships part. XML DTD and entity
+declarations are not accepted. These limits apply before imported resources are
+synchronized to BaSyx.
+
 The development test suites use the Eclipse BaSyx Python SDK 2.1.0 as an
 independent AAS/AASX reader. They parse generated JSON and round-trip generated
 AASX packages with `failsafe=False`, so missing mandatory metamodel fields,

@@ -66,6 +66,7 @@ def test_model_metadata_normalizes_defaults_capabilities_and_dimensions():
 
 def test_public_model_metadata_exposes_only_describe_contract_fields():
     public_metadata = _public_model_metadata({
+        "modelName": "ThermalModel",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
         "simulationType": "CoSimulation",
@@ -96,6 +97,7 @@ def test_public_model_metadata_exposes_only_describe_contract_fields():
     })
 
     assert public_metadata == {
+        "modelName": "ThermalModel",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
         "simulationType": "CoSimulation",

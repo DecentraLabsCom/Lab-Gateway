@@ -860,6 +860,7 @@ services:
       - FMU_STATION_INTERNAL_TOKEN_FILE=/run/secrets/fmu_station_internal_token
       - FMU_STATION_REQUEST_TIMEOUT=${FMU_STATION_REQUEST_TIMEOUT:-10}
       - FMU_SESSION_OBSERVATION_MAX_ATTEMPTS=${FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:-3}
+      - FMU_MAX_SIMULATION_PARAMETERS=${FMU_MAX_SIMULATION_PARAMETERS:-128}
       # Bound scheduled input payloads at the public facade before forwarding
       # them to the production Station Executor.
       - FMU_MAX_INPUT_SCHEDULE_EVENTS=${FMU_MAX_INPUT_SCHEDULE_EVENTS:-120000}
@@ -953,6 +954,7 @@ services:
       - FMU_EXECUTOR_TEMP=/tmp
       - FMU_EXECUTOR_STATE_DIR=/var/lib/fmu-executor/state
       - FMU_EXECUTION_TIMEOUT_SECONDS=${FMU_EXECUTION_TIMEOUT_SECONDS:-300}
+      - FMU_MAX_SIMULATION_PARAMETERS=${FMU_MAX_SIMULATION_PARAMETERS:-128}
       - FMU_MAX_ARCHIVE_BYTES=${FMU_MAX_ARCHIVE_BYTES:-134217728}
       - FMU_MAX_EXPANDED_BYTES=${FMU_MAX_EXPANDED_BYTES:-201326592}
       - FMU_MAX_ARCHIVE_ENTRIES=${FMU_MAX_ARCHIVE_ENTRIES:-20000}
@@ -1024,6 +1026,7 @@ services:
       - FMU_LOCAL_DEV_MODE=true
       - FMU_LOCAL_EXECUTOR_BASE_URL=${FMU_LOCAL_EXECUTOR_BASE_URL:-http://fmu-executor-local:8091}
       - FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN_FILE=/run/secrets/fmu_local_executor_token
+      - FMU_MAX_SIMULATION_PARAMETERS=64
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
       - DIGITAL_TWIN_ASSETS_PATH=/app/digital-twin-assets

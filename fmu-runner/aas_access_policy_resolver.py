@@ -57,7 +57,16 @@ class AasAccessPolicyResolver:
         access_key = self._claim_text(claims, "accessKey")
         lab_id = self._claim_text(claims, "labId")
         for key in dict.fromkeys(value for value in (access_key, lab_id) if value):
-            path = self.get_link_path(key)
+            try:
+                path = self.get_link_path(key)
+            except Exception as exc:
+                # FMU access keys commonly contain a relative path and cannot
+                # be used as a one-segment link filename. A lab ID is also
+                # carried in the reservation claims, so use that safe index
+                # before treating the link as unavailable.
+                if key != lab_id and lab_id:
+                    continue
+                raise RuntimeError("AAS link record is unavailable") from exc
             if not path.is_file():
                 continue
             try:

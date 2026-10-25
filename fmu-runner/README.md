@@ -77,6 +77,11 @@ imported shells; the lightweight catalog under `AAS_CATALOG_PATH` (default
 `/app/data/aasx`) retains only imported-package provenance. Link files retain
 only external-shell mappings. The Gateway does not retain uploaded archives;
 downloads are generated from the current BaSyx resources.
+
+AASX uploads are limited to 50 MiB compressed, 256 MiB total expanded content,
+10,000 ZIP entries, and 16 MiB for the environment part (1 MiB for each OPC
+relationships part). DTD and entity declarations are rejected. The Gateway
+rejects oversized input before synchronizing any resources.
 The Lab Manager uses these protected endpoints to manage the associations:
 
 | Method | Path | Description |
@@ -105,6 +110,12 @@ per batch. A batch is charged once per case; realtime initialize, reset, and
 non-empty input update operations also consume a scenario. History, status, cancellation, and result
 routes forward the authenticated reservation scope to the Executor, which
 returns `404` for jobs outside that scope.
+
+Published Gateway requests and the Windows/Linux Station services share a
+maximum of 128 named parameters per simulation. `FMU_MAX_SIMULATION_PARAMETERS`
+can lower the Gateway limit, but the supported maximum is 128. The local demo
+profile sets 64 on both its Gateway facade and Executor. The parameter payload
+remains bounded to 16 KiB independently of the count limit.
 
 ## Backend Modes
 

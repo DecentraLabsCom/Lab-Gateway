@@ -89,6 +89,55 @@ async def test_resolves_generated_policy_from_linked_shell_submodel(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_path_like_fmu_access_key_falls_back_to_safe_lab_id_link(tmp_path, monkeypatch, metadata):
+    lab_id = "local_demo_0123456789abcdef01234567"
+    shell_id = _aas_id_for_lab(lab_id)
+    policy_id = _submodel_id_for_access_control(lab_id)
+    simulation_id = f"urn:decentralabs:lab:{lab_id}:sm:simulationModels"
+    shell = {
+        "id": shell_id,
+        "submodels": [
+            {"keys": [{"type": "Submodel", "value": policy_id}]},
+            {"keys": [{"type": "Submodel", "value": simulation_id}]},
+        ],
+    }
+    policy_submodel = build_simulation_access_control_submodel(lab_id, metadata)
+
+    import fmu_aas_generator
+    monkeypatch.setattr(fmu_aas_generator, "BASYX_AAS_URL", "http://basyx-aas-server:8081")
+    client = Client({
+        f"/shells/{_encode_id(shell_id)}": Response(200, shell),
+        f"/submodels/{_encode_id(policy_id)}": Response(200, policy_submodel),
+    })
+
+    def get_link_path(key):
+        if "/" in key:
+            raise ValueError("FMU path cannot be used directly as a link filename")
+        return tmp_path / f"{key}.aas-link.json"
+
+    (tmp_path / f"{lab_id}.aas-link.json").write_text(json.dumps({
+        "aasId": shell_id,
+        "labId": lab_id,
+        "submodelIds": [policy_id, simulation_id],
+        "accessControlSubmodelId": policy_id,
+    }), encoding="utf-8")
+    resolver = AasAccessPolicyResolver(
+        get_basyx_url=lambda: fmu_aas_generator.BASYX_AAS_URL,
+        get_request_headers=lambda: {},
+        get_link_path=get_link_path,
+        client_factory=lambda **_kwargs: client,
+    )
+
+    result = await resolver.resolve({
+        "labId": lab_id,
+        "accessKey": "local-demos/dc-motor/linux64/DC_motor.fmu",
+    }, metadata)
+
+    assert result["policySource"] == "aas-generated"
+    assert result["variables"]["command"]["writeAt"] == ["initialization", "runtime"]
+
+
+@pytest.mark.asyncio
 async def test_generated_policy_can_reference_imported_simulation_models_submodel_id(tmp_path, monkeypatch, metadata):
     lab_id = "42"
     shell_id = "urn:external:aas:42"

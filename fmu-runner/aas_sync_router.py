@@ -8,6 +8,29 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile
 
+from aasx_limits import (
+    AasxInvalidContentError,
+    AasxLimitError,
+    MAX_AASX_UPLOAD_BYTES,
+)
+
+
+async def _read_bounded_aasx_upload(upload: UploadFile) -> bytes:
+    size = getattr(upload, "size", None)
+    if isinstance(size, int) and size > MAX_AASX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"AASX upload exceeds the {MAX_AASX_UPLOAD_BYTES // (1024 * 1024)} MiB limit",
+        )
+
+    content = await upload.read(MAX_AASX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_AASX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"AASX upload exceeds the {MAX_AASX_UPLOAD_BYTES // (1024 * 1024)} MiB limit",
+        )
+    return content
+
 
 def _parse_documentation_urls(raw_value: Any) -> list[str]:
     if raw_value is None:
@@ -99,7 +122,7 @@ def create_aas_sync_router(
             upload = form.get("file") or form.get("aasx")
             if isinstance(upload, UploadFile):
                 aasx_filename = upload.filename
-                aasx_bytes = await upload.read()
+                aasx_bytes = await _read_bounded_aasx_upload(upload)
             extra_info: dict = {}
             for field in ("description", "license", "documentationUrl", "contactEmail"):
                 value = str(form.get(field) or request.query_params.get(field, "")).strip()
@@ -188,18 +211,23 @@ def create_aas_sync_router(
                     type(exc).__name__,
                 )
 
-        result = await sync_fmu_to_basyx(
-            lab_id=lab_id or access_key,
-            access_key=access_key,
-            metadata=metadata,
-            aasx_bytes=aasx_bytes,
-            extra_info=merged_extra_info or None,
-            fmu_path=fmu_path,
-            unit_definitions=metadata.get("unitDefinitions", []),
-            required_aas_id=f"urn:decentralabs:lab:{lab_id}" if aasx_bytes and lab_id else None,
-            runtime_info=runtime_info,
-            force_regenerate_access_policy=force_regenerate_access_policy,
-        )
+        try:
+            result = await sync_fmu_to_basyx(
+                lab_id=lab_id or access_key,
+                access_key=access_key,
+                metadata=metadata,
+                aasx_bytes=aasx_bytes,
+                extra_info=merged_extra_info or None,
+                fmu_path=fmu_path,
+                unit_definitions=metadata.get("unitDefinitions", []),
+                required_aas_id=f"urn:decentralabs:lab:{lab_id}" if aasx_bytes and lab_id else None,
+                runtime_info=runtime_info,
+                force_regenerate_access_policy=force_regenerate_access_policy,
+            )
+        except AasxLimitError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except AasxInvalidContentError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if "error" in result:
             raise HTTPException(status_code=502, detail=result["error"])
         if aasx_bytes and lab_id and record_aasx and result.get("disabled") is not True:
@@ -246,7 +274,7 @@ def create_aas_sync_router(
         upload = form.get("file") or form.get("aasx")
         if not isinstance(upload, UploadFile):
             raise HTTPException(status_code=400, detail="AASX file is required")
-        aasx_bytes = await upload.read()
+        aasx_bytes = await _read_bounded_aasx_upload(upload)
         if not aasx_bytes:
             raise HTTPException(status_code=400, detail="AASX file is empty")
 
@@ -262,16 +290,21 @@ def create_aas_sync_router(
         if documentation_urls:
             extra_info["documentationUrls"] = documentation_urls
 
-        result = await sync_fmu_to_basyx(
-            lab_id=lab_id,
-            access_key=lab_id,
-            metadata={},
-            aasx_bytes=aasx_bytes,
-            extra_info=extra_info or None,
-            fmu_path=None,
-            unit_definitions=[],
-            required_aas_id=f"urn:decentralabs:lab:{lab_id}",
-        )
+        try:
+            result = await sync_fmu_to_basyx(
+                lab_id=lab_id,
+                access_key=lab_id,
+                metadata={},
+                aasx_bytes=aasx_bytes,
+                extra_info=extra_info or None,
+                fmu_path=None,
+                unit_definitions=[],
+                required_aas_id=f"urn:decentralabs:lab:{lab_id}",
+            )
+        except AasxLimitError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except AasxInvalidContentError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if "error" in result:
             raise HTTPException(status_code=502, detail=result["error"])
         if record_aasx and result.get("disabled") is not True:

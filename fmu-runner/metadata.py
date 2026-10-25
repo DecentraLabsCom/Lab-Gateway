@@ -420,6 +420,9 @@ def _public_model_metadata(metadata: dict) -> dict:
         "supportsModelExchange": bool(metadata.get("supportsModelExchange")),
         "modelVariables": variables,
     }
+    model_name = metadata.get("modelName")
+    if isinstance(model_name, str) and model_name.strip():
+        payload["modelName"] = model_name.strip()[:256]
     for key in ("defaultStartTime", "defaultStopTime", "defaultStepSize"):
         if metadata.get(key) is not None:
             payload[key] = float(metadata[key])

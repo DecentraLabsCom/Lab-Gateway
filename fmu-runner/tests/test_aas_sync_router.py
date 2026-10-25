@@ -129,6 +129,22 @@ def test_fmu_sync_route_reads_metadata_before_accepting_multipart_aasx():
     assert sync_call.kwargs["required_aas_id"] == "urn:decentralabs:lab:99"
 
 
+def test_fmu_sync_route_rejects_oversized_aasx_upload_before_sync(monkeypatch):
+    import aas_sync_router
+
+    monkeypatch.setattr(aas_sync_router, "MAX_AASX_UPLOAD_BYTES", 8)
+    client, _, _, _, sync_fmu_to_basyx, _ = _client()
+
+    response = client.post(
+        "/aas-admin/fmu/demo.fmu/sync",
+        data={"labId": "99"},
+        files={"file": ("demo.aasx", b"123456789", "application/octet-stream")},
+    )
+
+    assert response.status_code == 413
+    sync_fmu_to_basyx.assert_not_awaited()
+
+
 def test_sync_route_passes_explicit_access_policy_regeneration():
     client, _, _, _, sync_fmu_to_basyx, _ = _client()
     response = client.post(
