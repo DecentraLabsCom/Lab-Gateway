@@ -372,7 +372,10 @@ filter the standard form, GLB viewer, results and Three.js app metadata. The
 Gateway remains the enforcement point if a client ignores the UI contract.
 Active Station WebSocket sessions refresh the policy before forwarding commands
 or returning FMI data; the five-second resolver cache bounds how quickly an
-AAS policy edit becomes effective.
+AAS policy edit becomes effective. The Gateway pins the trusted FMI interface
+metadata read for that active FMU session and reuses it when re-evaluating the
+policy, so each WebSocket frame does not trigger another FMU metadata read.
+The pinned metadata remains server-side and is never accepted from the browser.
 
 This policy governs simulation operations and runtime values. Static interface
 descriptions in public lab metadata and `SimulationModels/Ports` may still be

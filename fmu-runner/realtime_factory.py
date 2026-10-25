@@ -21,11 +21,19 @@ def build_realtime_manager(
     internal_ws_token: str,
     ws_create_rate_limit_per_minute: int,
     get_effective_policy: Any = None,
+    get_session_model_metadata: Any = None,
+    get_effective_policy_for_metadata: Any = None,
     station_manager_factory: Any = StationRealtimeWsProxyManager,
     unsupported_manager_factory: Any,
 ) -> Any:
     """Proxy realtime sessions to the configured Station or Executor service."""
     if backend.mode == "station":
+        session_policy_callbacks = {}
+        if get_session_model_metadata is not None or get_effective_policy_for_metadata is not None:
+            session_policy_callbacks = {
+                "get_session_model_metadata": get_session_model_metadata,
+                "get_effective_policy_for_metadata": get_effective_policy_for_metadata,
+            }
         return station_manager_factory(
             logger=logger,
             station_backend=backend,
@@ -38,6 +46,7 @@ def build_realtime_manager(
             issue_session_ticket=issue_session_ticket,
             confirm_session_started=confirm_session_started,
             get_effective_policy=get_effective_policy,
+            **session_policy_callbacks,
             ws_cleanup_seconds=ws_cleanup_seconds,
             internal_ws_token=internal_ws_token,
             ws_create_rate_limit_per_minute=ws_create_rate_limit_per_minute,

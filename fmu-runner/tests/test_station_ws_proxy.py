@@ -157,7 +157,7 @@ class _ExplodingReaderStationConnection(_FakeStationConnection):
         return await super().__anext__()
 
 
-def _build_manager():
+def _build_manager(*, get_session_model_metadata=None, get_effective_policy_for_metadata=None):
     async def _fake_verify(token: str):
         if token != "test-token":
             raise AssertionError("unexpected token")
@@ -194,6 +194,8 @@ def _build_manager():
         redeem_session_ticket=_fake_redeem,
         issue_session_ticket=_fake_issue,
         confirm_session_started=_fake_confirm,
+        get_session_model_metadata=get_session_model_metadata,
+        get_effective_policy_for_metadata=get_effective_policy_for_metadata,
         ws_cleanup_seconds=60,
         internal_ws_token="gateway-internal",
         ws_create_rate_limit_per_minute=30,
@@ -338,18 +340,26 @@ def test_station_realtime_rejects_denied_writes_and_reads_and_filters_responses(
 
 
 def test_station_realtime_refreshes_policy_for_an_active_session(monkeypatch):
-    manager = _build_manager()
+    model_metadata = {
+        "modelVariables": [
+            {"name": "command", "valueReference": 1, "causality": "input", "variability": "continuous"},
+            {"name": "speed", "valueReference": 2, "causality": "output", "variability": "continuous"},
+        ],
+    }
+    metadata_reads = []
+    policy_evaluations = []
     fake_station = _FakeStationConnection()
     policy_state = {"restrict_speed": False, "restrict_command": False}
 
-    async def _get_policy(_claims):
+    async def _get_model_metadata(_claims):
+        metadata_reads.append(True)
+        return model_metadata
+
+    async def _get_policy_for_metadata(_claims, metadata):
+        policy_evaluations.append(metadata)
+        assert metadata is model_metadata
         policy = build_effective_policy(
-            {
-                "modelVariables": [
-                    {"name": "command", "valueReference": 1, "causality": "input", "variability": "continuous"},
-                    {"name": "speed", "valueReference": 2, "causality": "output", "variability": "continuous"},
-                ],
-            },
+            metadata,
             overrides={
                 "speed": {"read": not policy_state["restrict_speed"]},
                 "command": {
@@ -363,7 +373,10 @@ def test_station_realtime_refreshes_policy_for_an_active_session(monkeypatch):
         ]
         return policy
 
-    manager.get_effective_policy = _get_policy
+    manager = _build_manager(
+        get_session_model_metadata=_get_model_metadata,
+        get_effective_policy_for_metadata=_get_policy_for_metadata,
+    )
 
     async def _fake_connect(_headers):
         return fake_station
@@ -404,6 +417,8 @@ def test_station_realtime_refreshes_policy_for_an_active_session(monkeypatch):
 
     assert refreshed_outputs["outputs"] == {}
     assert refreshed_outputs["requestId"] == "refresh-output"
+    assert len(metadata_reads) == 1
+    assert len(policy_evaluations) >= 3
     assert [message["type"] for message in fake_station.sent_messages] == ["session.create"]
 
 

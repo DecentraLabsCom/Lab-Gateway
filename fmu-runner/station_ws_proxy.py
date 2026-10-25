@@ -68,6 +68,7 @@ class _GatewayStationSession:
     access_key: str
     exp: Optional[int]
     access_policy: Optional[dict] = None
+    model_metadata: Optional[dict] = None
     close_handler: Optional[Callable[[], Awaitable[None]]] = None
 
     def matches_claims(self, claims: dict, get_claim_lab_id) -> bool:
@@ -102,6 +103,8 @@ class StationRealtimeWsProxyManager:
         issue_session_ticket=None,
         confirm_session_started=None,
         get_effective_policy=None,
+        get_session_model_metadata=None,
+        get_effective_policy_for_metadata=None,
         ws_cleanup_seconds: float = 15.0,
         internal_ws_token: str = "",
         ws_create_rate_limit_per_minute: int = 30,
@@ -117,6 +120,10 @@ class StationRealtimeWsProxyManager:
         self.issue_session_ticket = issue_session_ticket
         self.confirm_session_started = confirm_session_started
         self.get_effective_policy = get_effective_policy
+        self.get_session_model_metadata = get_session_model_metadata
+        self.get_effective_policy_for_metadata = get_effective_policy_for_metadata
+        if (get_session_model_metadata is None) != (get_effective_policy_for_metadata is None):
+            raise ValueError("Session metadata and metadata-based policy callbacks must be configured together")
         self.ws_cleanup_seconds = ws_cleanup_seconds
         self.internal_ws_token = internal_ws_token
         self.ws_create_rate_limit_per_minute = ws_create_rate_limit_per_minute
@@ -125,6 +132,10 @@ class StationRealtimeWsProxyManager:
         self._sessions_lock = asyncio.Lock()
         self._cleanup_task: Optional[asyncio.Task] = None
         self._create_hits: dict[str, deque[float]] = defaultdict(deque)
+
+    @property
+    def access_policy_enabled(self) -> bool:
+        return self.get_effective_policy is not None or self.get_effective_policy_for_metadata is not None
 
     async def start(self):
         if self._cleanup_task is None or self._cleanup_task.done():
@@ -186,9 +197,14 @@ class StationRealtimeWsProxyManager:
 
     async def _refresh_session_access_policy(self, session: _GatewayStationSession) -> Optional[dict]:
         """Refresh an active session's policy before forwarding or exposing FMI data."""
-        if self.get_effective_policy is None:
+        if not self.access_policy_enabled:
             return session.access_policy
-        policy = await self.get_effective_policy(session.claims)
+        if self.get_effective_policy_for_metadata is not None and session.model_metadata is not None:
+            policy = await self.get_effective_policy_for_metadata(session.claims, session.model_metadata)
+        elif self.get_effective_policy is not None:
+            policy = await self.get_effective_policy(session.claims)
+        else:
+            raise RuntimeError("FMU access policy resolver is unavailable")
         if not isinstance(policy, dict) or not isinstance(policy.get("variables"), dict):
             raise RuntimeError("FMU access policy is unavailable")
         session.access_policy = policy
@@ -441,6 +457,7 @@ class StationRealtimeWsProxyManager:
                                 access_key=access_key,
                                 exp=exp,
                                 access_policy=create_context.get("access_policy"),
+                                model_metadata=create_context.get("model_metadata"),
                             )
 
                             async def _close_registered_session(session_id=session_id):
@@ -756,9 +773,27 @@ class StationRealtimeWsProxyManager:
                         continue
 
                     access_policy = None
-                    if self.get_effective_policy is not None:
+                    model_metadata = None
+                    if self.access_policy_enabled:
                         try:
-                            access_policy = await self.get_effective_policy(create_claims)
+                            if (
+                                self.get_session_model_metadata is not None
+                                and self.get_effective_policy_for_metadata is not None
+                            ):
+                                model_metadata = await self.get_session_model_metadata(create_claims)
+                                if (
+                                    not isinstance(model_metadata, dict)
+                                    or not isinstance(model_metadata.get("modelVariables"), list)
+                                ):
+                                    raise HTTPException(status_code=503, detail="FMU model metadata is unavailable")
+                                access_policy = await self.get_effective_policy_for_metadata(
+                                    create_claims,
+                                    model_metadata,
+                                )
+                            elif self.get_effective_policy is not None:
+                                access_policy = await self.get_effective_policy(create_claims)
+                            else:
+                                raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
                             if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
                                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
                             self._validate_session_message(message, access_policy)
@@ -810,6 +845,7 @@ class StationRealtimeWsProxyManager:
                             "session_ticket": session_ticket,
                             "reservation_key": reservation_key,
                             "access_policy": access_policy,
+                            "model_metadata": model_metadata,
                         }
                         await _send_station(json.dumps(forward_message))
                         continue
@@ -896,7 +932,7 @@ class StationRealtimeWsProxyManager:
 
                 async with self._sessions_lock:
                     active_session = self._sessions.get(current_session_id)
-                if self.get_effective_policy is not None and active_session is None:
+                if self.access_policy_enabled and active_session is None:
                     response = self.error_payload(
                         code="FORBIDDEN",
                         message="Session is no longer available",
@@ -911,7 +947,7 @@ class StationRealtimeWsProxyManager:
                     await _close_expired_session(current_session_id, request_id=request_id)
                     return
 
-                if active_session and self.get_effective_policy is not None:
+                if active_session and self.access_policy_enabled:
                     try:
                         await self._refresh_session_access_policy(active_session)
                     except Exception:

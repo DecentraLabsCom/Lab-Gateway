@@ -241,21 +241,23 @@ async def _catalog_get_authorized_model_metadata(
     )
 
 
-async def _simulation_effective_access_policy(claims: dict) -> dict:
-    """Resolve the Gateway-enforced policy from the authorized FMU metadata.
-
-    The initial source is the conservative FMI default. AAS overrides are
-    resolved by the policy service before this callback is exposed to routes.
-    """
+async def _simulation_access_model_metadata(claims: dict) -> dict:
+    """Read trusted FMI metadata once when the Executor session is created."""
     filename = str(claims.get("accessKey") or claims.get("fmuFileName") or "").strip()
     if not filename:
         raise HTTPException(status_code=403, detail="Token has no authorised FMU file")
+    return await _runner_runtime.backend.get_authorized_model_metadata(
+        claims=claims,
+        requested_fmu_filename=filename,
+        include_internal_variables=True,
+    )
+
+
+async def _simulation_effective_access_policy_for_metadata(claims: dict, metadata: dict) -> dict:
+    """Resolve current AAS permissions against the active session's FMI interface."""
     try:
-        metadata = await _runner_runtime.backend.get_authorized_model_metadata(
-            claims=claims,
-            requested_fmu_filename=filename,
-            include_internal_variables=True,
-        )
+        if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
+            raise ValueError("authorized FMI metadata is invalid")
         policy = await _get_aas_access_policy_resolver().resolve(claims, metadata)
         public_metadata = _public_model_metadata(metadata)
         visible_description = filter_model_description(policy, public_metadata)
@@ -267,6 +269,18 @@ async def _simulation_effective_access_policy(claims: dict) -> dict:
     except Exception as exc:
         logger.warning("FMU access policy could not be resolved: %s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="FMU access policy is unavailable") from exc
+
+
+async def _simulation_effective_access_policy(claims: dict) -> dict:
+    """Resolve the Gateway-enforced policy from the authorized FMU metadata."""
+    try:
+        metadata = await _simulation_access_model_metadata(claims)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("FMU metadata could not be read for access policy: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="FMU access policy is unavailable") from exc
+    return await _simulation_effective_access_policy_for_metadata(claims, metadata)
 
 
 def _catalog_public_model_metadata(metadata: dict):
@@ -778,7 +792,7 @@ async def _redeem_session_ticket(
     if _preview_tickets is not None and session_ticket.startswith("preview_"):
         if lab_id is None or reservation_key is None:
             raise HTTPException(status_code=403, detail="Preview reservation mismatch")
-        return _preview_tickets.redeem(session_ticket, lab_id, reservation_key)
+        return dict(_preview_tickets.redeem(session_ticket, lab_id, reservation_key))
     return await _redeem_session_ticket_service(
         session_ticket=session_ticket,
         lab_id=lab_id,
@@ -958,6 +972,8 @@ _runner_runtime.bind_realtime_manager(_build_realtime_manager_impl(
     issue_session_ticket=_issue_session_ticket,
     confirm_session_started=_confirm_fmu_session_started,
     get_effective_policy=_simulation_effective_access_policy,
+    get_session_model_metadata=_simulation_access_model_metadata,
+    get_effective_policy_for_metadata=_simulation_effective_access_policy_for_metadata,
     ws_cleanup_seconds=WS_CLEANUP_SECONDS,
     internal_ws_token=INTERNAL_WS_TOKEN,
     ws_create_rate_limit_per_minute=WS_CREATE_RATE_LIMIT_PER_MINUTE,
