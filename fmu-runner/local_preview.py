@@ -7,7 +7,7 @@ No preview JWT issuer or alternate Station execution protocol is introduced.
 import hashlib
 import secrets
 import time
-from typing import Any
+from typing import Any, NotRequired, TypedDict, cast
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -15,12 +15,32 @@ from pydantic import BaseModel, Field
 from fmu_backend import BaseFmuBackend
 
 
+class PreviewClaims(TypedDict):
+    sub: str
+    pucHash: str
+    resourceType: str
+    labId: str
+    reservationKey: str
+    accessKey: str
+    exp: NotRequired[int]
+    reservationEndsAt: NotRequired[int]
+
+
+class PreviewGrant(TypedDict):
+    protocolVersion: str
+    gatewayWsUrl: str
+    labId: str
+    reservationKey: str
+    sessionTicket: str
+    ticketExpiresAt: int
+
+
 class PreviewTickets:
     def __init__(self):
-        self.tickets: dict[str, tuple[int, dict[str, str | int]]] = {}
+        self.tickets: dict[str, tuple[int, PreviewClaims]] = {}
 
     @staticmethod
-    def claims_for_access_key(access_key: str) -> dict[str, str | int]:
+    def claims_for_access_key(access_key: str) -> PreviewClaims:
         access_key = BaseFmuBackend.validate_access_key(access_key)
         identifier = hashlib.sha256(access_key.encode()).hexdigest()[:24]
         return {
@@ -32,21 +52,22 @@ class PreviewTickets:
             "accessKey": access_key,
         }
 
-    def issue(self, access_key: str) -> dict[str, str | int]:
+    def issue(self, access_key: str) -> PreviewGrant:
         now = int(time.time())
         self.tickets = {key: value for key, value in self.tickets.items() if value[0] > now}
         if len(self.tickets) >= 128:
             raise HTTPException(429, "Too many outstanding local preview tickets")
         claims = self.claims_for_access_key(access_key)
-        claims["exp"] = now + 3600
-        claims["reservationEndsAt"] = now + 3600
+        expires_at = now + 3600
+        claims["exp"] = expires_at
+        claims["reservationEndsAt"] = expires_at
         ticket = "preview_" + secrets.token_urlsafe(32)
         self.tickets[ticket] = (now + 60, claims)
         return {"protocolVersion": "1.0", "gatewayWsUrl": "ws://127.0.0.1:8081/dev-fmu/sessions",
                 "labId": claims["labId"], "reservationKey": claims["reservationKey"],
                 "sessionTicket": ticket, "ticketExpiresAt": now + 60}
 
-    def redeem(self, ticket: str, lab_id: str, reservation_key: str) -> dict[str, str | int]:
+    def redeem(self, ticket: str, lab_id: str, reservation_key: str) -> PreviewClaims:
         entry = self.tickets.get(ticket)
         if not entry or entry[0] <= time.time():
             raise HTTPException(401, "Preview ticket is invalid or expired")
@@ -54,7 +75,7 @@ class PreviewTickets:
         if claims["labId"] != lab_id or claims["reservationKey"] != reservation_key:
             raise HTTPException(403, "Preview reservation mismatch")
         self.tickets.pop(ticket)
-        return dict(claims)
+        return cast(PreviewClaims, dict(claims))
 
 
 class PreviewRequest(BaseModel):
@@ -75,10 +96,11 @@ def create_preview_router(
         if not internal_token or not secrets.compare_digest(token, internal_token):
             raise HTTPException(403, "Forbidden")
 
-    async def prepare_preview(access_key: str) -> tuple[dict[str, str | int], dict[str, Any]]:
+    async def prepare_preview(access_key: str) -> tuple[PreviewClaims, dict[str, Any]]:
         claims = tickets.claims_for_access_key(access_key)
         expires_at = int(time.time()) + 3600
-        claims.update({"exp": expires_at, "reservationEndsAt": expires_at})
+        claims["exp"] = expires_at
+        claims["reservationEndsAt"] = expires_at
         if ensure_aas_policy is None:
             raise HTTPException(503, "Local AAS access policy provisioning is unavailable")
         policy = await ensure_aas_policy(claims)
