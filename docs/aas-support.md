@@ -345,17 +345,33 @@ policy-to-FMU mapping cannot be validated. An external AAS with no compatible
 policy uses FMI-derived defaults and is reported as such; the status check
 never edits the external shell.
 
-The platform defaults are:
+The following table shows how synchronization maps FMI metadata to the AAS
+port description and to the generated access policy. The IDTA 02005 port group
+and `VariableCausality` describe the kind/direction of a port; they are not
+privacy permissions. Privacy is represented separately by IDTA 01004 Part 4
+`READ` and `UPDATE` rules in `SimulationAccessControl`. A generated `UPDATE`
+rule identifies eligible variables; the Gateway derives the permitted write
+phases from the active FMU metadata and runtime capabilities.
 
-- every FMI interface variable with causality other than `local` is readable;
-- `input` variables can be written at initialization and, unless their
-  variability is `constant`, at runtime;
-- `parameter` variables with `fixed` or `tunable` variability can be written
-  during initialization; FMI 2.0 and FMI 3.0 Co-Simulation `tunable`
-  parameters can also be written at runtime communication points; and
-- `local` variables and `structuralParameter` writes are unavailable to the
-  consumer with the current runtime contract. An unrecognized causality grants
-  no access, and an unrecognized variability grants no write permission.
+| FMI causality | IDTA 02005 port group / `VariableCausality` | Generated Part 4 rights | Effective default write phases |
+| --- | --- | --- | --- |
+| `input` | `Input` / `Input` | `READ`; `UPDATE` when variability is recognized | Initialization; runtime for `continuous`, `discrete` or `tunable` variability. |
+| `output` | `Output` / `Output` | `READ` | None. |
+| `parameter` | `Parameter` / `Input` | `READ`, `UPDATE` when variability is `fixed` or `tunable` | Initialization for `fixed` or `tunable`; runtime communication points for `tunable` FMI 2.0/3.0 Co-Simulation. |
+| `calculatedParameter` | `Parameter` / `Input` | `READ` | None; read-only. |
+| `structuralParameter` | `Parameter` / `Input` | `READ` | None; writes are unavailable under the current runtime contract. |
+| `independent` | `Internal` / `Acausal` | `READ` | None; read-only. |
+| `local` | Omitted from generated `Ports` | None | None. |
+| Unknown causality | `Internal` / `Acausal` if present in the interface | None | None; fails closed. |
+
+For `input`, initialization writes are granted when variability is recognized;
+runtime writes are limited to `continuous`, `discrete` and `tunable` inputs.
+Thus `constant` and `fixed` inputs are initialization-only. For all
+recognized non-`local` causalities, read access is granted by default. An
+unrecognized variability preserves that default read access but grants no
+write permission; an unrecognized causality grants neither read nor write
+access. Provider-authored AAS rules may restrict these defaults, but cannot
+grant access beyond FMI and runtime support.
 
 The effective decision is enforced by Gateway for run, stream, job/batch,
 result/history and Station WebSocket paths. Denied writes are rejected before
