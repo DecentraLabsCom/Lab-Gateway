@@ -1291,10 +1291,11 @@ class TestParseAasx:
         with pytest.raises(aasx_limits.AasxLimitError, match="part aasx/data.json"):
             _aas_mod._parse_aasx(package.getvalue())
 
-    def test_rejects_xml_entity_declarations(self):
+    @pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
+    def test_rejects_xml_entity_declarations(self, encoding):
         import aasx_limits
 
-        xml = b'<!DOCTYPE environment [<!ENTITY x "expanded">]><environment />'
+        xml = '<!DOCTYPE environment [<!ENTITY x "expanded">]><environment />'.encode(encoding)
         with pytest.raises(aasx_limits.AasxInvalidContentError, match="DTD and entity"):
             _aas_mod._parse_aasx_xml_environment(xml)
 

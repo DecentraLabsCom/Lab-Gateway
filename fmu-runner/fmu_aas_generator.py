@@ -6,6 +6,7 @@ following IDTA 02005 (Provision of Simulation Models) for the simulation submode
 """
 
 import base64
+import codecs
 import hashlib
 import io
 import json
@@ -1234,7 +1235,23 @@ def _aasx_xml_local_name(tag: Any) -> str:
 
 
 def _parse_aasx_xml_root(xml_bytes: bytes) -> ET.Element:
-    if re.search(rb"<!\s*(?:DOCTYPE|ENTITY)\b", xml_bytes, re.IGNORECASE):
+    if xml_bytes.startswith((codecs.BOM_UTF32_BE, codecs.BOM_UTF32_LE)):
+        security_scan_text = xml_bytes.decode("utf-32")
+    elif xml_bytes.startswith((codecs.BOM_UTF16_BE, codecs.BOM_UTF16_LE)):
+        security_scan_text = xml_bytes.decode("utf-16")
+    elif xml_bytes.startswith(b"\x00\x00\x00<"):
+        security_scan_text = xml_bytes.decode("utf-32-be")
+    elif xml_bytes.startswith(b"<\x00\x00\x00"):
+        security_scan_text = xml_bytes.decode("utf-32-le")
+    elif xml_bytes.startswith(b"\x00<\x00?"):
+        security_scan_text = xml_bytes.decode("utf-16-be")
+    elif xml_bytes.startswith(b"<\x00?\x00"):
+        security_scan_text = xml_bytes.decode("utf-16-le")
+    else:
+        # Latin-1 preserves the ASCII markup bytes used in all ASCII-compatible
+        # XML encodings, including the legacy single-byte encodings AASX permits.
+        security_scan_text = xml_bytes.decode("latin-1")
+    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)\b", security_scan_text, re.IGNORECASE):
         raise AasxInvalidContentError("AASX XML DTD and entity declarations are not supported")
     return ET.fromstring(xml_bytes)
 
