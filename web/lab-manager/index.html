@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-income-v1">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-digital-twin-assets-v1">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -793,19 +793,21 @@
                                 <select id="fmuSyncAssetType">
                                     <option value="">No visual asset</option>
                                     <option value="glb">GLB scene · Marketplace viewer and controls</option>
-                                    <option value="threejs-app">Three.js application · complete provider presentation</option>
+                                    <option value="threejs-app">Three.js application · Complete provider presentation</option>
                                 </select>
                                 <span class="mt-2"><label for="fmuSyncAssetUrl">Asset URL</label> <span class="muted-text">(optional)</span></span>
-                                <input type="text" id="fmuSyncAssetUrl" inputmode="url" maxlength="2048" placeholder="Gateway asset path or HTTPS GLB URL" autocomplete="url">
-                                <small class="muted-text">Import a same-stem companion from the active FMU backend, upload an asset, or set a public HTTPS URL for a GLB. The Three.js app owns its controls and presentation. Marketplace authorizes a reservation-bound connection, then the app executes the FMU directly over the provider Gateway WebSocket. Marketplace may add optional shared controls.</small>
-                                <button class="btn btn-secondary mt-2" id="fmuSyncImportAssetBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import selected companion from FMU backend</button>
+                                <div class="digital-twin-asset-url-control">
+                                    <input type="text" id="fmuSyncAssetUrl" inputmode="url" maxlength="2048" placeholder="Gateway asset path or HTTPS GLB URL" autocomplete="url">
+                                    <button class="digital-twin-asset-import" id="fmuSyncImportAssetBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import asset</button>
+                                </div>
+                                <small class="muted-text">Import looks for an asset with the same base name as the FMU in the same location (for example, Model.glb or Model.webapp.zip for Model.fmu). You can instead enter a Gateway asset path or a public HTTPS URL for a GLB.</small>
                                 <div class="file-picker mt-2">
                                     <input class="file-picker-input" type="file" id="fmuSyncAssetFile" accept=".glb,model/gltf-binary" aria-label="Upload digital twin asset">
-                                    <label class="file-picker-button" for="fmuSyncAssetFile">Choose asset</label>
+                                    <label class="file-picker-button" for="fmuSyncAssetFile">Upload asset</label>
                                     <span class="file-picker-name" id="fmuSyncAssetFileName" aria-live="polite">No file chosen</span>
                                 </div>
                                 <div class="digital-twin-validation" id="fmuSyncAssetValidation" role="status" aria-live="polite" hidden></div>
-                                <small class="muted-text">Assets are stored on this provider Gateway and published as immutable public files; Marketplace write access is not required. GLB bindings are checked against the selected FMU outputs. A Three.js app owns all presentation controls and must report when its scene is ready. An uploaded AASX must carry its own visual asset reference.</small>
+                                <small class="muted-text">Alternatively, upload a GLB scene or Three.js app ZIP. An uploaded AASX must carry its own visual asset reference.</small>
                             </div>
                             <label class="field full">
                                 <span>Contact Email <span class="muted-text">(optional)</span></span>
