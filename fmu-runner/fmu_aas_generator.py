@@ -96,6 +96,8 @@ _SIMULATION_SEMANTICS = {
     "unit_description": "https://admin-shell.io/idta/SimulationModels/UnitDescription/1/0",
     "variable_causality": "https://admin-shell.io/idta/SimulationModels/VariableCausality/1/0",
 }
+_FMI_VARIABLE_METADATA_EXTENSION = "decentralabs.fmi.variableMetadata.v1"
+_MAX_FMI_VARIABLE_METADATA_BYTES = 262_144
 
 
 def _aas_request_headers() -> dict[str, str]:
@@ -258,9 +260,9 @@ def _fmi_type_to_idta(fmi_type: str) -> str:
         "UInt64": "Integer",
         "Boolean": "Boolean",
         "String": "String",
-        "Enumeration": "Enumeration",
+        "Enumeration": "ENUM",
     }
-    return mapping.get(fmi_type, "Real")
+    return mapping.get(fmi_type, str(fmi_type or "Unknown"))
 
 
 def _causality_to_port_type(causality: str) -> str:
@@ -270,10 +272,20 @@ def _causality_to_port_type(causality: str) -> str:
         "output": "Output",
         "parameter": "Parameter",
         "calculatedParameter": "Parameter",
+        "structuralParameter": "Parameter",
         "local": "Internal",
         "independent": "Internal",
     }
     return mapping.get(causality, "Internal")
+
+
+def _fmi_causality_to_idta(causality: str) -> str:
+    """Map FMI causalities onto IDTA 02005's Input/Output/Acausal values."""
+    if causality == "output":
+        return "Output"
+    if causality in {"input", "parameter", "calculatedParameter", "structuralParameter"}:
+        return "Input"
+    return "Acausal"
 
 
 def _semantic_id(value: str) -> dict:
@@ -309,12 +321,53 @@ def _arbitrary_property(id_short: str, value_type: str, value: object, descripti
     return element
 
 
+def _fmi_variable_metadata_extension(variable: dict) -> Optional[dict]:
+    """Preserve FMI variable attributes not represented by IDTA 02005 fields.
+
+    Standard port fields remain the interoperable representation for name,
+    causality, type family, description, unit, and range. This versioned AAS
+    Extension carries FMI-specific details that the template cannot express.
+    """
+    metadata_fields = (
+        "type", "causality", "valueReference", "variability", "initial", "start", "nominal",
+        "quantity", "displayName", "displayUnit", "dimensions", "enumItems", "declaredType",
+    )
+    metadata = {
+        field: variable[field]
+        for field in metadata_fields
+        if field != "declaredType" and field in variable and variable[field] is not None
+    }
+    declared_type = variable.get("declaredType")
+    if isinstance(declared_type, dict):
+        # The effective unit, range, quantity and enumeration choices are
+        # represented separately above or in IDTA's standard fields. Preserve
+        # the FMI type alias identity without repeating those values.
+        alias = {
+            field: declared_type[field]
+            for field in ("name", "type", "description")
+            if isinstance(declared_type.get(field), str) and declared_type[field]
+        }
+        if alias:
+            metadata["declaredType"] = alias
+    if not metadata:
+        return None
+
+    encoded = json.dumps(metadata, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > _MAX_FMI_VARIABLE_METADATA_BYTES:
+        raise ValueError("FMI variable metadata exceeds the AAS extension size limit")
+    return {
+        "name": _FMI_VARIABLE_METADATA_EXTENSION,
+        "valueType": "xs:string",
+        "value": encoded,
+    }
+
+
 def build_simulation_ports(variables: list[dict]) -> list[dict]:
     """Build the standard IDTA 02005 Ports/PortsConnector/Variable hierarchy."""
     grouped: dict[str, list[dict]] = {}
     for var in variables:
         causality = var.get("causality", "local")
-        if causality in ("local", "independent"):
+        if causality == "local":
             continue
         grouped.setdefault(_causality_to_port_type(causality), []).append(var)
 
@@ -332,7 +385,7 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
                     _SIMULATION_SEMANTICS["variable_type"],
                 ),
                 _standard_property(
-                    "VariableCausality", "xs:string", var.get("causality", "local"),
+                    "VariableCausality", "xs:string", _fmi_causality_to_idta(causality),
                     _SIMULATION_SEMANTICS["variable_causality"],
                 ),
             ]
@@ -345,16 +398,12 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
                 )
             unit = str(var.get("unit") or "").strip()
             variable_value.append(
-                _standard_property("UnitList", "xs:string", unit or "others", _SIMULATION_SEMANTICS["unit_list"])
+                _standard_property("UnitList", "xs:string", "others", _SIMULATION_SEMANTICS["unit_list"])
             )
-            display_unit = var.get("displayUnit")
-            if isinstance(display_unit, dict):
-                display_unit = display_unit.get("name")
-            unit_description = display_unit or var.get("quantity")
-            if unit_description:
+            if unit:
                 variable_value.append(
                     _standard_mlp(
-                        "UnitDescription", str(unit_description),
+                        "UnitDescription", unit,
                         _SIMULATION_SEMANTICS["unit_description"],
                     )
                 )
@@ -375,6 +424,7 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
                 "semanticId": _semantic_id(_SIMULATION_SEMANTICS["variable"]),
                 "modelType": "SubmodelElementCollection",
                 "value": variable_value,
+                **({"extensions": [extension]} if (extension := _fmi_variable_metadata_extension(var)) else {}),
             })
 
         connectors.append({

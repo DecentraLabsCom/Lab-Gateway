@@ -236,7 +236,8 @@ sequenceDiagram
     A-->>G: Shell synchronized
     U->>M: Open the reserved FMU lab
     M->>A: Read the lab's AAS shell
-    A-->>M: Return GLB path and content type
+    A-->>M: Return GLB path and SimulationModels port metadata
+    M->>M: Match AAS variables to the FMU description for generated controls
     M->>G: Fetch GLB through Marketplace's same-origin asset proxy
     G-->>M: Return immutable GLB file
     M-->>U: Render generated controls and GLB viewer
@@ -251,16 +252,37 @@ sequenceDiagram
 ~~~
 
 The AAS File stores the visual asset location and MIME only. FMI remains the
-source of model variables and ports; provider-authored GLB `extras.fmiBindings`
-map FMI output names to allowed scene targets and are required for
-output-driven scene behavior, while a Three.js app owns its rendering logic. No
-separate manifest or duplicate FMI/AAS metadata is needed. If a
-future requirement cannot be represented in FMI, AAS, GLB or the app itself,
-any manifest must contain only that missing complementary information. When
-uploading an `.aasx` package, its Handover Documentation remains authoritative
+source of model execution; the generated GLB interface reads its variable
+descriptions from AAS `SimulationModels` ports when present. Provider-authored
+GLB `extras.fmiBindings` map FMI output names to allowed scene targets and are
+required for output-driven scene behavior, while a Three.js app owns its
+rendering logic. No separate manifest is used. When uploading an `.aasx`
+package, its Handover Documentation remains authoritative
 and cannot be combined with a separate visual-asset upload. Public HTTPS GLB
 URLs must allow browser CORS, use an origin permitted by Marketplace
 `CSP_CONNECT_SRC`, and contain no credentials or access tokens.
+
+#### 2.1.1. FMI variable metadata for generated GLB controls
+
+IDTA 02005 standardizes a port variable's name, range, type family,
+description, unit and causality. It does not define FMI-specific fields such as
+the exact FMI type, value reference, variability, initial attribute, start
+value, nominal, display-unit conversion, vector dimensions or enumeration
+items. Generated FMU shells keep the IDTA fields in their standard locations
+and add only those missing FMI details to a versioned AAS `Extension` on each
+port variable (`decentralabs.fmi.variableMetadata.v1`). This is a compact
+metadata projection; it does not copy the FMU binary or create a second
+manifest. The generator reads the model description used by the active FMU
+backend, including Lab Station's description of the same FMU.
+
+The Marketplace GLB route reads these AAS ports for control labels, types,
+units, ranges, defaults, dimensions and enumeration choices. It checks each
+variable against the FMU description that governs simulation requests. Missing
+AAS fields are filled from that description; a conflicting name, causality,
+type, bound, default or unit falls back to FMU metadata. AAS descriptions and
+display names remain presentation metadata. The FMU description is still the
+authority for execution and validation. External or older AAS shells without
+the extension continue to work through standard fields and FMU fallback.
 
 #### 2.2. Managing AAS shells in Lab Manager
 

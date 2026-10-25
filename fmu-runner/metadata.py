@@ -275,6 +275,9 @@ def _model_metadata_from_model_description(
         quantity = getattr(var, "quantity", None) or getattr(declared_type, "quantity", None)
         if quantity:
             entry["quantity"] = quantity
+        display_name = getattr(var, "displayName", None)
+        if isinstance(display_name, str) and display_name.strip():
+            entry["displayName"] = display_name.strip()[:256]
         display_unit = _display_unit_metadata(md, var, declared_type, display_unit_inverses)
         if display_unit is not None:
             entry["displayUnit"] = display_unit
@@ -401,8 +404,9 @@ def _public_model_metadata(metadata: dict) -> dict:
             "variability": variable.get("variability", "continuous"),
         }
         for optional_key in (
-            "initial", "unit", "start", "min", "max", "dimensions",
-            "description", "displayName", "displayUnit", "enumItems",
+            "valueReference", "initial", "unit", "start", "min", "max", "dimensions",
+            "description", "displayName", "displayUnit", "enumItems", "nominal",
+            "quantity", "declaredType",
         ):
             if optional_key in variable:
                 entry[optional_key] = variable[optional_key]

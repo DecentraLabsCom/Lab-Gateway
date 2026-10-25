@@ -134,6 +134,9 @@ async def test_station_backend_normalizes_model_metadata(monkeypatch):
             "defaultStartTime": 2.5,
             "defaultStopTime": 12.0,
             "defaultStepSize": 0.05,
+            "defaultTolerance": 1e-5,
+            "generationTool": "FMI Test Tool",
+            "capabilities": {"canGetAndSetFMUstate": True, "fixedInternalStepSize": 0.01},
             "variables": [
                 {
                     "name": "u",
@@ -142,6 +145,11 @@ async def test_station_backend_normalizes_model_metadata(monkeypatch):
                     "variability": "continuous",
                     "valueReference": 0,
                     "unit": "V",
+                    "initial": "exact",
+                    "nominal": 2.0,
+                    "quantity": "Voltage",
+                    "dimensions": [{"start": 2, "variableName": "n"}],
+                    "declaredType": {"name": "VoltageType", "type": "Real"},
                 },
                 {
                     "name": "y",
@@ -167,13 +175,21 @@ async def test_station_backend_normalizes_model_metadata(monkeypatch):
     assert metadata["supportsModelExchange"] is False
     assert metadata["modelVariables"][0]["valueReference"] == 0
     assert metadata["modelVariables"][0]["unit"] == "V"
+    assert metadata["modelVariables"][0]["initial"] == "exact"
+    assert metadata["modelVariables"][0]["nominal"] == 2.0
+    assert metadata["modelVariables"][0]["quantity"] == "Voltage"
+    assert metadata["modelVariables"][0]["dimensions"] == [{"start": 2, "variableName": "n"}]
+    assert metadata["modelVariables"][0]["declaredType"] == {"name": "VoltageType", "type": "Real"}
+    assert metadata["defaultTolerance"] == 1e-5
+    assert metadata["generationTool"] == "FMI Test Tool"
+    assert metadata["capabilities"] == {"canGetAndSetFMUstate": True, "fixedInternalStepSize": 0.01}
 
 
 @pytest.mark.asyncio
 async def test_station_catalog_404_falls_back_to_describe(monkeypatch):
     backend = StationFmuBackend(base_url="https://station.internal")
 
-    async def _fake_request(operation: str, *, access_key: str | None = None):
+    async def _fake_request(operation: str, *, access_key: str | None = None, public_only: bool = False):
         if operation == "catalog" and access_key == "demo.fmu":
             raise HTTPException(status_code=404, detail="missing")
         if operation == "describe" and access_key == "demo.fmu":

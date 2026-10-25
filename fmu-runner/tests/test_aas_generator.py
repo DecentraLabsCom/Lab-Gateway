@@ -6,6 +6,7 @@ endpoint with mocked BaSyx and FMU reading.
 """
 
 import hashlib
+import json
 import sys
 from typing import Any
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -24,6 +25,7 @@ from fmu_aas_generator import (
     _encode_id,
     _aas_resource_path,
     _fmi_type_to_idta,
+    _fmi_causality_to_idta,
     _causality_to_port_type,
     _sanitize_idshort,
     build_simulation_ports,
@@ -92,8 +94,8 @@ class TestTypeMapping:
         ("Int32", "Integer"),
         ("Boolean", "Boolean"),
         ("String", "String"),
-        ("Enumeration", "Enumeration"),
-        ("SomethingElse", "Real"),
+        ("Enumeration", "ENUM"),
+        ("SomethingElse", "SomethingElse"),
     ])
     def test_fmi_type_mapping(self, fmi, expected):
         assert _fmi_type_to_idta(fmi) == expected
@@ -103,12 +105,23 @@ class TestTypeMapping:
         ("output", "Output"),
         ("parameter", "Parameter"),
         ("calculatedParameter", "Parameter"),
+        ("structuralParameter", "Parameter"),
         ("local", "Internal"),
         ("independent", "Internal"),
         ("unknown", "Internal"),
     ])
     def test_causality_mapping(self, causality, expected):
         assert _causality_to_port_type(causality) == expected
+
+    @pytest.mark.parametrize("causality,expected", [
+        ("input", "Input"),
+        ("output", "Output"),
+        ("parameter", "Input"),
+        ("structuralParameter", "Input"),
+        ("independent", "Acausal"),
+    ])
+    def test_fmi_causality_maps_to_the_closed_idta_values(self, causality, expected):
+        assert _fmi_causality_to_idta(causality) == expected
 
 
 class TestBuildSimulationPorts:
@@ -118,7 +131,14 @@ class TestBuildSimulationPorts:
             {"name": "y", "causality": "independent", "type": "Real"},
         ]
         ports = build_simulation_ports(variables)
-        assert len(ports) == 0
+        assert len(ports) == 1
+        assert ports[0]["idShort"] == "Internal"
+        variable = ports[0]["value"][1]
+        values = {element["idShort"]: element for element in variable["value"]}
+        fmi_metadata = json.loads(variable["extensions"][0]["value"])
+        assert values["VariableName"]["value"] == "y"
+        assert values["VariableCausality"]["value"] == "Acausal"
+        assert fmi_metadata["causality"] == "independent"
 
     def test_creates_input_port(self):
         variables = [
@@ -133,9 +153,14 @@ class TestBuildSimulationPorts:
         values = {el["idShort"]: el for el in variable["value"]}
         assert values["VariableName"]["value"] == "force"
         assert values["VariableType"]["value"] == "Real"
-        assert values["VariableCausality"]["value"] == "input"
-        assert values["UnitList"]["value"] == "N"
+        assert values["VariableCausality"]["value"] == "Input"
+        assert values["UnitList"]["value"] == "others"
+        assert values["UnitDescription"]["value"][0]["text"] == "N"
         assert "DefaultValue" not in values
+        metadata_extension = variable["extensions"][0]
+        assert metadata_extension["name"] == "decentralabs.fmi.variableMetadata.v1"
+        assert json.loads(metadata_extension["value"])["type"] == "Real"
+        assert json.loads(metadata_extension["value"])["start"] == 0.0
 
     def test_output_port_without_optional_fields(self):
         variables = [
@@ -147,7 +172,7 @@ class TestBuildSimulationPorts:
         values = {el["idShort"]: el for el in variable["value"]}
         assert values["VariableName"]["value"] == "velocity"
         assert values["VariableType"]["value"] == "Real"
-        assert values["VariableCausality"]["value"] == "output"
+        assert values["VariableCausality"]["value"] == "Output"
         assert values["UnitList"]["value"] == "others"
 
     def test_port_description_field(self):
@@ -164,9 +189,24 @@ class TestBuildSimulationPorts:
             {"name": "mass", "causality": "input", "type": "Real", "quantity": "Mass"},
         ]
         ports = build_simulation_ports(variables)
-        values = {el["idShort"]: el for el in ports[0]["value"][1]["value"]}
-        assert "UnitDescription" in values
-        assert values["UnitDescription"]["value"][0]["text"] == "Mass"
+        variable = ports[0]["value"][1]
+        values = {el["idShort"]: el for el in variable["value"]}
+        assert "UnitDescription" not in values
+        assert json.loads(variable["extensions"][0]["value"])["quantity"] == "Mass"
+
+    def test_fmi_parameter_uses_the_idta_causality_value_and_keeps_exact_fmi_causality(self):
+        ports = build_simulation_ports([
+            {"name": "gain", "causality": "parameter", "type": "Float32", "variability": "fixed", "start": 2.0},
+        ])
+
+        assert ports[0]["idShort"] == "Parameter"
+        variable = ports[0]["value"][1]
+        values = {element["idShort"]: element for element in variable["value"]}
+        fmi_metadata = json.loads(variable["extensions"][0]["value"])
+        assert values["VariableCausality"]["value"] == "Input"
+        assert values["VariableType"]["value"] == "Real"
+        assert fmi_metadata["causality"] == "parameter"
+        assert fmi_metadata["type"] == "Float32"
 
 
 SAMPLE_METADATA = {
@@ -175,6 +215,7 @@ SAMPLE_METADATA = {
     "simulationType": "CoSimulation",
     "supportsCoSimulation": True,
     "supportsModelExchange": False,
+    "capabilities": {"canGetAndSetFMUstate": True},
     "defaultStartTime": 0.0,
     "defaultStopTime": 10.0,
     "defaultStepSize": 0.001,
