@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 from collections import defaultdict, deque
 from typing import Optional
@@ -24,6 +25,10 @@ from simulation_access_policy import (
     validate_writes,
 )
 
+# Must match FMU Executor's bounded per-advance input batch.
+MAX_ADVANCE_INPUT_EVENTS = 1024
+MAX_ADVANCE_INPUT_BYTES = 256 * 1024
+MAX_ADVANCE_OUTPUT_VARIABLES = 512
 
 
 
@@ -178,6 +183,29 @@ class StationRealtimeWsProxyManager:
                 validate_writes(access_policy, options["inputs"], phase="initialization")
         elif msg_type == "sim.setInputs":
             validate_writes(access_policy, message.get("values", {}), phase="runtime")
+        elif msg_type == "sim.advance":
+            input_schedule = message.get("inputSchedule", [])
+            if not isinstance(input_schedule, list) or len(input_schedule) > MAX_ADVANCE_INPUT_EVENTS:
+                raise AccessDenied
+            try:
+                schedule_bytes = len(json.dumps(
+                    input_schedule,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8"))
+            except (TypeError, ValueError):
+                raise AccessDenied
+            if schedule_bytes > MAX_ADVANCE_INPUT_BYTES:
+                raise AccessDenied
+            for event in input_schedule:
+                if not isinstance(event, dict) or not isinstance(event.get("values"), dict):
+                    raise AccessDenied
+                validate_writes(access_policy, event["values"], phase="runtime")
+            if "outputVariables" in message:
+                output_variables = message["outputVariables"]
+                if not isinstance(output_variables, list) or len(output_variables) > MAX_ADVANCE_OUTPUT_VARIABLES:
+                    raise AccessDenied
+                validate_reads(access_policy, output_variables)
         elif msg_type in {"sim.getOutputs", "sim.subscribeOutputs"}:
             if "variables" in message and "valueReferences" in message:
                 raise AccessDenied
