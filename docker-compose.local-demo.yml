@@ -53,6 +53,9 @@ services:
       # This one local-only FMU launches Spawn. The executor grants child-process
       # execution only to this access key and the exact configured binary.
       - FMU_SPAWN_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
+      # BOPTEST's bundled OpenBLAS runtime cannot start its worker pool under
+      # the Executor memory limit. Apply single-threaded native math only here.
+      - FMU_NATIVE_THREAD_LIMIT_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
       - FMU_SPAWN_EXECUTABLE=/var/lib/fmu-executor/state/local-runtime/Spawn-light-0.4.3-7048a72798-Linux/bin/spawn-0.4.3-7048a72798
     entrypoint: ["/bin/sh", "/run/local-boptest-entrypoint.sh"]
     command: ["python", "-m", "app"]
