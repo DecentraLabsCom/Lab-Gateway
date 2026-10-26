@@ -1,35 +1,78 @@
-"""
-AAS shell and submodel generator for FMU resources.
-
-Generates BaSyx V2-compatible JSON payloads from FMU describe metadata,
-following IDTA 02005 (Provision of Simulation Models) for the simulation submodel.
-"""
+"""Coordinate FMU AAS payload generation and BaSyx synchronization."""
 
 import base64
-import codecs
 import hashlib
-import io
 import json
 import logging
 import os
-import platform
-import posixpath
 import re
-import zipfile
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
 
 import httpx
+from aas_model_builders import (
+    _AAS_LAB_ID_RE,
+    _FMI_VARIABLE_METADATA_EXTENSION,
+    _IDSHORT_UNSAFE_RE,
+    _MAX_FMI_VARIABLE_METADATA_BYTES,
+    _SEMANTIC_ID_ACCESS_GENERATED_DIGEST,
+    _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST,
+    _SEMANTIC_ID_ARBITRARY,
+    _SEMANTIC_ID_ASSET_INTERFACES,
+    _SEMANTIC_ID_CAPABILITY_DESCRIPTION,
+    _SEMANTIC_ID_CONTACT_INFORMATION,
+    _SEMANTIC_ID_HANDOVER_DOCUMENTATION,
+    _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL,
+    _SEMANTIC_ID_SIMULATION_MODEL,
+    _SEMANTIC_ID_SIMULATION_MODELS,
+    _SEMANTIC_ID_TECHNICAL_DATA,
+    _SIMULATION_SEMANTICS,
+    _aas_id_for_lab,
+    _arbitrary_property,
+    _asset_interface_action,
+    _causality_to_port_type,
+    _documentation_urls,
+    _encode_id,
+    _fmi_causality_to_idta,
+    _fmi_type_to_idta,
+    _fmi_variable_metadata_extension,
+    _fmu_digest as _model_fmu_digest,
+    _non_negative_int,
+    _sanitize_idshort,
+    _semantic_id,
+    _standard_mlp,
+    _standard_property,
+    _submodel_id_for_access_control,
+    _submodel_id_for_contact,
+    _submodel_id_for_execution,
+    _submodel_id_for_fmu,
+    _submodel_id_for_handover,
+    _submodel_id_for_interfaces,
+    _submodel_id_for_technical,
+    _validate_lab_id,
+    build_aas_shell,
+    build_asset_interfaces_description_submodel,
+    build_contact_information_submodel,
+    build_execution_capabilities_submodel,
+    build_handover_documentation_submodel,
+    build_simulation_access_control_submodel,
+    build_simulation_ports,
+    build_simulation_submodel as _build_simulation_submodel,
+    build_technical_data_submodel,
+)
+from aas_access_control_sync import (
+    _decode_part4_access_rules_blob,
+    _find_property_value,
+    _is_simulation_access_control_submodel,
+    _sync_simulation_access_control,
+)
+from aasx_import import _parse_aasx_xml_environment, parse_aasx as _parse_aasx_package
 from aasx_limits import (
-    AasxInvalidContentError,
-    AasxLimitError,
     MAX_AASX_ENVIRONMENT_PART_BYTES,
     MAX_AASX_RELATIONSHIP_PART_BYTES,
     MAX_AASX_UPLOAD_BYTES,
-    validate_aasx_archive,
 )
 from simulation_access_policy import (
     build_part4_access_rules,
@@ -38,7 +81,6 @@ from simulation_access_policy import (
 )
 
 logger = logging.getLogger("fmu-runner.aas")
-
 
 def _env_or_secret_file(name: str, default: str = "") -> str:
     value = os.getenv(name)
@@ -54,7 +96,6 @@ def _env_or_secret_file(name: str, default: str = "") -> str:
         logger.warning("Unable to read secret file for %s", name)
         return default
 
-
 # Empty default: if not configured (e.g. Lite mode gateways without --profile aas),
 # sync_fmu_to_basyx returns a disabled result instead of attempting a connection.
 BASYX_AAS_URL = os.getenv("BASYX_AAS_URL", "")
@@ -63,7 +104,6 @@ AAS_SERVICE_TOKEN = _env_or_secret_file("AAS_SERVICE_TOKEN")
 AAS_SERVICE_TOKEN_HEADER = os.getenv("AAS_SERVICE_TOKEN_HEADER", "Authorization")
 _BUNDLED_AAS_URL = "http://basyx-aas-server:8081"
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
-_AAS_LAB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 _AAS_ENCODED_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,1024}")
 _AAS_COLLECTIONS = frozenset({"shells", "submodels"})
 _AASX_MEDIA_TYPE = "application/asset-administration-shell-package+xml"
@@ -73,50 +113,27 @@ _AASX_MEDIA_TYPES = frozenset({
     "application/aas+zip",
 })
 
-_SEMANTIC_ID_SIMULATION_MODELS = "https://admin-shell.io/idta/SubmodelTemplate/SimulationModels/1/1"
-_SEMANTIC_ID_SIMULATION_MODEL = "https://admin-shell.io/idta/SimulationModels/SimulationModel/1/1"
-_SEMANTIC_ID_TECHNICAL_DATA = "0173-1#01-AHX837#002"
-_SEMANTIC_ID_CAPABILITY_DESCRIPTION = "https://admin-shell.io/idta/SubmodelTemplate/CapabilityDescription/1/0"
-_SEMANTIC_ID_ASSET_INTERFACES = "https://admin-shell.io/idta/AssetInterfacesDescription/1/1/Submodel"
-_SEMANTIC_ID_CONTACT_INFORMATION = "https://admin-shell.io/zvei/nameplate/1/0/ContactInformations"
-_SEMANTIC_ID_HANDOVER_DOCUMENTATION = "0173-1#01-AHF578#003"
-_SEMANTIC_ID_ARBITRARY = "https://admin-shell.io/SMT/General/Arbitrary"
-_SEMANTIC_ID_SIMULATION_ACCESS_CONTROL = "urn:decentralabs:aas:SimulationAccessControl:1"
-_SEMANTIC_ID_ACCESS_INTERFACE_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:InterfaceDigest:1"
-_SEMANTIC_ID_ACCESS_GENERATED_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:GeneratedPolicyDigest:1"
+def _fmu_digest(fmu_path: Path) -> str:
+    """Return the digest of the matching FMU under the configured data root."""
+    return _model_fmu_digest(fmu_path, FMU_DATA_PATH)
 
-_SIMULATION_SEMANTICS = {
-    "summary": "https://admin-shell.io/idta/SimulationModels/Summary/1/0",
-    "type_of_model": "https://admin-shell.io/idta/SimulationModels/TypeOfModel/1/0",
-    "license_model": "https://admin-shell.io/idta/SimulationModels/LicenseModel/1/0",
-    "default_sim_time": "https://admin-shell.io/idta/SimulationModels/DefaultSimTime/1/0",
-    "environment": "https://admin-shell.io/idta/SimulationModels/Environment/1/0",
-    "simulation_tool": "https://admin-shell.io/idta/SimulationModels/SimulationTool/1/0",
-    "sim_tool_name": "https://admin-shell.io/idta/SimulationModels/SimToolName/1/0",
-    "solver": "https://admin-shell.io/idta/SimulationModels/SolverAndTolerances/1/0",
-    "fixed_step_size": "https://admin-shell.io/idta/SimulationModels/FixedStepSize/1/0",
-    "tolerance": "https://admin-shell.io/idta/SimulationModels/Tolerance/1/0",
-    "model_file": "https://admin-shell.io/idta/SimulationModels/ModelFile/1/0",
-    "model_file_type": "https://admin-shell.io/idta/SimulationModels/ModelFileType/1/0",
-    "model_file_version": "https://admin-shell.io/idta/SimulationModels/ModelFileVersion/1/0",
-    "model_version_id": "https://admin-shell.io/idta/SimulationModels/ModelVersionId/1/0",
-    "digital_file": "https://admin-shell.io/idta/SimulationModels/DigitalFile/1/0",
-    "manufacturer_information": "https://admin-shell.io/idta/SimulationModels/SimModManufacturerInformation/1/0",
-    "ports": "https://admin-shell.io/idta/SimulationModels/Ports/1/0",
-    "ports_connector": "https://admin-shell.io/idta/SimulationModels/PortsConnector/1/0",
-    "port_connector_name": "https://admin-shell.io/idta/SimulationModels/PortConnectorName/1/0",
-    "variable": "https://admin-shell.io/idta/SimulationModels/Variable/1/0",
-    "variable_name": "https://admin-shell.io/idta/SimulationModels/VariableName/1/0",
-    "range": "https://admin-shell.io/idta/SimulationModels/Range/1/0",
-    "variable_type": "https://admin-shell.io/idta/SimulationModels/VariableType/1/0",
-    "variable_description": "https://admin-shell.io/idta/SimulationModels/VariableDescription/1/0",
-    "unit_list": "https://admin-shell.io/idta/SimulationModels/UnitList/1/0",
-    "unit_description": "https://admin-shell.io/idta/SimulationModels/UnitDescription/1/0",
-    "variable_causality": "https://admin-shell.io/idta/SimulationModels/VariableCausality/1/0",
-}
-_FMI_VARIABLE_METADATA_EXTENSION = "decentralabs.fmi.variableMetadata.v1"
-_MAX_FMI_VARIABLE_METADATA_BYTES = 262_144
-
+def build_simulation_submodel(
+    lab_id: str,
+    access_key: str,
+    metadata: dict,
+    extra_info: Optional[dict] = None,
+    *,
+    fmu_path: Optional[Path] = None,
+) -> dict:
+    """Build the simulation model submodel using this module's FMU data root."""
+    return _build_simulation_submodel(
+        lab_id,
+        access_key,
+        metadata,
+        extra_info,
+        fmu_path=fmu_path,
+        fmu_data_path=FMU_DATA_PATH,
+    )
 
 def _aas_request_headers() -> dict[str, str]:
     """Return the dedicated AAS credential, rejecting unsafe external URLs."""
@@ -155,1295 +172,20 @@ def _aas_request_headers() -> dict[str, str]:
         value = f"Bearer {value}"
     return {header_name: value}
 
-
-def _validate_lab_id(lab_id: str) -> str:
-    """Return a lab identifier safe to embed in an AAS resource identifier."""
-    value = str(lab_id).strip()
-    if _AAS_LAB_ID_RE.fullmatch(value) is None:
-        raise ValueError("AAS lab ID is invalid")
-    return value
-
-
 def _aas_resource_path(collection: str, encoded_id: str) -> str:
     """Build a BaSyx resource path from an encoded, single-segment ID."""
     if collection not in _AAS_COLLECTIONS or _AAS_ENCODED_ID_RE.fullmatch(encoded_id) is None:
         raise ValueError("AAS resource path is invalid")
     return f"/{collection}/{encoded_id}"
 
-
-def _aas_id_for_lab(lab_id: str) -> str:
-    return f"urn:decentralabs:lab:{lab_id}"
-
-
-def _submodel_id_for_fmu(lab_id: str) -> str:
-    return f"urn:decentralabs:lab:{lab_id}:sm:simulationModels"
-
-
-def _submodel_id_for_technical(lab_id: str) -> str:
-    return f"urn:decentralabs:lab:{lab_id}:sm:technicalData"
-
-
-def _submodel_id_for_execution(lab_id: str) -> str:
-    return f"urn:decentralabs:lab:{lab_id}:sm:executionCapabilities"
-
-
-def _submodel_id_for_interfaces(lab_id: str) -> str:
-    return f"urn:decentralabs:lab:{lab_id}:sm:assetInterfaces"
-
-
-def _submodel_id_for_contact(lab_id: str) -> str:
-    return f"urn:decentralabs:lab:{lab_id}:sm:contactInformation"
-
-
-def _submodel_id_for_handover(lab_id: str) -> str:
-    return f"urn:decentralabs:lab:{lab_id}:sm:handoverDocumentation"
-
-
-def _submodel_id_for_access_control(lab_id: str) -> str:
-    return f"urn:decentralabs:lab:{lab_id}:sm:simulationAccessControl"
-
-
-def _fmu_digest(fmu_path: Path) -> str:
-    """Return a digest for the configured-root FMU matching its filename.
-
-    The caller supplies the already resolved FMU path to indicate that a hash
-    is wanted, but the file to read is selected from directory entries below
-    ``FMU_DATA_PATH``.  This keeps an arbitrary path from becoming a file
-    system access in this module as well as in the runner.
-    """
-    try:
-        base = Path(FMU_DATA_PATH).resolve()
-        filename = fmu_path.name
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*\.fmu", filename, re.IGNORECASE):
-            return ""
-
-        def _find_match(directory: Path) -> Optional[Path]:
-            try:
-                entries = directory.iterdir()
-            except OSError:
-                return None
-            for entry in entries:
-                if os.path.normcase(entry.name) != os.path.normcase(filename):
-                    continue
-                try:
-                    candidate = entry.resolve(strict=True)
-                except OSError:
-                    continue
-                try:
-                    candidate.relative_to(base)
-                except ValueError:
-                    continue
-                if candidate.is_file():
-                    return candidate
-            return None
-
-        candidate = _find_match(base)
-        if candidate is None:
-            for child in base.iterdir():
-                if child.is_dir():
-                    candidate = _find_match(child)
-                    if candidate is not None:
-                        break
-        if candidate is None:
-            return ""
-        return hashlib.sha256(candidate.read_bytes()).hexdigest()
-    except (OSError, ValueError):
-        return ""
-
-
-_IDSHORT_UNSAFE_RE = re.compile(r"[^a-zA-Z0-9]+")
-
-
-def _sanitize_idshort(name: str) -> str:
-    """Convert an arbitrary string (e.g. a unit name) into a valid AAS idShort."""
-    sanitized = _IDSHORT_UNSAFE_RE.sub("_", name).strip("_") or "Unit"
-    if sanitized[0].isdigit():
-        sanitized = "u" + sanitized
-    return sanitized
-
-
-def _encode_id(raw_id: str) -> str:
-    """URL-encode an AAS/submodel ID for use in BaSyx V2 REST paths (base64url)."""
-    return base64.urlsafe_b64encode(raw_id.encode()).decode().rstrip("=")
-
-
-def _fmi_type_to_idta(fmi_type: str) -> str:
-    """Map FMI variable type to the IDTA 02005 variable type vocabulary."""
-    mapping = {
-        "Real": "Real",
-        "Float64": "Real",
-        "Float32": "Real",
-        "Integer": "Integer",
-        "Int32": "Integer",
-        "Int16": "Integer",
-        "Int64": "Integer",
-        "UInt32": "Integer",
-        "UInt16": "Integer",
-        "UInt64": "Integer",
-        "Boolean": "Boolean",
-        "String": "String",
-        "Enumeration": "ENUM",
-    }
-    return mapping.get(fmi_type, str(fmi_type or "Unknown"))
-
-
-def _causality_to_port_type(causality: str) -> str:
-    """Map FMI causality to IDTA port direction."""
-    mapping = {
-        "input": "Input",
-        "output": "Output",
-        "parameter": "Parameter",
-        "calculatedParameter": "Parameter",
-        "structuralParameter": "Parameter",
-        "local": "Internal",
-        "independent": "Internal",
-    }
-    return mapping.get(causality, "Internal")
-
-
-def _fmi_causality_to_idta(causality: str) -> str:
-    """Map FMI causalities onto IDTA 02005's Input/Output/Acausal values."""
-    if causality == "output":
-        return "Output"
-    if causality in {"input", "parameter", "calculatedParameter", "structuralParameter"}:
-        return "Input"
-    return "Acausal"
-
-
-def _semantic_id(value: str) -> dict:
-    return {
-        "type": "ExternalReference",
-        "keys": [{"type": "GlobalReference", "value": value}],
-    }
-
-
-def _standard_property(id_short: str, value_type: str, value: object, semantic_id: str) -> dict:
-    return {
-        "idShort": id_short,
-        "semanticId": _semantic_id(semantic_id),
-        "modelType": "Property",
-        "valueType": value_type,
-        "value": str(value) if value is not None else "",
-    }
-
-
-def _standard_mlp(id_short: str, value: str, semantic_id: str) -> dict:
-    return {
-        "idShort": id_short,
-        "semanticId": _semantic_id(semantic_id),
-        "modelType": "MultiLanguageProperty",
-        "value": [{"language": "en", "text": value}],
-    }
-
-
-def _arbitrary_property(id_short: str, value_type: str, value: object, description: str = "") -> dict:
-    element = _standard_property(id_short, value_type, value, _SEMANTIC_ID_ARBITRARY)
-    if description:
-        element["description"] = [{"language": "en", "text": description}]
-    return element
-
-
-def _fmi_variable_metadata_extension(variable: dict) -> Optional[dict]:
-    """Preserve FMI variable attributes not represented by IDTA 02005 fields.
-
-    Standard port fields remain the interoperable representation for name,
-    causality, type family, description, unit, and range. This versioned AAS
-    Extension carries FMI-specific details that the template cannot express.
-    """
-    metadata_fields = (
-        "type", "causality", "valueReference", "variability", "initial", "start", "nominal",
-        "quantity", "displayName", "displayUnit", "dimensions", "enumItems", "declaredType",
-    )
-    metadata = {
-        field: variable[field]
-        for field in metadata_fields
-        if field != "declaredType" and field in variable and variable[field] is not None
-    }
-    declared_type = variable.get("declaredType")
-    if isinstance(declared_type, dict):
-        # The effective unit, range, quantity and enumeration choices are
-        # represented separately above or in IDTA's standard fields. Preserve
-        # the FMI type alias identity without repeating those values.
-        alias = {
-            field: declared_type[field]
-            for field in ("name", "type", "description")
-            if isinstance(declared_type.get(field), str) and declared_type[field]
-        }
-        if alias:
-            metadata["declaredType"] = alias
-    if not metadata:
-        return None
-
-    encoded = json.dumps(metadata, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-    if len(encoded.encode("utf-8")) > _MAX_FMI_VARIABLE_METADATA_BYTES:
-        raise ValueError("FMI variable metadata exceeds the AAS extension size limit")
-    return {
-        "name": _FMI_VARIABLE_METADATA_EXTENSION,
-        "valueType": "xs:string",
-        "value": encoded,
-    }
-
-
-def build_simulation_ports(variables: list[dict]) -> list[dict]:
-    """Build the standard IDTA 02005 Ports/PortsConnector/Variable hierarchy."""
-    grouped: dict[str, list[dict]] = {}
-    for var in variables:
-        causality = var.get("causality", "local")
-        if causality == "local":
-            continue
-        grouped.setdefault(_causality_to_port_type(causality), []).append(var)
-
-    connectors = []
-    for connector_name, connector_variables in grouped.items():
-        variable_elements = []
-        for var in connector_variables:
-            variable_name = str(var.get("name") or "Variable")
-            variable_value = [
-                _standard_property(
-                    "VariableName", "xs:string", variable_name, _SIMULATION_SEMANTICS["variable_name"]
-                ),
-                _standard_property(
-                    "VariableType", "xs:string", _fmi_type_to_idta(var.get("type", "Real")),
-                    _SIMULATION_SEMANTICS["variable_type"],
-                ),
-                _standard_property(
-                    "VariableCausality", "xs:string", _fmi_causality_to_idta(causality),
-                    _SIMULATION_SEMANTICS["variable_causality"],
-                ),
-            ]
-            if var.get("description"):
-                variable_value.append(
-                    _standard_mlp(
-                        "VariableDescription", str(var["description"]),
-                        _SIMULATION_SEMANTICS["variable_description"],
-                    )
-                )
-            unit = str(var.get("unit") or "").strip()
-            variable_value.append(
-                _standard_property("UnitList", "xs:string", "others", _SIMULATION_SEMANTICS["unit_list"])
-            )
-            if unit:
-                variable_value.append(
-                    _standard_mlp(
-                        "UnitDescription", unit,
-                        _SIMULATION_SEMANTICS["unit_description"],
-                    )
-                )
-            if var.get("min") is not None or var.get("max") is not None:
-                minimum = str(var["min"]) if var.get("min") is not None else ""
-                maximum = str(var["max"]) if var.get("max") is not None else ""
-                if minimum and maximum:
-                    range_text = f"[{minimum}, {maximum}]"
-                elif minimum:
-                    range_text = f"[{minimum}, ∞)"
-                else:
-                    range_text = f"(-∞, {maximum}]"
-                variable_value.append(
-                    _standard_property("Range", "xs:string", range_text, _SIMULATION_SEMANTICS["range"])
-                )
-            variable_elements.append({
-                "idShort": _sanitize_idshort(variable_name),
-                "semanticId": _semantic_id(_SIMULATION_SEMANTICS["variable"]),
-                "modelType": "SubmodelElementCollection",
-                "value": variable_value,
-                **({"extensions": [extension]} if (extension := _fmi_variable_metadata_extension(var)) else {}),
-            })
-
-        connectors.append({
-            "idShort": _sanitize_idshort(connector_name),
-            "semanticId": _semantic_id(_SIMULATION_SEMANTICS["ports_connector"]),
-            "modelType": "SubmodelElementCollection",
-            "value": [
-                _standard_property(
-                    "PortConnectorName", "xs:string", connector_name,
-                    _SIMULATION_SEMANTICS["port_connector_name"],
-                ),
-                *variable_elements,
-            ],
-        })
-    return connectors
-
-
-def build_simulation_access_control_submodel(
-    lab_id: str,
-    metadata: dict,
-    *,
-    simulation_model_submodel_id: str | None = None,
-) -> dict:
-    """Build the Gateway's IDTA Part 4 JSON access-rule profile for an FMU."""
-    access_rules = build_part4_access_rules(
-        metadata,
-        simulation_model_submodel_id or _submodel_id_for_fmu(lab_id),
-    )
-    encoded_rules = json.dumps(
-        access_rules,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    digest = fmi_interface_digest(metadata)
-    generated_digest = hashlib.sha256(encoded_rules).hexdigest()
-    return {
-        "id": _submodel_id_for_access_control(lab_id),
-        "idShort": "SimulationAccessControl",
-        "semanticId": _semantic_id(_SEMANTIC_ID_SIMULATION_ACCESS_CONTROL),
-        "modelType": "Submodel",
-        "submodelElements": [
-            _standard_property(
-                "InterfaceDigest", "xs:string", digest,
-                _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST,
-            ),
-            _standard_property(
-                "GeneratedPolicyDigest", "xs:string", generated_digest,
-                _SEMANTIC_ID_ACCESS_GENERATED_DIGEST,
-            ),
-            {
-                "idShort": "AllAccessPermissionRules",
-                "modelType": "Blob",
-                "contentType": "application/json",
-                "value": base64.b64encode(encoded_rules).decode("ascii"),
-            },
-        ],
-    }
-
-
-def build_simulation_submodel(
-    lab_id: str,
-    access_key: str,
-    metadata: dict,
-    extra_info: Optional[dict] = None,
-    *,
-    fmu_path: Optional[Path] = None,
-) -> dict:
-    """Build an IDTA 02005 v1.1 Provision of Simulation Models submodel.
-
-    Provider contact and documentation are emitted into their dedicated standard
-    submodels; this submodel only contains the simulation-model information.
-
-    *fmu_path* is the filesystem path to the ``.fmu`` binary; when supplied a
-    SHA-256 digest is computed and embedded in the ``ModelFile`` element.
-    """
-    submodel_id = _submodel_id_for_fmu(lab_id)
-
-    # Summary is a standard IDTA 02005 MultiLanguageProperty.
-    _description = (extra_info or {}).get("description", "").strip() or metadata.get("description", "").strip()
-    sim_model_elements: list[dict] = []
-    if _description:
-        sim_model_elements.append(_standard_mlp("Summary", _description, _SIMULATION_SEMANTICS["summary"]))
-
-    model_name = str(metadata.get("modelName") or "Unknown")
-    model_collection = {
-        "displayName": [{"language": "en", "text": model_name}],
-    }
-    model_type = metadata.get("simulationType") or metadata.get("simulationKind")
-    if model_type:
-        sim_model_elements.append(
-            _standard_property("TypeOfModel", "xs:string", model_type, _SIMULATION_SEMANTICS["type_of_model"])
-        )
-
-    # ModelFile is a standard collection; DigitalFile is the only element that
-    # points to the gateway resource. The access key is never published as a field.
-    _fmu_sha256 = _fmu_digest(fmu_path) if fmu_path is not None else ""
-    model_file_value: list[dict] = []
-    fmi_version = str(metadata.get("fmiVersion") or "2.0")
-    modes = []
-    if metadata.get("supportsCoSimulation"):
-        modes.append("Co-Simulation")
-    if metadata.get("supportsModelExchange"):
-        modes.append("Model Exchange")
-    if not modes and metadata.get("simulationType"):
-        modes.append(str(metadata["simulationType"]))
-    model_file_value.append(_standard_property(
-        "ModelFileType", "xs:string", ", ".join([f"FMI {fmi_version}", *modes]),
-        _SIMULATION_SEMANTICS["model_file_type"],
-    ))
-    model_version = str(metadata.get("version") or "unversioned").strip() or "unversioned"
-    digital_file: dict = {
-        "idShort": "DigitalFile",
-        "semanticId": _semantic_id(_SIMULATION_SEMANTICS["digital_file"]),
-        "modelType": "File",
-        "contentType": "application/zip",
-        "value": f"/fmu-data/{access_key}",
-    }
-    if _fmu_sha256:
-        digital_file["extensions"] = [{"name": "sha256", "valueType": "xs:string", "value": _fmu_sha256}]
-    model_file_value.append({
-        "idShort": "ModelFileVersion",
-        "semanticId": _semantic_id(_SIMULATION_SEMANTICS["model_file_version"]),
-        "modelType": "SubmodelElementCollection",
-        "value": [
-            _standard_property("ModelVersionId", "xs:string", model_version, _SIMULATION_SEMANTICS["model_version_id"]),
-            digital_file,
-        ],
-    })
-    sim_model_elements.append({
-        "idShort": "ModelFile",
-        "semanticId": _semantic_id(_SIMULATION_SEMANTICS["model_file"]),
-        "modelType": "SubmodelElementCollection",
-        "value": model_file_value,
-    })
-
-    raw_default_stop = metadata.get("defaultStopTime")
-    if raw_default_stop is not None:
-        default_start = float(metadata.get("defaultStartTime") or 0.0)
-        default_stop = float(raw_default_stop)
-        if default_stop > default_start:
-            sim_model_elements.append(
-                _standard_property("DefaultSimTime", "xs:double", default_stop - default_start, _SIMULATION_SEMANTICS["default_sim_time"])
-            )
-
-    # FMU tool and solver metadata have direct IDTA 02005 homes.
-    _gen_tool = str(metadata.get("generationTool") or metadata.get("simulationTool") or "").strip()
-    tolerance = metadata.get("defaultTolerance")
-    fmi_capabilities = metadata.get("capabilities") or {}
-    fixed_step = fmi_capabilities.get("fixedInternalStepSize")
-    has_solver_metadata = (
-        tolerance is not None
-        or fixed_step is not None
-        or bool(fmi_capabilities)
-        or metadata.get("stiffSolverNeeded") is not None
-    )
-    if _gen_tool or has_solver_metadata:
-        solver_elements = []
-        if has_solver_metadata:
-            solver_elements.extend([
-                _standard_property(
-                    "StepSizeControlNeeded", "xs:boolean", str(fixed_step is None).lower(),
-                    "https://admin-shell.io/idta/SimulationModels/StepSizeControlNeeded/1/0",
-                ),
-                _standard_property(
-                    "StiffSolverNeeded", "xs:boolean",
-                    str(bool(metadata.get("stiffSolverNeeded", fmi_capabilities.get("stiffSolverNeeded", False)))).lower(),
-                    "https://admin-shell.io/idta/SimulationModels/StiffSolverNeeded/1/0",
-                ),
-                _standard_property(
-                    "SolverIncluded", "xs:boolean", str(bool(metadata.get("supportsCoSimulation"))).lower(),
-                    "https://admin-shell.io/idta/SimulationModels/SolverIncluded/1/0",
-                ),
-            ])
-        if fixed_step is not None:
-            solver_elements.append(_standard_property("FixedStepSize", "xs:double", fixed_step, _SIMULATION_SEMANTICS["fixed_step_size"]))
-        if tolerance is not None:
-            solver_elements.append(_standard_property("Tolerance", "xs:double", tolerance, _SIMULATION_SEMANTICS["tolerance"]))
-        simulation_tool_elements = [
-            _standard_property("SimToolName", "xs:string", _gen_tool or "FMI runtime", _SIMULATION_SEMANTICS["sim_tool_name"]),
-        ]
-        if solver_elements:
-            simulation_tool_elements.append({
-                "idShort": "SolverAndTolerances",
-                "semanticId": _semantic_id(_SIMULATION_SEMANTICS["solver"]),
-                "modelType": "SubmodelElementCollection",
-                "value": solver_elements,
-            })
-        sim_model_elements.append({
-            "idShort": "Environment",
-            "semanticId": _semantic_id(_SIMULATION_SEMANTICS["environment"]),
-            "modelType": "SubmodelElementCollection",
-            "value": [
-                _standard_property(
-                    "OperatingSystem", "xs:string", metadata.get("operatingSystem") or platform.platform(),
-                    "https://admin-shell.io/idta/SimulationModels/OperatingSystem/1/0",
-                ),
-                {
-                    "idShort": "SimulationTool",
-                    "semanticId": _semantic_id(_SIMULATION_SEMANTICS["simulation_tool"]),
-                    "modelType": "SubmodelElementCollection",
-                    "value": simulation_tool_elements,
-                }
-            ],
-        })
-
-    license_model = str((extra_info or {}).get("license") or metadata.get("license") or "").strip()
-    if license_model:
-        sim_model_elements.append(_standard_property("LicenseModel", "xs:string", license_model, _SIMULATION_SEMANTICS["license_model"]))
-
-    author = str(metadata.get("author") or "").strip()
-    contact_email = str((extra_info or {}).get("contactEmail") or "").strip()
-    if author or contact_email:
-        manufacturer_values = []
-        manufacturer_values.append(_standard_property(
-            "Company", "xs:string", author or "DecentraLabs", "0173-1#02-AAW001#001"
-        ))
-        manufacturer_values.append(_standard_property(
-            "Language", "xs:string", str(metadata.get("language") or "en"), "0173-1#02-AAO895#003"
-        ))
-        if contact_email:
-            manufacturer_values.append({
-                "idShort": "Email",
-                "semanticId": _semantic_id("0173-1#02-AAQ836#005"),
-                "modelType": "SubmodelElementCollection",
-                "value": [
-                    _standard_property("EmailAddress", "xs:string", contact_email, "0173-1#02-AAO198#002"),
-                ],
-            })
-        sim_model_elements.append({
-            "idShort": "SimModManufacturerInformation",
-            "semanticId": _semantic_id(_SIMULATION_SEMANTICS["manufacturer_information"]),
-            "modelType": "SubmodelElementCollection",
-            "value": manufacturer_values,
-        })
-
-    ports = build_simulation_ports(metadata.get("modelVariables", []))
-    if ports:
-        sim_model_elements.append({
-            "idShort": "Ports",
-            "semanticId": _semantic_id(_SIMULATION_SEMANTICS["ports"]),
-            "modelType": "SubmodelElementCollection",
-            "value": ports,
-        })
-
-    submodel = {
-        "id": submodel_id,
-        "idShort": "SimulationModels",
-        "semanticId": _semantic_id(_SEMANTIC_ID_SIMULATION_MODELS),
-        "modelType": "Submodel",
-        "submodelElements": [
-            {
-                "idShort": "SimulationModel",
-                "semanticId": _semantic_id(_SEMANTIC_ID_SIMULATION_MODEL),
-                "modelType": "SubmodelElementCollection",
-                "value": sim_model_elements,
-                **model_collection,
-            }
-        ],
-    }
-    return submodel
-
-
-def build_execution_capabilities_submodel(
-    lab_id: str,
-    metadata: dict,
-    runtime_info: Optional[dict] = None,
-) -> Optional[dict]:
-    """Build the standard IDTA 02020 capability description for an FMU."""
-    metadata = metadata or {}
-    supports_cosimulation = bool(metadata.get("supportsCoSimulation"))
-    supports_model_exchange = bool(metadata.get("supportsModelExchange"))
-    can_run_batch = supports_cosimulation or supports_model_exchange
-
-    capability_names: list[tuple[str, str]] = []
-    if can_run_batch:
-        capability_names.extend([
-            ("RunSimulation", "Run a reservation-authorized batch FMU simulation."),
-            ("CancelSimulation", "Cancel a reservation-authorized batch FMU simulation."),
-        ])
-
-    if supports_cosimulation:
-        capability_names.extend([
-            ("CreateRealtimeSession", "Create an authenticated FMI Co-Simulation session."),
-            ("Initialize", "Initialize a co-simulation session."),
-            ("Start", "Start a co-simulation session."),
-            ("Pause", "Pause a co-simulation session."),
-            ("Resume", "Resume a co-simulation session."),
-            ("Reset", "Reset a co-simulation session."),
-            ("Step", "Advance a co-simulation session by one communication step."),
-            ("RunUntil", "Advance a co-simulation session to a target time."),
-            ("SetInputs", "Set FMI input values in a co-simulation session."),
-            ("GetOutputs", "Read FMI output values from a co-simulation session."),
-            ("TerminateSession", "Terminate a co-simulation session."),
-        ])
-
-    containers = []
-    for name, description in capability_names:
-        containers.append({
-            "idShort": f"CapabilityContainer_{_sanitize_idshort(name)}",
-            "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/CapabilityContainer/1/0"),
-            "modelType": "SubmodelElementCollection",
-            "value": [{
-                "idShort": name,
-                "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/Capability/1/0"),
-                "modelType": "Capability",
-                "description": [{"language": "en", "text": description}],
-            }],
-        })
-
-    fmi_capabilities = metadata.get("capabilities") or {}
-    if fmi_capabilities:
-        property_containers = []
-        for name, value in fmi_capabilities.items():
-            if isinstance(value, bool):
-                value_type = "xs:boolean"
-                serialized = str(value).lower()
-            elif isinstance(value, (int, float)) and not isinstance(value, bool):
-                value_type = "xs:double"
-                serialized = value
-            else:
-                value_type = "xs:string"
-                serialized = str(value)
-            property_containers.append({
-                "idShort": f"PropertyContainer_{_sanitize_idshort(name)}",
-                "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/PropertyContainer/1/0"),
-                "modelType": "SubmodelElementCollection",
-                "value": [{
-                    "idShort": "PropertyProperty",
-                    "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityPropertyType/Property/1/0"),
-                    "modelType": "Property",
-                    "valueType": value_type,
-                    "value": str(serialized),
-                    "description": [{"language": "en", "text": f"FMI capability: {name}"}],
-                }],
-            })
-        containers.append({
-            "idShort": "CapabilityContainer_FMISimulation",
-            "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/CapabilityContainer/1/0"),
-            "modelType": "SubmodelElementCollection",
-            "value": [
-                {
-                    "idShort": "FMISimulation",
-                    "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/Capability/1/0"),
-                    "modelType": "Capability",
-                    "description": [{"language": "en", "text": "FMI capabilities reported by the simulation model."}],
-                },
-                {
-                    "idShort": "PropertySet_FMICapabilities",
-                    "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/PropertySet/1/0"),
-                    "modelType": "SubmodelElementCollection",
-                    "value": property_containers,
-                },
-            ],
-        })
-
-    if not containers:
-        return None
-
-    return {
-        "id": _submodel_id_for_execution(lab_id),
-        "idShort": "CapabilityDescription",
-        "modelType": "Submodel",
-        "semanticId": _semantic_id(_SEMANTIC_ID_CAPABILITY_DESCRIPTION),
-        "submodelElements": [{
-            "idShort": "CapabilitySet",
-            "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/CapabilitySet/1/0"),
-            "modelType": "SubmodelElementCollection",
-            "value": containers,
-        }],
-    }
-
-
-def _asset_interface_action(name: str, href: str, method: str = "POST", subprotocol: str = "") -> dict:
-    form_values = [
-        _standard_property("href", "xs:anyURI", href, "https://www.w3.org/2019/wot/hypermedia#hasTarget"),
-        _standard_property("htv_methodName", "xs:string", method, "https://www.w3.org/2011/http#methodName"),
-    ]
-    if subprotocol:
-        form_values.append(_standard_property(
-            "subprotocol", "xs:string", subprotocol,
-            "https://www.w3.org/2019/wot/hypermedia#forSubProtocol",
-        ))
-    return {
-        "idShort": name,
-        "semanticId": _semantic_id("https://www.w3.org/2019/wot/td#ActionAffordance"),
-        "modelType": "SubmodelElementCollection",
-        "value": [{
-            "idShort": "forms",
-            "semanticId": _semantic_id("https://www.w3.org/2019/wot/td#hasForm"),
-            "modelType": "SubmodelElementCollection",
-            "value": form_values,
-        }],
-    }
-
-
-def build_asset_interfaces_description_submodel(
-    lab_id: str,
-    operations: Sequence[tuple[str, str, str, str]],
-    *,
-    title: str = "DecentraLabs FMU interface",
-) -> Optional[dict]:
-    """Describe gateway HTTP/WebSocket affordances using IDTA 02017 / WoT."""
-    actions = [_asset_interface_action(name, href, method, subprotocol) for name, href, method, subprotocol in operations]
-    if not actions:
-        return None
-    bearer_scheme = {
-        "idShort": "bearer_sc",
-        "semanticId": _semantic_id("https://www.w3.org/2019/wot/security#BearerSecurityScheme"),
-        "modelType": "SubmodelElementCollection",
-        "value": [
-            _standard_property("scheme", "xs:string", "bearer", "https://www.w3.org/2019/wot/security#SecurityScheme"),
-            _standard_property("name", "xs:string", "Authorization", "https://www.w3.org/2019/wot/security#name"),
-            _standard_property("in", "xs:string", "header", "https://www.w3.org/2019/wot/security#in"),
-        ],
-    }
-    endpoint_metadata = {
-        "idShort": "EndpointMetadata",
-        "semanticId": _semantic_id("https://admin-shell.io/idta/AssetInterfacesDescription/1/0/EndpointMetadata"),
-        "modelType": "SubmodelElementCollection",
-        "value": [
-            _standard_property("base", "xs:anyURI", "/fmu/api/v1", "https://www.w3.org/2019/wot/td#baseURI"),
-            _standard_property("contentType", "xs:string", "application/json", "https://www.w3.org/2019/wot/hypermedia#forContentType"),
-            {
-                "idShort": "securityDefinitions",
-                "semanticId": _semantic_id("https://www.w3.org/2019/wot/security#definesSecurityScheme"),
-                "modelType": "SubmodelElementCollection",
-                "value": [bearer_scheme],
-            },
-        ],
-    }
-    interface = {
-        "idShort": "InterfaceTemplateForHTTP",
-        "semanticId": _semantic_id("https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Interface"),
-        "modelType": "SubmodelElementCollection",
-        "value": [
-            _standard_property("title", "xs:string", title, "https://www.w3.org/2019/wot/td#title"),
-            endpoint_metadata,
-            {
-                "idShort": "InteractionMetadata",
-                "semanticId": _semantic_id("https://admin-shell.io/idta/AssetInterfacesDescription/1/0/InteractionMetadata"),
-                "modelType": "SubmodelElementCollection",
-                "value": [{
-                    "idShort": "actions",
-                    "semanticId": _semantic_id("https://www.w3.org/2019/wot/td#ActionAffordance"),
-                    "modelType": "SubmodelElementCollection",
-                    "value": actions,
-                }],
-            },
-        ],
-    }
-    return {
-        "id": _submodel_id_for_interfaces(lab_id),
-        "idShort": "AssetInterfacesDescription",
-        "modelType": "Submodel",
-        "semanticId": _semantic_id(_SEMANTIC_ID_ASSET_INTERFACES),
-        "submodelElements": [interface],
-    }
-
-
-def build_contact_information_submodel(lab_id: str, extra_info: Optional[dict] = None) -> Optional[dict]:
-    email = str((extra_info or {}).get("contactEmail") or "").strip()
-    if not email:
-        return None
-    values = []
-    values.append({
-        "idShort": "Email",
-        "semanticId": _semantic_id("0173-1#02-AAQ836#005"),
-        "modelType": "SubmodelElementCollection",
-        "value": [_standard_property("EmailAddress", "xs:string", email, "0173-1#02-AAO198#002")],
-    })
-    return {
-        "id": _submodel_id_for_contact(lab_id),
-        "idShort": "ContactInformations",
-        "modelType": "Submodel",
-        "semanticId": _semantic_id(_SEMANTIC_ID_CONTACT_INFORMATION),
-        "submodelElements": [{
-            "idShort": "ContactInformation",
-            "semanticId": _semantic_id("https://admin-shell.io/zvei/nameplate/1/0/ContactInformations/ContactInformation"),
-            "modelType": "SubmodelElementCollection",
-            "value": values,
-        }],
-    }
-
-
-def _documentation_urls(extra_info: Optional[dict]) -> list[str]:
-    values = (extra_info or {}).get("documentationUrls", [])
-    if isinstance(values, str):
-        try:
-            values = json.loads(values)
-        except (TypeError, ValueError):
-            values = []
-    if not isinstance(values, list):
-        values = []
-    single = str((extra_info or {}).get("documentationUrl") or "").strip()
-    if single:
-        values.append(single)
-    return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
-
-
-def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict] = None) -> Optional[dict]:
-    documents = []
-    urls = _documentation_urls(extra_info)
-    license_value = str((extra_info or {}).get("license") or "").strip()
-    if license_value and (license_value.startswith("http://") or license_value.startswith("https://")):
-        urls.insert(0, license_value)
-    document_specs = [
-        (url, "License terms" if url == license_value else f"Documentation {index + 1}", "application/octet-stream")
-        for index, url in enumerate(dict.fromkeys(urls))
-    ]
-    asset_url = str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
-    if asset_url:
-        app_asset = urlsplit(asset_url).path.startswith("/digital-twin-apps/")
-        document_specs.append((
-            asset_url,
-            "Three.js digital twin application" if app_asset else "Digital twin GLB scene",
-            "text/html" if app_asset else "model/gltf-binary",
-        ))
-    if not document_specs:
-        return None
-    for index, (url, title, content_type) in enumerate(document_specs):
-        identifier = url or f"license:{license_value}"
-        document_ids = {
-            "idShort": "DocumentIds",
-            "semanticId": _semantic_id("0173-1#02-ABI501#003"),
-            "modelType": "SubmodelElementList",
-            "typeValueListElement": "SubmodelElementCollection",
-            "value": [{
-                "idShort": "DocumentIdentifier_0",
-                "semanticId": _semantic_id("0173-1#02-ABI501#003/0173-1#01-AHF580#003"),
-                "modelType": "SubmodelElementCollection",
-                "value": [
-                    _standard_property("DocumentDomainId", "xs:string", urlsplit(url).hostname or "decentralabs", "0173-1#02-ABH994#003"),
-                    _standard_property("DocumentIdentifier", "xs:string", identifier, "0173-1#02-AAO099#004"),
-                ],
-            }],
-        }
-        documents.append({
-            "idShort": f"Document_{index}",
-            "semanticId": _semantic_id("0173-1#02-ABI500#003/0173-1#01-AHF579#003"),
-            "modelType": "SubmodelElementCollection",
-            "value": [{
-                **document_ids,
-            }, {
-                "idShort": "DocumentVersions",
-                "semanticId": _semantic_id("0173-1#02-ABI503#003"),
-                "modelType": "SubmodelElementList",
-                "typeValueListElement": "SubmodelElementCollection",
-                "value": [{
-                    "idShort": "DocumentVersion_0",
-                    "semanticId": _semantic_id("0173-1#02-ABI503#003/0173-1#01-AHF582#003"),
-                    "modelType": "SubmodelElementCollection",
-                    "value": [
-                        {
-                            "idShort": "Language",
-                            "semanticId": _semantic_id("0173-1#02-AAN468#008"),
-                            "modelType": "SubmodelElementList",
-                            "typeValueListElement": "Property",
-                            "valueTypeListElement": "xs:string",
-                            "value": [{
-                                "idShort": "Language_0",
-                                "semanticId": _semantic_id("0173-1#02-AAN468#008"),
-                                "modelType": "Property",
-                                "valueType": "xs:string",
-                                "value": "en",
-                                "valueId": _semantic_id("0173-1#07-AAS045#003"),
-                            }],
-                        },
-                        _standard_property("Version", "xs:string", "1.0", "0173-1#02-AAP003#005"),
-                        _standard_mlp("Title", title, "0173-1#02-ABG940#003"),
-                        {
-                            "idShort": "DigitalFiles",
-                            "semanticId": _semantic_id("0173-1#02-ABK126#002"),
-                            "modelType": "SubmodelElementList",
-                            "typeValueListElement": "File",
-                            "value": [{
-                                "idShort": "DigitalTwinScene" if content_type == "model/gltf-binary" else "DigitalFile",
-                                "semanticId": _semantic_id("0173-1#02-ABK126#002"),
-                                "modelType": "File",
-                                "contentType": content_type,
-                                "value": url,
-                            }],
-                        },
-                    ],
-                }],
-            }],
-        })
-    return {
-        "id": _submodel_id_for_handover(lab_id),
-        "idShort": "HandoverDocumentation",
-        "modelType": "Submodel",
-        "semanticId": _semantic_id(_SEMANTIC_ID_HANDOVER_DOCUMENTATION),
-        "submodelElements": [{
-            "idShort": "Documents",
-            "semanticId": _semantic_id("0173-1#02-ABI500#003"),
-            "modelType": "SubmodelElementList",
-            "typeValueListElement": "SubmodelElementCollection",
-            "value": documents,
-        }],
-    }
-
-
-def _non_negative_int(value: object) -> str:
-    try:
-        number = int(str(value).strip())
-    except (TypeError, ValueError):
-        return ""
-    return str(number) if number >= 0 else ""
-
-
-def build_technical_data_submodel(
-    lab_id: str,
-    metadata: dict,
-    runtime_info: Optional[dict] = None,
-) -> dict:
-    """Build IDTA 02003 v2.0.1 TechnicalData with standard arbitrary extensions.
-
-    Runtime status and capacity are not covered by the generic technical-data
-    vocabulary. They therefore live in the template's official
-    ``TechnicalPropertyAreas`` arbitrary-property slot, with descriptions that
-    preserve their meaning without inventing DecentraLabs semantic IDs.
-    """
-    runtime = runtime_info or {}
-    raw_status = str(runtime.get("status") or "").strip().upper()
-    status_map = {
-        "UP": "Ready",
-        "DEGRADED": "Degraded",
-        "DOWN": "Unavailable",
-    }
-    resource_status = status_map.get(raw_status, "Unknown")
-    ready_flag = "true" if raw_status == "UP" else ("false" if raw_status in {"DEGRADED", "DOWN"} else "")
-    metadata_available = bool(metadata)
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    general_information = {
-        "idShort": "GeneralInformation",
-        "semanticId": _semantic_id("0173-1#02-ABK161#002/0173-1#01-AHX838#002"),
-        "modelType": "SubmodelElementCollection",
-        "value": [
-            _standard_property("ManufacturerName", "xs:string", "DecentraLabs", "0173-1#02-AAO677#004"),
-            _standard_mlp("ManufacturerProductDesignation", "FMU execution resource", "0173-1#02-AAW338#003"),
-        ],
-    }
-    arbitrary_values = [
-        _arbitrary_property("ResourceType", "xs:string", "FMU", "DecentraLabs resource classification."),
-        _arbitrary_property("ResourceStatus", "xs:string", resource_status, "Current publication status."),
-        _arbitrary_property("ModelAvailable", "xs:boolean", str(metadata_available).lower(), "Whether FMU metadata is available."),
-        _arbitrary_property("ExecutionBackend", "xs:string", str(runtime.get("backendMode") or ""), "Configured FMU execution backend."),
-        _arbitrary_property("RunnerStatus", "xs:string", str(runtime.get("status") or ""), "Raw runner health status."),
-        _arbitrary_property("LastSyncTimestamp", "xs:dateTime", now_iso, "Timestamp of this AAS publication."),
-    ]
-    if ready_flag:
-        arbitrary_values.append(
-            _arbitrary_property("ReadyFlag", "xs:boolean", ready_flag, "Whether the FMU runner reports readiness.")
-        )
-    active_simulation_count = _non_negative_int(runtime.get("activeSimulationCount"))
-    if active_simulation_count:
-        arbitrary_values.append(
-            _arbitrary_property(
-                "ActiveSimulationCount",
-                "xs:nonNegativeInteger",
-                active_simulation_count,
-                "Active batch simulations.",
-            )
-        )
-    max_concurrent_simulations = _non_negative_int(runtime.get("maxConcurrentSimulations"))
-    if max_concurrent_simulations:
-        arbitrary_values.append(
-            _arbitrary_property(
-                "MaxConcurrentSimulations",
-                "xs:nonNegativeInteger",
-                max_concurrent_simulations,
-                "Configured simulation concurrency limit.",
-            )
-        )
-    elements = [
-        general_information,
-        {
-            "idShort": "TechnicalPropertyAreas",
-            "semanticId": _semantic_id("0173-1#02-ABK163#002"),
-            "modelType": "SubmodelElementList",
-            "typeValueListElement": "SubmodelElementCollection",
-            "value": [{
-                "idShort": "OperationalStatus",
-                "semanticId": _semantic_id("0173-1#02-ABL358#002/0173-1#01-AHX773#002"),
-                "modelType": "SubmodelElementCollection",
-                "value": arbitrary_values,
-            }],
-        },
-    ]
-
-    return {
-        "id": _submodel_id_for_technical(lab_id),
-        "idShort": "TechnicalData",
-        "modelType": "Submodel",
-        "semanticId": {
-            "type": "ExternalReference",
-            "keys": [{"type": "GlobalReference", "value": _SEMANTIC_ID_TECHNICAL_DATA}],
-        },
-        "submodelElements": elements,
-    }
-
-
-def build_aas_shell(
-    lab_id: str,
-    access_key: str,
-    metadata: dict,
-    extra_info: Optional[dict] = None,
-    extra_submodel_ids: Sequence[str] = (),
-) -> dict:
-    """Build the AAS shell JSON for BaSyx V2.
-
-    *extra_info* may contain ``description`` (str) for a human-readable
-    description of the asset, surfaced as the AAS shell ``description`` field.
-    *extra_submodel_ids* lists IDs of additional provider-managed submodels.
-    """
-    aas_id = _aas_id_for_lab(lab_id)
-    all_sm_ids = [
-        _submodel_id_for_fmu(lab_id),
-        _submodel_id_for_technical(lab_id),
-    ]
-    metadata = metadata or {}
-    supports_execution = bool(
-        metadata.get("supportsCoSimulation")
-        or metadata.get("supportsModelExchange")
-        or metadata.get("capabilities")
-    )
-    if supports_execution:
-        all_sm_ids.append(_submodel_id_for_execution(lab_id))
-    if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
-        all_sm_ids.append(_submodel_id_for_interfaces(lab_id))
-    if isinstance(metadata.get("modelVariables"), list):
-        all_sm_ids.append(_submodel_id_for_access_control(lab_id))
-    if str((extra_info or {}).get("contactEmail") or "").strip():
-        all_sm_ids.append(_submodel_id_for_contact(lab_id))
-    if (
-        _documentation_urls(extra_info)
-        or str((extra_info or {}).get("license") or "").strip().startswith(("http://", "https://"))
-        or str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
-    ):
-        all_sm_ids.append(_submodel_id_for_handover(lab_id))
-    all_sm_ids.extend(extra_submodel_ids)
-
-    shell = {
-        "id": aas_id,
-        "idShort": f"DecentraLabs_Lab_{lab_id}",
-        "modelType": "AssetAdministrationShell",
-        "assetInformation": {
-            "assetKind": "Instance",
-            "globalAssetId": aas_id,
-        },
-        "submodels": [
-            {"type": "ModelReference", "keys": [{"type": "Submodel", "value": sm_id}]}
-            for sm_id in all_sm_ids
-        ],
-    }
-
-    description = (extra_info or {}).get("description", "").strip()
-    if description:
-        shell["description"] = [{"language": "en", "text": description}]
-
-    return shell
-
-
-_AASX_XML_SME_TYPES = {
-    "annotatedRelationshipElement", "basicEventElement", "blob", "capability",
-    "entity", "file", "multiLanguageProperty", "operation", "property", "range",
-    "referenceElement", "relationshipElement", "submodelElementCollection",
-    "submodelElementList",
-}
-_AASX_XML_ROOT_TYPES = {
-    "assetAdministrationShell": "AssetAdministrationShell",
-    "conceptDescription": "ConceptDescription",
-    "submodel": "Submodel",
-}
-_AASX_XML_LIST_CONTAINERS = {
-    "assetAdministrationShells", "category", "conceptDescriptions", "description",
-    "displayName", "embeddedDataSpecifications", "extensions", "keys", "qualifiers",
-    "submodelElements", "submodels", "supplementalSemanticIds",
-}
-_AASX_XML_LIST_VALUE_TYPES = {"MultiLanguageProperty", "SubmodelElementCollection", "SubmodelElementList"}
-
-
-def _aasx_xml_local_name(tag: Any) -> str:
-    return str(tag).rsplit("}", 1)[-1].split(":")[-1]
-
-
-def _parse_aasx_xml_root(xml_bytes: bytes) -> ET.Element:
-    if xml_bytes.startswith((codecs.BOM_UTF32_BE, codecs.BOM_UTF32_LE)):
-        security_scan_text = xml_bytes.decode("utf-32")
-    elif xml_bytes.startswith((codecs.BOM_UTF16_BE, codecs.BOM_UTF16_LE)):
-        security_scan_text = xml_bytes.decode("utf-16")
-    elif xml_bytes.startswith(b"\x00\x00\x00<"):
-        security_scan_text = xml_bytes.decode("utf-32-be")
-    elif xml_bytes.startswith(b"<\x00\x00\x00"):
-        security_scan_text = xml_bytes.decode("utf-32-le")
-    elif xml_bytes.startswith(b"\x00<\x00?"):
-        security_scan_text = xml_bytes.decode("utf-16-be")
-    elif xml_bytes.startswith(b"<\x00?\x00"):
-        security_scan_text = xml_bytes.decode("utf-16-le")
-    else:
-        # Latin-1 preserves the ASCII markup bytes used in all ASCII-compatible
-        # XML encodings, including the legacy single-byte encodings AASX permits.
-        security_scan_text = xml_bytes.decode("latin-1")
-    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)\b", security_scan_text, re.IGNORECASE):
-        raise AasxInvalidContentError("AASX XML DTD and entity declarations are not supported")
-    return ET.fromstring(xml_bytes)
-
-
-def _aasx_xml_node_value(node: ET.Element) -> Any:
-    """Convert an AAS XML object or container into its JSON API shape."""
-    local_name = _aasx_xml_local_name(node.tag)
-    children = list(node)
-    if local_name in _AASX_XML_SME_TYPES:
-        return _aasx_xml_model_element(node)
-    if not children:
-        text = (node.text or "").strip()
-        if local_name in {"allowDuplicates", "orderRelevant"}:
-            return text.lower() == "true"
-        return text
-    if local_name in _AASX_XML_LIST_CONTAINERS:
-        return [_aasx_xml_node_value(child) for child in children]
-
-    result: dict[str, Any] = {}
-    for child in children:
-        child_name = _aasx_xml_local_name(child.tag)
-        child_value = _aasx_xml_node_value(child)
-        if child_name in result:
-            previous = result[child_name]
-            result[child_name] = [*previous, child_value] if isinstance(previous, list) else [previous, child_value]
-        else:
-            result[child_name] = child_value
-    return result
-
-
-def _aasx_xml_model_element(node: ET.Element) -> dict[str, Any]:
-    element_type = _aasx_xml_local_name(node.tag)
-    model_type = element_type[0].upper() + element_type[1:]
-    result: dict[str, Any] = {"modelType": model_type}
-    for child in list(node):
-        field_name = _aasx_xml_local_name(child.tag)
-        if model_type == "Blob" and field_name == "value" and not list(child):
-            # AAS XML serializers may line-wrap base64 Blob payloads as text.
-            value = re.sub(r"\s+", "", child.text or "")
-        elif field_name == "value" and list(child):
-            value_children = list(child)
-            if model_type in _AASX_XML_LIST_VALUE_TYPES or all(
-                _aasx_xml_local_name(item.tag) in _AASX_XML_SME_TYPES for item in value_children
-            ):
-                value = [_aasx_xml_node_value(item) for item in value_children]
-            elif all(_aasx_xml_local_name(item.tag).startswith("langString") for item in value_children):
-                value = [_aasx_xml_node_value(item) for item in value_children]
-            else:
-                value = _aasx_xml_node_value(child)
-        else:
-            value = _aasx_xml_node_value(child)
-        if field_name in result:
-            previous = result[field_name]
-            result[field_name] = [*previous, value] if isinstance(previous, list) else [previous, value]
-        else:
-            result[field_name] = value
-    return result
-
-
-def _parse_aasx_xml_environment(xml_bytes: bytes) -> Optional[dict]:
-    try:
-        root = _parse_aasx_xml_root(xml_bytes)
-    except ET.ParseError:
-        return None
-    if _aasx_xml_local_name(root.tag) != "environment":
-        return None
-
-    environment: dict[str, list] = {
-        "assetAdministrationShells": [],
-        "submodels": [],
-        "conceptDescriptions": [],
-    }
-    for child in list(root):
-        field_name = _aasx_xml_local_name(child.tag)
-        if field_name not in environment:
-            continue
-        objects = []
-        for item in list(child):
-            object_type = _aasx_xml_local_name(item.tag)
-            parsed = _aasx_xml_node_value(item)
-            if object_type in _AASX_XML_ROOT_TYPES and isinstance(parsed, dict):
-                parsed["modelType"] = _AASX_XML_ROOT_TYPES[object_type]
-            objects.append(parsed)
-        environment[field_name] = objects
-    return environment
-
-
 def _parse_aasx(aasx_bytes: bytes) -> dict:
-    """
-    Parse an AASX package (ZIP/OPC container) and extract the AAS environment.
-
-    AASX is a ZIP archive with a ``_rels/.rels`` relationship file pointing to
-    the AAS origin part (typically a JSON or XML file).  Returns a dict with
-    ``shells``, ``submodels``, and ``conceptDescriptions`` lists.
-    """
-    shells: list = []
-    submodels: list = []
-    concept_descs: list = []
-
-    if len(aasx_bytes) > MAX_AASX_UPLOAD_BYTES:
-        raise AasxLimitError("AASX upload exceeds the 50 MiB limit")
-
-    try:
-        with zipfile.ZipFile(io.BytesIO(aasx_bytes)) as zf:
-            infos = validate_aasx_archive(zf.infolist(), len(aasx_bytes))
-            info_by_name = {info.filename: info for info in infos}
-            names = set(info_by_name)
-
-            def read_part(name: str, max_bytes: int) -> bytes:
-                info = info_by_name[name]
-                if info.file_size > max_bytes:
-                    raise AasxLimitError(f"AASX part {name} exceeds its {max_bytes} byte limit")
-                return zf.read(info)
-
-            # Step 1: follow _rels/.rels to find the AAS origin part
-            origin_path: Optional[str] = None
-            origin_part_path: Optional[str] = None
-            rels_path = "_rels/.rels"
-            if rels_path in names:
-                try:
-                    root = _parse_aasx_xml_root(
-                        read_part(rels_path, MAX_AASX_RELATIONSHIP_PART_BYTES)
-                    )
-                    ns = {"r": "http://schemas.openxmlformats.org/package/2006/relationships"}
-                    for rel in root.findall("r:Relationship", ns):
-                        rel_type = rel.get("Type", "")
-                        target = rel.get("Target", "").lstrip("/")
-                        if "aasx-origin" in rel_type and target in names:
-                            origin_part_path = target
-                        elif "aas-spec" in rel_type and target in names:
-                            origin_path = target
-
-                    if origin_part_path:
-                        origin_rels_path = posixpath.join(
-                            posixpath.dirname(origin_part_path),
-                            "_rels",
-                            f"{posixpath.basename(origin_part_path)}.rels",
-                        )
-                        if origin_rels_path in names:
-                            origin_root = _parse_aasx_xml_root(read_part(
-                                origin_rels_path,
-                                MAX_AASX_RELATIONSHIP_PART_BYTES,
-                            ))
-                            for rel in origin_root.findall("r:Relationship", ns):
-                                if "aas-spec" not in rel.get("Type", ""):
-                                    continue
-                                target = rel.get("Target", "")
-                                spec_path = posixpath.normpath(posixpath.join(
-                                    posixpath.dirname(origin_part_path),
-                                    target.lstrip("/"),
-                                ))
-                                if spec_path in names:
-                                    origin_path = spec_path
-                                    break
-                except ET.ParseError:
-                    # A malformed relationships part can be handled by JSON fallback scanning.
-                    pass
-
-            # Step 2: candidates — origin part first, then JSON scan fallback
-            candidates: list = []
-            if origin_path:
-                candidates.append(origin_path)
-            candidates.extend(sorted(
-                name for name in names
-                if name != origin_path
-                and name.lower().endswith((".json", ".xml"))
-                and not name.startswith("[")
-            ))
-
-            for candidate in candidates:
-                if not candidate or candidate not in names:
-                    continue
-                try:
-                    content = read_part(candidate, MAX_AASX_ENVIRONMENT_PART_BYTES)
-                    if candidate.lower().endswith(".xml"):
-                        data = _parse_aasx_xml_environment(content)
-                        if data is None:
-                            continue
-                    else:
-                        data = json.loads(content)
-                    if "assetAdministrationShells" in data or "submodels" in data:
-                        shells = data.get("assetAdministrationShells", [])
-                        submodels = data.get("submodels", [])
-                        concept_descs = data.get("conceptDescriptions", [])
-                        break
-                except (json.JSONDecodeError, KeyError, RecursionError, UnicodeDecodeError):
-                    continue
-    except zipfile.BadZipFile:
-        logger.error("AASX upload: not a valid ZIP/AASX file")
-
-    return {"shells": shells, "submodels": submodels, "conceptDescriptions": concept_descs}
-
+    """Keep the generator's import surface while delegating AASX parsing."""
+    return _parse_aasx_package(
+        aasx_bytes,
+        max_upload_bytes=MAX_AASX_UPLOAD_BYTES,
+        environment_part_bytes=MAX_AASX_ENVIRONMENT_PART_BYTES,
+        relationship_part_bytes=MAX_AASX_RELATIONSHIP_PART_BYTES,
+    )
 
 async def delete_aasx_resources(
     *,
@@ -1529,7 +271,6 @@ async def delete_aasx_resources(
         result["error"] = "BaSyx resource deletion failed"
     return result
 
-
 async def serialize_aasx_resources(
     *,
     shell_ids: Sequence[str],
@@ -1613,7 +354,6 @@ async def serialize_aasx_resources(
         )
         return {"error": "AAS endpoint policy rejected"}
 
-
 def _aas_collection_items(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         candidates = payload
@@ -1629,7 +369,6 @@ def _aas_collection_items(payload: Any) -> list[dict[str, Any]]:
     else:
         candidates = []
     return [item for item in candidates if isinstance(item, dict)]
-
 
 def _shell_submodel_ids(shell: dict[str, Any]) -> list[str]:
     result: list[str] = []
@@ -1654,155 +393,6 @@ def _shell_submodel_ids(shell: dict[str, Any]) -> list[str]:
     return result
 
 
-def _decode_part4_access_rules_blob(element: Any) -> dict[str, Any] | None:
-    if (
-        not isinstance(element, dict)
-        or element.get("modelType") != "Blob"
-        or str(element.get("contentType") or "").lower() != "application/json"
-    ):
-        return None
-    encoded = element.get("value")
-    if not isinstance(encoded, str) or len(encoded) > 2 * 1_048_576:
-        return None
-    try:
-        raw = base64.b64decode(encoded, validate=True)
-        if len(raw) > 1_048_576:
-            return None
-        payload = json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) and set(payload) == {"AllAccessPermissionRules"} else None
-
-
-def _is_simulation_access_control_submodel(submodel: Any) -> bool:
-    if not isinstance(submodel, dict):
-        return False
-    if submodel.get("idShort") == "SimulationAccessControl":
-        return True
-    semantic_id = submodel.get("semanticId")
-    if isinstance(semantic_id, dict):
-        keys = semantic_id.get("keys")
-        if isinstance(keys, list) and any(
-            isinstance(key, dict) and key.get("value") == _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL
-            for key in keys
-        ):
-            return True
-    elements = submodel.get("submodelElements")
-    return isinstance(elements, list) and any(
-        _decode_part4_access_rules_blob(element) is not None
-        for element in elements
-    )
-
-
-def _find_property_value(payload: Any, id_short: str) -> Optional[str]:
-    """Find a scalar Property value in a nested AAS element payload."""
-    if isinstance(payload, dict):
-        if (
-            payload.get("modelType") == "Property"
-            and payload.get("idShort") == id_short
-            and payload.get("value") is not None
-        ):
-            value = str(payload.get("value")).strip()
-            return value or None
-        for child in payload.values():
-            found = _find_property_value(child, id_short)
-            if found:
-                return found
-    elif isinstance(payload, list):
-        for child in payload:
-            found = _find_property_value(child, id_short)
-            if found:
-                return found
-    return None
-
-
-async def _sync_simulation_access_control(
-    client: httpx.AsyncClient,
-    lab_id: str,
-    metadata: dict,
-    *,
-    simulation_model_submodel_id: str | None = None,
-    force_regenerate: bool = False,
-) -> dict[str, Any]:
-    """Upsert generated rules without overwriting provider-edited rules."""
-    submodel_id = _submodel_id_for_access_control(lab_id)
-    encoded_id = _encode_id(submodel_id)
-    if _AAS_ENCODED_ID_RE.fullmatch(encoded_id) is None:
-        return {"error": "AAS access control resource ID is invalid"}
-
-    payload = build_simulation_access_control_submodel(
-        lab_id,
-        metadata,
-        simulation_model_submodel_id=simulation_model_submodel_id,
-    )
-    current = await client.get(f"/submodels/{encoded_id}")
-    if current.status_code == 200:
-        try:
-            existing = current.json()
-        except (TypeError, ValueError):
-            return {"error": "AAS access control resource is invalid"}
-        if not isinstance(existing, dict):
-            return {"error": "AAS access control resource is invalid"}
-        old_generated_digest = _find_property_value(existing, "GeneratedPolicyDigest")
-        old_interface_digest = _find_property_value(existing, "InterfaceDigest")
-        old_blob = next((
-            element for element in existing.get("submodelElements", [])
-            if isinstance(element, dict)
-            and element.get("idShort") == "AllAccessPermissionRules"
-            and element.get("modelType") == "Blob"
-        ), None)
-        blob_digest = None
-        if isinstance(old_blob, dict) and isinstance(old_blob.get("value"), str):
-            try:
-                blob_digest = hashlib.sha256(base64.b64decode(old_blob["value"], validate=True)).hexdigest()
-            except (ValueError, TypeError):
-                blob_digest = "invalid"
-        if not force_regenerate and (not old_generated_digest or blob_digest != old_generated_digest):
-            # A changed or externally authored policy is provider-owned. Its
-            # old interface digest intentionally remains, making it stale and
-            # unusable after an incompatible FMU update until reviewed.
-            payload = existing
-            new_digest = _find_property_value(
-                build_simulation_access_control_submodel(
-                    lab_id,
-                    metadata,
-                    simulation_model_submodel_id=simulation_model_submodel_id,
-                ),
-                "InterfaceDigest",
-            )
-            return_flags = {
-                "accessPolicyPreserved": True,
-                "accessPolicyStale": old_interface_digest != new_digest,
-            }
-        else:
-            return_flags = {"accessPolicyRegenerated": True} if force_regenerate else {}
-    elif current.status_code == 404:
-        return_flags = {}
-    else:
-        return {"error": f"access policy lookup failed: {current.status_code}"}
-
-    response = await client.put(
-        f"/submodels/{encoded_id}",
-        json=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    if response.status_code in (200, 201, 204):
-        return {
-            "created": response.status_code == 201,
-            "updated": response.status_code != 201,
-            **return_flags,
-        }
-    if response.status_code == 404:
-        response = await client.post(
-            "/submodels",
-            json=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        if response.status_code in (200, 201):
-            return {"created": True, **return_flags}
-    return {"error": f"access policy sync failed: {response.status_code}"}
-
-
 async def _generated_updated_at(
     client: httpx.AsyncClient,
     lab_id: str,
@@ -1823,7 +413,6 @@ async def _generated_updated_at(
     except (TypeError, ValueError):
         return None
     return _find_property_value(payload, "LastSyncTimestamp")
-
 
 async def discover_basyx_shells() -> dict[str, Any]:
     """Discover current provider shells for the Lab Manager association view."""
@@ -1902,6 +491,461 @@ async def discover_basyx_shells() -> dict[str, Any]:
         )
         return {"error": "AAS endpoint policy rejected"}
 
+async def _sync_aasx_package_resources(
+    client: httpx.AsyncClient,
+    result: dict,
+    *,
+    lab_id: str,
+    access_key: str,
+    metadata: dict,
+    aasx_bytes: bytes,
+    extra_info: Optional[dict],
+    fmu_path: Optional[Path],
+    required_aas_id: Optional[str],
+    force_regenerate_access_policy: bool,
+) -> dict:
+    """Validate and upload a provider AASX package and its contained resources."""
+    # ── AASX path: parse package and upload contained resources ──
+    env = _parse_aasx(aasx_bytes)
+    all_shells = env.get("shells", [])
+    all_submodels = env.get("submodels", [])
+
+    if not all_shells and not all_submodels:
+        result["error"] = "AASX parse produced no shells or submodels"
+        return result
+
+    required_shell_id = str(required_aas_id or "").strip()
+    if required_shell_id and not any(
+        isinstance(shell, dict) and shell.get("id") == required_shell_id
+        for shell in all_shells
+    ):
+        result["error"] = f"AASX must contain shell {required_shell_id}"
+        return result
+
+    aasx_simulation_model_id: str | None = None
+    generate_access_policy = False
+    if isinstance(metadata.get("modelVariables"), list):
+        if force_regenerate_access_policy:
+            result["error"] = "Access policy defaults cannot be regenerated while importing AASX"
+            return result
+        if not required_shell_id:
+            result["error"] = "FMU AASX import requires its stable laboratory shell ID"
+            return result
+        target_shells = [
+            shell for shell in all_shells
+            if isinstance(shell, dict) and shell.get("id") == required_shell_id
+        ]
+        if len(target_shells) != 1:
+            result["error"] = "FMU AASX must contain exactly one stable laboratory shell"
+            return result
+        target_shell = target_shells[0]
+
+        simulation_models = [
+            submodel for submodel in all_submodels
+            if isinstance(submodel, dict) and submodel.get("idShort") == "SimulationModels"
+        ]
+        if len(simulation_models) > 1:
+            result["error"] = "FMU AASX contains ambiguous SimulationModels submodels"
+            return result
+        if simulation_models:
+            aasx_simulation_model_id = simulation_models[0].get("id")
+            if not isinstance(aasx_simulation_model_id, str) or not aasx_simulation_model_id.strip():
+                result["error"] = "FMU AASX SimulationModels submodel has no valid ID"
+                return result
+        else:
+            generated_simulation_model = build_simulation_submodel(
+                lab_id,
+                access_key,
+                metadata,
+                extra_info,
+                fmu_path=fmu_path,
+            )
+            aasx_simulation_model_id = generated_simulation_model["id"]
+            all_submodels.append(generated_simulation_model)
+
+        shell_refs = target_shell.get("submodels")
+        if not isinstance(shell_refs, list):
+            shell_refs = []
+            target_shell["submodels"] = shell_refs
+        if aasx_simulation_model_id not in _shell_submodel_ids(target_shell):
+            shell_refs.append({
+                "type": "ModelReference",
+                "keys": [{"type": "Submodel", "value": aasx_simulation_model_id}],
+            })
+
+        imported_access_policies = [
+            submodel for submodel in all_submodels
+            if _is_simulation_access_control_submodel(submodel)
+        ]
+        if len(imported_access_policies) > 1:
+            result["error"] = "FMU AASX contains ambiguous simulation access policies"
+            return result
+        if imported_access_policies:
+            policy_submodel = imported_access_policies[0]
+            policy_submodel_id = policy_submodel.get("id")
+            shell_submodel_ids = set(_shell_submodel_ids(target_shell))
+            if not isinstance(policy_submodel_id, str) or policy_submodel_id not in shell_submodel_ids:
+                result["error"] = "FMU AASX access policy must be referenced by its laboratory shell"
+                return result
+            policy_elements = policy_submodel.get("submodelElements", [])
+            policy_blobs = [
+                element for element in policy_elements
+                if isinstance(element, dict)
+                and (
+                    element.get("idShort") == "AllAccessPermissionRules"
+                    or _decode_part4_access_rules_blob(element) is not None
+                )
+            ] if isinstance(policy_elements, list) else []
+            if len(policy_blobs) != 1:
+                result["error"] = "FMU AASX access policy must contain one Part 4 JSON Blob"
+                return result
+            rules_blob = policy_blobs[0]
+            rules_document = _decode_part4_access_rules_blob(rules_blob)
+            if rules_document is None:
+                result["error"] = "FMU AASX access policy Blob is invalid"
+                return result
+            raw_rules = base64.b64decode(rules_blob["value"], validate=True)
+            generated_digest = _find_property_value(policy_submodel, "GeneratedPolicyDigest")
+            interface_digest = _find_property_value(policy_submodel, "InterfaceDigest")
+            source = "aas-generated" if (
+                generated_digest
+                and generated_digest == hashlib.sha256(raw_rules).hexdigest()
+            ) else "aas-provider"
+            try:
+                compile_part4_access_rules(
+                    rules_document,
+                    metadata,
+                    aasx_simulation_model_id,
+                    declared_interface_digest=interface_digest,
+                    claims={},
+                    source=source,
+                    allowed_submodel_ids=shell_submodel_ids,
+                )
+            except (TypeError, ValueError) as exc:
+                logger.warning("Imported FMU AASX access policy is invalid: %s", type(exc).__name__)
+                result["error"] = "FMU AASX access policy does not match its FMU or AAS shell"
+                return result
+            result["accessPolicyPreserved"] = True
+            result["accessControlSubmodelId"] = policy_submodel_id
+        else:
+            generate_access_policy = True
+            generated_policy_id = _submodel_id_for_access_control(lab_id)
+            if generated_policy_id not in _shell_submodel_ids(target_shell):
+                shell_refs.append({
+                    "type": "ModelReference",
+                    "keys": [{"type": "Submodel", "value": generated_policy_id}],
+                })
+
+    uploaded_aas_ids: list = []
+    uploaded_sm_ids: list = []
+
+    for shell in all_shells:
+        shell_enc = _encode_id(shell.get("id", ""))
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", shell_enc) is None:
+            raise ValueError("AAS shell resource ID is invalid")
+        r = await client.put(
+            f"/shells/{shell_enc}",
+            json=shell,
+            headers={"Content-Type": "application/json"},
+        )
+        if r.status_code in (200, 201, 204):
+            uploaded_aas_ids.append(shell.get("id", ""))
+            result["created" if r.status_code == 201 else "updated"] = True
+        else:
+            r2 = await client.post("/shells", json=shell, headers={"Content-Type": "application/json"})
+            if r2.status_code in (200, 201):
+                uploaded_aas_ids.append(shell.get("id", ""))
+                result["created"] = True
+            else:
+                logger.error("AASX shell upload failed: %s %s", r2.status_code, r2.text[:300])
+                result["error"] = f"shell upload failed: {r2.status_code}"
+                return result
+
+    for submodel in all_submodels:
+        sm_enc = _encode_id(submodel.get("id", ""))
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", sm_enc):
+            raise ValueError("AAS submodel resource ID is invalid")
+        r = await client.put(
+            f"/submodels/{sm_enc}",
+            json=submodel,
+            headers={"Content-Type": "application/json"},
+        )
+        if r.status_code in (200, 201, 204):
+            uploaded_sm_ids.append(submodel.get("id", ""))
+            result["created" if r.status_code == 201 else "updated"] = True
+        else:
+            r2 = await client.post("/submodels", json=submodel, headers={"Content-Type": "application/json"})
+            if r2.status_code in (200, 201):
+                uploaded_sm_ids.append(submodel.get("id", ""))
+                result["created"] = True
+            else:
+                logger.error("AASX submodel upload failed: %s %s", r2.status_code, r2.text[:300])
+                result["error"] = f"submodel upload failed: {r2.status_code}"
+                return result
+
+    if generate_access_policy:
+        access_policy_result = await _sync_simulation_access_control(
+            client,
+            lab_id,
+            metadata,
+            simulation_model_submodel_id=aasx_simulation_model_id,
+            force_regenerate=force_regenerate_access_policy,
+        )
+        if access_policy_result.get("error"):
+            result["error"] = access_policy_result["error"]
+            return result
+        result["created"] = bool(result["created"] or access_policy_result.get("created"))
+        result["updated"] = bool(result["updated"] or access_policy_result.get("updated"))
+        result["accessControlSubmodelId"] = _submodel_id_for_access_control(lab_id)
+        result["accessPolicyGenerated"] = True
+        for flag in ("accessPolicyPreserved", "accessPolicyStale", "accessPolicyRegenerated"):
+            if flag in access_policy_result:
+                result[flag] = access_policy_result[flag]
+
+    result["aasxUpload"] = True
+    result["uploadedAasIds"] = uploaded_aas_ids
+    result["uploadedSubmodelIds"] = uploaded_sm_ids
+    if uploaded_aas_ids:
+        result["aasId"] = uploaded_aas_ids[0]
+    if uploaded_sm_ids:
+        result["submodelId"] = uploaded_sm_ids[0]
+    return result
+
+
+async def _sync_generated_fmu_submodels(
+    client: httpx.AsyncClient,
+    result: dict,
+    *,
+    lab_id: str,
+    access_key: str,
+    metadata: dict,
+    extra_info: Optional[dict],
+    fmu_path: Optional[Path],
+    runtime_info: Optional[dict],
+    force_regenerate_access_policy: bool,
+) -> dict:
+    """Build and upsert the generated FMU AAS resources."""
+    aas_id = result["aasId"]
+    submodel_id = result["submodelId"]
+    technical_data_id = result["technicalDataSubmodelId"]
+    access_control_id = result["accessControlSubmodelId"]
+    execution_capabilities_id = result["executionSubmodelId"]
+    interfaces_id = result["interfacesSubmodelId"]
+    contact_id = result["contactSubmodelId"]
+    handover_id = result["handoverSubmodelId"]
+    aas_id_encoded = _encode_id(aas_id)
+    submodel_id_encoded = _encode_id(submodel_id)
+    technical_data_id_encoded = _encode_id(technical_data_id)
+
+    shell_payload = build_aas_shell(lab_id, access_key, metadata, extra_info)
+    submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info, fmu_path=fmu_path)
+    technical_data_payload = build_technical_data_submodel(lab_id, metadata, runtime_info)
+    execution_capabilities_payload = build_execution_capabilities_submodel(
+        lab_id,
+        metadata,
+        runtime_info,
+    )
+    execution_operations = []
+    if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
+        execution_operations.extend([
+            ("RunSimulation", "/fmu/api/v1/simulations/run", "POST", ""),
+            ("CancelSimulation", "/fmu/api/v1/simulations/{simulationId}/cancel", "POST", ""),
+        ])
+    if metadata.get("supportsCoSimulation"):
+        execution_operations.extend([
+            ("CreateRealtimeSession", "/fmu/api/v1/fmu/sessions", "GET", "websocket"),
+            *[(command, "/fmu/api/v1/fmu/sessions", "GET", "websocket") for command in (
+                "Initialize", "Start", "Pause", "Resume", "Reset", "Step", "RunUntil",
+                "SetInputs", "GetOutputs", "TerminateSession",
+            )],
+        ])
+    interfaces_payload = build_asset_interfaces_description_submodel(lab_id, execution_operations)
+    contact_payload = build_contact_information_submodel(lab_id, extra_info)
+    handover_payload = build_handover_documentation_submodel(lab_id, extra_info)
+
+    # --- Submodel: PUT (create or replace) ---
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", submodel_id_encoded):
+        raise ValueError("AAS submodel resource ID is invalid")
+    sm_resp = await client.put(
+        f"/submodels/{submodel_id_encoded}",
+        json=submodel_payload,
+        headers={"Content-Type": "application/json"},
+    )
+    if sm_resp.status_code == 201:
+        result["created"] = True
+        logger.info("Created simulation submodel")
+    elif sm_resp.status_code in (200, 204):
+        result["updated"] = True
+        logger.info("Updated simulation submodel")
+    else:
+        # Try POST if PUT-to-create isn't supported
+        if sm_resp.status_code == 404:
+            sm_post = await client.post(
+                "/submodels",
+                json=submodel_payload,
+                headers={"Content-Type": "application/json"},
+            )
+            if sm_post.status_code in (200, 201):
+                result["created"] = True
+                logger.info("Created simulation submodel via POST")
+            else:
+                logger.error("Failed to create simulation submodel: status=%s", sm_post.status_code)
+                result["error"] = f"submodel creation failed: {sm_post.status_code}"
+                return result
+        else:
+            logger.error("Failed to update simulation submodel: status=%s", sm_resp.status_code)
+            result["error"] = f"submodel sync failed: {sm_resp.status_code}"
+            return result
+
+    # --- Common TechnicalData submodel ---
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", technical_data_id_encoded):
+        raise ValueError("AAS technical data resource ID is invalid")
+    td_resp = await client.put(
+        f"/submodels/{technical_data_id_encoded}",
+        json=technical_data_payload,
+        headers={"Content-Type": "application/json"},
+    )
+    if td_resp.status_code == 201:
+        result["created"] = True
+        logger.info("Created TechnicalData submodel")
+    elif td_resp.status_code in (200, 204):
+        result["updated"] = True
+        logger.info("Updated TechnicalData submodel")
+    elif td_resp.status_code == 404:
+        td_post = await client.post(
+            "/submodels",
+            json=technical_data_payload,
+            headers={"Content-Type": "application/json"},
+        )
+        if td_post.status_code in (200, 201):
+            result["created"] = True
+            logger.info("Created TechnicalData submodel via POST")
+        else:
+            logger.error("Failed to create TechnicalData submodel: status=%s", td_post.status_code)
+            result["error"] = f"technical data creation failed: {td_post.status_code}"
+            return result
+    else:
+        logger.error("Failed to update TechnicalData submodel: status=%s", td_resp.status_code)
+        result["error"] = f"technical data sync failed: {td_resp.status_code}"
+        return result
+
+    if isinstance(metadata.get("modelVariables"), list):
+        result["accessControlSubmodelId"] = access_control_id
+        access_policy_result = await _sync_simulation_access_control(
+            client,
+            lab_id,
+            metadata,
+            force_regenerate=force_regenerate_access_policy,
+        )
+        if access_policy_result.get("error"):
+            result["error"] = access_policy_result["error"]
+            return result
+        result["created"] = bool(result["created"] or access_policy_result.get("created"))
+        result["updated"] = bool(result["updated"] or access_policy_result.get("updated"))
+        for flag in ("accessPolicyPreserved", "accessPolicyStale", "accessPolicyRegenerated"):
+            if flag in access_policy_result:
+                result[flag] = access_policy_result[flag]
+
+    # --- CapabilityDescription submodel ---
+    if execution_capabilities_payload is not None:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _encode_id(execution_capabilities_id)):
+            raise ValueError("AAS execution capabilities resource ID is invalid")
+        execution_resp = await client.put(
+            f"/submodels/{_encode_id(execution_capabilities_id)}",
+            json=execution_capabilities_payload,
+            headers={"Content-Type": "application/json"},
+        )
+        if execution_resp.status_code == 201:
+            result["created"] = True
+            logger.info("Created CapabilityDescription submodel")
+        elif execution_resp.status_code in (200, 204):
+            result["updated"] = True
+            logger.info("Updated CapabilityDescription submodel")
+        elif execution_resp.status_code == 404:
+            execution_post = await client.post(
+                "/submodels",
+                json=execution_capabilities_payload,
+                headers={"Content-Type": "application/json"},
+            )
+            if execution_post.status_code in (200, 201):
+                result["created"] = True
+                logger.info("Created CapabilityDescription submodel via POST")
+            else:
+                logger.error(
+                    "Failed to create CapabilityDescription submodel: status=%s",
+                    execution_post.status_code,
+                )
+                result["error"] = f"execution capabilities creation failed: {execution_post.status_code}"
+                return result
+        else:
+            logger.error(
+                "Failed to update CapabilityDescription submodel: status=%s",
+                execution_resp.status_code,
+            )
+            result["error"] = f"execution capabilities sync failed: {execution_resp.status_code}"
+            return result
+
+    # --- Standard interface/contact/handover submodels ---
+    for _sm_id, _sm_payload, _label in (
+        (interfaces_id, interfaces_payload, "AssetInterfacesDescription"),
+        (contact_id, contact_payload, "ContactInformations"),
+        (handover_id, handover_payload, "HandoverDocumentation"),
+    ):
+        if _sm_payload is None:
+            continue
+        _sm_enc = _encode_id(_sm_id)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _sm_enc):
+            raise ValueError(f"AAS {_label} resource ID is invalid")
+        _sm_resp = await client.put(
+            f"/submodels/{_sm_enc}",
+            json=_sm_payload,
+            headers={"Content-Type": "application/json"},
+        )
+        if _sm_resp.status_code in (200, 201, 204):
+            logger.info("%s submodel synced", _label)
+        elif _sm_resp.status_code == 404:
+            _sm_post = await client.post(
+                "/submodels", json=_sm_payload,
+                headers={"Content-Type": "application/json"},
+            )
+            if _sm_post.status_code not in (200, 201):
+                result["error"] = f"{_label} creation failed: {_sm_post.status_code}"
+                return result
+        else:
+            result["error"] = f"{_label} sync failed: {_sm_resp.status_code}"
+            return result
+
+    # --- Shell: PUT (create or replace) ---
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", aas_id_encoded):
+        raise ValueError("AAS shell resource ID is invalid")
+    shell_resp = await client.put(
+        f"/shells/{aas_id_encoded}",
+        json=shell_payload,
+        headers={"Content-Type": "application/json"},
+    )
+    if shell_resp.status_code == 201:
+        logger.info("Created AAS shell")
+    elif shell_resp.status_code in (200, 204):
+        logger.info("Updated AAS shell")
+    else:
+        if shell_resp.status_code == 404:
+            shell_post = await client.post(
+                "/shells",
+                json=shell_payload,
+                headers={"Content-Type": "application/json"},
+            )
+            if shell_post.status_code in (200, 201):
+                logger.info("Created AAS shell via POST")
+            else:
+                logger.error("Failed to create AAS shell: status=%s", shell_post.status_code)
+                result["error"] = f"shell creation failed: {shell_post.status_code}"
+                return result
+        else:
+            logger.error("Failed to update AAS shell: status=%s", shell_resp.status_code)
+            result["error"] = f"shell sync failed: {shell_resp.status_code}"
+            return result
+    return result
+
 
 async def sync_fmu_to_basyx(
     lab_id: str,
@@ -1964,424 +1008,36 @@ async def sync_fmu_to_basyx(
             timeout=15.0,
         ) as client:
             if aasx_bytes:
-                # ── AASX path: parse package and upload contained resources ──
-                env = _parse_aasx(aasx_bytes)
-                all_shells = env.get("shells", [])
-                all_submodels = env.get("submodels", [])
-
-                if not all_shells and not all_submodels:
-                    result["error"] = "AASX parse produced no shells or submodels"
+                result = await _sync_aasx_package_resources(
+                    client,
+                    result,
+                    lab_id=lab_id,
+                    access_key=access_key,
+                    metadata=metadata,
+                    aasx_bytes=aasx_bytes,
+                    extra_info=extra_info,
+                    fmu_path=fmu_path,
+                    required_aas_id=required_aas_id,
+                    force_regenerate_access_policy=force_regenerate_access_policy,
+                )
+                if result.get("error"):
                     return result
-
-                required_shell_id = str(required_aas_id or "").strip()
-                if required_shell_id and not any(
-                    isinstance(shell, dict) and shell.get("id") == required_shell_id
-                    for shell in all_shells
-                ):
-                    result["error"] = f"AASX must contain shell {required_shell_id}"
-                    return result
-
-                aasx_simulation_model_id: str | None = None
-                generate_access_policy = False
-                if isinstance(metadata.get("modelVariables"), list):
-                    if force_regenerate_access_policy:
-                        result["error"] = "Access policy defaults cannot be regenerated while importing AASX"
-                        return result
-                    if not required_shell_id:
-                        result["error"] = "FMU AASX import requires its stable laboratory shell ID"
-                        return result
-                    target_shells = [
-                        shell for shell in all_shells
-                        if isinstance(shell, dict) and shell.get("id") == required_shell_id
-                    ]
-                    if len(target_shells) != 1:
-                        result["error"] = "FMU AASX must contain exactly one stable laboratory shell"
-                        return result
-                    target_shell = target_shells[0]
-
-                    simulation_models = [
-                        submodel for submodel in all_submodels
-                        if isinstance(submodel, dict) and submodel.get("idShort") == "SimulationModels"
-                    ]
-                    if len(simulation_models) > 1:
-                        result["error"] = "FMU AASX contains ambiguous SimulationModels submodels"
-                        return result
-                    if simulation_models:
-                        aasx_simulation_model_id = simulation_models[0].get("id")
-                        if not isinstance(aasx_simulation_model_id, str) or not aasx_simulation_model_id.strip():
-                            result["error"] = "FMU AASX SimulationModels submodel has no valid ID"
-                            return result
-                    else:
-                        generated_simulation_model = build_simulation_submodel(
-                            lab_id,
-                            access_key,
-                            metadata,
-                            extra_info,
-                            fmu_path=fmu_path,
-                        )
-                        aasx_simulation_model_id = generated_simulation_model["id"]
-                        all_submodels.append(generated_simulation_model)
-
-                    shell_refs = target_shell.get("submodels")
-                    if not isinstance(shell_refs, list):
-                        shell_refs = []
-                        target_shell["submodels"] = shell_refs
-                    if aasx_simulation_model_id not in _shell_submodel_ids(target_shell):
-                        shell_refs.append({
-                            "type": "ModelReference",
-                            "keys": [{"type": "Submodel", "value": aasx_simulation_model_id}],
-                        })
-
-                    imported_access_policies = [
-                        submodel for submodel in all_submodels
-                        if _is_simulation_access_control_submodel(submodel)
-                    ]
-                    if len(imported_access_policies) > 1:
-                        result["error"] = "FMU AASX contains ambiguous simulation access policies"
-                        return result
-                    if imported_access_policies:
-                        policy_submodel = imported_access_policies[0]
-                        policy_submodel_id = policy_submodel.get("id")
-                        shell_submodel_ids = set(_shell_submodel_ids(target_shell))
-                        if not isinstance(policy_submodel_id, str) or policy_submodel_id not in shell_submodel_ids:
-                            result["error"] = "FMU AASX access policy must be referenced by its laboratory shell"
-                            return result
-                        policy_elements = policy_submodel.get("submodelElements", [])
-                        policy_blobs = [
-                            element for element in policy_elements
-                            if isinstance(element, dict)
-                            and (
-                                element.get("idShort") == "AllAccessPermissionRules"
-                                or _decode_part4_access_rules_blob(element) is not None
-                            )
-                        ] if isinstance(policy_elements, list) else []
-                        if len(policy_blobs) != 1:
-                            result["error"] = "FMU AASX access policy must contain one Part 4 JSON Blob"
-                            return result
-                        rules_blob = policy_blobs[0]
-                        rules_document = _decode_part4_access_rules_blob(rules_blob)
-                        if rules_document is None:
-                            result["error"] = "FMU AASX access policy Blob is invalid"
-                            return result
-                        raw_rules = base64.b64decode(rules_blob["value"], validate=True)
-                        generated_digest = _find_property_value(policy_submodel, "GeneratedPolicyDigest")
-                        interface_digest = _find_property_value(policy_submodel, "InterfaceDigest")
-                        source = "aas-generated" if (
-                            generated_digest
-                            and generated_digest == hashlib.sha256(raw_rules).hexdigest()
-                        ) else "aas-provider"
-                        try:
-                            compile_part4_access_rules(
-                                rules_document,
-                                metadata,
-                                aasx_simulation_model_id,
-                                declared_interface_digest=interface_digest,
-                                claims={},
-                                source=source,
-                                allowed_submodel_ids=shell_submodel_ids,
-                            )
-                        except (TypeError, ValueError) as exc:
-                            logger.warning("Imported FMU AASX access policy is invalid: %s", type(exc).__name__)
-                            result["error"] = "FMU AASX access policy does not match its FMU or AAS shell"
-                            return result
-                        result["accessPolicyPreserved"] = True
-                        result["accessControlSubmodelId"] = policy_submodel_id
-                    else:
-                        generate_access_policy = True
-                        generated_policy_id = _submodel_id_for_access_control(lab_id)
-                        if generated_policy_id not in _shell_submodel_ids(target_shell):
-                            shell_refs.append({
-                                "type": "ModelReference",
-                                "keys": [{"type": "Submodel", "value": generated_policy_id}],
-                            })
-
-                uploaded_aas_ids: list = []
-                uploaded_sm_ids: list = []
-
-                for shell in all_shells:
-                    shell_enc = _encode_id(shell.get("id", ""))
-                    if re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", shell_enc) is None:
-                        raise ValueError("AAS shell resource ID is invalid")
-                    r = await client.put(
-                        f"/shells/{shell_enc}",
-                        json=shell,
-                        headers={"Content-Type": "application/json"},
-                    )
-                    if r.status_code in (200, 201, 204):
-                        uploaded_aas_ids.append(shell.get("id", ""))
-                        result["created" if r.status_code == 201 else "updated"] = True
-                    else:
-                        r2 = await client.post("/shells", json=shell, headers={"Content-Type": "application/json"})
-                        if r2.status_code in (200, 201):
-                            uploaded_aas_ids.append(shell.get("id", ""))
-                            result["created"] = True
-                        else:
-                            logger.error("AASX shell upload failed: %s %s", r2.status_code, r2.text[:300])
-                            result["error"] = f"shell upload failed: {r2.status_code}"
-                            return result
-
-                for submodel in all_submodels:
-                    sm_enc = _encode_id(submodel.get("id", ""))
-                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", sm_enc):
-                        raise ValueError("AAS submodel resource ID is invalid")
-                    r = await client.put(
-                        f"/submodels/{sm_enc}",
-                        json=submodel,
-                        headers={"Content-Type": "application/json"},
-                    )
-                    if r.status_code in (200, 201, 204):
-                        uploaded_sm_ids.append(submodel.get("id", ""))
-                        result["created" if r.status_code == 201 else "updated"] = True
-                    else:
-                        r2 = await client.post("/submodels", json=submodel, headers={"Content-Type": "application/json"})
-                        if r2.status_code in (200, 201):
-                            uploaded_sm_ids.append(submodel.get("id", ""))
-                            result["created"] = True
-                        else:
-                            logger.error("AASX submodel upload failed: %s %s", r2.status_code, r2.text[:300])
-                            result["error"] = f"submodel upload failed: {r2.status_code}"
-                            return result
-
-                if generate_access_policy:
-                    access_policy_result = await _sync_simulation_access_control(
-                        client,
-                        lab_id,
-                        metadata,
-                        simulation_model_submodel_id=aasx_simulation_model_id,
-                        force_regenerate=force_regenerate_access_policy,
-                    )
-                    if access_policy_result.get("error"):
-                        result["error"] = access_policy_result["error"]
-                        return result
-                    result["created"] = bool(result["created"] or access_policy_result.get("created"))
-                    result["updated"] = bool(result["updated"] or access_policy_result.get("updated"))
-                    result["accessControlSubmodelId"] = _submodel_id_for_access_control(lab_id)
-                    result["accessPolicyGenerated"] = True
-                    for flag in ("accessPolicyPreserved", "accessPolicyStale", "accessPolicyRegenerated"):
-                        if flag in access_policy_result:
-                            result[flag] = access_policy_result[flag]
-
-                result["aasxUpload"] = True
-                result["uploadedAasIds"] = uploaded_aas_ids
-                result["uploadedSubmodelIds"] = uploaded_sm_ids
-                if uploaded_aas_ids:
-                    result["aasId"] = uploaded_aas_ids[0]
-                if uploaded_sm_ids:
-                    result["submodelId"] = uploaded_sm_ids[0]
 
             else:
                 # ── Metadata path: auto-generate shell + submodel from FMU ──
-                aas_id_encoded = _encode_id(aas_id)
-                submodel_id_encoded = _encode_id(submodel_id)
-                technical_data_id_encoded = _encode_id(technical_data_id)
-
-                shell_payload = build_aas_shell(lab_id, access_key, metadata, extra_info)
-                submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info, fmu_path=fmu_path)
-                technical_data_payload = build_technical_data_submodel(lab_id, metadata, runtime_info)
-                execution_capabilities_payload = build_execution_capabilities_submodel(
-                    lab_id,
-                    metadata,
-                    runtime_info,
+                result = await _sync_generated_fmu_submodels(
+                    client,
+                    result,
+                    lab_id=lab_id,
+                    access_key=access_key,
+                    metadata=metadata,
+                    extra_info=extra_info,
+                    fmu_path=fmu_path,
+                    runtime_info=runtime_info,
+                    force_regenerate_access_policy=force_regenerate_access_policy,
                 )
-                execution_operations = []
-                if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
-                    execution_operations.extend([
-                        ("RunSimulation", "/fmu/api/v1/simulations/run", "POST", ""),
-                        ("CancelSimulation", "/fmu/api/v1/simulations/{simulationId}/cancel", "POST", ""),
-                    ])
-                if metadata.get("supportsCoSimulation"):
-                    execution_operations.extend([
-                        ("CreateRealtimeSession", "/fmu/api/v1/fmu/sessions", "GET", "websocket"),
-                        *[(command, "/fmu/api/v1/fmu/sessions", "GET", "websocket") for command in (
-                            "Initialize", "Start", "Pause", "Resume", "Reset", "Step", "RunUntil",
-                            "SetInputs", "GetOutputs", "TerminateSession",
-                        )],
-                    ])
-                interfaces_payload = build_asset_interfaces_description_submodel(lab_id, execution_operations)
-                contact_payload = build_contact_information_submodel(lab_id, extra_info)
-                handover_payload = build_handover_documentation_submodel(lab_id, extra_info)
-
-                # --- Submodel: PUT (create or replace) ---
-                if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", submodel_id_encoded):
-                    raise ValueError("AAS submodel resource ID is invalid")
-                sm_resp = await client.put(
-                    f"/submodels/{submodel_id_encoded}",
-                    json=submodel_payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                if sm_resp.status_code == 201:
-                    result["created"] = True
-                    logger.info("Created simulation submodel")
-                elif sm_resp.status_code in (200, 204):
-                    result["updated"] = True
-                    logger.info("Updated simulation submodel")
-                else:
-                    # Try POST if PUT-to-create isn't supported
-                    if sm_resp.status_code == 404:
-                        sm_post = await client.post(
-                            "/submodels",
-                            json=submodel_payload,
-                            headers={"Content-Type": "application/json"},
-                        )
-                        if sm_post.status_code in (200, 201):
-                            result["created"] = True
-                            logger.info("Created simulation submodel via POST")
-                        else:
-                            logger.error("Failed to create simulation submodel: status=%s", sm_post.status_code)
-                            result["error"] = f"submodel creation failed: {sm_post.status_code}"
-                            return result
-                    else:
-                        logger.error("Failed to update simulation submodel: status=%s", sm_resp.status_code)
-                        result["error"] = f"submodel sync failed: {sm_resp.status_code}"
-                        return result
-
-                # --- Common TechnicalData submodel ---
-                if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", technical_data_id_encoded):
-                    raise ValueError("AAS technical data resource ID is invalid")
-                td_resp = await client.put(
-                    f"/submodels/{technical_data_id_encoded}",
-                    json=technical_data_payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                if td_resp.status_code == 201:
-                    result["created"] = True
-                    logger.info("Created TechnicalData submodel")
-                elif td_resp.status_code in (200, 204):
-                    result["updated"] = True
-                    logger.info("Updated TechnicalData submodel")
-                elif td_resp.status_code == 404:
-                    td_post = await client.post(
-                        "/submodels",
-                        json=technical_data_payload,
-                        headers={"Content-Type": "application/json"},
-                    )
-                    if td_post.status_code in (200, 201):
-                        result["created"] = True
-                        logger.info("Created TechnicalData submodel via POST")
-                    else:
-                        logger.error("Failed to create TechnicalData submodel: status=%s", td_post.status_code)
-                        result["error"] = f"technical data creation failed: {td_post.status_code}"
-                        return result
-                else:
-                    logger.error("Failed to update TechnicalData submodel: status=%s", td_resp.status_code)
-                    result["error"] = f"technical data sync failed: {td_resp.status_code}"
+                if result.get("error"):
                     return result
-
-                if isinstance(metadata.get("modelVariables"), list):
-                    result["accessControlSubmodelId"] = access_control_id
-                    access_policy_result = await _sync_simulation_access_control(
-                        client,
-                        lab_id,
-                        metadata,
-                        force_regenerate=force_regenerate_access_policy,
-                    )
-                    if access_policy_result.get("error"):
-                        result["error"] = access_policy_result["error"]
-                        return result
-                    result["created"] = bool(result["created"] or access_policy_result.get("created"))
-                    result["updated"] = bool(result["updated"] or access_policy_result.get("updated"))
-                    for flag in ("accessPolicyPreserved", "accessPolicyStale", "accessPolicyRegenerated"):
-                        if flag in access_policy_result:
-                            result[flag] = access_policy_result[flag]
-
-                # --- CapabilityDescription submodel ---
-                if execution_capabilities_payload is not None:
-                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _encode_id(execution_capabilities_id)):
-                        raise ValueError("AAS execution capabilities resource ID is invalid")
-                    execution_resp = await client.put(
-                        f"/submodels/{_encode_id(execution_capabilities_id)}",
-                        json=execution_capabilities_payload,
-                        headers={"Content-Type": "application/json"},
-                    )
-                    if execution_resp.status_code == 201:
-                        result["created"] = True
-                        logger.info("Created CapabilityDescription submodel")
-                    elif execution_resp.status_code in (200, 204):
-                        result["updated"] = True
-                        logger.info("Updated CapabilityDescription submodel")
-                    elif execution_resp.status_code == 404:
-                        execution_post = await client.post(
-                            "/submodels",
-                            json=execution_capabilities_payload,
-                            headers={"Content-Type": "application/json"},
-                        )
-                        if execution_post.status_code in (200, 201):
-                            result["created"] = True
-                            logger.info("Created CapabilityDescription submodel via POST")
-                        else:
-                            logger.error(
-                                "Failed to create CapabilityDescription submodel: status=%s",
-                                execution_post.status_code,
-                            )
-                            result["error"] = f"execution capabilities creation failed: {execution_post.status_code}"
-                            return result
-                    else:
-                        logger.error(
-                            "Failed to update CapabilityDescription submodel: status=%s",
-                            execution_resp.status_code,
-                        )
-                        result["error"] = f"execution capabilities sync failed: {execution_resp.status_code}"
-                        return result
-
-                # --- Standard interface/contact/handover submodels ---
-                for _sm_id, _sm_payload, _label in (
-                    (interfaces_id, interfaces_payload, "AssetInterfacesDescription"),
-                    (contact_id, contact_payload, "ContactInformations"),
-                    (handover_id, handover_payload, "HandoverDocumentation"),
-                ):
-                    if _sm_payload is None:
-                        continue
-                    _sm_enc = _encode_id(_sm_id)
-                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", _sm_enc):
-                        raise ValueError(f"AAS {_label} resource ID is invalid")
-                    _sm_resp = await client.put(
-                        f"/submodels/{_sm_enc}",
-                        json=_sm_payload,
-                        headers={"Content-Type": "application/json"},
-                    )
-                    if _sm_resp.status_code in (200, 201, 204):
-                        logger.info("%s submodel synced", _label)
-                    elif _sm_resp.status_code == 404:
-                        _sm_post = await client.post(
-                            "/submodels", json=_sm_payload,
-                            headers={"Content-Type": "application/json"},
-                        )
-                        if _sm_post.status_code not in (200, 201):
-                            result["error"] = f"{_label} creation failed: {_sm_post.status_code}"
-                            return result
-                    else:
-                        result["error"] = f"{_label} sync failed: {_sm_resp.status_code}"
-                        return result
-
-                # --- Shell: PUT (create or replace) ---
-                if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", aas_id_encoded):
-                    raise ValueError("AAS shell resource ID is invalid")
-                shell_resp = await client.put(
-                    f"/shells/{aas_id_encoded}",
-                    json=shell_payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                if shell_resp.status_code == 201:
-                    logger.info("Created AAS shell")
-                elif shell_resp.status_code in (200, 204):
-                    logger.info("Updated AAS shell")
-                else:
-                    if shell_resp.status_code == 404:
-                        shell_post = await client.post(
-                            "/shells",
-                            json=shell_payload,
-                            headers={"Content-Type": "application/json"},
-                        )
-                        if shell_post.status_code in (200, 201):
-                            logger.info("Created AAS shell via POST")
-                        else:
-                            logger.error("Failed to create AAS shell: status=%s", shell_post.status_code)
-                            result["error"] = f"shell creation failed: {shell_post.status_code}"
-                            return result
-                    else:
-                        logger.error("Failed to update AAS shell: status=%s", shell_resp.status_code)
-                        result["error"] = f"shell sync failed: {shell_resp.status_code}"
-                        return result
 
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         logger.warning(

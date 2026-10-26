@@ -95,7 +95,19 @@ The app opens the provider Gateway's FMU session WebSocket; FMU requests and
 simulation samples travel directly between the app and Gateway, then to the
 private Station Executor. Marketplace never relays simulation requests or
 samples, and never sends the FMU, access key or reservation token. GLB scenes
-and generated interfaces retain their existing Marketplace execution path.
+and generated interfaces retain their Marketplace execution path. Generated
+GLB viewers use the batch stream for scheduled runs. For reserved FMI 2/3
+Co-Simulation models, step-by-step and continuous live modes request the same
+reservation-scoped connection grant used by provider apps, then open the
+Gateway session WebSocket from the Marketplace page. Step mode sends one
+`sim.step` request per user action. Continuous mode sends the next step after
+the previous Gateway response; runtime edits are sent before the next step
+request. The Gateway enforces its effective variable-access policy on every
+write and filters output values returned to the browser. The page's exact
+origin must be allowed by the Gateway's `MARKETPLACE_URL` or
+`CORS_ALLOWED_ORIGINS` configuration, and the Marketplace operator must include
+this Gateway's WSS origin in `CSP_CONNECT_SRC` so its browser policy permits the
+direct session connection.
 This section documents the AAS asset reference and Gateway storage, validation
 and delivery responsibilities; message names, payloads and lifecycle belong in
 Marketplace's **Three.js digital twin app contract**. The app owns the complete
@@ -128,14 +140,30 @@ sequenceDiagram
     M->>G: Fetch GLB through Marketplace's same-origin asset proxy
     G-->>M: Return immutable GLB file
     M-->>U: Render generated controls and GLB viewer
-    U->>M: Set inputs and run simulation
-    M->>G: POST /fmu/api/v1/simulations/stream with reservation authorization
-    G->>S: Forward execution through the private Station connection
-    S-->>G: Stream FMU output samples
-    G-->>M: Return output stream
-    M->>M: Apply output values using GLB extras.fmiBindings
-    M-->>U: Update the scene, timeline and output indicators
-    Note over M,S: The generated GLB route uses Marketplace's authorized simulation API; only complete Three.js apps open the direct session WebSocket.
+    alt Batch
+        U->>M: Set inputs and schedule changes
+        M->>G: POST /fmu/api/v1/simulations/stream with reservation authorization
+        G->>S: Forward execution through the private Station connection
+        S-->>G: Stream FMU output samples
+        G-->>M: Return output stream
+        M->>M: Apply output values using GLB extras.fmiBindings
+        M-->>U: Update the scene, timeline and output indicators
+    else Step by step or continuous live
+        U->>M: Select mode and set initial inputs
+        M->>G: POST /fmu/api/v1/fmu/connection/{labId}
+        G-->>M: Return reservation-scoped connection grant
+        M-->>U: Provide temporary grant
+        U->>G: WSS session.create and sim.initialize
+        G->>S: Open private realtime session
+        loop One step per click or next response
+            U->>G: Optional sim.setInputs, then sim.step
+            G->>S: Forward authorized session messages
+            S-->>G: Return current simulation outputs
+            G-->>U: Filtered output sample
+            U->>U: Update GLB bindings, timeline and indicators
+        end
+    end
+    Note over M,S: Batch samples pass through Marketplace. Interactive steps and samples travel directly between the browser and Gateway.
 ~~~
 
 ## AASX and public GLB constraints

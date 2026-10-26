@@ -7,7 +7,6 @@ Endpoints:
   GET  /health                      — Health check
 """
 
-import base64
 import os
 import time
 import json
@@ -19,7 +18,6 @@ from typing import Any, NoReturn, Optional
 from uuid import uuid4
 
 import httpx
-import jwt
 from fmpy import read_model_description
 from fastapi import HTTPException, WebSocket, Request
 from fastapi.responses import StreamingResponse
@@ -32,6 +30,11 @@ from claim_values import (
     normalize_lab_id as _normalize_lab_id_value,
 )
 from fmu_backend import LocalFmuMetadataBackend, StationFmuBackend
+from fmu_path_resolver import (
+    FmuPathResolutionError,
+    _is_within_base,
+    resolve_fmu_path as _resolve_fmu_path_impl,
+)
 from backend_factory import build_fmu_backend as _build_fmu_backend_impl
 from execution_adapters import (
     reject_unsupported_remote_operation as _reject_unsupported_remote_operation_adapter,
@@ -86,6 +89,10 @@ from session_observation_service import (
     confirm_session_started as _confirm_session_started_service,
     confirm_session_started_with_retries as _confirm_session_started_with_retries,
     record_browser_session_started as _record_browser_session_started_service,
+)
+from session_observer_auth import (
+    SessionObserverConfigurationError,
+    create_session_observer_authorization,
 )
 from runner_runtime import create_fmu_runner_runtime
 from simulation_request import SimulationRequest
@@ -439,12 +446,6 @@ _digital_twin_assets_router = create_digital_twin_assets_router(
 
 # ----- helpers -----
 
-def _is_within_base(base: Path, candidate: Path) -> bool:
-    try:
-        candidate.relative_to(base)
-        return True
-    except ValueError:
-        return False
 
 
 def _normalize_lab_id(value) -> Optional[str]:
@@ -500,78 +501,14 @@ def _coerce_epoch_seconds(value) -> Optional[int]:
 
 def _resolve_fmu_path(fmu_filename: str) -> Path:
     """Resolve an authorised FMU access key within *FMU_DATA_PATH*."""
-    if len(str(fmu_filename)) > 255:
-        raise HTTPException(status_code=400, detail="Invalid FMU file key")
-    fmu_filename = StationFmuBackend.validate_access_key(fmu_filename)
-    base = Path(FMU_DATA_PATH).resolve()
-    if not base.is_dir():
-        raise HTTPException(status_code=503, detail="FMU data directory is unavailable")
-
-    segments = fmu_filename.split("/")
-    if len(segments) > 1:
-        # Explicit access keys may address files nested below fmu-data (for
-        # example, local-demos/<demo>/linux64/model.fmu). Walk directory
-        # entries instead of joining untrusted input, and reject symlinks that
-        # resolve outside the configured FMU root.
-        current = base
-        for index, segment in enumerate(segments):
-            try:
-                entry = next(
-                    (
-                        candidate
-                        for candidate in current.iterdir()
-                        if os.path.normcase(candidate.name) == os.path.normcase(segment)
-                    ),
-                    None,
-                )
-            except OSError:
-                entry = None
-            if entry is None:
-                raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
-            try:
-                current = entry.resolve(strict=True)
-            except OSError:
-                raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
-            if not _is_within_base(base, current):
-                raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
-            if index < len(segments) - 1 and not current.is_dir():
-                raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
-        if current.is_file():
-            return current
-        raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
-
-    def _trusted_match(directory: Path) -> Optional[Path]:
-        """Return a matching file already discovered under the trusted root."""
-        try:
-            entries = directory.iterdir()
-        except OSError:
-            return None
-        for entry in entries:
-            # Compare against the directory entry name; never construct a path
-            # by appending the request value to a filesystem path.
-            if os.path.normcase(entry.name) != os.path.normcase(fmu_filename):
-                continue
-            try:
-                resolved = entry.resolve(strict=True)
-            except OSError:
-                continue
-            if _is_within_base(base, resolved) and resolved.is_file():
-                return resolved
-        return None
-
-    # Direct match.  The path comes from directory enumeration, not user input.
-    direct = _trusted_match(base)
-    if direct is not None:
-        return direct
-
-    # Search in provider sub-directories (fmu-data/<provider-wallet>/file.fmu).
-    for child in base.iterdir():
-        if child.is_dir():
-            candidate = _trusted_match(child)
-            if candidate is not None:
-                return candidate
-    raise HTTPException(status_code=404, detail=f"FMU file not found: {fmu_filename}")
-
+    try:
+        return _resolve_fmu_path_impl(
+            fmu_filename,
+            FMU_DATA_PATH,
+            validate_access_key=StationFmuBackend.validate_access_key,
+        )
+    except FmuPathResolutionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 def _extract_authorization_header(request: Request) -> Optional[str]:
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
@@ -810,42 +747,16 @@ async def _redeem_session_ticket(
 
 
 def _session_observer_authorization() -> str:
-    if not SESSION_OBSERVER_GATEWAY_ID or not SESSION_OBSERVER_SIGNING_SECRET:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "SESSION_OBSERVER_NOT_CONFIGURED",
-                "error": "Session observer gateway credentials are not configured",
-            },
-        )
     try:
-        padding = "=" * (-len(SESSION_OBSERVER_SIGNING_SECRET) % 4)
-        signing_key = base64.urlsafe_b64decode(SESSION_OBSERVER_SIGNING_SECRET + padding)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "SESSION_OBSERVER_NOT_CONFIGURED", "error": "Invalid session observer signing secret"},
-        ) from exc
-    if len(signing_key) < 32:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "SESSION_OBSERVER_NOT_CONFIGURED", "error": "Session observer signing secret is too short"},
+        return create_session_observer_authorization(
+            SESSION_OBSERVER_GATEWAY_ID,
+            SESSION_OBSERVER_SIGNING_SECRET,
         )
-    now = int(time.time())
-    token = jwt.encode(
-        {
-            "iss": SESSION_OBSERVER_GATEWAY_ID,
-            "sub": SESSION_OBSERVER_GATEWAY_ID,
-            "aud": "session-observation",
-            "scope": "session-observation:submit",
-            "iat": now,
-            "exp": now + 60,
-            "jti": base64.urlsafe_b64encode(os.urandom(18)).rstrip(b"=").decode("ascii"),
-        },
-        signing_key,
-        algorithm="HS256",
-    )
-    return f"Bearer {token}"
+    except SessionObserverConfigurationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "SESSION_OBSERVER_NOT_CONFIGURED", "error": str(exc)},
+        ) from exc
 
 
 async def _confirm_fmu_session_started(
