@@ -40,6 +40,10 @@ fmi3Status ToFmiStatus(Fmi3Instance* instance, const OperationResult& status) {
     if (status) {
         return fmi3OK;
     }
+    if (status.code == "INPUT_UPDATE_RATE_LIMIT" || status.code == "OUTPUT_READ_RATE_LIMITED") {
+        Log(instance, fmi3Warning, "logStatusWarning", status.message);
+        return fmi3Discard;
+    }
     Log(instance, fmi3Error, "logStatusError", status.message);
     return fmi3Error;
 }
@@ -743,7 +747,22 @@ fmi3Status fmi3DoStep(
     }
     const auto status = impl->runtime.DoStep(currentCommunicationPoint, communicationStepSize);
     if (!status) {
-        return ToFmiStatus(impl, status);
+        const auto fmi_status = ToFmiStatus(impl, status);
+        if (fmi_status == fmi3Discard) {
+            if (eventHandlingNeeded != nullptr) {
+                *eventHandlingNeeded = fmi3False;
+            }
+            if (terminateSimulation != nullptr) {
+                *terminateSimulation = fmi3False;
+            }
+            if (earlyReturn != nullptr) {
+                *earlyReturn = fmi3False;
+            }
+            if (lastSuccessfulTime != nullptr) {
+                *lastSuccessfulTime = impl->runtime.CurrentTime();
+            }
+        }
+        return fmi_status;
     }
     if (eventHandlingNeeded != nullptr) {
         *eventHandlingNeeded = impl->runtime.LastStepEventHandlingNeeded() ? fmi3True : fmi3False;

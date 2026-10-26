@@ -786,6 +786,7 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
     if (!std::isfinite(current_time) || !std::isfinite(step_size) || step_size <= 0.0) {
         return OperationResult::Failure("INVALID_STEP", "Step time and size must be finite and step size positive");
     }
+    last_error_.clear();
     const double time_tolerance = std::max(1e-12, std::abs(current_time_) * 1e-12);
     if (std::abs(current_time - current_time_) > time_tolerance) {
         return OperationResult::Failure("INVALID_STEP", "Current communication point does not match simulation time");
@@ -801,6 +802,11 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
 
     const auto snapshot = gateway_client_->Advance(current_time, step_size, pending_inputs_);
     if (!snapshot) {
+        if (snapshot.status.code == "INPUT_UPDATE_RATE_LIMIT"
+            || snapshot.status.code == "OUTPUT_READ_RATE_LIMITED") {
+            last_error_ = snapshot.status.message;
+            return snapshot.status;
+        }
         state_ = SessionState::kError;
         SetError(snapshot.status.message);
         return snapshot.status;
@@ -878,9 +884,9 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         state_ == SessionState::kInstantiated || state_ == SessionState::kSessionCreated;
     const bool runtime_state = state_ == SessionState::kInitialized || state_ == SessionState::kRunning;
     const bool writable_input = variable.causality == "input" && (initialization_state || runtime_state);
-    const bool writable_parameter = initialization_state
-        && variable.causality == "parameter"
-        && variable.variability != "constant";
+    const bool writable_parameter = variable.causality == "parameter"
+        && ((initialization_state && variable.variability != "constant")
+            || (runtime_state && variable.variability == "tunable"));
     if (!writable_input && !writable_parameter) {
         return OperationResult::Failure(
             "VARIABLE_NOT_SETTABLE",
@@ -938,13 +944,19 @@ OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_refere
         }
         if (flat_size == 1) {
             if (expected_type == ScalarType::kReal) {
-                SetValue(*variable, static_cast<double>(values[offset]));
+                const auto status = SetValue(*variable, static_cast<double>(values[offset]));
+                if (!status) {
+                    return status;
+                }
             } else {
                 ScalarValue normalized;
                 if (!TryNormalizeIntegerValue(*variable, values[offset], &normalized)) {
                     return OperationResult::Failure("TYPE_MISMATCH", "Integer value is outside the supported range for the FMI variable");
                 }
-                SetValue(*variable, normalized);
+                const auto status = SetValue(*variable, normalized);
+                if (!status) {
+                    return status;
+                }
             }
         } else if (expected_type == ScalarType::kReal) {
             RealArray buffer;
@@ -952,7 +964,10 @@ OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_refere
             for (std::size_t element = 0; element < flat_size; ++element) {
                 buffer.push_back(static_cast<double>(values[offset + element]));
             }
-            SetValue(*variable, std::move(buffer));
+            const auto status = SetValue(*variable, std::move(buffer));
+            if (!status) {
+                return status;
+            }
         } else {
             if (BoundsForDeclaredType(variable->declared_type).unsigned_only) {
                 UnsignedIntegerArray buffer;
@@ -968,7 +983,10 @@ OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_refere
                     }
                     buffer.push_back(*integer);
                 }
-                SetValue(*variable, std::move(buffer));
+                const auto status = SetValue(*variable, std::move(buffer));
+                if (!status) {
+                    return status;
+                }
             } else {
                 IntegerArray buffer;
                 buffer.reserve(flat_size);
@@ -983,7 +1001,10 @@ OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_refere
                     }
                     buffer.push_back(*integer);
                 }
-                SetValue(*variable, std::move(buffer));
+                const auto status = SetValue(*variable, std::move(buffer));
+                if (!status) {
+                    return status;
+                }
             }
         }
         offset += flat_size;
@@ -1044,14 +1065,20 @@ OperationResult ProxyRuntime::SetBoolean(const std::uint32_t* value_references,
             return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
-            SetValue(*variable, values[offset]);
+            const auto status = SetValue(*variable, values[offset]);
+            if (!status) {
+                return status;
+            }
         } else {
             BooleanArray buffer;
             buffer.reserve(flat_size);
             for (std::size_t element = 0; element < flat_size; ++element) {
                 buffer.push_back(values[offset + element]);
             }
-            SetValue(*variable, std::move(buffer));
+            const auto status = SetValue(*variable, std::move(buffer));
+            if (!status) {
+                return status;
+            }
         }
         offset += flat_size;
     }
@@ -1083,14 +1110,20 @@ OperationResult ProxyRuntime::SetString(const std::uint32_t* value_references,
             return OperationResult::Failure("INVALID_ARGUMENT", "SetString buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
-            SetValue(*variable, std::string(values[offset] ? values[offset] : ""));
+            const auto status = SetValue(*variable, std::string(values[offset] ? values[offset] : ""));
+            if (!status) {
+                return status;
+            }
         } else {
             StringArray buffer;
             buffer.reserve(flat_size);
             for (std::size_t element = 0; element < flat_size; ++element) {
                 buffer.emplace_back(values[offset + element] ? values[offset + element] : "");
             }
-            SetValue(*variable, std::move(buffer));
+            const auto status = SetValue(*variable, std::move(buffer));
+            if (!status) {
+                return status;
+            }
         }
         offset += flat_size;
     }
@@ -1124,15 +1157,35 @@ OperationResult ProxyRuntime::SetBinary(const std::uint32_t* value_references,
         }
         if (flat_size == 1) {
             const auto* data = values[offset];
-            SetValue(*variable, BinaryValue(data, data + value_sizes[offset]));
+            BinaryValue binary;
+            if (value_sizes[offset] > 0) {
+                if (data == nullptr) {
+                    return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary received a null value buffer");
+                }
+                binary.assign(data, data + value_sizes[offset]);
+            }
+            const auto status = SetValue(*variable, std::move(binary));
+            if (!status) {
+                return status;
+            }
         } else {
             BinaryArray buffer;
             buffer.reserve(flat_size);
             for (std::size_t element = 0; element < flat_size; ++element) {
                 const auto* data = values[offset + element];
-                buffer.emplace_back(data, data + value_sizes[offset + element]);
+                BinaryValue binary;
+                if (value_sizes[offset + element] > 0) {
+                    if (data == nullptr) {
+                        return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary received a null value buffer");
+                    }
+                    binary.assign(data, data + value_sizes[offset + element]);
+                }
+                buffer.push_back(std::move(binary));
             }
-            SetValue(*variable, std::move(buffer));
+            const auto status = SetValue(*variable, std::move(buffer));
+            if (!status) {
+                return status;
+            }
         }
         offset += flat_size;
     }
@@ -1153,7 +1206,10 @@ OperationResult ProxyRuntime::SetClock(const std::uint32_t* value_references,
         if (variable->type != ScalarType::kClock) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match SetClock");
         }
-        SetValue(*variable, values[index]);
+        const auto status = SetValue(*variable, values[index]);
+        if (!status) {
+            return status;
+        }
     }
     return OperationResult::Success();
 }

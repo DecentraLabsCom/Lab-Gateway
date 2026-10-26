@@ -28,6 +28,8 @@ The files here now implement a functional `win64` runtime:
 - `modelDescription.xml` parsing for generated proxy metadata
 - local runtime state, cached values and FMI call mapping
 - Gateway protocol client with request/response correlation
+- capability-aware pacing for input update and output read quotas
+- runtime writes to FMI `tunable` parameters at Co-Simulation communication points
 - native `WSS` transport on Windows via WinHTTP
 - native `WSS` transport on Linux via OpenSSL + raw sockets/WebSocket framing
 - native POSIX/OpenSSL `WSS` source path shared by Linux and Darwin

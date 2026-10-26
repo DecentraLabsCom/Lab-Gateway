@@ -38,6 +38,10 @@ fmi2Status ToFmiStatus(Fmi2Instance* instance, const OperationResult& status) {
     if (status) {
         return fmi2OK;
     }
+    if (status.code == "INPUT_UPDATE_RATE_LIMIT" || status.code == "OUTPUT_READ_RATE_LIMITED") {
+        Log(instance, fmi2Warning, "logStatusWarning", status.message);
+        return fmi2Discard;
+    }
     Log(instance, fmi2Error, "logStatusError", status.message);
     return fmi2Error;
 }

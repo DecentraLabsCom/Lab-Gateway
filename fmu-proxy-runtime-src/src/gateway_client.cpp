@@ -107,6 +107,21 @@ JsonObject ToJsonObject(const std::map<std::string, ScalarValue>& values) {
     return json_values;
 }
 
+double PositiveIntegerCapability(const JsonObject* object, const char* key, double maximum) {
+    if (object == nullptr) {
+        return 0.0;
+    }
+    const JsonValue* value = FindObjectValue(*object, key);
+    if (value == nullptr || !value->IsNumber()) {
+        return 0.0;
+    }
+    const double number = value->AsNumber();
+    if (!std::isfinite(number) || number < 1.0 || number > maximum || std::floor(number) != number) {
+        return 0.0;
+    }
+    return number;
+}
+
 ValueResult<JsonObject> ParseResponseObject(const std::string& payload) {
     const auto parsed = ParseJson(payload);
     if (!parsed) {
@@ -229,7 +244,73 @@ OperationResult GatewayClient::CreateSession(const RuntimeConfig& config) {
     if (session_id_.empty()) {
         return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway did not return a sessionId");
     }
+
+    const JsonValue* capabilities_value = FindObjectValue(response.value, "capabilities");
+    const JsonObject* capabilities = capabilities_value != nullptr ? capabilities_value->AsObject() : nullptr;
+    const JsonValue* input_quota_value = capabilities != nullptr
+        ? FindObjectValue(*capabilities, "inputUpdateQuota")
+        : nullptr;
+    const JsonObject* input_quota = input_quota_value != nullptr ? input_quota_value->AsObject() : nullptr;
+    const double input_update_limit = PositiveIntegerCapability(input_quota, "maxUpdatesPerWindow", 10000.0);
+    const double input_update_window_ms = PositiveIntegerCapability(input_quota, "windowMs", 3600000.0);
+    const double output_hz = PositiveIntegerCapability(capabilities, "maxOutputHz", 1000.0);
+    max_input_updates_per_window_ = input_update_limit > 0.0
+        ? static_cast<std::size_t>(input_update_limit)
+        : 0;
+    input_update_window_ = input_update_window_ms > 0.0
+        ? std::chrono::milliseconds(static_cast<std::int64_t>(input_update_window_ms))
+        : std::chrono::milliseconds::zero();
+    max_output_hz_ = output_hz;
     return OperationResult::Success();
+}
+
+OperationResult GatewayClient::WaitForRequestCapacity(
+    const bool has_input_update,
+    std::chrono::milliseconds& total_wait,
+    const std::chrono::milliseconds max_wait) {
+    using Clock = std::chrono::steady_clock;
+    while (true) {
+        const auto now = Clock::now();
+        auto wait_duration = Clock::duration::zero();
+        std::string wait_code = "OUTPUT_READ_RATE_LIMITED";
+
+        if (max_output_hz_ > 0.0 && last_output_advance_ != Clock::time_point{}) {
+            const auto minimum_interval = std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double>(1.0 / max_output_hz_));
+            const auto output_wait = last_output_advance_ + minimum_interval - now;
+            if (output_wait > wait_duration) {
+                wait_duration = output_wait;
+            }
+        }
+
+        if (has_input_update && max_input_updates_per_window_ > 0 && input_update_window_.count() > 0) {
+            while (!input_update_times_.empty()
+                   && input_update_times_.front() + input_update_window_ <= now) {
+                input_update_times_.pop_front();
+            }
+            if (input_update_times_.size() >= max_input_updates_per_window_) {
+                const auto input_wait = input_update_times_.front() + input_update_window_ - now;
+                if (input_wait >= wait_duration) {
+                    wait_duration = input_wait;
+                    wait_code = "INPUT_UPDATE_RATE_LIMIT";
+                }
+            }
+        }
+
+        if (wait_duration <= Clock::duration::zero()) {
+            return OperationResult::Success();
+        }
+
+        const auto wait_ms = std::chrono::ceil<std::chrono::milliseconds>(wait_duration)
+            + std::chrono::milliseconds(1);
+        if (total_wait + wait_ms > max_wait) {
+            return OperationResult::Failure(
+                wait_code,
+                "The provider's advertised FMU request quota exceeds the proxy's bounded wait");
+        }
+        std::this_thread::sleep_for(wait_ms);
+        total_wait += wait_ms;
+    }
 }
 
 OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
@@ -326,6 +407,14 @@ ValueResult<OutputSnapshot> GatewayClient::Advance(
     auto total_retry_wait = std::chrono::milliseconds::zero();
 
     for (int attempt = 0; attempt < kMaxRetryAttempts; ++attempt) {
+        const auto capacity_status = WaitForRequestCapacity(
+            !input_values.empty(),
+            total_retry_wait,
+            std::chrono::duration_cast<std::chrono::milliseconds>(kMaxRetryWait));
+        if (!capacity_status) {
+            return ValueResult<OutputSnapshot>::Failure(capacity_status.code, capacity_status.message);
+        }
+
         JsonObject request = {
             {"type", JsonValue(std::string(kSimAdvance))},
             {"requestId", JsonValue(NextRequestId())},
@@ -401,6 +490,11 @@ ValueResult<OutputSnapshot> GatewayClient::Advance(
                 "Gateway advance sample did not contain an output object");
         }
         snapshot.values = *values->AsObject();
+        const auto completed_at = std::chrono::steady_clock::now();
+        last_output_advance_ = completed_at;
+        if (!input_values.empty()) {
+            input_update_times_.push_back(completed_at);
+        }
         return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
     }
 

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstddef>
+#include <chrono>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -55,12 +58,20 @@ public:
 private:
     ValueResult<JsonObject> SendRequest(const JsonObject& request);
     OperationResult EnsureConnected(const std::string& url);
+    OperationResult WaitForRequestCapacity(bool has_input_update,
+                                           std::chrono::milliseconds& total_wait,
+                                           std::chrono::milliseconds max_wait);
     std::string NextRequestId();
 
     std::unique_ptr<GatewayTransport> transport_;
     std::uint64_t request_counter_ = 0;
     std::string gateway_url_;
     std::string session_id_;
+    std::size_t max_input_updates_per_window_ = 0;
+    std::chrono::milliseconds input_update_window_{0};
+    double max_output_hz_ = 0.0;
+    std::deque<std::chrono::steady_clock::time_point> input_update_times_;
+    std::chrono::steady_clock::time_point last_output_advance_{};
 };
 
 }  // namespace decentralabs::proxy

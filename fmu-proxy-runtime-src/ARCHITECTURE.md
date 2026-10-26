@@ -78,9 +78,21 @@ stateDiagram-v2
 Invalid local lifecycle use, expired reservation/ticket and unrecoverable
 transport failures surface as FMI errors. Retryable network failures should
 first be reported through the FMI logger; do not silently duplicate a step.
-For input-update and output-read quota rejections, the proxy retries only when
-the Gateway explicitly supplies `retryAfterMs`, with an eight-attempt and
-30-second total wait bound. Other errors are returned immediately.
+The proxy reads `inputUpdateQuota` and `maxOutputHz` from `session.created`,
+paces input-bearing advances and output-producing advances to those advertised
+limits, and retains the last successful input timestamps across retries. If a
+provider's quota is shared with another client, the Gateway remains
+authoritative: the proxy retries explicit input-update or output-read
+rejections only when `retryAfterMs` is supplied, within an eight-attempt and
+30-second total wait bound. Such temporary quota failures leave the proxy
+session and pending inputs intact. If that wait bound is reached, the proxy
+returns FMI `Discard` without advancing or dropping the pending inputs, so an
+importer can retry the same communication point.
+
+Tunable parameters can be set at communication points while the FMU is in
+Co-Simulation Step Mode. The Gateway and Executor still enforce the reservation's
+variable write policy; fixed and constant parameters remain unavailable after
+initialization.
 
 ## Platform status and release
 
