@@ -380,7 +380,7 @@ if "!fmu_local_executor_internal_token!"=="" (
 )
 call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "!fmu_local_executor_internal_token!"
 call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_EXECUTOR_IMAGE" fmu_executor_image
-if not defined fmu_executor_image set "fmu_executor_image=ghcr.io/decentralabscom/fmu-executor:0.2.1"
+if not defined fmu_executor_image set "fmu_executor_image=ghcr.io/decentralabscom/fmu-executor:0.3.4"
 call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_EXECUTOR_IMAGE" "!fmu_executor_image!"
 call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_EXECUTOR_SOURCE_PATH"
 call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED"

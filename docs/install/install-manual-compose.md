@@ -386,13 +386,13 @@ docker compose --profile fmu-runner up -d --build
 
 For development-only FMU execution, use `fmu-local-dev` instead; never start
 both FMU profiles. The profile pulls the shared FMU Executor image configured
-by `FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.2.1`)
+by `FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.3.4`)
 and delegates execution to it. No additional repository clone is needed. Set
 the local mode explicitly in `.env`:
 
 `setup.sh` creates `fmu-executor-state/` as a private bind-mounted directory
 for reservation-scoped history and results. The manual install creates and
-assigns it in Step 5. Use FMU Executor 0.2.1 or newer for batch jobs,
+assigns it in Step 5. Use FMU Executor 0.3.4 or newer for batch jobs,
 cancellation, and the new history routes.
 
 ```env

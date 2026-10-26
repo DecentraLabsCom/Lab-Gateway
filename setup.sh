@@ -822,7 +822,7 @@ update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "$fmu_local_
 # a second source checkout. Keep any explicit operator override.
 fmu_executor_image="$(get_env_default "FMU_EXECUTOR_IMAGE" "$ROOT_ENV_FILE")"
 if [ -z "$fmu_executor_image" ]; then
-    fmu_executor_image="ghcr.io/decentralabscom/fmu-executor:0.2.1"
+    fmu_executor_image="ghcr.io/decentralabscom/fmu-executor:0.3.4"
 fi
 update_env_var "$ROOT_ENV_FILE" "FMU_EXECUTOR_IMAGE" "$fmu_executor_image"
 remove_env_var "$ROOT_ENV_FILE" "FMU_EXECUTOR_SOURCE_PATH"
