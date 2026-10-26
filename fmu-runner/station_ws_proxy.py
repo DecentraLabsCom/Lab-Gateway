@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import math
 import time
 from collections import defaultdict, deque
 from typing import Optional
@@ -29,6 +30,7 @@ from simulation_access_policy import (
 MAX_ADVANCE_INPUT_EVENTS = 1024
 MAX_ADVANCE_INPUT_BYTES = 256 * 1024
 MAX_ADVANCE_OUTPUT_VARIABLES = 512
+MAX_ADVANCE_COMPUTE_MS = 1000
 
 
 
@@ -184,6 +186,14 @@ class StationRealtimeWsProxyManager:
         elif msg_type == "sim.setInputs":
             validate_writes(access_policy, message.get("values", {}), phase="runtime")
         elif msg_type == "sim.advance":
+            max_compute_ms = message.get("maxComputeMs")
+            if max_compute_ms is not None and (
+                isinstance(max_compute_ms, bool)
+                or not isinstance(max_compute_ms, (int, float))
+                or not math.isfinite(max_compute_ms)
+                or not 1 <= max_compute_ms <= MAX_ADVANCE_COMPUTE_MS
+            ):
+                raise AccessDenied
             input_schedule = message.get("inputSchedule", [])
             if not isinstance(input_schedule, list) or len(input_schedule) > MAX_ADVANCE_INPUT_EVENTS:
                 raise AccessDenied
