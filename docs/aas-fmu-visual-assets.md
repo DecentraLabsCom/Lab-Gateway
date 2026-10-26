@@ -100,10 +100,19 @@ GLB viewers use the batch stream for scheduled runs. For reserved FMI 2/3
 Co-Simulation models, step-by-step and continuous live modes request the same
 reservation-scoped connection grant used by provider apps, then open the
 Gateway session WebSocket from the Marketplace page. Step mode sends one
-`sim.step` request per user action. Continuous mode sends the next step after
-the previous Gateway response; runtime edits are sent before the next step
-request. The Gateway enforces its effective variable-access policy on every
-write and filters output values returned to the browser. The page's exact
+`sim.step` request per user action. Continuous mode uses `sim.advance` to
+request bounded batches of intermediate samples, starting at one communication
+sample and adapting up to the lower of 256 samples or 2% of the configured
+model-time horizon, rounded down to whole communication steps with a one-step
+minimum. This unit-independent limit preserves roughly 50 communication
+opportunities across runs with at least 50 configured steps. The viewer adjusts
+the next batch using smoothed request
+response time and the delay until the latest sample is rendered. During
+interactive execution, the GLB viewer follows the latest sample and retains the
+full timeline for replay after the run. Runtime edits are sent before the next
+batch, after the current advance completes. The Gateway enforces its effective
+variable-access policy on every write and filters output values returned to the
+browser. The page's exact
 origin must be allowed by the Gateway's `MARKETPLACE_URL` or
 `CORS_ALLOWED_ORIGINS` configuration, and the Marketplace operator must include
 this Gateway's WSS origin in `CSP_CONNECT_SRC` so its browser policy permits the
@@ -153,14 +162,26 @@ sequenceDiagram
         M->>G: POST /fmu/api/v1/fmu/connection/{labId}
         G-->>M: Return reservation-scoped connection grant
         M-->>U: Provide temporary grant
-        U->>G: WSS session.create and sim.initialize
+        U->>G: WSS session.create
         G->>S: Open private realtime session
-        loop One step per click or next response
-            U->>G: Optional sim.setInputs, then sim.step
-            G->>S: Forward authorized session messages
-            S-->>G: Return current simulation outputs
-            G-->>U: Filtered output sample
-            U->>U: Update GLB bindings, timeline and indicators
+        alt Step by step
+            U->>G: sim.initialize with external time mode
+            loop One step per click
+                U->>G: Optional sim.setInputs, then sim.step
+                G->>S: Forward authorized session messages
+                S-->>G: Return current simulation outputs
+                G-->>U: Filtered output sample
+                U->>U: Update GLB bindings, timeline and indicators
+            end
+        else Continuous live
+            U->>G: sim.initialize with simulation time mode
+            loop Adaptive batch
+                U->>G: Optional sim.setInputs, then sim.advance
+                G->>S: Forward authorized session messages
+                S-->>G: Return bounded intermediate samples
+                G-->>U: Filtered sample batch
+                U->>U: Append samples and update the displayed scene
+            end
         end
     end
     Note over M,S: Batch samples pass through Marketplace. Interactive steps and samples travel directly between the browser and Gateway.
