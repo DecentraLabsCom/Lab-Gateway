@@ -186,6 +186,11 @@ class StationRealtimeWsProxyManager:
         elif msg_type == "sim.setInputs":
             validate_writes(access_policy, message.get("values", {}), phase="runtime")
         elif msg_type == "sim.advance":
+            input_values = message.get("inputValues", {})
+            if not isinstance(input_values, dict):
+                raise AccessDenied
+            if input_values:
+                validate_writes(access_policy, input_values, phase="runtime")
             max_compute_ms = message.get("maxComputeMs")
             if max_compute_ms is not None and (
                 isinstance(max_compute_ms, bool)
@@ -195,7 +200,10 @@ class StationRealtimeWsProxyManager:
             ):
                 raise AccessDenied
             input_schedule = message.get("inputSchedule", [])
-            if not isinstance(input_schedule, list) or len(input_schedule) > MAX_ADVANCE_INPUT_EVENTS:
+            if (
+                not isinstance(input_schedule, list)
+                or len(input_schedule) + bool(input_values) > MAX_ADVANCE_INPUT_EVENTS
+            ):
                 raise AccessDenied
             try:
                 schedule_bytes = len(json.dumps(
@@ -203,9 +211,14 @@ class StationRealtimeWsProxyManager:
                     separators=(",", ":"),
                     allow_nan=False,
                 ).encode("utf-8"))
+                input_values_bytes = len(json.dumps(
+                    input_values,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8"))
             except (TypeError, ValueError):
                 raise AccessDenied
-            if schedule_bytes > MAX_ADVANCE_INPUT_BYTES:
+            if schedule_bytes + input_values_bytes > MAX_ADVANCE_INPUT_BYTES:
                 raise AccessDenied
             for event in input_schedule:
                 if not isinstance(event, dict) or not isinstance(event.get("values"), dict):

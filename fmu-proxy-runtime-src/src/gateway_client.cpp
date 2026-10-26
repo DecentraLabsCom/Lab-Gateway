@@ -1,5 +1,8 @@
 #include "decentralabs_proxy/gateway_client.hpp"
 
+#include <chrono>
+#include <cmath>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -312,6 +315,98 @@ ValueResult<OutputSnapshot> GatewayClient::Step(const double current_time, const
         }
     }
     return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
+}
+
+ValueResult<OutputSnapshot> GatewayClient::Advance(
+    const double current_time,
+    const double delta_t,
+    const std::map<std::string, ScalarValue>& input_values) {
+    constexpr int kMaxRetryAttempts = 8;
+    constexpr auto kMaxRetryWait = std::chrono::seconds(30);
+    auto total_retry_wait = std::chrono::milliseconds::zero();
+
+    for (int attempt = 0; attempt < kMaxRetryAttempts; ++attempt) {
+        JsonObject request = {
+            {"type", JsonValue(std::string(kSimAdvance))},
+            {"requestId", JsonValue(NextRequestId())},
+            {"sessionId", JsonValue(session_id_)},
+            {"currentCommunicationPoint", JsonValue(current_time)},
+            {"targetTime", JsonValue(current_time + delta_t)},
+            {"stepSize", JsonValue(delta_t)},
+            {"maxSamples", JsonValue(1)},
+        };
+        if (!input_values.empty()) {
+            request.emplace("inputValues", JsonValue(ToJsonObject(input_values)));
+        }
+
+        const auto response = SendRequest(request);
+        if (!response) {
+            return ValueResult<OutputSnapshot>::Failure(response.status.code, response.status.message);
+        }
+
+        const std::string response_type = JsonString(response.value, "type");
+        const std::string error_code = JsonString(response.value, "code");
+        const bool retryable_pre_execution_code = error_code == "INPUT_UPDATE_RATE_LIMIT"
+            || error_code == "OUTPUT_READ_RATE_LIMITED";
+        const bool safe_to_retry = response_type == "error"
+            && JsonBool(response.value, "retryable")
+            && retryable_pre_execution_code;
+        const double retry_after_ms = JsonNumber(response.value, "retryAfterMs", 0.0);
+        const double remaining_retry_budget_ms =
+            std::chrono::duration<double, std::milli>(kMaxRetryWait - total_retry_wait).count();
+        if (safe_to_retry && std::isfinite(retry_after_ms) && retry_after_ms > 0.0
+            && retry_after_ms <= remaining_retry_budget_ms) {
+            const auto retry_delay = std::chrono::milliseconds(
+                static_cast<std::int64_t>(std::ceil(retry_after_ms)));
+            if (attempt + 1 < kMaxRetryAttempts && retry_delay.count() > 0
+                && total_retry_wait + retry_delay <= kMaxRetryWait) {
+                std::this_thread::sleep_for(retry_delay);
+                total_retry_wait += retry_delay;
+                continue;
+            }
+        }
+
+        const auto type_status = EnsureResponseType(response.value, kSimSamples);
+        if (!type_status) {
+            return ValueResult<OutputSnapshot>::Failure(type_status.code, type_status.message);
+        }
+
+        const JsonValue* samples_value = FindObjectValue(response.value, "samples");
+        const JsonArray* samples = samples_value != nullptr ? samples_value->AsArray() : nullptr;
+        if (samples == nullptr || samples->empty() || samples->back().AsObject() == nullptr) {
+            return ValueResult<OutputSnapshot>::Failure(
+                "GATEWAY_PROTOCOL_ERROR",
+                "Gateway advance reply did not contain an output sample");
+        }
+
+        const JsonObject& sample = *samples->back().AsObject();
+        OutputSnapshot snapshot;
+        snapshot.sim_time = JsonNumber(sample, "time", JsonNumber(response.value, "simTime", 0.0));
+        const double time_tolerance = std::max(1e-12, std::abs(current_time + delta_t) * 1e-12);
+        if (!std::isfinite(snapshot.sim_time)
+            || snapshot.sim_time < current_time - time_tolerance
+            || snapshot.sim_time > current_time + delta_t + time_tolerance) {
+            return ValueResult<OutputSnapshot>::Failure(
+                "GATEWAY_PROTOCOL_ERROR",
+                "Gateway advance returned a sample outside the requested interval");
+        }
+        snapshot.early_return = JsonBool(sample, "earlyReturn");
+        snapshot.event_handling_needed = JsonBool(sample, "eventHandlingNeeded");
+        snapshot.terminate_simulation = JsonBool(sample, "terminateSimulation");
+        snapshot.finished = JsonBool(sample, "finished", JsonBool(response.value, "finished"));
+        const JsonValue* values = FindObjectValue(sample, "outputs");
+        if (values == nullptr || values->AsObject() == nullptr) {
+            return ValueResult<OutputSnapshot>::Failure(
+                "GATEWAY_PROTOCOL_ERROR",
+                "Gateway advance sample did not contain an output object");
+        }
+        snapshot.values = *values->AsObject();
+        return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
+    }
+
+    return ValueResult<OutputSnapshot>::Failure(
+        "ADVANCE_RETRY_LIMIT",
+        "Gateway advance exceeded its bounded retry limit");
 }
 
 ValueResult<OutputSnapshot> GatewayClient::GetOutputs(const std::vector<std::string>& variables) {

@@ -40,11 +40,15 @@ proxy artifact works in both modes.
 | `fmi2Instantiate` | Load generated config and create local runtime state. |
 | `fmi2EnterInitializationMode` | Open WSS and send `session.create`. |
 | `fmi2ExitInitializationMode` | Send `sim.initialize`. |
-| `fmi2Set*` | Buffer/send `sim.setInputs`. |
-| `fmi2DoStep` | Send `sim.step` with `deltaT`. |
+| `fmi2Set*` / `fmi3Set*` | Buffer the latest value for the next `DoStep`; repeated assignments to the same cached value do not create a remote update. |
+| `fmi2DoStep` / `fmi3DoStep` | Send one bounded `sim.advance` to `currentCommunicationPoint + communicationStepSize`; pending inputs are applied at the start of that interval in the same request. |
 | `fmi2Get*` | Read cached outputs from the latest step/get response. |
 | `fmi2Terminate` | Send `session.terminate` and close WSS. |
 | `fmi2Reset` | Reset local state and request remote reset where supported. |
+
+The proxy sends `maxSamples=1` and uses the FMI master's requested communication
+step as the remote step size. A policy that subdivides one FMI `DoStep` into
+multiple remote FMU steps would need an explicit, validated numerical setting.
 
 Realtime `session.create` is reservation-bound and must complete durable
 observation before `session.created` is returned. `session.attach` must match
@@ -74,6 +78,9 @@ stateDiagram-v2
 Invalid local lifecycle use, expired reservation/ticket and unrecoverable
 transport failures surface as FMI errors. Retryable network failures should
 first be reported through the FMI logger; do not silently duplicate a step.
+For input-update and output-read quota rejections, the proxy retries only when
+the Gateway explicitly supplies `retryAfterMs`, with an eight-attempt and
+30-second total wait bound. Other errors are returned immediately.
 
 ## Platform status and release
 

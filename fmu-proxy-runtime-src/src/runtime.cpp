@@ -793,22 +793,19 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
     last_step_early_return_ = false;
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
-    if (!pending_inputs_.empty()) {
-        const auto set_status = gateway_client_->SetInputs(pending_inputs_);
-        if (!set_status) {
-            state_ = SessionState::kError;
-            SetError(set_status.message);
-            return set_status;
-        }
-        pending_inputs_.clear();
+    const double requested_time = current_time + step_size;
+    const double stop_tolerance = std::max(1e-12, std::abs(experiment_.stop_time) * 1e-12);
+    if (!std::isfinite(requested_time) || requested_time > experiment_.stop_time + stop_tolerance) {
+        return OperationResult::Failure("INVALID_STEP", "Step would advance past stopTime");
     }
 
-    const auto snapshot = gateway_client_->Step(current_time, step_size);
+    const auto snapshot = gateway_client_->Advance(current_time, step_size, pending_inputs_);
     if (!snapshot) {
         state_ = SessionState::kError;
         SetError(snapshot.status.message);
         return snapshot.status;
     }
+    pending_inputs_.clear();
     auto status = ApplyOutputSnapshot(snapshot.value);
     if (!status) {
         return status;
@@ -891,6 +888,10 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     }
     if (simulation_finished_) {
         return OperationResult::Failure("SIMULATION_FINISHED", "Simulation has finished");
+    }
+    const auto cached = cached_values_.find(variable.value_reference);
+    if (cached != cached_values_.end() && cached->second == value) {
+        return OperationResult::Success();
     }
     cached_values_[variable.value_reference] = value;
     if (initialization_state) {

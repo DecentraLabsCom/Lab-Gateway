@@ -41,6 +41,10 @@ public:
     OperationResult SetInputs(const std::map<std::string, ScalarValue>& values);
     ValueResult<OutputSnapshot> Step(double delta_t);
     ValueResult<OutputSnapshot> Step(double current_time, double delta_t);
+    ValueResult<OutputSnapshot> Advance(
+        double current_time,
+        double delta_t,
+        const std::map<std::string, ScalarValue>& input_values);
     ValueResult<OutputSnapshot> GetOutputs(const std::vector<std::string>& variables);
     OperationResult Reset();
     OperationResult Terminate();
