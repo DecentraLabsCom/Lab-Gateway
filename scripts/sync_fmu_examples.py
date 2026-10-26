@@ -1,9 +1,9 @@
 """Sync canonical FMU examples into Gateway's ignored development data directory.
 
 The six reference FMUs and Smart Warehouse are synced by default. Local
-BOPTEST, qFMU, water-tank, DC-motor and inverted-pendulum demos require
-explicit flags. This script never adds demo files to Gateway images or release
-packages.
+BOPTEST, qFMU, water-tank, DC-motor, inverted-pendulum and lateral-motion demos
+require explicit flags. This script never adds demo files to Gateway images or
+release packages.
 """
 
 from __future__ import annotations
@@ -66,6 +66,9 @@ FMU_SESSION_APP_MARKERS = (
 DC_MOTOR_FMU_NAME = "DC_motor.fmu"
 DC_MOTOR_APP_NAME = "DC_motor.webapp.zip"
 INVERTED_PENDULUM_FMU_NAME = "InvertedPendulum.fmu"
+INVERTED_PENDULUM_APP_NAME = "InvertedPendulum.webapp.zip"
+LATERAL_MOTION_FMU_NAME = "LateralMotionControl.fmu"
+LATERAL_MOTION_APP_NAME = "LateralMotionControl.webapp.zip"
 WATER_TANK_FMU_NAME = "singlewatertank-20sim.fmu"
 WATER_TANK_APP_NAME = "singlewatertank-20sim.webapp.zip"
 DC_MOTOR_REQUIRED_PARAMETERS = {
@@ -429,6 +432,14 @@ def validate_water_tank_app(path: Path) -> None:
         raise ValueError("The water-tank app must not depend on external runtime services.")
 
 
+def validate_local_fmu_session_app(path: Path, demo_name: str, required_assets: set[str] | None = None) -> None:
+    files = validate_webapp_bundle(path)
+    validate_fmu_session_app(path)
+    missing = (required_assets or set()) - files
+    if missing:
+        raise ValueError(f"The local {demo_name} app is missing: " + ", ".join(sorted(missing)))
+
+
 def validate_boptest_complex_air_fmu(path: Path) -> set[str]:
     names = validate_linux_x64_fmu(path)
     required_binaries = {"binaries/linux64/wrapped.so"}
@@ -529,6 +540,7 @@ def sync(
     include_local_dc_motor: bool = False,
     include_local_water_tank: bool = False,
     include_local_inverted_pendulum: bool = False,
+    include_local_lateral_motion: bool = False,
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     boptest_target = target / "local-demos" / "boptest-building" / "linux64"
@@ -624,11 +636,29 @@ def sync(
     copy_verified(warehouse_license, target / "SmartWarehouseCell.LICENSE.txt")
 
     if include_local_inverted_pendulum:
-        pendulum_fmu = examples_root / "local-demos" / "inverted-pendulum" / INVERTED_PENDULUM_FMU_NAME
+        pendulum_root = examples_root / "local-demos" / "inverted-pendulum"
+        pendulum_fmu = pendulum_root / INVERTED_PENDULUM_FMU_NAME
+        pendulum_app = pendulum_root / INVERTED_PENDULUM_APP_NAME
         validate_inverted_pendulum_fmu(pendulum_fmu)
+        validate_local_fmu_session_app(pendulum_app, "inverted-pendulum")
         pendulum_target = target / "local-demos" / "inverted-pendulum" / "linux64"
         pendulum_target.mkdir(parents=True, exist_ok=True)
         copy_verified(pendulum_fmu, pendulum_target / INVERTED_PENDULUM_FMU_NAME)
+        copy_verified(pendulum_app, pendulum_target / INVERTED_PENDULUM_APP_NAME)
+
+    if include_local_lateral_motion:
+        lateral_root = examples_root / "local-demos" / "bosch-lateral-motion"
+        lateral_fmu = lateral_root / LATERAL_MOTION_FMU_NAME
+        lateral_app = lateral_root / LATERAL_MOTION_APP_NAME
+        validate_linux_x64_fmu(lateral_fmu)
+        validate_local_fmu_session_app(lateral_app, "lateral-motion", {"crossover-suv.glb"})
+        lateral_target = target / "local-demos" / "bosch-lateral-motion" / "linux64"
+        lateral_target.mkdir(parents=True, exist_ok=True)
+        copy_verified(lateral_fmu, lateral_target / LATERAL_MOTION_FMU_NAME)
+        copy_verified(lateral_app, lateral_target / LATERAL_MOTION_APP_NAME)
+        license_path = lateral_root / "LICENSE.txt"
+        if license_path.is_file():
+            copy_verified(license_path, lateral_target / "LateralMotionControl.LICENSE.txt")
 
     if include_local_water_tank:
         water_tank_root = examples_root / "local-demos" / "into-cps-water-tank" / "linux64"
@@ -764,7 +794,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--include-local-inverted-pendulum",
         action="store_true",
-        help="Also copy the local-only Linux inverted-pendulum FMU",
+        help="Also copy the local-only Linux inverted-pendulum FMU and webapp bundle",
+    )
+    parser.add_argument(
+        "--include-local-lateral-motion",
+        action="store_true",
+        help="Also copy the local-only Bosch lateral-motion FMU and webapp bundle",
     )
     args = parser.parse_args(argv)
 
@@ -777,6 +812,7 @@ def main(argv: list[str] | None = None) -> int:
             include_local_dc_motor=args.include_local_dc_motor,
             include_local_water_tank=args.include_local_water_tank,
             include_local_inverted_pendulum=args.include_local_inverted_pendulum,
+            include_local_lateral_motion=args.include_local_lateral_motion,
         )
     except (FileNotFoundError, OSError, ValueError) as error:
         print(error, file=sys.stderr)

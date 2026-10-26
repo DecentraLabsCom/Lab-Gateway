@@ -12,6 +12,7 @@ services:
       - ./openresty/conf.d/gateway_dev_dc_motor.conf:/etc/openresty/conf.d/gateway_dev_dc_motor.conf:ro
       - ./openresty/conf.d/gateway_dev_water_tank.conf:/etc/openresty/conf.d/gateway_dev_water_tank.conf:ro
       - ./openresty/conf.d/gateway_dev_lateral_motion.conf:/etc/openresty/conf.d/gateway_dev_lateral_motion.conf:ro
+      - ./openresty/conf.d/gateway_dev_inverted_pendulum.conf:/etc/openresty/conf.d/gateway_dev_inverted_pendulum.conf:ro
 
   # qFMU, DC motor, water tank and inverted-pendulum runs share this generic
   # Executor/session runtime. Their per-demo OpenResty routes only serve app
