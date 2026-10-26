@@ -42,6 +42,9 @@ services:
       # 10 ms. Raise the local-only bounded caps so a complete 100 Hz feedback
       # run fits the normal FMI session protocol.
       - FMU_MAX_INPUT_UPDATES_PER_WINDOW=10000
+      # A 60-second Lateral Motion run schedules 109,987 input events. Use the
+      # Executor's local maximum so the full run fits and can be repeated.
+      - FMU_MAX_INPUT_UPDATES_PER_DAY=1000000
       - FMU_MAX_OUTPUT_SUBSCRIPTION_HZ=1000
       # Bosch Lateral Motion uses a deterministic trigger schedule at 0.1 ms
       # resolution. These raised caps apply only to this local-demo executor.
