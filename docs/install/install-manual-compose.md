@@ -411,16 +411,11 @@ accepted sessions. The local Executor and facade share the generated internal
 development FMU token. It is separate from the Lab Station token. Neither
 needs Station or administrator credentials.
 
-For local execution, place each published FMU in one of the supported layouts
-and make its `accessKey`/`fmuFileName` match the configured resource:
-
-```text
-fmu-data/<accessKey>.fmu
-fmu-data/<accessKey>/model.fmu
-```
-
-See [FMU data layout](../../fmu-data/README.md) for provider-scoped storage
-and [FMI/FMU support](../fmi-fmu-support.md) for publication and validation.
+For local development, copy the FMU fixture into the Gateway's `fmu-data`
+mount using the [Executor's storage layout and access-key rules](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#fmu-provisioning).
+See [Gateway FMU development data](../../fmu-data/README.md) for the local
+example sync and [FMI/FMU support](../fmi-fmu-support.md) for publication and
+reservation access. Production FMUs are provisioned on Lab Station.
 
 `FMU_BACKEND_MODE` controls FMU execution location; Full/Lite authentication
 controls the JWKS source independently. See the

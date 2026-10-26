@@ -44,8 +44,10 @@ table of contents.
 
 - [FMI/FMU support](docs/fmi-fmu-support.md)
 - [AAS support](docs/aas-support.md)
+- [FMU visual assets](docs/aas-fmu-visual-assets.md)
 - [FMU Runner](fmu-runner/README.md)
-- [FMU data layout](fmu-data/README.md)
+- [FMU Executor documentation index](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md)
+- [Gateway FMU development data](fmu-data/README.md)
 - [FMU proxy runtime](fmu-proxy-runtime/README.md)
 - [FMU proxy runtime source](fmu-proxy-runtime-src/README.md)
 - [FMU proxy runtime architecture](fmu-proxy-runtime-src/ARCHITECTURE.md)
@@ -59,6 +61,6 @@ table of contents.
 
 ## Backend service
 
-The `blockchain-services/` backend contains detailed
-API, security, wallet, deployment, and operations documentation starts at
-the [backend documentation index](blockchain-services/SUMMARY.md).
+The `blockchain-services/` backend has detailed API, security, wallet,
+deployment and operations documentation. Start at the
+[backend documentation index](blockchain-services/SUMMARY.md).

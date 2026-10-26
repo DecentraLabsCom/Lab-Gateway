@@ -61,15 +61,12 @@ does not change between these topologies.
 | GET | `/api/v1/simulations/{id}/result` | Read a terminal result, including available partial output |
 | GET | `/api/v1/simulations/history?limit=20&offset=0` | Page through history for the authorized reservation |
 | POST | `/api/v1/simulations/stream` | Stream simulation output through the active backend |
-| WS | `/api/v1/fmu/sessions` | Realtime FMU session API (`requestId`, `model.describe`, control, subscribe/unsubscribe, ping/pong) |
-| WS (internal) | `/internal/fmu/sessions` | Internal realtime channel for Lab Station integration |
+| WS | `/api/v1/fmu/sessions` | Realtime FMU session facade with reservation-bound authorization |
 
-The simulation description includes FMI variable descriptions, inherited type
-bounds, and enumeration items when present. `displayUnit` is emitted as
-`{ name, factor, offset, inverse? }`, normalized for direct and inverse FMI
-display-unit conversions; execution requests still use the FMU's native value.
-`min` and `max` describe the model's operating range and do not declare a
-control resolution.
+The model-description response is defined by the
+[FMU Executor](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#runtime-capabilities).
+The Gateway applies its AAS-based variable-access policy separately; see
+[AAS support](../docs/aas-support.md#fmi-variable-access-policy).
 
 When the AAS admin integration is enabled, the Lab Manager exposes a unified
 AAS association catalog. BaSyx is the source of truth for generated and
@@ -103,19 +100,12 @@ through `X-Internal-Session-Token`. If it is absent, the endpoint rejects every
 connection (fail-closed). The Station endpoint applies the same rule to
 `FMU_INTERNAL_TOKEN`; keep both services private even when the tokens are set.
 
-The Executor enforces per-reservation daily scenario quotas, per-run step
-limits, bounded batch sizes, and history retention. Defaults are 100 scenario
-starts per UTC day, 10,000 steps per run, 7 days of history, and 8 scenarios
-per batch. A batch is charged once per case; realtime initialize, reset, and
-non-empty input update operations also consume a scenario. History, status, cancellation, and result
-routes forward the authenticated reservation scope to the Executor, which
-returns `404` for jobs outside that scope.
-
-Published Gateway requests and the Windows/Linux Station services share a
-maximum of 128 named parameters per simulation. `FMU_MAX_SIMULATION_PARAMETERS`
-can lower the Gateway limit, but the supported maximum is 128. The local demo
-profile sets 64 on both its Gateway facade and Executor. The parameter payload
-remains bounded to 16 KiB independently of the count limit.
+The Gateway forwards reservation-scoped jobs and results to the Executor; the
+Executor owns execution quotas, runtime limits, retention and result evidence.
+See the [FMU Executor README](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md)
+for those limits. Gateway-side request bounds and Compose values are documented
+in the [configuration reference](../docs/reference/configuration.md); effective
+limits are constrained by both services.
 
 ## Backend Modes
 
@@ -168,7 +158,8 @@ FMU Executor 0.3.0 or newer for the authenticated scene endpoint.
 
 FMU files are mounted read-only in both containers. The local Executor uses a
 private executable tmpfs for extraction. See
-[fmu-data/README.md](../fmu-data/README.md) for the expected directory layout.
+[fmu-data/README.md](../fmu-data/README.md) for local fixtures and sync behavior;
+the Executor README owns the FMU storage layout and access-key mapping.
 
 That mount belongs to the `fmu-runner-local` development profile. It is not
 part of the intended production execution topology.
@@ -182,73 +173,10 @@ Target production topology:
 
 Marketplace upload is disabled by design.
 
-## Realtime WS Notes
+## Gateway-specific session controls
 
-- Every client command must include `requestId` (idempotent replay support).
-- `session.terminate` is idempotent.
-- `sim.outputs` includes `seq` and `dropped` for backpressure visibility.
-- Realtime output reads share the Executor's per-session `FMU_MAX_OUTPUT_SUBSCRIPTION_HZ` cap across subscriptions, `sim.getOutputs`, `sim.step`, and `sim.runUntil`. `OUTPUT_READ_RATE_LIMITED` errors include `retryAfterMs`; retry after that delay with a new `requestId` because duplicate IDs replay the prior response.
-- Keepalive/telemetry events: `session.pong`, `session.heartbeat`, `session.expiring`.
-- External `session.create` always passes through a short-lived, reservation-bounded `sessionTicket`. The ticket authorizes the handoff; it is not the FMU session or its reconnect handle. Ticket-only clients provide it directly; when a bearer is already present (for example from `FMU_SESSION`), the runner issues and redeems the ticket server-side. The durable session observation is recorded before `session.created` is returned. Internal Station hops do not issue a second ticket; the gateway proxy confirms the observation after Station accepts the session.
-- FMU HTTP and WebSocket JWT authentication accepts only `Authorization: Bearer <jwt>`; query-string and ambient cookie JWTs are rejected. Browser clients that cannot set a WebSocket header must use the opaque `sessionTicket` in `session.create`.
-- After `session.created`, reconnect with `session.attach` using the returned `sessionId` and the original validated context. Do not create a second FMU session or replay the ticket to reconnect; the Station attach grace period preserves the existing FMU state.
-- `session.attach` is bound to the original `sub`, lab, FMU access key, `reservationKey`, `pucHash`, and `targetGatewayId`; a bearer for another overlapping reservation cannot reattach to the session.
-- Explicit rate limits:
-  - Proxy download endpoint (`PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE`, default `20`)
-  - Realtime `session.create` (`WS_CREATE_RATE_LIMIT_PER_MINUTE`, default `30`)
-- Proxy artifact integrity headers:
-  - `X-Proxy-Artifact-Sha256` always present.
-  - `X-Proxy-Artifact-Signature` present when `FMU_PROXY_SIGNING_KEY` is configured.
-
-## Station Mode Notes
-
-- `fmu-runner` keeps the public API on Gateway and forwards execution to Lab Station.
-- `fmu-runner-local` is an explicit development facade; it calls the local
-  `fmu-executor-local` container over the same internal HTTP/WSS contract used
-  for Lab Station. Neither container joins the Station control plane.
-- The local Gateway facade receives a dedicated executor token and the
-  session-observer credential needed for ticket redemption and durable session
-  observation. It does not receive proxy-signing or external Station secrets.
-- FMU execution mode is independent of JWT key retrieval. Full mode uses the
-  local `blockchain-services` JWKS endpoint, Lite mode uses the external
-  issuer's JWKS endpoint, and `AUTH_JWKS_URL` can override either choice.
-- Internal REST targets:
-  - `GET /internal/fmu/catalog` (header `X-FMU-Access-Key`)
-  - `GET /internal/fmu/describe` (header `X-FMU-Access-Key`)
-  - `GET /internal/fmu/backends`
-  - `POST /internal/fmu/simulations/run` (the JSON body contains `accessKey`)
-  - `POST /internal/fmu/simulations/stream` (the JSON body contains `accessKey`)
-- Internal realtime target:
-  - `WS /internal/fmu/sessions`
-- The shared Executor uses FMPy `0.3.32` and supports FMI 2/FMI 3
-  Co-Simulation, including typed scalar
-  and array values. One-shot and stream work is process-isolated on Station;
-  interactive sessions remain stateful on the Station side.
-- Station exposes `GET /internal/fmu/backends` for diagnostics. OMSimulator is
-  reserved as an optional future SSP/multi-FMU backend and is not silently
-  selected for current single-FMU requests.
-- `session.create` and `session.attach` are forwarded with `gatewayContext` containing validated claims plus effective `accessKey`, `labId`, `reservationKey`, `pucHash`, and `targetGatewayId`.
-- Gateway does not execute FMUs in-process. Run, stream and realtime requests
-  are forwarded to the configured remote Executor; AAS parsing remains in the
-  Gateway facade.
-- Async jobs, batches, status, cancellation, results and history are forwarded
-  to the Station Executor. FMU Executor 0.2.1 or newer is required for these
-  operations; the Executor owns simulation history and stored results.
-
-## Current limitations and operational contract
-
-- `FMU_BACKEND_MODE=station` forwards catalog, describe, run, stream, realtime
-  sessions, async jobs, batches, status, cancellation, results and history to
-  Lab Station. Use FMU Executor 0.2.1 or newer for the async job APIs. The
-  Station Executor is internal and must not be exposed through OpenResty.
-- External realtime `session.create` always obtains a reservation-scoped ticket
-  and records the durable observation before `session.created`; a bearer or
-  `FMU_SESSION` is not a bypass.
-- `session.attach` checks the original subject, lab, access key,
-  `reservationKey`, `pucHash` and `targetGatewayId`.
-- In station mode, a public WebSocket disconnect closes only the Gateway's
-  internal channel; Lab Station retains the FMU state for its configured
-  `FMU_ATTACH_GRACE_SECONDS` window so a new authenticated channel can attach.
-- Gateway records the accepted-session observation before forwarding work. A
-  remote execution failure remains visible through that observation; simulation
-  history is not currently stored by Gateway.
+The Gateway owns public JWT and ticket authorization, session observation,
+rate limits, and proxy artifact integrity headers. Their user-facing contract
+is described in [FMI/FMU support](../docs/fmi-fmu-support.md). The internal
+message protocol, execution limits and Station API are owned by the
+[FMU Executor](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md).

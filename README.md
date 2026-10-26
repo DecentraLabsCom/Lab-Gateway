@@ -137,8 +137,10 @@ upstream alias. When testing AAS with the local runner, start the `aas` profile
 alongside `fmu-local-dev`; the Gateway facade reaches BaSyx over the internal
 `fmu_aas` network and the local Executor over the isolated `fmu_local_edge`
 network. The local profile pulls the version pinned by `FMU_EXECUTOR_IMAGE`,
-so it does not require a separate FMU-Executor checkout. Neither service joins
-the Station/control-plane networks. For the complete configuration model, see
+so it does not require a separate FMU-Executor checkout. The Executor joins
+only `fmu_local_edge`; the local runner also joins `fmu_status`, `fmu_auth`,
+and `fmu_aas`. Neither joins the production Station or broader FMU-control
+networks. For the complete configuration model, see
 [Configuration reference](docs/reference/configuration.md).
 
 `FMU_BACKEND_MODE` selects where the FMU executes and is independent of the

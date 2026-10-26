@@ -109,10 +109,17 @@ For the complete design and trust requirements, read
 
 ### Offer an FMU or AAS resource
 
-- [FMI/FMU support](fmi-fmu-support.md) is the public execution and proxy guide.
-- [AAS support](aas-support.md) describes Asset Administration Shell metadata.
+- [FMI/FMU support](fmi-fmu-support.md) covers Gateway-facing FMU access,
+  proxy delivery, and provider workflows.
+- [FMU Executor documentation index](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md)
+  links to the authoritative configuration, private API, and runtime/FMI
+  guides.
+- [AAS support](aas-support.md) covers the architecture, provider workflows,
+  generated metadata and variable-access policy.
+- [FMU visual assets](aas-fmu-visual-assets.md) describes GLB and Three.js
+  assets linked through an FMU's AAS shell.
 - Component details live in [FMU Runner](../fmu-runner/README.md),
-  [FMU data layout](../fmu-data/README.md), and
+  [Gateway FMU development data](../fmu-data/README.md), and
   [FMU proxy runtime](../fmu-proxy-runtime/README.md).
 
 ### Diagnose or verify a deployment

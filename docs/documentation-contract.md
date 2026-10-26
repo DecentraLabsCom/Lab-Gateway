@@ -10,8 +10,8 @@ When two descriptions disagree, use this order:
 
 1. Deployed Smart-Contracts ABI, selector manifest and on-chain state.
 2. Executable configuration and migrations in
-   `blockchain-services` plus the OpenResty/Lab Gateway
-   implementation.
+   `blockchain-services`, the OpenResty/Lab Gateway implementation, and the
+   FMU Executor implementation for its runtime contract.
 3. The owning workflow and service guides listed below.
 4. Marketplace audience guides, tutorials and translations.
 
@@ -28,6 +28,7 @@ security boundaries or state transitions.
 | Reservation, intent and on-chain lifecycle | [Institutional reservation workflow](workflows/institutional-reservation-workflow.md) | Marketplace reservation and provider guides |
 | Check-in, access-code redemption and session evidence | [Institutional check-in, access and sessions](workflows/institutional-check-in-access-sessions.md) | Guacamole policy, eduGAIN guide, Marketplace access guides |
 | Backend roles and endpoint contracts | [`blockchain-services` API reference](../blockchain-services/docs/reference/API_REFERENCE.md) and [authentication guide](../blockchain-services/docs/services/authentication/AUTH.md) | Backend `README.md`, Marketplace integration notes |
+| FMU runtime, private API, validation, limits, isolation, and FMI conformance | [FMU Executor README](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md) | Gateway docs cover public access, authorization, and forwarding |
 | Gateway session policy | [Guacamole session policy](guacamole-session-policy.md) | Tutorials and operations guide |
 | Smart-contract behavior | Deployed contract, ABI and [Smart-Contracts docs](../../Smart-Contracts/docs/README.md) | Marketplace catalogue/reservation guides |
 
