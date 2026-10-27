@@ -66,20 +66,33 @@ The authenticated Gateway import endpoint is
 ## Validation and scene bindings
 
 For a GLB upload or FMU companion import, Gateway compares each
-`extras.fmiBindings` entry with the selected FMU's declared outputs and the
-targets supported by Marketplace. The response includes a transient
-`validation` report with the binding counts and any findings; it is derived
-from the FMU and GLB and is not stored in the AAS. A scene with warnings can
+`extras.fmiBindings` entry with the selected FMU's declared inputs or outputs
+and the targets supported by Marketplace. Input bindings are accepted for
+numeric inputs mapped to a position axis with a finite, non-zero scale. The
+response includes a transient `validation` report with binding counts and any
+findings; it is derived from the FMU and GLB and is not stored in the AAS. A scene with warnings can
 still be stored, but Lab Manager shows the findings and asks the provider to
 review them before synchronizing. Public HTTPS GLBs cannot be inspected by
 Gateway and are labelled unchecked. Three.js ZIP validation checks the
 package structure and bundled paths; Marketplace checks the app's startup
 handshake when it is opened.
 
-For an FMU-driven GLB scene, the provider must author the `extras.fmiBindings`
-that connect its visual elements to the relevant FMU outputs. A GLB without
-bindings may render as static geometry, but it cannot behave as an
-output-driven digital twin.
+For an FMU-driven GLB scene, the provider authors `extras.fmiBindings` on nodes
+that represent relevant FMU outputs or writable numeric inputs. Output bindings
+drive scene targets from model samples. An input binding to `position.x`,
+`position.y` or `position.z` also enables constrained dragging in Marketplace;
+the existing `scale` and `offset` map between the input value and the node's
+local position. Each node can have only one binding per position axis for
+unambiguous dragging; the Gateway reports an input binding that shares its
+position target with another binding. FMI minimum and maximum values constrain
+the drag. Scene dragging is available only during live Step by step or
+Continuous execution when Gateway permits runtime writes; initialization values
+remain editable through the standard input controls. A GLB without bindings may render as static
+geometry, but it cannot behave as an FMU-driven digital twin.
+
+See the [DecentraLabs FMI GLB bindings contract](https://github.com/DecentraLabsCom/Marketplace/blob/main/docs/provider/fmi-glb-bindings-contract.md)
+for the canonical versioned specification, target semantics, examples and JSON
+Schema.
 
 ## Marketplace runtime flow
 
@@ -192,9 +205,10 @@ sequenceDiagram
 The AAS File stores the visual asset location and MIME type only. FMI remains the
 source of model execution; the generated GLB interface reads its variable
 descriptions from AAS `SimulationModels` ports when present. Provider-authored
-GLB `extras.fmiBindings` map FMI output names to allowed scene targets and are
-required for output-driven scene behavior, while a Three.js app owns its
-rendering logic. No separate manifest is used. When uploading an `.aasx`
+GLB `extras.fmiBindings` map FMI input and output names to allowed scene targets
+and are required for output-driven or input-interactive scene behavior, while a
+Three.js app owns its rendering logic. No separate manifest is used. When
+uploading an `.aasx`
 package, its Handover Documentation remains authoritative
 and cannot be combined with a separate visual-asset upload. Public HTTPS GLB
 URLs must allow browser CORS, use an origin permitted by Marketplace

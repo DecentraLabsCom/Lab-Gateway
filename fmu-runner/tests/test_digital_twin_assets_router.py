@@ -63,6 +63,84 @@ def _client(
     return TestClient(app)
 
 
+def test_glb_validation_accepts_numeric_input_position_bindings_alongside_outputs():
+    report = assets_router._validate_glb_bindings(
+        {
+            "nodes": [{
+                "name": "Gate",
+                "extras": {"fmiBindings": [
+                    {"variable": "gatePosition", "target": "position.x", "scale": 2, "offset": 1},
+                    {"variable": "gateOpen", "target": "visible"},
+                ]},
+            }],
+        },
+        {"modelVariables": [
+            {"name": "gatePosition", "causality": "input", "type": "Real"},
+            {"name": "gateOpen", "causality": "output", "type": "Boolean"},
+        ]},
+    )
+
+    assert report == {
+        "assetType": "glb",
+        "status": "passed",
+        "bindingCount": 2,
+        "validBindingCount": 2,
+        "issueCount": 0,
+        "issues": [],
+        "message": "Scene bindings match this FMU's declared inputs and outputs.",
+    }
+
+
+def test_glb_validation_warns_when_input_binding_cannot_be_dragged():
+    report = assets_router._validate_glb_bindings(
+        {
+            "nodes": [{
+                "name": "Gate",
+                "extras": {"fmiBindings": [
+                    {"variable": "gateOpen", "target": "position.x"},
+                    {"variable": "gatePosition", "target": "material.color"},
+                    {"variable": "fixedGatePosition", "target": "position.z", "scale": 0},
+                ]},
+            }],
+        },
+        {"modelVariables": [
+            {"name": "gateOpen", "causality": "input", "type": "Boolean"},
+            {"name": "gatePosition", "causality": "input", "type": "Real"},
+            {"name": "fixedGatePosition", "causality": "input", "type": "Real"},
+        ]},
+    )
+
+    assert report["status"] == "warning"
+    assert report["validBindingCount"] == 0
+    assert [issue["code"] for issue in report["issues"]] == [
+        "non_numeric_input",
+        "unsupported_input_target",
+        "non_invertible_input_binding",
+    ]
+
+
+def test_glb_validation_warns_when_an_input_shares_a_scene_target():
+    report = assets_router._validate_glb_bindings(
+        {
+            "nodes": [{
+                "name": "Gate",
+                "extras": {"fmiBindings": [
+                    {"variable": "gatePosition", "target": "position.x"},
+                    {"variable": "actualPosition", "target": "position.x"},
+                ]},
+            }],
+        },
+        {"modelVariables": [
+            {"name": "gatePosition", "causality": "input", "type": "Real"},
+            {"name": "actualPosition", "causality": "output", "type": "Real"},
+        ]},
+    )
+
+    assert report["status"] == "warning"
+    assert report["validBindingCount"] == 1
+    assert [issue["code"] for issue in report["issues"]] == ["competing_input_target"]
+
+
 def test_upload_requires_admin_authentication(tmp_path):
     response = _client(tmp_path).put(
         "/admin/digital-twin-assets/42",
@@ -100,7 +178,7 @@ def test_upload_valid_glb_is_stored_by_content_hash(tmp_path):
             "validBindingCount": 0,
             "issueCount": 0,
             "issues": [],
-            "message": "FMU output metadata was unavailable, so scene bindings could not be checked.",
+            "message": "FMU variable metadata was unavailable, so scene bindings could not be checked.",
         },
     }
     assert (tmp_path / "scenes" / "42" / f"{digest}.glb").read_bytes() == content

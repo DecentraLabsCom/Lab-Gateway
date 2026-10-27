@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import os
 import re
 import struct
@@ -38,6 +39,62 @@ _FMI_BINDING_TARGETS = {
     "scale.x", "scale.y", "scale.z",
     "visible", "material.color",
 }
+_FMI_INPUT_POSITION_TARGETS = {"position.x", "position.y", "position.z"}
+_NUMERIC_FMI_INPUT_TYPES = {
+    "real", "integer", "float32", "float64",
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64",
+}
+
+
+def _is_finite_binding_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _is_binding_color(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return 0 <= value <= 0xFFFFFF
+    return (
+        isinstance(value, float)
+        and math.isfinite(value)
+        and value.is_integer()
+        and 0 <= value <= 0xFFFFFF
+    )
+
+
+def _has_valid_fmi_binding_fields(binding: dict[str, Any]) -> bool:
+    for field in ("scale", "offset", "visibleWhenGreaterThanOrEqual"):
+        if field in binding and not _is_finite_binding_number(binding[field]):
+            return False
+    return all(
+        field not in binding or _is_binding_color(binding[field])
+        for field in ("trueColor", "falseColor")
+    )
+
+
+def _fmi_binding_scale(binding: dict[str, Any]) -> float:
+    raw_scale = binding.get("scale", 1)
+    return float(raw_scale) if _is_finite_binding_number(raw_scale) else math.nan
+
+
+def _is_draggable_input_binding(binding: dict[str, Any], variable: dict[str, Any]) -> bool:
+    return (
+        _has_valid_fmi_binding_fields(binding)
+        and str(variable.get("causality", "")).lower() == "input"
+        and binding.get("target") in _FMI_INPUT_POSITION_TARGETS
+        and str(variable.get("type", "")).lower() in _NUMERIC_FMI_INPUT_TYPES
+        and math.isfinite(_fmi_binding_scale(binding))
+        and _fmi_binding_scale(binding) != 0
+    )
 
 
 def _validate_glb(content: bytes) -> dict[str, Any]:
@@ -108,18 +165,17 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
             "validBindingCount": 0,
             "issueCount": 0,
             "issues": [],
-            "message": "FMU output metadata was unavailable, so scene bindings could not be checked.",
+            "message": "FMU variable metadata was unavailable, so scene bindings could not be checked.",
         }
 
-    output_names: set[str] = set()
+    variables_by_name: dict[str, dict[str, Any]] = {}
     for variable in model_variables:
         if not isinstance(variable, dict):
             continue
         variable_name = variable.get("name")
         if not isinstance(variable_name, str):
             continue
-        if str(variable.get("causality", "")).lower() == "output":
-            output_names.add(variable_name)
+        variables_by_name[variable_name] = variable
     issues: list[dict[str, Any]] = []
     issue_count = 0
     binding_count = 0
@@ -164,6 +220,32 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
             add_issue("invalid_binding_list", "fmiBindings must be an array.", node_name)
             continue
 
+        target_counts: dict[str, int] = {}
+        for candidate in bindings:
+            candidate_target = candidate.get("target") if isinstance(candidate, dict) else None
+            candidate_variable_name = candidate.get("variable") if isinstance(candidate, dict) else None
+            candidate_variable = variables_by_name.get(candidate_variable_name) if isinstance(candidate_variable_name, str) else None
+            candidate_has_valid_fields = (
+                isinstance(candidate, dict) and _has_valid_fmi_binding_fields(candidate)
+            )
+            is_output_binding = (
+                candidate_has_valid_fields
+                and str(candidate_variable.get("causality", "")).lower() == "output"
+                if candidate_variable
+                else False
+            )
+            is_draggable_input = (
+                _is_draggable_input_binding(candidate, candidate_variable)
+                if isinstance(candidate, dict) and candidate_variable
+                else False
+            )
+            if (
+                isinstance(candidate_target, str)
+                and candidate_target in _FMI_BINDING_TARGETS
+                and (is_output_binding or is_draggable_input)
+            ):
+                target_counts[candidate_target] = target_counts.get(candidate_target, 0) + 1
+
         for binding_index, binding in enumerate(bindings):
             binding_count += 1
             if not isinstance(binding, dict):
@@ -173,20 +255,41 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
             variable_name = binding.get("variable")
             target = binding.get("target")
             valid = True
+            for field in ("scale", "offset", "visibleWhenGreaterThanOrEqual"):
+                if field in binding and not _is_finite_binding_number(binding[field]):
+                    add_issue(
+                        "invalid_binding_field",
+                        f"The binding field '{field}' must be a finite JSON number.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+            for field in ("trueColor", "falseColor"):
+                if field in binding and not _is_binding_color(binding[field]):
+                    add_issue(
+                        "invalid_binding_field",
+                        f"The binding field '{field}' must be a non-empty color string or a 24-bit color integer.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
             if not isinstance(variable_name, str) or not variable_name:
-                add_issue("missing_variable", "The binding must name an FMI output variable.", node_name, binding_index)
+                add_issue("missing_variable", "The binding must name an FMI input or output variable.", node_name, binding_index)
                 valid = False
-            elif variable_name not in output_names:
+            elif variable_name not in variables_by_name:
                 add_issue(
-                    "unknown_output",
-                    "The variable is not declared as an output by this FMU.",
+                    "unknown_variable",
+                    "The variable is not declared by this FMU.",
                     node_name,
                     binding_index,
                     variable_name,
                 )
                 valid = False
 
-            if not isinstance(target, str) or target not in _FMI_BINDING_TARGETS:
+            target_is_supported = isinstance(target, str) and target in _FMI_BINDING_TARGETS
+            if not target_is_supported:
                 add_issue(
                     "unsupported_target",
                     "The binding target is not supported by the Marketplace GLB viewer.",
@@ -195,6 +298,59 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
                     variable_name,
                 )
                 valid = False
+
+            variable = variables_by_name.get(variable_name) if isinstance(variable_name, str) else None
+            causality = str(variable.get("causality", "")).lower() if variable else ""
+            if variable and causality not in {"input", "output"}:
+                add_issue(
+                    "unsupported_causality",
+                    "GLB bindings can reference FMI inputs or outputs only.",
+                    node_name,
+                    binding_index,
+                    variable_name,
+                )
+                valid = False
+            elif variable and causality == "input" and target_is_supported:
+                if target not in _FMI_INPUT_POSITION_TARGETS:
+                    add_issue(
+                        "unsupported_input_target",
+                        "Writable scene inputs must target position.x, position.y, or position.z.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                elif target_counts.get(target, 0) > 1:
+                    add_issue(
+                        "competing_input_target",
+                        "This position target has another binding on the node, so the input cannot be dragged.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                elif str(variable.get("type", "")).lower() not in _NUMERIC_FMI_INPUT_TYPES:
+                    add_issue(
+                        "non_numeric_input",
+                        "A draggable scene input must be a numeric FMI variable.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                elif not _has_valid_fmi_binding_fields(binding):
+                    valid = False
+                else:
+                    scale = _fmi_binding_scale(binding)
+                    if not math.isfinite(scale) or scale == 0:
+                        add_issue(
+                            "non_invertible_input_binding",
+                            "An input position binding must have a finite, non-zero scale.",
+                            node_name,
+                            binding_index,
+                            variable_name,
+                        )
+                        valid = False
 
             if valid:
                 valid_binding_count += 1
@@ -209,7 +365,7 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
         "validBindingCount": valid_binding_count,
         "issueCount": issue_count,
         "issues": issues,
-        "message": "Scene bindings match this FMU's declared outputs." if issue_count == 0 else "Review the scene binding findings before publishing.",
+        "message": "Scene bindings match this FMU's declared inputs and outputs." if issue_count == 0 else "Review the scene binding findings before publishing.",
     }
 
 
@@ -234,7 +390,7 @@ async def _asset_validation_report(
             "validBindingCount": 0,
             "issueCount": 0,
             "issues": [],
-            "message": "FMU output metadata was unavailable, so scene bindings could not be checked.",
+            "message": "FMU variable metadata was unavailable, so scene bindings could not be checked.",
         }
     try:
         model_metadata = await get_model_metadata(access_key)
@@ -246,7 +402,7 @@ async def _asset_validation_report(
             "validBindingCount": 0,
             "issueCount": 0,
             "issues": [],
-            "message": "FMU output metadata could not be read, so scene bindings were not checked.",
+            "message": "FMU variable metadata could not be read, so scene bindings were not checked.",
         }
     return _validate_glb_bindings(document, model_metadata)
 
