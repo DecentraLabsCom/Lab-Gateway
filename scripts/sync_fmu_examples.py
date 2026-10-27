@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import math
 import posixpath
 import re
 import shutil
+import struct
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
@@ -115,6 +118,82 @@ def validate_linux_x64_fmu(path: Path) -> set[str]:
     if not linux_x64_entries:
         raise ValueError(f"FMU has no Linux x86_64 binary: {path}")
     return names
+
+
+def validate_local_glb_output_bindings(
+    scene_path: Path,
+    fmu_path: Path,
+    *,
+    require_bindings: bool = True,
+) -> None:
+    """Check companion GLB bindings against the FMU interface they visualize."""
+    try:
+        scene_bytes = scene_path.read_bytes()
+        if len(scene_bytes) < 20 or scene_bytes[:4] != b"glTF":
+            raise ValueError("invalid GLB header")
+        version, declared_length = struct.unpack_from("<II", scene_bytes, 4)
+        chunk_length, chunk_type = struct.unpack_from("<I4s", scene_bytes, 12)
+        if version != 2 or declared_length != len(scene_bytes) or chunk_type != b"JSON":
+            raise ValueError("invalid GLB version, length, or JSON chunk")
+        document = json.loads(scene_bytes[20 : 20 + chunk_length].decode("utf-8").rstrip("\x00 "))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, struct.error, ValueError) as error:
+        raise ValueError(f"Invalid companion GLB {scene_path}: {error}") from error
+    if not isinstance(document, dict) or not isinstance(document.get("nodes"), list):
+        raise ValueError(f"Invalid companion GLB {scene_path}: the node list is missing")
+
+    try:
+        with zipfile.ZipFile(fmu_path) as archive:
+            model_description = ET.fromstring(archive.read("modelDescription.xml"))
+    except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError) as error:
+        raise ValueError(f"Unable to inspect FMU variables in {fmu_path}: {error}") from error
+
+    model_variables = model_description.find("ModelVariables")
+    if model_variables is None:
+        raise ValueError(f"FMU has no ModelVariables interface: {fmu_path}")
+    variables = {
+        variable.get("name"): variable
+        for variable in model_variables
+        if isinstance(variable.get("name"), str)
+    }
+    targets = {
+        "position.x", "position.y", "position.z",
+        "rotation.x", "rotation.y", "rotation.z",
+        "scale.x", "scale.y", "scale.z", "visible", "material.color",
+    }
+    bindings_found = 0
+    for node_index, node in enumerate(document.get("nodes", [])):
+        extras = node.get("extras") if isinstance(node, dict) else None
+        if not isinstance(extras, dict) or "fmiBindings" not in extras:
+            continue
+        bindings = extras["fmiBindings"]
+        if not isinstance(bindings, list):
+            raise ValueError(f"{scene_path}: node {node_index} fmiBindings must be an array")
+        for binding_index, binding in enumerate(bindings):
+            bindings_found += 1
+            if not isinstance(binding, dict):
+                raise ValueError(f"{scene_path}: node {node_index} binding {binding_index} must be an object")
+            name = binding.get("variable")
+            variable = variables.get(name) if isinstance(name, str) else None
+            if variable is None:
+                raise ValueError(f"{scene_path}: binding references unknown FMU variable {name!r}")
+            if (variable.get("causality") or "local").lower() != "output":
+                raise ValueError(
+                    f"{scene_path}: {name!r} is not an FMU output; local GLB companions use output bindings, "
+                    "while writable inputs remain in Run Controls"
+                )
+            target = binding.get("target")
+            if not isinstance(target, str) or target not in targets:
+                raise ValueError(f"{scene_path}: {name!r} has an unsupported target {target!r}")
+            for field in ("scale", "offset", "visibleWhenGreaterThanOrEqual"):
+                if field in binding and (
+                    isinstance(binding[field], bool)
+                    or not isinstance(binding[field], (int, float))
+                    or not math.isfinite(binding[field])
+                ):
+                    raise ValueError(f"{scene_path}: {name!r} has an invalid {field}")
+
+    if bindings_found == 0 and require_bindings:
+        raise ValueError(f"The local GLB has no FMI output bindings: {scene_path}")
 
 
 def copy_verified(origin: Path, destination: Path) -> None:
@@ -617,6 +696,7 @@ def sync(
         warehouse_embedded_scene = archive.read("resources/smart-warehouse-cell.glb")
     if warehouse_embedded_scene != warehouse_scene.read_bytes():
         raise ValueError("The Smart Warehouse FMU's embedded scene differs from its companion GLB.")
+    validate_local_glb_output_bindings(warehouse_scene, warehouse_fmu)
     validate_webapp_bundle(warehouse_app)
     with zipfile.ZipFile(warehouse_app) as archive:
         app_names = set(archive.namelist())
@@ -639,23 +719,29 @@ def sync(
         pendulum_root = examples_root / "local-demos" / "inverted-pendulum"
         pendulum_fmu = pendulum_root / INVERTED_PENDULUM_FMU_NAME
         pendulum_app = pendulum_root / INVERTED_PENDULUM_APP_NAME
+        pendulum_scene = pendulum_root / "InvertedPendulum.glb"
         validate_inverted_pendulum_fmu(pendulum_fmu)
+        validate_local_glb_output_bindings(pendulum_scene, pendulum_fmu)
         validate_local_fmu_session_app(pendulum_app, "inverted-pendulum")
         pendulum_target = target / "local-demos" / "inverted-pendulum" / "linux64"
         pendulum_target.mkdir(parents=True, exist_ok=True)
         copy_verified(pendulum_fmu, pendulum_target / INVERTED_PENDULUM_FMU_NAME)
         copy_verified(pendulum_app, pendulum_target / INVERTED_PENDULUM_APP_NAME)
+        copy_verified(pendulum_scene, pendulum_target / "InvertedPendulum.glb")
 
     if include_local_lateral_motion:
         lateral_root = examples_root / "local-demos" / "bosch-lateral-motion"
         lateral_fmu = lateral_root / LATERAL_MOTION_FMU_NAME
         lateral_app = lateral_root / LATERAL_MOTION_APP_NAME
+        lateral_scene = lateral_root / "LateralMotionControl.glb"
         validate_linux_x64_fmu(lateral_fmu)
+        validate_local_glb_output_bindings(lateral_scene, lateral_fmu)
         validate_local_fmu_session_app(lateral_app, "lateral-motion", {"crossover-suv.glb"})
         lateral_target = target / "local-demos" / "bosch-lateral-motion" / "linux64"
         lateral_target.mkdir(parents=True, exist_ok=True)
         copy_verified(lateral_fmu, lateral_target / LATERAL_MOTION_FMU_NAME)
         copy_verified(lateral_app, lateral_target / LATERAL_MOTION_APP_NAME)
+        copy_verified(lateral_scene, lateral_target / "LateralMotionControl.glb")
         license_path = lateral_root / "LICENSE.txt"
         if license_path.is_file():
             copy_verified(license_path, lateral_target / "LateralMotionControl.LICENSE.txt")
@@ -664,21 +750,26 @@ def sync(
         water_tank_root = examples_root / "local-demos" / "into-cps-water-tank" / "linux64"
         water_tank_fmu = water_tank_root / WATER_TANK_FMU_NAME
         water_tank_app = water_tank_root / WATER_TANK_APP_NAME
+        water_tank_scene = water_tank_root / "singlewatertank-20sim.glb"
         water_tank_entries = validate_linux_x64_fmu(water_tank_fmu)
         if "binaries/linux64/SingleWatertank.so" not in water_tank_entries:
             raise ValueError("The water-tank FMU is missing its Linux x86_64 model binary.")
         validate_water_tank_app(water_tank_app)
+        validate_local_glb_output_bindings(water_tank_scene, water_tank_fmu)
         water_tank_target = target / "local-demos" / "into-cps-water-tank" / "linux64"
         water_tank_target.mkdir(parents=True, exist_ok=True)
         copy_verified(water_tank_fmu, water_tank_target / WATER_TANK_FMU_NAME)
         copy_verified(water_tank_app, water_tank_target / WATER_TANK_APP_NAME)
+        copy_verified(water_tank_scene, water_tank_target / "singlewatertank-20sim.glb")
 
     if include_local_boptest:
         boptest_root = examples_root / "local-demos" / "boptest-building"
         complex_fmu = boptest_root / BOPTEST_COMPLEX_FMU_NAME
         complex_app = boptest_root / BOPTEST_COMPLEX_APP_NAME
+        complex_scene = boptest_root / "BOPTEST-MultizoneOfficeComplexAir.glb"
         complex_license = boptest_root / BOPTEST_COMPLEX_LICENSE_NAME
         validate_boptest_complex_air_fmu(complex_fmu)
+        validate_local_glb_output_bindings(complex_scene, complex_fmu)
         if not complex_license.is_file() or "International Building Performance Simulation Association" not in complex_license.read_text(encoding="utf-8"):
             raise ValueError("The local BOPTEST Complex Air FMU must include its upstream redistribution license.")
         validate_webapp_bundle(complex_app)
@@ -716,6 +807,7 @@ def sync(
         boptest_target.mkdir(parents=True, exist_ok=True)
         copy_verified(complex_fmu, boptest_target / BOPTEST_COMPLEX_FMU_NAME)
         copy_verified(complex_app, boptest_target / BOPTEST_COMPLEX_APP_NAME)
+        copy_verified(complex_scene, boptest_target / "BOPTEST-MultizoneOfficeComplexAir.glb")
         copy_verified(complex_license, boptest_target / "BOPTEST-MultizoneOfficeComplexAir.LICENSE.txt")
 
     if include_local_qfmu:
@@ -741,9 +833,13 @@ def sync(
         motor_root = examples_root / "local-demos" / "dc-motor"
         motor_fmu = motor_root / DC_MOTOR_FMU_NAME
         motor_app = motor_root / DC_MOTOR_APP_NAME
+        motor_scene = motor_root / "DC_motor.glb"
         fmugym_license = motor_root / "FMUGym-LICENSE"
         credibility_license = motor_root / "Credibility-LICENSE.md"
         validate_dc_motor_fmu(motor_fmu)
+        # Shaft orientation is derived by integrating speed samples in the
+        # Three.js app; the current GLB binding contract cannot express that.
+        validate_local_glb_output_bindings(motor_scene, motor_fmu, require_bindings=False)
         validate_dc_motor_app(motor_app)
         if not fmugym_license.is_file() or "MIT License" not in fmugym_license.read_text(encoding="utf-8"):
             raise ValueError("The DC motor FMU must include the upstream FMUGym MIT license.")
@@ -753,6 +849,7 @@ def sync(
         motor_target.mkdir(parents=True, exist_ok=True)
         copy_verified(motor_fmu, motor_target / DC_MOTOR_FMU_NAME)
         copy_verified(motor_app, motor_target / DC_MOTOR_APP_NAME)
+        copy_verified(motor_scene, motor_target / "DC_motor.glb")
         copy_verified(fmugym_license, motor_target / "DC_motor.FMUGym-LICENSE.txt")
         copy_verified(credibility_license, motor_target / "DC_motor.Credibility-LICENSE.md")
 
