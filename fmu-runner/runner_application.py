@@ -120,7 +120,7 @@ from aas_access_policy_resolver import AasAccessPolicyResolver
 from proxy_router import create_proxy_router
 from local_preview import PreviewTickets, create_preview_router
 from local_preview_aasx import LocalPreviewAasxRegistry
-from digital_twin_assets_router import create_digital_twin_assets_router
+from digital_twin_assets_router import create_digital_twin_assets_router, store_local_preview_webapp
 
 FMU_DATA_PATH = CONFIG.fmu_data_path
 _DIGITAL_TWIN_ASSETS_PATH = CONFIG.digital_twin_assets_path
@@ -969,6 +969,17 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
                 include_internal_variables=True,
             )
 
+        def get_local_preview_digital_twin_asset(lab_id: str, access_key: str):
+            if FMU_BACKEND_MODE != "local":
+                return None
+            return store_local_preview_webapp(
+                root=_DIGITAL_TWIN_ASSETS_PATH,
+                lab_id=lab_id,
+                access_key=access_key,
+                fmu_data_root=Path(FMU_DATA_PATH),
+                resolve_local_fmu_path=_resolve_fmu_path,
+            )
+
         _LOCAL_PREVIEW_AASX_REGISTRY = LocalPreviewAasxRegistry(
             get_model_metadata=get_preview_model_metadata,
             sync_fmu_to_basyx=_aas_sync_to_basyx,
@@ -979,6 +990,7 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
             build_aas_shell=fmu_aas_generator.build_aas_shell,
             get_effective_policy=_simulation_effective_access_policy,
             invalidate_access_policy=_invalidate_aas_access_policy,
+            get_digital_twin_asset=get_local_preview_digital_twin_asset,
         )
     return _LOCAL_PREVIEW_AASX_REGISTRY
 
@@ -1004,6 +1016,9 @@ async def _local_preview_access_payload(
     if not isinstance(model_description, dict):
         model_description = {}
     model_variables = model_description.get("modelVariables", policy.get("modelVariables"))
+    import fmu_aas_generator
+
+    visual_assets = await fmu_aas_generator.get_handover_visual_assets(str(claims.get("labId") or ""))
     return {
         **model_description,
         "policySource": policy.get("policySource", "unavailable"),
@@ -1012,6 +1027,7 @@ async def _local_preview_access_payload(
         "accessKey": claims.get("accessKey"),
         "variables": visible_permissions,
         "modelVariables": model_variables if isinstance(model_variables, list) else [],
+        "visualAssets": visual_assets,
     }
 
 

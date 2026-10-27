@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urljoin
 import zipfile
+from html.parser import HTMLParser
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -407,6 +408,27 @@ async def _asset_validation_report(
     return _validate_glb_bindings(document, model_metadata)
 
 
+class _WebappAssetReferenceParser(HTMLParser):
+    """Reject remote asset loads while allowing ordinary HTTPS documentation links."""
+
+    _NAVIGATION_TAGS = frozenset({"a", "area"})
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.has_unbundled_asset = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for name, value in attrs:
+            if name not in {"src", "href"} or not value:
+                continue
+            reference = value.strip()
+            navigation_link = name == "href" and tag.lower() in self._NAVIGATION_TAGS
+            if navigation_link and reference.lower().startswith("https://"):
+                continue
+            if re.match(r"(?:https?:)?//|/", reference, re.IGNORECASE):
+                self.has_unbundled_asset = True
+
+
 def _validate_webapp_archive(content: bytes) -> dict[str, bytes]:
     if not content:
         raise HTTPException(status_code=400, detail="Three.js application archive is empty")
@@ -466,8 +488,13 @@ def _validate_webapp_archive(content: bytes) -> dict[str, bytes]:
         raise HTTPException(status_code=400, detail="Three.js application index.html must use UTF-8") from exc
     if "<html" not in html or "<base" in html:
         raise HTTPException(status_code=400, detail="Three.js application index.html is invalid or uses a base URL")
-    if re.search(r"(?:src|href)\s*=\s*['\"](?:https?:|//|/)", html):
-        raise HTTPException(status_code=400, detail="Three.js application must use bundled relative assets")
+    references = _WebappAssetReferenceParser()
+    references.feed(html)
+    if references.has_unbundled_asset:
+        raise HTTPException(
+            status_code=400,
+            detail="Three.js application must bundle remote assets; HTTPS navigation links are allowed",
+        )
     if len(files) > _MAX_WEBAPP_FILES:
         raise HTTPException(status_code=413, detail="Three.js application has too many files")
     return files
@@ -586,6 +613,50 @@ def _validate_access_key(access_key: Any) -> str:
     ):
         raise HTTPException(status_code=400, detail="Invalid FMU access key")
     return access_key
+
+
+def store_local_preview_webapp(
+    *,
+    root: Path,
+    lab_id: str,
+    access_key: str,
+    fmu_data_root: Path,
+    resolve_local_fmu_path,
+) -> dict[str, Any] | None:
+    """Store a local FMU's companion app under its synthetic preview lab ID.
+
+    This helper is only used by the local-preview provisioner. The public
+    Lab Manager routes continue to accept numeric lab IDs exclusively.
+    """
+    if not isinstance(lab_id, str) or re.fullmatch(r"local_demo_[a-f0-9]{24}", lab_id) is None:
+        raise ValueError("Invalid local preview laboratory ID")
+    access_key = _validate_access_key(access_key)
+    expected_lab_id = f"local_demo_{hashlib.sha256(access_key.encode()).hexdigest()[:24]}"
+    if lab_id != expected_lab_id:
+        raise ValueError("Local preview laboratory ID does not match its FMU")
+    if resolve_local_fmu_path is None:
+        return None
+
+    try:
+        local_root = Path(fmu_data_root).expanduser().resolve(strict=True)
+        fmu_path = Path(resolve_local_fmu_path(access_key)).resolve(strict=True)
+        fmu_path.relative_to(local_root)
+        companion_path = fmu_path.with_name(fmu_path.stem + ".webapp.zip").resolve(strict=True)
+        companion_path.relative_to(local_root)
+    except FileNotFoundError:
+        return None
+    except (ValueError, IndexError) as exc:
+        raise ValueError("Invalid local preview companion app path") from exc
+
+    if not companion_path.is_file():
+        return None
+    try:
+        if companion_path.stat().st_size > _MAX_WEBAPP_ARCHIVE_BYTES:
+            raise HTTPException(status_code=413, detail="Companion Three.js application exceeds the size limit")
+        content = companion_path.read_bytes()
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Companion Three.js application could not be read") from exc
+    return _store_webapp(Path(root).expanduser().resolve(), lab_id, content)
 
 
 async def _read_limited_response(response: httpx.Response, limit: int, label: str) -> bytes:

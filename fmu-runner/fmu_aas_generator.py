@@ -393,6 +393,96 @@ def _shell_submodel_ids(shell: dict[str, Any]) -> list[str]:
     return result
 
 
+async def get_handover_visual_assets(lab_id: str) -> list[dict[str, str]]:
+    """Read local preview visual assets from the linked AAS handover submodel."""
+    normalized_lab_id = str(lab_id or "").strip()
+    if _AAS_LAB_ID_RE.fullmatch(normalized_lab_id) is None or not BASYX_AAS_URL:
+        return []
+
+    shell_id = f"urn:decentralabs:lab:{normalized_lab_id}"
+    handover_id = _submodel_id_for_handover(normalized_lab_id)
+    try:
+        async with httpx.AsyncClient(
+            base_url=BASYX_AAS_URL,
+            headers=_aas_request_headers(),
+            timeout=8.0,
+        ) as client:
+            shell_response = await client.get(f"/shells/{_encode_id(shell_id)}")
+            if shell_response.status_code == 404:
+                return []
+            if shell_response.status_code != 200:
+                raise RuntimeError("AAS shell could not be read")
+            shell = shell_response.json()
+            if not isinstance(shell, dict) or shell.get("id") != shell_id:
+                raise RuntimeError("AAS shell reference is invalid")
+            raw_submodel_ids = shell.get("submodelIds")
+            submodel_ids = (
+                [value for value in raw_submodel_ids if isinstance(value, str)]
+                if isinstance(raw_submodel_ids, list) and raw_submodel_ids
+                else _shell_submodel_ids(shell)
+            )
+            if handover_id not in submodel_ids:
+                return []
+
+            submodel_response = await client.get(f"/submodels/{_encode_id(handover_id)}")
+            if submodel_response.status_code == 404:
+                return []
+            if submodel_response.status_code != 200:
+                raise RuntimeError("AAS handover submodel could not be read")
+            submodel = submodel_response.json()
+            if not isinstance(submodel, dict) or submodel.get("id") != handover_id:
+                raise RuntimeError("AAS handover submodel reference is invalid")
+    except (httpx.RequestError, ValueError) as exc:
+        raise RuntimeError("AAS visual asset references are unavailable") from exc
+
+    visual_assets: list[dict[str, str]] = []
+    pending: list[tuple[Any, int]] = [(submodel.get("submodelElements", []), 0)]
+    visited = 0
+    while pending and visited < 2048 and len(visual_assets) < 32:
+        elements, depth = pending.pop()
+        if depth > 12 or not isinstance(elements, list):
+            continue
+        for element in elements:
+            visited += 1
+            if visited > 2048:
+                break
+            if not isinstance(element, dict):
+                continue
+            if element.get("modelType") == "File":
+                url = element.get("value")
+                content_type = str(element.get("contentType") or "").split(";", 1)[0].strip().lower()
+                if not isinstance(url, str):
+                    continue
+                if (
+                    content_type == "text/html"
+                    and re.fullmatch(
+                        rf"/digital-twin-apps/{re.escape(normalized_lab_id)}/[a-f0-9]{{64}}/index\.html",
+                        url,
+                    )
+                ):
+                    renderer = "threejs-app"
+                elif (
+                    content_type == "model/gltf-binary"
+                    and re.fullmatch(
+                        rf"/digital-twin-scenes/{re.escape(normalized_lab_id)}/[a-f0-9]{{64}}\.glb",
+                        url,
+                    )
+                ):
+                    renderer = "glb"
+                else:
+                    continue
+                visual_assets.append({
+                    "submodelId": handover_id,
+                    "elementIdShort": str(element.get("idShort") or ""),
+                    "url": url,
+                    "contentType": content_type,
+                    "renderer": renderer,
+                })
+            elif isinstance(element.get("value"), list):
+                pending.append((element["value"], depth + 1))
+    return visual_assets
+
+
 async def _generated_updated_at(
     client: httpx.AsyncClient,
     lab_id: str,

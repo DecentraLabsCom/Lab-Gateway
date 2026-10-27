@@ -46,6 +46,7 @@ class LocalPreviewAasxRegistry:
         build_aas_shell: Callable[..., dict],
         get_effective_policy: Callable[[dict], Any],
         invalidate_access_policy: Callable[..., Any],
+        get_digital_twin_asset: Callable[[str, str], Any] | None = None,
     ):
         self.get_model_metadata = get_model_metadata
         self.sync_fmu_to_basyx = sync_fmu_to_basyx
@@ -56,6 +57,7 @@ class LocalPreviewAasxRegistry:
         self.build_aas_shell = build_aas_shell
         self.get_effective_policy = get_effective_policy
         self.invalidate_access_policy = invalidate_access_policy
+        self.get_digital_twin_asset = get_digital_twin_asset
         self._locks: dict[str, asyncio.Lock] = {}
         self._cache: dict[str, dict[str, Any]] = {}
 
@@ -99,25 +101,54 @@ class LocalPreviewAasxRegistry:
             if cached is not None:
                 return dict(cached)
 
+            asset = self.get_digital_twin_asset(lab_id, access_key) if self.get_digital_twin_asset else None
+            asset_url = str(asset.get("path") or "").strip() if isinstance(asset, dict) else ""
+            if asset_url and re.fullmatch(
+                rf"/digital-twin-apps/{re.escape(lab_id)}/[a-f0-9]{{64}}/index\.html",
+                asset_url,
+            ) is None:
+                raise RuntimeError("Local digital twin application reference is invalid")
+
             link_path = self.get_link_path(lab_id)
             if link_path.exists():
                 if self.get_aasx_package(lab_id) is None:
                     raise RuntimeError("Local AASX link has no package record")
-                policy = await self.get_effective_policy(claims)
-                if not isinstance(policy, dict) or not str(policy.get("policySource") or "").startswith("aas-"):
-                    raise RuntimeError("Linked local AASX policy is unavailable")
-                self._cache[lab_id] = dict(policy)
-                return dict(policy)
+                try:
+                    existing_link = json.loads(link_path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise RuntimeError("Local AASX link is unavailable") from exc
+                stored_asset_url = (
+                    str(existing_link.get("digitalTwinAssetUrl") or "").strip()
+                    if isinstance(existing_link, dict)
+                    else ""
+                )
+                if stored_asset_url and re.fullmatch(
+                    rf"/digital-twin-apps/{re.escape(lab_id)}/[a-f0-9]{{64}}/index\.html",
+                    stored_asset_url,
+                ) is None:
+                    raise RuntimeError("Local digital twin application reference is invalid")
+                if asset is None:
+                    asset_url = stored_asset_url
+                if isinstance(existing_link, dict) and existing_link.get("digitalTwinAssetUrl", "") == asset_url:
+                    policy = await self.get_effective_policy(claims)
+                    if not isinstance(policy, dict) or not str(policy.get("policySource") or "").startswith("aas-"):
+                        raise RuntimeError("Linked local AASX policy is unavailable")
+                    self._cache[lab_id] = dict(policy)
+                    return dict(policy)
 
             metadata = await self.get_model_metadata(access_key)
             if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
                 raise RuntimeError("Local FMU metadata is unavailable")
 
+            extra_info = {"description": "Local-only digital twin access-policy validation."}
+            if asset_url:
+                extra_info["digitalTwinAssetUrl"] = asset_url
+
             generated = self._require_sync(await self.sync_fmu_to_basyx(
                 lab_id=lab_id,
                 access_key=access_key,
                 metadata=metadata,
-                extra_info={"description": "Local-only digital twin access-policy validation."},
+                extra_info=extra_info,
             ), "metadata sync")
             shell_id = generated.get("aasId")
             if not isinstance(shell_id, str) or shell_id != f"{_SHELL_ID_PREFIX}{lab_id}":
@@ -126,7 +157,7 @@ class LocalPreviewAasxRegistry:
                 lab_id,
                 access_key,
                 metadata,
-                extra_info={"description": "Local-only digital twin access-policy validation."},
+                extra_info=extra_info,
             )
             submodel_ids = self._submodel_ids(shell)
             if not submodel_ids or not generated.get("accessControlSubmodelId"):
@@ -169,6 +200,7 @@ class LocalPreviewAasxRegistry:
                 "labId": lab_id,
                 "submodelIds": resolved_submodel_ids,
                 "accessControlSubmodelId": imported.get("accessControlSubmodelId"),
+                "digitalTwinAssetUrl": asset_url,
             }
             link_path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path = link_path.with_name(f".{link_path.name}.{uuid4().hex}.tmp")
