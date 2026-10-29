@@ -15,6 +15,7 @@
         let fmuDescriptionAccessKey = '';
         let gatewayUploadedAssetUrl = '';
         let gatewayUploadedAssetAccessKey = '';
+        let gatewayUploadedAssetType = '';
         let acknowledgedAssetValidationKey = '';
         let lastAssetValidation = null;
 
@@ -114,6 +115,31 @@
 
         function isGatewayAssetPath(path, assetType) {
             return assetType === 'glb' ? isGatewaySceneAssetPath(path) : isGatewayApplicationAssetPath(path);
+        }
+
+        function inferAssetTypeFromFile(file) {
+            const name = String(file?.name || '').toLowerCase();
+            if (name.endsWith('.glb')) return 'glb';
+            if (name.endsWith('.zip')) return 'threejs-app';
+            return '';
+        }
+
+        function inferAssetTypeFromUrl(value) {
+            const url = String(value || '').trim();
+            if (isGatewaySceneAssetPath(url) || /\.glb(?:[?#].*)?$/i.test(url)) return 'glb';
+            if (isGatewayApplicationAssetPath(url) || /\.(?:webapp\.)?zip(?:[?#].*)?$/i.test(url)) return 'threejs-app';
+            return '';
+        }
+
+        function updateAssetFileAccept(assetType) {
+            if (!fields.assetFileInput) return;
+            fields.assetFileInput.accept = assetType === 'glb'
+                ? '.glb,model/gltf-binary'
+                : assetType === 'threejs-app'
+                    ? '.zip,application/zip'
+                    : assetType === 'auto'
+                        ? '.glb,.zip,model/gltf-binary,application/zip'
+                        : '';
         }
 
         function assetValidationKey(labId, accessKey, assetType, assetFile, assetUrl) {
@@ -277,6 +303,7 @@
         function updateAssetVisibility() {
             if (!fields.assetField) return;
             const laboratory = selectedLaboratory();
+            const wasHidden = fields.assetField.hidden;
             fields.assetField.hidden = laboratory.resourceType !== 1;
             if (laboratory.resourceType !== 1) {
                 if (fields.assetType) fields.assetType.value = '';
@@ -285,7 +312,12 @@
                 if (fields.assetFileName) fields.assetFileName.textContent = 'No file chosen';
                 gatewayUploadedAssetUrl = '';
                 gatewayUploadedAssetAccessKey = '';
+                gatewayUploadedAssetType = '';
                 return;
+            }
+            if (wasHidden && fields.assetType && !fields.assetType.value) {
+                fields.assetType.value = 'auto';
+                updateAssetFileAccept('auto');
             }
             if (!fields.assetUrl) return;
 
@@ -298,11 +330,12 @@
                 fields.assetUrl.value = '';
                 gatewayUploadedAssetUrl = '';
                 gatewayUploadedAssetAccessKey = '';
+                gatewayUploadedAssetType = '';
             }
         }
 
         async function importCompanionAsset(labId, accessKey, assetType) {
-            if (!['glb', 'threejs-app'].includes(assetType)) {
+            if (!['auto', 'glb', 'threejs-app'].includes(assetType)) {
                 throw new Error('Choose GLB or Three.js application before importing a companion asset');
             }
             const response = await fetchImpl(
@@ -315,20 +348,24 @@
             );
             const body = await response.json().catch(() => ({}));
             if (!response.ok) {
-                throw new Error(body.detail || `Companion asset import failed (HTTP ${response.status})`);
+                const error = new Error(body.detail || `Companion asset import failed (HTTP ${response.status})`);
+                error.status = response.status;
+                throw error;
             }
-            if (!isGatewayAssetPath(body.path, assetType)) {
+            const resolvedAssetType = assetType === 'auto' ? String(body.assetType || '').trim() : assetType;
+            if (!['glb', 'threejs-app'].includes(resolvedAssetType) || !isGatewayAssetPath(body.path, resolvedAssetType)) {
                 throw new Error('Gateway returned an invalid digital twin asset path');
             }
             if (fields.assetUrl) fields.assetUrl.value = body.path;
             gatewayUploadedAssetUrl = body.path;
             gatewayUploadedAssetAccessKey = accessKey;
+            gatewayUploadedAssetType = resolvedAssetType;
             lastAssetValidation = {
-                key: assetValidationKey(labId, accessKey, assetType, null, body.path),
+                key: assetValidationKey(labId, accessKey, resolvedAssetType, null, body.path),
                 report: body.validation,
             };
             renderAssetValidation(body.validation);
-            return body;
+            return { ...body, assetType: resolvedAssetType };
         }
 
         function appendMetadataToForm(form, metadata) {
@@ -351,18 +388,31 @@
                 showToast('Select an FMU laboratory', 'error');
                 return;
             }
-            const assetType = isFmu
+            const selectedAssetType = isFmu
                 ? String(extraInfo.digitalTwinAssetType || fields.assetType?.value || '').trim()
                 : '';
+            let assetType = selectedAssetType;
+            if (assetType === 'auto') {
+                assetType = assetFile
+                    ? inferAssetTypeFromFile(assetFile)
+                    : gatewayUploadedAssetUrl === String(extraInfo.digitalTwinAssetUrl || '').trim()
+                        ? gatewayUploadedAssetType
+                        : inferAssetTypeFromUrl(extraInfo.digitalTwinAssetUrl);
+            }
+            const hasVisualAsset = Boolean(
+                assetFile
+                || extraInfo.digitalTwinAssetUrl
+                || (selectedAssetType && selectedAssetType !== 'auto'),
+            );
             if (aasxFile && assetFile) {
                 showToast('Choose either an AASX package or a visual asset for generated FMU metadata', 'error');
                 return;
             }
-            if (aasxFile && (assetType || extraInfo.digitalTwinAssetUrl)) {
+            if (aasxFile && hasVisualAsset) {
                 showToast('An uploaded AASX package must contain its own visual asset reference', 'error');
                 return;
             }
-            if ((assetFile || assetType || extraInfo.digitalTwinAssetUrl) && !isFmu) {
+            if (hasVisualAsset && !isFmu) {
                 showToast('A visual companion asset can only be attached to an FMU laboratory', 'error');
                 return;
             }
@@ -412,18 +462,24 @@
                     if (fields.assetUrl) fields.assetUrl.value = syncInfo.digitalTwinAssetUrl;
                     gatewayUploadedAssetUrl = syncInfo.digitalTwinAssetUrl;
                     gatewayUploadedAssetAccessKey = accessKey;
+                    gatewayUploadedAssetType = assetType;
                 }
                 if (
                     isFmu
                     && !assetFile
                     && !aasxFile
-                    && assetType
+                    && selectedAssetType
                     && !syncInfo.digitalTwinAssetUrl
                 ) {
-                    const importedAsset = await importCompanionAsset(labId, accessKey, assetType);
-                    syncInfo.digitalTwinAssetUrl = importedAsset.path;
-                    const validationKey = assetValidationKey(labId, accessKey, assetType, null, importedAsset.path);
-                    if (!reviewAssetValidation(importedAsset.validation, validationKey)) return;
+                    try {
+                        const importedAsset = await importCompanionAsset(labId, accessKey, selectedAssetType);
+                        syncInfo.digitalTwinAssetUrl = importedAsset.path;
+                        const validationKey = assetValidationKey(labId, accessKey, importedAsset.assetType, null, importedAsset.path);
+                        if (!reviewAssetValidation(importedAsset.validation, validationKey)) return;
+                    } catch (error) {
+                        if (selectedAssetType !== 'auto' || error.status !== 404) throw error;
+                        showToast('No REF visual asset or same-name companion was found. Sync can continue; upload a .webapp.zip or .glb if needed.', 'info');
+                    }
                 } else if (!assetFile && assetType && !aasxFile && syncInfo.digitalTwinAssetUrl) {
                     const validationKey = assetValidationKey(labId, accessKey, assetType, null, syncInfo.digitalTwinAssetUrl);
                     const knownValidation = lastAssetValidation?.key === validationKey
@@ -541,11 +597,7 @@
                 });
             }
             if (fields.assetType) {
-                if (fields.assetFileInput) {
-                    fields.assetFileInput.accept = fields.assetType.value === 'glb'
-                        ? '.glb,model/gltf-binary'
-                        : fields.assetType.value === 'threejs-app' ? '.zip,application/zip' : '';
-                }
+                updateAssetFileAccept(fields.assetType.value);
                 fields.assetType.addEventListener('change', () => {
                     clearAssetValidation();
                     if (fields.assetUrl) fields.assetUrl.value = '';
@@ -553,11 +605,8 @@
                     if (fields.assetFileName) fields.assetFileName.textContent = 'No file chosen';
                     gatewayUploadedAssetUrl = '';
                     gatewayUploadedAssetAccessKey = '';
-                    if (fields.assetFileInput) {
-                        fields.assetFileInput.accept = fields.assetType.value === 'glb'
-                            ? '.glb,model/gltf-binary'
-                            : fields.assetType.value === 'threejs-app' ? '.zip,application/zip' : '';
-                    }
+                    gatewayUploadedAssetType = '';
+                    updateAssetFileAccept(fields.assetType.value);
                 });
             }
             if (fields.assetFileInput) {
@@ -585,16 +634,20 @@
                     fields.importAssetButton.disabled = true;
                     try {
                         const asset = await importCompanionAsset(laboratory.labId, laboratory.accessKey, assetType);
-                        const validationKey = assetValidationKey(laboratory.labId, laboratory.accessKey, assetType, null, asset.path);
+                        const validationKey = assetValidationKey(laboratory.labId, laboratory.accessKey, asset.assetType, null, asset.path);
                         if (needsAssetValidationAcknowledgement(asset.validation)) {
                             acknowledgedAssetValidationKey = validationKey;
                             showToast('Review the validation findings before synchronizing the AAS.', 'info');
                         } else {
-                            showToast(`Companion asset imported from ${asset.source || 'FMU backend'}`, 'success');
+                            showToast(`Companion asset imported (${asset.assetSource || asset.source || 'FMU backend'})`, 'success');
                         }
                     } catch (error) {
                         logger.error(error);
-                        showToast(`Companion asset import failed: ${error.message}`, 'error');
+                        if (assetType === 'auto' && error.status === 404) {
+                            showToast('No REF visual asset or same-name companion was found. Upload a .webapp.zip or .glb if you want to add one.', 'info');
+                        } else {
+                            showToast(`Companion asset import failed: ${error.message}`, 'error');
+                        }
                     } finally {
                         fields.importAssetButton.disabled = false;
                     }

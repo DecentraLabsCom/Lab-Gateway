@@ -19,6 +19,8 @@ from html.parser import HTMLParser
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 
+from fmi_ls_ref import read_visual_asset as read_fmi_ls_ref_visual_asset
+
 
 _MAX_SCENE_BYTES = 50 * 1024 * 1024
 _MAX_WEBAPP_ARCHIVE_BYTES = 50 * 1024 * 1024
@@ -598,8 +600,8 @@ def _store_webapp(root: Path, lab_id: str, content: bytes) -> dict[str, Any]:
 
 def _validate_asset_type(asset_type: Any) -> str:
     normalized = str(asset_type or "").strip().lower()
-    if normalized not in {"glb", "threejs-app"}:
-        raise HTTPException(status_code=400, detail="assetType must be glb or threejs-app")
+    if normalized not in {"auto", "glb", "threejs-app"}:
+        raise HTTPException(status_code=400, detail="assetType must be auto, glb, or threejs-app")
     return normalized
 
 
@@ -697,6 +699,24 @@ async def _read_limited_request(request: Request, limit: int, *, label: str) -> 
     return b"".join(chunks)
 
 
+def _read_local_companion(path: Path, asset_type: str) -> bytes | None:
+    if not path.is_file():
+        return None
+    size_limit = _MAX_SCENE_BYTES if asset_type == "glb" else _MAX_WEBAPP_ARCHIVE_BYTES
+    label = "GLB" if asset_type == "glb" else "Three.js application"
+    try:
+        if path.stat().st_size > size_limit:
+            raise HTTPException(status_code=413, detail=f"Companion {label} exceeds the size limit")
+        content = path.read_bytes()
+    except HTTPException:
+        raise
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"Companion {label} could not be read") from exc
+    if len(content) > size_limit:
+        raise HTTPException(status_code=413, detail=f"Companion {label} exceeds the size limit")
+    return content
+
+
 def create_digital_twin_assets_router(
     *,
     asset_root: Path,
@@ -767,10 +787,9 @@ def create_digital_twin_assets_router(
             raise HTTPException(status_code=400, detail="A JSON accessKey is required")
         access_key = _validate_access_key(body.get("accessKey"))
         asset_type = _validate_asset_type(body.get("assetType"))
-        is_glb = asset_type == "glb"
-        suffix = ".glb" if is_glb else ".webapp.zip"
-        media_type = "model/gltf-binary" if is_glb else "application/zip"
-        size_limit = _MAX_SCENE_BYTES if is_glb else _MAX_WEBAPP_ARCHIVE_BYTES
+        selected_asset_type = asset_type
+        asset_source = "legacy-sibling"
+        content = None
 
         if fmu_backend_mode == "local":
             if resolve_local_fmu_path is None:
@@ -779,20 +798,48 @@ def create_digital_twin_assets_router(
                 fmu_path = Path(resolve_local_fmu_path(access_key)).resolve(strict=True)
                 local_root = Path(fmu_data_root).expanduser().resolve(strict=True)
                 fmu_path.relative_to(local_root)
-                companion_path = fmu_path.with_name(fmu_path.stem + suffix).resolve(strict=True)
-                companion_path.relative_to(local_root.resolve())
             except FileNotFoundError as exc:
-                raise HTTPException(status_code=404, detail="Companion digital twin asset not found for this FMU") from exc
+                raise HTTPException(status_code=404, detail="FMU was not found") from exc
             except (ValueError, IndexError) as exc:
-                raise HTTPException(status_code=400, detail="Invalid companion GLB path") from exc
-            try:
-                if not companion_path.is_file():
+                raise HTTPException(status_code=400, detail="Invalid companion asset path") from exc
+
+            if asset_type == "auto":
+                declared_asset = read_fmi_ls_ref_visual_asset(fmu_path)
+                if declared_asset is not None and declared_asset[1] == "threejs-app":
+                    content, selected_asset_type, asset_source = declared_asset
+                else:
+                    app_path = fmu_path.with_name(fmu_path.stem + ".webapp.zip")
+                    try:
+                        app_path = app_path.resolve(strict=True)
+                        app_path.relative_to(local_root)
+                    except (FileNotFoundError, ValueError):
+                        app_path = None
+                    if app_path is not None:
+                        content = _read_local_companion(app_path, "threejs-app")
+                        selected_asset_type = "threejs-app"
+                        asset_source = "legacy-sibling"
+                    elif declared_asset is not None:
+                        content, selected_asset_type, asset_source = declared_asset
+                    else:
+                        glb_path = fmu_path.with_name(fmu_path.stem + ".glb")
+                        try:
+                            glb_path = glb_path.resolve(strict=True)
+                            glb_path.relative_to(local_root)
+                        except (FileNotFoundError, ValueError):
+                            glb_path = None
+                        if glb_path is not None:
+                            content = _read_local_companion(glb_path, "glb")
+                            selected_asset_type = "glb"
+            else:
+                suffix = ".glb" if asset_type == "glb" else ".webapp.zip"
+                try:
+                    companion_path = fmu_path.with_name(fmu_path.stem + suffix).resolve(strict=True)
+                    companion_path.relative_to(local_root)
+                except (FileNotFoundError, ValueError) as exc:
+                    raise HTTPException(status_code=404, detail="Companion digital twin asset not found for this FMU") from exc
+                content = _read_local_companion(companion_path, asset_type)
+                if content is None:
                     raise HTTPException(status_code=404, detail="Companion digital twin asset not found for this FMU")
-                if companion_path.stat().st_size > size_limit:
-                    raise HTTPException(status_code=413, detail="Companion digital twin asset exceeds the size limit")
-                content = companion_path.read_bytes()
-            except OSError as exc:
-                raise HTTPException(status_code=503, detail="Companion digital twin asset could not be read") from exc
             source = "gateway"
         elif fmu_backend_mode == "station":
             if not station_base_url or not station_internal_token:
@@ -807,15 +854,50 @@ def create_digital_twin_assets_router(
                     timeout=station_request_timeout,
                     follow_redirects=False,
                 ) as client:
-                    async with client.stream("GET", station_url, params={"assetType": asset_type}, headers=headers) as response:
-                        if response.status_code == 404:
-                            raise HTTPException(status_code=404, detail="Companion digital twin asset not found on Lab Station")
-                        if response.status_code != 200:
-                            raise HTTPException(status_code=502, detail="Lab Station could not provide the companion digital twin asset")
-                        response_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-                        if response_type != media_type:
-                            raise HTTPException(status_code=502, detail="Lab Station returned an invalid digital twin asset type")
-                        content = await _read_limited_response(response, size_limit, asset_type)
+                    async def read_station_asset(requested_type: str):
+                        async with client.stream(
+                            "GET", station_url, params={"assetType": requested_type}, headers=headers,
+                        ) as response:
+                            if response.status_code == 404:
+                                return None
+                            if response.status_code == 400 and requested_type == "auto":
+                                try:
+                                    error_body = json.loads((await response.aread()).decode("utf-8"))
+                                except (UnicodeDecodeError, json.JSONDecodeError):
+                                    error_body = {}
+                                if error_body.get("detail") == "INVALID_COMPANION_ASSET_TYPE":
+                                    return "auto-unsupported"
+                            if response.status_code != 200:
+                                raise HTTPException(status_code=502, detail="Lab Station could not provide the companion digital twin asset")
+
+                            resolved_type = requested_type
+                            resolved_source = "legacy-sibling"
+                            if requested_type == "auto":
+                                resolved_type = response.headers.get("x-digital-twin-asset-type", "").strip().lower()
+                                if resolved_type not in {"glb", "threejs-app"}:
+                                    raise HTTPException(status_code=502, detail="Lab Station returned an invalid digital twin asset type")
+                                resolved_source = response.headers.get("x-digital-twin-asset-source", "").strip().lower()
+                                if resolved_source not in {"fmi-ls-ref", "legacy-sibling"}:
+                                    raise HTTPException(status_code=502, detail="Lab Station returned an invalid digital twin asset source")
+                            response_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                            expected_media_type = "model/gltf-binary" if resolved_type == "glb" else "application/zip"
+                            if response_type != expected_media_type:
+                                raise HTTPException(status_code=502, detail="Lab Station returned an invalid digital twin asset type")
+                            size_limit = _MAX_SCENE_BYTES if resolved_type == "glb" else _MAX_WEBAPP_ARCHIVE_BYTES
+                            response_content = await _read_limited_response(response, size_limit, resolved_type)
+                            return response_content, resolved_type, resolved_source
+
+                    station_asset = await read_station_asset(asset_type)
+                    if station_asset == "auto-unsupported":
+                        # Older Station Executors do not accept `auto`; preserve their
+                        # same-name companion behavior until the REF-aware release lands.
+                        for fallback_type in ("threejs-app", "glb"):
+                            station_asset = await read_station_asset(fallback_type)
+                            if station_asset is not None:
+                                break
+                    if station_asset is None or station_asset == "auto-unsupported":
+                        raise HTTPException(status_code=404, detail="Companion digital twin asset not found on Lab Station")
+                    content, selected_asset_type, asset_source = station_asset
             except HTTPException:
                 raise
             except httpx.TimeoutException as exc:
@@ -826,6 +908,10 @@ def create_digital_twin_assets_router(
         else:
             raise HTTPException(status_code=503, detail="Digital twin FMU backend mode is unsupported")
 
+        if content is None:
+            raise HTTPException(status_code=404, detail="Companion digital twin asset not found for this FMU")
+
+        is_glb = selected_asset_type == "glb"
         document = _validate_glb(content) if is_glb else None
         stored = (
             _store_scene(root, lab_id, content, validated_document=document)
@@ -833,9 +919,11 @@ def create_digital_twin_assets_router(
             else _store_webapp(root, lab_id, content)
         )
         stored["source"] = source
+        stored["assetSource"] = asset_source
+        stored["assetType"] = selected_asset_type
         stored["accessKey"] = access_key
         stored["validation"] = await _asset_validation_report(
-            asset_type,
+            selected_asset_type,
             access_key=access_key,
             document=document,
             get_model_metadata=get_model_metadata,

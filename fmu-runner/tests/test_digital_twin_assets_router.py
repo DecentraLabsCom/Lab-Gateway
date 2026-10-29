@@ -39,6 +39,28 @@ def _webapp_archive(entries: dict[str, bytes] | None = None) -> bytes:
     return buffer.getvalue()
 
 
+def _fmu_with_ref_assets(related_files: list[tuple[str, str]], entries: dict[str, bytes]) -> bytes:
+    manifest_items = "".join(
+        f'<Related type="{media_type}" source="{source}" role="other" />'
+        for media_type, source in related_files
+    )
+    manifest = (
+        '<fmiReferences xmlns:fmi-ls="http://fmi-standard.org/fmi-ls-manifest" '
+        'fmi-ls:fmi-ls-name="org.fmi-standard.fmi-ls-ref" '
+        'fmi-ls:fmi-ls-version="1.0.0-beta.1">'
+        f"{manifest_items}</fmiReferences>"
+    ).encode()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "extra/org.fmi-standard.fmi-ls-ref/fmi-ls-manifest.xml",
+            manifest,
+        )
+        for name, payload in entries.items():
+            archive.writestr(name, payload)
+    return buffer.getvalue()
+
+
 def _client(
     tmp_path: Path,
     *,
@@ -437,6 +459,101 @@ def test_import_from_local_gateway_uses_companion_threejs_app(tmp_path):
     assert (tmp_path / "scenes" / "42" / digest / "index.html").is_file()
 
 
+def test_import_auto_prefers_ref_webapp_to_ref_glb_and_legacy_companions(tmp_path):
+    data_root = tmp_path / "fmu-data"
+    fmu_path = data_root / "SmartWarehouseCell.fmu"
+    fmu_path.parent.mkdir(parents=True)
+    fmu_path.write_bytes(_fmu_with_ref_assets(
+        [
+            ("model/gltf-binary", "../../visualizations/cell.glb"),
+            ("application/zip", "../../visualizations/cell.webapp.zip"),
+        ],
+        {
+            "visualizations/cell.glb": _glb(),
+            "visualizations/cell.webapp.zip": _webapp_archive(),
+        },
+    ))
+    fmu_path.with_suffix(".glb").write_bytes(_glb({"asset": {"version": "2.0"}, "scene": "legacy"}))
+    fmu_path.with_suffix(".webapp.zip").write_bytes(_webapp_archive({
+        "index.html": b"<!doctype html><html>legacy</html>",
+    }))
+    ref_app = zipfile.ZipFile(fmu_path).read("visualizations/cell.webapp.zip")
+
+    response = _client(
+        tmp_path,
+        fmu_backend_mode="local",
+        fmu_data_root=data_root,
+        resolve_local_fmu_path=lambda access_key: data_root / access_key,
+    ).post(
+        "/admin/digital-twin-assets/42/from-fmu",
+        json={"accessKey": _FMU_ACCESS_KEY, "assetType": "auto"},
+        headers={"X-Digital-Twin-Admin-Token": _ADMIN_TOKEN},
+    )
+
+    digest = hashlib.sha256(ref_app).hexdigest()
+    assert response.status_code == 200
+    assert response.json()["assetType"] == "threejs-app"
+    assert response.json()["assetSource"] == "fmi-ls-ref"
+    assert response.json()["sha256"] == digest
+    assert (tmp_path / "scenes" / "42" / digest / "index.html").read_bytes().startswith(b"<!doctype html>")
+
+
+def test_import_auto_prefers_legacy_webapp_to_ref_glb(tmp_path):
+    data_root = tmp_path / "fmu-data"
+    fmu_path = data_root / "SmartWarehouseCell.fmu"
+    fmu_path.parent.mkdir(parents=True)
+    fmu_path.write_bytes(_fmu_with_ref_assets(
+        [("model/gltf-binary", "../../visualizations/cell.glb")],
+        {"visualizations/cell.glb": _glb()},
+    ))
+    sibling_app = _webapp_archive()
+    fmu_path.with_suffix(".webapp.zip").write_bytes(sibling_app)
+
+    response = _client(
+        tmp_path,
+        fmu_backend_mode="local",
+        fmu_data_root=data_root,
+        resolve_local_fmu_path=lambda access_key: data_root / access_key,
+    ).post(
+        "/admin/digital-twin-assets/42/from-fmu",
+        json={"accessKey": _FMU_ACCESS_KEY, "assetType": "auto"},
+        headers={"X-Digital-Twin-Admin-Token": _ADMIN_TOKEN},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assetType"] == "threejs-app"
+    assert response.json()["assetSource"] == "legacy-sibling"
+    assert response.json()["sha256"] == hashlib.sha256(sibling_app).hexdigest()
+
+
+def test_import_auto_uses_legacy_sibling_when_ref_is_absent(tmp_path):
+    data_root = tmp_path / "fmu-data"
+    fmu_path = data_root / "SmartWarehouseCell.fmu"
+    fmu_path.parent.mkdir(parents=True)
+    fmu_path.write_bytes(_fmu_with_ref_assets(
+        [("application/zip", "https://example.test/remote.webapp.zip")],
+        {},
+    ))
+    content = _webapp_archive()
+    fmu_path.with_suffix(".webapp.zip").write_bytes(content)
+
+    response = _client(
+        tmp_path,
+        fmu_backend_mode="local",
+        fmu_data_root=data_root,
+        resolve_local_fmu_path=lambda access_key: data_root / access_key,
+    ).post(
+        "/admin/digital-twin-assets/42/from-fmu",
+        json={"accessKey": _FMU_ACCESS_KEY, "assetType": "auto"},
+        headers={"X-Digital-Twin-Admin-Token": _ADMIN_TOKEN},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assetType"] == "threejs-app"
+    assert response.json()["assetSource"] == "legacy-sibling"
+    assert response.json()["sha256"] == hashlib.sha256(content).hexdigest()
+
+
 def test_import_from_station_fetches_authenticated_companion_glb(tmp_path, monkeypatch):
     content = _glb()
     station_requests = []
@@ -559,6 +676,128 @@ def test_import_from_station_fetches_authenticated_threejs_app(tmp_path, monkeyp
             "X-FMU-Access-Key": "SmartWarehouseCell.fmu",
         },
     }
+
+
+def test_import_from_station_auto_uses_the_type_selected_by_ref_discovery(tmp_path, monkeypatch):
+    content = _webapp_archive()
+    station_requests = []
+
+    class FakeResponse:
+        status_code = 200
+        headers = {
+            "content-type": "application/zip",
+            "content-length": str(len(content)),
+            "x-digital-twin-asset-type": "threejs-app",
+            "x-digital-twin-asset-source": "fmi-ls-ref",
+        }
+
+        async def aiter_bytes(self):
+            yield content
+
+    class FakeStream:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, *_):
+            return False
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            station_requests.append({"clientOptions": kwargs})
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        def stream(self, method, url, *, params, headers):
+            station_requests.append({"method": method, "url": url, "params": params, "headers": headers})
+            return FakeStream()
+
+    monkeypatch.setattr(assets_router.httpx, "AsyncClient", FakeAsyncClient)
+    response = _client(
+        tmp_path,
+        fmu_backend_mode="station",
+        station_base_url="http://lab-station:8080/api/",
+        station_internal_token="station-secret",
+    ).post(
+        "/admin/digital-twin-assets/42/from-fmu",
+        json={"accessKey": _FMU_ACCESS_KEY, "assetType": "auto"},
+        headers={"X-Digital-Twin-Admin-Token": _ADMIN_TOKEN},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assetType"] == "threejs-app"
+    assert response.json()["source"] == "station"
+    assert response.json()["assetSource"] == "fmi-ls-ref"
+    assert station_requests[1]["params"] == {"assetType": "auto"}
+
+
+def test_import_from_station_auto_falls_back_for_executor_without_auto_support(tmp_path, monkeypatch):
+    content = _webapp_archive()
+    station_requests = []
+
+    class FakeResponse:
+        def __init__(self, status_code, body=b"", headers=None):
+            self.status_code = status_code
+            self.body = body
+            self.headers = headers or {}
+
+        async def aread(self):
+            return self.body
+
+        async def aiter_bytes(self):
+            yield self.body
+
+    class FakeStream:
+        def __init__(self, response):
+            self.response = response
+
+        async def __aenter__(self):
+            return self.response
+
+        async def __aexit__(self, *_):
+            return False
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            station_requests.append({"clientOptions": kwargs})
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        def stream(self, method, url, *, params, headers):
+            station_requests.append({"method": method, "url": url, "params": params, "headers": headers})
+            if params["assetType"] == "auto":
+                response = FakeResponse(400, b'{"detail":"INVALID_COMPANION_ASSET_TYPE"}')
+            else:
+                response = FakeResponse(
+                    200,
+                    content,
+                    {"content-type": "application/zip", "content-length": str(len(content))},
+                )
+            return FakeStream(response)
+
+    monkeypatch.setattr(assets_router.httpx, "AsyncClient", FakeAsyncClient)
+    response = _client(
+        tmp_path,
+        fmu_backend_mode="station",
+        station_base_url="http://lab-station:8080/api/",
+        station_internal_token="station-secret",
+    ).post(
+        "/admin/digital-twin-assets/42/from-fmu",
+        json={"accessKey": _FMU_ACCESS_KEY, "assetType": "auto"},
+        headers={"X-Digital-Twin-Admin-Token": _ADMIN_TOKEN},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assetType"] == "threejs-app"
+    assert response.json()["assetSource"] == "legacy-sibling"
+    assert [request["params"]["assetType"] for request in station_requests[1:]] == ["auto", "threejs-app"]
 
 
 def test_import_rejects_external_glb_resources(tmp_path):

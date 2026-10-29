@@ -791,6 +791,7 @@
                             <div class="field full" id="fmuSyncAssetField" hidden>
                                 <span><label for="fmuSyncAssetType">Visualisation</label> <span class="muted-text">(optional)</span></span>
                                 <select id="fmuSyncAssetType">
+                                    <option value="auto" selected>Detect from FMI-LS-REF (webapp preferred)</option>
                                     <option value="">No visual asset</option>
                                     <option value="glb">GLB scene · Marketplace viewer and controls</option>
                                     <option value="threejs-app">Three.js application · Complete provider presentation</option>
@@ -800,14 +801,14 @@
                                     <input type="text" id="fmuSyncAssetUrl" inputmode="url" maxlength="2048" placeholder="Gateway asset path or HTTPS GLB URL" autocomplete="url">
                                     <button class="digital-twin-asset-import" id="fmuSyncImportAssetBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import asset</button>
                                 </div>
-                                <small class="muted-text">Import looks for an asset with the same base name as the FMU in the same location (for example, Model.glb or Model.webapp.zip for Model.fmu). You can instead enter a Gateway asset path or a public HTTPS URL for a GLB.</small>
+                                <small class="muted-text">Automatic detection prefers a Three.js webapp ZIP declared by FMI-LS-REF or named Model.webapp.zip. If neither is available, it uses a declared GLB, then looks for Model.glb. If no companion is found, you can upload one. You can also enter a Gateway asset path or a public HTTPS GLB URL.</small>
                                 <div class="file-picker mt-2">
                                     <input class="file-picker-input" type="file" id="fmuSyncAssetFile" accept=".glb,model/gltf-binary" aria-label="Upload digital twin asset">
                                     <label class="file-picker-button" for="fmuSyncAssetFile">Upload asset</label>
                                     <span class="file-picker-name" id="fmuSyncAssetFileName" aria-live="polite">No file chosen</span>
                                 </div>
                                 <div class="digital-twin-validation" id="fmuSyncAssetValidation" role="status" aria-live="polite" hidden></div>
-                                <small class="muted-text">Alternatively, upload a GLB scene or Three.js app ZIP. An uploaded AASX must carry its own visual asset reference.</small>
+                                <small class="muted-text">Alternatively, upload a GLB scene or Three.js app ZIP. Automatic detection infers the type from the selected file. An uploaded AASX must carry its own visual asset reference.</small>
                             </div>
                             <label class="field full">
                                 <span>Contact Email <span class="muted-text">(optional)</span></span>
