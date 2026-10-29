@@ -75,6 +75,7 @@ LATERAL_MOTION_APP_NAME = "LateralMotionControl.webapp.zip"
 WATER_TANK_FMU_NAME = "singlewatertank-20sim.fmu"
 WATER_TANK_APP_NAME = "singlewatertank-20sim.webapp.zip"
 DC_MOTOR_REQUIRED_PARAMETERS = {
+    "sine.offset",
     "speedController.k",
     "speedController.Ti",
     "damper.d",
@@ -85,7 +86,19 @@ DC_MOTOR_REQUIRED_PARAMETERS = {
     "data.Ja.value",
     "data.Jm.value",
 }
-DC_MOTOR_REQUIRED_OUTPUTS = {"out_control_err", "out_load_speed", "out_motor_speed"}
+DC_MOTOR_REQUIRED_OUTPUT_UNITS = {
+    "out_control_err": "rad/s",
+    "out_load_speed": "rad/s",
+    "out_motor_speed": "rad/s",
+    "out_motor_position": "rad",
+    "out_gear_position": "rad",
+    "out_load_position": "rad",
+    "out_shaft_twist": "rad",
+    "out_reference": "rad/s",
+    "out_motor_torque": "N.m",
+    "out_load_torque": "N.m",
+    "out_shaft_torque_on_load": "N.m",
+}
 EXTERNAL_ANCHOR_HREF_PATTERN = re.compile(
     r'(<a\b[^>]*?\bhref\s*=\s*)(["\'])https?://[^"\']*\2',
     re.IGNORECASE,
@@ -125,6 +138,7 @@ def validate_local_glb_output_bindings(
     fmu_path: Path,
     *,
     require_bindings: bool = True,
+    required_bindings: set[tuple[str, str]] | None = None,
 ) -> None:
     """Check companion GLB bindings against the FMU interface they visualize."""
     try:
@@ -161,6 +175,7 @@ def validate_local_glb_output_bindings(
         "scale.x", "scale.y", "scale.z", "visible", "material.color",
     }
     bindings_found = 0
+    binding_pairs: set[tuple[str, str]] = set()
     for node_index, node in enumerate(document.get("nodes", [])):
         extras = node.get("extras") if isinstance(node, dict) else None
         if not isinstance(extras, dict) or "fmiBindings" not in extras:
@@ -173,7 +188,9 @@ def validate_local_glb_output_bindings(
             if not isinstance(binding, dict):
                 raise ValueError(f"{scene_path}: node {node_index} binding {binding_index} must be an object")
             name = binding.get("variable")
-            variable = variables.get(name) if isinstance(name, str) else None
+            if not isinstance(name, str):
+                raise ValueError(f"{scene_path}: node {node_index} binding {binding_index} must name an FMU variable")
+            variable = variables.get(name)
             if variable is None:
                 raise ValueError(f"{scene_path}: binding references unknown FMU variable {name!r}")
             if (variable.get("causality") or "local").lower() != "output":
@@ -184,6 +201,7 @@ def validate_local_glb_output_bindings(
             target = binding.get("target")
             if not isinstance(target, str) or target not in targets:
                 raise ValueError(f"{scene_path}: {name!r} has an unsupported target {target!r}")
+            binding_pairs.add((name, target))
             for field in ("scale", "offset", "visibleWhenGreaterThanOrEqual"):
                 if field in binding and (
                     isinstance(binding[field], bool)
@@ -194,6 +212,10 @@ def validate_local_glb_output_bindings(
 
     if bindings_found == 0 and require_bindings:
         raise ValueError(f"The local GLB has no FMI output bindings: {scene_path}")
+    missing_bindings = (required_bindings or set()) - binding_pairs
+    if missing_bindings:
+        missing = ", ".join(f"{name} -> {target}" for name, target in sorted(missing_bindings))
+        raise ValueError(f"{scene_path}: required FMI output bindings are missing: {missing}")
 
 
 def copy_verified(origin: Path, destination: Path) -> None:
@@ -381,7 +403,7 @@ def validate_qfmu_webapp(path: Path) -> None:
 
 def validate_dc_motor_fmu(path: Path) -> None:
     names = validate_linux_x64_fmu(path)
-    expected_binary = "binaries/linux64/DC_motor.so"
+    expected_binary = "binaries/linux64/DC_motor_with_positions.so"
     if expected_binary not in names:
         raise ValueError(f"The DC motor FMU is missing its Linux x86_64 binary {expected_binary}.")
     try:
@@ -390,11 +412,11 @@ def validate_dc_motor_fmu(path: Path) -> None:
     except (OSError, zipfile.BadZipFile, ET.ParseError) as error:
         raise ValueError(f"Invalid DC motor model description: {error}") from error
 
-    if description.attrib.get("fmiVersion") != "2.0":
-        raise ValueError("The DC motor FMU must use FMI 2.0.")
+    if description.attrib.get("fmiVersion") != "2.0" or description.attrib.get("modelName") != "DC_motor_with_positions":
+        raise ValueError("The local DC motor demo requires the reviewed FMI 2.0 DC_motor_with_positions wrapper.")
     co_simulation = description.find("{*}CoSimulation")
-    if co_simulation is None or co_simulation.attrib.get("modelIdentifier") != "DC_motor":
-        raise ValueError("The DC motor FMU must expose FMI Co-Simulation with modelIdentifier DC_motor.")
+    if co_simulation is None or co_simulation.attrib.get("modelIdentifier") != "DC_motor_with_positions":
+        raise ValueError("The reviewed DC motor FMU must expose Co-Simulation as DC_motor_with_positions.")
     variables = description.find("{*}ModelVariables")
     if variables is None:
         raise ValueError("The DC motor FMU has no model variables.")
@@ -415,9 +437,17 @@ def validate_dc_motor_fmu(path: Path) -> None:
             parameters.add(name)
     if inputs != {"in_torque"}:
         raise ValueError(f"Unexpected DC motor FMU inputs: {sorted(inputs)}")
-    missing_outputs = DC_MOTOR_REQUIRED_OUTPUTS - outputs
+    missing_outputs = set(DC_MOTOR_REQUIRED_OUTPUT_UNITS) - outputs
     if missing_outputs:
         raise ValueError("The DC motor FMU is missing output signals: " + ", ".join(sorted(missing_outputs)))
+    for variable in variables:
+        variable_name = variable.attrib.get("name")
+        if variable_name is None or variable_name not in DC_MOTOR_REQUIRED_OUTPUT_UNITS:
+            continue
+        expected_unit = DC_MOTOR_REQUIRED_OUTPUT_UNITS[variable_name]
+        real = variable.find("{*}Real")
+        if variable.attrib.get("causality") != "output" or real is None or real.attrib.get("unit") != expected_unit:
+            raise ValueError(f"The DC motor output {variable_name} must be FMI Real with unit {expected_unit}.")
     missing_parameters = DC_MOTOR_REQUIRED_PARAMETERS - parameters
     if missing_parameters:
         raise ValueError("The DC motor FMU is missing tunable parameters: " + ", ".join(sorted(missing_parameters)))
@@ -465,6 +495,7 @@ def validate_dc_motor_app(path: Path) -> None:
             required = {
                 "index.html",
                 "app.js",
+                "model.js",
                 "scene.js",
                 "styles.css",
                 "vendor/three.module.js",
@@ -837,9 +868,17 @@ def sync(
         fmugym_license = motor_root / "FMUGym-LICENSE"
         credibility_license = motor_root / "Credibility-LICENSE.md"
         validate_dc_motor_fmu(motor_fmu)
-        # Shaft orientation is derived by integrating speed samples in the
-        # Three.js app; the current GLB binding contract cannot express that.
-        validate_local_glb_output_bindings(motor_scene, motor_fmu, require_bindings=False)
+        # Keep the companion GLB for the optional GLB route; the packaged
+        # Three.js app uses the FMU's public motor/gear/load positions.
+        validate_local_glb_output_bindings(
+            motor_scene,
+            motor_fmu,
+            required_bindings={
+                ("out_motor_position", "rotation.x"),
+                ("out_gear_position", "rotation.x"),
+                ("out_load_position", "rotation.x"),
+            },
+        )
         validate_dc_motor_app(motor_app)
         if not fmugym_license.is_file() or "MIT License" not in fmugym_license.read_text(encoding="utf-8"):
             raise ValueError("The DC motor FMU must include the upstream FMUGym MIT license.")
