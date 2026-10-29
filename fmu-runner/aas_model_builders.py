@@ -296,6 +296,7 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
         variable_elements = []
         for var in connector_variables:
             variable_name = str(var.get("name") or "Variable")
+            variable_causality = var.get("causality", "local")
             variable_value = [
                 _standard_property(
                     "VariableName", "xs:string", variable_name, _SIMULATION_SEMANTICS["variable_name"]
@@ -305,7 +306,7 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
                     _SIMULATION_SEMANTICS["variable_type"],
                 ),
                 _standard_property(
-                    "VariableCausality", "xs:string", _fmi_causality_to_idta(causality),
+                    "VariableCausality", "xs:string", _fmi_causality_to_idta(variable_causality),
                     _SIMULATION_SEMANTICS["variable_causality"],
                 ),
             ]

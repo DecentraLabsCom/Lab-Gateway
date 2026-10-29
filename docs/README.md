@@ -118,6 +118,8 @@ For the complete design and trust requirements, read
   generated metadata and variable-access policy.
 - [FMU visual assets](aas-fmu-visual-assets.md) describes GLB and Three.js
   assets linked through an FMU's AAS shell.
+- [FMI-LS expansion plan](PLAN_fmi-ls-struct-bus-xcp.md) records the proposed
+  implementation phases for STRUCT, BUS and XCP.
 - Component details live in [FMU Runner](../fmu-runner/README.md),
   [Gateway FMU development data](../fmu-data/README.md), and
   [FMU proxy runtime](../fmu-proxy-runtime/README.md).
