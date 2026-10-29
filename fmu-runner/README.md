@@ -53,6 +53,7 @@ does not change between these topologies.
 | GET | `/api/v1/fmu/list` | Return authorised FMU through the active backend |
 | GET | `/api/v1/fmu/proxy/{labId}?reservationKey=...` | Auto-generate reservation-scoped `proxy.fmu` |
 | GET | `/api/v1/simulations/describe?fmuFileName=<file>` | Read FMU model description through the active backend |
+| GET | `/api/v1/simulations/parameter-sets` | Return provider SSP presets fully writable under the current reservation policy |
 | POST | `/api/v1/simulations/run` | Execute a simulation through the active backend |
 | POST | `/api/v1/simulations/jobs` | Submit one reservation-scoped, cancellable simulation |
 | POST | `/api/v1/simulations/batches` | Submit up to 8 parameter scenarios against the same FMU |

@@ -23,6 +23,7 @@ from aas_model_builders import (
     _SEMANTIC_ID_ASSET_INTERFACES,
     _SEMANTIC_ID_CAPABILITY_DESCRIPTION,
     _SEMANTIC_ID_CONTACT_INFORMATION,
+    _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES,
     _SEMANTIC_ID_HANDOVER_DOCUMENTATION,
     _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL,
     _SEMANTIC_ID_SIMULATION_MODEL,
@@ -47,6 +48,7 @@ from aas_model_builders import (
     _submodel_id_for_access_control,
     _submodel_id_for_contact,
     _submodel_id_for_execution,
+    _submodel_id_for_fmi_ls_related_resources,
     _submodel_id_for_fmu,
     _submodel_id_for_handover,
     _submodel_id_for_interfaces,
@@ -56,6 +58,7 @@ from aas_model_builders import (
     build_asset_interfaces_description_submodel,
     build_contact_information_submodel,
     build_execution_capabilities_submodel,
+    build_fmi_ls_related_resources_submodel,
     build_handover_documentation_submodel,
     build_simulation_access_control_submodel,
     build_simulation_ports,
@@ -590,6 +593,7 @@ async def _sync_aasx_package_resources(
     metadata: dict,
     aasx_bytes: bytes,
     extra_info: Optional[dict],
+    fmi_ls_resources: Optional[dict],
     fmu_path: Optional[Path],
     required_aas_id: Optional[str],
     force_regenerate_access_policy: bool,
@@ -662,6 +666,63 @@ async def _sync_aasx_package_resources(
                 "type": "ModelReference",
                 "keys": [{"type": "Submodel", "value": aasx_simulation_model_id}],
             })
+
+        generated_related_resources = build_fmi_ls_related_resources_submodel(
+            lab_id,
+            fmi_ls_resources,
+        )
+        if generated_related_resources is not None:
+            related_candidates = [
+                (index, submodel)
+                for index, submodel in enumerate(all_submodels)
+                if isinstance(submodel, dict)
+                and (
+                    submodel.get("idShort") == "FmiLsRelatedResources"
+                    or any(
+                        isinstance(key, dict)
+                        and key.get("value") == _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES
+                        for key in (
+                            submodel.get("semanticId", {}).get("keys", [])
+                            if isinstance(submodel.get("semanticId"), dict)
+                            else []
+                        )
+                    )
+                )
+            ]
+            if len(related_candidates) > 1:
+                result["error"] = "FMU AASX contains ambiguous FMI-LS-REF resource submodels"
+                return result
+            if related_candidates:
+                related_index, related_existing = related_candidates[0]
+                existing_id = related_existing.get("id")
+                if not isinstance(existing_id, str) or not existing_id.strip():
+                    result["error"] = "FMU AASX FMI-LS-REF resource submodel has no valid ID"
+                    return result
+                if any(
+                    isinstance(key, dict)
+                    and key.get("value") == _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES
+                    for key in (
+                        related_existing.get("semanticId", {}).get("keys", [])
+                        if isinstance(related_existing.get("semanticId"), dict)
+                        else []
+                    )
+                ):
+                    generated_related_resources["id"] = existing_id
+                    all_submodels[related_index] = generated_related_resources
+                else:
+                    # Keep a provider-authored submodel with the same short
+                    # name if it uses a different semantic contract.
+                    generated_related_resources = related_existing
+                related_id = existing_id
+            else:
+                related_id = generated_related_resources["id"]
+                all_submodels.append(generated_related_resources)
+            if related_id not in _shell_submodel_ids(target_shell):
+                shell_refs.append({
+                    "type": "ModelReference",
+                    "keys": [{"type": "Submodel", "value": related_id}],
+                })
+            result["fmiLsRelatedResourcesSubmodelId"] = related_id
 
         imported_access_policies = [
             submodel for submodel in all_submodels
@@ -810,6 +871,7 @@ async def _sync_generated_fmu_submodels(
     access_key: str,
     metadata: dict,
     extra_info: Optional[dict],
+    fmi_ls_resources: Optional[dict],
     fmu_path: Optional[Path],
     runtime_info: Optional[dict],
     force_regenerate_access_policy: bool,
@@ -823,11 +885,19 @@ async def _sync_generated_fmu_submodels(
     interfaces_id = result["interfacesSubmodelId"]
     contact_id = result["contactSubmodelId"]
     handover_id = result["handoverSubmodelId"]
+    related_resources_id = _submodel_id_for_fmi_ls_related_resources(lab_id)
     aas_id_encoded = _encode_id(aas_id)
     submodel_id_encoded = _encode_id(submodel_id)
     technical_data_id_encoded = _encode_id(technical_data_id)
 
-    shell_payload = build_aas_shell(lab_id, access_key, metadata, extra_info)
+    related_resources_payload = build_fmi_ls_related_resources_submodel(lab_id, fmi_ls_resources)
+    shell_payload = build_aas_shell(
+        lab_id,
+        access_key,
+        metadata,
+        extra_info,
+        fmi_ls_resources=fmi_ls_resources,
+    )
     submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info, fmu_path=fmu_path)
     technical_data_payload = build_technical_data_submodel(lab_id, metadata, runtime_info)
     execution_capabilities_payload = build_execution_capabilities_submodel(
@@ -852,6 +922,8 @@ async def _sync_generated_fmu_submodels(
     interfaces_payload = build_asset_interfaces_description_submodel(lab_id, execution_operations)
     contact_payload = build_contact_information_submodel(lab_id, extra_info)
     handover_payload = build_handover_documentation_submodel(lab_id, extra_info)
+    if related_resources_payload is not None:
+        result["fmiLsRelatedResourcesSubmodelId"] = related_resources_id
 
     # --- Submodel: PUT (create or replace) ---
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", submodel_id_encoded):
@@ -980,6 +1052,7 @@ async def _sync_generated_fmu_submodels(
         (interfaces_id, interfaces_payload, "AssetInterfacesDescription"),
         (contact_id, contact_payload, "ContactInformations"),
         (handover_id, handover_payload, "HandoverDocumentation"),
+        (related_resources_id, related_resources_payload, "FmiLsRelatedResources"),
     ):
         if _sm_payload is None:
             continue
@@ -1043,6 +1116,7 @@ async def sync_fmu_to_basyx(
     metadata: dict,
     aasx_bytes: Optional[bytes] = None,
     extra_info: Optional[dict] = None,
+    fmi_ls_resources: Optional[dict] = None,
     fmu_path: Optional[Path] = None,
     unit_definitions: Sequence[dict] = (),
     required_aas_id: Optional[str] = None,
@@ -1072,6 +1146,7 @@ async def sync_fmu_to_basyx(
     interfaces_id = _submodel_id_for_interfaces(lab_id)
     contact_id = _submodel_id_for_contact(lab_id)
     handover_id = _submodel_id_for_handover(lab_id)
+    related_resources_id = _submodel_id_for_fmi_ls_related_resources(lab_id)
 
     result: dict = {
         "aasId": aas_id,
@@ -1106,6 +1181,7 @@ async def sync_fmu_to_basyx(
                     metadata=metadata,
                     aasx_bytes=aasx_bytes,
                     extra_info=extra_info,
+                    fmi_ls_resources=fmi_ls_resources,
                     fmu_path=fmu_path,
                     required_aas_id=required_aas_id,
                     force_regenerate_access_policy=force_regenerate_access_policy,
@@ -1122,6 +1198,7 @@ async def sync_fmu_to_basyx(
                     access_key=access_key,
                     metadata=metadata,
                     extra_info=extra_info,
+                    fmi_ls_resources=fmi_ls_resources,
                     fmu_path=fmu_path,
                     runtime_info=runtime_info,
                     force_regenerate_access_policy=force_regenerate_access_policy,

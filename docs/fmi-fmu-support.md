@@ -106,9 +106,12 @@ Before publication, validate it through the Station's private Executor API. Its
 [internal API](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#internal-api)
 and [validation results](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#admission-expiry-isolation-and-execution-evidence)
 document the validation fields, optional isolated probe, quarantine operations, and limits of what
-a passing probe establishes. These private endpoints are not called by Marketplace users. Gateway
-public descriptions use the reduced `publicOnly=true` view where appropriate; the Executor still
-validates and parses the full model description.
+a passing probe establishes. With `probe=true`, the Executor also discovers and runs supported
+REF smoke experiments. The current interpreter accepts transient tests with optional SSP parameters;
+tests requiring stimuli or reference time series are reported as skipped until their data format is
+supported. These private endpoints are not called by Marketplace users. Gateway public descriptions
+use the reduced `publicOnly=true` view where appropriate; the Executor still validates and parses the
+full model description.
 
 ### 2. Publish the resource
 
@@ -283,6 +286,16 @@ reservation-authorized Gateway API:
 | `POST` | `/fmu/api/v1/simulations/{id}/cancel` | Cancel an active run or remaining cases |
 | `GET` | `/fmu/api/v1/simulations/{id}/result` | Read final or terminal partial output |
 | `GET` | `/fmu/api/v1/simulations/history?limit=20&offset=0` | Browse history for the current reservation |
+| `GET` | `/fmu/api/v1/simulations/parameter-sets` | Discover provider SSP presets from FMI-LS-REF, filtered to complete configurations writable during initialization for this reservation |
+
+Provider presets stay attached to the FMU as SSP files referenced by
+FMI-LS-REF. Generated FMU shells publish the REF manifest's local resource
+descriptors in the versioned `FmiLsRelatedResources` AAS submodel so users and
+M2M clients can discover roles, media types, descriptions, labels and archive
+availability without opening the FMU. The projection does not copy parameter
+values or other file contents. Simulation preset values remain behind the
+reservation-authorized parameter-set API; the FMU and its REF manifest remain
+the source of truth. External REF URIs are omitted from this public projection.
 
 For example, a batch body contains shared options and one parameter map per case:
 

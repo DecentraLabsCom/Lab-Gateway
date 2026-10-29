@@ -96,6 +96,7 @@ def create_aas_sync_router(
     read_model_description: Any,
     metadata_builder: Any,
     get_model_metadata: Any = None,
+    get_fmi_ls_related_resources: Any = None,
     sync_fmu_to_basyx: Any,
     logger: Any,
     get_runtime_status: Any = None,
@@ -193,6 +194,21 @@ def create_aas_sync_router(
                 )
                 raise HTTPException(status_code=422, detail="Cannot read FMU model description") from exc
             metadata = metadata_builder(model_description)
+
+        fmi_ls_resources = None
+        if get_fmi_ls_related_resources is not None:
+            try:
+                candidate = await get_fmi_ls_related_resources(access_key)
+                if isinstance(candidate, dict):
+                    fmi_ls_resources = candidate
+            except Exception as exc:
+                # REF metadata is an optional public projection; preserve the
+                # core AAS/FMU synchronization if an older Executor lacks it.
+                logger.warning(
+                    "AAS sync: FMI-LS-REF resources unavailable for %s: %s",
+                    str(access_key).replace("\r", "\\r").replace("\n", "\\n"),
+                    type(exc).__name__,
+                )
         auto_fallback = {
             key: metadata.get(key, "")
             for key in ("description", "license")
@@ -218,6 +234,7 @@ def create_aas_sync_router(
                 metadata=metadata,
                 aasx_bytes=aasx_bytes,
                 extra_info=merged_extra_info or None,
+                fmi_ls_resources=fmi_ls_resources,
                 fmu_path=fmu_path,
                 unit_definitions=metadata.get("unitDefinitions", []),
                 required_aas_id=f"urn:decentralabs:lab:{lab_id}" if aasx_bytes and lab_id else None,

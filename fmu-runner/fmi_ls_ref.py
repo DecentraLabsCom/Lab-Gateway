@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import posixpath
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -12,9 +13,96 @@ import zlib
 
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_ASSET_BYTES = 50 * 1024 * 1024
+MAX_RELATED_RESOURCES = 128
 MANIFEST_PATH = "extra/org.fmi-standard.fmi-ls-ref/fmi-ls-manifest.xml"
 MANIFEST_NAME = "org.fmi-standard.fmi-ls-ref"
 _FMI_LS_NAMESPACE = "http://fmi-standard.org/fmi-ls-manifest"
+
+
+def read_related_resources(fmu_path: Path) -> dict:
+    """Read bounded metadata for relative REF resources embedded in an FMU."""
+    empty = {"manifestName": None, "manifestVersion": None, "resources": []}
+    try:
+        with zipfile.ZipFile(fmu_path) as archive:
+            manifest_info = archive.getinfo(MANIFEST_PATH)
+            if manifest_info.file_size > MAX_MANIFEST_BYTES:
+                return empty
+            with archive.open(manifest_info) as source:
+                manifest = source.read(MAX_MANIFEST_BYTES + 1)
+            if len(manifest) > MAX_MANIFEST_BYTES:
+                return empty
+            lowered = manifest.lower()
+            if b"<!doctype" in lowered or b"<!entity" in lowered:
+                return empty
+
+            root = ET.fromstring(manifest)
+            if (
+                root.tag.rsplit("}", 1)[-1] != "fmiReferences"
+                or root.attrib.get(f"{{{_FMI_LS_NAMESPACE}}}fmi-ls-name") != MANIFEST_NAME
+            ):
+                return empty
+
+            names: dict[str, int] = {}
+            for name in archive.namelist():
+                names[name] = names.get(name, 0) + 1
+
+            resources = []
+            identity_counts: dict[str, int] = {}
+            for related in root:
+                if related.tag.rsplit("}", 1)[-1] != "Related":
+                    continue
+                source = str(related.attrib.get("source") or "").strip()
+                path = _archive_path(source)
+                if path is None:
+                    # Keep arbitrary external URLs out of the provider's public AAS index.
+                    continue
+
+                role = str(related.attrib.get("role") or "").strip()[:128]
+                media_type = str(related.attrib.get("type") or "").split(";", 1)[0].strip().lower()[:256]
+                description = str(related.attrib.get("description") or "").strip()[:2048]
+                labels = []
+                for child in related:
+                    if child.tag.rsplit("}", 1)[-1] != "Label" or len(labels) >= 32:
+                        continue
+                    name = str(child.attrib.get("name") or "").strip()[:256]
+                    if not name:
+                        continue
+                    labels.append({
+                        "name": name,
+                        "description": str(child.attrib.get("description") or "").strip()[:1024],
+                    })
+
+                identity = hashlib.sha256(
+                    f"{role}\0{media_type}\0{source}".encode("utf-8")
+                ).hexdigest()[:24]
+                identity_counts[identity] = identity_counts.get(identity, 0) + 1
+                resource_id = identity if identity_counts[identity] == 1 else f"{identity}_{identity_counts[identity]}"
+                available = names.get(path) == 1
+                if available:
+                    try:
+                        available = not archive.getinfo(path).is_dir()
+                    except KeyError:
+                        available = False
+
+                resources.append({
+                    "id": resource_id,
+                    "role": role,
+                    "type": media_type,
+                    "source": source[:2048],
+                    "description": description,
+                    "labels": labels,
+                    "availableInFmu": available,
+                })
+                if len(resources) >= MAX_RELATED_RESOURCES:
+                    break
+
+            return {
+                "manifestName": MANIFEST_NAME,
+                "manifestVersion": str(root.attrib.get(f"{{{_FMI_LS_NAMESPACE}}}fmi-ls-version") or "")[:64],
+                "resources": resources,
+            }
+    except (OSError, KeyError, ValueError, ET.ParseError, zipfile.BadZipFile, RuntimeError, EOFError, zlib.error):
+        return empty
 
 
 def _archive_path(source: str) -> str | None:

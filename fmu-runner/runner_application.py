@@ -35,6 +35,7 @@ from fmu_path_resolver import (
     _is_within_base,
     resolve_fmu_path as _resolve_fmu_path_impl,
 )
+from fmi_ls_ref import read_related_resources as _read_fmi_ls_related_resources
 from backend_factory import build_fmu_backend as _build_fmu_backend_impl
 from execution_adapters import (
     reject_unsupported_remote_operation as _reject_unsupported_remote_operation_adapter,
@@ -248,6 +249,10 @@ async def _catalog_get_authorized_model_metadata(
     )
 
 
+async def _catalog_get_authorized_parameter_sets(*, claims: dict):
+    return await _runner_runtime.backend.get_authorized_parameter_sets(claims=claims)
+
+
 async def _simulation_access_model_metadata(claims: dict) -> dict:
     """Read trusted FMI metadata once when the Executor session is created."""
     filename = str(claims.get("accessKey") or claims.get("fmuFileName") or "").strip()
@@ -333,6 +338,12 @@ async def _aas_fmu_model_metadata(access_key: str):
     )
 
 
+async def _aas_fmu_related_resources(access_key: str) -> dict[str, Any]:
+    return await _runner_runtime.backend.get_authorized_related_resources(
+        claims={"accessKey": access_key},
+    )
+
+
 async def _aas_sync_access_policy_status(lab_id: str, access_key: str) -> dict:
     metadata = await _aas_fmu_model_metadata(access_key)
     return await _get_aas_access_policy_resolver().inspect(
@@ -395,6 +406,7 @@ _catalog_router = create_catalog_router(
     verify_jwt=verify_jwt,
     enforce_fmu_claim=_catalog_enforce_fmu_claim,
     get_authorized_model_metadata=_catalog_get_authorized_model_metadata,
+    get_authorized_parameter_sets=_catalog_get_authorized_parameter_sets,
     public_model_metadata=_catalog_public_model_metadata,
     list_authorized_fmu=_catalog_list_authorized_fmu,
     get_effective_policy=_simulation_effective_access_policy,
@@ -415,6 +427,7 @@ _aas_sync_router = create_aas_sync_router(
     read_model_description=_aas_sync_read_model_description,
     metadata_builder=_aas_sync_metadata_builder,
     get_model_metadata=_aas_fmu_model_metadata,
+    get_fmi_ls_related_resources=_aas_fmu_related_resources,
     sync_fmu_to_basyx=_aas_sync_to_basyx,
     get_runtime_status=_aas_sync_runtime_status,
     logger=logger,
@@ -582,6 +595,10 @@ def _list_local_fmus_payload(claimed_file: str) -> dict:
     )
 
 
+def _load_local_fmi_ls_related_resources(fmu_filename: str) -> dict[str, Any]:
+    return _read_fmi_ls_related_resources(_resolve_fmu_path(fmu_filename))
+
+
 def _build_fmu_backend():
     return _build_fmu_backend_impl(
         mode=FMU_BACKEND_MODE,
@@ -594,6 +611,7 @@ def _build_fmu_backend():
         health_loader=_local_metadata_backend_health_payload,
         model_metadata_loader=_load_local_model_metadata,
         list_loader=_list_local_fmus_payload,
+        related_resources_loader=_load_local_fmi_ls_related_resources,
         logger=logger,
         station_backend_factory=StationFmuBackend,
         local_metadata_backend_factory=LocalFmuMetadataBackend,
@@ -991,6 +1009,7 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
             get_effective_policy=_simulation_effective_access_policy,
             invalidate_access_policy=_invalidate_aas_access_policy,
             get_digital_twin_asset=get_local_preview_digital_twin_asset,
+            get_fmi_ls_related_resources=_aas_fmu_related_resources,
         )
     return _LOCAL_PREVIEW_AASX_REGISTRY
 

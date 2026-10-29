@@ -108,12 +108,20 @@ class BaseFmuBackend:
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
         raise NotImplementedError
 
+    async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
+        return []
+
+    async def get_authorized_related_resources(self, *, claims: dict) -> dict[str, Any]:
+        self.authorized_access_key(claims)
+        return {"manifestName": None, "manifestVersion": None, "resources": []}
+
 
 @dataclass
 class LocalFmuMetadataBackend(BaseFmuBackend):
     health_loader: Callable[..., dict]
     model_metadata_loader: Callable[..., ModelMetadata]
     list_loader: Callable[[str], dict]
+    related_resources_loader: Optional[Callable[[str], dict[str, Any]]] = None
 
     mode = "local"
 
@@ -139,6 +147,18 @@ class LocalFmuMetadataBackend(BaseFmuBackend):
 
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
         return self.list_loader(self.authorized_access_key(claims))
+
+    async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
+        # Local metadata mode does not execute simulations and has no private
+        # Executor endpoint from which to load provider presets.
+        self.authorized_access_key(claims)
+        return []
+
+    async def get_authorized_related_resources(self, *, claims: dict) -> dict[str, Any]:
+        access_key = self.authorized_access_key(claims)
+        if self.related_resources_loader is None:
+            return {"manifestName": None, "manifestVersion": None, "resources": []}
+        return self.related_resources_loader(access_key)
 
 
 class StationFmuBackend(BaseFmuBackend):
@@ -338,7 +358,7 @@ class StationFmuBackend(BaseFmuBackend):
             path = "/internal/health"
         elif operation == "capacity":
             path = "/internal/fmu/capacity"
-        elif operation in {"describe", "catalog"}:
+        elif operation in {"describe", "catalog", "parameter-sets", "related-resources"}:
             if access_key is None:
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
             key = str(access_key)
@@ -347,7 +367,12 @@ class StationFmuBackend(BaseFmuBackend):
                 key,
             ):
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
-            route = "describe" if operation == "describe" else "catalog"
+            route = {
+                "describe": "describe",
+                "catalog": "catalog",
+                "parameter-sets": "parameter-sets",
+                "related-resources": "related-resources",
+            }[operation]
             path = f"/internal/fmu/{route}"
         else:
             raise ValueError("Unsupported Station GET operation")
@@ -355,7 +380,7 @@ class StationFmuBackend(BaseFmuBackend):
         try:
             async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
                 request_kwargs: dict[str, Any] = {"headers": self._headers()}
-                if operation in {"describe", "catalog"}:
+                if operation in {"describe", "catalog", "parameter-sets", "related-resources"}:
                     request_kwargs["headers"]["X-FMU-Access-Key"] = key
                 if operation == "describe" and public_only:
                     request_kwargs["params"] = {"publicOnly": "true"}
@@ -1014,6 +1039,60 @@ class StationFmuBackend(BaseFmuBackend):
         else:
             payload = await self._request_json("describe", access_key=access_key, public_only=True)
         return self._normalize_model_metadata(payload)
+
+    async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
+        access_key = self.authorized_access_key(claims)
+        payload = await self._request_json("parameter-sets", access_key=access_key)
+        presets = payload.get("presets")
+        if not isinstance(presets, list) or len(presets) > 24:
+            raise HTTPException(status_code=502, detail="Station backend returned invalid parameter sets")
+        return [preset for preset in presets if isinstance(preset, dict)]
+
+    async def get_authorized_related_resources(self, *, claims: dict) -> dict[str, Any]:
+        access_key = self.authorized_access_key(claims)
+        payload = await self._request_json("related-resources", access_key=access_key)
+        resources = payload.get("resources")
+        if not isinstance(resources, list) or len(resources) > 128:
+            raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-REF resources")
+
+        normalized = []
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+            source = resource.get("source")
+            if not isinstance(source, str) or not source.strip() or len(source) > 2048:
+                continue
+            labels = resource.get("labels")
+            normalized_labels = []
+            if isinstance(labels, list):
+                for label in labels[:32]:
+                    if not isinstance(label, dict):
+                        continue
+                    name = label.get("name")
+                    if not isinstance(name, str) or not name.strip():
+                        continue
+                    description = label.get("description")
+                    normalized_labels.append({
+                        "name": name.strip()[:256],
+                        "description": description.strip()[:1024] if isinstance(description, str) else "",
+                    })
+            normalized.append({
+                "id": str(resource.get("id") or "")[:64],
+                "role": str(resource.get("role") or "")[:128],
+                "type": str(resource.get("type") or "")[:256],
+                "source": source.strip(),
+                "description": str(resource.get("description") or "")[:2048],
+                "labels": normalized_labels,
+                "availableInFmu": resource.get("availableInFmu") is True,
+            })
+
+        manifest_name = payload.get("manifestName")
+        manifest_version = payload.get("manifestVersion")
+        return {
+            "manifestName": manifest_name if isinstance(manifest_name, str) else None,
+            "manifestVersion": manifest_version[:64] if isinstance(manifest_version, str) else None,
+            "resources": normalized,
+        }
 
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
         access_key = self.authorized_access_key(claims)

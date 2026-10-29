@@ -21,6 +21,7 @@ _SUBMODEL_ID_FIELDS = (
     "interfacesSubmodelId",
     "contactSubmodelId",
     "handoverSubmodelId",
+    "fmiLsRelatedResourcesSubmodelId",
     "accessControlSubmodelId",
 )
 
@@ -47,6 +48,7 @@ class LocalPreviewAasxRegistry:
         get_effective_policy: Callable[[dict], Any],
         invalidate_access_policy: Callable[..., Any],
         get_digital_twin_asset: Callable[[str, str], Any] | None = None,
+        get_fmi_ls_related_resources: Callable[[str], Any] | None = None,
     ):
         self.get_model_metadata = get_model_metadata
         self.sync_fmu_to_basyx = sync_fmu_to_basyx
@@ -58,6 +60,7 @@ class LocalPreviewAasxRegistry:
         self.get_effective_policy = get_effective_policy
         self.invalidate_access_policy = invalidate_access_policy
         self.get_digital_twin_asset = get_digital_twin_asset
+        self.get_fmi_ls_related_resources = get_fmi_ls_related_resources
         self._locks: dict[str, asyncio.Lock] = {}
         self._cache: dict[str, dict[str, Any]] = {}
 
@@ -139,6 +142,9 @@ class LocalPreviewAasxRegistry:
             metadata = await self.get_model_metadata(access_key)
             if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
                 raise RuntimeError("Local FMU metadata is unavailable")
+            fmi_ls_resources = None
+            if self.get_fmi_ls_related_resources is not None:
+                fmi_ls_resources = await self.get_fmi_ls_related_resources(access_key)
 
             extra_info = {"description": "Local-only digital twin access-policy validation."}
             if asset_url:
@@ -149,6 +155,7 @@ class LocalPreviewAasxRegistry:
                 access_key=access_key,
                 metadata=metadata,
                 extra_info=extra_info,
+                fmi_ls_resources=fmi_ls_resources,
             ), "metadata sync")
             shell_id = generated.get("aasId")
             if not isinstance(shell_id, str) or shell_id != f"{_SHELL_ID_PREFIX}{lab_id}":
@@ -158,6 +165,7 @@ class LocalPreviewAasxRegistry:
                 access_key,
                 metadata,
                 extra_info=extra_info,
+                fmi_ls_resources=fmi_ls_resources,
             )
             submodel_ids = self._submodel_ids(shell)
             if not submodel_ids or not generated.get("accessControlSubmodelId"):
@@ -181,6 +189,7 @@ class LocalPreviewAasxRegistry:
                 access_key=access_key,
                 metadata=metadata,
                 aasx_bytes=package,
+                fmi_ls_resources=fmi_ls_resources,
                 required_aas_id=shell_id,
             ), "package import")
             if imported.get("accessPolicyPreserved") is not True:

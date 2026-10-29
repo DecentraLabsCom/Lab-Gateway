@@ -264,7 +264,7 @@ The main generated submodels vary by resource type:
 
 | Resource | Main submodels | Typical information |
 | --- | --- | --- |
-| FMU simulation | IDTA 02005 `SimulationModels`, IDTA 02020 `CapabilityDescription`, IDTA 02017 `AssetInterfacesDescription`, IDTA 02003 `TechnicalData`, IDTA 02002/02004 | Summary, FMI file type/version, ports, tools, solver values, model-file hash, runner status and discoverable execution affordances. |
+| FMU simulation | IDTA 02005 `SimulationModels`, IDTA 02020 `CapabilityDescription`, IDTA 02017 `AssetInterfacesDescription`, IDTA 02003 `TechnicalData`, IDTA 02002/02004, DecentraLabs `FmiLsRelatedResources` when REF is present | Summary, FMI file type/version, ports, tools, solver values, model-file hash, runner status, discoverable execution affordances and a public index of embedded FMI-LS-REF resources. |
 | Physical laboratory | IDTA 02006 `Nameplate`, IDTA 02020 `CapabilityDescription`, IDTA 02017 `AssetInterfacesDescription`, IDTA 02003 `TechnicalData`, IDTA 02002/02004 | Standard identity, host/network details as permitted arbitrary nameplate properties, heartbeat, station state and discoverable access/status affordances. |
 
 The FMU `SimulationModels` submodel currently includes:
@@ -280,6 +280,26 @@ The generated `CapabilityDescription` and `AssetInterfacesDescription`
 submodels are intentionally separate from `SimulationModels` and
 `TechnicalData`. They describe capabilities and affordances, not live status
 and not authorization grants.
+
+### FMI-LS-REF related resources
+
+When the FMU contains a valid FMI-LS-REF manifest, generated synchronization
+adds `FmiLsRelatedResources` with semantic ID
+`urn:decentralabs:aas:FmiLsRelatedResources:1`. It projects the manifest name
+and version plus each safe relative `Related` entry's role, media type, source
+URI, description, labels and whether the referenced file exists in the FMU.
+Absolute/external URIs are omitted so provider-private endpoints and credentials
+are not copied into the public shell. File contents and parameter values are
+not copied; provider presets continue to be read from the FMU by the
+reservation-authorized simulation API. The whole projection is regenerated
+from the current FMU on synchronization.
+
+`HandoverDocumentation` continues to expose the selected visual asset through
+its standard `File` element. That value is the Gateway-managed immutable asset
+path used by Marketplace; it is a delivery reference, not a second copy of the
+GLB or webapp ZIP. The related-resources submodel complements that viewer link
+with a discoverable inventory of all embedded REF files, including alternative
+visuals and parameter-set descriptors.
 
 ### Automatic versus manual data
 

@@ -38,6 +38,8 @@ _SEMANTIC_ID_ARBITRARY = "https://admin-shell.io/SMT/General/Arbitrary"
 
 _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL = "urn:decentralabs:aas:SimulationAccessControl:1"
 
+_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES = "urn:decentralabs:aas:FmiLsRelatedResources:1"
+
 _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:InterfaceDigest:1"
 
 _SEMANTIC_ID_ACCESS_GENERATED_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:GeneratedPolicyDigest:1"
@@ -103,6 +105,9 @@ def _submodel_id_for_contact(lab_id: str) -> str:
 
 def _submodel_id_for_handover(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:handoverDocumentation"
+
+def _submodel_id_for_fmi_ls_related_resources(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:fmiLsRelatedResources"
 
 def _submodel_id_for_access_control(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:simulationAccessControl"
@@ -934,6 +939,127 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
         }],
     }
 
+
+def build_fmi_ls_related_resources_submodel(
+    lab_id: str,
+    related_resources: Optional[dict],
+) -> Optional[dict]:
+    """Project embedded FMI-LS-REF resource descriptors into a versioned AAS submodel."""
+    if not isinstance(related_resources, dict):
+        return None
+    manifest_name = str(related_resources.get("manifestName") or "").strip()
+    if manifest_name != "org.fmi-standard.fmi-ls-ref":
+        return None
+
+    def property_element(id_short: str, name: str, value: object, value_type: str = "xs:string") -> dict:
+        return _standard_property(
+            id_short,
+            value_type,
+            value,
+            f"{_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES}:{name}",
+        )
+
+    resource_elements: list[dict] = []
+    used_id_shorts: set[str] = set()
+    raw_resources = related_resources.get("resources")
+    if isinstance(raw_resources, list):
+        for resource in raw_resources[:128]:
+            if not isinstance(resource, dict):
+                continue
+            source = str(resource.get("source") or "").strip()
+            parsed_source = urlsplit(source)
+            if (
+                not source
+                or len(source) > 2048
+                or "\\" in source
+                or "\x00" in source
+                or source.startswith("/")
+                or parsed_source.scheme
+                or parsed_source.netloc
+                or parsed_source.query
+                or parsed_source.fragment
+            ):
+                continue
+
+            role = str(resource.get("role") or "").strip()[:128]
+            media_type = str(resource.get("type") or "").strip()[:256]
+            description = str(resource.get("description") or "").strip()[:2048]
+            digest = hashlib.sha256(f"{role}\0{media_type}\0{source}".encode("utf-8")).hexdigest()[:24]
+            id_short = f"RelatedResource_{digest}"
+            suffix = 2
+            while id_short in used_id_shorts:
+                id_short = f"RelatedResource_{digest}_{suffix}"
+                suffix += 1
+            used_id_shorts.add(id_short)
+
+            labels = []
+            raw_labels = resource.get("labels")
+            if isinstance(raw_labels, list):
+                for label_index, label in enumerate(raw_labels[:32]):
+                    if not isinstance(label, dict):
+                        continue
+                    label_name = str(label.get("name") or "").strip()[:256]
+                    if not label_name:
+                        continue
+                    label_description = str(label.get("description") or "").strip()[:1024]
+                    labels.append({
+                        "idShort": f"Label_{label_index + 1}",
+                        "modelType": "SubmodelElementCollection",
+                        "value": [
+                            property_element("Name", "LabelName", label_name),
+                            *([property_element("Description", "LabelDescription", label_description)] if label_description else []),
+                        ],
+                    })
+
+            fields = [
+                property_element("Role", "Role", role),
+                property_element("MediaType", "MediaType", media_type),
+                property_element("Source", "Source", source),
+                property_element(
+                    "AvailableInFmu",
+                    "AvailableInFmu",
+                    str(resource.get("availableInFmu") is True).lower(),
+                    "xs:boolean",
+                ),
+            ]
+            if description:
+                fields.append(property_element("Description", "Description", description))
+            if labels:
+                fields.append({
+                    "idShort": "Labels",
+                    "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES}:Labels"),
+                    "modelType": "SubmodelElementList",
+                    "typeValueListElement": "SubmodelElementCollection",
+                    "value": labels,
+                })
+            resource_elements.append({
+                "idShort": id_short,
+                "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES}:RelatedResource"),
+                "modelType": "SubmodelElementCollection",
+                "value": fields,
+            })
+
+    submodel_elements = [
+        property_element("ManifestName", "ManifestName", manifest_name),
+    ]
+    manifest_version = str(related_resources.get("manifestVersion") or "").strip()[:64]
+    if manifest_version:
+        submodel_elements.append(property_element("ManifestVersion", "ManifestVersion", manifest_version))
+    submodel_elements.append({
+        "idShort": "Resources",
+        "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES}:Resources"),
+        "modelType": "SubmodelElementList",
+        "typeValueListElement": "SubmodelElementCollection",
+        "value": resource_elements,
+    })
+    return {
+        "id": _submodel_id_for_fmi_ls_related_resources(lab_id),
+        "idShort": "FmiLsRelatedResources",
+        "semanticId": _semantic_id(_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES),
+        "modelType": "Submodel",
+        "submodelElements": submodel_elements,
+    }
+
 def _non_negative_int(value: object) -> str:
     try:
         number = int(str(value).strip())
@@ -1039,6 +1165,7 @@ def build_aas_shell(
     metadata: dict,
     extra_info: Optional[dict] = None,
     extra_submodel_ids: Sequence[str] = (),
+    fmi_ls_resources: Optional[dict] = None,
 ) -> dict:
     """Build the AAS shell JSON for BaSyx V2.
 
@@ -1071,6 +1198,8 @@ def build_aas_shell(
         or str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
     ):
         all_sm_ids.append(_submodel_id_for_handover(lab_id))
+    if build_fmi_ls_related_resources_submodel(lab_id, fmi_ls_resources) is not None:
+        all_sm_ids.append(_submodel_id_for_fmi_ls_related_resources(lab_id))
     all_sm_ids.extend(extra_submodel_ids)
 
     shell = {

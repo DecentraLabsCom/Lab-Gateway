@@ -216,9 +216,17 @@ source of model execution; the generated GLB interface reads its variable
 descriptions from AAS `SimulationModels` ports when present. Provider-authored
 GLB `extras.fmiBindings` map FMI input and output names to allowed scene targets
 and are required for output-driven or input-interactive scene behavior, while a
-Three.js app owns its rendering logic. No separate manifest is used. When
+Three.js app owns its rendering logic. No additional GLB-specific manifest is
+used; an FMU can separately declare the asset as a related file in
+FMI-LS-REF. When
 uploading an `.aasx`
 package, its Handover Documentation remains authoritative
 and cannot be combined with a separate visual-asset upload. Public HTTPS GLB
 URLs must allow browser CORS, use an origin permitted by Marketplace
 `CSP_CONNECT_SRC`, and contain no credentials or access tokens.
+
+Generated AAS shells also include a `FmiLsRelatedResources` submodel when the
+FMU declares embedded resources in FMI-LS-REF. It records descriptors for all
+declared local resources, while `HandoverDocumentation` points to the visual
+asset selected by the Gateway. Neither submodel copies the GLB or webapp ZIP
+bytes into AASX by itself.
