@@ -53,7 +53,7 @@ does not change between these topologies.
 | GET | `/api/v1/fmu/list` | Return authorised FMU through the active backend |
 | GET | `/api/v1/fmu/proxy/{labId}?reservationKey=...` | Auto-generate reservation-scoped `proxy.fmu` |
 | GET | `/api/v1/simulations/describe?fmuFileName=<file>` | Read FMU model description through the active backend |
-| GET | `/api/v1/simulations/parameter-sets` | Return provider SSP presets fully writable under the current reservation policy |
+| GET | `/api/v1/simulations/parameter-sets` | Return FMI-LS-REF parameter presets fully writable under the current reservation policy |
 | POST | `/api/v1/simulations/run` | Execute a simulation through the active backend |
 | POST | `/api/v1/simulations/jobs` | Submit one reservation-scoped, cancellable simulation |
 | POST | `/api/v1/simulations/batches` | Submit up to 8 parameter scenarios against the same FMU |
@@ -66,6 +66,10 @@ does not change between these topologies.
 
 The model-description response is defined by the
 [FMU Executor](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#runtime-capabilities).
+FMI 3 descriptions can include FMI-LS-STRUCT map declarations. Reservation
+access filters out each map unless every member variable is readable, and
+generated proxy FMUs preserve the permitted declarations. The Marketplace
+renders fixed-size one-dimensional domain/codomain maps as reference curves.
 The Gateway applies its AAS-based variable-access policy separately; see
 [AAS support](../docs/aas-support.md#fmi-variable-access-policy).
 

@@ -290,7 +290,7 @@ and version plus each safe relative `Related` entry's role, media type, source
 URI, description, labels and whether the referenced file exists in the FMU.
 Absolute/external URIs are omitted so provider-private endpoints and credentials
 are not copied into the public shell. File contents and parameter values are
-not copied; provider presets continue to be read from the FMU by the
+not copied; FMI-LS-REF parameter presets continue to be read from the FMU by the
 reservation-authorized simulation API. The whole projection is regenerated
 from the current FMU on synchronization.
 

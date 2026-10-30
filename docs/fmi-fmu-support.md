@@ -286,9 +286,9 @@ reservation-authorized Gateway API:
 | `POST` | `/fmu/api/v1/simulations/{id}/cancel` | Cancel an active run or remaining cases |
 | `GET` | `/fmu/api/v1/simulations/{id}/result` | Read final or terminal partial output |
 | `GET` | `/fmu/api/v1/simulations/history?limit=20&offset=0` | Browse history for the current reservation |
-| `GET` | `/fmu/api/v1/simulations/parameter-sets` | Discover provider SSP presets from FMI-LS-REF, filtered to complete configurations writable during initialization for this reservation |
+| `GET` | `/fmu/api/v1/simulations/parameter-sets` | Discover FMI-LS-REF parameter presets, filtered to complete configurations writable during initialization for this reservation |
 
-Provider presets stay attached to the FMU as SSP files referenced by
+Parameter presets stay attached to the FMU as SSP files referenced by
 FMI-LS-REF. Generated FMU shells publish the REF manifest's local resource
 descriptors in the versioned `FmiLsRelatedResources` AAS submodel so users and
 M2M clients can discover roles, media types, descriptions, labels and archive

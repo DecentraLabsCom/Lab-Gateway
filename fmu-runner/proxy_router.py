@@ -132,6 +132,7 @@ def create_proxy_router(
             model_xml=model_xml,
             config_payload=config_payload,
             runtime_files=runtime_files,
+            fmi_ls_struct=model_metadata.get("fmiLsStruct"),
         )
         signing_key = get_signing_key()
         headers = build_proxy_artifact_headers(

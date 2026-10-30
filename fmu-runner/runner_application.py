@@ -36,6 +36,7 @@ from fmu_path_resolver import (
     resolve_fmu_path as _resolve_fmu_path_impl,
 )
 from fmi_ls_ref import read_related_resources as _read_fmi_ls_related_resources
+from fmi_ls_struct import read_fmi_ls_struct
 from backend_factory import build_fmu_backend as _build_fmu_backend_impl
 from execution_adapters import (
     reject_unsupported_remote_operation as _reject_unsupported_remote_operation_adapter,
@@ -253,6 +254,10 @@ async def _catalog_get_authorized_parameter_sets(*, claims: dict):
     return await _runner_runtime.backend.get_authorized_parameter_sets(claims=claims)
 
 
+async def _catalog_get_authorized_experiments(*, claims: dict):
+    return await _runner_runtime.backend.get_authorized_experiments(claims=claims)
+
+
 async def _simulation_access_model_metadata(claims: dict) -> dict:
     """Read trusted FMI metadata once when the Executor session is created."""
     filename = str(claims.get("accessKey") or claims.get("fmuFileName") or "").strip()
@@ -275,6 +280,10 @@ async def _simulation_effective_access_policy_for_metadata(claims: dict, metadat
         visible_description = filter_model_description(policy, public_metadata)
         policy["modelDescription"] = visible_description
         policy["modelVariables"] = visible_description.get("modelVariables", [])
+        if "fmiLsStruct" in visible_description:
+            policy["fmiLsStruct"] = visible_description["fmiLsStruct"]
+        else:
+            policy.pop("fmiLsStruct", None)
         return policy
     except HTTPException:
         raise
@@ -407,6 +416,7 @@ _catalog_router = create_catalog_router(
     enforce_fmu_claim=_catalog_enforce_fmu_claim,
     get_authorized_model_metadata=_catalog_get_authorized_model_metadata,
     get_authorized_parameter_sets=_catalog_get_authorized_parameter_sets,
+    get_authorized_experiments=_catalog_get_authorized_experiments,
     public_model_metadata=_catalog_public_model_metadata,
     list_authorized_fmu=_catalog_list_authorized_fmu,
     get_effective_policy=_simulation_effective_access_policy,
@@ -575,7 +585,7 @@ def _load_local_model_metadata(
     *,
     include_internal_variables: bool = True,
 ) -> dict:
-    return _catalog_load_local_model_metadata(
+    metadata = _catalog_load_local_model_metadata(
         fmu_filename,
         resolve_fmu_path=_resolve_fmu_path,
         model_description_reader=read_model_description,
@@ -584,6 +594,18 @@ def _load_local_model_metadata(
         display_unit_inverse_reader=_display_unit_inverse_map_from_fmu,
         include_internal_variables=include_internal_variables,
     )
+    fmi_ls_struct = read_fmi_ls_struct(
+        _resolve_fmu_path(fmu_filename),
+        fmi_version=str(metadata.get("fmiVersion") or ""),
+        variable_names=[
+            variable["name"]
+            for variable in metadata.get("modelVariables", [])
+            if isinstance(variable, dict) and isinstance(variable.get("name"), str)
+        ],
+    )
+    if fmi_ls_struct is not None:
+        metadata["fmiLsStruct"] = fmi_ls_struct
+    return metadata
 
 
 def _list_local_fmus_payload(claimed_file: str) -> dict:
@@ -1270,5 +1292,7 @@ if _preview_tickets is not None:
         FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN,
         ensure_aas_policy=_ensure_local_preview_aas_policy,
         get_access_policy=_local_preview_access_payload,
+        get_authorized_parameter_sets=_catalog_get_authorized_parameter_sets,
+        get_authorized_experiments=_catalog_get_authorized_experiments,
         stream_simulation=_local_preview_stream_simulation,
     ))

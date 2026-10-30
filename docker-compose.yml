@@ -962,6 +962,9 @@ services:
       - FMU_WORKER_CPU_SECONDS=${FMU_WORKER_CPU_SECONDS:-300}
       - FMU_WORKER_MEMORY_MIB=${FMU_WORKER_MEMORY_MIB:-768}
       - FMU_WORKER_FILE_MIB=${FMU_WORKER_FILE_MIB:-128}
+      # FMPy's NumPy/OpenBLAS stack initializes inside the DC Motor worker;
+      # avoid consuming its address-space budget with a core-sized thread pool.
+      - FMU_NATIVE_THREAD_LIMIT_ACCESS_KEYS=${FMU_NATIVE_THREAD_LIMIT_ACCESS_KEYS:-local-demos/dc-motor/linux64/DC_motor.fmu}
       - FMU_MAX_BATCH_CASES=${FMU_MAX_BATCH_CASES:-8}
       - FMU_MAX_SCENARIOS_PER_RESERVATION_PER_DAY=${FMU_MAX_SCENARIOS_PER_RESERVATION_PER_DAY:-}
       - FMU_MAX_SIMULATION_STEPS=${FMU_MAX_SIMULATION_STEPS:-600000}

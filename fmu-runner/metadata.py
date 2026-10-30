@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
+from fmi_ls_struct import normalize_fmi_ls_struct
 
 
 def _normalize_xml_value(value) -> Optional[str]:
@@ -428,4 +429,12 @@ def _public_model_metadata(metadata: dict) -> dict:
             payload[key] = float(metadata[key])
     if metadata.get("instantiationToken"):
         payload["instantiationToken"] = metadata["instantiationToken"]
+    fmi_ls_struct = None
+    if str(metadata.get("fmiVersion") or "").split(".", 1)[0] == "3":
+        fmi_ls_struct = normalize_fmi_ls_struct(
+            metadata.get("fmiLsStruct"),
+            variable_names=[variable["name"] for variable in variables if isinstance(variable.get("name"), str)],
+        )
+    if fmi_ls_struct is not None:
+        payload["fmiLsStruct"] = fmi_ls_struct
     return payload

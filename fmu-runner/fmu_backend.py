@@ -11,6 +11,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 from fastapi import HTTPException
+from fmi_ls_struct import normalize_fmi_ls_struct
 
 
 ModelMetadata = dict[str, Any]
@@ -111,6 +112,10 @@ class BaseFmuBackend:
     async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
         return []
 
+    async def get_authorized_experiments(self, *, claims: dict) -> dict[str, Any]:
+        self.authorized_access_key(claims)
+        return {"resourceSets": [], "truncated": False}
+
     async def get_authorized_related_resources(self, *, claims: dict) -> dict[str, Any]:
         self.authorized_access_key(claims)
         return {"manifestName": None, "manifestVersion": None, "resources": []}
@@ -150,7 +155,7 @@ class LocalFmuMetadataBackend(BaseFmuBackend):
 
     async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
         # Local metadata mode does not execute simulations and has no private
-        # Executor endpoint from which to load provider presets.
+        # Executor endpoint from which to load FMI-LS-REF parameter presets.
         self.authorized_access_key(claims)
         return []
 
@@ -358,7 +363,7 @@ class StationFmuBackend(BaseFmuBackend):
             path = "/internal/health"
         elif operation == "capacity":
             path = "/internal/fmu/capacity"
-        elif operation in {"describe", "catalog", "parameter-sets", "related-resources"}:
+        elif operation in {"describe", "catalog", "parameter-sets", "experiments", "related-resources"}:
             if access_key is None:
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
             key = str(access_key)
@@ -371,6 +376,7 @@ class StationFmuBackend(BaseFmuBackend):
                 "describe": "describe",
                 "catalog": "catalog",
                 "parameter-sets": "parameter-sets",
+                "experiments": "experiments",
                 "related-resources": "related-resources",
             }[operation]
             path = f"/internal/fmu/{route}"
@@ -380,7 +386,7 @@ class StationFmuBackend(BaseFmuBackend):
         try:
             async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
                 request_kwargs: dict[str, Any] = {"headers": self._headers()}
-                if operation in {"describe", "catalog", "parameter-sets", "related-resources"}:
+                if operation in {"describe", "catalog", "parameter-sets", "experiments", "related-resources"}:
                     request_kwargs["headers"]["X-FMU-Access-Key"] = key
                 if operation == "describe" and public_only:
                     request_kwargs["params"] = {"publicOnly": "true"}
@@ -964,6 +970,15 @@ class StationFmuBackend(BaseFmuBackend):
                 raise HTTPException(status_code=502, detail="Station backend returned an invalid model variable entry")
             normalized["modelVariables"].append(self._normalize_variable(variable, index))
 
+        fmi_ls_struct = None
+        if normalized["fmiVersion"].split(".", 1)[0] == "3":
+            fmi_ls_struct = normalize_fmi_ls_struct(
+                payload.get("fmiLsStruct"),
+                variable_names=[variable["name"] for variable in normalized["modelVariables"]],
+            )
+        if fmi_ls_struct is not None:
+            normalized["fmiLsStruct"] = fmi_ls_struct
+
         return normalized
 
     async def health(self, *, lab_id: Optional[str] = None) -> dict:
@@ -1043,10 +1058,21 @@ class StationFmuBackend(BaseFmuBackend):
     async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
         access_key = self.authorized_access_key(claims)
         payload = await self._request_json("parameter-sets", access_key=access_key)
-        presets = payload.get("presets")
-        if not isinstance(presets, list) or len(presets) > 24:
+        parameter_presets = payload.get("fmiLsParameterPresets")
+        if not isinstance(parameter_presets, list) or len(parameter_presets) > 24:
             raise HTTPException(status_code=502, detail="Station backend returned invalid parameter sets")
-        return [preset for preset in presets if isinstance(preset, dict)]
+        return [preset for preset in parameter_presets if isinstance(preset, dict)]
+
+    async def get_authorized_experiments(self, *, claims: dict) -> dict[str, Any]:
+        access_key = self.authorized_access_key(claims)
+        payload = await self._request_json("experiments", access_key=access_key)
+        resource_sets = payload.get("resourceSets")
+        if not isinstance(resource_sets, list) or len(resource_sets) > 8:
+            raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-REF experiments")
+        return {
+            "resourceSets": [resource_set for resource_set in resource_sets if isinstance(resource_set, dict)],
+            "truncated": payload.get("truncated") is True,
+        }
 
     async def get_authorized_related_resources(self, *, claims: dict) -> dict[str, Any]:
         access_key = self.authorized_access_key(claims)

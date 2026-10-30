@@ -19,6 +19,7 @@ from fmi_variable_policy import (
     _PHASE_SET,
     build_effective_policy,
 )
+from fmi_ls_struct import normalize_fmi_ls_struct
 
 
 class AccessDenied(Exception):
@@ -132,6 +133,21 @@ def filter_model_description(policy: Mapping[str, Any], payload: Any) -> Any:
         if permission.get("read") is not True:
             variable.pop("start", None)
     filtered["modelVariables"] = safe_variables
+    raw_permissions = policy.get("variables")
+    permissions = raw_permissions if isinstance(raw_permissions, Mapping) else {}
+    readable_names = {
+        name
+        for name, permission in permissions.items()
+        if isinstance(name, str) and isinstance(permission, Mapping) and permission.get("read") is True
+    }
+    fmi_ls_struct = normalize_fmi_ls_struct(
+        payload.get("fmiLsStruct"),
+        variable_names=readable_names,
+    )
+    if fmi_ls_struct is not None:
+        filtered["fmiLsStruct"] = fmi_ls_struct
+    else:
+        filtered.pop("fmiLsStruct", None)
     return filtered
 
 
