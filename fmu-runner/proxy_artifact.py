@@ -32,12 +32,12 @@ def _fmi_ls_struct_archive_entries(model_xml: bytes, value: Any) -> tuple[tuple[
         (child for child in root if child.tag.rsplit("}", 1)[-1] == "ModelVariables"),
         None,
     )
-    names = {
-        variable.get("name")
-        for variable in (model_variables or ())
-        if isinstance(variable.get("name"), str)
-    }
-    struct = normalize_fmi_ls_struct(value, variable_names=names)
+    names: set[str] = set()
+    for variable in model_variables or ():
+        name = variable.get("name")
+        if isinstance(name, str):
+            names.add(name)
+    struct = normalize_fmi_ls_struct(value, variable_names=tuple(names))
     if not struct or not struct["maps"]:
         return ()
 
@@ -55,11 +55,16 @@ def _fmi_ls_struct_archive_entries(model_xml: bytes, value: Any) -> tuple[tuple[
             "matchingRule": map_entry["matchingRule"],
         })
         for member in map_entry["members"]:
-            ET.SubElement(terminal, "TerminalMemberVariable", {
+            terminal_member = ET.SubElement(terminal, "TerminalMemberVariable", {
                 "variableName": member["variableName"],
                 "memberName": member["memberName"],
                 "variableKind": member["variableKind"],
             })
+            ordering_constraint = member.get("orderingConstraint")
+            if ordering_constraint:
+                annotations = ET.SubElement(terminal_member, "Annotations")
+                annotation = ET.SubElement(annotations, "Annotation", {"type": f"{MANIFEST_NAME}.orderingConstraint"})
+                annotation.text = ordering_constraint
 
     entries = (
         (_FMI_LS_STRUCT_MANIFEST_PATH, ET.tostring(manifest, encoding="utf-8", xml_declaration=True)),

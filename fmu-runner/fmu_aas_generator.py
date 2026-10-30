@@ -24,6 +24,7 @@ from aas_model_builders import (
     _SEMANTIC_ID_CAPABILITY_DESCRIPTION,
     _SEMANTIC_ID_CONTACT_INFORMATION,
     _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES,
+    _SEMANTIC_ID_FMI_LS_STRUCT,
     _SEMANTIC_ID_HANDOVER_DOCUMENTATION,
     _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL,
     _SEMANTIC_ID_SIMULATION_MODEL,
@@ -49,16 +50,19 @@ from aas_model_builders import (
     _submodel_id_for_contact,
     _submodel_id_for_execution,
     _submodel_id_for_fmi_ls_related_resources,
+    _submodel_id_for_fmi_ls_struct,
     _submodel_id_for_fmu,
     _submodel_id_for_handover,
     _submodel_id_for_interfaces,
     _submodel_id_for_technical,
+    _readable_fmi_variable_names,
     _validate_lab_id,
     build_aas_shell,
     build_asset_interfaces_description_submodel,
     build_contact_information_submodel,
     build_execution_capabilities_submodel,
     build_fmi_ls_related_resources_submodel,
+    build_fmi_ls_struct_submodel,
     build_handover_documentation_submodel,
     build_simulation_access_control_submodel,
     build_simulation_ports,
@@ -763,7 +767,7 @@ async def _sync_aasx_package_resources(
                 and generated_digest == hashlib.sha256(raw_rules).hexdigest()
             ) else "aas-provider"
             try:
-                compile_part4_access_rules(
+                imported_access_policy = compile_part4_access_rules(
                     rules_document,
                     metadata,
                     aasx_simulation_model_id,
@@ -776,16 +780,83 @@ async def _sync_aasx_package_resources(
                 logger.warning("Imported FMU AASX access policy is invalid: %s", type(exc).__name__)
                 result["error"] = "FMU AASX access policy does not match its FMU or AAS shell"
                 return result
+            if source == "aas-provider":
+                struct_readable_variable_names: set[str] = set()
+            else:
+                struct_readable_variable_names = {
+                    name
+                    for name, permission in imported_access_policy.get("variables", {}).items()
+                    if isinstance(name, str) and isinstance(permission, dict) and permission.get("read") is True
+                }
             result["accessPolicyPreserved"] = True
             result["accessControlSubmodelId"] = policy_submodel_id
         else:
             generate_access_policy = True
+            struct_readable_variable_names = _readable_fmi_variable_names(metadata)
             generated_policy_id = _submodel_id_for_access_control(lab_id)
             if generated_policy_id not in _shell_submodel_ids(target_shell):
                 shell_refs.append({
                     "type": "ModelReference",
                     "keys": [{"type": "Submodel", "value": generated_policy_id}],
                 })
+
+        generated_struct = build_fmi_ls_struct_submodel(
+            lab_id,
+            metadata.get("fmiLsStruct"),
+            readable_variable_names=struct_readable_variable_names,
+        )
+        if generated_struct is not None:
+            struct_candidates = [
+                (index, submodel)
+                for index, submodel in enumerate(all_submodels)
+                if isinstance(submodel, dict)
+                and (
+                    submodel.get("idShort") == "FmiLsStruct"
+                    or any(
+                        isinstance(key, dict)
+                        and key.get("value") == _SEMANTIC_ID_FMI_LS_STRUCT
+                        for key in (
+                            submodel.get("semanticId", {}).get("keys", [])
+                            if isinstance(submodel.get("semanticId"), dict)
+                            else []
+                        )
+                    )
+                )
+            ]
+            if len(struct_candidates) > 1:
+                result["error"] = "FMU AASX contains ambiguous FMI-LS-STRUCT map submodels"
+                return result
+            if struct_candidates:
+                struct_index, struct_existing = struct_candidates[0]
+                existing_id = struct_existing.get("id")
+                if not isinstance(existing_id, str) or not existing_id.strip():
+                    result["error"] = "FMU AASX FMI-LS-STRUCT submodel has no valid ID"
+                    return result
+                has_struct_semantic = any(
+                    isinstance(key, dict) and key.get("value") == _SEMANTIC_ID_FMI_LS_STRUCT
+                    for key in (
+                        struct_existing.get("semanticId", {}).get("keys", [])
+                        if isinstance(struct_existing.get("semanticId"), dict)
+                        else []
+                    )
+                )
+                if has_struct_semantic:
+                    generated_struct["id"] = existing_id
+                    all_submodels[struct_index] = generated_struct
+                else:
+                    # Preserve a provider-authored submodel with a colliding idShort.
+                    generated_struct = None
+                struct_id = existing_id
+            else:
+                struct_id = generated_struct["id"]
+                all_submodels.append(generated_struct)
+            if struct_id not in _shell_submodel_ids(target_shell):
+                shell_refs.append({
+                    "type": "ModelReference",
+                    "keys": [{"type": "Submodel", "value": struct_id}],
+                })
+            if generated_struct is not None:
+                result["fmiLsStructSubmodelId"] = struct_id
 
     uploaded_aas_ids: list = []
     uploaded_sm_ids: list = []
@@ -886,11 +957,17 @@ async def _sync_generated_fmu_submodels(
     contact_id = result["contactSubmodelId"]
     handover_id = result["handoverSubmodelId"]
     related_resources_id = _submodel_id_for_fmi_ls_related_resources(lab_id)
+    struct_id = _submodel_id_for_fmi_ls_struct(lab_id)
     aas_id_encoded = _encode_id(aas_id)
     submodel_id_encoded = _encode_id(submodel_id)
     technical_data_id_encoded = _encode_id(technical_data_id)
 
     related_resources_payload = build_fmi_ls_related_resources_submodel(lab_id, fmi_ls_resources)
+    struct_payload = build_fmi_ls_struct_submodel(
+        lab_id,
+        metadata.get("fmiLsStruct"),
+        readable_variable_names=_readable_fmi_variable_names(metadata),
+    )
     shell_payload = build_aas_shell(
         lab_id,
         access_key,
@@ -924,6 +1001,8 @@ async def _sync_generated_fmu_submodels(
     handover_payload = build_handover_documentation_submodel(lab_id, extra_info)
     if related_resources_payload is not None:
         result["fmiLsRelatedResourcesSubmodelId"] = related_resources_id
+    if struct_payload is not None:
+        result["fmiLsStructSubmodelId"] = struct_id
 
     # --- Submodel: PUT (create or replace) ---
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", submodel_id_encoded):
@@ -1053,6 +1132,7 @@ async def _sync_generated_fmu_submodels(
         (contact_id, contact_payload, "ContactInformations"),
         (handover_id, handover_payload, "HandoverDocumentation"),
         (related_resources_id, related_resources_payload, "FmiLsRelatedResources"),
+        (struct_id, struct_payload, "FmiLsStruct"),
     ):
         if _sm_payload is None:
             continue

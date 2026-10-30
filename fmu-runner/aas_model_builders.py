@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
 
-from simulation_access_policy import build_part4_access_rules, fmi_interface_digest
+from simulation_access_policy import build_effective_policy, build_part4_access_rules, fmi_interface_digest
+from fmi_ls_struct import normalize_fmi_ls_struct
 
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
 
@@ -39,6 +40,8 @@ _SEMANTIC_ID_ARBITRARY = "https://admin-shell.io/SMT/General/Arbitrary"
 _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL = "urn:decentralabs:aas:SimulationAccessControl:1"
 
 _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES = "urn:decentralabs:aas:FmiLsRelatedResources:1"
+
+_SEMANTIC_ID_FMI_LS_STRUCT = "urn:decentralabs:aas:FmiLsStruct:1"
 
 _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:InterfaceDigest:1"
 
@@ -108,6 +111,9 @@ def _submodel_id_for_handover(lab_id: str) -> str:
 
 def _submodel_id_for_fmi_ls_related_resources(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:fmiLsRelatedResources"
+
+def _submodel_id_for_fmi_ls_struct(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:fmiLsStruct"
 
 def _submodel_id_for_access_control(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:simulationAccessControl"
@@ -1061,6 +1067,146 @@ def build_fmi_ls_related_resources_submodel(
         "submodelElements": submodel_elements,
     }
 
+
+def _readable_fmi_variable_names(metadata: dict) -> set[str]:
+    try:
+        policy = build_effective_policy(metadata or {})
+    except (TypeError, ValueError):
+        return set()
+    return {
+        name
+        for name, permission in policy.get("variables", {}).items()
+        if isinstance(name, str) and isinstance(permission, dict) and permission.get("read") is True
+    }
+
+
+def build_fmi_ls_struct_submodel(
+    lab_id: str,
+    fmi_ls_struct: Optional[dict],
+    *,
+    readable_variable_names: Optional[set[str]] = None,
+) -> Optional[dict]:
+    """Project STRUCT map declarations to AAS without copying map values."""
+    normalized_struct = normalize_fmi_ls_struct(fmi_ls_struct)
+    if normalized_struct is None:
+        return None
+    manifest_version = normalized_struct["manifestVersion"]
+    raw_maps = normalized_struct["maps"]
+    if not raw_maps:
+        return None
+
+    def property_element(id_short: str, name: str, value: object) -> dict:
+        return _standard_property(
+            id_short,
+            "xs:string",
+            value,
+            f"{_SEMANTIC_ID_FMI_LS_STRUCT}:{name}",
+        )
+
+    maps = []
+    seen_map_names: set[str] = set()
+    total_members = 0
+    for map_index, raw_map in enumerate(raw_maps[:128]):
+        if not isinstance(raw_map, dict):
+            continue
+        name = str(raw_map.get("name") or "").strip()[:256]
+        terminal_kind = str(raw_map.get("terminalKind") or "").strip()[:256]
+        matching_rule = str(raw_map.get("matchingRule") or "").strip()[:256]
+        raw_members = raw_map.get("members")
+        if (
+            not name
+            or name in seen_map_names
+            or terminal_kind not in {
+                "org.fmi-standard.fmi-ls-struct.map.rectilinearGrid",
+                "org.fmi-standard.fmi-ls-struct.map.irregular",
+            }
+            or matching_rule != "org.fmi-standard.fmi-ls-struct.map"
+            or not isinstance(raw_members, list)
+        ):
+            continue
+
+        if readable_variable_names is not None and any(
+            not isinstance(member, dict) or member.get("variableName") not in readable_variable_names
+            for member in raw_members
+        ):
+            continue
+
+        members = []
+        member_names: set[str] = set()
+        member_variables: set[str] = set()
+        for member_index, raw_member in enumerate(raw_members[:512]):
+            if not isinstance(raw_member, dict):
+                continue
+            variable_name = str(raw_member.get("variableName") or "").strip()[:512]
+            member_name = str(raw_member.get("memberName") or "").strip()[:256]
+            variable_kind = str(raw_member.get("variableKind") or "").strip()[:256]
+            ordering = raw_member.get("orderingConstraint")
+            if (
+                not variable_name or not member_name or not variable_kind
+                or member_name in member_names or variable_name in member_variables
+                or (ordering is not None and ordering not in {
+                    "unordered", "increasing", "decreasing", "strictlyIncreasing", "strictlyDecreasing",
+                })
+            ):
+                continue
+            fields = [
+                property_element("VariableName", "VariableName", variable_name),
+                property_element("MemberName", "MemberName", member_name),
+                property_element("VariableKind", "VariableKind", variable_kind),
+            ]
+            if ordering is not None and variable_kind == "org.fmi-standard.fmi-ls-struct.map.domain" and terminal_kind.endswith("rectilinearGrid"):
+                fields.append(property_element("OrderingConstraint", "OrderingConstraint", ordering))
+            members.append({
+                "idShort": f"Member_{member_index + 1}",
+                "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_STRUCT}:Member"),
+                "modelType": "SubmodelElementCollection",
+                "value": fields,
+            })
+            member_names.add(member_name)
+            member_variables.add(variable_name)
+        if not members or total_members + len(members) > 4096:
+            continue
+        maps.append({
+            "idShort": f"Map_{map_index + 1}",
+            "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_STRUCT}:Map"),
+            "modelType": "SubmodelElementCollection",
+            "value": [
+                property_element("Name", "MapName", name),
+                property_element("TerminalKind", "TerminalKind", terminal_kind),
+                property_element("MatchingRule", "MatchingRule", matching_rule),
+                {
+                    "idShort": "Members",
+                    "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_STRUCT}:Members"),
+                    "modelType": "SubmodelElementList",
+                    "typeValueListElement": "SubmodelElementCollection",
+                    "value": members,
+                },
+            ],
+        })
+        seen_map_names.add(name)
+        total_members += len(members)
+
+    if not maps:
+        return None
+
+    return {
+        "id": _submodel_id_for_fmi_ls_struct(lab_id),
+        "idShort": "FmiLsStruct",
+        "semanticId": _semantic_id(_SEMANTIC_ID_FMI_LS_STRUCT),
+        "modelType": "Submodel",
+        "submodelElements": [
+            property_element("ManifestName", "ManifestName", "org.fmi-standard.fmi-ls-struct"),
+            property_element("ManifestVersion", "ManifestVersion", manifest_version),
+            {
+                "idShort": "Maps",
+                "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_STRUCT}:Maps"),
+                "modelType": "SubmodelElementList",
+                "typeValueListElement": "SubmodelElementCollection",
+                "value": maps,
+            },
+        ],
+    }
+
 def _non_negative_int(value: object) -> str:
     try:
         number = int(str(value).strip())
@@ -1201,6 +1347,12 @@ def build_aas_shell(
         all_sm_ids.append(_submodel_id_for_handover(lab_id))
     if build_fmi_ls_related_resources_submodel(lab_id, fmi_ls_resources) is not None:
         all_sm_ids.append(_submodel_id_for_fmi_ls_related_resources(lab_id))
+    if build_fmi_ls_struct_submodel(
+        lab_id,
+        metadata.get("fmiLsStruct"),
+        readable_variable_names=_readable_fmi_variable_names(metadata),
+    ) is not None:
+        all_sm_ids.append(_submodel_id_for_fmi_ls_struct(lab_id))
     all_sm_ids.extend(extra_submodel_ids)
 
     shell = {
