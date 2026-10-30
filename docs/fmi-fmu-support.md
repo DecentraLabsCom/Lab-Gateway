@@ -108,8 +108,10 @@ and [validation results](https://github.com/DecentraLabsCom/FMU-Executor/blob/ma
 document the validation fields, optional isolated probe, quarantine operations, and limits of what
 a passing probe establishes. With `probe=true`, the Executor also discovers and runs supported
 REF smoke experiments. The current interpreter accepts transient tests with optional SSP parameters;
-tests requiring stimuli or reference time series are reported as skipped until their data format is
-supported. These private endpoints are not called by Marketplace users. Gateway public descriptions
+tests may also use local `text/csv` stimuli with a `time` column and numeric FMU input columns. Rows
+must begin at the experiment start, increase strictly, align to the declared step size and fit the
+128-event schedule limit; each row becomes a runtime input change. Reference time series and solver
+tolerances remain unsupported and are reported as skipped. These private endpoints are not called by Marketplace users. Gateway public descriptions
 use the reduced `publicOnly=true` view where appropriate; the Executor still validates and parses the
 full model description.
 

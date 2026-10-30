@@ -239,7 +239,7 @@ def filter_authorized_parameter_sets(raw_presets: Any, policy: Any) -> list[dict
 
 
 def filter_authorized_experiments(raw_discovery: Any, policy: Any) -> list[dict[str, Any]]:
-    """Keep usable REF experiments whose complete initialization writes are authorized."""
+    """Keep usable REF experiments whose initialization and runtime writes are authorized."""
     if (
         not isinstance(raw_discovery, dict)
         or not isinstance(raw_discovery.get("resourceSets"), list)
@@ -250,6 +250,25 @@ def filter_authorized_experiments(raw_discovery: Any, policy: Any) -> list[dict[
         return []
 
     safe_experiments: list[dict[str, Any]] = []
+    model_variables = {
+        variable.get("name"): variable
+        for variable in policy["modelVariables"]
+        if isinstance(variable, dict) and isinstance(variable.get("name"), str)
+    }
+    runtime_names = {
+        name for name, permission in policy["variables"].items()
+        if isinstance(permission, dict)
+        and isinstance(permission.get("writeAt"), list)
+        and "runtime" in permission["writeAt"]
+        and isinstance(model_variables.get(name), dict)
+        and (
+            str(model_variables[name].get("causality") or "").lower() == "input"
+            or (
+                str(model_variables[name].get("causality") or "").lower() == "parameter"
+                and str(model_variables[name].get("variability") or "").lower() == "tunable"
+            )
+        )
+    }
     for set_index, resource_set in enumerate(raw_discovery["resourceSets"][:8]):
         if not isinstance(resource_set, dict) or not isinstance(resource_set.get("experiments"), list):
             continue
@@ -265,6 +284,7 @@ def filter_authorized_experiments(raw_discovery: Any, policy: Any) -> list[dict[
             parameters = experiment.get("parameters")
             parameter_units = experiment.get("parameterUnits", {})
             options = experiment.get("options", {})
+            raw_schedule = experiment.get("inputSchedule", [])
             if (
                 not isinstance(name, str)
                 or not name.strip()
@@ -273,6 +293,8 @@ def filter_authorized_experiments(raw_discovery: Any, policy: Any) -> list[dict[
                 or len(parameters) > 2048
                 or not isinstance(parameter_units, dict)
                 or not isinstance(options, dict)
+                or not isinstance(raw_schedule, list)
+                or len(raw_schedule) > 128
             ):
                 continue
 
@@ -317,7 +339,59 @@ def filter_authorized_experiments(raw_discovery: Any, policy: Any) -> list[dict[
                     continue
                 safe_parameters = {}
 
-            if not safe_parameters and not safe_options:
+            safe_schedule: list[dict[str, Any]] = []
+            if raw_schedule:
+                start = safe_options.get("startTime")
+                stop = safe_options.get("stopTime")
+                step = safe_options.get("stepSize")
+                if (
+                    start is None or stop is None or step is None
+                    or not math.isfinite(start) or not math.isfinite(stop) or not math.isfinite(step)
+                    or step <= 0 or stop <= start
+                ):
+                    continue
+                schedule_valid = True
+                previous_time = start
+                seen_values: set[tuple[float, str]] = set()
+                for event in raw_schedule:
+                    if not isinstance(event, dict) or set(event) != {"time", "values"}:
+                        schedule_valid = False
+                        break
+                    event_time = event["time"]
+                    values = event["values"]
+                    if (
+                        isinstance(event_time, bool) or not isinstance(event_time, (int, float))
+                        or not math.isfinite(event_time) or event_time < start or event_time >= stop
+                        or event_time < previous_time or not isinstance(values, dict) or not values
+                    ):
+                        schedule_valid = False
+                        break
+                    step_index = round((event_time - start) / step)
+                    tolerance = max(1e-9, abs(step) * 1e-7)
+                    if abs(start + step_index * step - event_time) > tolerance:
+                        schedule_valid = False
+                        break
+                    safe_values: dict[str, float] = {}
+                    for variable_name, value in values.items():
+                        identity = (float(event_time), variable_name)
+                        if (
+                            not isinstance(variable_name, str) or not variable_name
+                            or len(variable_name) > 512 or variable_name not in runtime_names
+                            or isinstance(value, bool) or not isinstance(value, (int, float))
+                            or not math.isfinite(value) or identity in seen_values
+                        ):
+                            schedule_valid = False
+                            break
+                        safe_values[variable_name] = float(value)
+                        seen_values.add(identity)
+                    if not schedule_valid:
+                        break
+                    safe_schedule.append({"time": float(event_time), "values": safe_values})
+                    previous_time = float(event_time)
+                if not schedule_valid:
+                    continue
+
+            if not safe_parameters and not safe_options and not safe_schedule:
                 continue
             description = experiment.get("description")
             if not isinstance(description, str) or not description.strip():
@@ -328,5 +402,6 @@ def filter_authorized_experiments(raw_discovery: Any, policy: Any) -> list[dict[
                 "description": description[:2048],
                 "parameters": safe_parameters,
                 "options": safe_options,
+                **({"inputSchedule": safe_schedule} if safe_schedule else {}),
             })
     return safe_experiments
