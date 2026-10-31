@@ -26,8 +26,8 @@ services:
       # Complex Air's EnergyPlus initialization needs more address space than
       # the standard small-FMU worker budget; this override is local-only.
       - FMU_WORKER_MEMORY_MIB=3072
-      # The demo's 15 zones use two setpoint inputs and two activation flags each.
-      - FMU_MAX_SIMULATION_PARAMETERS=64
+      # Local demonstrations may expose FMUs with more than 128 editable parameters.
+      - FMU_MAX_SIMULATION_PARAMETERS=256
       # Local demos may use denser fixed-step models than published labs.
       # Keep the limit finite: 600,000 steps covers sixty seconds at 0.1 ms.
       - FMU_MAX_SIMULATION_STEPS=600000

@@ -738,8 +738,19 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
         return OperationResult::Failure("STATE_ERROR", "Runtime is not in session_created state");
     }
 
+    std::map<std::string, ScalarValue> initialization_inputs;
+    for (const auto& [name, value] : pending_inputs_) {
+        const VariableInfo* variable = FindVariableByName(model_, name);
+        if (variable != nullptr && variable->start_value.has_value()
+            && *variable->start_value == value) {
+            initial_inputs_.erase(name);
+            continue;
+        }
+        initialization_inputs.emplace(name, value);
+    }
+
     const auto status = gateway_client_->Initialize(
-        config_, experiment_, pending_inputs_, early_return_allowed_);
+        config_, experiment_, initialization_inputs, early_return_allowed_);
     if (!status) {
         state_ = SessionState::kError;
         SetError(status.message);
@@ -895,8 +906,16 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     if (simulation_finished_) {
         return OperationResult::Failure("SIMULATION_FINISHED", "Simulation has finished");
     }
+    if (initialization_state && variable.start_value.has_value()
+        && *variable.start_value == value) {
+        cached_values_[variable.value_reference] = std::move(value);
+        initial_inputs_.erase(variable.name);
+        pending_inputs_.erase(variable.name);
+        return OperationResult::Success();
+    }
+
     const auto cached = cached_values_.find(variable.value_reference);
-    if (cached != cached_values_.end() && cached->second == value) {
+    if (runtime_state && cached != cached_values_.end() && cached->second == value) {
         return OperationResult::Success();
     }
     cached_values_[variable.value_reference] = value;

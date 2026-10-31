@@ -157,7 +157,7 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
         ),
         ws_create_rate_limit_per_minute=int(values.get("WS_CREATE_RATE_LIMIT_PER_MINUTE", "30")),
         max_simulation_parameters=_bounded_int(
-            values, "FMU_MAX_SIMULATION_PARAMETERS", 128, 1, 128,
+            values, "FMU_MAX_SIMULATION_PARAMETERS", 256, 1, 256,
         ),
         max_input_schedule_events=_bounded_int(
             values, "FMU_MAX_INPUT_SCHEDULE_EVENTS", 128, 1, 200000,
