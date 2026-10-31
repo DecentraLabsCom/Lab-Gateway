@@ -16,8 +16,6 @@ namespace decentralabs::proxy {
 
 namespace {
 
-using scalar_value_codec::BoundsForDeclaredType;
-
 std::string PercentDecode(const std::string_view text) {
     std::string output;
     output.reserve(text.size());
@@ -39,15 +37,297 @@ std::string PercentDecode(const std::string_view text) {
     return output;
 }
 
+struct IntegerBounds {
+    std::int64_t min = std::numeric_limits<std::int64_t>::min();
+    std::uint64_t max = std::numeric_limits<std::uint64_t>::max();
+    bool unsigned_only = false;
+};
+
+IntegerBounds BoundsForDeclaredType(const std::string_view declared_type) {
+    if (declared_type == "Int8") {
+        return {std::numeric_limits<std::int8_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int8_t>::max()), false};
+    }
+    if (declared_type == "UInt8") {
+        return {0, std::numeric_limits<std::uint8_t>::max(), true};
+    }
+    if (declared_type == "Int16") {
+        return {std::numeric_limits<std::int16_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int16_t>::max()), false};
+    }
+    if (declared_type == "UInt16") {
+        return {0, std::numeric_limits<std::uint16_t>::max(), true};
+    }
+    if (declared_type == "Int32" || declared_type == "Integer" || declared_type == "Enumeration") {
+        return {std::numeric_limits<std::int32_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()), false};
+    }
+    if (declared_type == "UInt32") {
+        return {0, std::numeric_limits<std::uint32_t>::max(), true};
+    }
+    if (declared_type == "UInt64") {
+        return {0, std::numeric_limits<std::uint64_t>::max(), true};
+    }
+    return {std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::uint64_t>::max(), false};
+}
+
+bool TryNormalizeIntegerValue(const VariableInfo& variable, const std::int64_t raw_value, ScalarValue* output) {
+    if (output == nullptr) {
+        return false;
+    }
+    const auto bounds = BoundsForDeclaredType(variable.declared_type);
+    if (bounds.unsigned_only) {
+        if (raw_value < 0) {
+            return false;
+        }
+        const auto value = static_cast<std::uint64_t>(raw_value);
+        if (value > bounds.max) {
+            return false;
+        }
+        *output = value;
+        return true;
+    }
+    if (raw_value < bounds.min || (raw_value >= 0 && static_cast<std::uint64_t>(raw_value) > bounds.max)) {
+        return false;
+    }
+    *output = raw_value;
+    return true;
+}
+
+bool TryNormalizeIntegerValue(const VariableInfo& variable, const std::uint64_t raw_value, ScalarValue* output) {
+    if (output == nullptr) {
+        return false;
+    }
+    const auto bounds = BoundsForDeclaredType(variable.declared_type);
+    if (bounds.unsigned_only) {
+        if (raw_value > bounds.max) {
+            return false;
+        }
+        *output = raw_value;
+        return true;
+    }
+    if (raw_value > bounds.max || raw_value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        return false;
+    }
+    *output = static_cast<std::int64_t>(raw_value);
+    return true;
+}
+
 template <typename T>
 bool TryNormalizeIntegerValue(const VariableInfo& variable, const T raw_value, ScalarValue* output) {
     if constexpr (std::is_unsigned_v<T>) {
-        return scalar_value_codec::TryNormalizeIntegerValue(
-            variable, static_cast<std::uint64_t>(raw_value), output);
+        return TryNormalizeIntegerValue(variable, static_cast<std::uint64_t>(raw_value), output);
     } else {
-        return scalar_value_codec::TryNormalizeIntegerValue(
-            variable, static_cast<std::int64_t>(raw_value), output);
+        return TryNormalizeIntegerValue(variable, static_cast<std::int64_t>(raw_value), output);
     }
+}
+
+std::optional<std::int64_t> ParseSignedInteger(const JsonValue& value) {
+    try {
+        if (value.IsString()) {
+            return static_cast<std::int64_t>(std::stoll(value.AsString()));
+        }
+        if (value.IsNumber()) {
+            const double number = value.AsNumber();
+            double integral_part = 0.0;
+            const double fractional_part = std::modf(number, &integral_part);
+            if (!std::isfinite(number) || std::abs(fractional_part) > std::numeric_limits<double>::epsilon()) {
+                return std::nullopt;
+            }
+            if (number < static_cast<double>(std::numeric_limits<std::int64_t>::min()) ||
+                number > static_cast<double>(std::numeric_limits<std::int64_t>::max())) {
+                return std::nullopt;
+            }
+            return static_cast<std::int64_t>(number);
+        }
+    } catch (...) {
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::uint64_t> ParseUnsignedInteger(const JsonValue& value) {
+    try {
+        if (value.IsString()) {
+            return static_cast<std::uint64_t>(std::stoull(value.AsString()));
+        }
+        if (value.IsNumber()) {
+            const double number = value.AsNumber();
+            double integral_part = 0.0;
+            const double fractional_part = std::modf(number, &integral_part);
+            if (!std::isfinite(number) || std::abs(fractional_part) > std::numeric_limits<double>::epsilon() || number < 0.0) {
+                return std::nullopt;
+            }
+            if (number > static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
+                return std::nullopt;
+            }
+            return static_cast<std::uint64_t>(number);
+        }
+    } catch (...) {
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::optional<ScalarValue> DecodeIntegerArray(const JsonArray& items, const VariableInfo& variable) {
+    if (BoundsForDeclaredType(variable.declared_type).unsigned_only) {
+        UnsignedIntegerArray values;
+        values.reserve(items.size());
+        for (const auto& item : items) {
+            const auto parsed = ParseUnsignedInteger(item);
+            if (!parsed.has_value()) {
+                return std::nullopt;
+            }
+            ScalarValue normalized;
+            if (!TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
+                return std::nullopt;
+            }
+            const auto* integer = std::get_if<std::uint64_t>(&normalized);
+            if (integer == nullptr) {
+                return std::nullopt;
+            }
+            values.push_back(*integer);
+        }
+        return ScalarValue(std::move(values));
+    }
+
+    IntegerArray values;
+    values.reserve(items.size());
+    for (const auto& item : items) {
+        const auto parsed = ParseSignedInteger(item);
+        if (!parsed.has_value()) {
+            return std::nullopt;
+        }
+        ScalarValue normalized;
+        if (!TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
+            return std::nullopt;
+        }
+        const auto* integer = std::get_if<std::int64_t>(&normalized);
+        if (integer == nullptr) {
+            return std::nullopt;
+        }
+        values.push_back(*integer);
+    }
+    return ScalarValue(std::move(values));
+}
+
+// codeql[cpp/poorly-documented-function]
+std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const VariableInfo& variable) {
+    if (value.IsArray()) {
+        const JsonArray* items = value.AsArray();
+        if (items == nullptr) {
+            return std::nullopt;
+        }
+        switch (variable.type) {
+            case ScalarType::kReal: {
+                RealArray values;
+                values.reserve(items->size());
+                for (const auto& item : *items) {
+                    if (!item.IsNumber()) {
+                        return std::nullopt;
+                    }
+                    values.push_back(item.AsNumber());
+                }
+                return ScalarValue(std::move(values));
+            }
+            case ScalarType::kInteger:
+            case ScalarType::kEnumeration:
+                return DecodeIntegerArray(*items, variable);
+            case ScalarType::kBoolean:
+            case ScalarType::kClock: {
+                BooleanArray values;
+                values.reserve(items->size());
+                for (const auto& item : *items) {
+                    if (item.IsBool()) {
+                        values.push_back(item.AsBool());
+                    } else if (item.IsNumber()) {
+                        values.push_back(item.AsNumber() != 0.0);
+                    } else {
+                        return std::nullopt;
+                    }
+                }
+                return ScalarValue(std::move(values));
+            }
+            case ScalarType::kString: {
+                StringArray values;
+                values.reserve(items->size());
+                for (const auto& item : *items) {
+                    if (!item.IsString()) {
+                        return std::nullopt;
+                    }
+                    values.push_back(item.AsString());
+                }
+                return ScalarValue(std::move(values));
+            }
+            case ScalarType::kBinary: {
+                BinaryArray values;
+                values.reserve(items->size());
+                for (const auto& item : *items) {
+                    if (!item.IsString()) {
+                        return std::nullopt;
+                    }
+                    const auto decoded = scalar_value_codec::DecodeBase64(item.AsString());
+                    if (!decoded.has_value()) {
+                        return std::nullopt;
+                    }
+                    values.push_back(*decoded);
+                }
+                return ScalarValue(std::move(values));
+            }
+        }
+    }
+
+    switch (variable.type) {
+        case ScalarType::kReal:
+            if (value.IsNumber()) {
+                return ScalarValue(value.AsNumber());
+            }
+            break;
+        case ScalarType::kInteger:
+        case ScalarType::kEnumeration:
+            if (value.IsNumber() || value.IsString()) {
+                ScalarValue normalized;
+                if (BoundsForDeclaredType(variable.declared_type).unsigned_only) {
+                    const auto parsed = ParseUnsignedInteger(value);
+                    if (parsed.has_value() && TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
+                        return normalized;
+                    }
+                } else {
+                    const auto parsed = ParseSignedInteger(value);
+                    if (parsed.has_value() && TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
+                        return normalized;
+                    }
+                }
+            }
+            break;
+        case ScalarType::kBoolean:
+            if (value.IsBool()) {
+                return ScalarValue(value.AsBool());
+            }
+            if (value.IsNumber()) {
+                return ScalarValue(value.AsNumber() != 0.0);
+            }
+            break;
+        case ScalarType::kString:
+            if (value.IsString()) {
+                return ScalarValue(value.AsString());
+            }
+            break;
+        case ScalarType::kBinary:
+            if (value.IsString()) {
+                const auto decoded = scalar_value_codec::DecodeBase64(value.AsString());
+                if (decoded.has_value()) {
+                    return ScalarValue(*decoded);
+                }
+            }
+            break;
+        case ScalarType::kClock:
+            if (value.IsBool()) {
+                return ScalarValue(value.AsBool());
+            }
+            if (value.IsNumber()) {
+                return ScalarValue(value.AsNumber() != 0.0);
+            }
+            break;
+    }
+    return std::nullopt;
 }
 
 template <typename T>
@@ -432,7 +712,7 @@ OperationResult ProxyRuntime::ApplyOutputSnapshot(const OutputSnapshot& snapshot
         if (variable == nullptr) {
             continue;
         }
-        const auto converted = scalar_value_codec::DecodeJsonValue(json_value, *variable);
+        const auto converted = ConvertJsonValue(json_value, *variable);
         if (!converted.has_value()) {
             continue;
         }
