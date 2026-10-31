@@ -2,9 +2,9 @@
 
 import json
 import math
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from config import CONFIG
 
@@ -76,6 +76,8 @@ class SimulationRequest(BaseModel):
     labId: Optional[str] = None
     parameters: dict = Field(default_factory=dict)
     options: dict = Field(default_factory=dict)
+    checkpoint: Optional[dict[str, Any]] = None
+    captureFmuState: StrictBool = False
     inputSchedule: list[dict] = Field(
         default_factory=list,
         max_length=CONFIG.max_input_schedule_events,
@@ -97,6 +99,21 @@ class SimulationRequest(BaseModel):
     @classmethod
     def _bounded_input_schedule(cls, value):
         return _validate_input_schedule(value)
+
+    @field_validator("checkpoint")
+    @classmethod
+    def _bounded_checkpoint(cls, value):
+        if value is None:
+            return value
+        if not isinstance(value, dict):
+            raise ValueError("FMU state checkpoint must be an object")
+        try:
+            encoded = json.dumps(value, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("FMU state checkpoint is invalid") from exc
+        if len(encoded) > 4096:
+            raise ValueError("FMU state checkpoint exceeds 4 KiB")
+        return value
 
 
 class BatchScenarioRequest(BaseModel):

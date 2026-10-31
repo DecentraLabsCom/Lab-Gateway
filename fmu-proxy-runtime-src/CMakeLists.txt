@@ -17,6 +17,7 @@ add_library(
   src/protocol.cpp
   src/runtime.cpp
   src/runtime_config.cpp
+  src/scalar_value_codec.cpp
   src/session_state.cpp
   src/transport.cpp
   src/transport_linux.cpp

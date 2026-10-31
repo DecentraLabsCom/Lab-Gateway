@@ -427,6 +427,15 @@ def _public_model_metadata(metadata: dict) -> dict:
     for key in ("defaultStartTime", "defaultStopTime", "defaultStepSize"):
         if metadata.get(key) is not None:
             payload[key] = float(metadata[key])
+    raw_capabilities = metadata.get("capabilities")
+    if isinstance(raw_capabilities, dict):
+        state_capabilities = {}
+        for name in ("canGetAndSetFMUstate", "canSerializeFMUstate", "canGetAndSetFMUState", "canSerializeFMUState"):
+            value = raw_capabilities.get(name)
+            if isinstance(value, bool):
+                state_capabilities[name] = value
+        if state_capabilities:
+            payload["capabilities"] = state_capabilities
     if metadata.get("instantiationToken"):
         payload["instantiationToken"] = metadata["instantiationToken"]
     fmi_ls_struct = None

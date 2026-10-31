@@ -49,6 +49,10 @@ public:
         double delta_t,
         const std::map<std::string, ScalarValue>& input_values);
     ValueResult<OutputSnapshot> GetOutputs(const std::vector<std::string>& variables);
+    ValueResult<JsonObject> CaptureFmuState();
+    ValueResult<OutputSnapshot> RestoreFmuState(
+        const JsonObject& checkpoint,
+        const std::vector<std::string>& variables);
     OperationResult Reset();
     OperationResult Terminate();
 

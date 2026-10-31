@@ -1,5 +1,7 @@
 #include "decentralabs_proxy/runtime.hpp"
 
+#include "decentralabs_proxy/scalar_value_codec.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -13,6 +15,8 @@
 namespace decentralabs::proxy {
 
 namespace {
+
+using scalar_value_codec::BoundsForDeclaredType;
 
 std::string PercentDecode(const std::string_view text) {
     std::string output;
@@ -35,172 +39,14 @@ std::string PercentDecode(const std::string_view text) {
     return output;
 }
 
-std::optional<BinaryValue> DecodeBase64(const std::string& text) {
-    static const int8_t kTable[256] = {
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-2,-1,-1,
-        -1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
-        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-    };
-    if (text.empty()) {
-        return BinaryValue{};
-    }
-    if (text.size() % 4 != 0) {
-        return std::nullopt;
-    }
-    BinaryValue output;
-    output.reserve((text.size() / 4) * 3);
-    for (std::size_t index = 0; index < text.size(); index += 4) {
-        const int8_t a = kTable[static_cast<unsigned char>(text[index])];
-        const int8_t b = kTable[static_cast<unsigned char>(text[index + 1])];
-        const int8_t c = text[index + 2] == '=' ? -2 : kTable[static_cast<unsigned char>(text[index + 2])];
-        const int8_t d = text[index + 3] == '=' ? -2 : kTable[static_cast<unsigned char>(text[index + 3])];
-        if (a < 0 || b < 0 || c == -1 || d == -1) {
-            return std::nullopt;
-        }
-        const std::uint32_t triple =
-            (static_cast<std::uint32_t>(a) << 18U) |
-            (static_cast<std::uint32_t>(b) << 12U) |
-            (static_cast<std::uint32_t>(c < 0 ? 0 : c) << 6U) |
-            static_cast<std::uint32_t>(d < 0 ? 0 : d);
-        output.push_back(static_cast<std::uint8_t>((triple >> 16U) & 0xFFU));
-        if (c != -2) {
-            output.push_back(static_cast<std::uint8_t>((triple >> 8U) & 0xFFU));
-        }
-        if (d != -2) {
-            output.push_back(static_cast<std::uint8_t>(triple & 0xFFU));
-        }
-    }
-    return output;
-}
-
-struct IntegerBounds {
-    std::int64_t min = std::numeric_limits<std::int64_t>::min();
-    std::uint64_t max = std::numeric_limits<std::uint64_t>::max();
-    bool unsigned_only = false;
-};
-
-IntegerBounds BoundsForDeclaredType(const std::string_view declared_type) {
-    if (declared_type == "Int8") {
-        return {std::numeric_limits<std::int8_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int8_t>::max()), false};
-    }
-    if (declared_type == "UInt8") {
-        return {0, std::numeric_limits<std::uint8_t>::max(), true};
-    }
-    if (declared_type == "Int16") {
-        return {std::numeric_limits<std::int16_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int16_t>::max()), false};
-    }
-    if (declared_type == "UInt16") {
-        return {0, std::numeric_limits<std::uint16_t>::max(), true};
-    }
-    if (declared_type == "Int32" || declared_type == "Integer" || declared_type == "Enumeration") {
-        return {std::numeric_limits<std::int32_t>::min(), static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()), false};
-    }
-    if (declared_type == "UInt32") {
-        return {0, std::numeric_limits<std::uint32_t>::max(), true};
-    }
-    if (declared_type == "UInt64") {
-        return {0, std::numeric_limits<std::uint64_t>::max(), true};
-    }
-    return {};
-}
-
-std::optional<std::int64_t> ParseSignedIntegerJsonValue(const JsonValue& value) {
-    try {
-        if (value.IsString()) {
-            return static_cast<std::int64_t>(std::stoll(value.AsString()));
-        }
-        if (value.IsNumber()) {
-            const double number = value.AsNumber();
-            double integral_part = 0.0;
-            const double fractional_part = std::modf(number, &integral_part);
-            if (!std::isfinite(number)
-                || std::abs(fractional_part) > std::numeric_limits<double>::epsilon()) {
-                return std::nullopt;
-            }
-            if (number < static_cast<double>(std::numeric_limits<std::int64_t>::min()) ||
-                number > static_cast<double>(std::numeric_limits<std::int64_t>::max())) {
-                return std::nullopt;
-            }
-            return static_cast<std::int64_t>(number);
-        }
-    } catch (...) {
-        return std::nullopt;
-    }
-    return std::nullopt;
-}
-
-std::optional<std::uint64_t> ParseUnsignedIntegerJsonValue(const JsonValue& value) {
-    try {
-        if (value.IsString()) {
-            return static_cast<std::uint64_t>(std::stoull(value.AsString()));
-        }
-        if (value.IsNumber()) {
-            const double number = value.AsNumber();
-            double integral_part = 0.0;
-            const double fractional_part = std::modf(number, &integral_part);
-            if (!std::isfinite(number)
-                || std::abs(fractional_part) > std::numeric_limits<double>::epsilon()
-                || number < 0.0) {
-                return std::nullopt;
-            }
-            if (number > static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
-                return std::nullopt;
-            }
-            return static_cast<std::uint64_t>(number);
-        }
-    } catch (...) {
-        return std::nullopt;
-    }
-    return std::nullopt;
-}
-
 template <typename T>
 bool TryNormalizeIntegerValue(const VariableInfo& variable, const T raw_value, ScalarValue* output) {
-    if (output == nullptr) {
-        return false;
-    }
-
-    const auto bounds = BoundsForDeclaredType(variable.declared_type);
-    if (bounds.unsigned_only) {
-        std::uint64_t value = 0;
-        if constexpr (std::is_unsigned_v<T>) {
-            value = static_cast<std::uint64_t>(raw_value);
-        } else {
-            const auto signed_value = static_cast<std::int64_t>(raw_value);
-            if (signed_value < 0) {
-                return false;
-            }
-            value = static_cast<std::uint64_t>(signed_value);
-        }
-        if (value > bounds.max) {
-            return false;
-        }
-        *output = value;
-        return true;
-    }
-
     if constexpr (std::is_unsigned_v<T>) {
-        const auto value = static_cast<std::uint64_t>(raw_value);
-        if (value > bounds.max || value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-            return false;
-        }
-        *output = static_cast<std::int64_t>(value);
-        return true;
+        return scalar_value_codec::TryNormalizeIntegerValue(
+            variable, static_cast<std::uint64_t>(raw_value), output);
     } else {
-        const auto value = static_cast<std::int64_t>(raw_value);
-        if (value < bounds.min) {
-            return false;
-        }
-        if (value >= 0 && static_cast<std::uint64_t>(value) > bounds.max) {
-            return false;
-        }
-        *output = value;
-        return true;
+        return scalar_value_codec::TryNormalizeIntegerValue(
+            variable, static_cast<std::int64_t>(raw_value), output);
     }
 }
 
@@ -215,19 +61,11 @@ bool TryCastStoredInteger(const VariableInfo& variable, const ScalarValue& store
         if (!bounds.unsigned_only || *unsigned_value > bounds.max) {
             return false;
         }
-        if constexpr (std::is_unsigned_v<T>) {
-            if (*unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
-                return false;
-            }
-            *output = static_cast<T>(*unsigned_value);
-            return true;
-        } else {
-            if (*unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
-                return false;
-            }
-            *output = static_cast<T>(*unsigned_value);
-            return true;
+        if (*unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
+            return false;
         }
+        *output = static_cast<T>(*unsigned_value);
+        return true;
     }
 
     const auto* signed_value = std::get_if<std::int64_t>(&stored_value);
@@ -261,187 +99,6 @@ bool TryCastStoredInteger(const VariableInfo& variable, const ScalarValue& store
         *output = static_cast<T>(*signed_value);
         return true;
     }
-}
-
-std::optional<ScalarValue> ConvertIntegerArrayValue(
-    const JsonArray& items,
-    const VariableInfo& variable
-) {
-    const auto bounds = BoundsForDeclaredType(variable.declared_type);
-    if (bounds.unsigned_only) {
-        UnsignedIntegerArray values;
-        values.reserve(items.size());
-        for (const auto& item : items) {
-            const auto parsed = ParseUnsignedIntegerJsonValue(item);
-            if (!parsed.has_value()) {
-                return std::nullopt;
-            }
-            ScalarValue normalized;
-            if (!TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
-                return std::nullopt;
-            }
-            const auto* integer = std::get_if<std::uint64_t>(&normalized);
-            if (integer == nullptr) {
-                return std::nullopt;
-            }
-            values.push_back(*integer);
-        }
-        return ScalarValue(std::move(values));
-    }
-
-    IntegerArray values;
-    values.reserve(items.size());
-    for (const auto& item : items) {
-        const auto parsed = ParseSignedIntegerJsonValue(item);
-        if (!parsed.has_value()) {
-            return std::nullopt;
-        }
-        ScalarValue normalized;
-        if (!TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
-            return std::nullopt;
-        }
-        const auto* integer = std::get_if<std::int64_t>(&normalized);
-        if (integer == nullptr) {
-            return std::nullopt;
-        }
-        values.push_back(*integer);
-    }
-    return ScalarValue(std::move(values));
-}
-
-// codeql[cpp/poorly-documented-function]
-std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const VariableInfo& variable) {
-    if (value.IsArray()) {
-        const JsonArray* items = value.AsArray();
-        if (items == nullptr) {
-            return std::nullopt;
-        }
-        switch (variable.type) {
-            case ScalarType::kReal: {
-                RealArray values;
-                values.reserve(items->size());
-                for (const auto& item : *items) {
-                    if (!item.IsNumber()) {
-                        return std::nullopt;
-                    }
-                    values.push_back(item.AsNumber());
-                }
-                return ScalarValue(std::move(values));
-            }
-            case ScalarType::kInteger:
-            case ScalarType::kEnumeration:
-                return ConvertIntegerArrayValue(*items, variable);
-            case ScalarType::kBoolean: {
-                BooleanArray values;
-                values.reserve(items->size());
-                for (const auto& item : *items) {
-                    if (item.IsBool()) {
-                        values.push_back(item.AsBool());
-                    } else if (item.IsNumber()) {
-                        values.push_back(item.AsNumber() != 0.0);
-                    } else {
-                        return std::nullopt;
-                    }
-                }
-                return ScalarValue(std::move(values));
-            }
-            case ScalarType::kString: {
-                StringArray values;
-                values.reserve(items->size());
-                for (const auto& item : *items) {
-                    if (!item.IsString()) {
-                        return std::nullopt;
-                    }
-                    values.push_back(item.AsString());
-                }
-                return ScalarValue(std::move(values));
-            }
-            case ScalarType::kBinary: {
-                BinaryArray values;
-                values.reserve(items->size());
-                for (const auto& item : *items) {
-                    if (!item.IsString()) {
-                        return std::nullopt;
-                    }
-                    const auto decoded = DecodeBase64(item.AsString());
-                    if (!decoded.has_value()) {
-                        return std::nullopt;
-                    }
-                    values.push_back(*decoded);
-                }
-                return ScalarValue(std::move(values));
-            }
-            case ScalarType::kClock: {
-                BooleanArray values;
-                values.reserve(items->size());
-                for (const auto& item : *items) {
-                    if (item.IsBool()) {
-                        values.push_back(item.AsBool());
-                    } else if (item.IsNumber()) {
-                        values.push_back(item.AsNumber() != 0.0);
-                    } else {
-                        return std::nullopt;
-                    }
-                }
-                return ScalarValue(std::move(values));
-            }
-        }
-    }
-    switch (variable.type) {
-        case ScalarType::kReal:
-            if (value.IsNumber()) {
-                return ScalarValue(value.AsNumber());
-            }
-            break;
-        case ScalarType::kInteger:
-        case ScalarType::kEnumeration:
-            if (value.IsNumber() || value.IsString()) {
-                const auto bounds = BoundsForDeclaredType(variable.declared_type);
-                ScalarValue normalized;
-                if (bounds.unsigned_only) {
-                    const auto parsed = ParseUnsignedIntegerJsonValue(value);
-                    if (parsed.has_value() && TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
-                        return normalized;
-                    }
-                } else {
-                    const auto parsed = ParseSignedIntegerJsonValue(value);
-                    if (parsed.has_value() && TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
-                        return normalized;
-                    }
-                }
-            }
-            break;
-        case ScalarType::kBoolean:
-            if (value.IsBool()) {
-                return ScalarValue(value.AsBool());
-            }
-            if (value.IsNumber()) {
-                return ScalarValue(value.AsNumber() != 0.0);
-            }
-            break;
-        case ScalarType::kString:
-            if (value.IsString()) {
-                return ScalarValue(value.AsString());
-            }
-            break;
-        case ScalarType::kBinary:
-            if (value.IsString()) {
-                const auto decoded = DecodeBase64(value.AsString());
-                if (decoded.has_value()) {
-                    return ScalarValue(*decoded);
-                }
-            }
-            break;
-        case ScalarType::kClock:
-            if (value.IsBool()) {
-                return ScalarValue(value.AsBool());
-            }
-            if (value.IsNumber()) {
-                return ScalarValue(value.AsNumber() != 0.0);
-            }
-            break;
-    }
-    return std::nullopt;
 }
 
 std::optional<std::int32_t> ScalarValueToInt32(const ScalarValue& value) {
@@ -775,7 +432,7 @@ OperationResult ProxyRuntime::ApplyOutputSnapshot(const OutputSnapshot& snapshot
         if (variable == nullptr) {
             continue;
         }
-        const auto converted = ConvertJsonValue(json_value, *variable);
+        const auto converted = scalar_value_codec::DecodeJsonValue(json_value, *variable);
         if (!converted.has_value()) {
             continue;
         }
@@ -887,6 +544,70 @@ OperationResult ProxyRuntime::Reset() {
     simulation_finished_ = false;
     realtime_clock_started_ = false;
     state_ = SessionState::kInstantiated;
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::CaptureFmuState(std::string& serialized_state) {
+    if (gateway_client_ == nullptr || !gateway_client_->IsConnected()) {
+        return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "FMU state capture requires an active Gateway session");
+    }
+    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
+        return OperationResult::Failure("STATE_ERROR", "FMU state capture requires an initialized simulation");
+    }
+    const auto checkpoint = gateway_client_->CaptureFmuState();
+    if (!checkpoint) {
+        SetError(checkpoint.status.message);
+        return checkpoint.status;
+    }
+    serialized_state = SerializeJson(JsonValue(checkpoint.value));
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_state) {
+    if (gateway_client_ == nullptr || !gateway_client_->IsConnected()) {
+        return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "FMU state restore requires an active Gateway session");
+    }
+    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
+        return OperationResult::Failure("STATE_ERROR", "FMU state restore requires an initialized simulation");
+    }
+    const auto parsed = ParseJson(serialized_state);
+    if (!parsed || parsed.value.AsObject() == nullptr) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state is invalid");
+    }
+    const JsonObject* serialized_object = parsed.value.AsObject();
+    const JsonValue* checkpoint_value = FindObjectValue(*serialized_object, "checkpoint");
+    const JsonObject* checkpoint = checkpoint_value == nullptr ? nullptr : checkpoint_value->AsObject();
+    if (checkpoint == nullptr) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state is incomplete");
+    }
+    std::vector<std::string> output_variables;
+    output_variables.reserve(512);
+    for (const auto& variable : model_.variables) {
+        if (variable.causality == "output" && output_variables.size() < 512) {
+            output_variables.push_back(variable.name);
+        }
+    }
+    const auto restored = gateway_client_->RestoreFmuState(*checkpoint, output_variables);
+    if (!restored) {
+        SetError(restored.status.message);
+        return restored.status;
+    }
+    current_time_ = restored.value.sim_time;
+    simulation_finished_ = false;
+    last_step_early_return_ = false;
+    last_step_event_handling_needed_ = false;
+    last_step_terminated_ = false;
+    pending_inputs_.clear();
+    cached_values_.clear();
+    SeedCacheFromModelDefaults();
+    const OutputSnapshot output_snapshot{
+        restored.value.sim_time,
+        restored.value.values,
+    };
+    ApplyOutputSnapshot(output_snapshot);
+    realtime_sim_origin_ = current_time_;
+    realtime_wall_origin_ = std::chrono::steady_clock::now();
+    realtime_clock_started_ = true;
     return OperationResult::Success();
 }
 

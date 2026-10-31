@@ -1,7 +1,9 @@
 #include "fmi3/fmi3Functions.h"
 
 #include <limits>
+#include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -20,6 +22,12 @@ struct Fmi3Instance {
     ProxyRuntime runtime;
     std::vector<std::string> string_cache;
 };
+
+struct Fmi3StateHandle {
+    std::string checkpoint;
+};
+
+constexpr size_t kMaximumSerializedStateTokenBytes = 64 * 1024;
 
 Fmi3Instance* AsInstance(fmi3Instance instance) {
     return static_cast<Fmi3Instance*>(instance);
@@ -176,7 +184,10 @@ fmi3Status SetUnsignedIntegerValues(Fmi3Instance* instance,
 using decentralabs::proxy::AsInstance;
 using decentralabs::proxy::AttachLogger;
 using decentralabs::proxy::Fmi3Instance;
+using decentralabs::proxy::Fmi3StateHandle;
+using decentralabs::proxy::kMaximumSerializedStateTokenBytes;
 using decentralabs::proxy::OperationResult;
+using decentralabs::proxy::ParseJson;
 using decentralabs::proxy::ToFmiStatus;
 using decentralabs::proxy::Unsupported;
 using decentralabs::proxy::ValidateValueCounts;
@@ -785,15 +796,26 @@ fmi3Status fmi3GetFMUState(fmi3Instance instance, fmi3FMUState* FMUState) {
         return fmi3Fatal;
     }
     *FMUState = nullptr;
-    return Unsupported(impl, "FMU state snapshots are not supported");
+    std::string checkpoint;
+    const OperationResult status = impl->runtime.CaptureFmuState(checkpoint);
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
+    auto state = std::unique_ptr<Fmi3StateHandle>(new (std::nothrow) Fmi3StateHandle{std::move(checkpoint)});
+    if (!state) {
+        return fmi3Error;
+    }
+    *FMUState = static_cast<fmi3FMUState>(state.release());
+    return fmi3OK;
 }
 
-fmi3Status fmi3SetFMUState(fmi3Instance instance, fmi3FMUState) {
+fmi3Status fmi3SetFMUState(fmi3Instance instance, fmi3FMUState FMUState) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr) {
+    if (impl == nullptr || FMUState == nullptr) {
         return fmi3Fatal;
     }
-    return Unsupported(impl, "FMU state snapshots are not supported");
+    const auto* state = static_cast<const Fmi3StateHandle*>(FMUState);
+    return ToFmiStatus(impl, impl->runtime.RestoreFmuState(state->checkpoint));
 }
 
 fmi3Status fmi3FreeFMUState(fmi3Instance instance, fmi3FMUState* FMUState) {
@@ -801,34 +823,54 @@ fmi3Status fmi3FreeFMUState(fmi3Instance instance, fmi3FMUState* FMUState) {
     if (impl == nullptr || FMUState == nullptr) {
         return fmi3Fatal;
     }
+    delete static_cast<Fmi3StateHandle*>(*FMUState);
     *FMUState = nullptr;
     return fmi3OK;
 }
 
-fmi3Status fmi3SerializedFMUStateSize(fmi3Instance instance, fmi3FMUState, size_t* size) {
+fmi3Status fmi3SerializedFMUStateSize(fmi3Instance instance, fmi3FMUState FMUState, size_t* size) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || size == nullptr) {
+    if (impl == nullptr || size == nullptr || FMUState == nullptr) {
         return fmi3Fatal;
     }
-    *size = 0;
-    return Unsupported(impl, "FMU state serialization is not supported");
+    const auto* state = static_cast<const Fmi3StateHandle*>(FMUState);
+    *size = state->checkpoint.size();
+    return fmi3OK;
 }
 
-fmi3Status fmi3SerializeFMUState(fmi3Instance instance, fmi3FMUState, fmi3Byte[], size_t) {
+fmi3Status fmi3SerializeFMUState(fmi3Instance instance, fmi3FMUState FMUState, fmi3Byte serializedState[], size_t size) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr) {
+    if (impl == nullptr || FMUState == nullptr || serializedState == nullptr) {
         return fmi3Fatal;
     }
-    return Unsupported(impl, "FMU state serialization is not supported");
+    const auto* state = static_cast<const Fmi3StateHandle*>(FMUState);
+    if (size != state->checkpoint.size()) {
+        return Unsupported(impl, "Serialized FMU state buffer has the wrong size");
+    }
+    std::memcpy(serializedState, state->checkpoint.data(), size);
+    return fmi3OK;
 }
 
-fmi3Status fmi3DeserializeFMUState(fmi3Instance instance, const fmi3Byte[], size_t, fmi3FMUState* FMUState) {
+fmi3Status fmi3DeserializeFMUState(fmi3Instance instance, const fmi3Byte serializedState[], size_t size, fmi3FMUState* FMUState) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || FMUState == nullptr) {
+    if (impl == nullptr || FMUState == nullptr || serializedState == nullptr) {
         return fmi3Fatal;
     }
     *FMUState = nullptr;
-    return Unsupported(impl, "FMU state serialization is not supported");
+    if (size == 0 || size > kMaximumSerializedStateTokenBytes) {
+        return Unsupported(impl, "Serialized FMU state token has an invalid size");
+    }
+    std::string checkpoint(reinterpret_cast<const char*>(serializedState), size);
+    const auto parsed = ParseJson(checkpoint);
+    if (!parsed || parsed.value.AsObject() == nullptr) {
+        return Unsupported(impl, "Serialized FMU state token is invalid");
+    }
+    auto state = std::unique_ptr<Fmi3StateHandle>(new (std::nothrow) Fmi3StateHandle{std::move(checkpoint)});
+    if (!state) {
+        return fmi3Error;
+    }
+    *FMUState = static_cast<fmi3FMUState>(state.release());
+    return fmi3OK;
 }
 
 fmi3Status fmi3GetDirectionalDerivative(

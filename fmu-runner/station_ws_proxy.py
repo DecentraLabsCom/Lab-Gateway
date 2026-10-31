@@ -6,7 +6,7 @@ import json
 import math
 import time
 from collections import defaultdict, deque
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import HTTPException, WebSocket
 
@@ -180,9 +180,23 @@ class StationRealtimeWsProxyManager:
             options = message.get("options", {})
             if not isinstance(parameters, dict) or not isinstance(options, dict):
                 raise AccessDenied
+            checkpoint = message.get("checkpoint")
+            if checkpoint is not None:
+                StationRealtimeWsProxyManager._validate_state_checkpoint(checkpoint)
             validate_writes(access_policy, parameters, phase="initialization")
             if "inputs" in options:
                 validate_writes(access_policy, options["inputs"], phase="initialization")
+        elif msg_type == "sim.restoreFMUState":
+            StationRealtimeWsProxyManager._validate_state_checkpoint(message.get("checkpoint"))
+            variables = message.get("variables", [])
+            if (
+                not isinstance(variables, list)
+                or len(variables) > 512
+                or any(not isinstance(name, str) or not name or len(name) > 256 for name in variables)
+                or len(set(variables)) != len(variables)
+            ):
+                raise AccessDenied
+            validate_reads(access_policy, variables)
         elif msg_type == "sim.setInputs":
             validate_writes(access_policy, message.get("values", {}), phase="runtime")
         elif msg_type == "sim.advance":
@@ -236,6 +250,17 @@ class StationRealtimeWsProxyManager:
                 validate_read_value_references(access_policy, message["valueReferences"])
             else:
                 validate_reads(access_policy, message.get("variables"))
+
+    @staticmethod
+    def _validate_state_checkpoint(checkpoint: Any) -> None:
+        if not isinstance(checkpoint, dict):
+            raise AccessDenied
+        try:
+            encoded = json.dumps(checkpoint, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError):
+            raise AccessDenied
+        if len(encoded) > 4096:
+            raise AccessDenied
 
     @classmethod
     def extract_ws_token(cls, websocket: WebSocket) -> str:

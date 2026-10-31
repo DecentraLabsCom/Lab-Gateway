@@ -11,6 +11,8 @@ def simulation_request_payload(
     options: dict,
     input_schedule: Optional[list[dict]] = None,
     sim_id: Optional[str] = None,
+    checkpoint: Optional[dict] = None,
+    capture_fmu_state: bool = False,
 ) -> dict:
     payload = {
         "reservationKey": reservation_key,
@@ -20,6 +22,10 @@ def simulation_request_payload(
     }
     if input_schedule:
         payload["inputSchedule"] = input_schedule
+    if checkpoint is not None:
+        payload["checkpoint"] = checkpoint
+    if capture_fmu_state:
+        payload["captureFmuState"] = True
     if sim_id:
         payload["simId"] = sim_id
     return payload

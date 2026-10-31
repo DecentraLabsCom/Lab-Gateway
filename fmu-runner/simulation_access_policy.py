@@ -135,11 +135,11 @@ def filter_model_description(policy: Mapping[str, Any], payload: Any) -> Any:
     filtered["modelVariables"] = safe_variables
     raw_permissions = policy.get("variables")
     permissions = raw_permissions if isinstance(raw_permissions, Mapping) else {}
-    readable_names = {
+    readable_names = [
         name
         for name, permission in permissions.items()
         if isinstance(name, str) and isinstance(permission, Mapping) and permission.get("read") is True
-    }
+    ]
     fmi_ls_struct = normalize_fmi_ls_struct(
         payload.get("fmiLsStruct"),
         variable_names=readable_names,
@@ -163,6 +163,13 @@ def filter_fmi_values(policy: Mapping[str, Any], payload: Any) -> Any:
             output_map = parent_key in {"outputs", "modelVariables"}
             for key, item in value.items():
                 if not isinstance(key, str):
+                    continue
+                # Checkpoint references are opaque signed tokens, not FMI
+                # variable maps. Preserve them byte-for-byte through the
+                # variable read policy so names inside the token cannot be
+                # mistaken for model variables.
+                if parent_key is None and key == "checkpoint":
+                    filtered[key] = item
                     continue
                 permission = permissions.get(key)
                 if isinstance(permission, Mapping) and permission.get("read") is not True:

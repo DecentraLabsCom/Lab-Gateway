@@ -34,6 +34,8 @@ public:
     OperationResult DoStep(double current_time, double step_size);
     OperationResult Terminate();
     OperationResult Reset();
+    OperationResult CaptureFmuState(std::string& serialized_state);
+    OperationResult RestoreFmuState(const std::string& serialized_state);
 
     OperationResult SetReal(const std::uint32_t* value_references, std::size_t count, const double* values, std::size_t value_count = 0);
     OperationResult SetInteger(const std::uint32_t* value_references, std::size_t count, const std::int32_t* values, std::size_t value_count = 0);

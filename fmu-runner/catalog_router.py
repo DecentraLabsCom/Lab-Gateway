@@ -82,6 +82,25 @@ def create_catalog_router(
                 value = model_description.get(field)
                 if isinstance(value, str) and value.strip() and len(value) <= 32:
                     response[field] = value.strip()
+            capabilities = model_description.get("capabilities")
+            # The Executor's current session runtime captures/restores state
+            # through its Co-Simulation path. Do not offer the UI controls for
+            # a Model Exchange-only FMU even if its XML declares the generic
+            # state serialization flags.
+            if model_description.get("simulationType") == "CoSimulation" and isinstance(capabilities, dict):
+                state_capabilities = {}
+                for key in ("canGetAndSetFMUstate", "canSerializeFMUstate", "canGetAndSetFMUState", "canSerializeFMUState"):
+                    if isinstance(capabilities.get(key), bool):
+                        state_capabilities[key] = capabilities[key]
+                if state_capabilities:
+                    response["fmuState"] = {
+                        "getAndSet": bool(
+                            state_capabilities.get("canGetAndSetFMUstate", state_capabilities.get("canGetAndSetFMUState", False))
+                        ),
+                        "serialize": bool(
+                            state_capabilities.get("canSerializeFMUstate", state_capabilities.get("canSerializeFMUState", False))
+                        ),
+                    }
         if get_authorized_experiments is not None:
             raw_experiments = await get_authorized_experiments(claims=claims)
             response["fmiLsExperiments"] = filter_authorized_experiments(raw_experiments, policy)

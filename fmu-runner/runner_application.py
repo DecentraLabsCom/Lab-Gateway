@@ -654,6 +654,8 @@ def _simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = 
         options=req.options,
         input_schedule=req.inputSchedule,
         sim_id=sim_id,
+        checkpoint=req.checkpoint,
+        capture_fmu_state=req.captureFmuState,
     )
 
 

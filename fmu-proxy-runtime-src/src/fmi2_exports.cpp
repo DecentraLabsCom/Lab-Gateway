@@ -1,6 +1,8 @@
 #include "fmi2/fmi2Functions.h"
 
 #include <memory>
+#include <cstring>
+#include <new>
 #include <string>
 
 #include "decentralabs_proxy/runtime.hpp"
@@ -16,6 +18,12 @@ struct Fmi2Instance {
     ProxyRuntime runtime;
     std::string last_string_status;
 };
+
+struct Fmi2StateHandle {
+    std::string checkpoint;
+};
+
+constexpr size_t kMaximumSerializedStateTokenBytes = 64 * 1024;
 
 Fmi2Instance* AsInstance(fmi2Component component) {
     return static_cast<Fmi2Instance*>(component);
@@ -61,8 +69,11 @@ void AttachLogger(Fmi2Instance* instance) {
 using decentralabs::proxy::AsInstance;
 using decentralabs::proxy::AttachLogger;
 using decentralabs::proxy::Fmi2Instance;
+using decentralabs::proxy::Fmi2StateHandle;
+using decentralabs::proxy::kMaximumSerializedStateTokenBytes;
 using decentralabs::proxy::Log;
 using decentralabs::proxy::OperationResult;
+using decentralabs::proxy::ParseJson;
 using decentralabs::proxy::SessionState;
 using decentralabs::proxy::ToFmiStatus;
 
@@ -223,17 +234,26 @@ fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* value) {
         return fmi2Fatal;
     }
     *value = nullptr;
-    Log(instance, fmi2Error, "logStatusError", "FMU state snapshots are not supported");
-    return fmi2Error;
+    std::string checkpoint;
+    const OperationResult status = instance->runtime.CaptureFmuState(checkpoint);
+    if (!status) {
+        return ToFmiStatus(instance, status);
+    }
+    auto state = std::unique_ptr<Fmi2StateHandle>(new (std::nothrow) Fmi2StateHandle{std::move(checkpoint)});
+    if (!state) {
+        return fmi2Error;
+    }
+    *value = static_cast<fmi2FMUstate>(state.release());
+    return fmi2OK;
 }
 
-fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate) {
+fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate value) {
     Fmi2Instance* instance = AsInstance(c);
-    if (instance == nullptr) {
+    if (instance == nullptr || value == nullptr) {
         return fmi2Fatal;
     }
-    Log(instance, fmi2Error, "logStatusError", "FMU state snapshots are not supported");
-    return fmi2Error;
+    const auto* state = static_cast<const Fmi2StateHandle*>(value);
+    return ToFmiStatus(instance, instance->runtime.RestoreFmuState(state->checkpoint));
 }
 
 fmi2Status fmi2FreeFMUstate(fmi2Component c, fmi2FMUstate* value) {
@@ -241,43 +261,63 @@ fmi2Status fmi2FreeFMUstate(fmi2Component c, fmi2FMUstate* value) {
     if (instance == nullptr || value == nullptr) {
         return fmi2Fatal;
     }
+    delete static_cast<Fmi2StateHandle*>(*value);
     *value = nullptr;
     return fmi2OK;
 }
 
-fmi2Status fmi2SerializedFMUstateSize(fmi2Component c, fmi2FMUstate, size_t* size) {
+fmi2Status fmi2SerializedFMUstateSize(fmi2Component c, fmi2FMUstate value, size_t* size) {
     Fmi2Instance* instance = AsInstance(c);
-    if (instance == nullptr || size == nullptr) {
+    if (instance == nullptr || size == nullptr || value == nullptr) {
         return fmi2Fatal;
     }
-    *size = 0;
-    Log(instance, fmi2Error, "logStatusError", "FMU state serialization is not supported");
-    return fmi2Error;
+    const auto* state = static_cast<const Fmi2StateHandle*>(value);
+    *size = state->checkpoint.size();
+    return fmi2OK;
 }
 
 fmi2Status fmi2SerializeFMUstate(fmi2Component c,
-                                 fmi2FMUstate,
-                                 fmi2Byte[],
-                                 size_t) {
+                                 fmi2FMUstate value,
+                                 fmi2Byte serialized_state[],
+                                 size_t size) {
     Fmi2Instance* instance = AsInstance(c);
-    if (instance == nullptr) {
+    if (instance == nullptr || value == nullptr || serialized_state == nullptr) {
         return fmi2Fatal;
     }
-    Log(instance, fmi2Error, "logStatusError", "FMU state serialization is not supported");
-    return fmi2Error;
+    const auto* state = static_cast<const Fmi2StateHandle*>(value);
+    if (size != state->checkpoint.size()) {
+        Log(instance, fmi2Error, "logStatusError", "Serialized FMU state buffer has the wrong size");
+        return fmi2Error;
+    }
+    std::memcpy(serialized_state, state->checkpoint.data(), size);
+    return fmi2OK;
 }
 
 fmi2Status fmi2DeSerializeFMUstate(fmi2Component c,
-                                   const fmi2Byte[],
-                                   size_t,
+                                   const fmi2Byte serialized_state[],
+                                   size_t size,
                                    fmi2FMUstate* value) {
     Fmi2Instance* instance = AsInstance(c);
     if (instance == nullptr || value == nullptr) {
         return fmi2Fatal;
     }
     *value = nullptr;
-    Log(instance, fmi2Error, "logStatusError", "FMU state serialization is not supported");
-    return fmi2Error;
+    if (size == 0 || size > kMaximumSerializedStateTokenBytes) {
+        Log(instance, fmi2Error, "logStatusError", "Serialized FMU state token has an invalid size");
+        return fmi2Error;
+    }
+    std::string checkpoint(reinterpret_cast<const char*>(serialized_state), size);
+    const auto parsed = ParseJson(checkpoint);
+    if (!parsed || parsed.value.AsObject() == nullptr) {
+        Log(instance, fmi2Error, "logStatusError", "Serialized FMU state token is invalid");
+        return fmi2Error;
+    }
+    auto state = std::unique_ptr<Fmi2StateHandle>(new (std::nothrow) Fmi2StateHandle{std::move(checkpoint)});
+    if (!state) {
+        return fmi2Error;
+    }
+    *value = static_cast<fmi2FMUstate>(state.release());
+    return fmi2OK;
 }
 
 fmi2Status fmi2GetDirectionalDerivative(fmi2Component c,

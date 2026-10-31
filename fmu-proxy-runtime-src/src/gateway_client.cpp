@@ -3,109 +3,14 @@
 #include <chrono>
 #include <cmath>
 #include <thread>
-#include <type_traits>
 #include <utility>
 
 #include "decentralabs_proxy/protocol.hpp"
+#include "decentralabs_proxy/scalar_value_codec.hpp"
 
 namespace decentralabs::proxy {
 
 namespace {
-
-JsonValue ToJsonValuePrimitive(double value) { return JsonValue(value); }
-JsonValue ToJsonValuePrimitive(std::int64_t value) { return JsonValue(std::to_string(value)); }
-JsonValue ToJsonValuePrimitive(std::uint64_t value) { return JsonValue(std::to_string(value)); }
-JsonValue ToJsonValuePrimitive(bool value) { return JsonValue(value); }
-JsonValue ToJsonValuePrimitive(const std::string& value) { return JsonValue(value); }
-
-std::string Base64Encode(const BinaryValue& data) {
-    static constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    encoded.reserve(((data.size() + 2) / 3) * 4);
-    std::size_t index = 0;
-    while (index + 3 <= data.size()) {
-        const std::uint32_t chunk =
-            (static_cast<std::uint32_t>(data[index]) << 16U) |
-            (static_cast<std::uint32_t>(data[index + 1]) << 8U) |
-            static_cast<std::uint32_t>(data[index + 2]);
-        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 6U) & 0x3FU]);
-        encoded.push_back(kAlphabet[chunk & 0x3FU]);
-        index += 3;
-    }
-    const std::size_t remaining = data.size() - index;
-    if (remaining == 1U) {
-        const std::uint32_t chunk = static_cast<std::uint32_t>(data[index]) << 16U;
-        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
-        encoded.push_back('=');
-        encoded.push_back('=');
-    } else if (remaining == 2U) {
-        const std::uint32_t chunk =
-            (static_cast<std::uint32_t>(data[index]) << 16U) |
-            (static_cast<std::uint32_t>(data[index + 1]) << 8U);
-        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 6U) & 0x3FU]);
-        encoded.push_back('=');
-    }
-    return encoded;
-}
-
-template <typename T>
-JsonValue ToJsonValueArray(const std::vector<T>& values) {
-    JsonArray items;
-    items.reserve(values.size());
-    for (const auto& item : values) {
-        items.emplace_back(ToJsonValuePrimitive(item));
-    }
-    return JsonValue(std::move(items));
-}
-
-/** Convert a runtime scalar/array value into the gateway JSON representation. */
-// ToJsonValue is reached through ToJsonObject from GatewayClient::Initialize
-// and GatewayClient::SetInputs; the analyzer does not follow that call chain.
-// codeql[cpp/unused-static-function]
-JsonValue ToJsonValue(const ScalarValue& value) {
-    return std::visit(
-        [](const auto& typed) -> JsonValue {
-            using ValueType = std::decay_t<decltype(typed)>;
-            if constexpr (std::is_same_v<ValueType, RealArray> ||
-                          std::is_same_v<ValueType, IntegerArray> ||
-                          std::is_same_v<ValueType, UnsignedIntegerArray> ||
-                          std::is_same_v<ValueType, StringArray>) {
-                return ToJsonValueArray(typed);
-            } else if constexpr (std::is_same_v<ValueType, BinaryValue>) {
-                return JsonValue(Base64Encode(typed));
-            } else if constexpr (std::is_same_v<ValueType, BinaryArray>) {
-                JsonArray items;
-                items.reserve(typed.size());
-                for (const auto& item : typed) {
-                    items.emplace_back(JsonValue(Base64Encode(item)));
-                }
-                return JsonValue(std::move(items));
-            } else if constexpr (std::is_same_v<ValueType, BooleanArray>) {
-                JsonArray items;
-                items.reserve(typed.size());
-                for (bool item : typed) {
-                    items.emplace_back(JsonValue(item));
-                }
-                return JsonValue(std::move(items));
-            } else {
-                return ToJsonValuePrimitive(typed);
-            }
-        },
-        value);
-}
-
-JsonObject ToJsonObject(const std::map<std::string, ScalarValue>& values) {
-    JsonObject json_values;
-    for (const auto& [name, value] : values) {
-        json_values.emplace(name, ToJsonValue(value));
-    }
-    return json_values;
-}
 
 double PositiveIntegerCapability(const JsonObject* object, const char* key, double maximum) {
     if (object == nullptr) {
@@ -326,7 +231,7 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
         {"playbackSpeed", JsonValue(config.playback_speed)},
     };
     if (!initial_inputs.empty()) {
-        options.emplace("inputs", JsonValue(ToJsonObject(initial_inputs)));
+        options.emplace("inputs", JsonValue(scalar_value_codec::EncodeJsonObject(initial_inputs)));
     }
 
     JsonObject request = {
@@ -352,7 +257,7 @@ OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue
         {"type", JsonValue(std::string(kSimSetInputs))},
         {"requestId", JsonValue(NextRequestId())},
         {"sessionId", JsonValue(session_id_)},
-        {"values", JsonValue(ToJsonObject(values))},
+        {"values", JsonValue(scalar_value_codec::EncodeJsonObject(values))},
     };
 
     const auto response = SendRequest(request);
@@ -425,7 +330,7 @@ ValueResult<OutputSnapshot> GatewayClient::Advance(
             {"maxSamples", JsonValue(1)},
         };
         if (!input_values.empty()) {
-            request.emplace("inputValues", JsonValue(ToJsonObject(input_values)));
+            request.emplace("inputValues", JsonValue(scalar_value_codec::EncodeJsonObject(input_values)));
         }
 
         const auto response = SendRequest(request);
@@ -531,6 +436,64 @@ ValueResult<OutputSnapshot> GatewayClient::GetOutputs(const std::vector<std::str
         if (const JsonObject* object = values->AsObject()) {
             snapshot.values = *object;
         }
+    }
+    return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
+}
+
+ValueResult<JsonObject> GatewayClient::CaptureFmuState() {
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimCaptureFmuState))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return ValueResult<JsonObject>::Failure(response.status.code, response.status.message);
+    }
+    const auto type_status = EnsureResponseType(response.value, kSimFmuState);
+    if (!type_status) {
+        return ValueResult<JsonObject>::Failure(type_status.code, type_status.message);
+    }
+    const JsonValue* checkpoint = FindObjectValue(response.value, "checkpoint");
+    const JsonObject* checkpoint_object = checkpoint == nullptr ? nullptr : checkpoint->AsObject();
+    if (checkpoint_object == nullptr) {
+        return ValueResult<JsonObject>::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway did not return an FMU state checkpoint");
+    }
+    return ValueResult<JsonObject>::Success({{"checkpoint", JsonValue(*checkpoint_object)}});
+}
+
+ValueResult<OutputSnapshot> GatewayClient::RestoreFmuState(
+    const JsonObject& checkpoint,
+    const std::vector<std::string>& variables) {
+    JsonArray variable_names;
+    variable_names.reserve(variables.size());
+    for (const auto& variable : variables) {
+        variable_names.emplace_back(variable);
+    }
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimRestoreFmuState))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+        {"checkpoint", JsonValue(checkpoint)},
+        {"variables", JsonValue(std::move(variable_names))},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return ValueResult<OutputSnapshot>::Failure(response.status.code, response.status.message);
+    }
+    const auto type_status = EnsureResponseType(response.value, kSimState);
+    if (!type_status) {
+        return ValueResult<OutputSnapshot>::Failure(type_status.code, type_status.message);
+    }
+    const JsonValue* simulation_time = FindObjectValue(response.value, "simTime");
+    if (simulation_time == nullptr || !simulation_time->IsNumber()) {
+        return ValueResult<OutputSnapshot>::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway did not return the restored FMU time");
+    }
+    OutputSnapshot snapshot;
+    snapshot.sim_time = simulation_time->AsNumber();
+    const JsonValue* outputs = FindObjectValue(response.value, "outputs");
+    if (outputs != nullptr && outputs->AsObject() != nullptr) {
+        snapshot.values = *outputs->AsObject();
     }
     return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
 }

@@ -14,6 +14,8 @@ inline constexpr std::string_view kSimStep = "sim.step";
 inline constexpr std::string_view kSimAdvance = "sim.advance";
 inline constexpr std::string_view kSimGetOutputs = "sim.getOutputs";
 inline constexpr std::string_view kSimReset = "sim.reset";
+inline constexpr std::string_view kSimCaptureFmuState = "sim.captureFMUState";
+inline constexpr std::string_view kSimRestoreFmuState = "sim.restoreFMUState";
 inline constexpr std::string_view kSessionTerminate = "session.terminate";
 
 inline constexpr std::string_view kSessionCreated = "session.created";
@@ -23,6 +25,7 @@ inline constexpr std::string_view kSimState = "sim.state";
 inline constexpr std::string_view kSimOutputs = "sim.outputs";
 inline constexpr std::string_view kSimSamples = "sim.samples";
 inline constexpr std::string_view kSimInputsUpdated = "sim.inputs.updated";
+inline constexpr std::string_view kSimFmuState = "sim.fmuState";
 inline constexpr std::string_view kSessionClosed = "session.closed";
 inline constexpr std::string_view kError = "error";
 

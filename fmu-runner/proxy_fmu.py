@@ -72,6 +72,13 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
     instantiation_token = _normalize_xml_value(model_metadata.get("instantiationToken")) or guid
     model_identifier = _proxy_model_identifier(model_metadata)
     fmi_major_version = _parse_fmi_major_version(model_metadata.get("fmiVersion"))
+    source_capabilities = model_metadata.get("capabilities")
+    source_capabilities = source_capabilities if isinstance(source_capabilities, dict) else {}
+    supports_serialized_fmu_state = bool(
+        model_metadata.get("simulationType") == "CoSimulation"
+        and source_capabilities.get("canGetAndSetFMUstate", source_capabilities.get("canGetAndSetFMUState", False))
+        and source_capabilities.get("canSerializeFMUstate", source_capabilities.get("canSerializeFMUState", False))
+    )
     declared_units: set[str] = set()
     for variable in model_metadata.get("modelVariables", []):
         if str(variable.get("type", "Real") or "Real") not in {"Real", "Float32", "Float64"}:
@@ -104,8 +111,8 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             {
                 "modelIdentifier": model_identifier,
                 "canHandleVariableCommunicationStepSize": "true",
-                "canGetAndSetFMUState": "false",
-                "canSerializeFMUState": "false",
+                "canGetAndSetFMUState": str(supports_serialized_fmu_state).lower(),
+                "canSerializeFMUState": str(supports_serialized_fmu_state).lower(),
                 "hasEventMode": "false",
                 "mightReturnEarly": "true",
             },
@@ -122,8 +129,8 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
                 "canRunAsynchronuously": "false",
                 "canBeInstantiatedOnlyOncePerProcess": "false",
                 "canNotUseMemoryManagementFunctions": "true",
-                "canGetAndSetFMUstate": "false",
-                "canSerializeFMUstate": "false",
+                "canGetAndSetFMUstate": str(supports_serialized_fmu_state).lower(),
+                "canSerializeFMUstate": str(supports_serialized_fmu_state).lower(),
                 "providesDirectionalDerivative": "false",
             },
         )
