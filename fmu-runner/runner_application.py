@@ -122,7 +122,7 @@ from aas_access_policy_resolver import AasAccessPolicyResolver
 from proxy_router import create_proxy_router
 from local_preview import PreviewTickets, create_preview_router
 from local_preview_aasx import LocalPreviewAasxRegistry
-from digital_twin_assets_router import create_digital_twin_assets_router, store_local_preview_webapp
+from digital_twin_assets_router import create_digital_twin_assets_router, store_local_preview_assets
 
 FMU_DATA_PATH = CONFIG.fmu_data_path
 _DIGITAL_TWIN_ASSETS_PATH = CONFIG.digital_twin_assets_path
@@ -1009,10 +1009,10 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
                 include_internal_variables=True,
             )
 
-        def get_local_preview_digital_twin_asset(lab_id: str, access_key: str):
+        def get_local_preview_digital_twin_assets(lab_id: str, access_key: str):
             if FMU_BACKEND_MODE != "local":
-                return None
-            return store_local_preview_webapp(
+                return []
+            return store_local_preview_assets(
                 root=_DIGITAL_TWIN_ASSETS_PATH,
                 lab_id=lab_id,
                 access_key=access_key,
@@ -1030,7 +1030,7 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
             build_aas_shell=fmu_aas_generator.build_aas_shell,
             get_effective_policy=_simulation_effective_access_policy,
             invalidate_access_policy=_invalidate_aas_access_policy,
-            get_digital_twin_asset=get_local_preview_digital_twin_asset,
+            get_digital_twin_assets=get_local_preview_digital_twin_assets,
             get_fmi_ls_related_resources=_aas_fmu_related_resources,
         )
     return _LOCAL_PREVIEW_AASX_REGISTRY
@@ -1204,6 +1204,8 @@ _proxy_router = create_proxy_router(
     derive_gateway_ws_url=_proxy_derive_gateway_ws_url,
     get_authorized_model_metadata=_proxy_get_authorized_model_metadata,
     get_effective_policy=_simulation_effective_access_policy,
+    get_authorized_parameter_sets=_catalog_get_authorized_parameter_sets,
+    get_authorized_experiments=_catalog_get_authorized_experiments,
     build_proxy_model_description_xml=_proxy_build_model_description_xml,
     parse_fmi_major_version=_proxy_parse_fmi_major_version,
     proxy_model_identifier=_proxy_model_identifier_for_route,

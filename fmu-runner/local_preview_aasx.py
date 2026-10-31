@@ -47,7 +47,7 @@ class LocalPreviewAasxRegistry:
         build_aas_shell: Callable[..., dict],
         get_effective_policy: Callable[[dict], Any],
         invalidate_access_policy: Callable[..., Any],
-        get_digital_twin_asset: Callable[[str, str], Any] | None = None,
+        get_digital_twin_assets: Callable[[str, str], Any] | None = None,
         get_fmi_ls_related_resources: Callable[[str], Any] | None = None,
     ):
         self.get_model_metadata = get_model_metadata
@@ -59,7 +59,7 @@ class LocalPreviewAasxRegistry:
         self.build_aas_shell = build_aas_shell
         self.get_effective_policy = get_effective_policy
         self.invalidate_access_policy = invalidate_access_policy
-        self.get_digital_twin_asset = get_digital_twin_asset
+        self.get_digital_twin_assets = get_digital_twin_assets
         self.get_fmi_ls_related_resources = get_fmi_ls_related_resources
         self._locks: dict[str, asyncio.Lock] = {}
         self._cache: dict[str, dict[str, Any]] = {}
@@ -104,13 +104,35 @@ class LocalPreviewAasxRegistry:
             if cached is not None:
                 return dict(cached)
 
-            asset = self.get_digital_twin_asset(lab_id, access_key) if self.get_digital_twin_asset else None
-            asset_url = str(asset.get("path") or "").strip() if isinstance(asset, dict) else ""
-            if asset_url and re.fullmatch(
-                rf"/digital-twin-apps/{re.escape(lab_id)}/[a-f0-9]{{64}}/index\.html",
-                asset_url,
-            ) is None:
-                raise RuntimeError("Local digital twin application reference is invalid")
+            raw_assets = self.get_digital_twin_assets(lab_id, access_key) if self.get_digital_twin_assets else []
+            if raw_assets is None:
+                raw_assets = []
+            if not isinstance(raw_assets, list) or len(raw_assets) > 2:
+                raise RuntimeError("Local digital twin asset references are invalid")
+            assets: list[dict[str, str]] = []
+            for raw_asset in raw_assets:
+                if not isinstance(raw_asset, dict):
+                    raise RuntimeError("Local digital twin asset reference is invalid")
+                asset_path = str(raw_asset.get("path") or "").strip()
+                content_type = str(raw_asset.get("contentType") or "").strip().lower()
+                valid_app = (
+                    content_type == "text/html"
+                    and re.fullmatch(
+                        rf"/digital-twin-apps/{re.escape(lab_id)}/[a-f0-9]{{64}}/index\.html",
+                        asset_path,
+                    ) is not None
+                )
+                valid_scene = (
+                    content_type == "model/gltf-binary"
+                    and re.fullmatch(
+                        rf"/digital-twin-scenes/{re.escape(lab_id)}/[a-f0-9]{{64}}\.glb",
+                        asset_path,
+                    ) is not None
+                )
+                if not (valid_app or valid_scene) or any(asset["path"] == asset_path for asset in assets):
+                    raise RuntimeError("Local digital twin asset reference is invalid")
+                assets.append({"path": asset_path, "contentType": content_type})
+            asset_urls = [asset["path"] for asset in assets]
 
             link_path = self.get_link_path(lab_id)
             if link_path.exists():
@@ -120,19 +142,19 @@ class LocalPreviewAasxRegistry:
                     existing_link = json.loads(link_path.read_text(encoding="utf-8"))
                 except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                     raise RuntimeError("Local AASX link is unavailable") from exc
-                stored_asset_url = (
-                    str(existing_link.get("digitalTwinAssetUrl") or "").strip()
+                stored_asset_urls = (
+                    existing_link.get("digitalTwinAssetUrls")
                     if isinstance(existing_link, dict)
-                    else ""
+                    else None
                 )
-                if stored_asset_url and re.fullmatch(
-                    rf"/digital-twin-apps/{re.escape(lab_id)}/[a-f0-9]{{64}}/index\.html",
-                    stored_asset_url,
-                ) is None:
-                    raise RuntimeError("Local digital twin application reference is invalid")
-                if asset is None:
-                    asset_url = stored_asset_url
-                if isinstance(existing_link, dict) and existing_link.get("digitalTwinAssetUrl", "") == asset_url:
+                if not isinstance(stored_asset_urls, list):
+                    legacy_asset_url = (
+                        str(existing_link.get("digitalTwinAssetUrl") or "").strip()
+                        if isinstance(existing_link, dict)
+                        else ""
+                    )
+                    stored_asset_urls = [legacy_asset_url] if legacy_asset_url else []
+                if isinstance(existing_link, dict) and stored_asset_urls == asset_urls:
                     policy = await self.get_effective_policy(claims)
                     if not isinstance(policy, dict) or not str(policy.get("policySource") or "").startswith("aas-"):
                         raise RuntimeError("Linked local AASX policy is unavailable")
@@ -146,9 +168,12 @@ class LocalPreviewAasxRegistry:
             if self.get_fmi_ls_related_resources is not None:
                 fmi_ls_resources = await self.get_fmi_ls_related_resources(access_key)
 
-            extra_info = {"description": "Local-only digital twin access-policy validation."}
-            if asset_url:
-                extra_info["digitalTwinAssetUrl"] = asset_url
+            extra_info: dict[str, Any] = {"description": "Local-only digital twin access-policy validation."}
+            if assets:
+                extra_info["digitalTwinAssets"] = [
+                    {"url": asset["path"], "contentType": asset["contentType"]}
+                    for asset in assets
+                ]
 
             generated = self._require_sync(await self.sync_fmu_to_basyx(
                 lab_id=lab_id,
@@ -209,7 +234,7 @@ class LocalPreviewAasxRegistry:
                 "labId": lab_id,
                 "submodelIds": resolved_submodel_ids,
                 "accessControlSubmodelId": imported.get("accessControlSubmodelId"),
-                "digitalTwinAssetUrl": asset_url,
+                "digitalTwinAssetUrls": asset_urls,
             }
             link_path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path = link_path.with_name(f".{link_path.name}.{uuid4().hex}.tmp")

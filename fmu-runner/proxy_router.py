@@ -10,6 +10,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
+from catalog_router import filter_authorized_experiments, filter_authorized_parameter_sets
+from proxy_artifact import ProxyFmiLsRefSizeLimitError
 from simulation_access_policy import filter_model_description
 
 
@@ -26,6 +28,8 @@ def create_proxy_router(
     derive_gateway_ws_url: Any,
     get_authorized_model_metadata: Any,
     get_effective_policy: Any = None,
+    get_authorized_parameter_sets: Any = None,
+    get_authorized_experiments: Any = None,
     build_proxy_model_description_xml: Any,
     parse_fmi_major_version: Any,
     proxy_model_identifier: Any,
@@ -105,11 +109,32 @@ def create_proxy_router(
             claims=claims,
             requested_fmu_filename=str(fmu_filename),
         )
+        access_policy = None
         if get_effective_policy is not None:
             access_policy = await get_effective_policy(claims)
             if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
             model_metadata = filter_model_description(access_policy, model_metadata)
+        raw_parameter_sets = (
+            await get_authorized_parameter_sets(claims=claims)
+            if get_authorized_parameter_sets is not None
+            else []
+        )
+        raw_experiments = (
+            await get_authorized_experiments(claims=claims)
+            if get_authorized_experiments is not None
+            else {"resourceSets": [], "truncated": False}
+        )
+        fmi_ls_parameter_sets = (
+            filter_authorized_parameter_sets(raw_parameter_sets, access_policy)
+            if access_policy is not None
+            else []
+        )
+        fmi_ls_experiments = (
+            filter_authorized_experiments(raw_experiments, access_policy)
+            if access_policy is not None
+            else []
+        )
         model_xml = build_proxy_model_description_xml(model_metadata)
         proxy_fmi_version = (
             "3.0" if parse_fmi_major_version(model_metadata.get("fmiVersion")) >= 3 else "2.0.3"
@@ -128,12 +153,21 @@ def create_proxy_router(
             session_ticket=session_ticket,
             ticket_expires_at=ticket_expiry,
         )
-        archive_bytes = build_proxy_artifact(
-            model_xml=model_xml,
-            config_payload=config_payload,
-            runtime_files=runtime_files,
-            fmi_ls_struct=model_metadata.get("fmiLsStruct"),
-        )
+        try:
+            archive_bytes = build_proxy_artifact(
+                model_xml=model_xml,
+                config_payload=config_payload,
+                runtime_files=runtime_files,
+                fmi_ls_struct=model_metadata.get("fmiLsStruct"),
+                fmi_ls_parameter_sets=fmi_ls_parameter_sets,
+                fmi_ls_experiments=fmi_ls_experiments,
+                fmi_ls_model_metadata=model_metadata,
+            )
+        except ProxyFmiLsRefSizeLimitError as error:
+            raise HTTPException(
+                status_code=413,
+                detail="FMI-LS-REF resources exceed the supported proxy FMU size limit",
+            ) from error
         signing_key = get_signing_key()
         headers = build_proxy_artifact_headers(
             artifact_bytes=archive_bytes,

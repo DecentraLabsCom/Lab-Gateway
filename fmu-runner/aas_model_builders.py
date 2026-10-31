@@ -855,8 +855,32 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
         (url, "License terms" if url == license_value else f"Documentation {index + 1}", "application/octet-stream")
         for index, url in enumerate(dict.fromkeys(urls))
     ]
+    digital_twin_assets = (extra_info or {}).get("digitalTwinAssets")
+    if not isinstance(digital_twin_assets, list):
+        digital_twin_assets = []
+    for asset in digital_twin_assets:
+        if not isinstance(asset, dict):
+            continue
+        asset_url = str(asset.get("url") or "").strip()
+        content_type = str(asset.get("contentType") or "").split(";", 1)[0].strip().lower()
+        if not asset_url or content_type not in {"text/html", "model/gltf-binary"}:
+            continue
+        app_asset = content_type == "text/html"
+        if (app_asset and not re.fullmatch(
+            rf"/digital-twin-apps/{re.escape(str(lab_id))}/[a-f0-9]{{64}}/index\.html",
+            asset_url,
+        )) or (not app_asset and not re.fullmatch(
+            rf"/digital-twin-scenes/{re.escape(str(lab_id))}/[a-f0-9]{{64}}\.glb",
+            asset_url,
+        )):
+            continue
+        document_specs.append((
+            asset_url,
+            "Three.js digital twin application" if app_asset else "Digital twin GLB scene",
+            content_type,
+        ))
     asset_url = str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
-    if asset_url:
+    if asset_url and all(spec[0] != asset_url for spec in document_specs):
         app_asset = urlsplit(asset_url).path.startswith("/digital-twin-apps/")
         document_specs.append((
             asset_url,
@@ -1343,6 +1367,7 @@ def build_aas_shell(
         _documentation_urls(extra_info)
         or str((extra_info or {}).get("license") or "").strip().startswith(("http://", "https://"))
         or str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
+        or bool((extra_info or {}).get("digitalTwinAssets"))
     ):
         all_sm_ids.append(_submodel_id_for_handover(lab_id))
     if build_fmi_ls_related_resources_submodel(lab_id, fmi_ls_resources) is not None:

@@ -617,15 +617,15 @@ def _validate_access_key(access_key: Any) -> str:
     return access_key
 
 
-def store_local_preview_webapp(
+def store_local_preview_assets(
     *,
     root: Path,
     lab_id: str,
     access_key: str,
     fmu_data_root: Path,
     resolve_local_fmu_path,
-) -> dict[str, Any] | None:
-    """Store a local FMU's companion app under its synthetic preview lab ID.
+) -> list[dict[str, str]]:
+    """Store local companion visuals under their synthetic preview lab ID.
 
     This helper is only used by the local-preview provisioner. The public
     Lab Manager routes continue to accept numeric lab IDs exclusively.
@@ -637,28 +637,44 @@ def store_local_preview_webapp(
     if lab_id != expected_lab_id:
         raise ValueError("Local preview laboratory ID does not match its FMU")
     if resolve_local_fmu_path is None:
-        return None
+        return []
 
     try:
         local_root = Path(fmu_data_root).expanduser().resolve(strict=True)
         fmu_path = Path(resolve_local_fmu_path(access_key)).resolve(strict=True)
         fmu_path.relative_to(local_root)
-        companion_path = fmu_path.with_name(fmu_path.stem + ".webapp.zip").resolve(strict=True)
-        companion_path.relative_to(local_root)
     except FileNotFoundError:
-        return None
+        return []
     except (ValueError, IndexError) as exc:
-        raise ValueError("Invalid local preview companion app path") from exc
+        raise ValueError("Invalid local preview companion asset path") from exc
 
-    if not companion_path.is_file():
-        return None
-    try:
-        if companion_path.stat().st_size > _MAX_WEBAPP_ARCHIVE_BYTES:
-            raise HTTPException(status_code=413, detail="Companion Three.js application exceeds the size limit")
-        content = companion_path.read_bytes()
-    except OSError as exc:
-        raise HTTPException(status_code=503, detail="Companion Three.js application could not be read") from exc
-    return _store_webapp(Path(root).expanduser().resolve(), lab_id, content)
+    asset_root = Path(root).expanduser().resolve()
+    assets: list[dict[str, str]] = []
+    for suffix, asset_type in ((".webapp.zip", "threejs-app"), (".glb", "glb")):
+        try:
+            companion_path = fmu_path.with_name(fmu_path.stem + suffix).resolve(strict=True)
+            companion_path.relative_to(local_root)
+        except (FileNotFoundError, ValueError):
+            continue
+
+        content = _read_local_companion(companion_path, asset_type)
+        if content is None:
+            continue
+        if asset_type == "glb":
+            document = _validate_glb(content)
+            stored = _store_scene(asset_root, lab_id, content, validated_document=document)
+            content_type = "model/gltf-binary"
+            renderer = "glb"
+        else:
+            stored = _store_webapp(asset_root, lab_id, content)
+            content_type = "text/html"
+            renderer = "threejs-app"
+        assets.append({
+            "path": stored["path"],
+            "contentType": content_type,
+            "renderer": renderer,
+        })
+    return assets
 
 
 async def _read_limited_response(response: httpx.Response, limit: int, label: str) -> bytes:
