@@ -47,7 +47,7 @@ services:
       - FMU_SPAWN_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
       # FMPy's OpenBLAS stack cannot safely create a core-sized thread pool
       # for these FMUs within the isolated worker resource limits.
-      - FMU_NATIVE_THREAD_LIMIT_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu,local-demos/dc-motor/linux64/DC_motor.fmu,local-demos/qfmu/linux64/qFMU_LinearSystems.fmu
+      - FMU_NATIVE_THREAD_LIMIT_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu,local-demos/dc-motor/linux64/DC_motor.fmu,local-demos/qfmu/linux64/qFMU_LinearSystems.fmu,local-demos/inverted-pendulum/linux64/InvertedPendulum.fmu
       - FMU_SPAWN_EXECUTABLE=/var/lib/fmu-executor/state/local-runtime/Spawn-light-0.4.3-7048a72798-Linux/bin/spawn-0.4.3-7048a72798
     entrypoint: ["/bin/sh", "/run/local-boptest-entrypoint.sh"]
     command: ["python", "-m", "app"]
