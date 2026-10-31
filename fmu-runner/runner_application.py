@@ -98,6 +98,7 @@ from session_observer_auth import (
 )
 from runner_runtime import create_fmu_runner_runtime
 from simulation_request import SimulationRequest
+from fmu_state_capabilities import normalize_fmu_state_capabilities
 from simulation_access_policy import filter_fmi_values, filter_model_description
 from config import (
     _default_access_audit_url as _default_access_audit_url_value,
@@ -1062,7 +1063,7 @@ async def _local_preview_access_payload(
     import fmu_aas_generator
 
     visual_assets = await fmu_aas_generator.get_handover_visual_assets(str(claims.get("labId") or ""))
-    return {
+    response = {
         **model_description,
         "policySource": policy.get("policySource", "unavailable"),
         "policyVersion": policy.get("policyVersion", ""),
@@ -1072,6 +1073,10 @@ async def _local_preview_access_payload(
         "modelVariables": model_variables if isinstance(model_variables, list) else [],
         "visualAssets": visual_assets,
     }
+    state_capabilities = normalize_fmu_state_capabilities(model_description)
+    if state_capabilities is not None:
+        response["fmuState"] = state_capabilities
+    return response
 
 
 async def _local_preview_stream_simulation(

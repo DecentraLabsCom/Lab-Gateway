@@ -485,6 +485,11 @@ def validate_inverted_pendulum_fmu(path: Path) -> None:
     co_simulation = description.find("{*}CoSimulation")
     if co_simulation is None or co_simulation.attrib.get("modelIdentifier") != "InvertedPendulum":
         raise ValueError("The inverted-pendulum FMU must expose FMI Co-Simulation as InvertedPendulum.")
+    if (
+        co_simulation.attrib.get("canGetAndSetFMUstate") != "true"
+        or co_simulation.attrib.get("canSerializeFMUstate") != "true"
+    ):
+        raise ValueError("The inverted-pendulum FMU must support get/set and serialization of FMU state.")
     variables = description.find("{*}ModelVariables")
     if variables is None:
         raise ValueError("The inverted-pendulum FMU has no model variables.")
@@ -738,6 +743,16 @@ def sync(
     warehouse_app = smart_warehouse_root / "SmartWarehouseCell.webapp.zip"
     warehouse_license = smart_warehouse_root / "LICENSE.txt"
     warehouse_entries = validate_linux_x64_fmu(warehouse_fmu)
+    with zipfile.ZipFile(warehouse_fmu) as archive:
+        warehouse_description = ET.fromstring(archive.read("modelDescription.xml"))
+    warehouse_co_simulation = warehouse_description.find("{*}CoSimulation")
+    if (
+        warehouse_co_simulation is None
+        or warehouse_co_simulation.attrib.get("modelIdentifier") != "SmartWarehouseCell"
+        or warehouse_co_simulation.attrib.get("canGetAndSetFMUstate") != "true"
+        or warehouse_co_simulation.attrib.get("canSerializeFMUstate") != "true"
+    ):
+        raise ValueError("The Smart Warehouse FMU must support get/set and serialization of FMU state.")
     if "resources/smart-warehouse-cell.glb" not in warehouse_entries:
         raise ValueError("The Smart Warehouse FMU is missing its embedded GLB scene.")
     with zipfile.ZipFile(warehouse_fmu) as archive:
@@ -755,6 +770,8 @@ def sync(
         app_script = archive.read("app.js").decode("utf-8")
         if "createSmartWarehouseScene" not in app_script or "scene.js" not in app_script:
             raise ValueError("The Smart Warehouse app bundle does not load its procedural scene module.")
+        if b"fmu-state-checkpoints" not in archive.read("sdk/client.js"):
+            raise ValueError("The Smart Warehouse app bundle is missing FMU state checkpoint support in its SDK.")
         if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
             raise ValueError("The Smart Warehouse app must request the bottom-right playback control position.")
 
@@ -771,6 +788,9 @@ def sync(
         validate_inverted_pendulum_fmu(pendulum_fmu)
         validate_local_glb_output_bindings(pendulum_scene, pendulum_fmu)
         validate_local_fmu_session_app(pendulum_app, "inverted-pendulum")
+        with zipfile.ZipFile(pendulum_app) as archive:
+            if b"fmu-state-checkpoints" not in archive.read("sdk/client.js"):
+                raise ValueError("The inverted-pendulum app bundle is missing FMU state checkpoint support in its SDK.")
         pendulum_target = target / "local-demos" / "inverted-pendulum" / "linux64"
         pendulum_target.mkdir(parents=True, exist_ok=True)
         copy_verified(pendulum_fmu, pendulum_target / INVERTED_PENDULUM_FMU_NAME)
