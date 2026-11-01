@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
+
+from simulation_access_policy import build_effective_policy
 
 
 _LAB_ID_RE = re.compile(r"local_demo_[a-f0-9]{24}")
@@ -24,6 +27,8 @@ _SUBMODEL_ID_FIELDS = (
     "fmiLsRelatedResourcesSubmodelId",
     "accessControlSubmodelId",
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LocalPreviewAasxRegistry:
@@ -155,11 +160,48 @@ class LocalPreviewAasxRegistry:
                     )
                     stored_asset_urls = [legacy_asset_url] if legacy_asset_url else []
                 if isinstance(existing_link, dict) and stored_asset_urls == asset_urls:
-                    policy = await self.get_effective_policy(claims)
-                    if not isinstance(policy, dict) or not str(policy.get("policySource") or "").startswith("aas-"):
-                        raise RuntimeError("Linked local AASX policy is unavailable")
-                    self._cache[lab_id] = dict(policy)
-                    return dict(policy)
+                    canonical_shell_id = f"{_SHELL_ID_PREFIX}{lab_id}"
+                    owns_local_shell = existing_link.get("aasId") == canonical_shell_id
+                    try:
+                        policy = await self.get_effective_policy(claims)
+                    except Exception as exc:
+                        if not owns_local_shell:
+                            raise
+                        logger.warning(
+                            "Regenerating local preview AAS after policy resolution failed: %s",
+                            type(exc).__name__,
+                        )
+                    else:
+                        has_aas_policy = (
+                            isinstance(policy, dict)
+                            and str(policy.get("policySource") or "").startswith("aas-")
+                        )
+                        if has_aas_policy:
+                            if owns_local_shell:
+                                try:
+                                    current_metadata = await self.get_model_metadata(access_key)
+                                    expected_variables = build_effective_policy(current_metadata).get("variables")
+                                except Exception:
+                                    expected_variables = None
+                                if (
+                                    isinstance(expected_variables, dict)
+                                    and policy.get("variables") != expected_variables
+                                ):
+                                    logger.warning(
+                                        "Regenerating local preview AAS because its generated FMI access defaults changed",
+                                    )
+                                else:
+                                    self._cache[lab_id] = dict(policy)
+                                    return dict(policy)
+                            else:
+                                self._cache[lab_id] = dict(policy)
+                                return dict(policy)
+                        if not owns_local_shell:
+                            raise RuntimeError("Linked local AASX policy is unavailable")
+                        if not has_aas_policy:
+                            logger.warning(
+                                "Regenerating local preview AAS because its saved policy is unavailable",
+                            )
 
             metadata = await self.get_model_metadata(access_key)
             if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):

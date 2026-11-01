@@ -30,6 +30,9 @@ public:
     OperationResult SetupExperiment(double start_time, double stop_time, double step_size);
     OperationResult EnterInitializationMode();
     OperationResult ExitInitializationMode();
+    OperationResult EnterConfigurationMode();
+    OperationResult ExitConfigurationMode();
+    bool HasStructuralParameters() const;
     void SetEarlyReturnAllowed(bool allowed);
     OperationResult DoStep(double current_time, double step_size);
     OperationResult Terminate();
@@ -53,7 +56,7 @@ public:
     OperationResult GetBoolean(const std::uint32_t* value_references, std::size_t count, bool* values, std::size_t value_count = 0) const;
     OperationResult GetString(const std::uint32_t* value_references, std::size_t count, const char** values, std::size_t value_count = 0);
     OperationResult GetBinary(const std::uint32_t* value_references, std::size_t count, std::size_t* value_sizes, const std::uint8_t** values, std::size_t value_count = 0);
-    OperationResult GetClock(const std::uint32_t* value_references, std::size_t count, bool* values) const;
+    OperationResult GetClock(const std::uint32_t* value_references, std::size_t count, bool* values);
     std::size_t ExpectedValueCount(const std::uint32_t* value_references, std::size_t count) const;
 
     const RuntimeConfig& Config() const;
@@ -102,6 +105,7 @@ private:
     std::string last_error_;
     double current_time_ = 0.0;
     bool early_return_allowed_ = false;
+    bool configuration_mode_ = false;
     bool last_step_early_return_ = false;
     bool last_step_event_handling_needed_ = false;
     bool last_step_terminated_ = false;

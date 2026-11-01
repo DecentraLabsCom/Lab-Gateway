@@ -83,10 +83,6 @@ def create_catalog_router(
                 value = model_description.get(field)
                 if isinstance(value, str) and value.strip() and len(value) <= 32:
                     response[field] = value.strip()
-            # The Executor's current session runtime captures/restores state
-            # through its Co-Simulation path. Do not offer the UI controls for
-            # a Model Exchange-only FMU even if its XML declares the generic
-            # state serialization flags.
             state_capabilities = normalize_fmu_state_capabilities(model_description)
             if state_capabilities is not None:
                 response["fmuState"] = state_capabilities

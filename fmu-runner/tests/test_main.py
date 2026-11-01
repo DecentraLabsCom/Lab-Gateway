@@ -802,6 +802,7 @@ def test_proxy_model_description_generates_fmi3_model_description():
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
                 "name": "time",
@@ -846,6 +847,7 @@ def test_proxy_model_description_generates_fmi3_dimensioned_variables():
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
                 "name": "m",
@@ -893,12 +895,44 @@ def test_proxy_model_description_generates_fmi3_dimensioned_variables():
     assert y_dimension.attrib["valueReference"] == "1"
 
 
+def test_proxy_model_description_with_structural_arrays_passes_fmpy_validation(tmp_path):
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyStructuralArrayFmi3",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "modelVariables": [
+            {"name": "time", "type": "Float64", "causality": "independent", "variability": "continuous", "valueReference": 0},
+            {"name": "n", "type": "UInt64", "causality": "structuralParameter", "variability": "fixed", "valueReference": 1, "start": 3},
+            {"name": "u", "type": "Float64", "causality": "input", "variability": "continuous", "valueReference": 2, "start": [1.0, 2.0, 3.0], "dimensions": [{"valueReference": 1}]},
+            {"name": "y", "type": "Float64", "causality": "output", "variability": "continuous", "valueReference": 3, "dimensions": [{"valueReference": 1}]},
+        ],
+    })
+    fmu_path = tmp_path / "proxy-structural-array.fmu"
+    with zipfile.ZipFile(fmu_path, "w") as archive:
+        archive.writestr("modelDescription.xml", xml_bytes)
+
+    read_model_description(str(fmu_path), validate=True)
+
+
+def test_proxy_generation_rejects_tunable_structural_parameters():
+    with pytest.raises(HTTPException, match="fixed UInt64 structural parameters"):
+        _validate_proxy_generation_supported({
+            "fmiVersion": "3.0",
+            "modelVariables": [
+                {"name": "n", "type": "UInt64", "causality": "structuralParameter", "variability": "tunable", "valueReference": 1, "start": 3},
+                {"name": "u", "type": "Float64", "causality": "input", "dimensions": [{"valueReference": 1}], "valueReference": 2},
+            ],
+        })
+
+
 def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "ProxyFmi3BinaryClock",
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
                 "name": "blob",
@@ -913,6 +947,8 @@ def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
                 "type": "Clock",
                 "causality": "output",
                 "variability": "discrete",
+                "initial": "exact",
+                "intervalVariability": "triggered",
                 "valueReference": 12,
                 "start": True,
             },
@@ -929,6 +965,45 @@ def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
     clock_el = root.find("./ModelVariables/Clock")
     assert clock_el is not None
     assert "start" not in clock_el.attrib
+    assert "initial" not in clock_el.attrib
+    assert clock_el.attrib["intervalVariability"] == "triggered"
+    co_simulation = root.find("./CoSimulation")
+    assert co_simulation is not None
+    assert co_simulation.attrib["hasEventMode"] == "true"
+
+
+def test_proxy_model_description_with_clock_passes_fmpy_validation(tmp_path):
+    from fmpy import read_model_description
+
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyFmi3Clock",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "capabilities": {"hasEventMode": True},
+        "modelVariables": [
+            {
+                "name": "time",
+                "type": "Float64",
+                "causality": "independent",
+                "variability": "continuous",
+                "valueReference": 1,
+            },
+            {
+                "name": "tick",
+                "type": "Clock",
+                "causality": "output",
+                "variability": "discrete",
+                "intervalVariability": "triggered",
+                "valueReference": 12,
+            },
+        ],
+    })
+    fmu_path = tmp_path / "proxy-clock.fmu"
+    with zipfile.ZipFile(fmu_path, "w") as archive:
+        archive.writestr("modelDescription.xml", xml_bytes)
+
+    read_model_description(str(fmu_path), validate=True)
 
 
 def test_proxy_model_description_binary_start_from_metadata_pipeline_is_hex_encoded():
@@ -980,9 +1055,17 @@ def test_validate_proxy_generation_supports_fmi3_binary_and_clock_types():
     metadata = {
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {"name": "blob", "type": "Binary", "valueReference": 1},
-            {"name": "tick", "type": "Clock", "valueReference": 2},
+            {
+                "name": "tick",
+                "type": "Clock",
+                "causality": "output",
+                "variability": "discrete",
+                "intervalVariability": "triggered",
+                "valueReference": 2,
+            },
         ],
     }
 

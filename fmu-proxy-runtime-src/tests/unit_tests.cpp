@@ -152,8 +152,8 @@ void TestProtocolAndSessionState() {
     CHECK(IsSupportedServerMessage(kSessionCreated));
     CHECK(IsSupportedServerMessage(kError));
     CHECK(!IsSupportedServerMessage("sim.unknown"));
-    CHECK(SupportedClientMessages().size() == 9);
-    CHECK(SupportedServerMessages().size() == 8);
+    CHECK(SupportedClientMessages().size() == 12);
+    CHECK(SupportedServerMessages().size() == 10);
 
     CHECK(CanTransition(SessionState::kUnconfigured, SessionState::kInstantiated));
     CHECK(CanTransition(SessionState::kInstantiated, SessionState::kSocketConnecting));
@@ -284,17 +284,20 @@ void TestGatewayClientProtocol() {
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
     ExperimentConfig experiment{1.0, 8.0, 0.5};
     std::map<std::string, ScalarValue> initial_inputs = {
-        {"wide", ScalarValue(std::uint64_t{18446744073709551615ULL})},
         {"blob", ScalarValue(BinaryValue{0x01, 0x02})},
     };
-    CHECK_OK(client.Initialize(config, experiment, initial_inputs));
+    std::map<std::string, ScalarValue> initial_parameters = {
+        {"wide", ScalarValue(std::uint64_t{18446744073709551615ULL})},
+    };
+    CHECK_OK(client.Initialize(config, experiment, initial_inputs, initial_parameters));
     const auto initialize_request = ParseJson(scripted->SentPayloads().back());
     CHECK(initialize_request);
     const JsonObject& initialize_object = *initialize_request.value.AsObject();
     const JsonObject& options = *FindObjectValue(initialize_object, "options")->AsObject();
     CHECK(JsonString(options, "timeMode") == "simtime");
+    const JsonObject& encoded_parameters = *FindObjectValue(initialize_object, "parameters")->AsObject();
+    CHECK(JsonString(encoded_parameters, "wide") == "18446744073709551615");
     const JsonObject& encoded_inputs = *FindObjectValue(options, "inputs")->AsObject();
-    CHECK(JsonString(encoded_inputs, "wide") == "18446744073709551615");
     CHECK(JsonString(encoded_inputs, "blob") == "AQI=");
 
     scripted->QueueResponse(R"({"type":"sim.inputs.updated","requestId":"req-3"})");
@@ -378,9 +381,8 @@ void TestProxyRuntimeLifecycle() {
     const double stepped_input_value = 3.5;
     CHECK_OK(runtime.SetReal(&input_reference, 1, &stepped_input_value));
 
-    scripted->QueueResponse(R"({"type":"sim.inputs.updated","requestId":"req-3"})");
     scripted->QueueResponse(
-        R"({"type":"sim.outputs","requestId":"req-4","simTime":0.25,"values":{"output":4.25,"counter":12,"label":"ready","enabled":true}})");
+        R"({"type":"sim.samples","requestId":"req-3","simTime":0.25,"samples":[{"time":0.25,"outputs":{"output":4.25,"counter":12,"label":"ready","enabled":true}}]})");
     CHECK_OK(runtime.DoStep(0.0, 0.25));
     CHECK(runtime.State() == SessionState::kRunning);
     CHECK_NEAR(runtime.CurrentTime(), 0.25, 1e-12);
@@ -405,7 +407,7 @@ void TestProxyRuntimeLifecycle() {
     const std::uint32_t unknown_reference = 999;
     CHECK(runtime.GetReal(&unknown_reference, 1, &output_value).code == "INVALID_ARGUMENT");
 
-    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-5","state":"reset"})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"reset"})");
     CHECK_OK(runtime.Reset());
     CHECK(runtime.State() == SessionState::kInstantiated);
     CHECK_NEAR(runtime.CurrentTime(), 0.0, 1e-12);
@@ -413,7 +415,7 @@ void TestProxyRuntimeLifecycle() {
     CHECK_OK(runtime.GetReal(&output_reference, 1, &output_value));
     CHECK_NEAR(output_value, 0.0, 1e-12);
 
-    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-6","reason":"test complete"})");
+    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-5","reason":"test complete"})");
     CHECK_OK(runtime.Terminate());
     CHECK(runtime.State() == SessionState::kTerminated);
 }

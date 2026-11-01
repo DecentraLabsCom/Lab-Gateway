@@ -31,6 +31,7 @@ MAX_ADVANCE_INPUT_EVENTS = 1024
 MAX_ADVANCE_INPUT_BYTES = 256 * 1024
 MAX_ADVANCE_OUTPUT_VARIABLES = 512
 MAX_ADVANCE_COMPUTE_MS = 1000
+MAX_FMU_STATE_CHECKPOINT_BYTES = 4096
 
 
 
@@ -183,7 +184,24 @@ class StationRealtimeWsProxyManager:
             checkpoint = message.get("checkpoint")
             if checkpoint is not None:
                 StationRealtimeWsProxyManager._validate_state_checkpoint(checkpoint)
-            validate_writes(access_policy, parameters, phase="initialization")
+            model_variables = access_policy.get("modelVariables", [])
+            structural_parameter_names = {
+                variable.get("name")
+                for variable in model_variables
+                if isinstance(variable, dict)
+                and variable.get("causality") == "structuralParameter"
+                and isinstance(variable.get("name"), str)
+            } if isinstance(model_variables, list) else set()
+            configuration_values = {
+                name: value for name, value in parameters.items()
+                if name in structural_parameter_names
+            }
+            initialization_values = {
+                name: value for name, value in parameters.items()
+                if name not in structural_parameter_names
+            }
+            validate_writes(access_policy, initialization_values, phase="initialization")
+            validate_writes(access_policy, configuration_values, phase="configuration")
             if "inputs" in options:
                 validate_writes(access_policy, options["inputs"], phase="initialization")
         elif msg_type == "sim.restoreFMUState":
@@ -259,7 +277,7 @@ class StationRealtimeWsProxyManager:
             encoded = json.dumps(checkpoint, separators=(",", ":"), allow_nan=False).encode("utf-8")
         except (TypeError, ValueError):
             raise AccessDenied
-        if len(encoded) > 4096:
+        if len(encoded) > MAX_FMU_STATE_CHECKPOINT_BYTES:
             raise AccessDenied
 
     @classmethod

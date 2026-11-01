@@ -40,6 +40,7 @@ public:
     OperationResult Initialize(const RuntimeConfig& config,
                                const ExperimentConfig& experiment,
                                const std::map<std::string, ScalarValue>& initial_inputs,
+                               const std::map<std::string, ScalarValue>& initial_parameters,
                                bool early_return_allowed = false);
     OperationResult SetInputs(const std::map<std::string, ScalarValue>& values);
     ValueResult<OutputSnapshot> Step(double delta_t);

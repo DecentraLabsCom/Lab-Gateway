@@ -221,6 +221,7 @@ OperationResult GatewayClient::WaitForRequestCapacity(
 OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
                                           const ExperimentConfig& experiment,
                                           const std::map<std::string, ScalarValue>& initial_inputs,
+                                          const std::map<std::string, ScalarValue>& initial_parameters,
                                           const bool early_return_allowed) {
     JsonObject options = {
         {"timeMode", JsonValue(std::string(ToString(config.time_mode)))},
@@ -240,6 +241,9 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
         {"sessionId", JsonValue(session_id_)},
         {"options", JsonValue(std::move(options))},
     };
+    if (!initial_parameters.empty()) {
+        request.emplace("parameters", JsonValue(scalar_value_codec::EncodeJsonObject(initial_parameters)));
+    }
 
     const auto response = SendRequest(request);
     if (!response) {

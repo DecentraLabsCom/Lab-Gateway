@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -8,6 +9,32 @@ from fmi_ls_struct import normalize_fmi_ls_struct
 
 
 ModelMetadata = dict[str, Any]
+
+
+def _normalize_fmi_number(value: Any, *, integer: bool = False) -> int | float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if integer:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
+            try:
+                return int(value.strip())
+            except (ValueError, OverflowError):
+                return None
+        if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+            return int(value)
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _normalize_fmi_non_negative_integer(value: Any) -> int | None:
+    number = _normalize_fmi_number(value, integer=True)
+    return number if isinstance(number, int) and number >= 0 else None
 
 
 def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str, Any]:
@@ -21,6 +48,64 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
         "variability": str(raw.get("variability") or "continuous"),
         "valueReference": int(value_reference),
     }
+    interval_variability = raw.get("intervalVariability")
+    if entry["type"] == "Clock" and interval_variability in {
+        "constant", "fixed", "tunable", "changing", "countdown", "triggered",
+    }:
+        entry["intervalVariability"] = interval_variability
+    if entry["type"] == "Clock":
+        for attribute in ("canBeDeactivated", "supportsFraction"):
+            value = raw.get(attribute)
+            if isinstance(value, bool):
+                entry[attribute] = value
+        for attribute in ("intervalDecimal", "shiftDecimal"):
+            value = raw.get(attribute)
+            if value is None or isinstance(value, bool):
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if math.isfinite(number):
+                entry[attribute] = number
+        for attribute in ("priority", "resolution", "intervalCounter", "shiftCounter"):
+            value = _normalize_fmi_non_negative_integer(raw.get(attribute))
+            if value is not None:
+                entry[attribute] = value
+    alias = raw.get("alias")
+    if alias in {"noAlias", "alias", "negatedAlias"}:
+        entry["alias"] = alias
+    alias_of = raw.get("aliasOf")
+    if isinstance(alias_of, str) and alias_of.strip():
+        entry["aliasOf"] = alias_of.strip()[:512]
+    raw_aliases = raw.get("aliases")
+    if isinstance(raw_aliases, list) and len(raw_aliases) <= 256:
+        aliases = []
+        for raw_alias in raw_aliases:
+            if not isinstance(raw_alias, dict):
+                continue
+            name = raw_alias.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            alias_entry = {"name": name.strip()[:512]}
+            for field, maximum_length in (("description", 4096), ("displayUnit", 256)):
+                value = raw_alias.get(field)
+                if isinstance(value, str) and value.strip():
+                    alias_entry[field] = value.strip()[:maximum_length]
+            aliases.append(alias_entry)
+        if aliases:
+            entry["aliases"] = aliases
+    mime_type = raw.get("mimeType")
+    if isinstance(mime_type, str) and mime_type.strip():
+        entry["mimeType"] = mime_type.strip()[:256]
+    max_size = raw.get("maxSize")
+    normalized_max_size = _normalize_fmi_non_negative_integer(max_size)
+    if normalized_max_size is not None:
+        entry["maxSize"] = normalized_max_size
+    for attribute in ("relativeQuantity", "unbounded"):
+        value = raw.get(attribute)
+        if isinstance(value, bool):
+            entry[attribute] = value
     if raw.get("unit") is not None:
         entry["unit"] = raw.get("unit")
     if raw.get("start") is not None:
@@ -44,13 +129,9 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
         raw_bound = raw.get(bound)
         if raw_bound is None:
             continue
-        try:
-            value = float(raw_bound)
-            if not math.isfinite(value) or (integer_type and not value.is_integer()):
-                continue
-            entry[bound] = int(value) if integer_type else value
-        except (TypeError, ValueError, OverflowError):
-            continue
+        value = _normalize_fmi_number(raw_bound, integer=integer_type)
+        if value is not None:
+            entry[bound] = value
     description = raw.get("description")
     if isinstance(description, str) and description.strip():
         entry["description"] = description.strip()[:4096]
@@ -98,8 +179,9 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
             normalized_dimension = {}
             for field in ("start", "valueReference"):
                 value = dimension.get(field)
-                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-                    normalized_dimension[field] = value
+                normalized_value = _normalize_fmi_non_negative_integer(value)
+                if normalized_value is not None:
+                    normalized_dimension[field] = normalized_value
             variable_name = dimension.get("variableName")
             if isinstance(variable_name, str) and variable_name.strip():
                 normalized_dimension["variableName"] = variable_name.strip()[:256]
@@ -112,13 +194,38 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
         declared_type = {}
         for field, maximum_length in (
             ("name", 256), ("type", 64), ("description", 4096),
-            ("unit", 128), ("quantity", 256), ("displayUnit", 64),
+            ("unit", 128), ("quantity", 256), ("displayUnit", 64), ("mimeType", 256),
+            ("intervalVariability", 32),
         ):
             value = raw_declared_type.get(field)
             if isinstance(value, str) and value.strip():
                 declared_type[field] = value.strip()[:maximum_length]
         for bound in ("min", "max"):
             value = raw_declared_type.get(bound)
+            number = _normalize_fmi_number(value, integer=integer_type)
+            if number is not None:
+                declared_type[bound] = number
+        nominal = raw_declared_type.get("nominal")
+        if nominal is not None and not isinstance(nominal, bool):
+            try:
+                normalized_nominal = float(nominal)
+            except (TypeError, ValueError, OverflowError):
+                normalized_nominal = 0.0
+            if math.isfinite(normalized_nominal) and normalized_nominal > 0:
+                declared_type["nominal"] = normalized_nominal
+        declared_max_size = _normalize_fmi_non_negative_integer(raw_declared_type.get("maxSize"))
+        if declared_max_size is not None:
+            declared_type["maxSize"] = declared_max_size
+        for attribute in ("relativeQuantity", "unbounded"):
+            value = raw_declared_type.get(attribute)
+            if isinstance(value, bool):
+                declared_type[attribute] = value
+        for attribute in ("supportsFraction", "canBeDeactivated"):
+            value = raw_declared_type.get(attribute)
+            if isinstance(value, bool):
+                declared_type[attribute] = value
+        for attribute in ("intervalDecimal", "shiftDecimal"):
+            value = raw_declared_type.get(attribute)
             if value is None or isinstance(value, bool):
                 continue
             try:
@@ -126,23 +233,22 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
             except (TypeError, ValueError, OverflowError):
                 continue
             if math.isfinite(number):
-                declared_type[bound] = int(number) if integer_type and number.is_integer() else number
+                declared_type[attribute] = number
+        for attribute in ("resolution", "intervalCounter", "shiftCounter", "priority"):
+            value = _normalize_fmi_non_negative_integer(raw_declared_type.get(attribute))
+            if value is not None:
+                declared_type[attribute] = value
         raw_items = raw_declared_type.get("items")
         if isinstance(raw_items, list) and len(raw_items) <= 256:
             items = []
             for item in raw_items:
                 if not isinstance(item, dict) or not isinstance(item.get("name"), str):
                     continue
-                raw_value = item.get("value")
-                if raw_value is None or isinstance(raw_value, bool) or not isinstance(raw_value, (str, int, float)):
+                integer_value = _normalize_fmi_number(item.get("value"), integer=True)
+                if not isinstance(integer_value, int):
                     continue
-                try:
-                    number = float(raw_value)
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if not math.isfinite(number) or not number.is_integer():
-                    continue
-                normalized_item = {"name": item["name"].strip()[:256], "value": int(number)}
+                item_value: int | str = integer_value if abs(integer_value) <= (2**53 - 1) else str(integer_value)
+                normalized_item = {"name": item["name"].strip()[:256], "value": item_value}
                 description = item.get("description")
                 if isinstance(description, str) and description.strip():
                     normalized_item["description"] = description.strip()[:1024]
@@ -158,16 +264,10 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
         for item in enum_items:
             if not isinstance(item, dict) or not isinstance(item.get("name"), str):
                 continue
-            raw_value = item.get("value")
-            if raw_value is None or isinstance(raw_value, bool) or not isinstance(raw_value, (str, int, float)):
+            integer_value = _normalize_fmi_number(item.get("value"), integer=True)
+            if not isinstance(integer_value, int):
                 continue
-            try:
-                numeric_value = float(raw_value)
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if not math.isfinite(numeric_value) or not numeric_value.is_integer():
-                continue
-            value = int(numeric_value)
+            value: int | str = integer_value if abs(integer_value) <= (2**53 - 1) else str(integer_value)
             normalized_item = {"value": value, "name": item["name"].strip()[:256]}
             item_description = item.get("description")
             if isinstance(item_description, str) and item_description.strip():
@@ -221,17 +321,26 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
         "defaultStepSize": optional_number("defaultStepSize"),
         "modelVariables": [],
     }
+    for field in ("numberOfContinuousStates", "numberOfEventIndicators"):
+        value = payload.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            normalized[field] = value
 
     for field, maximum_length in (
         ("description", 4096),
         ("author", 256),
         ("version", 128),
+        ("copyright", 1024),
         ("license", 256),
         ("generationTool", 256),
+        ("generationDateAndTime", 64),
     ):
         value = payload.get(field)
         if isinstance(value, str) and value.strip():
             normalized[field] = value.strip()[:maximum_length]
+    variable_naming_convention = payload.get("variableNamingConvention")
+    if variable_naming_convention in {"flat", "structured"}:
+        normalized["variableNamingConvention"] = variable_naming_convention
     default_tolerance = payload.get("defaultTolerance")
     if default_tolerance is not None and not isinstance(default_tolerance, bool):
         try:
@@ -244,14 +353,29 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
     if isinstance(raw_capabilities, dict):
         capabilities = {}
         for field in (
+            "needsExecutionTool",
+            "canBeInstantiatedOnlyOncePerProcess",
+            "canNotUseMemoryManagementFunctions",
             "canGetAndSetFMUstate",
             "canSerializeFMUstate",
             "canHandleVariableCommunicationStepSize",
+            "canInterpolateInputs",
+            "canRunAsynchronuously",
             "providesDirectionalDerivative",
             "providesAdjointDerivatives",
+            "providesPerElementDependencies",
+            "hasEventMode",
+            "providesIntermediateUpdate",
+            "canReturnEarlyAfterIntermediateUpdate",
+            "providesEvaluateDiscreteStates",
+            "needsCompletedIntegratorStep",
         ):
             value = raw_capabilities.get(field)
             if isinstance(value, bool):
+                capabilities[field] = value
+        for field in ("maxOutputDerivativeOrder", "recommendedIntermediateInputSmoothness"):
+            value = raw_capabilities.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                 capabilities[field] = value
         fixed_step = raw_capabilities.get("fixedInternalStepSize")
         if fixed_step is not None and not isinstance(fixed_step, bool):
@@ -272,6 +396,151 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
         if not isinstance(variable, dict):
             raise HTTPException(status_code=502, detail="Station backend returned an invalid model variable entry")
         normalized["modelVariables"].append(normalize_variable(variable, index))
+
+    raw_unit_definitions = payload.get("unitDefinitions")
+    if isinstance(raw_unit_definitions, list) and len(raw_unit_definitions) <= 1024:
+        unit_definitions = []
+        base_unit_fields = ("kg", "m", "s", "A", "K", "mol", "cd", "rad")
+        for raw_unit in raw_unit_definitions:
+            if not isinstance(raw_unit, dict):
+                continue
+            name = raw_unit.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            unit_entry: dict[str, Any] = {"name": name.strip()[:256]}
+            raw_base_unit = raw_unit.get("baseUnit")
+            if isinstance(raw_base_unit, dict):
+                base_unit: dict[str, Any] = {}
+                for field in base_unit_fields:
+                    value = raw_base_unit.get(field)
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        base_unit[field] = value
+                for field, default in (("factor", 1.0), ("offset", 0.0)):
+                    value = raw_base_unit.get(field)
+                    if value is None:
+                        continue
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if math.isfinite(number) and (field != "factor" or number != 0) and number != default:
+                        base_unit[field] = number
+                # An empty BaseUnit is meaningful for dimensionless units.
+                unit_entry["baseUnit"] = base_unit
+            raw_display_units = raw_unit.get("displayUnits")
+            if isinstance(raw_display_units, list) and len(raw_display_units) <= 256:
+                display_units = []
+                for raw_display_unit in raw_display_units:
+                    if not isinstance(raw_display_unit, dict):
+                        continue
+                    display_name = raw_display_unit.get("name")
+                    if not isinstance(display_name, str) or not display_name.strip():
+                        continue
+                    display_unit: dict[str, Any] = {"name": display_name.strip()[:256]}
+                    valid = True
+                    for field, default in (("factor", 1.0), ("offset", 0.0)):
+                        value = raw_display_unit.get(field)
+                        if value is None:
+                            continue
+                        try:
+                            number = float(value)
+                        except (TypeError, ValueError, OverflowError):
+                            valid = False
+                            break
+                        if not math.isfinite(number) or (field == "factor" and number == 0):
+                            valid = False
+                            break
+                        if number != default:
+                            display_unit[field] = number
+                    inverse = raw_display_unit.get("inverse") is True
+                    if inverse and float(display_unit.get("offset", 0.0)) != 0.0:
+                        valid = False
+                    if not valid:
+                        continue
+                    if inverse:
+                        display_unit["inverse"] = True
+                    display_units.append(display_unit)
+                if display_units:
+                    unit_entry["displayUnits"] = display_units
+            unit_definitions.append(unit_entry)
+        if unit_definitions:
+            normalized["unitDefinitions"] = unit_definitions
+
+    raw_type_definitions = payload.get("typeDefinitions")
+    if isinstance(raw_type_definitions, list) and len(raw_type_definitions) <= 1024:
+        type_definitions = []
+        integer_type_names = {
+            "Integer", "Enumeration", "Int8", "UInt8", "Int16", "UInt16",
+            "Int32", "UInt32", "Int64", "UInt64",
+        }
+        for raw_type in raw_type_definitions:
+            if not isinstance(raw_type, dict):
+                continue
+            name = raw_type.get("name")
+            type_name = raw_type.get("type")
+            if not isinstance(name, str) or not name.strip() or not isinstance(type_name, str) or not type_name.strip():
+                continue
+            declared_type: dict[str, Any] = {
+                "name": name.strip()[:256],
+                "type": type_name.strip()[:64],
+            }
+            for field, maximum_length in (
+                ("description", 4096), ("unit", 128), ("quantity", 256),
+                ("displayUnit", 256), ("mimeType", 256), ("intervalVariability", 32),
+            ):
+                value = raw_type.get(field)
+                if isinstance(value, str) and value.strip():
+                    declared_type[field] = value.strip()[:maximum_length]
+            for field in ("min", "max", "nominal", "intervalDecimal", "shiftDecimal"):
+                value = raw_type.get(field)
+                number = _normalize_fmi_number(
+                    value,
+                    integer=field in {"min", "max"} and type_name.strip() in integer_type_names,
+                )
+                if number is not None:
+                    declared_type[field] = number
+            for field in ("relativeQuantity", "unbounded", "supportsFraction", "canBeDeactivated"):
+                value = raw_type.get(field)
+                if isinstance(value, bool):
+                    declared_type[field] = value
+            for field in ("resolution", "intervalCounter", "shiftCounter", "priority"):
+                value = _normalize_fmi_non_negative_integer(raw_type.get(field))
+                if value is not None:
+                    declared_type[field] = value
+            max_size = _normalize_fmi_non_negative_integer(raw_type.get("maxSize"))
+            if max_size is not None:
+                declared_type["maxSize"] = max_size
+            raw_items = raw_type.get("items")
+            if isinstance(raw_items, list) and len(raw_items) <= 256:
+                items = []
+                for raw_item in raw_items:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    item_name = raw_item.get("name")
+                    item_value = raw_item.get("value")
+                    if not isinstance(item_name, str) or not item_name.strip() or isinstance(item_value, bool):
+                        continue
+                    try:
+                        if isinstance(item_value, int):
+                            integer_value = item_value
+                        elif isinstance(item_value, float) and math.isfinite(item_value) and item_value.is_integer():
+                            integer_value = int(item_value)
+                        elif isinstance(item_value, str) and re.fullmatch(r"[+-]?\d+", item_value.strip()):
+                            integer_value = int(item_value.strip())
+                        else:
+                            continue
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    item = {"name": item_name.strip()[:256], "value": str(integer_value)}
+                    description = raw_item.get("description")
+                    if isinstance(description, str) and description.strip():
+                        item["description"] = description.strip()[:1024]
+                    items.append(item)
+                if items:
+                    declared_type["items"] = items
+            type_definitions.append(declared_type)
+        if type_definitions:
+            normalized["typeDefinitions"] = type_definitions
 
     fmi_ls_struct = None
     if normalized["fmiVersion"].split(".", 1)[0] == "3":

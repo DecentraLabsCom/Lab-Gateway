@@ -11,7 +11,7 @@ from typing import Any
 
 POLICY_VERSION = "fmi-variable-access-v1"
 
-_PHASES = ("initialization", "runtime")
+_PHASES = ("configuration", "initialization", "runtime")
 
 _PHASE_SET = frozenset(_PHASES)
 
@@ -41,10 +41,24 @@ def _supports_runtime_tunable_parameters(metadata: Mapping[str, Any]) -> bool:
     return fmi_major in {2, 3} and simulation_type == "cosimulation"
 
 
+def _supports_configuration_mode(metadata: Mapping[str, Any]) -> bool:
+    try:
+        fmi_major = int(str(metadata.get("fmiVersion") or "").split(".", 1)[0])
+    except (TypeError, ValueError):
+        return False
+    simulation_type = re.sub(
+        r"[^a-z]",
+        "",
+        str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
+    )
+    return fmi_major == 3 and simulation_type == "cosimulation"
+
+
 def _default_permissions(
     variable: Mapping[str, Any],
     *,
     supports_runtime_tunable_parameters: bool = False,
+    supports_configuration_mode: bool = False,
 ) -> dict[str, Any]:
     causality = str(variable.get("causality") or "local").strip()
     variability = str(variable.get("variability") or "continuous").strip()
@@ -72,6 +86,13 @@ def _default_permissions(
             # FMI 3 Co-Simulation accepts tunable parameters at communication
             # points; the Executor applies them before the corresponding doStep.
             write_at.append("runtime")
+    elif (
+        causality == "structuralParameter"
+        and variability == "fixed"
+        and str(variable.get("type") or variable.get("declaredType") or "") == "UInt64"
+        and supports_configuration_mode
+    ):
+        write_at.append("configuration")
 
     return {"read": read, "writeAt": write_at}
 
@@ -129,6 +150,7 @@ def build_effective_policy(
 
     variables: dict[str, dict[str, Any]] = {}
     supports_runtime_tunable_parameters = _supports_runtime_tunable_parameters(metadata)
+    supports_configuration_mode = _supports_configuration_mode(metadata)
     for variable in raw_variables:
         if not isinstance(variable, Mapping):
             raise ValueError("FMU variable metadata is invalid")
@@ -140,6 +162,7 @@ def build_effective_policy(
         variables[name] = _default_permissions(
             variable,
             supports_runtime_tunable_parameters=supports_runtime_tunable_parameters,
+            supports_configuration_mode=supports_configuration_mode,
         )
 
     if overrides is not None:

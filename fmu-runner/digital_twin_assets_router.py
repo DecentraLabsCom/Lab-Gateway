@@ -38,11 +38,17 @@ _JSON_CHUNK = 0x4E4F534A
 _BIN_CHUNK = 0x004E4942
 _FMI_BINDING_TARGETS = {
     "position.x", "position.y", "position.z",
+    "translation.x", "translation.y", "translation.z",
+    "translation", "rotation", "scale", "weights",
     "rotation.x", "rotation.y", "rotation.z",
     "scale.x", "scale.y", "scale.z",
     "visible", "material.color",
 }
-_FMI_INPUT_POSITION_TARGETS = {"position.x", "position.y", "position.z"}
+_FMI_INPUT_POSITION_TARGETS = {
+    "position.x": "x", "position.y": "y", "position.z": "z",
+    "translation.x": "x", "translation.y": "y", "translation.z": "z",
+}
+_FMI_VECTOR_TARGET_LENGTHS = {"translation": 3, "scale": 3, "rotation": 4}
 _NUMERIC_FMI_INPUT_TYPES = {
     "real", "integer", "float32", "float64",
     "int8", "int16", "int32", "int64",
@@ -84,12 +90,110 @@ def _has_valid_fmi_binding_fields(binding: dict[str, Any]) -> bool:
     )
 
 
+def _fmi_array_dimensions(variable: dict[str, Any]) -> list[dict[str, Any]]:
+    dimensions = variable.get("dimensions")
+    if isinstance(dimensions, list) and dimensions:
+        return [dimension for dimension in dimensions if isinstance(dimension, dict)]
+    start = variable.get("start")
+    return [{"start": len(start)}] if isinstance(start, list) else []
+
+
+def _valid_array_selector(
+    binding: dict[str, Any],
+    variable: dict[str, Any],
+    variables_by_reference: dict[Any, dict[str, Any]],
+    *,
+    allow_whole_array: bool,
+) -> bool:
+    dimensions = _fmi_array_dimensions(variable)
+    indices = binding.get("indices")
+    if indices is None:
+        return not dimensions or allow_whole_array
+    if allow_whole_array or not dimensions or not isinstance(indices, list) or len(indices) != len(dimensions):
+        return False
+    for index, dimension in zip(indices, dimensions):
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            return False
+        size = dimension.get("start")
+        if size is None and dimension.get("valueReference") is not None:
+            structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
+            size = structural_parameter.get("max") if structural_parameter else None
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            continue
+        if index >= size:
+            return False
+    return True
+
+
+def _position_target_axes(target: Any) -> tuple[str, ...]:
+    axis = _FMI_INPUT_POSITION_TARGETS.get(target)
+    if axis:
+        return (axis,)
+    return ("x", "y", "z") if target == "translation" else ()
+
+
+def _valid_whole_vector_shape(
+    variable: dict[str, Any],
+    target: str,
+    variables_by_reference: dict[Any, dict[str, Any]],
+) -> bool:
+    dimensions = _fmi_array_dimensions(variable)
+    if len(dimensions) != 1 or str(variable.get("type", "")).lower() not in _NUMERIC_FMI_INPUT_TYPES:
+        return False
+    dimension = dimensions[0]
+    expected_size = _FMI_VECTOR_TARGET_LENGTHS[target]
+    dimension_size = dimension.get("start")
+    if dimension_size is None and dimension.get("valueReference") is not None:
+        structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
+        dimension_size = structural_parameter.get("max") if structural_parameter else None
+    if isinstance(dimension_size, bool) or not isinstance(dimension_size, int):
+        return True
+    if dimension.get("start") is not None:
+        return dimension_size == expected_size
+    return dimension_size >= expected_size
+
+
+def _node_morph_target_count(document: dict[str, Any], node: dict[str, Any]) -> int | None:
+    meshes = document.get("meshes")
+    mesh_index = node.get("mesh")
+    if not isinstance(meshes, list) or isinstance(mesh_index, bool) or not isinstance(mesh_index, int):
+        return None
+    if mesh_index < 0 or mesh_index >= len(meshes) or not isinstance(meshes[mesh_index], dict):
+        return None
+    mesh = meshes[mesh_index]
+    primitives = mesh.get("primitives")
+    if not isinstance(primitives, list) or not primitives:
+        return None
+    target_counts = []
+    for primitive in primitives:
+        if not isinstance(primitive, dict):
+            return None
+        targets = primitive.get("targets", [])
+        if not isinstance(targets, list):
+            return None
+        target_counts.append(len(targets))
+    if not target_counts or any(count <= 0 for count in target_counts) or len(set(target_counts)) != 1:
+        return None
+    count = target_counts[0]
+    mesh_weights = mesh.get("weights")
+    if isinstance(mesh_weights, list) and len(mesh_weights) != count:
+        return None
+    node_weights = node.get("weights")
+    if isinstance(node_weights, list) and len(node_weights) != count:
+        return None
+    return count
+
+
 def _fmi_binding_scale(binding: dict[str, Any]) -> float:
     raw_scale = binding.get("scale", 1)
     return float(raw_scale) if _is_finite_binding_number(raw_scale) else math.nan
 
 
-def _is_draggable_input_binding(binding: dict[str, Any], variable: dict[str, Any]) -> bool:
+def _is_draggable_input_binding(
+    binding: dict[str, Any],
+    variable: dict[str, Any],
+    variables_by_reference: dict[Any, dict[str, Any]] | None = None,
+) -> bool:
     return (
         _has_valid_fmi_binding_fields(binding)
         and str(variable.get("causality", "")).lower() == "input"
@@ -97,6 +201,12 @@ def _is_draggable_input_binding(binding: dict[str, Any], variable: dict[str, Any
         and str(variable.get("type", "")).lower() in _NUMERIC_FMI_INPUT_TYPES
         and math.isfinite(_fmi_binding_scale(binding))
         and _fmi_binding_scale(binding) != 0
+        and _valid_array_selector(
+            binding,
+            variable,
+            variables_by_reference or {},
+            allow_whole_array=False,
+        )
     )
 
 
@@ -172,6 +282,7 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
         }
 
     variables_by_name: dict[str, dict[str, Any]] = {}
+    variables_by_reference: dict[Any, dict[str, Any]] = {}
     for variable in model_variables:
         if not isinstance(variable, dict):
             continue
@@ -179,6 +290,9 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
         if not isinstance(variable_name, str):
             continue
         variables_by_name[variable_name] = variable
+        value_reference = variable.get("valueReference")
+        if value_reference is not None:
+            variables_by_reference[value_reference] = variable
     issues: list[dict[str, Any]] = []
     issue_count = 0
     binding_count = 0
@@ -238,16 +352,34 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
                 else False
             )
             is_draggable_input = (
-                _is_draggable_input_binding(candidate, candidate_variable)
+                _is_draggable_input_binding(candidate, candidate_variable, variables_by_reference)
                 if isinstance(candidate, dict) and candidate_variable
                 else False
+            )
+            is_output_position_binding = (
+                isinstance(candidate_target, str)
+                and candidate_target in _FMI_BINDING_TARGETS
+                and is_output_binding
+                and candidate_variable is not None
+                and (
+                    candidate_target not in _FMI_VECTOR_TARGET_LENGTHS
+                    or _valid_whole_vector_shape(candidate_variable, candidate_target, variables_by_reference)
+                )
+                and _valid_array_selector(
+                    candidate,
+                    candidate_variable,
+                    variables_by_reference,
+                    allow_whole_array=(candidate_target in _FMI_VECTOR_TARGET_LENGTHS
+                                       or (candidate_target == "weights" and "index" not in candidate)),
+                )
             )
             if (
                 isinstance(candidate_target, str)
                 and candidate_target in _FMI_BINDING_TARGETS
-                and (is_output_binding or is_draggable_input)
+                and (is_output_position_binding or is_draggable_input)
             ):
-                target_counts[candidate_target] = target_counts.get(candidate_target, 0) + 1
+                for axis in _position_target_axes(candidate_target):
+                    target_counts[axis] = target_counts.get(axis, 0) + 1
 
         for binding_index, binding in enumerate(bindings):
             binding_count += 1
@@ -278,6 +410,22 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
                         variable_name,
                     )
                     valid = False
+            binding_indices = binding.get("indices")
+            if binding_indices is not None and (
+                not isinstance(binding_indices, list)
+                or any(isinstance(index, bool) or not isinstance(index, int) or index < 0 for index in binding_indices)
+            ):
+                add_issue("invalid_array_indices", "indices must be an array of non-negative FMI array coordinates.", node_name, binding_index, variable_name)
+                valid = False
+            target_index = binding.get("index")
+            if target_index is not None and (
+                isinstance(target_index, bool) or not isinstance(target_index, int) or target_index < 0
+            ):
+                add_issue("invalid_binding_field", "The binding field 'index' must be a non-negative integer.", node_name, binding_index, variable_name)
+                valid = False
+            if target_index is not None and target != "weights":
+                add_issue("invalid_binding_field", "The binding field 'index' is only supported for the glTF weights target.", node_name, binding_index, variable_name)
+                valid = False
             if not isinstance(variable_name, str) or not variable_name:
                 add_issue("missing_variable", "The binding must name an FMI input or output variable.", node_name, binding_index)
                 valid = False
@@ -304,6 +452,89 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
 
             variable = variables_by_name.get(variable_name) if isinstance(variable_name, str) else None
             causality = str(variable.get("causality", "")).lower() if variable else ""
+            if variable and target_is_supported:
+                variable_dimensions = _fmi_array_dimensions(variable)
+                vector_target = target in _FMI_VECTOR_TARGET_LENGTHS
+                weights_target = target == "weights"
+                whole_array = vector_target or (weights_target and target_index is None)
+                if not _valid_array_selector(
+                    binding,
+                    variable,
+                    variables_by_reference,
+                    allow_whole_array=whole_array,
+                ):
+                    add_issue(
+                        "invalid_array_selection",
+                        "The FMI array selection must match the declared dimensions and use in-range coordinates.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                if variable_dimensions and not whole_array and binding_indices is None:
+                    add_issue(
+                        "missing_array_indices",
+                        "An FMI array binding to a scalar scene target must declare indices.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                if vector_target:
+                    dimension_size = None
+                    if len(variable_dimensions) == 1:
+                        dimension = variable_dimensions[0]
+                        if dimension.get("start") is not None:
+                            dimension_size = dimension["start"]
+                        elif dimension.get("valueReference") is not None:
+                            structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
+                            dimension_size = structural_parameter.get("max") if structural_parameter else None
+                    expected_size = _FMI_VECTOR_TARGET_LENGTHS[target]
+                    if not variable_dimensions:
+                        add_issue("missing_vector_array", "glTF whole-vector targets require an FMI array variable.", node_name, binding_index, variable_name)
+                        valid = False
+                    elif len(variable_dimensions) != 1:
+                        add_issue("invalid_vector_shape", "glTF vector targets require a one-dimensional FMI array.", node_name, binding_index, variable_name)
+                        valid = False
+                    elif (
+                        isinstance(dimension_size, int)
+                        and (
+                            (variable_dimensions[0].get("start") is not None and dimension_size != expected_size)
+                            or (variable_dimensions[0].get("valueReference") is not None and dimension_size < expected_size)
+                        )
+                    ):
+                        add_issue("invalid_vector_shape", f"The FMI array length must be {expected_size} for the {target} target.", node_name, binding_index, variable_name)
+                        valid = False
+                    if variable and str(variable.get("type", "")).lower() not in _NUMERIC_FMI_INPUT_TYPES:
+                        add_issue("non_numeric_vector", "glTF vector targets require numeric FMI variables.", node_name, binding_index, variable_name)
+                        valid = False
+                if weights_target:
+                    morph_target_count = _node_morph_target_count(document, node)
+                    if morph_target_count is None:
+                        add_issue("missing_morph_targets", "The glTF node must reference a mesh with compatible morph targets.", node_name, binding_index, variable_name)
+                        valid = False
+                    elif target_index is not None and target_index >= morph_target_count:
+                        add_issue("invalid_morph_target_index", "The morph-target index is outside the node mesh's weights.", node_name, binding_index, variable_name)
+                        valid = False
+                    if target_index is None:
+                        if len(variable_dimensions) != 1:
+                            add_issue("invalid_weight_array", "A whole weights target requires a one-dimensional FMI array.", node_name, binding_index, variable_name)
+                            valid = False
+                        elif morph_target_count is not None:
+                            dimension = variable_dimensions[0]
+                            dimension_size = dimension.get("start")
+                            if dimension_size is None and dimension.get("valueReference") is not None:
+                                structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
+                                dimension_size = structural_parameter.get("max") if structural_parameter else None
+                            if isinstance(dimension_size, int) and (
+                                (dimension.get("start") is not None and dimension_size != morph_target_count)
+                                or (dimension.get("valueReference") is not None and dimension_size < morph_target_count)
+                            ):
+                                add_issue("invalid_weight_array", "The FMI array cannot provide one value per glTF morph target.", node_name, binding_index, variable_name)
+                                valid = False
+                    if str(variable.get("type", "")).lower() not in _NUMERIC_FMI_INPUT_TYPES:
+                        add_issue("non_numeric_weights", "Morph-target weights require numeric FMI values.", node_name, binding_index, variable_name)
+                        valid = False
             if variable and causality not in {"input", "output"}:
                 add_issue(
                     "unsupported_causality",
@@ -317,16 +548,16 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
                 if target not in _FMI_INPUT_POSITION_TARGETS:
                     add_issue(
                         "unsupported_input_target",
-                        "Writable scene inputs must target position.x, position.y, or position.z.",
+                        "Writable scene inputs must target one translation axis.",
                         node_name,
                         binding_index,
                         variable_name,
                     )
                     valid = False
-                elif target_counts.get(target, 0) > 1:
+                elif any(target_counts.get(axis, 0) > 1 for axis in _position_target_axes(target)):
                     add_issue(
                         "competing_input_target",
-                        "This position target has another binding on the node, so the input cannot be dragged.",
+                        "This translation axis has another binding on the node, so the input cannot be dragged.",
                         node_name,
                         binding_index,
                         variable_name,

@@ -10,7 +10,7 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from typing import cast
 
 from fmu_backend import StationFmuBackend
-from simulation_access_policy import build_effective_policy
+from simulation_access_policy import AccessDenied, build_effective_policy
 from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession, _public_http_detail
 
 
@@ -24,6 +24,34 @@ client = TestClient(app)
 
 def test_public_http_detail_uses_fallback_for_non_http_exceptions():
     assert _public_http_detail(ValueError("private details"), "Safe fallback") == "Safe fallback"
+
+
+def test_initialization_authorizes_structural_parameters_only_as_configuration_writes():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationType": "CoSimulation",
+        "modelVariables": [
+            {"name": "sampleCount", "valueReference": 4, "type": "UInt64",
+             "causality": "structuralParameter", "variability": "fixed"},
+            {"name": "samplesIn", "valueReference": 6, "type": "Float64",
+             "causality": "input", "variability": "continuous"},
+        ],
+    }
+    policy = build_effective_policy(metadata)
+    policy["modelVariables"] = metadata["modelVariables"]
+
+    StationRealtimeWsProxyManager._validate_session_message({
+        "type": "sim.initialize",
+        "parameters": {"sampleCount": 3},
+        "options": {"inputs": {"samplesIn": [1.0, 2.0, 3.0]}},
+    }, policy)
+
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message({
+            "type": "sim.initialize",
+            "parameters": {},
+            "options": {"inputs": {"sampleCount": 3}},
+        }, policy)
 
 
 def _claims():

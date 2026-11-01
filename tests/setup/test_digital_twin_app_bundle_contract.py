@@ -70,3 +70,24 @@ def test_webapp_bundle_validator_accepts_a_separately_bundled_client(tmp_path):
     })
 
     assert "custom/client.js" in sync_fmu_examples.validate_webapp_bundle(archive)
+
+
+def test_smart_warehouse_checkpoint_validation_checks_capability_and_client_usage(tmp_path):
+    archive_path = write_webapp(tmp_path / "smart-warehouse.webapp.zip", {
+        "sdk/index.js": "export const FMU_STATE_CHECKPOINTS = 'fmu-state-checkpoints';",
+        "sdk/client.js": "DIGITAL_TWIN_CAPABILITY.FMU_STATE_CHECKPOINTS",
+    })
+
+    with zipfile.ZipFile(archive_path) as archive:
+        sync_fmu_examples.validate_smart_warehouse_checkpoint_sdk(archive)
+
+
+def test_smart_warehouse_checkpoint_validation_rejects_client_without_capability_use(tmp_path):
+    archive_path = write_webapp(tmp_path / "smart-warehouse-no-checkpoints.webapp.zip", {
+        "sdk/index.js": "export const FMU_STATE_CHECKPOINTS = 'fmu-state-checkpoints';",
+        "sdk/client.js": "export function connect() {}",
+    })
+
+    with zipfile.ZipFile(archive_path) as archive:
+        with pytest.raises(ValueError, match="checkpoint support"):
+            sync_fmu_examples.validate_smart_warehouse_checkpoint_sdk(archive)

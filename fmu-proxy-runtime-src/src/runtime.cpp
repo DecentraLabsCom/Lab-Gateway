@@ -553,7 +553,11 @@ std::size_t ProxyRuntime::ResolveVariableFlatSize(const VariableInfo& variable) 
         if (!extent.has_value() || *extent < 0) {
             return 0;
         }
-        size *= static_cast<std::size_t>(*extent);
+        const auto unsigned_extent = static_cast<std::size_t>(*extent);
+        if (unsigned_extent != 0 && size > std::numeric_limits<std::size_t>::max() / unsigned_extent) {
+            return 0;
+        }
+        size *= unsigned_extent;
     }
     return size;
 }
@@ -622,6 +626,7 @@ OperationResult ProxyRuntime::Configure(const std::string& instance_name, const 
     experiment_.stop_time = model_.default_stop_time.value_or(10.0);
     experiment_.step_size = model_.default_step_size.value_or(0.01);
     current_time_ = experiment_.start_time;
+    configuration_mode_ = false;
     last_step_early_return_ = false;
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
@@ -645,6 +650,9 @@ OperationResult ProxyRuntime::SetupExperiment(const double start_time, const dou
 }
 
 OperationResult ProxyRuntime::EnterInitializationMode() {
+    if (configuration_mode_) {
+        return OperationResult::Failure("STATE_ERROR", "Exit Configuration Mode before initialization");
+    }
     if (gateway_client_ == nullptr) {
         return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
     }
@@ -667,6 +675,31 @@ OperationResult ProxyRuntime::EnterInitializationMode() {
     return Transition(SessionState::kSessionCreated);
 }
 
+OperationResult ProxyRuntime::EnterConfigurationMode() {
+    if (state_ != SessionState::kInstantiated || configuration_mode_) {
+        return OperationResult::Failure("STATE_ERROR", "Configuration Mode can only be entered before initialization");
+    }
+    if (!HasStructuralParameters()) {
+        return OperationResult::Failure("STATE_ERROR", "The model has no structural parameters");
+    }
+    configuration_mode_ = true;
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::ExitConfigurationMode() {
+    if (!configuration_mode_) {
+        return OperationResult::Failure("STATE_ERROR", "Runtime is not in Configuration Mode");
+    }
+    configuration_mode_ = false;
+    return OperationResult::Success();
+}
+
+bool ProxyRuntime::HasStructuralParameters() const {
+    return std::any_of(model_.variables.begin(), model_.variables.end(), [](const VariableInfo& variable) {
+        return variable.causality == "structuralParameter";
+    });
+}
+
 OperationResult ProxyRuntime::ExitInitializationMode() {
     if (gateway_client_ == nullptr) {
         return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
@@ -676,6 +709,7 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
     }
 
     std::map<std::string, ScalarValue> initialization_inputs;
+    std::map<std::string, ScalarValue> initialization_parameters;
     for (const auto& [name, value] : pending_inputs_) {
         const VariableInfo* variable = FindVariableByName(model_, name);
         if (variable != nullptr && variable->start_value.has_value()
@@ -683,11 +717,15 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
             initial_inputs_.erase(name);
             continue;
         }
-        initialization_inputs.emplace(name, value);
+        if (variable != nullptr && variable->causality == "input") {
+            initialization_inputs.emplace(name, value);
+        } else {
+            initialization_parameters.emplace(name, value);
+        }
     }
 
     const auto status = gateway_client_->Initialize(
-        config_, experiment_, initialization_inputs, early_return_allowed_);
+        config_, experiment_, initialization_inputs, initialization_parameters, early_return_allowed_);
     if (!status) {
         state_ = SessionState::kError;
         SetError(status.message);
@@ -766,6 +804,17 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
     }
     last_step_early_return_ = snapshot.value.early_return;
     last_step_event_handling_needed_ = snapshot.value.event_handling_needed;
+    for (const auto& variable : model_.variables) {
+        if (variable.type != ScalarType::kClock || variable.causality != "output") {
+            continue;
+        }
+        const ScalarValue* value = GetCachedValue(variable.value_reference);
+        const auto* active = value == nullptr ? nullptr : std::get_if<bool>(value);
+        if (active != nullptr && *active) {
+            last_step_event_handling_needed_ = true;
+            break;
+        }
+    }
     last_step_terminated_ = snapshot.value.terminate_simulation;
     simulation_finished_ = snapshot.value.finished;
     if (last_step_early_return_ && !early_return_allowed_) {
@@ -822,6 +871,7 @@ OperationResult ProxyRuntime::Reset() {
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
     simulation_finished_ = false;
+    configuration_mode_ = false;
     realtime_clock_started_ = false;
     state_ = SessionState::kInstantiated;
     return OperationResult::Success();
@@ -899,7 +949,13 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     const bool writable_parameter = variable.causality == "parameter"
         && ((initialization_state && variable.variability != "constant")
             || (runtime_state && variable.variability == "tunable"));
-    if (!writable_input && !writable_parameter) {
+    const bool writable_structural_parameter = variable.causality == "structuralParameter"
+        && variable.variability == "fixed"
+        && variable.declared_type == "UInt64"
+        && configuration_mode_
+        && initialization_state
+        && model_.fmi_version.rfind("3.", 0) == 0;
+    if (!writable_input && !writable_parameter && !writable_structural_parameter) {
         return OperationResult::Failure(
             "VARIABLE_NOT_SETTABLE",
             "Variable is not settable in the current FMI mode");
@@ -907,7 +963,25 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     if (simulation_finished_) {
         return OperationResult::Failure("SIMULATION_FINISHED", "Simulation has finished");
     }
-    if (initialization_state && variable.start_value.has_value()
+    if (writable_structural_parameter) {
+        const auto* unsigned_value = std::get_if<std::uint64_t>(&value);
+        if (unsigned_value == nullptr) {
+            return OperationResult::Failure("TYPE_MISMATCH", "Structural parameters must use UInt64 values");
+        }
+        const bool defines_array_dimension = std::any_of(
+            model_.variables.begin(), model_.variables.end(), [&variable](const VariableInfo& candidate) {
+                return std::any_of(candidate.dimensions.begin(), candidate.dimensions.end(), [&variable](const DimensionInfo& dimension) {
+                    return dimension.value_reference == variable.value_reference;
+                });
+            });
+        if (defines_array_dimension && (*unsigned_value == 0 ||
+            *unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()))) {
+            return OperationResult::Failure(
+                "INVALID_DIMENSION",
+                "Structural array dimensions must fit a positive 32-bit extent");
+        }
+    }
+    if (initialization_state && !writable_structural_parameter && variable.start_value.has_value()
         && *variable.start_value == value) {
         cached_values_[variable.value_reference] = std::move(value);
         initial_inputs_.erase(variable.name);
@@ -920,6 +994,37 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         return OperationResult::Success();
     }
     cached_values_[variable.value_reference] = value;
+    if (writable_structural_parameter) {
+        for (const auto& candidate : model_.variables) {
+            const bool depends_on_parameter = std::any_of(
+                candidate.dimensions.begin(), candidate.dimensions.end(), [&variable](const DimensionInfo& dimension) {
+                    return dimension.value_reference == variable.value_reference;
+                });
+            if (!depends_on_parameter) {
+                continue;
+            }
+            const std::size_t flat_size = ResolveVariableFlatSize(candidate);
+            auto cached = cached_values_.find(candidate.value_reference);
+            if (flat_size == 0 || cached == cached_values_.end()) {
+                continue;
+            }
+            auto resize_array = [flat_size](ScalarValue& array_value) {
+                if (auto* real_items = std::get_if<RealArray>(&array_value)) real_items->resize(flat_size, 0.0);
+                else if (auto* integer_items = std::get_if<IntegerArray>(&array_value)) integer_items->resize(flat_size, 0);
+                else if (auto* unsigned_items = std::get_if<UnsignedIntegerArray>(&array_value)) unsigned_items->resize(flat_size, 0);
+                else if (auto* boolean_items = std::get_if<BooleanArray>(&array_value)) boolean_items->resize(flat_size, false);
+                else if (auto* string_items = std::get_if<StringArray>(&array_value)) string_items->resize(flat_size);
+                else if (auto* binary_items = std::get_if<BinaryArray>(&array_value)) binary_items->resize(flat_size);
+            };
+            resize_array(cached->second);
+            if (auto pending = pending_inputs_.find(candidate.name); pending != pending_inputs_.end()) {
+                resize_array(pending->second);
+            }
+            if (auto initial = initial_inputs_.find(candidate.name); initial != initial_inputs_.end()) {
+                resize_array(initial->second);
+            }
+        }
+    }
     if (initialization_state) {
         initial_inputs_[variable.name] = value;
     }
@@ -1497,7 +1602,7 @@ OperationResult ProxyRuntime::GetBinary(const std::uint32_t* value_references,
 
 OperationResult ProxyRuntime::GetClock(const std::uint32_t* value_references,
                                        const std::size_t count,
-                                       bool* values) const {
+                                       bool* values) {
     if (value_references == nullptr || values == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetClock received null buffers");
     }
@@ -1518,6 +1623,9 @@ OperationResult ProxyRuntime::GetClock(const std::uint32_t* value_references,
             return OperationResult::Failure("TYPE_MISMATCH", "Cached value type does not match GetClock");
         }
         values[index] = *typed;
+        if (variable->causality == "output" && values[index]) {
+            cached_values_[value_references[index]] = false;
+        }
     }
     return OperationResult::Success();
 }

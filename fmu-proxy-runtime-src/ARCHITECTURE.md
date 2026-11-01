@@ -99,8 +99,9 @@ initialization.
 - `win64` runtime is implemented and built.
 - `linux64` runtime is reproducibly built and promoted to the runtime drop path.
 - `darwin64` build support exists, but a real binary still needs end-to-end validation.
-- FMI 3 scalar/dimensioned Co-Simulation is implemented; Model Exchange and
-  Scheduled Execution are not supported.
+- FMI 3 scalar/dimensioned Co-Simulation is implemented. Model Exchange for
+  FMI 2/3 is outside the supported runtime scope and is not planned; Scheduled
+  Execution is also unsupported.
 - `Binary` and `Clock`, and the full external tool/type matrix, still need
   validation against real sample FMUs.
 

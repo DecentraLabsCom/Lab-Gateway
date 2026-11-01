@@ -14,10 +14,22 @@ namespace decentralabs::proxy {
 
 namespace {
 
+enum class Fmi3Mode {
+    kInstantiated,
+    kConfiguration,
+    kInitialization,
+    kEvent,
+    kStep,
+    kTerminated,
+};
+
 struct Fmi3Instance {
     fmi3InstanceEnvironment environment = nullptr;
     fmi3LogMessageCallback logger = nullptr;
     bool logging_enabled = false;
+    bool event_mode_used = false;
+    bool event_mode_pending = false;
+    Fmi3Mode mode = Fmi3Mode::kInstantiated;
     std::string instance_name;
     ProxyRuntime runtime;
     std::vector<std::string> string_cache;
@@ -31,6 +43,19 @@ constexpr size_t kMaximumSerializedStateTokenBytes = 64 * 1024;
 
 Fmi3Instance* AsInstance(fmi3Instance instance) {
     return static_cast<Fmi3Instance*>(instance);
+}
+
+bool HasOutputClock(const Fmi3Instance* instance) {
+    if (instance == nullptr) {
+        return false;
+    }
+    const auto& variables = instance->runtime.Model().variables;
+    for (const auto& variable : variables) {
+        if (variable.type == ScalarType::kClock && variable.causality == "output") {
+            return true;
+        }
+    }
+    return false;
 }
 
 void Log(Fmi3Instance* instance, const fmi3Status status, const char* category, const std::string& message) {
@@ -183,8 +208,10 @@ fmi3Status SetUnsignedIntegerValues(Fmi3Instance* instance,
 
 using decentralabs::proxy::AsInstance;
 using decentralabs::proxy::AttachLogger;
+using decentralabs::proxy::Fmi3Mode;
 using decentralabs::proxy::Fmi3Instance;
 using decentralabs::proxy::Fmi3StateHandle;
+using decentralabs::proxy::HasOutputClock;
 using decentralabs::proxy::kMaximumSerializedStateTokenBytes;
 using decentralabs::proxy::OperationResult;
 using decentralabs::proxy::ParseJson;
@@ -217,7 +244,7 @@ fmi3Instance fmi3InstantiateCoSimulation(
     fmi3String resourcePath,
     fmi3Boolean,
     fmi3Boolean loggingOn,
-    fmi3Boolean,
+    fmi3Boolean eventModeUsed,
     fmi3Boolean earlyReturnAllowed,
     const fmi3ValueReference[],
     size_t,
@@ -232,12 +259,18 @@ fmi3Instance fmi3InstantiateCoSimulation(
     instance->environment = instanceEnvironment;
     instance->logger = logMessage;
     instance->logging_enabled = loggingOn != fmi3False;
+    instance->event_mode_used = eventModeUsed != fmi3False;
     instance->instance_name = instanceName;
     AttachLogger(instance);
 
     const OperationResult status = instance->runtime.Configure(instanceName, resourcePath);
     if (!status) {
         Log(instance, fmi3Error, "logStatusError", status.message);
+        delete instance;
+        return nullptr;
+    }
+    if (HasOutputClock(instance) && !instance->event_mode_used) {
+        Log(instance, fmi3Error, "logStatusError", "Clock outputs require Event Mode to be negotiated at instantiation");
         delete instance;
         return nullptr;
     }
@@ -275,6 +308,9 @@ fmi3Status fmi3EnterInitializationMode(
     if (impl == nullptr) {
         return fmi3Fatal;
     }
+    if (impl->mode != Fmi3Mode::kInstantiated) {
+        return Unsupported(impl, "Initialization Mode can only be entered from Instantiated Mode");
+    }
     const auto& model = impl->runtime.Model();
     const double effective_stop = stopTimeDefined != fmi3False
         ? stopTime
@@ -284,7 +320,12 @@ fmi3Status fmi3EnterInitializationMode(
     if (!status) {
         return ToFmiStatus(impl, status);
     }
-    return ToFmiStatus(impl, impl->runtime.EnterInitializationMode());
+    const auto init_status = impl->runtime.EnterInitializationMode();
+    if (!init_status) {
+        return ToFmiStatus(impl, init_status);
+    }
+    impl->mode = Fmi3Mode::kInitialization;
+    return fmi3OK;
 }
 
 fmi3Status fmi3ExitInitializationMode(fmi3Instance instance) {
@@ -292,7 +333,15 @@ fmi3Status fmi3ExitInitializationMode(fmi3Instance instance) {
     if (impl == nullptr) {
         return fmi3Fatal;
     }
-    return ToFmiStatus(impl, impl->runtime.ExitInitializationMode());
+    if (impl->mode != Fmi3Mode::kInitialization) {
+        return Unsupported(impl, "Initialization Mode has not been entered");
+    }
+    const auto status = impl->runtime.ExitInitializationMode();
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
+    impl->mode = impl->event_mode_used ? Fmi3Mode::kEvent : Fmi3Mode::kStep;
+    return fmi3OK;
 }
 
 fmi3Status fmi3EnterEventMode(fmi3Instance instance) {
@@ -300,7 +349,80 @@ fmi3Status fmi3EnterEventMode(fmi3Instance instance) {
     if (impl == nullptr) {
         return fmi3Fatal;
     }
-    return Unsupported(impl, "Event mode is not supported by the proxy runtime");
+    if (!impl->event_mode_used || impl->mode != Fmi3Mode::kStep || !impl->event_mode_pending) {
+        return Unsupported(impl, "Event Mode entry was not requested by fmi3DoStep");
+    }
+    impl->event_mode_pending = false;
+    impl->mode = Fmi3Mode::kEvent;
+    return fmi3OK;
+}
+
+fmi3Status fmi3EnterConfigurationMode(fmi3Instance instance) {
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr) {
+        return fmi3Fatal;
+    }
+    if (impl->mode != Fmi3Mode::kInstantiated) {
+        return Unsupported(impl, "Configuration Mode can only be entered before initialization");
+    }
+    const auto status = impl->runtime.EnterConfigurationMode();
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
+    impl->mode = Fmi3Mode::kConfiguration;
+    return fmi3OK;
+}
+
+fmi3Status fmi3ExitConfigurationMode(fmi3Instance instance) {
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr) {
+        return fmi3Fatal;
+    }
+    if (impl->mode != Fmi3Mode::kConfiguration) {
+        return Unsupported(impl, "Configuration Mode has not been entered");
+    }
+    const auto status = impl->runtime.ExitConfigurationMode();
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
+    impl->mode = Fmi3Mode::kInstantiated;
+    return fmi3OK;
+}
+
+fmi3Status fmi3EnterStepMode(fmi3Instance instance) {
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr) {
+        return fmi3Fatal;
+    }
+    if (impl->mode != Fmi3Mode::kEvent) {
+        return Unsupported(impl, "Step Mode can only be entered from Event Mode");
+    }
+    impl->mode = Fmi3Mode::kStep;
+    return fmi3OK;
+}
+
+fmi3Status fmi3UpdateDiscreteStates(
+    fmi3Instance instance,
+    fmi3Boolean* discreteStatesNeedUpdate,
+    fmi3Boolean* terminateSimulation,
+    fmi3Boolean* nominalsOfContinuousStatesChanged,
+    fmi3Boolean* valuesOfContinuousStatesChanged,
+    fmi3Boolean* nextEventTimeDefined,
+    fmi3Float64* nextEventTime) {
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr) {
+        return fmi3Fatal;
+    }
+    if (impl->mode != Fmi3Mode::kEvent) {
+        return Unsupported(impl, "Discrete states can only be updated in Event Mode");
+    }
+    if (discreteStatesNeedUpdate != nullptr) *discreteStatesNeedUpdate = fmi3False;
+    if (terminateSimulation != nullptr) *terminateSimulation = fmi3False;
+    if (nominalsOfContinuousStatesChanged != nullptr) *nominalsOfContinuousStatesChanged = fmi3False;
+    if (valuesOfContinuousStatesChanged != nullptr) *valuesOfContinuousStatesChanged = fmi3False;
+    if (nextEventTimeDefined != nullptr) *nextEventTimeDefined = fmi3False;
+    if (nextEventTime != nullptr) *nextEventTime = 0.0;
+    return fmi3OK;
 }
 
 fmi3Status fmi3Terminate(fmi3Instance instance) {
@@ -308,7 +430,12 @@ fmi3Status fmi3Terminate(fmi3Instance instance) {
     if (impl == nullptr) {
         return fmi3Fatal;
     }
-    return ToFmiStatus(impl, impl->runtime.Terminate());
+    const auto status = impl->runtime.Terminate();
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
+    impl->mode = Fmi3Mode::kTerminated;
+    return fmi3OK;
 }
 
 fmi3Status fmi3Reset(fmi3Instance instance) {
@@ -316,7 +443,13 @@ fmi3Status fmi3Reset(fmi3Instance instance) {
     if (impl == nullptr) {
         return fmi3Fatal;
     }
-    return ToFmiStatus(impl, impl->runtime.Reset());
+    const auto status = impl->runtime.Reset();
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
+    impl->event_mode_pending = false;
+    impl->mode = Fmi3Mode::kInstantiated;
+    return fmi3OK;
 }
 
 fmi3Status fmi3GetFloat32(
@@ -534,6 +667,9 @@ fmi3Status fmi3GetClock(
     if (impl == nullptr || values == nullptr) {
         return fmi3Fatal;
     }
+    if (impl->mode != Fmi3Mode::kEvent) {
+        return Unsupported(impl, "Clock values can only be read in Event Mode");
+    }
     std::unique_ptr<bool[]> buffer(new bool[nValueReferences]);
     const auto status = impl->runtime.GetClock(valueReferences, nValueReferences, buffer.get());
     if (!status) {
@@ -736,6 +872,9 @@ fmi3Status fmi3SetClock(
     if (impl == nullptr || values == nullptr) {
         return fmi3Fatal;
     }
+    if (impl->mode != Fmi3Mode::kEvent) {
+        return Unsupported(impl, "Input Clocks can only be set in Event Mode");
+    }
     std::unique_ptr<bool[]> buffer(new bool[nValueReferences]);
     for (size_t index = 0; index < nValueReferences; ++index) {
         buffer[index] = values[index] != fmi3False;
@@ -755,6 +894,9 @@ fmi3Status fmi3DoStep(
     Fmi3Instance* impl = AsInstance(instance);
     if (impl == nullptr) {
         return fmi3Fatal;
+    }
+    if (impl->mode != Fmi3Mode::kStep || impl->event_mode_pending) {
+        return Unsupported(impl, "fmi3DoStep can only be called in Step Mode");
     }
     const auto status = impl->runtime.DoStep(currentCommunicationPoint, communicationStepSize);
     if (!status) {
@@ -778,6 +920,8 @@ fmi3Status fmi3DoStep(
     if (eventHandlingNeeded != nullptr) {
         *eventHandlingNeeded = impl->runtime.LastStepEventHandlingNeeded() ? fmi3True : fmi3False;
     }
+    impl->event_mode_pending = impl->event_mode_used
+        && impl->runtime.LastStepEventHandlingNeeded();
     if (terminateSimulation != nullptr) {
         *terminateSimulation = impl->runtime.LastStepTerminated() ? fmi3True : fmi3False;
     }
@@ -909,11 +1053,8 @@ fmi3Status fmi3GetAdjointDerivative(
 
 FMI3_Export fmi3Status fmi3ActivateModelPartition(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3CompletedIntegratorStep(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3EnterConfigurationMode(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3EnterContinuousTimeMode(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3EnterStepMode(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3EvaluateDiscreteStates(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3ExitConfigurationMode(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetContinuousStateDerivatives(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetContinuousStates(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3GetEventIndicators(...) { return fmi3Error; }
@@ -933,6 +1074,5 @@ FMI3_Export fmi3Status fmi3SetIntervalFraction(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetShiftDecimal(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetShiftFraction(...) { return fmi3Error; }
 FMI3_Export fmi3Status fmi3SetTime(...) { return fmi3Error; }
-FMI3_Export fmi3Status fmi3UpdateDiscreteStates(...) { return fmi3Error; }
 
 }  // extern "C"

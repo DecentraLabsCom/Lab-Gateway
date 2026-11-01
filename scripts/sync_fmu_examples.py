@@ -317,6 +317,20 @@ def validate_webapp_bundle(path: Path) -> set[str]:
     return files
 
 
+def validate_smart_warehouse_checkpoint_sdk(archive: zipfile.ZipFile) -> None:
+    """Check the advertised checkpoint capability and its SDK client use."""
+    try:
+        sdk_index = archive.read("sdk/index.js")
+        sdk_client = archive.read("sdk/client.js")
+    except KeyError as error:
+        raise ValueError("The Smart Warehouse app bundle is missing its checkpoint SDK modules.") from error
+    if (
+        b"fmu-state-checkpoints" not in sdk_index
+        or b"DIGITAL_TWIN_CAPABILITY.FMU_STATE_CHECKPOINTS" not in sdk_client
+    ):
+        raise ValueError("The Smart Warehouse app bundle is missing FMU state checkpoint support in its SDK.")
+
+
 def validate_fmu_session_app(path: Path) -> None:
     """Require companion apps to use the host grant and generic FMI session protocol."""
     try:
@@ -770,8 +784,7 @@ def sync(
         app_script = archive.read("app.js").decode("utf-8")
         if "createSmartWarehouseScene" not in app_script or "scene.js" not in app_script:
             raise ValueError("The Smart Warehouse app bundle does not load its procedural scene module.")
-        if b"fmu-state-checkpoints" not in archive.read("sdk/client.js"):
-            raise ValueError("The Smart Warehouse app bundle is missing FMU state checkpoint support in its SDK.")
+        validate_smart_warehouse_checkpoint_sdk(archive)
         if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
             raise ValueError("The Smart Warehouse app must request the bottom-right playback control position.")
 

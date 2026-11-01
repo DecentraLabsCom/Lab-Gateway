@@ -10,6 +10,7 @@ def test_model_metadata_normalizes_defaults_capabilities_and_dimensions():
         causality="output",
         type="Real",
         variability="continuous",
+        intervalVariability=None,
         valueReference=7,
         initial="exact",
         unit="K",
@@ -32,6 +33,7 @@ def test_model_metadata_normalizes_defaults_capabilities_and_dimensions():
             canGetAndSetFMUstate=True,
             canSerializeFMUstate=False,
             canHandleVariableCommunicationStepSize=True,
+            hasEventMode=True,
             providesDirectionalDerivative=False,
             providesAdjointDerivatives=True,
             fixedInternalStepSize=0.01,
@@ -60,6 +62,7 @@ def test_model_metadata_normalizes_defaults_capabilities_and_dimensions():
     assert metadata["defaultStepSize"] == 0.5
     assert metadata["defaultTolerance"] == 1e-5
     assert metadata["capabilities"]["canGetAndSetFMUstate"] is True
+    assert metadata["capabilities"]["hasEventMode"] is True
     assert metadata["capabilities"]["fixedInternalStepSize"] == 0.01
     assert metadata["modelVariables"][0]["dimensions"] == [{"start": 4}]
 
@@ -82,6 +85,7 @@ def test_public_model_metadata_exposes_only_describe_contract_fields():
             "causality": "output",
             "type": "Float64",
             "variability": "continuous",
+            "intervalVariability": "triggered",
             "valueReference": 5,
             "initial": "exact",
             "unit": "K",
@@ -112,6 +116,7 @@ def test_public_model_metadata_exposes_only_describe_contract_fields():
             "causality": "output",
             "type": "Float64",
             "variability": "continuous",
+            "intervalVariability": "triggered",
             "valueReference": 5,
             "initial": "exact",
             "unit": "K",

@@ -42,18 +42,22 @@ The files here now implement a functional `win64` runtime:
   - FMI 2 proxy generation/loading
   - FMI 3 scalar proxy generation/loading (`Stair.fmu`)
   - FMI 3 dimensioned-variable proxy generation/loading (`StateSpace.fmu`)
+  - FMI 3 Binary, triggered Clock and structural-array proxy generation/loading
+    (`BinaryClockTest.fmu`), with the Windows DLL in FMPy and the Linux `.so`
+    in a Linux container connected to the live Gateway network
   - Linux-container loading of downloaded `proxy.fmu` artifacts for:
     - FMI 2 (`BouncingBall.fmu`)
     - FMI 3 with dimensioned outputs (`StateSpace.fmu`)
+    - FMI 3 Binary, Clock and a `sampleCount=3` reconfigured array (`BinaryClockTest.fmu`)
 
 What still is not finished:
 
 - `darwin64` is prepared at source/build level, but no real binary has been built yet
 - `darwin64` is not validated end-to-end yet
-- `Binary` and `Clock` are now implemented in the proxy generator, local Gateway path and runtime ABI, but they are not yet validated against a real sample FMU/tool pair in this environment
+- Binary, triggered Clock and Configuration Mode structural arrays are validated with `BinaryClockTest.fmu` through FMPy and the live local Gateway on Windows x64 and Linux x86_64; this is a targeted FMI 3 sample, not a full FMI type/tool matrix
 - full-range exact `Int64` / `UInt64` fidelity is preserved in the current Gateway/runtime path by transporting 64-bit integers as decimal strings where required
 - FMI 3 support is still not validated across the full type matrix and tool matrix
-- FMI 3 Model Exchange and Scheduled Execution are not supported
+- Model Exchange for FMI 2/3 and Scheduled Execution are outside the supported runtime scope; Model Exchange is not planned
 
 Promoted compiled binaries are copied into:
 
@@ -184,5 +188,5 @@ fmu-proxy-runtime-src/
 1. Produce and validate a real `darwin64` binary
 2. Add dedicated automated regression coverage for FMI 2 and FMI 3 live proxy simulation
 3. Validate `Binary` and `Clock` against real FMI 3 sample FMUs and tools
-4. Extend FMI 3 support to Model Exchange and Scheduled Execution
+4. Extend FMI 3 support to Scheduled Execution
 5. Validate the exact `Int64` / `UInt64` transport path against more external FMI tools

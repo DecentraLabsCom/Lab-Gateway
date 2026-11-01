@@ -76,8 +76,14 @@ companion. A direct upload uses
 
 For a GLB upload or FMU companion import, Gateway compares each
 `extras.fmiBindings` entry with the selected FMU's declared inputs or outputs
-and the targets supported by Marketplace. Input bindings are accepted for
-numeric inputs mapped to a position axis with a finite, non-zero scale. The
+and the targets supported by Marketplace. Bindings support glTF core
+`translation`, quaternion `rotation`, `scale` and morph `weights`, along with
+scalar transform, visibility and material-color targets. FMI array bindings
+can select an element by zero-based dimension coordinates. Whole glTF vectors
+require one-dimensional FMI arrays of a compatible runtime shape; `weights`
+can select an individual morph target with `index`, combining it with
+`indices` when the source is an FMI array. Input bindings are accepted for
+numeric inputs mapped to a translation axis with a finite, non-zero scale. The
 response includes a transient `validation` report with binding counts and any
 findings; it is derived from the FMU and GLB and is not stored in the AAS. A scene with warnings can
 still be stored, but Lab Manager shows the findings and asks the provider to
@@ -88,13 +94,13 @@ handshake when it is opened.
 
 For an FMU-driven GLB scene, the provider authors `extras.fmiBindings` on nodes
 that represent relevant FMU outputs or writable numeric inputs. Output bindings
-drive scene targets from model samples. An input binding to `position.x`,
-`position.y` or `position.z` also enables constrained dragging in Marketplace;
-the existing `scale` and `offset` map between the input value and the node's
-local position. Each node can have only one binding per position axis for
-unambiguous dragging; the Gateway reports an input binding that shares its
-position target with another binding. FMI minimum and maximum values constrain
-the drag. Scene dragging is available only during live Step by step or
+drive scene targets from model samples. An input binding to a `translation`
+axis also enables constrained dragging in Marketplace; the existing `scale`
+and `offset` map between the input value and the node's local translation. FMI
+array inputs must select an element using `indices`. Each node can have only one
+binding per translation axis for unambiguous dragging; the Gateway reports an
+input binding that shares its axis with another binding. FMI minimum and maximum
+values constrain the drag. Scene dragging is available only during live Step by step or
 Continuous execution when Gateway permits runtime writes; initialization values
 remain editable through the standard input controls. A GLB without bindings may render as static
 geometry, but it cannot behave as an FMU-driven digital twin.

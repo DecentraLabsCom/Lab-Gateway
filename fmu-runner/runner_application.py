@@ -49,6 +49,7 @@ from local_fmu_catalog import (
 )
 from metadata import (
     _display_unit_inverse_map_from_fmu,
+    _merge_raw_fmi_type_metadata,
     _model_metadata_from_model_description,
     _normalize_xml_value,
     _parse_fmi_major_version,
@@ -595,6 +596,7 @@ def _load_local_model_metadata(
         display_unit_inverse_reader=_display_unit_inverse_map_from_fmu,
         include_internal_variables=include_internal_variables,
     )
+    metadata = _merge_raw_fmi_type_metadata(metadata, _resolve_fmu_path(fmu_filename))
     fmi_ls_struct = read_fmi_ls_struct(
         _resolve_fmu_path(fmu_filename),
         fmi_version=str(metadata.get("fmiVersion") or ""),

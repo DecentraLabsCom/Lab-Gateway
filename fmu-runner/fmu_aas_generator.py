@@ -983,7 +983,7 @@ async def _sync_generated_fmu_submodels(
         runtime_info,
     )
     execution_operations = []
-    if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
+    if metadata.get("supportsCoSimulation"):
         execution_operations.extend([
             ("RunSimulation", "/fmu/api/v1/simulations/run", "POST", ""),
             ("CancelSimulation", "/fmu/api/v1/simulations/{simulationId}/cancel", "POST", ""),
@@ -996,6 +996,22 @@ async def _sync_generated_fmu_submodels(
                 "SetInputs", "GetOutputs", "TerminateSession",
             )],
         ])
+        capabilities = metadata.get("capabilities")
+        if (
+            isinstance(capabilities, dict)
+            and (
+                capabilities.get("canGetAndSetFMUstate") is True
+                or capabilities.get("canGetAndSetFMUState") is True
+            )
+            and (
+                capabilities.get("canSerializeFMUstate") is True
+                or capabilities.get("canSerializeFMUState") is True
+            )
+        ):
+            execution_operations.extend([
+                ("CaptureFMUState", "/fmu/api/v1/fmu/sessions", "GET", "websocket"),
+                ("RestoreFMUState", "/fmu/api/v1/fmu/sessions", "GET", "websocket"),
+            ])
     interfaces_payload = build_asset_interfaces_description_submodel(lab_id, execution_operations)
     contact_payload = build_contact_information_submodel(lab_id, extra_info)
     handover_payload = build_handover_documentation_submodel(lab_id, extra_info)

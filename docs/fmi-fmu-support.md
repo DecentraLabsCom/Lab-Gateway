@@ -177,8 +177,13 @@ ticket redemption and durable session observation. The public booking JWT is not
 protection of the internal channel.
 
 The Gateway uses FMPy to read model descriptions for AAS metadata and proxy generation; model
-loading and simulation are handled by the Executor. Lab Stations package a released Executor
-snapshot in their platform runtime.
+loading and simulation are handled by the Executor. The metadata path also reads the bounded source
+`modelDescription.xml` as a fallback for FMI type definitions and explicit attributes that some FMPy
+releases omit, including named FMI 3 Binary and Clock types. The generated proxy keeps supported
+units and display-unit conversions, type definitions, variable bounds and descriptions, FMI 3
+aliases, enumeration items, array dimensions and default-experiment values such as tolerance.
+Wrapper identity and runtime capabilities continue to describe the proxy itself. Lab Stations
+package a released Executor snapshot in their platform runtime.
 
 JWT key retrieval is independent of the FMU execution backend. In Full mode the runner uses
 `http://blockchain-services:8080/auth/jwks`; in Lite mode it uses the external issuer's JWKS
@@ -258,6 +263,9 @@ reservation expiry closes it. In Station mode, an unexpected internal disconnect
 with `session.attach` during the configured grace window. The Executor README owns the message
 types, payloads, step behavior, and reconnect contract in its
 [Realtime WebSocket protocol](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#realtime-websocket-protocol).
+The generated proxy advertises FMI state get/set and serialization only when the source FMU declares
+both capabilities. Station stores serialized state privately and returns a signed,
+reservation-bound checkpoint reference through the session protocol.
 
 A session ticket is bound to the user, lab and reservation. Its default TTL is 120 seconds and its
 configured maximum is 300 seconds. Tickets remain reusable for reconnects while valid; redemption

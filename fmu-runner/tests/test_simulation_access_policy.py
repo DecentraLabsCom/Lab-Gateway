@@ -173,6 +173,28 @@ def test_validate_reads_allows_outputs_and_rejects_hidden_or_unreadable_names(me
         validate_reads(policy, ["unknown"])
 
 
+def test_fixed_uint64_fmi3_structural_parameter_is_writable_only_in_configuration_mode():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationType": "CoSimulation",
+        "modelVariables": [{
+            "name": "sampleCount",
+            "type": "UInt64",
+            "causality": "structuralParameter",
+            "variability": "fixed",
+        }],
+    }
+    policy = build_effective_policy(metadata)
+
+    assert policy["variables"]["sampleCount"] == {
+        "read": True,
+        "writeAt": ["configuration"],
+    }
+    validate_writes(policy, {"sampleCount": 3}, phase="configuration")
+    with pytest.raises(AccessDenied):
+        validate_writes(policy, {"sampleCount": 3}, phase="initialization")
+
+
 def test_part4_generated_rules_are_exact_fmi_allow_list(metadata):
     submodel_id = "urn:decentralabs:lab:42:sm:simulationModels"
     document = build_part4_access_rules(metadata, submodel_id)

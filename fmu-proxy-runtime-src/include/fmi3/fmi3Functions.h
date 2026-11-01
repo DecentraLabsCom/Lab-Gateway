@@ -103,7 +103,18 @@ FMI3_Export fmi3Status fmi3EnterInitializationMode(
     fmi3Boolean stopTimeDefined,
     fmi3Float64 stopTime);
 FMI3_Export fmi3Status fmi3ExitInitializationMode(fmi3Instance instance);
+FMI3_Export fmi3Status fmi3EnterConfigurationMode(fmi3Instance instance);
+FMI3_Export fmi3Status fmi3ExitConfigurationMode(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3EnterEventMode(fmi3Instance instance);
+FMI3_Export fmi3Status fmi3EnterStepMode(fmi3Instance instance);
+FMI3_Export fmi3Status fmi3UpdateDiscreteStates(
+    fmi3Instance instance,
+    fmi3Boolean* discreteStatesNeedUpdate,
+    fmi3Boolean* terminateSimulation,
+    fmi3Boolean* nominalsOfContinuousStatesChanged,
+    fmi3Boolean* valuesOfContinuousStatesChanged,
+    fmi3Boolean* nextEventTimeDefined,
+    fmi3Float64* nextEventTime);
 FMI3_Export fmi3Status fmi3Terminate(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3Reset(fmi3Instance instance);
 

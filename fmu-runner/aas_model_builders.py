@@ -80,6 +80,8 @@ _SIMULATION_SEMANTICS = {
 _FMI_VARIABLE_METADATA_EXTENSION = "decentralabs.fmi.variableMetadata.v1"
 
 _MAX_FMI_VARIABLE_METADATA_BYTES = 262_144
+_FMI_MODEL_DESCRIPTION_EXTENSION = "decentralabs.fmi.modelDescription.v1"
+_MAX_FMI_MODEL_DESCRIPTION_METADATA_BYTES = 1_048_576
 
 def _validate_lab_id(lab_id: str) -> str:
     """Return a lab identifier safe to embed in an AAS resource identifier."""
@@ -256,8 +258,11 @@ def _fmi_variable_metadata_extension(variable: dict) -> Optional[dict]:
     Extension carries FMI-specific details that the template cannot express.
     """
     metadata_fields = (
-        "type", "causality", "valueReference", "variability", "initial", "start", "nominal",
+        "type", "causality", "valueReference", "alias", "aliasOf", "aliases", "variability", "initial", "start", "nominal",
         "quantity", "displayName", "displayUnit", "dimensions", "enumItems", "declaredType",
+        "mimeType", "maxSize", "relativeQuantity", "unbounded", "canBeDeactivated",
+        "priority", "intervalDecimal", "shiftDecimal", "supportsFraction", "resolution",
+        "intervalCounter", "shiftCounter",
     )
     metadata = {
         field: variable[field]
@@ -279,11 +284,91 @@ def _fmi_variable_metadata_extension(variable: dict) -> Optional[dict]:
     if not metadata:
         return None
 
+    # FMI 3 contains unsigned 64-bit metadata such as array extents and binary
+    # limits. Keep values outside JavaScript's exact integer range as decimal
+    # strings inside this JSON extension.
+    wide_integer_fields = {"maxSize", "resolution", "intervalCounter", "shiftCounter"}
+    for field in wide_integer_fields:
+        value = metadata.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
+            metadata[field] = str(value)
+    if isinstance(metadata.get("enumItems"), list):
+        enum_items = [dict(item) for item in metadata["enumItems"] if isinstance(item, dict)]
+        for item in enum_items:
+            value = item.get("value")
+            if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
+                item["value"] = str(value)
+        metadata["enumItems"] = enum_items
+    if isinstance(metadata.get("dimensions"), list):
+        dimensions = [dict(dimension) for dimension in metadata["dimensions"] if isinstance(dimension, dict)]
+        for dimension in dimensions:
+            value = dimension.get("start")
+            if isinstance(value, int) and not isinstance(value, bool) and value > (2**53 - 1):
+                dimension["start"] = str(value)
+        metadata["dimensions"] = dimensions
+
     encoded = json.dumps(metadata, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > _MAX_FMI_VARIABLE_METADATA_BYTES:
         raise ValueError("FMI variable metadata exceeds the AAS extension size limit")
     return {
         "name": _FMI_VARIABLE_METADATA_EXTENSION,
+        "valueType": "xs:string",
+        "value": encoded,
+    }
+
+
+def _fmi_model_description_extension(metadata: dict) -> Optional[dict]:
+    """Keep model-level FMI metadata that IDTA 02005 has no standard field for."""
+    fields = (
+        "fmiVersion", "modelName", "description", "author", "version", "copyright", "license",
+        "generationTool", "generationDateAndTime", "variableNamingConvention", "defaultStartTime", "defaultStopTime",
+        "defaultStepSize", "defaultTolerance", "numberOfContinuousStates", "numberOfEventIndicators",
+        "capabilities", "unitDefinitions", "typeDefinitions",
+    )
+    model_description = {
+        field: metadata[field]
+        for field in fields
+        if field in metadata and metadata[field] is not None and metadata[field] != ""
+    }
+    # JSON numbers above JavaScript's exact integer range would be rounded by
+    # AAS clients. Keep 64-bit FMI integer bounds as decimal strings so the
+    # source value remains recoverable across the AAS/Marketplace boundary.
+    integer_type_names = {"Integer", "Enumeration", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64"}
+    wide_integer_fields = {"maxSize", "resolution", "intervalCounter", "shiftCounter"}
+    raw_type_definitions = model_description.get("typeDefinitions")
+    if isinstance(raw_type_definitions, list):
+        model_description["typeDefinitions"] = [
+            dict(declared_type) for declared_type in raw_type_definitions if isinstance(declared_type, dict)
+        ]
+    for declared_type in model_description.get("typeDefinitions", []) or []:
+        if not isinstance(declared_type, dict):
+            continue
+        integer_fields = wide_integer_fields
+        if declared_type.get("type") in integer_type_names:
+            integer_fields = wide_integer_fields | {"min", "max"}
+        if isinstance(declared_type.get("items"), list):
+            declared_type["items"] = [
+                dict(item) for item in declared_type["items"] if isinstance(item, dict)
+            ]
+        for field in integer_fields:
+            value = declared_type.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
+                declared_type[field] = str(value)
+        if isinstance(declared_type.get("items"), list):
+            for item in declared_type["items"]:
+                if not isinstance(item, dict):
+                    continue
+                value = item.get("value")
+                if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
+                    item["value"] = str(value)
+    if not model_description:
+        return None
+
+    encoded = json.dumps(model_description, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > _MAX_FMI_MODEL_DESCRIPTION_METADATA_BYTES:
+        raise ValueError("FMI model-description metadata exceeds the AAS extension size limit")
+    return {
+        "name": _FMI_MODEL_DESCRIPTION_EXTENSION,
         "valueType": "xs:string",
         "value": encoded,
     }
@@ -601,6 +686,8 @@ def build_simulation_submodel(
         "idShort": "SimulationModels",
         "semanticId": _semantic_id(_SEMANTIC_ID_SIMULATION_MODELS),
         "modelType": "Submodel",
+        **({"extensions": [model_description_extension]}
+           if (model_description_extension := _fmi_model_description_extension(metadata)) else {}),
         "submodelElements": [
             {
                 "idShort": "SimulationModel",
@@ -621,8 +708,22 @@ def build_execution_capabilities_submodel(
     """Build the standard IDTA 02020 capability description for an FMU."""
     metadata = metadata or {}
     supports_cosimulation = bool(metadata.get("supportsCoSimulation"))
-    supports_model_exchange = bool(metadata.get("supportsModelExchange"))
-    can_run_batch = supports_cosimulation or supports_model_exchange
+    fmi_capabilities = metadata.get("capabilities")
+    fmi_capabilities = fmi_capabilities if isinstance(fmi_capabilities, dict) else {}
+    supports_fmu_state = (
+        supports_cosimulation
+        and (
+            fmi_capabilities.get("canGetAndSetFMUstate") is True
+            or fmi_capabilities.get("canGetAndSetFMUState") is True
+        )
+        and (
+            fmi_capabilities.get("canSerializeFMUstate") is True
+            or fmi_capabilities.get("canSerializeFMUState") is True
+        )
+    )
+    # This describes executable services. Model Exchange is retained below as
+    # source FMU metadata, but DecentraLabs has no Model Exchange runtime.
+    can_run_batch = supports_cosimulation
 
     capability_names: list[tuple[str, str]] = []
     if can_run_batch:
@@ -645,6 +746,11 @@ def build_execution_capabilities_submodel(
             ("GetOutputs", "Read FMI output values from a co-simulation session."),
             ("TerminateSession", "Terminate a co-simulation session."),
         ])
+        if supports_fmu_state:
+            capability_names.extend([
+                ("CaptureFMUState", "Capture a serialized FMI Co-Simulation state."),
+                ("RestoreFMUState", "Restore a serialized FMI Co-Simulation state."),
+            ])
 
     containers = []
     for name, description in capability_names:
@@ -660,7 +766,6 @@ def build_execution_capabilities_submodel(
             }],
         })
 
-    fmi_capabilities = metadata.get("capabilities") or {}
     if fmi_capabilities:
         property_containers = []
         for name, value in fmi_capabilities.items():
@@ -695,7 +800,7 @@ def build_execution_capabilities_submodel(
                     "idShort": "FMISimulation",
                     "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/Capability/1/0"),
                     "modelType": "Capability",
-                    "description": [{"language": "en", "text": "FMI capabilities reported by the simulation model."}],
+                    "description": [{"language": "en", "text": "FMI source capabilities reported by the FMU; execution availability depends on the DecentraLabs runtime."}],
                 },
                 {
                     "idShort": "PropertySet_FMICapabilities",
@@ -1352,12 +1457,11 @@ def build_aas_shell(
     metadata = metadata or {}
     supports_execution = bool(
         metadata.get("supportsCoSimulation")
-        or metadata.get("supportsModelExchange")
         or metadata.get("capabilities")
     )
     if supports_execution:
         all_sm_ids.append(_submodel_id_for_execution(lab_id))
-    if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
+    if metadata.get("supportsCoSimulation"):
         all_sm_ids.append(_submodel_id_for_interfaces(lab_id))
     if isinstance(metadata.get("modelVariables"), list):
         all_sm_ids.append(_submodel_id_for_access_control(lab_id))

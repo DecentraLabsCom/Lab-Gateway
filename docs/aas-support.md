@@ -47,9 +47,10 @@ shell.
 FMU shells describe `RunSimulation`, `CancelSimulation` and, when
 Co-Simulation is available, `CreateRealtimeSession` plus the real-time
 vocabulary (`Initialize`, `Start`, `Pause`, `Resume`, `Reset`, `Step`,
-`RunUntil`, `SetInputs`, `GetOutputs` and `TerminateSession`). Physical-lab
-shells describe `PrepareAccessSession`, `StartInteractiveSession`,
-`EndInteractiveSession` and `ReadOperationalStatus`. These names are useful
+`RunUntil`, `SetInputs`, `GetOutputs` and `TerminateSession`). FMUs that declare
+both state get/set and serialization support also describe `CaptureFMUState`
+and `RestoreFMUState`. Physical-lab shells describe `PrepareAccessSession`,
+`StartInteractiveSession`, `EndInteractiveSession` and `ReadOperationalStatus`. These names are useful
 for clients and adapters without pretending that every laboratory exposes the
 same physical commands.
 
@@ -334,7 +335,7 @@ substitute for provider validation of the actual model and license metadata.
 IDTA 02005 standardizes a port variable's name, range, type family,
 description, unit and causality. It does not define FMI-specific fields such as
 the exact FMI type, value reference, variability, initial attribute, start
-value, nominal, display-unit conversion, vector dimensions or enumeration
+value, FMI alias names, nominal, display-unit conversion, vector dimensions or enumeration
 items. Generated FMU shells keep the IDTA fields in their standard locations
 and add only those missing FMI details to a versioned AAS `Extension` on each
 port variable (`decentralabs.fmi.variableMetadata.v1`). This is a compact
@@ -350,6 +351,15 @@ type, bound, default or unit falls back to FMU metadata. AAS descriptions and
 display names remain presentation metadata. The FMU description is still the
 authority for execution and validation. External or older AAS shells without
 the extension continue to work through standard fields and FMU fallback.
+
+Generated `SimulationModels` submodels also carry a compact
+`decentralabs.fmi.modelDescription.v1` extension for model-level FMI metadata
+not represented by IDTA 02005, including source generation metadata, unit and
+named type definitions, and the default experiment. It excludes FMU identifiers
+and execution secrets. Large FMI integer metadata stays lossless as decimal text
+across JavaScript-based AAS clients. This keeps global units, type definitions
+and experiment values available in the AAS without duplicating the per-variable
+port manifest.
 
 ## FMI variable access policy
 
@@ -391,7 +401,11 @@ external AAS; it can consume the supported restricted Part 4 JSON profile when
 the provider has linked it. The Part 4 `UPDATE` right covers the write phases
 supported for that variable by FMI and the runtime; FMI 2.0 and FMI 3.0
 Co-Simulation `tunable` parameters can be changed at initialization and at
-runtime communication points. The Lab Manager link panel checks FMU AAS links
+runtime communication points. FMI 3.0 Co-Simulation fixed `UInt64`
+`structuralParameter` values are writable only in Configuration Mode; the
+Gateway keeps that phase distinct from ordinary initialization inputs, and the
+Executor applies the value before resolving dependent array shapes. The Lab
+Manager link panel checks FMU AAS links
 and displays a warning when the linked shell, policy submodel or
 policy-to-FMU mapping cannot be validated. An external AAS with no compatible
 policy uses FMI-derived defaults and is reported as such; the status check
