@@ -337,6 +337,11 @@ class StationRealtimeWsProxyManager:
             connect_kwargs["additional_headers"] = headers
         else:
             connect_kwargs["extra_headers"] = headers
+        # Large FMUs can return model descriptions larger than
+        # websockets' 1 MiB default. Keep this bounded and leave the
+        # browser-facing request/sample limits unchanged.
+        connect_kwargs["max_size"] = 32 * 1024 * 1024
+        connect_kwargs["max_queue"] = 1
         return await websockets.connect(self.station_backend.station_session_ws_url(), **connect_kwargs)
 
     async def handle_websocket(self, websocket: WebSocket, *, internal: bool):

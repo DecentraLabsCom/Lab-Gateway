@@ -23,8 +23,8 @@ services:
       # Run local native demo FMUs in isolated workers, keeping writable runtime
       # files under the per-run temporary workspace.
       - FMU_EXECUTION_MODE=process
-      # Complex Air's EnergyPlus initialization needs more address space than
-      # the standard small-FMU worker budget; this override is local-only.
+      # Use one worker memory budget across the local-demo FMUs. The larger
+      # budget covers BOPTEST's EnergyPlus initialization as well.
       - FMU_WORKER_MEMORY_MIB=3072
       # Local demonstrations may expose FMUs with more than 128 editable parameters.
       - FMU_MAX_SIMULATION_PARAMETERS=256
@@ -45,9 +45,8 @@ services:
       # This one local-only FMU launches Spawn. The executor grants child-process
       # execution only to this access key and the exact configured binary.
       - FMU_SPAWN_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
-      # FMPy's OpenBLAS stack cannot safely create a core-sized thread pool
-      # for these FMUs within the isolated worker resource limits.
-      - FMU_NATIVE_THREAD_LIMIT_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu,local-demos/dc-motor/linux64/DC_motor.fmu,local-demos/qfmu/linux64/qFMU_LinearSystems.fmu,local-demos/inverted-pendulum/linux64/InvertedPendulum.fmu
+      # Apply the same native BLAS/OpenMP thread cap to every local demo FMU.
+      - FMU_NATIVE_THREAD_LIMIT=${FMU_NATIVE_THREAD_LIMIT:-2}
       - FMU_SPAWN_EXECUTABLE=/var/lib/fmu-executor/state/local-runtime/Spawn-light-0.4.3-7048a72798-Linux/bin/spawn-0.4.3-7048a72798
     entrypoint: ["/bin/sh", "/run/local-boptest-entrypoint.sh"]
     command: ["python", "-m", "app"]
