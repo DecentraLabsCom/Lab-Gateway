@@ -67,7 +67,6 @@ class LocalPreviewAasxRegistry:
         self.get_digital_twin_assets = get_digital_twin_assets
         self.get_fmi_ls_related_resources = get_fmi_ls_related_resources
         self._locks: dict[str, asyncio.Lock] = {}
-        self._cache: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def _validate_claims(claims: dict) -> tuple[str, str]:
@@ -105,10 +104,10 @@ class LocalPreviewAasxRegistry:
         lab_id, access_key = self._validate_claims(claims)
         lock = self._locks.setdefault(lab_id, asyncio.Lock())
         async with lock:
-            cached = self._cache.get(lab_id)
-            if cached is not None:
-                return dict(cached)
-
+            # Local preview assets can be replaced while the Gateway process
+            # remains running. Always reconcile the source FMU and companion
+            # digests before reusing an AAS policy, so newly declared FMI
+            # inputs and refreshed scene bindings become visible immediately.
             raw_assets = self.get_digital_twin_assets(lab_id, access_key) if self.get_digital_twin_assets else []
             if raw_assets is None:
                 raw_assets = []
@@ -191,10 +190,8 @@ class LocalPreviewAasxRegistry:
                                         "Regenerating local preview AAS because its generated FMI access defaults changed",
                                     )
                                 else:
-                                    self._cache[lab_id] = dict(policy)
                                     return dict(policy)
                             else:
-                                self._cache[lab_id] = dict(policy)
                                 return dict(policy)
                         if not owns_local_shell:
                             raise RuntimeError("Linked local AASX policy is unavailable")
@@ -290,7 +287,6 @@ class LocalPreviewAasxRegistry:
             policy = await self.get_effective_policy(claims)
             if not isinstance(policy, dict) or not str(policy.get("policySource") or "").startswith("aas-"):
                 raise RuntimeError("Imported local AASX policy could not be resolved")
-            self._cache[lab_id] = dict(policy)
             return dict(policy)
 
 

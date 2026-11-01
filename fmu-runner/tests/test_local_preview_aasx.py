@@ -32,7 +32,7 @@ def test_registry_serializes_imports_records_and_links_one_aasx_per_fmu(tmp_path
          "accessControlSubmodelId": f"urn:decentralabs:lab:{claims['labId']}:sm:simulationAccessControl",
          "uploadedSubmodelIds": [f"urn:decentralabs:lab:{claims['labId']}:sm:simulationModels"]},
     ])
-    policy = {"policySource": "aas-generated", "variables": {"input": {"writeAt": ["initialization"]}}}
+    policy = {"policySource": "aas-generated", "variables": {}}
     resolve_policy = AsyncMock(return_value=policy)
     serialize = AsyncMock(return_value={"content": b"PK\x03\x04aasx"})
     record = MagicMock(side_effect=lambda **kwargs: package_record.update(kwargs))
