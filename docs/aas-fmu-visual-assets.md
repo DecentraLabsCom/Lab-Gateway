@@ -78,13 +78,15 @@ For a GLB upload or FMU companion import, Gateway compares each
 `extras.fmiBindings` entry with the selected FMU's declared inputs or outputs
 and the targets supported by Marketplace. Bindings support glTF core
 `translation`, quaternion `rotation`, `scale` and morph `weights`, along with
-scalar transform, visibility and material-color targets. FMI array bindings
-can select an element by zero-based dimension coordinates. Whole glTF vectors
+scalar transform, visibility and material-color targets. Numeric FMI input
+bindings may target a scalar translation or Euler-rotation axis for dragging.
+FMI array bindings can select an element by zero-based dimension coordinates.
+Whole glTF vectors
 require one-dimensional FMI arrays of a compatible runtime shape; `weights`
 can select an individual morph target with `index`, combining it with
-`indices` when the source is an FMI array. Input bindings are accepted for
-numeric inputs mapped to a translation axis with a finite, non-zero scale. The
-response includes a transient `validation` report with binding counts and any
+`indices` when the source is an FMI array. Input bindings require a numeric FMI
+input mapped to one translation or rotation axis with a finite, non-zero
+scale. The response includes a transient `validation` report with binding counts and any
 findings; it is derived from the FMU and GLB and is not stored in the AAS. A scene with warnings can
 still be stored, but Lab Manager shows the findings and asks the provider to
 review them before synchronizing. Public HTTPS GLBs cannot be inspected by
@@ -94,16 +96,26 @@ handshake when it is opened.
 
 For an FMU-driven GLB scene, the provider authors `extras.fmiBindings` on nodes
 that represent relevant FMU outputs or writable numeric inputs. Output bindings
-drive scene targets from model samples. An input binding to a `translation`
-axis also enables constrained dragging in Marketplace; the existing `scale`
-and `offset` map between the input value and the node's local translation. FMI
-array inputs must select an element using `indices`. Each node can have only one
-binding per translation axis for unambiguous dragging; the Gateway reports an
-input binding that shares its axis with another binding. FMI minimum and maximum
-values constrain the drag. Scene dragging is available only during live Step by step or
-Continuous execution when Gateway permits runtime writes; initialization values
-remain editable through the standard input controls. A GLB without bindings may render as static
-geometry, but it cannot behave as an FMU-driven digital twin.
+drive scene targets from model samples. An input binding to a scalar
+`translation.*`, `position.*` or `rotation.*` axis enables constrained dragging
+in Marketplace. `position.*` is an alias for the corresponding translation
+axis. The existing `scale` and `offset` map the drag to the FMI input; rotation
+components represent local Euler angles in radians, and dragging them uses a
+horizontal pointer gesture. A whole-quaternion `rotation` target is not a
+draggable input. FMI array inputs must select an element using `indices`.
+
+Each node can have only one draggable input binding per effective position or
+rotation axis. The Gateway reports competing input bindings; an output may
+share an axis with an input so the scene can show the model response. FMI
+minimum and maximum values constrain the drag. Scene dragging is available
+only during live Step by step or Continuous execution when Gateway permits
+runtime writes. Continuous execution pauses during the drag and resumes after
+the changed value is applied at a model step. The generic input binding does
+not itself change scene geometry or model state; the FMU must implement the
+response, and an output binding must drive the scene transform to display it.
+Initialization values remain editable through the standard input controls. A
+GLB without bindings may render as static geometry, but it cannot behave as an
+FMU-driven digital twin.
 
 See the [DecentraLabs FMI GLB bindings contract](https://github.com/DecentraLabsCom/Marketplace/blob/main/docs/provider/fmi-glb-bindings-contract.md)
 for the canonical versioned specification, target semantics, examples and JSON
