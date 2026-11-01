@@ -48,6 +48,7 @@ _FMI_INPUT_POSITION_TARGETS = {
     "position.x": "x", "position.y": "y", "position.z": "z",
     "translation.x": "x", "translation.y": "y", "translation.z": "z",
 }
+_FMI_INPUT_ROTATION_TARGETS = {"rotation.x", "rotation.y", "rotation.z"}
 _FMI_VECTOR_TARGET_LENGTHS = {"translation": 3, "scale": 3, "rotation": 4}
 _NUMERIC_FMI_INPUT_TYPES = {
     "real", "integer", "float32", "float64",
@@ -125,11 +126,13 @@ def _valid_array_selector(
     return True
 
 
-def _position_target_axes(target: Any) -> tuple[str, ...]:
+def _draggable_target_keys(target: Any) -> tuple[str, ...]:
     axis = _FMI_INPUT_POSITION_TARGETS.get(target)
     if axis:
-        return (axis,)
-    return ("x", "y", "z") if target == "translation" else ()
+        return (f"position.{axis}",)
+    if target in _FMI_INPUT_ROTATION_TARGETS:
+        return (str(target),)
+    return ("position.x", "position.y", "position.z") if target == "translation" else ()
 
 
 def _valid_whole_vector_shape(
@@ -197,7 +200,10 @@ def _is_draggable_input_binding(
     return (
         _has_valid_fmi_binding_fields(binding)
         and str(variable.get("causality", "")).lower() == "input"
-        and binding.get("target") in _FMI_INPUT_POSITION_TARGETS
+        and (
+            binding.get("target") in _FMI_INPUT_POSITION_TARGETS
+            or binding.get("target") in _FMI_INPUT_ROTATION_TARGETS
+        )
         and str(variable.get("type", "")).lower() in _NUMERIC_FMI_INPUT_TYPES
         and math.isfinite(_fmi_binding_scale(binding))
         and _fmi_binding_scale(binding) != 0
@@ -342,43 +348,17 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
             candidate_target = candidate.get("target") if isinstance(candidate, dict) else None
             candidate_variable_name = candidate.get("variable") if isinstance(candidate, dict) else None
             candidate_variable = variables_by_name.get(candidate_variable_name) if isinstance(candidate_variable_name, str) else None
-            candidate_has_valid_fields = (
-                isinstance(candidate, dict) and _has_valid_fmi_binding_fields(candidate)
-            )
-            is_output_binding = (
-                candidate_has_valid_fields
-                and str(candidate_variable.get("causality", "")).lower() == "output"
-                if candidate_variable
-                else False
-            )
             is_draggable_input = (
                 _is_draggable_input_binding(candidate, candidate_variable, variables_by_reference)
                 if isinstance(candidate, dict) and candidate_variable
                 else False
             )
-            is_output_position_binding = (
-                isinstance(candidate_target, str)
-                and candidate_target in _FMI_BINDING_TARGETS
-                and is_output_binding
-                and candidate_variable is not None
-                and (
-                    candidate_target not in _FMI_VECTOR_TARGET_LENGTHS
-                    or _valid_whole_vector_shape(candidate_variable, candidate_target, variables_by_reference)
-                )
-                and _valid_array_selector(
-                    candidate,
-                    candidate_variable,
-                    variables_by_reference,
-                    allow_whole_array=(candidate_target in _FMI_VECTOR_TARGET_LENGTHS
-                                       or (candidate_target == "weights" and "index" not in candidate)),
-                )
-            )
             if (
                 isinstance(candidate_target, str)
                 and candidate_target in _FMI_BINDING_TARGETS
-                and (is_output_position_binding or is_draggable_input)
+                and is_draggable_input
             ):
-                for axis in _position_target_axes(candidate_target):
+                for axis in _draggable_target_keys(candidate_target):
                     target_counts[axis] = target_counts.get(axis, 0) + 1
 
         for binding_index, binding in enumerate(bindings):
@@ -545,19 +525,19 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
                 )
                 valid = False
             elif variable and causality == "input" and target_is_supported:
-                if target not in _FMI_INPUT_POSITION_TARGETS:
+                if target not in _FMI_INPUT_POSITION_TARGETS and target not in _FMI_INPUT_ROTATION_TARGETS:
                     add_issue(
                         "unsupported_input_target",
-                        "Writable scene inputs must target one translation axis.",
+                        "Writable scene inputs must target one translation or rotation axis.",
                         node_name,
                         binding_index,
                         variable_name,
                     )
                     valid = False
-                elif any(target_counts.get(axis, 0) > 1 for axis in _position_target_axes(target)):
+                elif any(target_counts.get(axis, 0) > 1 for axis in _draggable_target_keys(target)):
                     add_issue(
                         "competing_input_target",
-                        "This translation axis has another binding on the node, so the input cannot be dragged.",
+                        "This scene axis has another input binding on the node, so the input cannot be dragged.",
                         node_name,
                         binding_index,
                         variable_name,
@@ -579,7 +559,7 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
                     if not math.isfinite(scale) or scale == 0:
                         add_issue(
                             "non_invertible_input_binding",
-                            "An input position binding must have a finite, non-zero scale.",
+                            "A draggable input binding must have a finite, non-zero scale.",
                             node_name,
                             binding_index,
                             variable_name,

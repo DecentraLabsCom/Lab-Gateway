@@ -85,19 +85,23 @@ def _client(
     return TestClient(app)
 
 
-def test_glb_validation_accepts_numeric_input_position_bindings_alongside_outputs():
+def test_glb_validation_accepts_numeric_translation_and_rotation_inputs_alongside_outputs():
     report = assets_router._validate_glb_bindings(
         {
             "nodes": [{
                 "name": "Gate",
                 "extras": {"fmiBindings": [
                     {"variable": "gatePosition", "target": "position.x", "scale": 2, "offset": 1},
+                    {"variable": "loadAngle", "target": "rotation.x"},
+                    {"variable": "loadPosition", "target": "rotation.x"},
                     {"variable": "gateOpen", "target": "visible"},
                 ]},
             }],
         },
         {"modelVariables": [
             {"name": "gatePosition", "causality": "input", "type": "Real"},
+            {"name": "loadAngle", "causality": "input", "type": "Real"},
+            {"name": "loadPosition", "causality": "output", "type": "Real"},
             {"name": "gateOpen", "causality": "output", "type": "Boolean"},
         ]},
     )
@@ -105,8 +109,8 @@ def test_glb_validation_accepts_numeric_input_position_bindings_alongside_output
     assert report == {
         "assetType": "glb",
         "status": "passed",
-        "bindingCount": 2,
-        "validBindingCount": 2,
+        "bindingCount": 4,
+        "validBindingCount": 4,
         "issueCount": 0,
         "issues": [],
         "message": "Scene bindings match this FMU's declared inputs and outputs.",
@@ -141,7 +145,7 @@ def test_glb_validation_warns_when_input_binding_cannot_be_dragged():
     ]
 
 
-def test_glb_validation_warns_when_an_input_shares_a_scene_target():
+def test_glb_validation_allows_input_binding_to_share_its_output_scene_target():
     report = assets_router._validate_glb_bindings(
         {
             "nodes": [{
@@ -158,9 +162,9 @@ def test_glb_validation_warns_when_an_input_shares_a_scene_target():
         ]},
     )
 
-    assert report["status"] == "warning"
-    assert report["validBindingCount"] == 1
-    assert [issue["code"] for issue in report["issues"]] == ["competing_input_target"]
+    assert report["status"] == "passed"
+    assert report["validBindingCount"] == 2
+    assert report["issues"] == []
 
 
 def test_upload_requires_admin_authentication(tmp_path):

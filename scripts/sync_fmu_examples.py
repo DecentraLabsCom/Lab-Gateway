@@ -139,6 +139,7 @@ def validate_local_glb_output_bindings(
     *,
     require_bindings: bool = True,
     required_bindings: set[tuple[str, str]] | None = None,
+    required_input_bindings: set[tuple[str, str]] | None = None,
 ) -> None:
     """Check companion GLB bindings against the FMU interface they visualize."""
     try:
@@ -171,11 +172,18 @@ def validate_local_glb_output_bindings(
     }
     targets = {
         "position.x", "position.y", "position.z",
+        "translation.x", "translation.y", "translation.z",
         "rotation.x", "rotation.y", "rotation.z",
         "scale.x", "scale.y", "scale.z", "visible", "material.color",
     }
+    draggable_input_targets = {
+        "position.x", "position.y", "position.z",
+        "translation.x", "translation.y", "translation.z",
+        "rotation.x", "rotation.y", "rotation.z",
+    }
     bindings_found = 0
     binding_pairs: set[tuple[str, str]] = set()
+    input_binding_pairs: set[tuple[str, str]] = set()
     for node_index, node in enumerate(document.get("nodes", [])):
         extras = node.get("extras") if isinstance(node, dict) else None
         if not isinstance(extras, dict) or "fmiBindings" not in extras:
@@ -193,12 +201,24 @@ def validate_local_glb_output_bindings(
             variable = variables.get(name)
             if variable is None:
                 raise ValueError(f"{scene_path}: binding references unknown FMU variable {name!r}")
-            if (variable.get("causality") or "local").lower() != "output":
-                raise ValueError(
-                    f"{scene_path}: {name!r} is not an FMU output; local GLB companions use output bindings, "
-                    "while writable inputs remain in Run Controls"
-                )
+            causality = (variable.get("causality") or "local").lower()
             target = binding.get("target")
+            if causality == "input":
+                if not isinstance(target, str) or target not in draggable_input_targets:
+                    raise ValueError(
+                        f"{scene_path}: input {name!r} must bind to one draggable translation or rotation axis"
+                    )
+                if variable.find("Real") is None and variable.find("Integer") is None:
+                    raise ValueError(f"{scene_path}: draggable input {name!r} must be numeric")
+                scale = binding.get("scale", 1)
+                if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale == 0:
+                    raise ValueError(f"{scene_path}: draggable input {name!r} must have a finite, non-zero scale")
+                input_binding_pairs.add((name, target))
+                continue
+            if causality != "output":
+                raise ValueError(
+                    f"{scene_path}: {name!r} must be an FMU input or output"
+                )
             if not isinstance(target, str) or target not in targets:
                 raise ValueError(f"{scene_path}: {name!r} has an unsupported target {target!r}")
             binding_pairs.add((name, target))
@@ -216,6 +236,10 @@ def validate_local_glb_output_bindings(
     if missing_bindings:
         missing = ", ".join(f"{name} -> {target}" for name, target in sorted(missing_bindings))
         raise ValueError(f"{scene_path}: required FMI output bindings are missing: {missing}")
+    missing_input_bindings = (required_input_bindings or set()) - input_binding_pairs
+    if missing_input_bindings:
+        missing = ", ".join(f"{name} -> {target}" for name, target in sorted(missing_input_bindings))
+        raise ValueError(f"{scene_path}: required FMI input bindings are missing: {missing}")
 
 
 def copy_verified(origin: Path, destination: Path) -> None:
@@ -466,8 +490,21 @@ def validate_dc_motor_fmu(path: Path) -> None:
             outputs.add(name)
         elif causality == "parameter" and variable.attrib.get("variability") != "constant":
             parameters.add(name)
-    if inputs != {"in_torque"}:
+    if inputs != {"in_torque", "in_load_angle_jump"}:
         raise ValueError(f"Unexpected DC motor FMU inputs: {sorted(inputs)}")
+    jump_input = next((variable for variable in variables if variable.get("name") == "in_load_angle_jump"), None)
+    jump_input_real = jump_input.find("Real") if jump_input is not None else None
+    if (
+        jump_input is None
+        or jump_input.get("causality") != "input"
+        or jump_input.get("variability") != "discrete"
+        or jump_input_real is None
+        or jump_input_real.get("unit") != "rad"
+        or jump_input_real.get("start") != "0"
+        or jump_input_real.get("min") is not None
+        or jump_input_real.get("max") is not None
+    ):
+        raise ValueError("The DC motor FMU must expose a discrete load-angle jump input in rad without min/max bounds.")
     missing_outputs = set(DC_MOTOR_REQUIRED_OUTPUT_UNITS) - outputs
     if missing_outputs:
         raise ValueError("The DC motor FMU is missing output signals: " + ", ".join(sorted(missing_outputs)))
@@ -925,6 +962,7 @@ def sync(
                 ("out_gear_position", "rotation.x"),
                 ("out_load_position", "rotation.x"),
             },
+            required_input_bindings={("in_load_angle_jump", "rotation.x")},
         )
         validate_dc_motor_app(motor_app)
         if not fmugym_license.is_file() or "MIT License" not in fmugym_license.read_text(encoding="utf-8"):
