@@ -264,11 +264,16 @@ to implement FMI-LS-DAE; that provider-side DAE path remains experimental. It ac
 Float32 and Float64 algebraic variables and residuals, including arrays whose dimensions are
 resolved from the run's structural parameters. The Executor accepts only the FMI-LS-DAE
 `1.0.0-alpha.1` manifest profile. Its integrator supports semi-explicit index-1 equations in
-Continuous-Time Mode. It rejects DAE execution when the manifest declares event indicators or
-clocked states, and it does not support time events or discontinuity handling. These are runtime
-limits, not general FMI-LS-DAE guarantees. A runtime DAE/ODE mode switch is available only for the
-manifest's Boolean `EnableDAEParameter`, and only when the source is executed through its Model
-Exchange interface.
+Continuous-Time Mode. It also composes that solver with FMI 3 Model Exchange core event semantics:
+event-indicator root location, Event Mode iteration, `nextEventTime`, input Clock activation and
+clocked output sampling, plus solver reinitialization after state or input discontinuities. These
+hybrid behaviors are not defined by FMI-LS-DAE alpha.1 itself; they come from the underlying FMI 3
+Model Exchange contract and remain experimental for DAE equations. FMI 3 Scheduled Execution,
+including `fmi3ActivateModelPartition`, is a separate interface and is not included in this support.
+When an FMI-LS-DAE FMU declares Clocks, execute it in DAE mode; its alternate ODE mode does not
+schedule Clocks.
+A runtime DAE/ODE mode switch is available only for the manifest's Boolean `EnableDAEParameter`,
+and only when the source is executed through its Model Exchange interface.
 
 When an FMU exposes both Co-Simulation and Model Exchange, the Executor selects Model Exchange by
 default for a valid FMI-LS-DAE declaration when its native binary is available; otherwise it
