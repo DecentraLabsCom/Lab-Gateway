@@ -916,7 +916,7 @@ def test_proxy_model_description_with_structural_arrays_passes_fmpy_validation(t
 
 
 def test_proxy_generation_rejects_tunable_structural_parameters():
-    with pytest.raises(HTTPException, match="fixed UInt64 structural parameters"):
+    with pytest.raises(HTTPException, match="fixed UInt64 dimension parameters"):
         _validate_proxy_generation_supported({
             "fmiVersion": "3.0",
             "modelVariables": [
@@ -924,6 +924,54 @@ def test_proxy_generation_rejects_tunable_structural_parameters():
                 {"name": "u", "type": "Float64", "causality": "input", "dimensions": [{"valueReference": 1}], "valueReference": 2},
             ],
         })
+
+
+def test_proxy_generation_supports_tunable_boolean_structural_parameters(tmp_path):
+    metadata = {
+        "modelName": "SimpleDAE",
+        "instantiationToken": "{simple-dae}",
+        "fmiVersion": "3.0",
+        "simulationKind": "modelExchange",
+        "modelVariables": [
+            {
+                "name": "time",
+                "type": "Float64",
+                "causality": "independent",
+                "variability": "continuous",
+                "valueReference": 0,
+            },
+            {
+                "name": "ODE_DAE_Switch",
+                "type": "Boolean",
+                "causality": "structuralParameter",
+                "variability": "tunable",
+                "valueReference": 7,
+                "start": False,
+            },
+            {
+                "name": "y",
+                "type": "Float64",
+                "causality": "output",
+                "variability": "continuous",
+                "valueReference": 8,
+                "start": 0.0,
+                "initial": "exact",
+            },
+        ],
+    }
+
+    _validate_proxy_generation_supported(metadata)
+    proxy_path = tmp_path / "proxy-simple-dae.fmu"
+    xml_bytes = _build_proxy_model_description_xml(metadata)
+    with zipfile.ZipFile(proxy_path, "w") as archive:
+        archive.writestr("modelDescription.xml", xml_bytes)
+    description = read_model_description(str(proxy_path), validate=True)
+
+    selector = next(variable for variable in description.modelVariables if variable.name == "ODE_DAE_Switch")
+    assert selector.type == "Boolean"
+    assert selector.causality == "structuralParameter"
+    assert selector.variability == "tunable"
+    assert selector.start == "false"
 
 
 def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():

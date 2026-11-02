@@ -278,11 +278,20 @@ def _validate_proxy_generation_supported(model_metadata: dict):
                     detail=f"Generated FMI 3 proxy FMUs currently support only triggered output Clocks: {variable.get('name')}",
                 )
         if variable.get("causality") == "structuralParameter":
-            if normalized_type != "UInt64" or variable.get("variability") != "fixed":
+            is_fixed_dimension_parameter = (
+                normalized_type == "UInt64" and variable.get("variability") == "fixed"
+            )
+            is_tunable_boolean_selector = (
+                normalized_type == "Boolean"
+                and variable.get("variability") == "tunable"
+                and not (variable.get("dimensions") or [])
+            )
+            if not is_fixed_dimension_parameter and not is_tunable_boolean_selector:
                 raise HTTPException(
                     status_code=422,
                     detail=(
-                        "Generated FMI 3 proxy FMUs currently support only fixed UInt64 structural parameters: "
+                        "Generated FMI 3 proxy FMUs support fixed UInt64 dimension parameters and scalar "
+                        "tunable Boolean structural parameters: "
                         f"{variable.get('name')}"
                     ),
                 )

@@ -36,8 +36,8 @@ def _supports_runtime_tunable_parameters(metadata: Mapping[str, Any]) -> bool:
         "",
         str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
     )
-    # Model Exchange writes are applied in Event Mode; Co-Simulation writes
-    # are applied at communication points.
+    # The Executor applies Model Exchange writes in Event Mode and Co-Simulation
+    # writes at communication points. FMI 2 and FMI 3 both support these phases.
     supports_execution = simulation_type in {"cosimulation", "modelexchange"} or any(
         metadata.get(field) is True
         for field in ("supportsCoSimulation", "supportsModelExchange")
@@ -77,6 +77,7 @@ def _default_permissions(
     # default, then let a provider's AAS policy restrict it when needed.
     read = causality != "local"
     write_at: list[str] = []
+    declared_type = str(variable.get("type") or variable.get("declaredType") or "")
 
     if variability not in _FMI_VARIABILITIES:
         return {"read": read, "writeAt": []}
@@ -91,13 +92,15 @@ def _default_permissions(
     elif causality == "parameter" and variability in {"fixed", "tunable"}:
         write_at.append("initialization")
         if variability == "tunable" and supports_runtime_tunable_parameters:
-            # FMI 3 Co-Simulation accepts tunable parameters at communication
-            # points; the Executor applies them before the corresponding doStep.
+            # Tunable parameters may be changed at legal FMI runtime points:
+            # Event Mode for Model Exchange, communication points for Co-Simulation.
             write_at.append("runtime")
     elif (
         causality == "structuralParameter"
-        and variability == "fixed"
-        and str(variable.get("type") or variable.get("declaredType") or "") == "UInt64"
+        and (
+            (variability == "fixed" and declared_type == "UInt64")
+            or (variability == "tunable" and declared_type == "Boolean")
+        )
         and supports_configuration_mode
     ):
         write_at.append("configuration")

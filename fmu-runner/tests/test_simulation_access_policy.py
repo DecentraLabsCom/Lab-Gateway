@@ -195,6 +195,31 @@ def test_fixed_uint64_fmi3_structural_parameter_is_writable_only_in_configuratio
         validate_writes(policy, {"sampleCount": 3}, phase="initialization")
 
 
+def test_tunable_boolean_fmi3_structural_parameter_is_writable_only_in_configuration_mode():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationType": "ModelExchange",
+        "modelVariables": [{
+            "name": "enableDAE",
+            "type": "Boolean",
+            "causality": "structuralParameter",
+            "variability": "tunable",
+            "start": False,
+        }],
+    }
+    policy = build_effective_policy(metadata)
+
+    assert policy["variables"]["enableDAE"] == {
+        "read": True,
+        "writeAt": ["configuration"],
+    }
+    validate_writes(policy, {"enableDAE": True}, phase="configuration")
+    with pytest.raises(AccessDenied):
+        validate_writes(policy, {"enableDAE": True}, phase="initialization")
+    with pytest.raises(AccessDenied):
+        validate_writes(policy, {"enableDAE": True}, phase="runtime")
+
+
 def test_part4_generated_rules_are_exact_fmi_allow_list(metadata):
     submodel_id = "urn:decentralabs:lab:42:sm:simulationModels"
     document = build_part4_access_rules(metadata, submodel_id)
@@ -452,9 +477,9 @@ def test_part4_malformed_or_cyclic_reusable_definitions_fail_closed(metadata, de
     ("version", "simulation_type", "expected_runtime"),
     [
         ("2.0", "CoSimulation", True),
-        ("2.0", "ModelExchange", False),
+        ("2.0", "ModelExchange", True),
         ("3.0", "CoSimulation", True),
-        ("3.0", "ModelExchange", False),
+        ("3.0", "ModelExchange", True),
     ],
 )
 def test_tunable_parameter_runtime_write_matrix(version, simulation_type, expected_runtime):

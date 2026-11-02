@@ -950,8 +950,8 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         && ((initialization_state && variable.variability != "constant")
             || (runtime_state && variable.variability == "tunable"));
     const bool writable_structural_parameter = variable.causality == "structuralParameter"
-        && variable.variability == "fixed"
-        && variable.declared_type == "UInt64"
+        && ((variable.variability == "fixed" && variable.declared_type == "UInt64")
+            || (variable.variability == "tunable" && variable.declared_type == "Boolean"))
         && configuration_mode_
         && initialization_state
         && model_.fmi_version.rfind("3.", 0) == 0;
@@ -964,21 +964,25 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         return OperationResult::Failure("SIMULATION_FINISHED", "Simulation has finished");
     }
     if (writable_structural_parameter) {
-        const auto* unsigned_value = std::get_if<std::uint64_t>(&value);
-        if (unsigned_value == nullptr) {
-            return OperationResult::Failure("TYPE_MISMATCH", "Structural parameters must use UInt64 values");
-        }
-        const bool defines_array_dimension = std::any_of(
-            model_.variables.begin(), model_.variables.end(), [&variable](const VariableInfo& candidate) {
-                return std::any_of(candidate.dimensions.begin(), candidate.dimensions.end(), [&variable](const DimensionInfo& dimension) {
-                    return dimension.value_reference == variable.value_reference;
+        if (variable.declared_type == "UInt64") {
+            const auto* unsigned_value = std::get_if<std::uint64_t>(&value);
+            if (unsigned_value == nullptr) {
+                return OperationResult::Failure("TYPE_MISMATCH", "UInt64 structural parameters must use UInt64 values");
+            }
+            const bool defines_array_dimension = std::any_of(
+                model_.variables.begin(), model_.variables.end(), [&variable](const VariableInfo& candidate) {
+                    return std::any_of(candidate.dimensions.begin(), candidate.dimensions.end(), [&variable](const DimensionInfo& dimension) {
+                        return dimension.value_reference == variable.value_reference;
+                    });
                 });
-            });
-        if (defines_array_dimension && (*unsigned_value == 0 ||
-            *unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()))) {
-            return OperationResult::Failure(
-                "INVALID_DIMENSION",
-                "Structural array dimensions must fit a positive 32-bit extent");
+            if (defines_array_dimension && (*unsigned_value == 0 ||
+                *unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()))) {
+                return OperationResult::Failure(
+                    "INVALID_DIMENSION",
+                    "Structural array dimensions must fit a positive 32-bit extent");
+            }
+        } else if (std::get_if<bool>(&value) == nullptr) {
+            return OperationResult::Failure("TYPE_MISMATCH", "Boolean structural parameters must use Boolean values");
         }
     }
     if (initialization_state && !writable_structural_parameter && variable.start_value.has_value()
@@ -1004,8 +1008,8 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
                 continue;
             }
             const std::size_t flat_size = ResolveVariableFlatSize(candidate);
-            auto cached = cached_values_.find(candidate.value_reference);
-            if (flat_size == 0 || cached == cached_values_.end()) {
+            auto cached_array = cached_values_.find(candidate.value_reference);
+            if (flat_size == 0 || cached_array == cached_values_.end()) {
                 continue;
             }
             auto resize_array = [flat_size](ScalarValue& array_value) {
@@ -1016,7 +1020,7 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
                 else if (auto* string_items = std::get_if<StringArray>(&array_value)) string_items->resize(flat_size);
                 else if (auto* binary_items = std::get_if<BinaryArray>(&array_value)) binary_items->resize(flat_size);
             };
-            resize_array(cached->second);
+            resize_array(cached_array->second);
             if (auto pending = pending_inputs_.find(candidate.name); pending != pending_inputs_.end()) {
                 resize_array(pending->second);
             }
