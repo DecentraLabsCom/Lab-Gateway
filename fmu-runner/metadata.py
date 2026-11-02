@@ -94,7 +94,9 @@ def _collect_declared_type_definitions(model_metadata: dict) -> dict[str, dict]:
     return definitions
 
 
-def _normalize_metadata_value(value, variable_type: Optional[str] = None):
+def _normalize_metadata_value(value: Any, variable_type: Optional[str] = None) -> Any:
+    if hasattr(value, "tolist") and callable(value.tolist):
+        value = value.tolist()
     if isinstance(value, (bytes, bytearray)):
         return base64.b64encode(bytes(value)).decode("ascii")
     if variable_type in {"Int64", "UInt64", "Enumeration"}:

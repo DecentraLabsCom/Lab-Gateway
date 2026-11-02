@@ -17,6 +17,18 @@ from metadata import (
 )
 
 
+def _flatten_fmi_start_values(value):
+    """Return FMI array starts in row-major flat order, including array-likes."""
+    if hasattr(value, "tolist") and callable(value.tolist):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        flattened = []
+        for item in value:
+            flattened.extend(_flatten_fmi_start_values(item))
+        return flattened
+    return [value]
+
+
 def _proxy_model_identifier(model_metadata: dict) -> str:
     # Keep a stable identifier so the native runtime binary name stays generic.
     return "decentralabs_proxy"
@@ -379,12 +391,12 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
     if fmi_major_version >= 3:
         root_attributes["fmiVersion"] = "3.0"
         root_attributes["instantiationToken"] = instantiation_token
-        root_attributes["variableNamingConvention"] = model_metadata.get("variableNamingConvention", "flat")
+        root_attributes["variableNamingConvention"] = model_metadata.get("variableNamingConvention") or "flat"
     else:
         root_attributes.update({
             "fmiVersion": "2.0",
             "guid": guid,
-            "variableNamingConvention": model_metadata.get("variableNamingConvention", "flat"),
+            "variableNamingConvention": model_metadata.get("variableNamingConvention") or "flat",
             "numberOfEventIndicators": "0",
         })
     root = ET.Element("fmiModelDescription", root_attributes)
@@ -397,7 +409,7 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             "canGetAndSetFMUState": str(supports_serializable_fmu_state).lower(),
             "canSerializeFMUState": str(supports_serializable_fmu_state).lower(),
             "hasEventMode": str(supports_event_mode).lower(),
-            "mightReturnEarly": "true",
+            "mightReturnEarlyFromDoStep": "true",
         }
         if fixed_internal_step_size is not None:
             co_simulation_attributes["fixedInternalStepSize"] = fixed_internal_step_size
@@ -608,7 +620,8 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
                         type_attrs[field] = format(value, ".17g")
                 elif isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                     type_attrs[field] = str(value)
-        start_value = _format_fmi_start_value(var.get("start"))
+        raw_start_value = var.get("start")
+        start_value = _format_fmi_start_value(raw_start_value)
         # FMI 2: start is required by spec when causality=parameter/input or initial=exact/approx.
         # Provide a safe default if the source FMU metadata omitted it.
         if fmi_major_version < 3 and start_value is None:
@@ -641,14 +654,6 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         if fmi_major_version >= 3:
             type_attrs.update(scalar_attrs)
             typed_variable = ET.SubElement(model_variables, normalized_fmi3_type, type_attrs)
-            # Binary/String: emit <Start value="..."/> child element(s)
-            if start_value is not None and (initial or "").lower() != "calculated":
-                if normalized_fmi3_type == "Binary":
-                    raw = var.get("start")
-                    hex_value = _format_fmi3_binary_start_value(raw, start_value)
-                    ET.SubElement(typed_variable, "Start", {"value": hex_value})
-                elif normalized_fmi3_type == "String":
-                    ET.SubElement(typed_variable, "Start", {"value": start_value})
             for dimension in var.get("dimensions", []) or []:
                 dimension_attrs = {}
                 if dimension.get("start") is not None:
@@ -657,6 +662,19 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
                     dimension_attrs["valueReference"] = str(dimension["valueReference"])
                 if dimension_attrs:
                     ET.SubElement(typed_variable, "Dimension", dimension_attrs)
+            # Binary/String: emit <Start value="..."/> child element(s)
+            if raw_start_value is not None and (initial or "").lower() != "calculated":
+                if normalized_fmi3_type == "Binary":
+                    raw_values = _flatten_fmi_start_values(raw_start_value)
+                    for raw_value in raw_values:
+                        formatted_value = _format_fmi_start_value(raw_value) or ""
+                        hex_value = _format_fmi3_binary_start_value(raw_value, formatted_value)
+                        ET.SubElement(typed_variable, "Start", {"value": hex_value})
+                elif normalized_fmi3_type == "String":
+                    raw_values = _flatten_fmi_start_values(raw_start_value)
+                    for raw_value in raw_values:
+                        formatted_value = _format_fmi_start_value(raw_value) or ""
+                        ET.SubElement(typed_variable, "Start", {"value": formatted_value})
             for alias in var.get("aliases", []) or []:
                 if not isinstance(alias, dict):
                     continue

@@ -30,6 +30,10 @@ The files here now implement a functional `win64` runtime:
 - Gateway protocol client with request/response correlation
 - capability-aware pacing for input update and output read quotas
 - runtime writes to FMI `tunable` parameters at Co-Simulation communication points
+- FMI 3 structural-parameter writes in Configuration Mode before initialization and
+  Reconfiguration Mode during Co-Simulation; Gateway policy currently authorizes runtime
+  reconfiguration only for the FMI-LS-DAE Boolean mode selector
+- FMI 2 and FMI 3 initialization with `stopTimeDefined = false` as an open-ended horizon
 - native `WSS` transport on Windows via WinHTTP
 - native `WSS` transport on Linux via OpenSSL + raw sockets/WebSocket framing
 - native POSIX/OpenSSL `WSS` source path shared by Linux and Darwin
@@ -57,6 +61,8 @@ What still is not finished:
 - Binary, triggered Clock and Configuration Mode structural arrays are validated with `BinaryClockTest.fmu` through FMPy and the live local Gateway on Windows x64 and Linux x86_64; this is a targeted FMI 3 sample, not a full FMI type/tool matrix
 - full-range exact `Int64` / `UInt64` fidelity is preserved in the current Gateway/runtime path by transporting 64-bit integers as decimal strings where required
 - FMI 3 support is still not validated across the full type matrix and tool matrix
+- FMI 3 `String` and `Binary` array starts are generated and parsed, but still need
+  end-to-end validation against representative third-party FMUs and importers
 - The proxy binary itself exports Co-Simulation, not Model Exchange or Scheduled Execution. A provider source that uses Model Exchange is integrated by FMU Executor and still reached through the generated Co-Simulation proxy.
 
 Promoted compiled binaries are copied into:

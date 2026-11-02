@@ -6,6 +6,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,7 +20,7 @@ namespace decentralabs::proxy {
 
 struct ExperimentConfig {
     double start_time = 0.0;
-    double stop_time = 1.0;
+    std::optional<double> stop_time;
     double step_size = 0.01;
 };
 
@@ -42,6 +43,7 @@ public:
                                const std::map<std::string, ScalarValue>& initial_inputs,
                                const std::map<std::string, ScalarValue>& initial_parameters,
                                bool early_return_allowed = false);
+    OperationResult Reconfigure(const std::map<std::string, ScalarValue>& values);
     OperationResult SetInputs(const std::map<std::string, ScalarValue>& values);
     ValueResult<OutputSnapshot> Step(double delta_t);
     ValueResult<OutputSnapshot> Step(double current_time, double delta_t);

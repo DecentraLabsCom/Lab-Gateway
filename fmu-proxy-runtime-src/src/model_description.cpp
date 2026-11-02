@@ -117,6 +117,36 @@ std::optional<BinaryValue> DecodeBase64(const std::string& text) {
     return output;
 }
 
+std::optional<BinaryValue> DecodeHexBinary(const std::string& text) {
+    std::string compact;
+    compact.reserve(text.size());
+    for (const unsigned char ch : text) {
+        if (!std::isspace(ch)) {
+            compact.push_back(static_cast<char>(ch));
+        }
+    }
+    if (compact.size() % 2 != 0) {
+        return std::nullopt;
+    }
+    const auto digit = [](const unsigned char ch) -> int {
+        if (ch >= '0' && ch <= '9') return ch - '0';
+        if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+        if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+        return -1;
+    };
+    BinaryValue output;
+    output.reserve(compact.size() / 2);
+    for (std::size_t index = 0; index < compact.size(); index += 2) {
+        const int high = digit(static_cast<unsigned char>(compact[index]));
+        const int low = digit(static_cast<unsigned char>(compact[index + 1]));
+        if (high < 0 || low < 0) {
+            return std::nullopt;
+        }
+        output.push_back(static_cast<std::uint8_t>((high << 4) | low));
+    }
+    return output;
+}
+
 struct IntegerBounds {
     std::int64_t min = std::numeric_limits<std::int64_t>::min();
     std::uint64_t max = std::numeric_limits<std::uint64_t>::max();
@@ -371,7 +401,44 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
             }
             info.dimensions.emplace_back(std::move(dimension));
         }
-        if (!info.dimensions.empty()) {
+        if (info.type == ScalarType::kString || info.type == ScalarType::kBinary) {
+            std::vector<std::string> starts;
+            const std::regex start_pattern(R"tag(<Start\b([^>]*)/?>)tag");
+            for (std::sregex_iterator it(block.begin(), block.end(), start_pattern), end; it != end; ++it) {
+                const auto start_attributes = ParseAttributes((*it)[0].str());
+                const auto value = start_attributes.find("value");
+                starts.push_back(value == start_attributes.end() ? std::string() : value->second);
+            }
+            if (!starts.empty()) {
+                const bool is_array = !info.dimensions.empty() || starts.size() > 1;
+                if (info.type == ScalarType::kString) {
+                    if (is_array) {
+                        info.start_value = ScalarValue(StringArray(starts.begin(), starts.end()));
+                    } else {
+                        info.start_value = ScalarValue(starts.front());
+                    }
+                } else {
+                    BinaryArray values;
+                    values.reserve(starts.size());
+                    bool valid = true;
+                    for (const auto& start : starts) {
+                        auto decoded = DecodeHexBinary(start);
+                        if (!decoded.has_value()) {
+                            valid = false;
+                            break;
+                        }
+                        values.push_back(std::move(*decoded));
+                    }
+                    if (valid) {
+                        if (is_array) {
+                            info.start_value = ScalarValue(std::move(values));
+                        } else {
+                            info.start_value = ScalarValue(std::move(values.front()));
+                        }
+                    }
+                }
+            }
+        } else if (!info.dimensions.empty()) {
             if (auto it = attributes.find("start"); it != attributes.end()) {
                 info.start_value = ParseArrayValue(info.declared_type, info.type, it->second);
             }

@@ -129,9 +129,9 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
         return fmi2Fatal;
     }
     const auto& model = instance->runtime.Model();
-    const double effective_stop = stopTimeDefined == fmi2True
-        ? stopTime
-        : model.default_stop_time.value_or(10.0);
+    const std::optional<double> effective_stop = stopTimeDefined == fmi2True
+        ? std::optional<double>(stopTime)
+        : std::nullopt;
     const double step = model.default_step_size.value_or(0.01);
     return ToFmiStatus(instance, instance->runtime.SetupExperiment(startTime, effective_stop, step));
 }

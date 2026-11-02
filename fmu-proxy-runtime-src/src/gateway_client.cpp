@@ -226,11 +226,13 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
     JsonObject options = {
         {"timeMode", JsonValue(std::string(ToString(config.time_mode)))},
         {"startTime", JsonValue(experiment.start_time)},
-        {"stopTime", JsonValue(experiment.stop_time)},
         {"stepSize", JsonValue(experiment.step_size)},
         {"earlyReturnAllowed", JsonValue(early_return_allowed)},
         {"playbackSpeed", JsonValue(config.playback_speed)},
     };
+    if (experiment.stop_time.has_value()) {
+        options.emplace("stopTime", JsonValue(*experiment.stop_time));
+    }
     if (!initial_inputs.empty()) {
         options.emplace("inputs", JsonValue(scalar_value_codec::EncodeJsonObject(initial_inputs)));
     }
@@ -250,6 +252,23 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
         return response.status;
     }
     return EnsureResponseType(response.value, kSimState);
+}
+
+OperationResult GatewayClient::Reconfigure(const std::map<std::string, ScalarValue>& values) {
+    if (values.empty()) {
+        return OperationResult::Success();
+    }
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimReconfigure))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+        {"values", JsonValue(scalar_value_codec::EncodeJsonObject(values))},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return response.status;
+    }
+    return EnsureResponseType(response.value, kSimReconfigured);
 }
 
 OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue>& values) {

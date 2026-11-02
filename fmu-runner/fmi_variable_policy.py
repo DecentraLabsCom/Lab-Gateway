@@ -11,7 +11,7 @@ from typing import Any
 
 POLICY_VERSION = "fmi-variable-access-v1"
 
-_PHASES = ("configuration", "initialization", "runtime")
+_PHASES = ("configuration", "initialization", "runtime", "reconfiguration")
 
 _PHASE_SET = frozenset(_PHASES)
 
@@ -62,9 +62,29 @@ def _supports_configuration_mode(metadata: Mapping[str, Any]) -> bool:
     return fmi_major == 3 and supports_execution
 
 
+def _fmi_ls_dae_enable_parameter_name(metadata: Mapping[str, Any]) -> str | None:
+    declaration = metadata.get("fmiLsDae")
+    if not isinstance(declaration, Mapping):
+        return None
+    name = declaration.get("enableDAEParameter")
+    return name if isinstance(name, str) and name else None
+
+
+def _supports_model_exchange(metadata: Mapping[str, Any]) -> bool:
+    if metadata.get("supportsModelExchange") is True:
+        return True
+    simulation_type = re.sub(
+        r"[^a-z]",
+        "",
+        str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
+    )
+    return simulation_type == "modelexchange"
+
+
 def _default_permissions(
     variable: Mapping[str, Any],
     *,
+    metadata: Mapping[str, Any],
     supports_runtime_tunable_parameters: bool = False,
     supports_configuration_mode: bool = False,
 ) -> dict[str, Any]:
@@ -104,6 +124,13 @@ def _default_permissions(
         and supports_configuration_mode
     ):
         write_at.append("configuration")
+        if (
+            variability == "tunable"
+            and declared_type == "Boolean"
+            and variable.get("name") == _fmi_ls_dae_enable_parameter_name(metadata)
+            and _supports_model_exchange(metadata)
+        ):
+            write_at.append("reconfiguration")
 
     return {"read": read, "writeAt": write_at}
 
@@ -174,6 +201,7 @@ def build_effective_policy(
             raise ValueError(f"duplicate FMI variable name {name!r}")
         variables[name] = _default_permissions(
             variable,
+            metadata=metadata,
             supports_runtime_tunable_parameters=supports_runtime_tunable_parameters,
             supports_configuration_mode=supports_configuration_mode,
         )

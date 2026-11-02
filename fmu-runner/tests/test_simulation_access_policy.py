@@ -199,6 +199,7 @@ def test_tunable_boolean_fmi3_structural_parameter_is_writable_only_in_configura
     metadata = {
         "fmiVersion": "3.0",
         "simulationType": "ModelExchange",
+        "fmiLsDae": {"enableDAEParameter": "enableDAE"},
         "modelVariables": [{
             "name": "enableDAE",
             "type": "Boolean",
@@ -211,13 +212,32 @@ def test_tunable_boolean_fmi3_structural_parameter_is_writable_only_in_configura
 
     assert policy["variables"]["enableDAE"] == {
         "read": True,
-        "writeAt": ["configuration"],
+        "writeAt": ["configuration", "reconfiguration"],
     }
     validate_writes(policy, {"enableDAE": True}, phase="configuration")
+    validate_writes(policy, {"enableDAE": False}, phase="reconfiguration")
     with pytest.raises(AccessDenied):
         validate_writes(policy, {"enableDAE": True}, phase="initialization")
     with pytest.raises(AccessDenied):
         validate_writes(policy, {"enableDAE": True}, phase="runtime")
+
+
+def test_tunable_boolean_structural_parameter_without_dae_declaration_is_not_reconfigurable():
+    policy = build_effective_policy({
+        "fmiVersion": "3.0",
+        "simulationType": "CoSimulation",
+        "modelVariables": [{
+            "name": "mode",
+            "type": "Boolean",
+            "causality": "structuralParameter",
+            "variability": "tunable",
+            "start": False,
+        }],
+    })
+
+    assert policy["variables"]["mode"]["writeAt"] == ["configuration"]
+    with pytest.raises(AccessDenied):
+        validate_writes(policy, {"mode": True}, phase="reconfiguration")
 
 
 def test_part4_generated_rules_are_exact_fmi_allow_list(metadata):

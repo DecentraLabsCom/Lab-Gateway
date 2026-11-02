@@ -54,6 +54,33 @@ def test_initialization_authorizes_structural_parameters_only_as_configuration_w
         }, policy)
 
 
+def test_runtime_reconfiguration_is_authorized_only_for_declared_dae_selector():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationType": "ModelExchange",
+        "fmiLsDae": {"enableDAEParameter": "enableDAE"},
+        "modelVariables": [{
+            "name": "enableDAE",
+            "valueReference": 9,
+            "type": "Boolean",
+            "causality": "structuralParameter",
+            "variability": "tunable",
+            "start": False,
+        }],
+    }
+    policy = build_effective_policy(metadata)
+
+    StationRealtimeWsProxyManager._validate_session_message({
+        "type": "sim.reconfigure",
+        "values": {"enableDAE": True},
+    }, policy)
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message({
+            "type": "sim.setInputs",
+            "values": {"enableDAE": True},
+        }, policy)
+
+
 def _claims():
     return {
         "sub": "user-1",
@@ -898,12 +925,12 @@ async def test_station_proxy_connect_station_supports_both_websocket_header_sign
     manager = _build_manager()
     calls = []
 
-    async def _connect_additional(url, additional_headers=None):
-        calls.append((url, {"additional_headers": additional_headers}))
+    async def _connect_additional(url, additional_headers=None, **kwargs):
+        calls.append((url, {"additional_headers": additional_headers, **kwargs}))
         return "connected-additional"
 
-    async def _connect_extra(url, extra_headers=None):
-        calls.append((url, {"extra_headers": extra_headers}))
+    async def _connect_extra(url, extra_headers=None, **kwargs):
+        calls.append((url, {"extra_headers": extra_headers, **kwargs}))
         return "connected-extra"
 
     module_with_additional = SimpleNamespace(connect=_connect_additional)
@@ -913,11 +940,15 @@ async def test_station_proxy_connect_station_supports_both_websocket_header_sign
     connected = await manager._connect_station({"Authorization": "Bearer test-token"})
     assert connected == "connected-additional"
     assert calls[0][1]["additional_headers"]["Authorization"] == "Bearer test-token"
+    assert calls[0][1]["max_size"] == 32 * 1024 * 1024
+    assert calls[0][1]["max_queue"] == 1
 
     monkeypatch.setitem(sys.modules, "websockets", module_with_extra)
     connected = await manager._connect_station({"Authorization": "Bearer test-token"})
     assert connected == "connected-extra"
     assert calls[1][1]["extra_headers"]["Authorization"] == "Bearer test-token"
+    assert calls[1][1]["max_size"] == 32 * 1024 * 1024
+    assert calls[1][1]["max_queue"] == 1
 
     monkeypatch.delitem(sys.modules, "websockets", raising=False)
 

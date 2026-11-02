@@ -262,9 +262,18 @@ calls `Set`, `DoStep` and `Get` through the proxy. This applies to standard ODE 
 to FMI-LS-DAE sources. FMI-LS-DAE support on the provider side does not require the importing tool
 to implement FMI-LS-DAE; that provider-side DAE path remains experimental. It accepts continuous
 Float32 and Float64 algebraic variables and residuals, including arrays whose dimensions are
-resolved from the run's structural parameters. The DAE profile remains limited to the semi-explicit
-index-1 equations and Continuous-Time Mode defined by FMI-LS-DAE alpha.1; event handling is outside
-that version's scope.
+resolved from the run's structural parameters. The Executor accepts only the FMI-LS-DAE
+`1.0.0-alpha.1` manifest profile. Its integrator supports semi-explicit index-1 equations in
+Continuous-Time Mode. It rejects DAE execution when the manifest declares event indicators or
+clocked states, and it does not support time events or discontinuity handling. These are runtime
+limits, not general FMI-LS-DAE guarantees. A runtime DAE/ODE mode switch is available only for the
+manifest's Boolean `EnableDAEParameter`, and only when the source is executed through its Model
+Exchange interface.
+
+When an FMU exposes both Co-Simulation and Model Exchange, the Executor selects Model Exchange by
+default for a valid FMI-LS-DAE declaration when its native binary is available; otherwise it
+prefers Co-Simulation. A session may request `executionInterface` explicitly when both binaries are
+executable.
 
 The externally advertised Gateway facade is:
 
@@ -277,7 +286,9 @@ Internal `fmu-runner` paths may appear as `/api/v1/...` behind the OpenResty rou
 ### 4. Session lifecycle
 
 The proxy forwards FMI lifecycle and variable operations through the Gateway's authenticated
-WebSocket facade. Gateway ticket redemption binds the session to the user, lab and reservation;
+WebSocket facade. `stopTimeDefined = false` in FMI 2/3 is forwarded as an open-ended simulation
+horizon; the proxy does not substitute `DefaultExperiment.stopTime` or a local fallback. Gateway
+ticket redemption binds the session to the user, lab and reservation;
 reservation expiry closes it. In Station mode, an unexpected internal disconnect can be resumed
 with `session.attach` during the configured grace window. The Executor README owns the message
 types, payloads, step behavior, and reconnect contract in its

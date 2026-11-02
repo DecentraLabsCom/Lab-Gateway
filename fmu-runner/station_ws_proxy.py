@@ -217,6 +217,11 @@ class StationRealtimeWsProxyManager:
             validate_reads(access_policy, variables)
         elif msg_type == "sim.setInputs":
             validate_writes(access_policy, message.get("values", {}), phase="runtime")
+        elif msg_type == "sim.reconfigure":
+            values = message.get("values", {})
+            if not isinstance(values, dict) or not values:
+                raise AccessDenied
+            validate_writes(access_policy, values, phase="reconfiguration")
         elif msg_type == "sim.advance":
             input_values = message.get("inputValues", {})
             if not isinstance(input_values, dict):

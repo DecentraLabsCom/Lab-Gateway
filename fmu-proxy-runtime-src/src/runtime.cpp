@@ -623,10 +623,11 @@ OperationResult ProxyRuntime::Configure(const std::string& instance_name, const 
     config_ = std::move(config.value);
     model_ = std::move(model.value);
     experiment_.start_time = model_.default_start_time.value_or(0.0);
-    experiment_.stop_time = model_.default_stop_time.value_or(10.0);
+    experiment_.stop_time = model_.default_stop_time;
     experiment_.step_size = model_.default_step_size.value_or(0.01);
     current_time_ = experiment_.start_time;
     configuration_mode_ = false;
+    configuration_mode_initialization_ = false;
     last_step_early_return_ = false;
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
@@ -635,13 +636,17 @@ OperationResult ProxyRuntime::Configure(const std::string& instance_name, const 
     SeedCacheFromModelDefaults();
     initial_inputs_.clear();
     pending_inputs_.clear();
+    reconfiguration_values_.clear();
     string_cache_.clear();
     last_error_.clear();
 
     return Transition(SessionState::kInstantiated);
 }
 
-OperationResult ProxyRuntime::SetupExperiment(const double start_time, const double stop_time, const double step_size) {
+OperationResult ProxyRuntime::SetupExperiment(
+    const double start_time,
+    const std::optional<double> stop_time,
+    const double step_size) {
     experiment_.start_time = start_time;
     experiment_.stop_time = stop_time;
     experiment_.step_size = step_size;
@@ -676,11 +681,22 @@ OperationResult ProxyRuntime::EnterInitializationMode() {
 }
 
 OperationResult ProxyRuntime::EnterConfigurationMode() {
-    if (state_ != SessionState::kInstantiated || configuration_mode_) {
-        return OperationResult::Failure("STATE_ERROR", "Configuration Mode can only be entered before initialization");
+    if (configuration_mode_) {
+        return OperationResult::Failure("STATE_ERROR", "Runtime is already in Configuration Mode");
     }
-    if (!HasStructuralParameters()) {
-        return OperationResult::Failure("STATE_ERROR", "The model has no structural parameters");
+    if (state_ == SessionState::kInstantiated) {
+        if (!HasStructuralParameters()) {
+            return OperationResult::Failure("STATE_ERROR", "The model has no structural parameters");
+        }
+        configuration_mode_initialization_ = true;
+    } else if (state_ == SessionState::kInitialized || state_ == SessionState::kRunning) {
+        if (!HasTunableStructuralParameters()) {
+            return OperationResult::Failure("STATE_ERROR", "The model has no tunable structural parameters");
+        }
+        configuration_mode_initialization_ = false;
+        reconfiguration_values_.clear();
+    } else {
+        return OperationResult::Failure("STATE_ERROR", "Configuration Mode is not available in the current state");
     }
     configuration_mode_ = true;
     return OperationResult::Success();
@@ -690,13 +706,31 @@ OperationResult ProxyRuntime::ExitConfigurationMode() {
     if (!configuration_mode_) {
         return OperationResult::Failure("STATE_ERROR", "Runtime is not in Configuration Mode");
     }
+    if (!configuration_mode_initialization_ && !reconfiguration_values_.empty()) {
+        if (gateway_client_ == nullptr) {
+            return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
+        }
+        const auto status = gateway_client_->Reconfigure(reconfiguration_values_);
+        if (!status) {
+            SetError(status.message);
+            return status;
+        }
+    }
     configuration_mode_ = false;
+    configuration_mode_initialization_ = false;
+    reconfiguration_values_.clear();
     return OperationResult::Success();
 }
 
 bool ProxyRuntime::HasStructuralParameters() const {
     return std::any_of(model_.variables.begin(), model_.variables.end(), [](const VariableInfo& variable) {
         return variable.causality == "structuralParameter";
+    });
+}
+
+bool ProxyRuntime::HasTunableStructuralParameters() const {
+    return std::any_of(model_.variables.begin(), model_.variables.end(), [](const VariableInfo& variable) {
+        return variable.causality == "structuralParameter" && variable.variability == "tunable";
     });
 }
 
@@ -781,8 +815,11 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
     const double requested_time = current_time + step_size;
-    const double stop_tolerance = std::max(1e-12, std::abs(experiment_.stop_time) * 1e-12);
-    if (!std::isfinite(requested_time) || requested_time > experiment_.stop_time + stop_tolerance) {
+    const double stop_tolerance = experiment_.stop_time.has_value()
+        ? std::max(1e-12, std::abs(*experiment_.stop_time) * 1e-12)
+        : 0.0;
+    if (!std::isfinite(requested_time)
+        || (experiment_.stop_time.has_value() && requested_time > *experiment_.stop_time + stop_tolerance)) {
         return OperationResult::Failure("INVALID_STEP", "Step would advance past stopTime");
     }
 
@@ -872,7 +909,9 @@ OperationResult ProxyRuntime::Reset() {
     last_step_terminated_ = false;
     simulation_finished_ = false;
     configuration_mode_ = false;
+    configuration_mode_initialization_ = false;
     realtime_clock_started_ = false;
+    reconfiguration_values_.clear();
     state_ = SessionState::kInstantiated;
     return OperationResult::Success();
 }
@@ -945,15 +984,19 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     const bool initialization_state =
         state_ == SessionState::kInstantiated || state_ == SessionState::kSessionCreated;
     const bool runtime_state = state_ == SessionState::kInitialized || state_ == SessionState::kRunning;
-    const bool writable_input = variable.causality == "input" && (initialization_state || runtime_state);
+    const bool writable_input = variable.causality == "input"
+        && (initialization_state || runtime_state)
+        && !configuration_mode_;
     const bool writable_parameter = variable.causality == "parameter"
+        && !configuration_mode_
         && ((initialization_state && variable.variability != "constant")
             || (runtime_state && variable.variability == "tunable"));
     const bool writable_structural_parameter = variable.causality == "structuralParameter"
         && ((variable.variability == "fixed" && variable.declared_type == "UInt64")
             || (variable.variability == "tunable" && variable.declared_type == "Boolean"))
         && configuration_mode_
-        && initialization_state
+        && ((initialization_state && configuration_mode_initialization_)
+            || (runtime_state && !configuration_mode_initialization_ && variable.variability == "tunable"))
         && model_.fmi_version.rfind("3.", 0) == 0;
     if (!writable_input && !writable_parameter && !writable_structural_parameter) {
         return OperationResult::Failure(
@@ -998,6 +1041,10 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         return OperationResult::Success();
     }
     cached_values_[variable.value_reference] = value;
+    if (writable_structural_parameter && runtime_state) {
+        reconfiguration_values_[variable.name] = std::move(value);
+        return OperationResult::Success();
+    }
     if (writable_structural_parameter) {
         for (const auto& candidate : model_.variables) {
             const bool depends_on_parameter = std::any_of(

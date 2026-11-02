@@ -152,8 +152,8 @@ void TestProtocolAndSessionState() {
     CHECK(IsSupportedServerMessage(kSessionCreated));
     CHECK(IsSupportedServerMessage(kError));
     CHECK(!IsSupportedServerMessage("sim.unknown"));
-    CHECK(SupportedClientMessages().size() == 12);
-    CHECK(SupportedServerMessages().size() == 10);
+    CHECK(SupportedClientMessages().size() == 13);
+    CHECK(SupportedServerMessages().size() == 11);
 
     CHECK(CanTransition(SessionState::kUnconfigured, SessionState::kInstantiated));
     CHECK(CanTransition(SessionState::kInstantiated, SessionState::kSocketConnecting));
@@ -214,7 +214,13 @@ void TestModelDescriptionParsing() {
           <ModelVariables>
             <Float64 name="output" valueReference="10" causality="output"/>
             <UInt64 name="wide" valueReference="11" causality="output" start="18446744073709551615"/>
-            <Binary name="blob" valueReference="12" causality="output" start="YQ=="/>
+            <Binary name="blob" valueReference="12" causality="output"><Start value="61"/></Binary>
+            <String name="labels" valueReference="14" causality="output">
+              <Dimension start="2"/><Start value="north"/><Start value="south"/>
+            </String>
+            <Binary name="payloads" valueReference="15" causality="output">
+              <Dimension start="2"/><Start value="0102"/><Start value="0304"/>
+            </Binary>
             <Clock name="clock" valueReference="13" causality="output" start="true"/>
           </ModelVariables>
         </fmiModelDescription>
@@ -222,10 +228,12 @@ void TestModelDescriptionParsing() {
     CHECK(fmi3);
     CHECK(fmi3.value.fmi_version == "3.0");
     CHECK(fmi3.value.guid == "token-1");
-    CHECK(fmi3.value.variables.size() == 4);
+    CHECK(fmi3.value.variables.size() == 6);
     CHECK(FindVariableByName(fmi3.value, "wide")->declared_type == "UInt64");
     CHECK(std::get<std::uint64_t>(*FindVariableByName(fmi3.value, "wide")->start_value) == UINT64_MAX);
     CHECK(std::get<BinaryValue>(*FindVariableByName(fmi3.value, "blob")->start_value) == BinaryValue{0x61});
+    CHECK(std::get<StringArray>(*FindVariableByName(fmi3.value, "labels")->start_value) == StringArray({"north", "south"}));
+    CHECK(std::get<BinaryArray>(*FindVariableByName(fmi3.value, "payloads")->start_value) == BinaryArray({BinaryValue{0x01, 0x02}, BinaryValue{0x03, 0x04}}));
     CHECK(std::get<bool>(*FindVariableByName(fmi3.value, "clock")->start_value));
 
     const auto invalid = ParseModelDescriptionXml("<not-a-model/>");
@@ -300,24 +308,33 @@ void TestGatewayClientProtocol() {
     const JsonObject& encoded_inputs = *FindObjectValue(options, "inputs")->AsObject();
     CHECK(JsonString(encoded_inputs, "blob") == "AQI=");
 
-    scripted->QueueResponse(R"({"type":"sim.inputs.updated","requestId":"req-3"})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-3","state":"initialized"})");
+    ExperimentConfig unbounded_experiment{1.0, std::nullopt, 0.5};
+    CHECK_OK(client.Initialize(config, unbounded_experiment, {}, {}));
+    const auto unbounded_request = ParseJson(scripted->SentPayloads().back());
+    CHECK(unbounded_request);
+    const JsonObject& unbounded_options = *FindObjectValue(
+        *unbounded_request.value.AsObject(), "options")->AsObject();
+    CHECK(FindObjectValue(unbounded_options, "stopTime") == nullptr);
+
+    scripted->QueueResponse(R"({"type":"sim.inputs.updated","requestId":"req-4"})");
     CHECK_OK(client.SetInputs({{"temperature", ScalarValue(21.0)}}));
     scripted->QueueResponse(
-        R"({"type":"sim.outputs","requestId":"req-4","simTime":1.5,"values":{"temperature":21.5,"counter":12}})");
+        R"({"type":"sim.outputs","requestId":"req-5","simTime":1.5,"values":{"temperature":21.5,"counter":12}})");
     const auto step = client.Step(0.5);
     CHECK(step);
     CHECK_NEAR(step.value.sim_time, 1.5, 1e-12);
     CHECK_NEAR(JsonNumber(step.value.values, "temperature"), 21.5, 1e-12);
     CHECK(JsonNumber(step.value.values, "counter") == 12.0);
 
-    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-5","simTime":1.75,"values":{"temperature":22.0}})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-6","simTime":1.75,"values":{"temperature":22.0}})");
     const auto outputs = client.GetOutputs({"temperature"});
     CHECK(outputs);
     CHECK_NEAR(outputs.value.sim_time, 1.75, 1e-12);
 
-    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-6","state":"reset"})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-7","state":"reset"})");
     CHECK_OK(client.Reset());
-    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-7","reason":"done"})");
+    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-8","reason":"done"})");
     CHECK_OK(client.Terminate());
     CHECK(client.SessionId().empty());
     CHECK(!client.IsConnected());
@@ -420,6 +437,91 @@ void TestProxyRuntimeLifecycle() {
     CHECK(runtime.State() == SessionState::kTerminated);
 }
 
+void TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1","timeMode":"simtime"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="2.0" modelName="UnboundedModel" guid="unbounded-guid">
+          <CoSimulation/>
+          <DefaultExperiment startTime="0.0" stopTime="0.5" stepSize="0.25"/>
+          <ModelVariables>
+            <ScalarVariable name="output" valueReference="1" causality="output"><Real start="0.0"/></ScalarVariable>
+          </ModelVariables>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("unbounded-instance", directory.path.string()));
+    CHECK_OK(runtime.SetupExperiment(0.0, std::nullopt, 0.25));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"unbounded-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    CHECK_OK(runtime.ExitInitializationMode());
+    const auto initialize_request = ParseJson(scripted->SentPayloads().back());
+    CHECK(initialize_request);
+    const JsonObject& options = *FindObjectValue(*initialize_request.value.AsObject(), "options")->AsObject();
+    CHECK(FindObjectValue(options, "stopTime") == nullptr);
+
+    scripted->QueueResponse(R"({"type":"sim.samples","requestId":"req-3","simTime":0.75,"samples":[{"time":0.75,"outputs":{"output":1.0}}]})");
+    CHECK_OK(runtime.DoStep(0.0, 0.75));
+    CHECK_NEAR(runtime.CurrentTime(), 0.75, 1e-12);
+    CHECK(!runtime.SimulationFinished());
+}
+
+void TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1","timeMode":"simtime","fmiVersion":"3.0"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="3.0" modelName="DaeProxy" instantiationToken="dae-token">
+          <CoSimulation hasEventMode="false"/>
+          <ModelVariables>
+            <Boolean name="dae" valueReference="1" causality="structuralParameter" variability="tunable" start="false"/>
+          </ModelVariables>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("dae-instance", directory.path.string()));
+    const std::uint32_t dae_reference = 1;
+    const bool enabled = true;
+    CHECK_OK(runtime.EnterConfigurationMode());
+    CHECK_OK(runtime.SetBoolean(&dae_reference, 1, &enabled));
+    CHECK_OK(runtime.ExitConfigurationMode());
+
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"dae-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    CHECK_OK(runtime.ExitInitializationMode());
+    const auto initialize_request = ParseJson(scripted->SentPayloads().back());
+    CHECK(initialize_request);
+    const JsonObject& parameters = *FindObjectValue(*initialize_request.value.AsObject(), "parameters")->AsObject();
+    CHECK(JsonBool(parameters, "dae"));
+
+    const bool disabled = false;
+    CHECK_OK(runtime.EnterConfigurationMode());
+    CHECK_OK(runtime.SetBoolean(&dae_reference, 1, &disabled));
+    scripted->QueueResponse(R"({"type":"sim.reconfigured","requestId":"req-3","simTime":0.0})");
+    CHECK_OK(runtime.ExitConfigurationMode());
+    const auto reconfiguration_request = ParseJson(scripted->SentPayloads().back());
+    CHECK(reconfiguration_request);
+    const JsonObject& reconfiguration = *reconfiguration_request.value.AsObject();
+    CHECK(JsonString(reconfiguration, "type") == "sim.reconfigure");
+    CHECK(JsonBool(*FindObjectValue(reconfiguration, "values")->AsObject(), "dae") == false);
+    CHECK(runtime.State() == SessionState::kInitialized);
+}
+
 using TestFunction = std::function<void()>;
 
 int RunTest(const char* name, const TestFunction& test) {
@@ -444,5 +546,7 @@ int main() {
     failures += RunTest("transport implementations", TestTransportImplementations);
     failures += RunTest("gateway client protocol", TestGatewayClientProtocol);
     failures += RunTest("proxy runtime lifecycle", TestProxyRuntimeLifecycle);
+    failures += RunTest("undefined stop time", TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit);
+    failures += RunTest("FMI 3 runtime reconfiguration", TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation);
     return failures == 0 ? 0 : 1;
 }

@@ -29,6 +29,7 @@ struct Fmi3Instance {
     bool logging_enabled = false;
     bool event_mode_used = false;
     bool event_mode_pending = false;
+    bool configuration_reconfiguration = false;
     Fmi3Mode mode = Fmi3Mode::kInstantiated;
     std::string instance_name;
     ProxyRuntime runtime;
@@ -312,9 +313,9 @@ fmi3Status fmi3EnterInitializationMode(
         return Unsupported(impl, "Initialization Mode can only be entered from Instantiated Mode");
     }
     const auto& model = impl->runtime.Model();
-    const double effective_stop = stopTimeDefined != fmi3False
-        ? stopTime
-        : model.default_stop_time.value_or(10.0);
+    const std::optional<double> effective_stop = stopTimeDefined != fmi3False
+        ? std::optional<double>(stopTime)
+        : std::nullopt;
     const double step = model.default_step_size.value_or(0.01);
     auto status = impl->runtime.SetupExperiment(startTime, effective_stop, step);
     if (!status) {
@@ -362,13 +363,15 @@ fmi3Status fmi3EnterConfigurationMode(fmi3Instance instance) {
     if (impl == nullptr) {
         return fmi3Fatal;
     }
-    if (impl->mode != Fmi3Mode::kInstantiated) {
-        return Unsupported(impl, "Configuration Mode can only be entered before initialization");
+    const bool initialization_configuration = impl->mode == Fmi3Mode::kInstantiated;
+    if (!initialization_configuration && impl->mode != Fmi3Mode::kStep) {
+        return Unsupported(impl, "Configuration Mode can only be entered before initialization or from Step Mode");
     }
     const auto status = impl->runtime.EnterConfigurationMode();
     if (!status) {
         return ToFmiStatus(impl, status);
     }
+    impl->configuration_reconfiguration = !initialization_configuration;
     impl->mode = Fmi3Mode::kConfiguration;
     return fmi3OK;
 }
@@ -385,7 +388,8 @@ fmi3Status fmi3ExitConfigurationMode(fmi3Instance instance) {
     if (!status) {
         return ToFmiStatus(impl, status);
     }
-    impl->mode = Fmi3Mode::kInstantiated;
+    impl->mode = impl->configuration_reconfiguration ? Fmi3Mode::kStep : Fmi3Mode::kInstantiated;
+    impl->configuration_reconfiguration = false;
     return fmi3OK;
 }
 

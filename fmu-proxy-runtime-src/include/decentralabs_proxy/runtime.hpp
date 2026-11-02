@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,12 +28,13 @@ public:
     void SetLogger(LogSink logger);
 
     OperationResult Configure(const std::string& instance_name, const std::string& resource_location);
-    OperationResult SetupExperiment(double start_time, double stop_time, double step_size);
+    OperationResult SetupExperiment(double start_time, std::optional<double> stop_time, double step_size);
     OperationResult EnterInitializationMode();
     OperationResult ExitInitializationMode();
     OperationResult EnterConfigurationMode();
     OperationResult ExitConfigurationMode();
     bool HasStructuralParameters() const;
+    bool HasTunableStructuralParameters() const;
     void SetEarlyReturnAllowed(bool allowed);
     OperationResult DoStep(double current_time, double step_size);
     OperationResult Terminate();
@@ -106,6 +108,7 @@ private:
     double current_time_ = 0.0;
     bool early_return_allowed_ = false;
     bool configuration_mode_ = false;
+    bool configuration_mode_initialization_ = false;
     bool last_step_early_return_ = false;
     bool last_step_event_handling_needed_ = false;
     bool last_step_terminated_ = false;
@@ -116,6 +119,7 @@ private:
     std::map<std::uint32_t, ScalarValue> cached_values_;
     std::map<std::string, ScalarValue> initial_inputs_;
     std::map<std::string, ScalarValue> pending_inputs_;
+    std::map<std::string, ScalarValue> reconfiguration_values_;
     std::vector<std::string> string_cache_;
 };
 
