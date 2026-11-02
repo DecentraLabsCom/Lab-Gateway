@@ -121,15 +121,23 @@ def visible_model_variables(
     return visible
 
 
-def filter_model_description(policy: Mapping[str, Any], payload: Any) -> Any:
+def filter_model_description(
+    policy: Mapping[str, Any],
+    payload: Any,
+    *,
+    include_proxy_dae_selector: bool = False,
+) -> Any:
     """Retain readable and writable variables in a realtime description reply."""
     if not isinstance(payload, Mapping) or not isinstance(payload.get("modelVariables"), list):
         return filter_fmi_values(policy, payload)
     filtered = dict(payload)
+    raw_fmi_ls_dae = payload.get("fmiLsDae")
     # Keep the execution capability flag, but do not publish solver-equation
     # declarations from the executor's private FMI-LS-DAE manifest.
     filtered.pop("fmiLsDae", None)
     filtered.pop("fmiLsDaeIssue", None)
+    raw_permissions = policy.get("variables")
+    permissions = raw_permissions if isinstance(raw_permissions, Mapping) else {}
     safe_variables = visible_model_variables(policy, payload)
     for variable in safe_variables:
         name = variable.get("name")
@@ -137,8 +145,28 @@ def filter_model_description(policy: Mapping[str, Any], payload: Any) -> Any:
         if permission.get("read") is not True:
             variable.pop("start", None)
     filtered["modelVariables"] = safe_variables
-    raw_permissions = policy.get("variables")
-    permissions = raw_permissions if isinstance(raw_permissions, Mapping) else {}
+    if include_proxy_dae_selector and isinstance(raw_fmi_ls_dae, Mapping):
+        selector_name = raw_fmi_ls_dae.get("enableDAEParameter")
+        selector_permission = permissions.get(selector_name) if isinstance(selector_name, str) else None
+        selector_is_visible = any(
+            variable.get("name") == selector_name
+            for variable in safe_variables
+        )
+        selector_write_phases = (
+            selector_permission.get("writeAt")
+            if isinstance(selector_permission, Mapping)
+            else None
+        )
+        if (
+            selector_is_visible
+            and isinstance(selector_write_phases, list)
+            and "configuration" in selector_write_phases
+            and "reconfiguration" in selector_write_phases
+        ):
+            # Proxy generation needs the selector name to emit its legal FMI
+            # interface. Keep this private summary out of normal describe and
+            # browser-facing metadata responses.
+            filtered["fmiLsDae"] = {"enableDAEParameter": selector_name}
     readable_names = [
         name
         for name, permission in permissions.items()

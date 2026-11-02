@@ -340,17 +340,33 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
     }
     fmi_ls_dae = payload.get("fmiLsDae")
     if normalized["supportsFmiLsDae"]:
-        # The full manifest details are intentionally removed before Gateway
-        # metadata is exposed. A public describe response may therefore carry
-        # the capability flag without the internal algebraic variable names.
+        # Keep only bounded summary metadata and the selector name required to
+        # enforce its FMI write phases. The full manifest remains private.
+        if fmi_ls_dae is None:
+            raise HTTPException(status_code=502, detail="Station backend omitted FMI-LS-DAE selector metadata")
         if fmi_ls_dae is not None:
             if not isinstance(fmi_ls_dae, dict):
                 raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+            enable_dae_parameter = fmi_ls_dae.get("enableDAEParameter")
             algebraic_variables = fmi_ls_dae.get("algebraicVariables")
             residual_variable_count = fmi_ls_dae.get("residualVariableCount")
+            enable_variable = next(
+                (
+                    variable for variable in raw_variables
+                    if isinstance(variable, dict)
+                    and variable.get("name") == enable_dae_parameter
+                    and variable.get("causality") == "structuralParameter"
+                    and variable.get("type") == "Boolean"
+                    and variable.get("variability") in ("fixed", "tunable")
+                ),
+                None,
+            )
             if (
                 fmi_ls_dae.get("manifestName") != "org.fmi-standard.fmi-ls-dae"
                 or fmi_ls_dae.get("manifestVersion") != "1.0.0-alpha.1"
+                or not isinstance(enable_dae_parameter, str)
+                or not enable_dae_parameter
+                or enable_variable is None
                 or not isinstance(algebraic_variables, list)
                 or len(algebraic_variables) > 100_000
                 or any(not isinstance(name, str) or not name or len(name) > 1024 for name in algebraic_variables)
@@ -364,6 +380,7 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
             normalized["fmiLsDae"] = {
                 "manifestName": "org.fmi-standard.fmi-ls-dae",
                 "manifestVersion": "1.0.0-alpha.1",
+                "enableDAEParameter": enable_dae_parameter,
                 "algebraicVariables": algebraic_variables,
                 "residualVariableCount": residual_variable_count,
             }

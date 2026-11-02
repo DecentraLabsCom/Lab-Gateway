@@ -258,7 +258,11 @@ Windows x64 and Linux x64; macOS is not yet validated.
 
 For a provider source model that uses Model Exchange, the generated proxy remains Co-Simulation.
 The remote Executor performs numerical integration and event handling; the importing tool only
-calls `Set`, `DoStep` and `Get` through the proxy. This applies to standard ODE Model Exchange and
+calls `Set`, `DoStep` and `Get` through the proxy. The FMI 3 Co-Simulation proxy advertises
+`hasEventMode` for a Model Exchange source and accepts importer-initiated Event Mode transitions.
+This lets an FMI 3 importer change the tunable FMI-LS-DAE selector in Reconfiguration Mode and
+return to Event Mode before continuing; the proxy applies that change to the remote Model Exchange
+session. This applies to standard ODE Model Exchange and
 to FMI-LS-DAE sources. FMI-LS-DAE support on the provider side does not require the importing tool
 to implement FMI-LS-DAE; that provider-side DAE path remains experimental. It accepts continuous
 Float32 and Float64 algebraic variables and residuals, including arrays whose dimensions are
@@ -273,12 +277,17 @@ including `fmi3ActivateModelPartition`, is a separate interface and is not inclu
 When an FMI-LS-DAE FMU declares Clocks, execute it in DAE mode; its alternate ODE mode does not
 schedule Clocks.
 A runtime DAE/ODE mode switch is available only for the manifest's Boolean `EnableDAEParameter`,
-and only when the source is executed through its Model Exchange interface.
+and only when the source is executed through its Model Exchange interface. The proxy exposes the
+same FMI 3 Reconfiguration Mode transition from Event Mode; its generated `hasEventMode` flag is
+false when neither the source nor its execution path supports Event Mode.
 
 When an FMU exposes both Co-Simulation and Model Exchange, the Executor selects Model Exchange by
 default for a valid FMI-LS-DAE declaration when its native binary is available; otherwise it
-prefers Co-Simulation. A session may request `executionInterface` explicitly when both binaries are
-executable.
+prefers Co-Simulation. A session may request `executionInterface` explicitly to select either
+available interface. In a Model Exchange FMI-LS-DAE run, the Executor enables the manifest selector
+by default; an explicit `false` keeps ODE mode unless the model declares Clocks, which require DAE
+mode in this implementation. To use the proxy's FMI 3 Event Mode and runtime reconfiguration
+operations, the importing tool must instantiate it with `eventModeUsed=true`.
 
 The externally advertised Gateway facade is:
 

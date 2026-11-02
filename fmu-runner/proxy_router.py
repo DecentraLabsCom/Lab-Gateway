@@ -114,7 +114,11 @@ def create_proxy_router(
             access_policy = await get_effective_policy(claims)
             if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
-            model_metadata = filter_model_description(access_policy, model_metadata)
+            model_metadata = filter_model_description(
+                access_policy,
+                model_metadata,
+                include_proxy_dae_selector=True,
+            )
         raw_parameter_sets = (
             await get_authorized_parameter_sets(claims=claims)
             if get_authorized_parameter_sets is not None

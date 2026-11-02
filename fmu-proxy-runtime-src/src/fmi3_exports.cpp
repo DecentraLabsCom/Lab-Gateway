@@ -29,7 +29,7 @@ struct Fmi3Instance {
     bool logging_enabled = false;
     bool event_mode_used = false;
     bool event_mode_pending = false;
-    bool configuration_reconfiguration = false;
+    Fmi3Mode configuration_return_mode = Fmi3Mode::kInstantiated;
     Fmi3Mode mode = Fmi3Mode::kInstantiated;
     std::string instance_name;
     ProxyRuntime runtime;
@@ -53,6 +53,20 @@ bool HasOutputClock(const Fmi3Instance* instance) {
     const auto& variables = instance->runtime.Model().variables;
     for (const auto& variable : variables) {
         if (variable.type == ScalarType::kClock && variable.causality == "output") {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool HasStructuralParameter(const Fmi3Instance* instance, const bool tunable_only) {
+    if (instance == nullptr) {
+        return false;
+    }
+    const auto& variables = instance->runtime.Model().variables;
+    for (const auto& variable : variables) {
+        if (variable.causality == "structuralParameter"
+            && (!tunable_only || variable.variability == "tunable")) {
             return true;
         }
     }
@@ -350,8 +364,8 @@ fmi3Status fmi3EnterEventMode(fmi3Instance instance) {
     if (impl == nullptr) {
         return fmi3Fatal;
     }
-    if (!impl->event_mode_used || impl->mode != Fmi3Mode::kStep || !impl->event_mode_pending) {
-        return Unsupported(impl, "Event Mode entry was not requested by fmi3DoStep");
+    if (!impl->event_mode_used || impl->mode != Fmi3Mode::kStep) {
+        return Unsupported(impl, "Event Mode can only be entered from Step Mode when Event Mode is enabled");
     }
     impl->event_mode_pending = false;
     impl->mode = Fmi3Mode::kEvent;
@@ -364,14 +378,21 @@ fmi3Status fmi3EnterConfigurationMode(fmi3Instance instance) {
         return fmi3Fatal;
     }
     const bool initialization_configuration = impl->mode == Fmi3Mode::kInstantiated;
-    if (!initialization_configuration && impl->mode != Fmi3Mode::kStep) {
-        return Unsupported(impl, "Configuration Mode can only be entered before initialization or from Step Mode");
+    if (!initialization_configuration && (impl->mode != Fmi3Mode::kEvent || !impl->event_mode_used)) {
+        return Unsupported(impl, "Reconfiguration Mode can only be entered from Event Mode");
+    }
+    if (!HasStructuralParameter(impl, !initialization_configuration)) {
+        return Unsupported(
+            impl,
+            initialization_configuration
+                ? "Configuration Mode requires a structural parameter"
+                : "Reconfiguration Mode requires a tunable structural parameter");
     }
     const auto status = impl->runtime.EnterConfigurationMode();
     if (!status) {
         return ToFmiStatus(impl, status);
     }
-    impl->configuration_reconfiguration = !initialization_configuration;
+    impl->configuration_return_mode = impl->mode;
     impl->mode = Fmi3Mode::kConfiguration;
     return fmi3OK;
 }
@@ -388,8 +409,8 @@ fmi3Status fmi3ExitConfigurationMode(fmi3Instance instance) {
     if (!status) {
         return ToFmiStatus(impl, status);
     }
-    impl->mode = impl->configuration_reconfiguration ? Fmi3Mode::kStep : Fmi3Mode::kInstantiated;
-    impl->configuration_reconfiguration = false;
+    impl->mode = impl->configuration_return_mode;
+    impl->configuration_return_mode = Fmi3Mode::kInstantiated;
     return fmi3OK;
 }
 
@@ -452,6 +473,7 @@ fmi3Status fmi3Reset(fmi3Instance instance) {
         return ToFmiStatus(impl, status);
     }
     impl->event_mode_pending = false;
+    impl->configuration_return_mode = Fmi3Mode::kInstantiated;
     impl->mode = Fmi3Mode::kInstantiated;
     return fmi3OK;
 }

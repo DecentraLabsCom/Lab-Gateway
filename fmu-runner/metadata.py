@@ -923,6 +923,18 @@ def _public_model_metadata(metadata: dict) -> dict:
         "supportsFmiLsDae": bool(metadata.get("supportsFmiLsDae")),
         "modelVariables": variables,
     }
+    fmi_ls_dae = metadata.get("fmiLsDae")
+    if isinstance(fmi_ls_dae, dict):
+        # The proxy needs this bounded declaration to expose the selector with
+        # legal Configuration/Reconfiguration write phases. Keep the equation
+        # names summary already used by Gateway, but do not expose the manifest.
+        payload["fmiLsDae"] = {
+            "manifestName": fmi_ls_dae.get("manifestName"),
+            "manifestVersion": fmi_ls_dae.get("manifestVersion"),
+            "enableDAEParameter": fmi_ls_dae.get("enableDAEParameter"),
+            "algebraicVariables": fmi_ls_dae.get("algebraicVariables"),
+            "residualVariableCount": fmi_ls_dae.get("residualVariableCount"),
+        }
     model_name = metadata.get("modelName")
     if isinstance(model_name, str) and model_name.strip():
         payload["modelName"] = model_name.strip()[:256]

@@ -244,6 +244,13 @@ def _validate_proxy_generation_supported(model_metadata: dict):
     source_capabilities = model_metadata.get("capabilities")
     source_capabilities = source_capabilities if isinstance(source_capabilities, dict) else {}
     has_clock = False
+    source_uses_model_exchange = str(model_metadata.get("simulationKind") or "").lower() == "modelexchange"
+    fmi_ls_dae = model_metadata.get("fmiLsDae")
+    dae_selector_name = (
+        fmi_ls_dae.get("enableDAEParameter")
+        if isinstance(fmi_ls_dae, dict)
+        else None
+    )
     model_variables = model_metadata.get("modelVariables", [])
     variables_by_reference = {
         variable.get("valueReference"): variable
@@ -297,6 +304,8 @@ def _validate_proxy_generation_supported(model_metadata: dict):
                 normalized_type == "Boolean"
                 and variable.get("variability") == "tunable"
                 and not (variable.get("dimensions") or [])
+                and source_uses_model_exchange
+                and variable.get("name") == dae_selector_name
             )
             if not is_fixed_dimension_parameter and not is_tunable_boolean_selector:
                 raise HTTPException(
@@ -328,7 +337,7 @@ def _validate_proxy_generation_supported(model_metadata: dict):
                             f"structural parameters: {variable.get('name')}"
                         ),
                     )
-    if has_clock and source_capabilities.get("hasEventMode") is not True:
+    if has_clock and not source_uses_model_exchange and source_capabilities.get("hasEventMode") is not True:
         raise HTTPException(
             status_code=422,
             detail="Generated FMI 3 proxy FMUs require source Event Mode support for Clock variables",
@@ -402,7 +411,11 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
     root = ET.Element("fmiModelDescription", root_attributes)
 
     if fmi_major_version >= 3:
-        supports_event_mode = not supports_model_exchange and source_capabilities.get("hasEventMode") is True
+        # A Co-Simulation proxy backed by a Model Exchange source can process
+        # importer-initiated input events and structural reconfiguration. The
+        # generated CS interface must therefore expose Event Mode even when
+        # the source capability document only describes the source ME FMU.
+        supports_event_mode = supports_model_exchange or source_capabilities.get("hasEventMode") is True
         co_simulation_attributes = {
             "modelIdentifier": model_identifier,
             "canHandleVariableCommunicationStepSize": str(can_handle_variable_communication_step_size).lower(),

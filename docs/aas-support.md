@@ -404,8 +404,9 @@ Co-Simulation `tunable` parameters can be changed at initialization and at
 runtime communication points. FMI 3.0 fixed `UInt64` `structuralParameter`
 values are writable only in Configuration Mode and determine dependent array
 shapes. FMI-LS-DAE's scalar tunable Boolean `structuralParameter` selector is
-also writable there, before Initialization Mode. The Gateway keeps this phase
-distinct from ordinary initialization inputs. The Lab
+writable in Configuration Mode before initialization and in Reconfiguration
+Mode from Event Mode during Model Exchange. The Gateway keeps these phases
+distinct from ordinary initialization and communication-point writes. The Lab
 Manager link panel checks FMU AAS links
 and displays a warning when the linked shell, policy submodel or
 policy-to-FMU mapping cannot be validated. An external AAS with no compatible
@@ -425,7 +426,7 @@ FMU metadata and runtime capabilities.
 | `output` | `Output` / `Output` | `READ`. |
 | `parameter` | `Parameter` / `Input` | `READ`; `UPDATE` for `fixed` or `tunable` variability. |
 | `calculatedParameter` | `Parameter` / `Input` | `READ`; read-only. |
-| `structuralParameter` | `Parameter` / `Input` | `READ`; `UPDATE` at configuration for fixed `UInt64` dimensions and scalar tunable Boolean FMI-LS-DAE selectors. |
+| `structuralParameter` | `Parameter` / `Input` | `READ`; `UPDATE` in Configuration Mode for fixed `UInt64` dimensions and scalar tunable Boolean FMI-LS-DAE selectors, with the selector also writable in Reconfiguration Mode. |
 | `independent` | `Internal` / `Acausal` | `READ`; read-only. |
 | `local` | Omitted from generated `Ports` | No access rule. |
 | Unknown causality | `Internal` / `Acausal`, if present | No access; fails closed. |
@@ -437,9 +438,10 @@ Default write phases are:
   are therefore initialization-only.
 - **Parameters:** initialization for `fixed` and `tunable`; runtime
   communication points for `tunable` parameters in FMI 2.0/3.0 Co-Simulation.
-- **Structural parameters:** configuration for FMI 3.0 fixed `UInt64`
-  dimensions and scalar tunable Boolean FMI-LS-DAE selectors; they cannot be
-  changed after initialization begins.
+- **Structural parameters:** Configuration Mode for FMI 3.0 fixed `UInt64`
+  dimensions and scalar tunable Boolean FMI-LS-DAE selectors. The DAE selector
+  may also be changed in Reconfiguration Mode from Event Mode; fixed dimensions
+  remain initialization-only.
 
 Read access is granted by default for recognized non-`local` causalities. An
 unrecognized variability preserves default read access but grants no write
