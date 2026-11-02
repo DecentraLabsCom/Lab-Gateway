@@ -57,7 +57,7 @@ What still is not finished:
 - Binary, triggered Clock and Configuration Mode structural arrays are validated with `BinaryClockTest.fmu` through FMPy and the live local Gateway on Windows x64 and Linux x86_64; this is a targeted FMI 3 sample, not a full FMI type/tool matrix
 - full-range exact `Int64` / `UInt64` fidelity is preserved in the current Gateway/runtime path by transporting 64-bit integers as decimal strings where required
 - FMI 3 support is still not validated across the full type matrix and tool matrix
-- Model Exchange for FMI 2/3 and Scheduled Execution are outside the supported runtime scope; Model Exchange is not planned
+- The proxy binary itself exports Co-Simulation, not Model Exchange or Scheduled Execution. A provider source that uses Model Exchange is integrated by FMU Executor and still reached through the generated Co-Simulation proxy.
 
 Promoted compiled binaries are copied into:
 

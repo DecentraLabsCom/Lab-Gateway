@@ -41,7 +41,7 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
     value_reference = raw.get("valueReference")
     if value_reference is None:
         value_reference = fallback_reference
-    entry = {
+    entry: dict[str, Any] = {
         "name": str(raw.get("name") or ""),
         "type": str(raw.get("type") or "Real"),
         "causality": str(raw.get("causality") or "local"),
@@ -267,8 +267,8 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
             integer_value = _normalize_fmi_number(item.get("value"), integer=True)
             if not isinstance(integer_value, int):
                 continue
-            value: int | str = integer_value if abs(integer_value) <= (2**53 - 1) else str(integer_value)
-            normalized_item = {"value": value, "name": item["name"].strip()[:256]}
+            enum_value: int | str = integer_value if abs(integer_value) <= (2**53 - 1) else str(integer_value)
+            normalized_item = {"value": enum_value, "name": item["name"].strip()[:256]}
             item_description = item.get("description")
             if isinstance(item_description, str) and item_description.strip():
                 normalized_item["description"] = item_description.strip()[:1024]
@@ -304,6 +304,20 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
             "ModelExchange" if simulation_kind == "modelExchange" else "Unknown"
         )
 
+    raw_execution_interface = payload.get("executionInterface")
+    if isinstance(raw_execution_interface, str) and raw_execution_interface in {"CoSimulation", "ModelExchange"}:
+        execution_interface = raw_execution_interface
+    elif simulation_type in {"CoSimulation", "ModelExchange"}:
+        execution_interface = simulation_type
+    else:
+        execution_interface = None
+    raw_supports_execution = payload.get("supportsExecution")
+    supports_execution = (
+        raw_supports_execution
+        if isinstance(raw_supports_execution, bool)
+        else execution_interface is not None
+    )
+
     def optional_number(name: str) -> Optional[float]:
         value = payload.get(name)
         return float(value) if value is not None else None
@@ -314,13 +328,47 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
         "fmiVersion": str(payload.get("fmiVersion") or "2.0"),
         "simulationKind": str(simulation_kind),
         "simulationType": str(simulation_type),
+        "executionInterface": execution_interface,
+        "supportsExecution": supports_execution,
         "supportsCoSimulation": bool(supports_cs if supports_cs is not None else simulation_kind == "coSimulation"),
         "supportsModelExchange": bool(supports_me if supports_me is not None else simulation_kind == "modelExchange"),
+        "supportsFmiLsDae": payload.get("supportsFmiLsDae") is True,
         "defaultStartTime": optional_number("defaultStartTime"),
         "defaultStopTime": optional_number("defaultStopTime"),
         "defaultStepSize": optional_number("defaultStepSize"),
         "modelVariables": [],
     }
+    fmi_ls_dae = payload.get("fmiLsDae")
+    if normalized["supportsFmiLsDae"]:
+        # The full manifest details are intentionally removed before Gateway
+        # metadata is exposed. A public describe response may therefore carry
+        # the capability flag without the internal algebraic variable names.
+        if fmi_ls_dae is not None:
+            if not isinstance(fmi_ls_dae, dict):
+                raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+            algebraic_variables = fmi_ls_dae.get("algebraicVariables")
+            residual_variable_count = fmi_ls_dae.get("residualVariableCount")
+            if (
+                fmi_ls_dae.get("manifestName") != "org.fmi-standard.fmi-ls-dae"
+                or fmi_ls_dae.get("manifestVersion") != "1.0.0-alpha.1"
+                or not isinstance(algebraic_variables, list)
+                or len(algebraic_variables) > 100_000
+                or any(not isinstance(name, str) or not name or len(name) > 1024 for name in algebraic_variables)
+                or len(set(algebraic_variables)) != len(algebraic_variables)
+                or isinstance(residual_variable_count, bool)
+                or not isinstance(residual_variable_count, int)
+                or residual_variable_count < 0
+                or residual_variable_count > 100_000
+            ):
+                raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+            normalized["fmiLsDae"] = {
+                "manifestName": "org.fmi-standard.fmi-ls-dae",
+                "manifestVersion": "1.0.0-alpha.1",
+                "algebraicVariables": algebraic_variables,
+                "residualVariableCount": residual_variable_count,
+            }
+    elif payload.get("fmiLsDae") is not None:
+        raise HTTPException(status_code=502, detail="Station backend returned inconsistent FMI-LS-DAE metadata")
     for field in ("numberOfContinuousStates", "numberOfEventIndicators"):
         value = payload.get(field)
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:

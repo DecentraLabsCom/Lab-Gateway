@@ -8,7 +8,15 @@ def normalize_fmu_state_capabilities(model_description: Any) -> dict[str, bool] 
     """Return the state capabilities needed by the runtime, when declared."""
     if not isinstance(model_description, Mapping):
         return None
-    if model_description.get("simulationType") != "CoSimulation":
+    if model_description.get("supportsExecution") is False:
+        return None
+    if (
+        model_description.get("simulationType") not in {"CoSimulation", "ModelExchange"}
+        and model_description.get("executionInterface") not in {"CoSimulation", "ModelExchange"}
+        and model_description.get("supportsCoSimulation") is not True
+        and model_description.get("supportsModelExchange") is not True
+        and model_description.get("supportsExecution") is not True
+    ):
         return None
 
     capabilities = model_description.get("capabilities")

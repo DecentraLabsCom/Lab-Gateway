@@ -402,7 +402,8 @@ def _merge_raw_fmi_type_metadata(metadata: dict, fmu_path) -> dict:
     for variable in metadata.get("modelVariables", []):
         if not isinstance(variable, dict):
             continue
-        source_variable = variable_elements.get(variable.get("name"))
+        variable_name = variable.get("name")
+        source_variable = variable_elements.get(variable_name) if isinstance(variable_name, str) else None
         source_attributes: dict[str, str] = {}
         typed_source = None
         if source_variable is not None:
@@ -462,7 +463,7 @@ def _merge_raw_fmi_type_metadata(metadata: dict, fmu_path) -> dict:
             if aliases:
                 variable["aliases"] = aliases
 
-        reference = variable_types.get(variable.get("name"))
+        reference = variable_types.get(variable_name) if isinstance(variable_name, str) else None
         definition = type_definitions_by_name.get(reference["name"]) if reference is not None else None
         if definition is not None:
             current = variable.get("declaredType")
@@ -560,8 +561,10 @@ def _model_metadata_from_model_description(
         alias = getattr(var, "alias", None)
         if isinstance(alias, str) and alias in {"noAlias", "alias", "negatedAlias"}:
             entry["alias"] = alias
-        elif alias is not None and getattr(alias, "name", None):
-            entry["aliasOf"] = str(alias.name).strip()[:512]
+        elif alias is not None and not isinstance(alias, str):
+            alias_name = getattr(alias, "name", None)
+            if isinstance(alias_name, str) and alias_name.strip():
+                entry["aliasOf"] = alias_name.strip()[:512]
         raw_aliases = getattr(var, "aliases", None)
         if raw_aliases:
             aliases = []
@@ -609,8 +612,10 @@ def _model_metadata_from_model_description(
             entry["displayUnit"] = display_unit
         if hasattr(var, "nominal") and var.nominal is not None:
             entry["nominal"] = var.nominal
-        elif getattr(declared_type, "nominal", None) is not None:
-            entry["nominal"] = declared_type.nominal
+        else:
+            declared_nominal = getattr(declared_type, "nominal", None)
+            if declared_nominal is not None:
+                entry["nominal"] = declared_nominal
         for attribute in ("mimeType", "maxSize"):
             value = getattr(var, attribute, None)
             if value is None:
@@ -808,8 +813,10 @@ def _model_metadata_from_model_description(
         "fmiVersion": md.fmiVersion,
         "simulationKind": simulation_kind,
         "simulationType": simulation_type,
+        "executionInterface": simulation_type if simulation_type in {"CoSimulation", "ModelExchange"} else None,
         "supportsCoSimulation": supports_cs,
         "supportsModelExchange": supports_me,
+        "supportsExecution": supports_cs or supports_me,
         "defaultStartTime": default_start,
         "defaultStopTime": default_stop,
         "defaultStepSize": default_step,
@@ -836,6 +843,10 @@ def _public_model_metadata(metadata: dict) -> dict:
         if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
             return str(value)
         return value
+
+    supports_execution = metadata.get("supportsExecution")
+    if not isinstance(supports_execution, bool):
+        supports_execution = bool(metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"))
 
     variables = []
     for variable in metadata.get("modelVariables", []):
@@ -903,8 +914,11 @@ def _public_model_metadata(metadata: dict) -> dict:
         "fmiVersion": metadata.get("fmiVersion", "2.0"),
         "simulationKind": metadata.get("simulationKind", "unknown"),
         "simulationType": metadata.get("simulationType", "Unknown"),
+        "executionInterface": metadata.get("executionInterface"),
+        "supportsExecution": supports_execution,
         "supportsCoSimulation": bool(metadata.get("supportsCoSimulation")),
         "supportsModelExchange": bool(metadata.get("supportsModelExchange")),
+        "supportsFmiLsDae": bool(metadata.get("supportsFmiLsDae")),
         "modelVariables": variables,
     }
     model_name = metadata.get("modelName")

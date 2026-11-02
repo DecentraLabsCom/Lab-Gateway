@@ -983,12 +983,19 @@ async def _sync_generated_fmu_submodels(
         runtime_info,
     )
     execution_operations = []
-    if metadata.get("supportsCoSimulation"):
+    supports_runtime_execution = metadata.get("supportsExecution")
+    if not isinstance(supports_runtime_execution, bool):
+        supports_runtime_execution = bool(
+            metadata.get("supportsCoSimulation")
+            or metadata.get("supportsModelExchange")
+            or metadata.get("supportsFmiLsDae")
+        )
+    if supports_runtime_execution:
         execution_operations.extend([
             ("RunSimulation", "/fmu/api/v1/simulations/run", "POST", ""),
             ("CancelSimulation", "/fmu/api/v1/simulations/{simulationId}/cancel", "POST", ""),
         ])
-    if metadata.get("supportsCoSimulation"):
+    if supports_runtime_execution:
         execution_operations.extend([
             ("CreateRealtimeSession", "/fmu/api/v1/fmu/sessions", "GET", "websocket"),
             *[(command, "/fmu/api/v1/fmu/sessions", "GET", "websocket") for command in (

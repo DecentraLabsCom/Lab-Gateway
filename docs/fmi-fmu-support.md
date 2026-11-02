@@ -35,9 +35,14 @@ DecentraLabs exposes a protected FMU as a reservation-scoped remote simulation:
 - Reservation windows, availability rules, terms and existing lab metadata apply to FMU resources in
   the same way as to physical laboratories.
 
-The current product focuses on FMI 2.x and FMI 3.x Co-Simulation. See the Executor's
-[FMI conformance baseline](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#fmi-conformance-baseline)
-for the validated execution subset; the native proxy's platform and tool validation is tracked in
+The current product supports FMI 2.x and FMI 3.x Co-Simulation and Model Exchange. The provider
+runtime integrates standard ODE Model Exchange models with CVode and handles FMI event iteration;
+FMI 3 Model Exchange models declaring the supported FMI-LS-DAE profile use a separate experimental
+IDAS path with a narrower scope. When an FMU declares both Co-Simulation and Model Exchange, the
+Executor prefers Co-Simulation. A Model-Exchange-only source remains exposed to external clients
+through a Co-Simulation `proxy.fmu`, so the importing tool does not need its own Model Exchange
+integrator. See the Executor's [FMI conformance baseline](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/docs/runtime.md#fmi-execution-scope)
+for the supported execution subset; the native proxy's platform and tool validation is tracked in
 [proxy runtime source](../fmu-proxy-runtime-src/README.md).
 
 FMI identifies its major and minor version in modelDescription.xml (for example, 2.0 or 3.0), not
@@ -243,9 +248,23 @@ Ticket redemption rechecks the current on-chain reservation state.
 
 ### 3. Import and run it in an FMI tool
 
-Import `proxy.fmu` as a normal Co-Simulation FMU. The proxy opens a secure WebSocket to the provider
-Gateway, exchanges the reservation-bound ticket and maps FMI calls to the remote real-time API. No
-local DecentraLabs agent is needed.
+Import `proxy.fmu` as a normal Co-Simulation FMU. The artifact includes the native proxy runtime and
+reservation-scoped connection configuration. The importer loads the binary matching its operating
+system and architecture; the runtime opens a secure WebSocket to the provider Gateway, exchanges the
+reservation-bound ticket and maps FMI calls to the remote real-time API. No separate local DecentraLabs
+agent or manual Gateway connection configuration is needed. The FMI tool must permit native FMU
+libraries and outbound TLS WebSocket connections. The currently validated proxy binaries target
+Windows x64 and Linux x64; macOS is not yet validated.
+
+For a provider source model that uses Model Exchange, the generated proxy remains Co-Simulation.
+The remote Executor performs numerical integration and event handling; the importing tool only
+calls `Set`, `DoStep` and `Get` through the proxy. This applies to standard ODE Model Exchange and
+to FMI-LS-DAE sources. FMI-LS-DAE support on the provider side does not require the importing tool
+to implement FMI-LS-DAE; that provider-side DAE path remains experimental. It accepts continuous
+Float32 and Float64 algebraic variables and residuals, including arrays whose dimensions are
+resolved from the run's structural parameters. The DAE profile remains limited to the semi-explicit
+index-1 equations and Continuous-Time Mode defined by FMI-LS-DAE alpha.1; event handling is outside
+that version's scope.
 
 The externally advertised Gateway facade is:
 

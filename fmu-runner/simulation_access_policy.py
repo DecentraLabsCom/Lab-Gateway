@@ -126,6 +126,10 @@ def filter_model_description(policy: Mapping[str, Any], payload: Any) -> Any:
     if not isinstance(payload, Mapping) or not isinstance(payload.get("modelVariables"), list):
         return filter_fmi_values(policy, payload)
     filtered = dict(payload)
+    # Keep the execution capability flag, but do not publish solver-equation
+    # declarations from the executor's private FMI-LS-DAE manifest.
+    filtered.pop("fmiLsDae", None)
+    filtered.pop("fmiLsDaeIssue", None)
     safe_variables = visible_model_variables(policy, payload)
     for variable in safe_variables:
         name = variable.get("name")

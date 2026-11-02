@@ -708,10 +708,15 @@ def build_execution_capabilities_submodel(
     """Build the standard IDTA 02020 capability description for an FMU."""
     metadata = metadata or {}
     supports_cosimulation = bool(metadata.get("supportsCoSimulation"))
+    supports_model_exchange = bool(metadata.get("supportsModelExchange"))
+    supports_fmi_ls_dae = metadata.get("supportsFmiLsDae") is True
+    supports_execution = metadata.get("supportsExecution")
+    if not isinstance(supports_execution, bool):
+        supports_execution = supports_cosimulation or supports_model_exchange or supports_fmi_ls_dae
     fmi_capabilities = metadata.get("capabilities")
     fmi_capabilities = fmi_capabilities if isinstance(fmi_capabilities, dict) else {}
     supports_fmu_state = (
-        supports_cosimulation
+        supports_execution
         and (
             fmi_capabilities.get("canGetAndSetFMUstate") is True
             or fmi_capabilities.get("canGetAndSetFMUState") is True
@@ -721,9 +726,9 @@ def build_execution_capabilities_submodel(
             or fmi_capabilities.get("canSerializeFMUState") is True
         )
     )
-    # This describes executable services. Model Exchange is retained below as
-    # source FMU metadata, but DecentraLabs has no Model Exchange runtime.
-    can_run_batch = supports_cosimulation
+    # Model Exchange sources use the same reservation-authorized API; the
+    # Executor owns numerical integration remotely.
+    can_run_batch = supports_execution
 
     capability_names: list[tuple[str, str]] = []
     if can_run_batch:
@@ -732,24 +737,33 @@ def build_execution_capabilities_submodel(
             ("CancelSimulation", "Cancel a reservation-authorized batch FMU simulation."),
         ])
 
-    if supports_cosimulation:
+    if supports_execution:
+        execution_interface = metadata.get("executionInterface")
+        if execution_interface not in {"CoSimulation", "ModelExchange"}:
+            execution_interface = "CoSimulation" if supports_cosimulation else "ModelExchange"
+        session_kind = "FMI Co-Simulation" if execution_interface == "CoSimulation" else "FMI Model Exchange"
         capability_names.extend([
-            ("CreateRealtimeSession", "Create an authenticated FMI Co-Simulation session."),
-            ("Initialize", "Initialize a co-simulation session."),
-            ("Start", "Start a co-simulation session."),
-            ("Pause", "Pause a co-simulation session."),
-            ("Resume", "Resume a co-simulation session."),
-            ("Reset", "Reset a co-simulation session."),
-            ("Step", "Advance a co-simulation session by one communication step."),
-            ("RunUntil", "Advance a co-simulation session to a target time."),
-            ("SetInputs", "Set FMI input values in a co-simulation session."),
-            ("GetOutputs", "Read FMI output values from a co-simulation session."),
-            ("TerminateSession", "Terminate a co-simulation session."),
+            ("CreateRealtimeSession", f"Create an authenticated {session_kind} session."),
+            ("Initialize", f"Initialize a {session_kind} session."),
+            ("Start", f"Start a {session_kind} session."),
+            ("Pause", f"Pause a {session_kind} session."),
+            ("Resume", f"Resume a {session_kind} session."),
+            ("Reset", f"Reset a {session_kind} session."),
+            ("Step", f"Advance a {session_kind} session by one step."),
+            ("RunUntil", f"Advance a {session_kind} session to a target time."),
+            ("SetInputs", f"Set FMI input values in a {session_kind} session."),
+            ("GetOutputs", f"Read FMI output values from a {session_kind} session."),
+            ("TerminateSession", f"Terminate a {session_kind} session."),
         ])
+        if supports_fmi_ls_dae:
+            capability_names.append((
+                "FmiLsDae",
+                "FMI 3 Model Exchange with the supported FMI-LS-DAE profile, integrated by the provider runtime.",
+            ))
         if supports_fmu_state:
             capability_names.extend([
-                ("CaptureFMUState", "Capture a serialized FMI Co-Simulation state."),
-                ("RestoreFMUState", "Restore a serialized FMI Co-Simulation state."),
+                ("CaptureFMUState", "Capture a serialized FMI model state."),
+                ("RestoreFMUState", "Restore a serialized FMI model state."),
             ])
 
     containers = []
@@ -1455,13 +1469,20 @@ def build_aas_shell(
         _submodel_id_for_technical(lab_id),
     ]
     metadata = metadata or {}
-    supports_execution = bool(
-        metadata.get("supportsCoSimulation")
-        or metadata.get("capabilities")
-    )
+    supports_execution = metadata.get("supportsExecution")
+    if not isinstance(supports_execution, bool):
+        supports_execution = bool(
+            metadata.get("supportsCoSimulation")
+            or metadata.get("supportsModelExchange")
+            or metadata.get("supportsFmiLsDae")
+        )
     if supports_execution:
         all_sm_ids.append(_submodel_id_for_execution(lab_id))
-    if metadata.get("supportsCoSimulation"):
+    if (
+        metadata.get("supportsCoSimulation")
+        or metadata.get("supportsModelExchange")
+        or metadata.get("supportsFmiLsDae")
+    ):
         all_sm_ids.append(_submodel_id_for_interfaces(lab_id))
     if isinstance(metadata.get("modelVariables"), list):
         all_sm_ids.append(_submodel_id_for_access_control(lab_id))

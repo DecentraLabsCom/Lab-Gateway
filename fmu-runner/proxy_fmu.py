@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import math
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 from xml.etree import ElementTree as ET
 
@@ -125,12 +126,15 @@ def _append_proxy_type_definitions(root, model_metadata: dict, fmi_major_version
     return exported_names
 
 
-def _append_enumeration_items(parent, declared_type: dict, *, minimum: int, maximum: int) -> None:
+def _append_enumeration_items(parent, declared_type: dict[str, Any], *, minimum: int, maximum: int) -> None:
     for item in declared_type.get("items", []) or []:
         if not isinstance(item, dict):
             continue
+        raw_value = item.get("value")
+        if raw_value is None:
+            continue
         try:
-            value = int(item.get("value"))
+            value = int(raw_value)
         except (TypeError, ValueError, OverflowError):
             continue
         name = _normalize_xml_value(item.get("name"))
@@ -194,8 +198,11 @@ def _validate_declared_type_references(model_metadata: dict, fmi_major_version: 
                 if not isinstance(item, dict):
                     raise HTTPException(status_code=422, detail=f"FMI enumeration type is malformed: {type_name}")
                 item_name = _normalize_xml_value(item.get("name"))
+                raw_item_value = item.get("value")
+                if raw_item_value is None:
+                    raise HTTPException(status_code=422, detail=f"FMI enumeration type is malformed: {type_name}")
                 try:
-                    item_value = int(item.get("value"))
+                    item_value = int(raw_item_value)
                 except (TypeError, ValueError, OverflowError):
                     item_name = None
                     item_value = minimum - 1
@@ -212,10 +219,12 @@ def _validate_declared_type_references(model_metadata: dict, fmi_major_version: 
 
 def _validate_proxy_generation_supported(model_metadata: dict):
     simulation_kind = str(model_metadata.get("simulationKind") or "coSimulation").lower()
-    if simulation_kind != "cosimulation":
-        raise HTTPException(status_code=422, detail="Generated proxy FMUs currently support only Co-Simulation models")
-
     fmi_major_version = _parse_fmi_major_version(model_metadata.get("fmiVersion"))
+    if simulation_kind not in {"cosimulation", "modelexchange"} or fmi_major_version not in {2, 3}:
+        raise HTTPException(
+            status_code=422,
+            detail="Generated proxy FMUs require an executable FMI 2 or FMI 3 Co-Simulation or Model Exchange source",
+        )
     _validate_declared_type_references(model_metadata, fmi_major_version)
     if fmi_major_version < 3:
         return
@@ -324,14 +333,15 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         for name in ("canSerializeFMUstate", "canSerializeFMUState")
     )
     supports_serializable_fmu_state = can_get_and_set_fmu_state and can_serialize_fmu_state
-    can_handle_variable_communication_step_size = any(
+    supports_model_exchange = str(model_metadata.get("simulationKind") or "").lower() == "modelexchange"
+    can_handle_variable_communication_step_size = supports_model_exchange or any(
         source_capabilities.get(name) is True
         for name in (
             "canHandleVariableCommunicationStepSize",
             "canhandlevariablecommunicationstepsize",
         )
     )
-    raw_fixed_internal_step_size = source_capabilities.get("fixedInternalStepSize")
+    raw_fixed_internal_step_size = None if supports_model_exchange else source_capabilities.get("fixedInternalStepSize")
     fixed_internal_step_size = None
     if isinstance(raw_fixed_internal_step_size, (int, float, str)) and not isinstance(raw_fixed_internal_step_size, bool):
         try:
@@ -371,7 +381,7 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
     root = ET.Element("fmiModelDescription", root_attributes)
 
     if fmi_major_version >= 3:
-        supports_event_mode = source_capabilities.get("hasEventMode") is True
+        supports_event_mode = not supports_model_exchange and source_capabilities.get("hasEventMode") is True
         co_simulation_attributes = {
             "modelIdentifier": model_identifier,
             "canHandleVariableCommunicationStepSize": str(can_handle_variable_communication_step_size).lower(),
@@ -408,11 +418,13 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             co_simulation_attributes,
         )
 
-    source_unit_definitions = {
-        unit.get("name"): unit
-        for unit in model_metadata.get("unitDefinitions", [])
-        if isinstance(unit, dict) and isinstance(unit.get("name"), str) and unit.get("name")
-    }
+    source_unit_definitions: dict[str, dict[str, Any]] = {}
+    for unit in model_metadata.get("unitDefinitions", []):
+        if not isinstance(unit, dict):
+            continue
+        unit_name = unit.get("name")
+        if isinstance(unit_name, str) and unit_name:
+            source_unit_definitions[unit_name] = unit
     all_unit_names = declared_units | set(source_unit_definitions)
     if all_unit_names:
         unit_definitions = ET.SubElement(root, "UnitDefinitions")

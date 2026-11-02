@@ -36,9 +36,13 @@ def _supports_runtime_tunable_parameters(metadata: Mapping[str, Any]) -> bool:
         "",
         str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
     )
-    # The Gateway's current executor path is FMI Co-Simulation. Both FMI 2.0
-    # and FMI 3.0 allow tunable parameters to change at communication points.
-    return fmi_major in {2, 3} and simulation_type == "cosimulation"
+    # Model Exchange writes are applied in Event Mode; Co-Simulation writes
+    # are applied at communication points.
+    supports_execution = simulation_type in {"cosimulation", "modelexchange"} or any(
+        metadata.get(field) is True
+        for field in ("supportsCoSimulation", "supportsModelExchange")
+    )
+    return fmi_major in {2, 3} and supports_execution
 
 
 def _supports_configuration_mode(metadata: Mapping[str, Any]) -> bool:
@@ -51,7 +55,11 @@ def _supports_configuration_mode(metadata: Mapping[str, Any]) -> bool:
         "",
         str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
     )
-    return fmi_major == 3 and simulation_type == "cosimulation"
+    supports_execution = simulation_type in {"cosimulation", "modelexchange"} or any(
+        metadata.get(field) is True
+        for field in ("supportsCoSimulation", "supportsModelExchange")
+    )
+    return fmi_major == 3 and supports_execution
 
 
 def _default_permissions(
@@ -151,6 +159,8 @@ def build_effective_policy(
     variables: dict[str, dict[str, Any]] = {}
     supports_runtime_tunable_parameters = _supports_runtime_tunable_parameters(metadata)
     supports_configuration_mode = _supports_configuration_mode(metadata)
+    fmi_ls_dae = metadata.get("fmiLsDae")
+    algebraic_names = set(fmi_ls_dae.get("algebraicVariables", [])) if isinstance(fmi_ls_dae, Mapping) else set()
     for variable in raw_variables:
         if not isinstance(variable, Mapping):
             raise ValueError("FMU variable metadata is invalid")
@@ -164,6 +174,10 @@ def build_effective_policy(
             supports_runtime_tunable_parameters=supports_runtime_tunable_parameters,
             supports_configuration_mode=supports_configuration_mode,
         )
+        if name in algebraic_names:
+            # The DAE solver owns algebraic unknowns. They must never become
+            # consumer-controlled values even if an FMU classifies one as input.
+            variables[name] = {"read": variables[name]["read"], "writeAt": []}
 
     if overrides is not None:
         if not isinstance(overrides, Mapping):
