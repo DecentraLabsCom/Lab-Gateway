@@ -55,6 +55,7 @@ def test_sync_route_builds_metadata_and_preserves_query_fields():
             ],
             "contactEmail": "lab@example.com",
         },
+        fmi_ls_resources=None,
         fmu_path=Path("/trusted/demo.fmu"),
         unit_definitions=[],
         required_aas_id=None,

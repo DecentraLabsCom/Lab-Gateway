@@ -425,7 +425,7 @@ class TestBuildExecutionCapabilitiesSubmodel:
         assert "st_secret" not in payload_text
         assert "capabilitydescription" in payload_text
 
-    def test_realtime_capabilities_are_omitted_without_co_simulation(self):
+    def test_realtime_capabilities_are_available_for_model_exchange(self):
         metadata = {**SAMPLE_METADATA, "supportsCoSimulation": False, "supportsModelExchange": True}
         sm = build_execution_capabilities_submodel("42", metadata)
         assert sm is not None
@@ -435,7 +435,7 @@ class TestBuildExecutionCapabilitiesSubmodel:
             for capability in container["value"]
         }
         assert "RunSimulation" in operation_names
-        assert "CreateRealtimeSession" not in operation_names
+        assert {"CreateRealtimeSession", "Initialize", "Step", "GetOutputs"}.issubset(operation_names)
 
 
 class TestStandardSupportSubmodels:
