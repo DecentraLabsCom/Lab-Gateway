@@ -1,9 +1,9 @@
 """Sync canonical FMU examples into Gateway's ignored development data directory.
 
-The six reference FMUs and Smart Warehouse are synced by default. Local
-BOPTEST, qFMU, water-tank, DC-motor, inverted-pendulum and lateral-motion demos
-require explicit flags. This script never adds demo files to Gateway images or
-release packages.
+The seven reference FMUs and Smart Warehouse are synced by default. Local
+BOPTEST, qFMU, water-tank, DC-motor, inverted-pendulum, lateral-motion and
+FMI-LS-DAE demos require explicit flags. This script never adds demo files to
+Gateway images or release packages.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ REFERENCE_FMU_NAMES = {
     "BinaryClockTest.fmu",
     "BouncingBall.fmu",
     "Feedthrough.fmu",
+    "SimpleDAE.fmu",
     "Stair.fmu",
     "StateSpace.fmu",
     "VanDerPol.fmu",
@@ -208,7 +209,14 @@ def validate_local_glb_output_bindings(
                     raise ValueError(
                         f"{scene_path}: input {name!r} must bind to one draggable translation or rotation axis"
                     )
-                if variable.find("Real") is None and variable.find("Integer") is None:
+                variable_type = variable.tag.rsplit("}", 1)[-1]
+                numeric_types = {
+                    "Real", "Integer", "Float32", "Float64", "Int8", "UInt8",
+                    "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
+                }
+                if variable_type not in numeric_types and not any(
+                    child.tag.rsplit("}", 1)[-1] in numeric_types for child in variable
+                ):
                     raise ValueError(f"{scene_path}: draggable input {name!r} must be numeric")
                 scale = binding.get("scale", 1)
                 if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale == 0:
@@ -240,6 +248,75 @@ def validate_local_glb_output_bindings(
     if missing_input_bindings:
         missing = ", ".join(f"{name} -> {target}" for name, target in sorted(missing_input_bindings))
         raise ValueError(f"{scene_path}: required FMI input bindings are missing: {missing}")
+
+
+def validate_fmi_ls_dae_fmu(
+    path: Path,
+    *,
+    required_variables: dict[str, tuple[str, str | None]] | None = None,
+    required_outputs: set[str] | None = None,
+    require_model_exchange_only: bool = True,
+) -> None:
+    """Check a Linux FMI 3 Model Exchange FMU and its FMI-LS-DAE manifest."""
+    names = validate_linux_x64_fmu(path)
+    manifest_path = "extra/org.fmi-standard.fmi-ls-dae/fmi-ls-manifest.xml"
+    if manifest_path not in names:
+        raise ValueError(f"The FMI-LS-DAE manifest is missing from {path.name}.")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            description = ET.fromstring(archive.read("modelDescription.xml"))
+            manifest = ET.fromstring(archive.read(manifest_path))
+    except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError) as error:
+        raise ValueError(f"Invalid FMI-LS-DAE FMU {path}: {error}") from error
+
+    if description.attrib.get("fmiVersion") != "3.0" or description.find("{*}ModelExchange") is None:
+        raise ValueError(f"{path.name} must expose FMI 3.0 Model Exchange.")
+    if require_model_exchange_only and description.find("{*}CoSimulation") is not None:
+        raise ValueError(
+            f"{path.name} declares Co-Simulation as well as Model Exchange, so the Executor would not select its DAE path."
+        )
+    if manifest.tag.rsplit("}", 1)[-1] != "fmiDAEManifest":
+        raise ValueError(f"{path.name} contains an unexpected FMI-LS-DAE manifest root.")
+    variables_node = description.find("{*}ModelVariables")
+    if variables_node is None:
+        raise ValueError(f"{path.name} has no FMI model variables.")
+    variables = {
+        variable.attrib["name"]: variable
+        for variable in variables_node
+        if variable.attrib.get("name")
+    }
+    for name, (causality, unit) in (required_variables or {}).items():
+        variable = variables.get(name)
+        if variable is None:
+            raise ValueError(f"{path.name} is missing FMI variable {name!r}.")
+        if variable.attrib.get("causality", "local") != causality:
+            raise ValueError(f"{path.name} variable {name!r} must have causality {causality!r}.")
+        scalar = variable if variable.tag.rsplit("}", 1)[-1] in {"Float32", "Float64"} else next(
+            (child for child in variable if child.tag.rsplit("}", 1)[-1] in {"Float32", "Float64"}),
+            None,
+        )
+        if scalar is None:
+            raise ValueError(f"{path.name} variable {name!r} must be a floating-point scalar.")
+        actual_unit = scalar.attrib.get("unit")
+        if unit is not None and actual_unit != unit:
+            raise ValueError(f"{path.name} variable {name!r} must use unit {unit!r}.")
+
+    if required_outputs:
+        expected_references = {
+            variable.attrib.get("valueReference")
+            for name, variable in variables.items()
+            if name in required_outputs
+        }
+        if None in expected_references or len(expected_references) != len(required_outputs):
+            raise ValueError(f"{path.name} is missing one or more required output variables.")
+        structure = manifest.find("{*}ModelStructure")
+        outputs = {
+            item.attrib.get("valueReference")
+            for item in (list(structure) if structure is not None else [])
+            if item.tag.rsplit("}", 1)[-1] == "Output"
+        }
+        if not expected_references <= outputs:
+            raise ValueError(f"{path.name} FMI-LS-DAE manifest does not list all required outputs.")
 
 
 def copy_verified(origin: Path, destination: Path) -> None:
@@ -724,6 +801,7 @@ def sync(
     include_local_water_tank: bool = False,
     include_local_inverted_pendulum: bool = False,
     include_local_lateral_motion: bool = False,
+    include_local_fmi_ls_dae_demos: bool = False,
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     boptest_target = target / "local-demos" / "boptest-building" / "linux64"
@@ -787,6 +865,10 @@ def sync(
         copy_verified(source, target / name)
 
     copy_verified(reference_root / "LICENSE.txt", target / "Reference-FMUs.LICENSE.txt")
+    dae_license = reference_root / "FMI-LS-DAE-LICENSE.txt"
+    if (reference_root / "SimpleDAE.fmu").is_file():
+        validate_fmi_ls_dae_fmu(reference_root / "SimpleDAE.fmu")
+        copy_verified(dae_license, target / "FMI-LS-DAE-LICENSE.txt")
 
     smart_warehouse_root = examples_root / "smart-warehouse-cell"
     warehouse_fmu = smart_warehouse_root / "SmartWarehouseCell-linux64.fmu"
@@ -977,6 +1059,79 @@ def sync(
         copy_verified(fmugym_license, motor_target / "DC_motor.FMUGym-LICENSE.txt")
         copy_verified(credibility_license, motor_target / "DC_motor.Credibility-LICENSE.md")
 
+    if include_local_fmi_ls_dae_demos:
+        local_demos_root = examples_root / "local-demos"
+        spring_root = local_demos_root / "mass-spring-oscillator"
+        spring_fmu = spring_root / "MassSpringOscillator.fmu"
+        spring_app = spring_root / "MassSpringOscillator.webapp.zip"
+        spring_scene = spring_root / "MassSpringOscillator.glb"
+        spring_license = spring_root / "FMI-LS-DAE-LICENSE.txt"
+        validate_fmi_ls_dae_fmu(
+            spring_fmu,
+            required_variables={
+                "m": ("parameter", "kg"),
+                "k": ("parameter", "N/m"),
+                "x": ("output", "m"),
+                "v": ("output", "m/s"),
+                "E": ("output", "J"),
+            },
+            required_outputs={"x", "v", "E"},
+        )
+        validate_local_glb_output_bindings(
+            spring_scene,
+            spring_fmu,
+            required_bindings={
+                ("x", "position.x"),
+                ("x", "scale.x"),
+            },
+        )
+        validate_local_fmu_session_app(spring_app, "mass-spring-oscillator")
+        with zipfile.ZipFile(spring_fmu) as archive:
+            ref_path = "extra/org.fmi-standard.fmi-ls-ref/fmi-ls-manifest.xml"
+            if ref_path not in archive.namelist():
+                raise ValueError("The mass-spring FMU is missing its FMI-LS-REF manifest.")
+            ref_manifest = ET.fromstring(archive.read(ref_path))
+            related = {
+                item.attrib.get("source"): item.attrib.get("type")
+                for item in ref_manifest.findall("Related")
+            }
+            expected = {
+                "MassSpringOscillator.webapp.zip": "application/zip",
+                "MassSpringOscillator.glb": "model/gltf-binary",
+            }
+            if any(related.get(name) != media_type for name, media_type in expected.items()):
+                raise ValueError("The mass-spring FMI-LS-REF manifest must link its app and GLB scene.")
+            missing_resources = {
+                f"extra/org.fmi-standard.fmi-ls-ref/{name}"
+                for name in expected
+                if f"extra/org.fmi-standard.fmi-ls-ref/{name}" not in archive.namelist()
+            }
+            if missing_resources:
+                raise ValueError("The mass-spring FMI-LS-REF resources are missing: " + ", ".join(sorted(missing_resources)))
+        if not spring_license.is_file():
+            raise FileNotFoundError(f"The mass-spring demo license is missing: {spring_license}")
+
+        spring_target = target / "local-demos" / "mass-spring-oscillator" / "linux64"
+        spring_target.mkdir(parents=True, exist_ok=True)
+        for source, name in (
+            (spring_fmu, "MassSpringOscillator.fmu"),
+            (spring_app, "MassSpringOscillator.webapp.zip"),
+            (spring_scene, "MassSpringOscillator.glb"),
+            (spring_license, "FMI-LS-DAE-LICENSE.txt"),
+        ):
+            copy_verified(source, spring_target / name)
+
+        roberts_root = local_demos_root / "roberts"
+        roberts_fmu = roberts_root / "Roberts.fmu"
+        validate_fmi_ls_dae_fmu(roberts_fmu)
+        roberts_target = target / "local-demos" / "roberts" / "linux64"
+        roberts_target.mkdir(parents=True, exist_ok=True)
+        copy_verified(roberts_fmu, roberts_target / "Roberts.fmu")
+        for license_name in ("FMI-LS-DAE-LICENSE.txt", "Modelica-Reference-FMUs-LICENSE.txt"):
+            license_path = roberts_root / license_name
+            if license_path.is_file():
+                copy_verified(license_path, roberts_target / license_name)
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1022,6 +1177,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also copy the local-only Bosch lateral-motion FMU and webapp bundle",
     )
+    parser.add_argument(
+        "--include-local-fmi-ls-dae-demos",
+        action="store_true",
+        help="Also copy the local FMI-LS-DAE Roberts and mass-spring demonstrations",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -1034,6 +1194,7 @@ def main(argv: list[str] | None = None) -> int:
             include_local_water_tank=args.include_local_water_tank,
             include_local_inverted_pendulum=args.include_local_inverted_pendulum,
             include_local_lateral_motion=args.include_local_lateral_motion,
+            include_local_fmi_ls_dae_demos=args.include_local_fmi_ls_dae_demos,
         )
     except (FileNotFoundError, OSError, ValueError) as error:
         print(error, file=sys.stderr)
