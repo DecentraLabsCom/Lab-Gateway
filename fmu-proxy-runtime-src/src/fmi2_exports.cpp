@@ -30,9 +30,42 @@ bool IsModelExchangeEvaluationMode(const Fmi2Instance::Mode mode) {
 
 struct Fmi2StateHandle {
     std::string checkpoint;
+    Fmi2Instance::Mode mode = Fmi2Instance::Mode::kInstantiated;
 };
 
 constexpr size_t kMaximumSerializedStateTokenBytes = 64 * 1024;
+
+std::string SerializeFmi2State(const Fmi2StateHandle& state) {
+    JsonObject object = {
+        {"checkpoint", JsonValue(state.checkpoint)},
+        {"mode", JsonValue(static_cast<int>(state.mode))},
+    };
+    return SerializeJson(JsonValue(std::move(object)));
+}
+
+bool ParseFmi2State(const std::string& serialized, Fmi2StateHandle* state) {
+    if (state == nullptr) {
+        return false;
+    }
+    const auto parsed = ParseJson(serialized);
+    const JsonObject* object = parsed ? parsed.value.AsObject() : nullptr;
+    if (object == nullptr) {
+        return false;
+    }
+    const JsonValue* checkpoint = FindObjectValue(*object, "checkpoint");
+    const JsonValue* mode = FindObjectValue(*object, "mode");
+    if (checkpoint == nullptr || !checkpoint->IsString() || mode == nullptr || !mode->IsNumber()) {
+        return false;
+    }
+    const double raw_mode = mode->AsNumber(-1.0);
+    if (!std::isfinite(raw_mode) || std::floor(raw_mode) != raw_mode
+        || raw_mode < 0 || raw_mode > static_cast<int>(Fmi2Instance::Mode::kTerminated)) {
+        return false;
+    }
+    state->checkpoint = checkpoint->AsString();
+    state->mode = static_cast<Fmi2Instance::Mode>(static_cast<int>(raw_mode));
+    return true;
+}
 
 Fmi2Instance* AsInstance(fmi2Component component) {
     return static_cast<Fmi2Instance*>(component);
@@ -127,6 +160,7 @@ using decentralabs::proxy::Log;
 using decentralabs::proxy::OperationResult;
 using decentralabs::proxy::ParseJson;
 using decentralabs::proxy::SessionState;
+using decentralabs::proxy::SerializeJson;
 using decentralabs::proxy::ToFmiStatus;
 
 extern "C" {
@@ -428,7 +462,8 @@ fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* value) {
     if (!status) {
         return ToFmiStatus(instance, status);
     }
-    auto state = std::unique_ptr<Fmi2StateHandle>(new (std::nothrow) Fmi2StateHandle{std::move(checkpoint)});
+    auto state = std::unique_ptr<Fmi2StateHandle>(new (std::nothrow) Fmi2StateHandle{
+        std::move(checkpoint), instance->mode});
     if (!state) {
         return fmi2Error;
     }
@@ -442,7 +477,11 @@ fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate value) {
         return fmi2Fatal;
     }
     const auto* state = static_cast<const Fmi2StateHandle*>(value);
-    return ToFmiStatus(instance, instance->runtime.RestoreFmuState(state->checkpoint));
+    const auto status = instance->runtime.RestoreFmuState(state->checkpoint);
+    if (status) {
+        instance->mode = state->mode;
+    }
+    return ToFmiStatus(instance, status);
 }
 
 fmi2Status fmi2FreeFMUstate(fmi2Component c, fmi2FMUstate* value) {
@@ -461,7 +500,12 @@ fmi2Status fmi2SerializedFMUstateSize(fmi2Component c, fmi2FMUstate value, size_
         return fmi2Fatal;
     }
     const auto* state = static_cast<const Fmi2StateHandle*>(value);
-    *size = state->checkpoint.size();
+    const std::string serialized = SerializeFmi2State(*state);
+    if (serialized.size() > kMaximumSerializedStateTokenBytes) {
+        Log(instance, fmi2Error, "logStatusError", "Serialized FMU state exceeds the supported size limit");
+        return fmi2Error;
+    }
+    *size = serialized.size();
     return fmi2OK;
 }
 
@@ -474,11 +518,12 @@ fmi2Status fmi2SerializeFMUstate(fmi2Component c,
         return fmi2Fatal;
     }
     const auto* state = static_cast<const Fmi2StateHandle*>(value);
-    if (size != state->checkpoint.size()) {
+    const std::string serialized = SerializeFmi2State(*state);
+    if (serialized.size() > kMaximumSerializedStateTokenBytes || size != serialized.size()) {
         Log(instance, fmi2Error, "logStatusError", "Serialized FMU state buffer has the wrong size");
         return fmi2Error;
     }
-    std::memcpy(serialized_state, state->checkpoint.data(), size);
+    std::memcpy(serialized_state, serialized.data(), size);
     return fmi2OK;
 }
 
@@ -495,14 +540,13 @@ fmi2Status fmi2DeSerializeFMUstate(fmi2Component c,
         Log(instance, fmi2Error, "logStatusError", "Serialized FMU state token has an invalid size");
         return fmi2Error;
     }
-    std::string checkpoint(reinterpret_cast<const char*>(serialized_state), size);
-    const auto parsed = ParseJson(checkpoint);
-    if (!parsed || parsed.value.AsObject() == nullptr) {
-        Log(instance, fmi2Error, "logStatusError", "Serialized FMU state token is invalid");
-        return fmi2Error;
+    if (serialized_state == nullptr) {
+        return fmi2Fatal;
     }
-    auto state = std::unique_ptr<Fmi2StateHandle>(new (std::nothrow) Fmi2StateHandle{std::move(checkpoint)});
-    if (!state) {
+    std::string serialized(reinterpret_cast<const char*>(serialized_state), size);
+    auto state = std::unique_ptr<Fmi2StateHandle>(new (std::nothrow) Fmi2StateHandle());
+    if (!state || !ParseFmi2State(serialized, state.get())) {
+        Log(instance, fmi2Error, "logStatusError", "Serialized FMU state token is invalid");
         return fmi2Error;
     }
     *value = static_cast<fmi2FMUstate>(state.release());

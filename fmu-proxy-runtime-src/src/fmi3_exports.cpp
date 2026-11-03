@@ -703,7 +703,9 @@ fmi3Status fmi3GetNominalsOfContinuousStates(fmi3Instance instance, fmi3Float64 
     Fmi3Instance* impl = AsInstance(instance);
     if (impl == nullptr) return fmi3Fatal;
     if (!impl->model_exchange
-        || (impl->mode != Fmi3Mode::kEvent && impl->mode != Fmi3Mode::kContinuous)
+        || (impl->mode != Fmi3Mode::kInitialization
+            && impl->mode != Fmi3Mode::kEvent
+            && impl->mode != Fmi3Mode::kContinuous)
         || nContinuousStates != impl->runtime.NumberOfContinuousStates()) {
         return Unsupported(impl, "getNominalsOfContinuousStates received an invalid mode or vector size");
     }

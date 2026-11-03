@@ -472,7 +472,7 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
                 ("canSerializeFMUstate", "canSerializeFMUState", False),
                 ("providesDirectionalDerivative", "providesDirectionalDerivative", False),
                 ("providesAdjointDerivatives", "providesAdjointDerivatives", False),
-                ("completedIntegratorStepNotNeeded", "completedIntegratorStepNotNeeded", False),
+                ("needsCompletedIntegratorStep", "needsCompletedIntegratorStep", False),
             ):
                 value = me_capabilities.get(source_name, source_capabilities.get(source_name, default))
                 if source_name in {"providesDirectionalDerivative", "providesAdjointDerivatives"}:
@@ -652,6 +652,7 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             "name": str(var.get("name") or f"var_{index}"),
             "valueReference": str(value_reference),
         }
+        fmi2_derivative_index = None
         state_reference = derivative_state_by_reference.get(numeric_reference)
         if state_reference is not None:
             if fmi_major_version >= 3:
@@ -660,7 +661,9 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
                 state_index = proxy_variable_indexes.get(state_reference)
                 if state_index is None:
                     raise HTTPException(status_code=422, detail="FMI 2 derivative references an unexported state variable")
-                scalar_attrs["derivative"] = str(state_index)
+                if var_type != "Real":
+                    raise HTTPException(status_code=422, detail="FMI 2 state derivatives must be Real variables")
+                fmi2_derivative_index = state_index
         variable_description = _normalize_xml_value(var.get("description"))
         if variable_description:
             scalar_attrs["description"] = variable_description
@@ -679,6 +682,10 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             scalar_attrs["initial"] = initial
 
         type_attrs = {}
+        if fmi2_derivative_index is not None:
+            # FMI 2.0 places the derivative state index on the Real element,
+            # while FMI 3 places the state value reference on the variable.
+            type_attrs["derivative"] = str(fmi2_derivative_index)
         if fmi_major_version >= 3 and normalized_fmi3_type != "Clock":
             clock_references = [
                 str(reference)

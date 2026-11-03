@@ -81,6 +81,28 @@ def test_runtime_reconfiguration_is_authorized_only_for_declared_dae_selector():
         }, policy)
 
 
+@pytest.mark.parametrize(("fmi_version", "allowed"), [("2.0", False), ("3.0", True)])
+def test_get_nominals_initialization_mode_matches_fmi_version(fmi_version, allowed):
+    metadata = {"fmiVersion": fmi_version}
+    policy = {"authorizedExecutionInterfaces": ["ModelExchange"]}
+    message = {
+        "type": "sim.modelExchangeCall",
+        "operation": "getNominalsOfContinuousStates",
+        "arguments": {},
+    }
+    active_session = SimpleNamespace(model_exchange_mode="initialization")
+
+    if allowed:
+        StationRealtimeWsProxyManager._validate_session_message(
+            message, policy, metadata, active_session
+        )
+    else:
+        with pytest.raises(AccessDenied):
+            StationRealtimeWsProxyManager._validate_session_message(
+                message, policy, metadata, active_session
+            )
+
+
 def _claims():
     return {
         "sub": "user-1",

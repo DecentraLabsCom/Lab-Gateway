@@ -22,6 +22,7 @@ def test_proxy_fmu_module_generates_model_description_without_main_import():
         "guid": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [],
     })
 
@@ -39,6 +40,7 @@ def test_fmi3_cosimulation_uses_standard_early_return_attribute_and_xsd():
         "modelName": "ProxyBoundary",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [{
             "name": "output",
             "valueReference": 1,
@@ -56,11 +58,70 @@ def test_fmi3_cosimulation_uses_standard_early_return_attribute_and_xsd():
     _validate_model_description(xml_bytes, "3.0")
 
 
+def test_fmi3_model_exchange_preserves_needs_completed_integrator_step():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ModelExchangeCallbacks",
+        "fmiVersion": "3.0",
+        "simulationKind": "modelExchange",
+        "supportsModelExchange": True,
+        "modelExchangeCapabilities": {"needsCompletedIntegratorStep": True},
+        "numberOfContinuousStates": 0,
+        "numberOfEventIndicators": 0,
+        "modelStructure": {"derivatives": [], "eventIndicators": []},
+        "modelVariables": [{
+            "name": "status",
+            "valueReference": 1,
+            "type": "Float64",
+            "causality": "output",
+            "variability": "continuous",
+        }],
+    })
+
+    root = ET.fromstring(xml_bytes)
+    model_exchange = root.find("./ModelExchange")
+    assert model_exchange is not None
+    assert model_exchange.attrib["needsCompletedIntegratorStep"] == "true"
+    assert "completedIntegratorStepNotNeeded" not in model_exchange.attrib
+    _validate_model_description(xml_bytes, "3.0")
+
+
+def test_fmi2_model_exchange_derivative_is_on_real_child_and_validates_xsd():
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "BouncingBall",
+        "fmiVersion": "2.0",
+        "simulationKind": "modelExchange",
+        "supportsModelExchange": True,
+        "numberOfContinuousStates": 1,
+        "numberOfEventIndicators": 0,
+        "modelVariables": [
+            {"name": "height", "valueReference": 10, "type": "Real", "causality": "local", "variability": "continuous"},
+            {"name": "der_height", "valueReference": 20, "type": "Real", "causality": "local", "variability": "continuous"},
+        ],
+        "modelStructure": {
+            "derivatives": [{"valueReference": 20, "stateValueReference": 10}],
+            "eventIndicators": [],
+        },
+    })
+
+    root = ET.fromstring(xml_bytes)
+    state = root.find("./ModelVariables/ScalarVariable[@name='height']")
+    derivative = root.find("./ModelVariables/ScalarVariable[@name='der_height']")
+    assert state is not None
+    assert derivative is not None
+    assert "derivative" not in state.attrib
+    assert "derivative" not in derivative.attrib
+    derivative_real = derivative.find("./Real")
+    assert derivative_real is not None
+    assert derivative_real.attrib["derivative"] == "1"
+    _validate_model_description(xml_bytes, "2.0")
+
+
 def test_fmi2_proxy_declares_ordered_initial_unknowns_and_validates_xsd():
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "InitialUnknowns",
         "fmiVersion": "2.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "time", "type": "Real", "causality": "independent", "variability": "continuous", "valueReference": 0},
             {"name": "estimated", "type": "Real", "causality": "output", "variability": "continuous", "valueReference": 1, "initial": "approx", "start": 0.0},
@@ -83,6 +144,7 @@ def test_fmi3_proxy_declares_output_initial_unknowns_and_validates_xsd():
         "modelName": "InitialUnknownsFmi3",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "estimated", "type": "Float64", "causality": "output", "variability": "continuous", "valueReference": 1, "initial": "calculated"},
             {"name": "known", "type": "Float64", "causality": "output", "variability": "continuous", "valueReference": 2, "initial": "exact", "start": 2.0},
@@ -102,6 +164,7 @@ def test_fmi3_string_and_binary_array_starts_emit_one_child_per_value():
         "modelName": "ProxyArrays",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "labels",

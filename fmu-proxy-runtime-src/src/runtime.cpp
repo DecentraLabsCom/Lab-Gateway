@@ -692,10 +692,29 @@ bool ProxyRuntime::IsModelExchangeMode() const {
 ValueResult<JsonObject> ProxyRuntime::ModelExchangeCall(
     const std::string& operation,
     const JsonObject& arguments) {
-    if (!model_exchange_mode_ || !model_exchange_external_solver_active_ || gateway_client_ == nullptr) {
+    if (!model_exchange_mode_ || gateway_client_ == nullptr) {
         return ValueResult<JsonObject>::Failure(
             "MODEL_EXCHANGE_NOT_ACTIVE",
             "External Model Exchange execution is not active");
+    }
+    if (!model_exchange_external_solver_active_) {
+        const bool initialization_read = operation == "getValues"
+            || operation == "getContinuousStates"
+            || operation == "getDerivatives"
+            || operation == "getContinuousStateDerivatives"
+            || operation == "getEventIndicators"
+            || operation == "getNominalsOfContinuousStates";
+        if (!initialization_read || state_ != SessionState::kSessionCreated || !initialization_mode_entered_) {
+            return ValueResult<JsonObject>::Failure(
+                "MODEL_EXCHANGE_NOT_ACTIVE",
+                "External Model Exchange execution is not active");
+        }
+        const auto initialization_status = EvaluateInitialization();
+        if (!initialization_status) {
+            return ValueResult<JsonObject>::Failure(
+                initialization_status.code,
+                initialization_status.message);
+        }
     }
     auto result = gateway_client_->ModelExchangeCall(operation, arguments);
     if (!result) {
@@ -1171,7 +1190,7 @@ OperationResult ProxyRuntime::EvaluateInitializationForValues(
         }
         requests_output = requests_output || variable->causality == "output";
     }
-    return requests_output ? EvaluateInitialization() : OperationResult::Success();
+    return (model_exchange_mode_ || requests_output) ? EvaluateInitialization() : OperationResult::Success();
 }
 
 void ProxyRuntime::SetEarlyReturnAllowed(const bool allowed) {
@@ -1583,13 +1602,15 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         && variable.causality != "independent";
     if (external_model_exchange_value) {
         const bool fmi3_state_settable = model_.fmi_version.rfind("3.", 0) == 0
-            && (model_exchange_remote_mode_ == "continuous"
+            && ((model_exchange_remote_mode_ == "initialization"
+                 && initialization_mode_entered_ && variable.initial == "exact")
+                || model_exchange_remote_mode_ == "continuous"
                 || (model_exchange_remote_mode_ == "event" && variable.reinit == false));
         if (is_continuous_state && !fmi3_state_settable) {
             return OperationResult::Failure(
                 "VARIABLE_NOT_SETTABLE",
-                "FMI 3 continuous states may be set through typed setters in Continuous-Time Mode, "
-                "or in Event Mode when reinit is false");
+                "FMI 3 continuous states may be set in Initialization Mode when initial is exact, "
+                "in Continuous-Time Mode, or in Event Mode when reinit is false");
         }
         const auto status = SetModelExchangeValue(variable, value);
         if (!status) {

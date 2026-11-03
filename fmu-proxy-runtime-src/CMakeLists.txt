@@ -92,6 +92,7 @@ set_target_properties(
 if(BUILD_TESTING)
   add_executable(
     decentralabs_proxy_unit_tests
+    src/fmi2_exports.cpp
     tests/unit_tests.cpp
   )
 

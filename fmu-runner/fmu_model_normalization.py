@@ -447,6 +447,7 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
         "defaultStepSize": optional_number("defaultStepSize"),
         "modelVariables": [],
     }
+    pending_dae_model_structure: dict[str, list[dict[str, Any]]] | None = None
     raw_available_interfaces = payload.get("availableExecutionInterfaces")
     if raw_available_interfaces is None:
         raw_available_interfaces = [
@@ -566,17 +567,7 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
                     field = kind_fields[item["kind"]]
                     entry = {key: value for key, value in item.items() if key != "kind"}
                     dae_structure[field].append(entry)
-                normalized["fmiLsDae"]["modelStructure"] = _normalize_model_structure(
-                    dae_structure,
-                    {
-                        int(variable["valueReference"])
-                        for variable in raw_variables
-                        if isinstance(variable, dict)
-                        and isinstance(variable.get("valueReference"), int)
-                        and not isinstance(variable.get("valueReference"), bool)
-                    },
-                    allow_dae=True,
-                )
+                pending_dae_model_structure = dae_structure
     elif payload.get("fmiLsDae") is not None:
         raise HTTPException(status_code=502, detail="Station backend returned inconsistent FMI-LS-DAE metadata")
     for field in ("numberOfContinuousStates", "numberOfEventIndicators"):
@@ -584,19 +575,6 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             normalized[field] = value
     if supports_me is True:
-        raw_model_structure = payload.get("modelStructure")
-        if raw_model_structure is not None:
-            references = {
-                int(variable["valueReference"])
-                for variable in normalized["modelVariables"]
-                if isinstance(variable.get("valueReference"), int)
-                and not isinstance(variable.get("valueReference"), bool)
-            }
-            normalized["modelStructure"] = _normalize_model_structure(
-                raw_model_structure,
-                references,
-                allow_dae=False,
-            )
         raw_me_capabilities = payload.get("modelExchangeCapabilities")
         if raw_me_capabilities is not None:
             if not isinstance(raw_me_capabilities, dict):
@@ -682,6 +660,27 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
         if not isinstance(variable, dict):
             raise HTTPException(status_code=502, detail="Station backend returned an invalid model variable entry")
         normalized["modelVariables"].append(normalize_variable(variable, index))
+
+    model_variable_references = {
+        variable["valueReference"]
+        for variable in normalized["modelVariables"]
+        if isinstance(variable.get("valueReference"), int)
+        and not isinstance(variable.get("valueReference"), bool)
+    }
+    if pending_dae_model_structure is not None:
+        normalized["fmiLsDae"]["modelStructure"] = _normalize_model_structure(
+            pending_dae_model_structure,
+            model_variable_references,
+            allow_dae=True,
+        )
+    if supports_me is True:
+        raw_model_structure = payload.get("modelStructure")
+        if raw_model_structure is not None:
+            normalized["modelStructure"] = _normalize_model_structure(
+                raw_model_structure,
+                model_variable_references,
+                allow_dae=False,
+            )
 
     raw_unit_definitions = payload.get("unitDefinitions")
     if isinstance(raw_unit_definitions, list) and len(raw_unit_definitions) <= 1024:

@@ -381,7 +381,11 @@ class StationRealtimeWsProxyManager:
                 "getDerivatives": {"initialization", "event", "continuous"},
                 "getContinuousStateDerivatives": {"initialization", "event", "continuous"},
                 "getEventIndicators": {"initialization", "event", "continuous"},
-                "getNominalsOfContinuousStates": {"event", "continuous"},
+                "getNominalsOfContinuousStates": (
+                    {"initialization", "event", "continuous"}
+                    if fmi_major == "3"
+                    else {"event", "continuous"}
+                ),
                 "completedIntegratorStep": {"continuous"},
                 "enterEventMode": {"continuous"},
                 "newDiscreteStates": {"event"},

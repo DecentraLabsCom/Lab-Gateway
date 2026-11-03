@@ -21,6 +21,7 @@
 #include "decentralabs_proxy/runtime_config.hpp"
 #include "decentralabs_proxy/session_state.hpp"
 #include "decentralabs_proxy/transport.hpp"
+#include "fmi2/fmi2Functions.h"
 #include "fmi3/fmi3Functions.h"
 
 static_assert(sizeof(fmi3Boolean) == sizeof(bool));
@@ -116,6 +117,34 @@ void TestJsonParserAndSerializer() {
     CHECK(!malformed);
     CHECK(malformed.status.code == "JSON_PARSE_ERROR");
     CHECK(JsonString(object, "not-present", "fallback") == "fallback");
+}
+
+void TestFmi2SerializedStatePreservesModelExchangeMode() {
+    const JsonObject checkpoint = {
+        {"simulation", JsonValue(JsonObject{{"externalSolver", JsonValue(JsonObject{{"mode", JsonValue("event")}})}})},
+    };
+    const std::string checkpoint_json = SerializeJson(JsonValue(checkpoint));
+    const std::string serialized_token = SerializeJson(JsonValue(JsonObject{
+        {"checkpoint", JsonValue(checkpoint_json)},
+        {"mode", JsonValue(2)},
+    }));
+
+    char instance_placeholder = 0;
+    fmi2FMUstate state = nullptr;
+    CHECK(fmi2DeSerializeFMUstate(
+        &instance_placeholder,
+        reinterpret_cast<const fmi2Byte*>(serialized_token.data()),
+        serialized_token.size(),
+        &state) == fmi2OK);
+    CHECK(state != nullptr);
+
+    size_t serialized_size = 0;
+    CHECK(fmi2SerializedFMUstateSize(&instance_placeholder, state, &serialized_size) == fmi2OK);
+    std::vector<fmi2Byte> roundtrip(serialized_size);
+    CHECK(fmi2SerializeFMUstate(&instance_placeholder, state, roundtrip.data(), roundtrip.size()) == fmi2OK);
+    CHECK(std::string(reinterpret_cast<const char*>(roundtrip.data()), roundtrip.size()) == serialized_token);
+    CHECK(fmi2FreeFMUstate(&instance_placeholder, &state) == fmi2OK);
+    CHECK(state == nullptr);
 }
 
 void TestRuntimeConfigParsing() {
@@ -239,6 +268,27 @@ void TestModelDescriptionParsing() {
     CHECK(std::get<StringArray>(*FindVariableByName(fmi3.value, "labels")->start_value) == StringArray({"north", "south"}));
     CHECK(std::get<BinaryArray>(*FindVariableByName(fmi3.value, "payloads")->start_value) == BinaryArray({BinaryValue{0x01, 0x02}, BinaryValue{0x03, 0x04}}));
     CHECK(std::get<bool>(*FindVariableByName(fmi3.value, "clock")->start_value));
+
+    const auto fmi2_model_exchange = ParseModelDescriptionXml(R"xml(
+        <fmiModelDescription fmiVersion="2.0" modelName="BouncingBall" guid="ball-guid">
+          <ModelExchange modelIdentifier="bouncing_ball"/>
+          <ModelVariables>
+            <ScalarVariable name="height" valueReference="10" causality="local" variability="continuous">
+              <Real start="1.0"/>
+            </ScalarVariable>
+            <ScalarVariable name="der_height" valueReference="20" causality="local" variability="continuous">
+              <Real derivative="1"/>
+            </ScalarVariable>
+          </ModelVariables>
+          <ModelStructure><Derivatives><Unknown index="2"/></Derivatives></ModelStructure>
+        </fmiModelDescription>
+    )xml");
+    CHECK(fmi2_model_exchange);
+    const VariableInfo* fmi2_derivative = FindVariableByName(fmi2_model_exchange.value, "der_height");
+    CHECK(fmi2_derivative != nullptr);
+    CHECK(fmi2_derivative->derivative_reference == std::uint32_t{1});
+    CHECK(fmi2_model_exchange.value.continuous_state_derivative_references == std::vector<std::uint32_t>{20});
+    CHECK(fmi2_model_exchange.value.continuous_state_value_references == std::vector<std::uint32_t>{10});
 
     const auto invalid = ParseModelDescriptionXml("<not-a-model/>");
     CHECK(!invalid);
@@ -533,6 +583,82 @@ void TestInitializationGetsEvaluateAndRefreshOutputs() {
     CHECK(JsonNumber(refreshed_inputs, "input") == 3.5);
 }
 
+void TestModelExchangeInitializationReadsAndExactStateWritesAreOrderIndependent() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="3.0" modelName="InitializationME" instantiationToken="initialization-me-token">
+          <ModelExchange modelIdentifier="initialization_me"/>
+          <ModelVariables>
+            <Float64 name="x" valueReference="1" causality="local" variability="continuous" initial="exact" start="0.25"/>
+            <Float64 name="der_x" valueReference="2" causality="local" variability="continuous" derivative="1"/>
+          </ModelVariables>
+          <ModelStructure><ContinuousStateDerivative valueReference="2"/></ModelStructure>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("initialization-me-instance", directory.path.string()));
+    CHECK_OK(runtime.SetModelExchangeMode(true));
+    CHECK_OK(runtime.SetupExperiment(0.0, 2.0, 0.1));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"initialization-me-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-3","result":{"values":[0.25]}})");
+    const auto states = runtime.ModelExchangeCall("getContinuousStates");
+    CHECK(states);
+    CHECK_NEAR((*FindObjectValue(states.value, "values")->AsArray())[0].AsNumber(), 0.25, 1e-12);
+
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-4","result":{"values":[0.4794]}})");
+    const auto derivatives = runtime.ModelExchangeCall("getContinuousStateDerivatives");
+    CHECK(derivatives);
+    const JsonArray* derivative_values = FindObjectValue(derivatives.value, "values")->AsArray();
+    CHECK(derivative_values != nullptr && derivative_values->size() == 1);
+    CHECK_NEAR((*derivative_values)[0].AsNumber(), 0.4794, 1e-12);
+
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-5","result":{"values":[0.4794]}})");
+    double derivative_value = 0.0;
+    const std::uint32_t derivative_reference = 2;
+    CHECK_OK(runtime.GetReal(&derivative_reference, 1, &derivative_value));
+    CHECK_NEAR(derivative_value, 0.4794, 1e-12);
+
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-6","result":{"values":[1.0]}})");
+    const auto nominals = runtime.ModelExchangeCall("getNominalsOfContinuousStates");
+    CHECK(nominals);
+    CHECK_NEAR((*FindObjectValue(nominals.value, "values")->AsArray())[0].AsNumber(), 1.0, 1e-12);
+
+    const std::uint32_t state_reference = 1;
+    const double state_value = 0.75;
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-7","result":{"values":[0.75]}})");
+    CHECK_OK(runtime.SetReal(&state_reference, 1, &state_value));
+
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-8","result":{"mode":"event"}})");
+    CHECK_OK(runtime.ExitInitializationMode());
+    CHECK(runtime.State() == SessionState::kInitialized);
+
+    const auto messages = scripted->SentPayloads();
+    CHECK(messages.size() == 8);
+    const auto initial_request = ParseJson(messages[1]);
+    CHECK(initial_request);
+    CHECK(JsonString(*initial_request.value.AsObject(), "type") == "sim.initialize");
+    const auto first_read = ParseJson(messages[2]);
+    CHECK(first_read);
+    CHECK(JsonString(*first_read.value.AsObject(), "operation") == "getContinuousStates");
+    const auto second_read = ParseJson(messages[3]);
+    CHECK(second_read);
+    CHECK(JsonString(*second_read.value.AsObject(), "operation") == "getContinuousStateDerivatives");
+    const auto state_write = ParseJson(messages[6]);
+    CHECK(state_write);
+    CHECK(JsonString(*state_write.value.AsObject(), "operation") == "setValues");
+}
+
 void TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs() {
     TemporaryDirectory directory;
     WriteFile(directory.path / "config.json",
@@ -694,6 +820,7 @@ int RunTest(const char* name, const TestFunction& test) {
 int main() {
     int failures = 0;
     failures += RunTest("json parser and serializer", TestJsonParserAndSerializer);
+    failures += RunTest("FMI 2 serialized state preserves Model Exchange mode", TestFmi2SerializedStatePreservesModelExchangeMode);
     failures += RunTest("runtime config parsing", TestRuntimeConfigParsing);
     failures += RunTest("protocol and session state", TestProtocolAndSessionState);
     failures += RunTest("model description parsing", TestModelDescriptionParsing);
@@ -701,6 +828,7 @@ int main() {
     failures += RunTest("gateway client protocol", TestGatewayClientProtocol);
     failures += RunTest("proxy runtime lifecycle", TestProxyRuntimeLifecycle);
     failures += RunTest("initialization reads evaluate and refresh outputs", TestInitializationGetsEvaluateAndRefreshOutputs);
+    failures += RunTest("Model Exchange initialization reads and exact state writes", TestModelExchangeInitializationReadsAndExactStateWritesAreOrderIndependent);
     failures += RunTest("discrete-state updates write inputs and refresh outputs", TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs);
     failures += RunTest("undefined stop time", TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit);
     failures += RunTest("FMI 3 runtime reconfiguration", TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation);

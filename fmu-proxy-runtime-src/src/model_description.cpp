@@ -492,16 +492,6 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
     if (auto it = scalar_attributes.find("initial"); it != scalar_attributes.end()) {
         info.initial = it->second;
     }
-    if (auto it = scalar_attributes.find("derivative"); it != scalar_attributes.end()) {
-        try {
-            const auto raw_reference = std::stoull(it->second);
-            if (raw_reference > std::numeric_limits<std::uint32_t>::max()) return false;
-            info.derivative_reference = static_cast<std::uint32_t>(raw_reference);
-        } catch (...) {
-            return false;
-        }
-    }
-
     const char* type_names[] = {"Real", "Integer", "Boolean", "String", "Enumeration", "Binary", "Clock"};
     for (const char* type_name : type_names) {
         const std::string needle = std::string("<") + type_name;
@@ -516,6 +506,17 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
         info.type = ParseScalarType(type_name);
         const auto type_attributes = ParseAttributes(block.substr(type_start, type_end - type_start + 1));
         info.declared_type = type_name;
+        if (std::string(type_name) == "Real") {
+            if (auto derivative_it = type_attributes.find("derivative"); derivative_it != type_attributes.end()) {
+                try {
+                    const auto raw_reference = std::stoull(derivative_it->second);
+                    if (raw_reference > std::numeric_limits<std::uint32_t>::max()) return false;
+                    info.derivative_reference = static_cast<std::uint32_t>(raw_reference);
+                } catch (...) {
+                    return false;
+                }
+            }
+        }
         if (auto unit_it = type_attributes.find("unit"); unit_it != type_attributes.end()) {
             info.unit = unit_it->second;
         }
