@@ -36,12 +36,14 @@ DecentraLabs exposes a protected FMU as a reservation-scoped remote simulation:
   the same way as to physical laboratories.
 
 The current product supports FMI 2.x and FMI 3.x Co-Simulation and Model Exchange. The provider
-runtime integrates standard ODE Model Exchange models with CVode and handles FMI event iteration;
-FMI 3 Model Exchange models declaring the supported FMI-LS-DAE profile use a separate experimental
-IDAS path with a narrower scope. When an FMU declares both Co-Simulation and Model Exchange, the
-Executor prefers Co-Simulation. A Model-Exchange-only source remains exposed to external clients
-through a Co-Simulation `proxy.fmu`, so the importing tool does not need its own Model Exchange
-integrator. See the Executor's [FMI conformance baseline](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/docs/runtime.md#fmi-execution-scope)
+runtime can integrate Model Exchange models with CVode, and FMI 3 Model Exchange models declaring
+the supported FMI-LS-DAE profile can use the experimental IDAS path. Web apps use one standard
+remote Co-Simulation flow and do not select an FMI interface. The Executor chooses and runs the
+source interface on the provider side. A native `proxy.fmu`, by contrast, exposes only the
+source-declared interfaces authorized in the AAS access-control submodel; if the source declares
+both Co-Simulation and Model Exchange, the provider can authorize either or both. With one declared
+interface, that interface is the default and there is no provider selection control. See the
+Executor's [FMI conformance baseline](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/docs/runtime.md#fmi-execution-scope)
 for the supported execution subset; the native proxy's platform and tool validation is tracked in
 [proxy runtime source](../fmu-proxy-runtime-src/README.md).
 
@@ -249,47 +251,50 @@ Ticket redemption rechecks the current on-chain reservation state.
 
 ### 3. Import and run it in an FMI tool
 
-Import `proxy.fmu` as a normal Co-Simulation FMU. The artifact includes the native proxy runtime and
-reservation-scoped connection configuration. The importer loads the binary matching its operating
-system and architecture; the runtime opens a secure WebSocket to the provider Gateway, exchanges the
-reservation-bound ticket and maps FMI calls to the remote real-time API. No separate local DecentraLabs
-agent or manual Gateway connection configuration is needed. The FMI tool must permit native FMU
-libraries and outbound TLS WebSocket connections. The currently validated proxy binaries target
-Windows x64 and Linux x64; macOS is not yet validated.
+Import `proxy.fmu` as the FMI interface(s) shown in its `modelDescription.xml`. The artifact includes
+the native proxy runtime and reservation-scoped connection configuration. The importer loads the
+binary matching its operating system and architecture; the runtime opens a secure WebSocket to the
+provider Gateway, exchanges the reservation-bound ticket and maps FMI calls to the remote real-time
+API. No separate local DecentraLabs agent or manual Gateway connection configuration is needed. The
+FMI tool must permit native FMU libraries and outbound TLS WebSocket connections. The currently
+validated proxy binaries target Windows x64 and Linux x64; macOS is not yet validated.
 
-For a provider source model that uses Model Exchange, the generated proxy remains Co-Simulation.
-The remote Executor performs numerical integration and event handling; the importing tool only
-calls `Set`, `DoStep` and `Get` through the proxy. The FMI 3 Co-Simulation proxy advertises
-`hasEventMode` for a Model Exchange source and accepts importer-initiated Event Mode transitions.
-An importer may reconfigure any declared tunable FMI 3 structural parameter: from Step Mode for
-Co-Simulation sources, and from Event Mode for Model Exchange sources. The proxy applies the change
-to the remote session, then returns to the FMI mode required by that source. This includes the
-FMI-LS-DAE Boolean selector when the model declares one, but reconfiguration is not specific to
-that selector. This applies to standard ODE Model Exchange and to FMI-LS-DAE sources. FMI-LS-DAE
-support on the provider side does not require the importing tool
-to implement FMI-LS-DAE; that provider-side DAE path remains experimental. It accepts continuous
-Float32 and Float64 algebraic variables and residuals, including arrays whose dimensions are
-resolved from the run's structural parameters. The Executor accepts only the FMI-LS-DAE
-`1.0.0-alpha.1` manifest profile. Its integrator supports semi-explicit index-1 equations in
-Continuous-Time Mode. It also composes that solver with FMI 3 Model Exchange core event semantics:
-event-indicator root location, Event Mode iteration, `nextEventTime`, input Clock activation and
-clocked output sampling, plus solver reinitialization after state or input discontinuities. These
-hybrid behaviors are not defined by FMI-LS-DAE alpha.1 itself; they come from the underlying FMI 3
-Model Exchange contract and remain experimental for DAE equations. FMI 3 Scheduled Execution,
-including `fmi3ActivateModelPartition`, is a separate interface and is not included in this support.
-When an FMI-LS-DAE FMU declares Clocks, execute it in DAE mode; its alternate ODE mode does not
-schedule Clocks. The generated proxy supports scalar triggered input and output Clocks when the
-source can use Event Mode. It rejects periodic or aperiodic Clocks, dimensioned Clocks, and
-Scheduled Execution, which requires `fmi3ActivateModelPartition`. A proxy for a Model Exchange
-source advertises `hasEventMode`; an importer must instantiate it with `eventModeUsed=true` if it
-will call the Event Mode API. Reconfiguration of a Co-Simulation source does not require Event Mode.
+The proxy preserves the source's authorized FMI interface. In Co-Simulation, the provider-side
+source FMU advances through `DoStep`. In Model Exchange, the importing tool owns integration and the
+proxy forwards time, state, input, derivative, event-indicator, and event-mode calls to the remote
+source FMU; the original binary remains on the provider side. When both interfaces are authorized,
+the importer selects one when instantiating the proxy, as with any multi-interface FMU. The AAS
+`AuthorizedExecutionInterfaces` property controls the interfaces included in the native proxy. An
+importer cannot use a source interface that is absent from the generated proxy.
 
-When an FMU exposes both Co-Simulation and Model Exchange, the Executor selects Model Exchange by
-default for a valid FMI-LS-DAE declaration when its native binary is available; otherwise it
-prefers Co-Simulation. A session may request `executionInterface` explicitly to select either
-available interface. In a Model Exchange FMI-LS-DAE run, the Executor enables the manifest selector
-by default; an explicit `false` keeps ODE mode unless the model declares Clocks, which require DAE
-mode in this implementation.
+An importer may reconfigure a declared tunable FMI 3 structural parameter from Step Mode for
+Co-Simulation or Event Mode for Model Exchange. The proxy applies the change to the remote session
+and returns to the mode required by the selected interface. This includes the FMI-LS-DAE Boolean
+selector when the model declares one, but reconfiguration is not specific to that selector.
+
+For Model Exchange, the proxy includes the source's supported FMI-LS-DAE manifest when the AAS
+authorizes Model Exchange. A DAE-capable importing tool can then own the integration and solve the
+remote algebraic equations; it must support the declared FMI-LS-DAE profile. The provider-side
+Executor also retains its own experimental FMI-LS-DAE path for web and provider-managed runs. That
+path accepts continuous Float32 and Float64 algebraic variables and residuals, including arrays
+whose dimensions are resolved from run structural parameters. It accepts only FMI-LS-DAE
+`1.0.0-alpha.1` and semi-explicit index-1 equations in Continuous-Time Mode. Provider-managed
+integration composes that solver with FMI 3 Model Exchange event semantics: event-indicator root
+location, Event Mode iteration, `nextEventTime`, input Clock activation, clocked output sampling,
+and solver reinitialization after state or input discontinuities. These hybrid behaviors come from
+the FMI 3 Model Exchange contract and remain experimental for DAE equations. FMI 3 Scheduled
+Execution, including `fmi3ActivateModelPartition`, is a separate interface and is not included.
+When an FMI-LS-DAE FMU declares Clocks, run it in DAE mode; its alternate ODE mode does not schedule
+Clocks. The proxy supports scalar triggered input and output Clocks when the source can use Event
+Mode. It rejects periodic or aperiodic Clocks, dimensioned Clocks, and Scheduled Execution.
+
+For provider-managed runs of an FMU exposing both Co-Simulation and Model Exchange, the Executor
+selects Model Exchange by default for a valid FMI-LS-DAE declaration when its native binary is
+available; otherwise it prefers Co-Simulation. Internal runtime callers may request
+`executionInterface` explicitly. This is not a selector exposed by the Three.js SDK or GLB web apps:
+they use the single remote Co-Simulation flow. In a provider-managed Model Exchange FMI-LS-DAE run,
+the Executor enables the manifest selector by default; an explicit `false` keeps ODE mode unless
+the model declares Clocks, which require DAE mode in this implementation.
 
 The externally advertised Gateway facade is:
 
@@ -481,6 +486,6 @@ Use these documents when the work is implementation- or deployment-specific:
 - [ ] A valid reservation exists for the requested window.
 - [ ] The proxy was downloaded from the authorized Gateway endpoint.
 - [ ] The artifact hash/signature was verified when supplied.
-- [ ] The proxy was imported as an FMI Co-Simulation FMU.
+- [ ] The proxy was imported through one of the authorized FMI interfaces.
 - [ ] The FMI tool uses the intended simulation time mode and step size.
 - [ ] The session is terminated when the simulation is complete.

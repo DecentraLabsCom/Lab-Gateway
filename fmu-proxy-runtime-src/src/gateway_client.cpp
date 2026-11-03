@@ -253,7 +253,9 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
                                           const ExperimentConfig& experiment,
                                           const std::map<std::string, ScalarValue>& initial_inputs,
                                           const std::map<std::string, ScalarValue>& initial_parameters,
-                                          const bool early_return_allowed) {
+                                          const bool early_return_allowed,
+                                          const bool model_exchange,
+                                          const bool defer_initialization_exit) {
     JsonObject options = {
         {"timeMode", JsonValue(std::string(ToString(config.time_mode)))},
         {"startTime", JsonValue(experiment.start_time)},
@@ -261,6 +263,11 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
         {"earlyReturnAllowed", JsonValue(early_return_allowed)},
         {"playbackSpeed", JsonValue(config.playback_speed)},
     };
+    if (model_exchange) {
+        options.emplace("executionInterface", JsonValue("ModelExchange"));
+        options.emplace("externalSolver", JsonValue(true));
+        options.emplace("deferInitializationExit", JsonValue(defer_initialization_exit));
+    }
     if (experiment.stop_time.has_value()) {
         options.emplace("stopTime", JsonValue(*experiment.stop_time));
     }
@@ -283,6 +290,34 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
         return response.status;
     }
     return EnsureResponseType(response.value, kSimState);
+}
+
+ValueResult<JsonObject> GatewayClient::ModelExchangeCall(
+    const std::string& operation,
+    const JsonObject& arguments) {
+    JsonObject request = {
+        {"type", JsonValue("sim.modelExchangeCall")},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+        {"operation", JsonValue(operation)},
+        {"arguments", JsonValue(arguments)},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return ValueResult<JsonObject>::Failure(response.status.code, response.status.message);
+    }
+    const auto type_status = EnsureResponseType(response.value, "sim.modelExchangeResult");
+    if (!type_status) {
+        return ValueResult<JsonObject>::Failure(type_status.code, type_status.message);
+    }
+    const JsonValue* result = FindObjectValue(response.value, "result");
+    const JsonObject* object = result == nullptr ? nullptr : result->AsObject();
+    if (object == nullptr) {
+        return ValueResult<JsonObject>::Failure(
+            "GATEWAY_PROTOCOL_ERROR",
+            "Gateway returned an invalid Model Exchange result");
+    }
+    return ValueResult<JsonObject>::Success(*object);
 }
 
 OperationResult GatewayClient::Reconfigure(const std::map<std::string, ScalarValue>& values) {

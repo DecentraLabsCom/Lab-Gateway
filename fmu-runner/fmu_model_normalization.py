@@ -9,6 +9,103 @@ from fmi_ls_struct import normalize_fmi_ls_struct
 
 
 ModelMetadata = dict[str, Any]
+_MAX_MODEL_STRUCTURE_ENTRIES = 100_000
+_MAX_FMI_VALUE_REFERENCE = (1 << 32) - 1
+_MODEL_STRUCTURE_KINDS = {
+    "outputs": "Output",
+    "derivatives": "ContinuousStateDerivative",
+    "clockedStates": "ClockedState",
+    "initialUnknowns": "InitialUnknown",
+    "eventIndicators": "EventIndicator",
+    "residuals": "Residual",
+    "invariants": "Invariant",
+}
+_DEPENDENCY_KINDS = {"dependent", "constant", "fixed", "tunable", "discrete"}
+
+
+def _normalize_model_structure(raw: Any, value_references: set[int], *, allow_dae: bool) -> dict[str, list[dict[str, Any]]]:
+    if not isinstance(raw, dict) or set(raw) - set(_MODEL_STRUCTURE_KINDS):
+        raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+    normalized: dict[str, list[dict[str, Any]]] = {}
+    for field, _xml_kind in _MODEL_STRUCTURE_KINDS.items():
+        if field in {"residuals", "invariants"} and not allow_dae:
+            continue
+        raw_entries = raw.get(field, [])
+        if not isinstance(raw_entries, list) or len(raw_entries) > _MAX_MODEL_STRUCTURE_ENTRIES:
+            raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+        entries: list[dict[str, Any]] = []
+        seen_references: set[int] = set()
+        for raw_entry in raw_entries:
+            if not isinstance(raw_entry, dict):
+                raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+            reference = _normalize_fmi_non_negative_integer(raw_entry.get("valueReference"))
+            if (
+                reference is None
+                or reference > _MAX_FMI_VALUE_REFERENCE
+                or reference not in value_references
+                or reference in seen_references
+            ):
+                raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+            seen_references.add(reference)
+            entry: dict[str, Any] = {"valueReference": reference}
+            if "stateValueReference" in raw_entry:
+                state_reference = _normalize_fmi_non_negative_integer(raw_entry.get("stateValueReference"))
+                if (
+                    field != "derivatives"
+                    or state_reference is None
+                    or state_reference > _MAX_FMI_VALUE_REFERENCE
+                    or state_reference not in value_references
+                ):
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure state mapping")
+                entry["stateValueReference"] = state_reference
+                state_name = raw_entry.get("stateName")
+                if state_name is not None:
+                    if not isinstance(state_name, str) or not state_name or len(state_name) > 1024:
+                        raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure state mapping")
+                    entry["stateName"] = state_name
+            elif "stateName" in raw_entry:
+                raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure state mapping")
+            name = raw_entry.get("name")
+            if name is not None:
+                if not isinstance(name, str) or not name or len(name) > 1024:
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+                entry["name"] = name
+            dependencies = raw_entry.get("dependencies")
+            if dependencies is not None:
+                if not isinstance(dependencies, list) or len(dependencies) > _MAX_MODEL_STRUCTURE_ENTRIES:
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+                normalized_dependencies = []
+                for dependency in dependencies:
+                    value = _normalize_fmi_non_negative_integer(dependency)
+                    if value is None or value > _MAX_FMI_VALUE_REFERENCE or value not in value_references:
+                        raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+                    normalized_dependencies.append(value)
+                if len(normalized_dependencies) != len(set(normalized_dependencies)):
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+                entry["dependencies"] = normalized_dependencies
+            dependency_names = raw_entry.get("dependencyNames")
+            if dependency_names is not None:
+                if (
+                    not isinstance(dependency_names, list)
+                    or not isinstance(dependencies, list)
+                    or len(dependency_names) != len(dependencies)
+                    or any(not isinstance(dependency_name, str) or not dependency_name or len(dependency_name) > 1024 for dependency_name in dependency_names)
+                ):
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+                entry["dependencyNames"] = list(dependency_names)
+            dependency_kinds = raw_entry.get("dependenciesKind")
+            if dependency_kinds is not None:
+                if (
+                    not isinstance(dependency_kinds, list)
+                    or not isinstance(dependencies, list)
+                    or len(dependency_kinds) != len(dependencies)
+                    or any(not isinstance(kind, str) or kind not in _DEPENDENCY_KINDS for kind in dependency_kinds)
+                ):
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+                entry["dependenciesKind"] = list(dependency_kinds)
+            entries.append(entry)
+        normalized[field] = entries
+    return normalized
 
 
 def _normalize_fmi_number(value: Any, *, integer: bool = False) -> int | float | None:
@@ -113,6 +210,9 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
     initial = raw.get("initial")
     if isinstance(initial, str) and initial.strip():
         entry["initial"] = initial.strip()[:32]
+    reinit = raw.get("reinit")
+    if isinstance(reinit, bool):
+        entry["reinit"] = reinit
     raw_clocks = raw.get("clocks")
     if isinstance(raw_clocks, list) and len(raw_clocks) <= 256:
         clock_references = [
@@ -347,6 +447,33 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
         "defaultStepSize": optional_number("defaultStepSize"),
         "modelVariables": [],
     }
+    raw_available_interfaces = payload.get("availableExecutionInterfaces")
+    if raw_available_interfaces is None:
+        raw_available_interfaces = [
+            name
+            for name, supported in (
+                ("CoSimulation", normalized["supportsCoSimulation"]),
+                ("ModelExchange", normalized["supportsModelExchange"]),
+            )
+            if supported
+        ]
+    if (
+        not isinstance(raw_available_interfaces, list)
+        or any(
+            not isinstance(name, str) or name not in {"CoSimulation", "ModelExchange"}
+            for name in raw_available_interfaces
+        )
+        or len(raw_available_interfaces) != len(set(raw_available_interfaces))
+        or any(
+            name == "CoSimulation" and not normalized["supportsCoSimulation"]
+            or name == "ModelExchange" and not normalized["supportsModelExchange"]
+            for name in raw_available_interfaces
+        )
+    ):
+        raise HTTPException(status_code=502, detail="Station backend returned invalid executable FMI interfaces")
+    normalized["availableExecutionInterfaces"] = [
+        name for name in ("CoSimulation", "ModelExchange") if name in raw_available_interfaces
+    ]
     fmi_ls_dae = payload.get("fmiLsDae")
     if normalized["supportsFmiLsDae"]:
         # Keep only bounded summary metadata and the selector name required to
@@ -393,12 +520,97 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
                 "algebraicVariables": algebraic_variables,
                 "residualVariableCount": residual_variable_count,
             }
+            raw_algebraic_references = fmi_ls_dae.get("algebraicValueReferences")
+            if isinstance(raw_algebraic_references, list):
+                algebraic_references = [
+                    _normalize_fmi_non_negative_integer(value)
+                    for value in raw_algebraic_references
+                ]
+                if (
+                    len(algebraic_references) != len(algebraic_variables)
+                    or any(value is None or value > _MAX_FMI_VALUE_REFERENCE for value in algebraic_references)
+                    or len(set(algebraic_references)) != len(algebraic_references)
+                ):
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+                normalized["fmiLsDae"]["algebraicValueReferences"] = algebraic_references
+            raw_residuals = fmi_ls_dae.get("residualVariables")
+            if isinstance(raw_residuals, list):
+                if len(raw_residuals) != residual_variable_count or len(raw_residuals) > 100_000:
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+                residuals = []
+                for residual in raw_residuals:
+                    if not isinstance(residual, dict):
+                        raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+                    name = residual.get("name")
+                    variable_type = residual.get("type")
+                    reference = _normalize_fmi_non_negative_integer(residual.get("valueReference"))
+                    if (
+                        not isinstance(name, str) or not name or len(name) > 1024
+                        or variable_type not in {"Float32", "Float64"}
+                        or reference is None or reference > _MAX_FMI_VALUE_REFERENCE
+                    ):
+                        raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+                    residuals.append({"name": name, "type": variable_type, "valueReference": reference})
+                normalized["fmiLsDae"]["residualVariables"] = residuals
+            raw_dae_structure = fmi_ls_dae.get("modelStructure")
+            if isinstance(raw_dae_structure, list):
+                if len(raw_dae_structure) > _MAX_MODEL_STRUCTURE_ENTRIES:
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+                dae_structure: dict[str, list[dict[str, Any]]] = {
+                    field: [] for field in _MODEL_STRUCTURE_KINDS
+                }
+                kind_fields = {value: key for key, value in _MODEL_STRUCTURE_KINDS.items()}
+                for item in raw_dae_structure:
+                    if not isinstance(item, dict) or item.get("kind") not in kind_fields:
+                        raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-DAE metadata")
+                    field = kind_fields[item["kind"]]
+                    entry = {key: value for key, value in item.items() if key != "kind"}
+                    dae_structure[field].append(entry)
+                normalized["fmiLsDae"]["modelStructure"] = _normalize_model_structure(
+                    dae_structure,
+                    {
+                        int(variable["valueReference"])
+                        for variable in raw_variables
+                        if isinstance(variable, dict)
+                        and isinstance(variable.get("valueReference"), int)
+                        and not isinstance(variable.get("valueReference"), bool)
+                    },
+                    allow_dae=True,
+                )
     elif payload.get("fmiLsDae") is not None:
         raise HTTPException(status_code=502, detail="Station backend returned inconsistent FMI-LS-DAE metadata")
     for field in ("numberOfContinuousStates", "numberOfEventIndicators"):
         value = payload.get(field)
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             normalized[field] = value
+    if supports_me is True:
+        raw_model_structure = payload.get("modelStructure")
+        if raw_model_structure is not None:
+            references = {
+                int(variable["valueReference"])
+                for variable in normalized["modelVariables"]
+                if isinstance(variable.get("valueReference"), int)
+                and not isinstance(variable.get("valueReference"), bool)
+            }
+            normalized["modelStructure"] = _normalize_model_structure(
+                raw_model_structure,
+                references,
+                allow_dae=False,
+            )
+        raw_me_capabilities = payload.get("modelExchangeCapabilities")
+        if raw_me_capabilities is not None:
+            if not isinstance(raw_me_capabilities, dict):
+                raise HTTPException(status_code=502, detail="Station backend returned invalid FMI Model Exchange capabilities")
+            allowed_me_capabilities = {
+                "needsExecutionTool", "canBeInstantiatedOnlyOncePerProcess", "canNotUseMemoryManagementFunctions",
+                "canGetAndSetFMUstate", "canSerializeFMUstate", "providesDirectionalDerivative",
+                "providesAdjointDerivatives", "completedIntegratorStepNotNeeded", "needsCompletedIntegratorStep",
+            }
+            if set(raw_me_capabilities) - allowed_me_capabilities or any(
+                not isinstance(value, bool) for value in raw_me_capabilities.values()
+            ):
+                raise HTTPException(status_code=502, detail="Station backend returned invalid FMI Model Exchange capabilities")
+            normalized["modelExchangeCapabilities"] = dict(raw_me_capabilities)
 
     for field, maximum_length in (
         ("description", 4096),

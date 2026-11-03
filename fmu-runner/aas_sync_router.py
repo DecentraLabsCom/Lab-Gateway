@@ -103,6 +103,7 @@ def create_aas_sync_router(
     record_aasx: Any = None,
     invalidate_access_policy: Any = None,
     get_access_policy_status: Any = None,
+    update_authorized_execution_interfaces: Any = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -279,6 +280,46 @@ def create_aas_sync_router(
         if not isinstance(status, dict):
             raise HTTPException(status_code=503, detail="FMU access policy status is unavailable")
         return JSONResponse(status, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+    @router.post("/aas-admin/fmu/{access_key}/access-policy")
+    async def update_fmu_execution_interfaces(access_key: str, request: Request):
+        if update_authorized_execution_interfaces is None:
+            raise HTTPException(status_code=503, detail="FMU execution-interface policy is unavailable")
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > 4096:
+                    raise HTTPException(status_code=413, detail="Execution-interface policy request is too large")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid request length") from exc
+        body_bytes = bytearray()
+        async for chunk in request.stream():
+            body_bytes.extend(chunk)
+            if len(body_bytes) > 4096:
+                raise HTTPException(status_code=413, detail="Execution-interface policy request is too large")
+        try:
+            body = json.loads(body_bytes.decode("utf-8"))
+        except (UnicodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid execution-interface policy request") from exc
+        if not isinstance(body, dict) or set(body) != {"labId", "authorizedExecutionInterfaces"}:
+            raise HTTPException(status_code=400, detail="Invalid execution-interface policy request")
+        lab_id = body.get("labId")
+        interfaces = body.get("authorizedExecutionInterfaces")
+        if not isinstance(lab_id, str) or not lab_id.strip() or len(lab_id) > 128:
+            raise HTTPException(status_code=400, detail="Invalid laboratory ID")
+        try:
+            saved = await update_authorized_execution_interfaces(lab_id, access_key, interfaces)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("FMU execution-interface policy update failed for lab %s: %s", lab_id, type(exc).__name__)
+            raise HTTPException(status_code=503, detail="FMU execution-interface policy could not be saved") from exc
+        if callable(invalidate_access_policy):
+            invalidate_access_policy(lab_id)
+        return JSONResponse(
+            {"authorizedExecutionInterfaces": saved},
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
 
     @router.post("/aas-admin/aas/{lab_id}/sync")
     async def aas_sync_resource_aasx(lab_id: str, request: Request):

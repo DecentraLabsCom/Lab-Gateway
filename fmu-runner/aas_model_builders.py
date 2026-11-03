@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
 
-from simulation_access_policy import build_effective_policy, build_part4_access_rules, fmi_interface_digest
+from simulation_access_policy import (
+    build_effective_policy,
+    build_part4_access_rules,
+    default_authorized_execution_interfaces,
+    fmi_interface_digest,
+)
 from fmi_ls_struct import normalize_fmi_ls_struct
 
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
@@ -46,6 +51,10 @@ _SEMANTIC_ID_FMI_LS_STRUCT = "urn:decentralabs:aas:FmiLsStruct:1"
 _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:InterfaceDigest:1"
 
 _SEMANTIC_ID_ACCESS_GENERATED_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:GeneratedPolicyDigest:1"
+
+_SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES = (
+    "urn:decentralabs:aas:SimulationAccessControl:AuthorizedExecutionInterfaces:1"
+)
 
 _SIMULATION_SEMANTICS = {
     "summary": "https://admin-shell.io/idta/SimulationModels/Summary/1/0",
@@ -472,6 +481,7 @@ def build_simulation_access_control_submodel(
     ).encode("utf-8")
     digest = fmi_interface_digest(metadata)
     generated_digest = hashlib.sha256(encoded_rules).hexdigest()
+    authorized_interfaces = default_authorized_execution_interfaces(metadata)
     return {
         "id": _submodel_id_for_access_control(lab_id),
         "idShort": "SimulationAccessControl",
@@ -485,6 +495,12 @@ def build_simulation_access_control_submodel(
             _standard_property(
                 "GeneratedPolicyDigest", "xs:string", generated_digest,
                 _SEMANTIC_ID_ACCESS_GENERATED_DIGEST,
+            ),
+            _standard_property(
+                "AuthorizedExecutionInterfaces",
+                "xs:string",
+                json.dumps(authorized_interfaces, separators=(",", ":")),
+                _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
             ),
             {
                 "idShort": "AllAccessPermissionRules",

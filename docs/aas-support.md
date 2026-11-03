@@ -378,6 +378,26 @@ policy from the configured AAS server using provider-side configuration. Its
 cache is bounded to five seconds and is invalidated when AAS synchronization or linking changes the
 association.
 
+The same submodel contains the DecentraLabs property
+`AuthorizedExecutionInterfaces` (`xs:string` with a JSON array value), which
+authorizes native proxy-FMU interfaces independently of Part 4 variable
+rights. Its semantic ID is
+`urn:decentralabs:aas:SimulationAccessControl:AuthorizedExecutionInterfaces:1`.
+Values must be a non-empty subset of the interfaces declared and executable
+for the active FMU. For an FMU declaring both Co-Simulation and Model
+Exchange, generated AAS defaults to Co-Simulation; Lab Manager lets the
+provider authorize either or both. A single available interface is selected
+automatically and has no provider selector. Imported AASX packages may carry
+the same property. When an older or linked AAS has no property, the Gateway
+uses the same safe default and does not write to the linked shell.
+
+This property controls interfaces exposed by `proxy.fmu`; it does not add a
+mode selector to the Three.js SDK or generated GLB applications. Those web
+clients always use the standard remote Co-Simulation flow. Selecting Model
+Exchange for a native proxy permits the importing FMI tool to evaluate the
+remote model through ME calls; the source FMU and its binary remain on the
+provider side.
+
 The current DecentraLabs profile is based on the IDTA 01004 v3.1 JSON
 serialization and accepts exact `REFERABLE` objects for
 `SimulationModels/Ports`, `READ` and `UPDATE` `ALLOW` rules, reusable Part 4

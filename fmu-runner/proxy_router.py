@@ -114,10 +114,22 @@ def create_proxy_router(
             access_policy = await get_effective_policy(claims)
             if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
+            authorized_interfaces = access_policy.get("authorizedExecutionInterfaces")
+            if not isinstance(authorized_interfaces, list) or not authorized_interfaces:
+                raise HTTPException(status_code=503, detail="Authorized FMI execution interfaces are unavailable")
             model_metadata = filter_model_description(
                 access_policy,
                 model_metadata,
                 include_proxy_dae_selector=True,
+                include_proxy_model_exchange="ModelExchange" in authorized_interfaces,
+            )
+            model_metadata["authorizedExecutionInterfaces"] = list(authorized_interfaces)
+        else:
+            available_interfaces = model_metadata.get("availableExecutionInterfaces")
+            if not isinstance(available_interfaces, list) or not available_interfaces:
+                available_interfaces = ["CoSimulation"] if model_metadata.get("supportsCoSimulation") else ["ModelExchange"]
+            model_metadata["authorizedExecutionInterfaces"] = (
+                ["CoSimulation"] if "CoSimulation" in available_interfaces else list(available_interfaces)
             )
         raw_parameter_sets = (
             await get_authorized_parameter_sets(claims=claims)
@@ -163,6 +175,11 @@ def create_proxy_router(
                 config_payload=config_payload,
                 runtime_files=runtime_files,
                 fmi_ls_struct=model_metadata.get("fmiLsStruct"),
+                fmi_ls_dae=(
+                    model_metadata.get("fmiLsDae")
+                    if "ModelExchange" in model_metadata.get("authorizedExecutionInterfaces", [])
+                    else None
+                ),
                 fmi_ls_parameter_sets=fmi_ls_parameter_sets,
                 fmi_ls_experiments=fmi_ls_experiments,
                 fmi_ls_model_metadata=model_metadata,

@@ -23,6 +23,8 @@ class ProxyFmiLsRefSizeLimitError(ValueError):
 
 _FMI_LS_NAMESPACE = "http://fmi-standard.org/fmi-ls-manifest"
 _FMI_LS_STRUCT_MANIFEST_PATH = f"extra/{MANIFEST_NAME}/fmi-ls-manifest.xml"
+_FMI_LS_DAE_NAME = "org.fmi-standard.fmi-ls-dae"
+_FMI_LS_DAE_MANIFEST_PATH = f"extra/{_FMI_LS_DAE_NAME}/fmi-ls-manifest.xml"
 _FMI_LS_STRUCT_TERMINALS_PATH = "terminalsAndIcons/terminalsAndIcons.xml"
 _MAX_FMI_LS_STRUCT_XML_BYTES = 1024 * 1024
 _FMI_LS_REF_NAME = "org.fmi-standard.fmi-ls-ref"
@@ -372,12 +374,100 @@ def _fmi_ls_struct_archive_entries(model_xml: bytes, value: Any) -> tuple[tuple[
     return entries if sum(len(content) for _, content in entries) <= _MAX_FMI_LS_STRUCT_XML_BYTES else ()
 
 
+def _fmi_ls_dae_archive_entry(value: Any, model_metadata: Any) -> tuple[str, bytes] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("FMI-LS-DAE proxy metadata is invalid")
+    manifest_name = value.get("manifestName")
+    manifest_version = value.get("manifestVersion")
+    enable_parameter = value.get("enableDAEParameter")
+    algebraic_references = value.get("algebraicValueReferences")
+    model_structure = value.get("modelStructure")
+    residuals = value.get("residualVariables")
+    if (
+        manifest_name != _FMI_LS_DAE_NAME
+        or manifest_version != "1.0.0-alpha.1"
+        or not isinstance(enable_parameter, str)
+        or not enable_parameter
+        or not isinstance(algebraic_references, list)
+        or not isinstance(model_structure, Mapping)
+        or not isinstance(residuals, list)
+    ):
+        raise ValueError("FMI-LS-DAE proxy metadata is incomplete")
+    root = ET.Element("fmiDAEManifest", {
+        f"{{{_FMI_LS_NAMESPACE}}}fmi-ls-name": manifest_name,
+        f"{{{_FMI_LS_NAMESPACE}}}fmi-ls-version": manifest_version,
+        f"{{{_FMI_LS_NAMESPACE}}}fmi-ls-description": "Layered standard for DAE support in FMI.",
+    })
+    source_variables = model_metadata.get("modelVariables", []) if isinstance(model_metadata, Mapping) else []
+    variables_by_name = {
+        variable.get("name"): variable
+        for variable in source_variables
+        if isinstance(variable, Mapping) and isinstance(variable.get("name"), str)
+    }
+    selector = variables_by_name.get(enable_parameter)
+    if not isinstance(selector, Mapping) or not isinstance(selector.get("valueReference"), int):
+        raise ValueError("FMI-LS-DAE selector is absent from the proxy model variables")
+    ET.SubElement(root, "EnableDAEParameter", {"valueReference": str(selector["valueReference"])})
+    algebraic_node = ET.SubElement(root, "AlgebraicVariables")
+    if len(algebraic_references) > 100_000:
+        raise ProxyFmiLsRefSizeLimitError("FMI-LS-DAE declaration exceeds the supported size")
+    for reference in algebraic_references:
+        if isinstance(reference, bool) or not isinstance(reference, int) or reference < 0:
+            raise ValueError("FMI-LS-DAE algebraic variable reference is invalid")
+        ET.SubElement(algebraic_node, "AlgebraicVariable", {"valueReference": str(reference)})
+    structure_node = ET.SubElement(root, "ModelStructure")
+    element_names = {
+        "outputs": "Output",
+        "derivatives": "ContinuousStateDerivative",
+        "clockedStates": "ClockedState",
+        "initialUnknowns": "InitialUnknown",
+        "eventIndicators": "EventIndicator",
+        "residuals": "Residual",
+        "invariants": "Invariant",
+    }
+    entry_count = 0
+    for field, element_name in element_names.items():
+        entries = model_structure.get(field, [])
+        if not isinstance(entries, list):
+            raise ValueError("FMI-LS-DAE ModelStructure is invalid")
+        entry_count += len(entries)
+        if entry_count > 100_000:
+            raise ProxyFmiLsRefSizeLimitError("FMI-LS-DAE ModelStructure exceeds the supported size")
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                raise ValueError("FMI-LS-DAE ModelStructure entry is invalid")
+            reference = entry.get("valueReference")
+            if isinstance(reference, bool) or not isinstance(reference, int) or reference < 0:
+                raise ValueError("FMI-LS-DAE ModelStructure valueReference is invalid")
+            attributes = {"valueReference": str(reference)}
+            if "dependencies" in entry:
+                dependencies = entry["dependencies"]
+                if not isinstance(dependencies, list) or any(
+                    isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in dependencies
+                ):
+                    raise ValueError("FMI-LS-DAE ModelStructure dependencies are invalid")
+                attributes["dependencies"] = " ".join(str(item) for item in dependencies)
+            if "dependenciesKind" in entry:
+                kinds = entry["dependenciesKind"]
+                if not isinstance(kinds, list) or any(not isinstance(item, str) for item in kinds):
+                    raise ValueError("FMI-LS-DAE ModelStructure dependenciesKind is invalid")
+                attributes["dependenciesKind"] = " ".join(kinds)
+            ET.SubElement(structure_node, element_name, attributes)
+    content = _xml_bytes(root)
+    if len(content) > _MAX_FMI_LS_STRUCT_XML_BYTES:
+        raise ProxyFmiLsRefSizeLimitError("FMI-LS-DAE manifest exceeds the supported size")
+    return _FMI_LS_DAE_MANIFEST_PATH, content
+
+
 def build_proxy_artifact(
     *,
     model_xml: bytes,
     config_payload: Mapping[str, Any],
     runtime_files: Iterable[RuntimeFile],
     fmi_ls_struct: Any = None,
+    fmi_ls_dae: Any = None,
     fmi_ls_parameter_sets: Any = None,
     fmi_ls_experiments: Any = None,
     fmi_ls_model_metadata: Any = None,
@@ -394,6 +484,9 @@ def build_proxy_artifact(
         )
         for archive_name, content in _fmi_ls_struct_archive_entries(model_xml, fmi_ls_struct):
             archive.writestr(archive_name, content)
+        dae_entry = _fmi_ls_dae_archive_entry(fmi_ls_dae, fmi_ls_model_metadata)
+        if dae_entry is not None:
+            archive.writestr(*dae_entry)
         for archive_name, content in _fmi_ls_ref_archive_entries(
             parameter_sets=fmi_ls_parameter_sets,
             experiments=fmi_ls_experiments,

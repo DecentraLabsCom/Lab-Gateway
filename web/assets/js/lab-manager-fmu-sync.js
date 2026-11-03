@@ -18,12 +18,45 @@
         let gatewayUploadedAssetType = '';
         let acknowledgedAssetValidationKey = '';
         let lastAssetValidation = null;
+        let currentAccessPolicyStatus = null;
+
+        function updateExecutionInterfaceEditor(status = currentAccessPolicyStatus) {
+            const editor = fields.executionInterfaceEditor;
+            const saveButton = fields.saveExecutionInterfacesButton;
+            const available = Array.isArray(status?.availableExecutionInterfaces)
+                ? status.availableExecutionInterfaces
+                : [];
+            const authorized = Array.isArray(status?.authorizedExecutionInterfaces)
+                ? status.authorizedExecutionInterfaces
+                : [];
+            if (editor) editor.hidden = available.length < 2;
+            if (fields.authorizeCoSimulation) {
+                fields.authorizeCoSimulation.checked = authorized.includes('CoSimulation');
+                fields.authorizeCoSimulation.disabled = status?.executionInterfacePolicyEditable !== true;
+            }
+            if (fields.authorizeModelExchange) {
+                fields.authorizeModelExchange.checked = authorized.includes('ModelExchange');
+                fields.authorizeModelExchange.disabled = status?.executionInterfacePolicyEditable !== true;
+            }
+            const selected = [
+                ...(fields.authorizeCoSimulation?.checked ? ['CoSimulation'] : []),
+                ...(fields.authorizeModelExchange?.checked ? ['ModelExchange'] : []),
+            ];
+            const unchanged = selected.length === authorized.length
+                && selected.every((name) => authorized.includes(name));
+            if (saveButton) {
+                saveButton.disabled = status?.executionInterfacePolicyEditable !== true
+                    || selected.length === 0
+                    || unchanged;
+            }
+        }
 
         function renderAccessPolicyStatus(status) {
             const panel = fields.accessPolicyStatus;
             const regenerateButton = fields.regenerateAccessPolicyButton;
             if (!panel) return;
             const state = String(status?.state || 'unavailable');
+            currentAccessPolicyStatus = status;
             const labels = {
                 generated: 'Generated defaults are active.',
                 customized: 'Provider-defined access rules are active.',
@@ -42,10 +75,14 @@
             if (status && Number.isFinite(Number(status.readableVariableCount))) {
                 panel.textContent += ` Readable variables: ${Number(status.readableVariableCount)}; writable variables: ${Number(status.writableVariableCount || 0)}.`;
             }
+            if (Array.isArray(status?.authorizedExecutionInterfaces) && status.authorizedExecutionInterfaces.length) {
+                panel.textContent += ` Native proxy interfaces: ${status.authorizedExecutionInterfaces.join(', ')}.`;
+            }
             if (regenerateButton) {
                 regenerateButton.hidden = status?.regenerationAvailable !== true;
                 regenerateButton.disabled = false;
             }
+            updateExecutionInterfaceEditor(status);
         }
 
         async function loadAccessPolicyStatus(laboratory = selectedLaboratory()) {
@@ -54,9 +91,12 @@
                 fields.accessPolicyStatus.textContent = 'Select an FMU to check its variable access rules.';
                 delete fields.accessPolicyStatus.dataset.state;
                 if (fields.regenerateAccessPolicyButton) fields.regenerateAccessPolicyButton.hidden = true;
+                currentAccessPolicyStatus = null;
+                updateExecutionInterfaceEditor(null);
                 return null;
             }
             fields.accessPolicyStatus.textContent = 'Checking FMU access rules…';
+            updateExecutionInterfaceEditor(null);
             const query = new urlSearchParamsCtor({ labId: laboratory.labId });
             try {
                 const response = await fetchImpl(
@@ -102,6 +142,44 @@
             } catch (error) {
                 showToast(`Access rule regeneration failed: ${error.message}`, 'error');
                 if (button) button.disabled = false;
+            }
+        }
+
+        async function saveExecutionInterfaces() {
+            const laboratory = selectedLaboratory();
+            if (laboratory.resourceType !== 1 || !laboratory.accessKey || !laboratory.labId) {
+                showToast('Select an FMU laboratory first', 'error');
+                return;
+            }
+            const authorizedExecutionInterfaces = [
+                ...(fields.authorizeCoSimulation?.checked ? ['CoSimulation'] : []),
+                ...(fields.authorizeModelExchange?.checked ? ['ModelExchange'] : []),
+            ];
+            if (!authorizedExecutionInterfaces.length) {
+                showToast('Authorize at least one FMI interface', 'error');
+                return;
+            }
+            const button = fields.saveExecutionInterfacesButton;
+            if (button) button.disabled = true;
+            try {
+                const response = await fetchImpl(
+                    `/aas-admin/fmu/${encodeURIComponentImpl(laboratory.accessKey)}/access-policy`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            labId: laboratory.labId,
+                            authorizedExecutionInterfaces,
+                        }),
+                    },
+                );
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+                showToast('Authorized FMI interfaces saved to AAS', 'success');
+                await loadAccessPolicyStatus(laboratory);
+            } catch (error) {
+                showToast(`FMI interface access could not be saved: ${error.message}`, 'error');
+                updateExecutionInterfaceEditor();
             }
         }
 
@@ -675,6 +753,11 @@
             fields.regenerateAccessPolicyButton?.addEventListener('click', () => {
                 void regenerateAccessPolicy();
             });
+            fields.authorizeCoSimulation?.addEventListener('change', () => updateExecutionInterfaceEditor());
+            fields.authorizeModelExchange?.addEventListener('change', () => updateExecutionInterfaceEditor());
+            fields.saveExecutionInterfacesButton?.addEventListener('click', () => {
+                void saveExecutionInterfaces();
+            });
             updateAssetVisibility();
         }
 
@@ -684,6 +767,7 @@
             initialize,
             loadAccessPolicyStatus,
             regenerateAccessPolicy,
+            saveExecutionInterfaces,
             renderAccessPolicyStatus,
             syncAasResource,
         });

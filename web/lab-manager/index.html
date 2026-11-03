@@ -821,6 +821,17 @@
                         <div class="digital-twin-validation mt-3" id="fmuAccessPolicyStatus" role="status" aria-live="polite">
                             Select an FMU to check its variable access rules.
                         </div>
+                        <div class="form-grid mt-3" id="fmuExecutionInterfaceEditor" hidden>
+                            <div class="field full">
+                                <span>Native proxy interfaces</span>
+                                <small class="muted-text">Choose which declared FMI interfaces can be used by the native proxy FMU.</small>
+                                <div class="inline-actions mt-2">
+                                    <label><input type="checkbox" id="fmuAuthorizeCoSimulation"> Co-Simulation</label>
+                                    <label><input type="checkbox" id="fmuAuthorizeModelExchange"> Model Exchange</label>
+                                    <button class="ghost-btn" id="fmuExecutionInterfacesSaveBtn" type="button" disabled>Save interface access</button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="actions inline-actions mt-2">
                             <button class="ghost-btn" id="fmuAccessPolicyCheckBtn" type="button">Check access rules</button>
                             <button class="danger-btn" id="fmuAccessPolicyRegenerateBtn" type="button" hidden>
@@ -1408,7 +1419,7 @@
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v2"></script>
     <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v2"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
-    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v13"></script>
+    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v14"></script>
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v7"></script>
     <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v3"></script>
     <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v7"></script>
@@ -1419,7 +1430,7 @@
     <script src="../assets/js/lab-manager-power-status.js?v=lab-manager-power-status-v2"></script>
     <script src="../assets/js/lab-manager-power-controllers.js?v=lab-manager-power-controllers-v6"></script>
         <script src="../assets/js/lab-manager-power-policies.js?v=lab-manager-power-policies-v5"></script>
-        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v6"></script>
+        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v7"></script>
     <script src="../assets/js/lab-manager-reservations-feature.js?v=lab-manager-reservations-feature-v1"></script>
     <script src="../assets/js/lab-manager.js?v=workflow-tabs-v23"></script>
     <script src="../assets/js/lab-publisher-values.js?v=publisher-values-v1"></script>

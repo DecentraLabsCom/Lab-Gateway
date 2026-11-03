@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <cstring>
+#include <cmath>
 #include <new>
 #include <string>
 
@@ -14,10 +15,18 @@ namespace {
 struct Fmi2Instance {
     fmi2CallbackFunctions callbacks{};
     bool logging_enabled = false;
+    bool model_exchange = false;
+    enum class Mode { kInstantiated, kInitialization, kEvent, kContinuous, kStep, kTerminated } mode = Mode::kInstantiated;
     std::string instance_name;
     ProxyRuntime runtime;
     std::string last_string_status;
 };
+
+bool IsModelExchangeEvaluationMode(const Fmi2Instance::Mode mode) {
+    return mode == Fmi2Instance::Mode::kInitialization
+        || mode == Fmi2Instance::Mode::kEvent
+        || mode == Fmi2Instance::Mode::kContinuous;
+}
 
 struct Fmi2StateHandle {
     std::string checkpoint;
@@ -63,6 +72,45 @@ void AttachLogger(Fmi2Instance* instance) {
     });
 }
 
+fmi2Status ModelExchangeVector(Fmi2Instance* instance,
+                               const std::string& operation,
+                               const fmi2Real input[],
+                               fmi2Real output[],
+                               const size_t count) {
+    if (instance == nullptr || (count > 0 && input != nullptr && operation != "setContinuousStates")
+        || (count > 0 && output != nullptr && operation == "setContinuousStates")) return fmi2Fatal;
+    JsonObject arguments;
+    if (operation == "setContinuousStates") {
+        if (count > 0 && input == nullptr) return fmi2Fatal;
+        JsonArray values;
+        values.reserve(count);
+        for (size_t index = 0; index < count; ++index) {
+            if (!std::isfinite(input[index])) return fmi2Error;
+            values.emplace_back(input[index]);
+        }
+        arguments.emplace("values", JsonValue(std::move(values)));
+    } else if (count > 0 && output == nullptr) {
+        return fmi2Fatal;
+    }
+    const auto response = instance->runtime.ModelExchangeCall(operation, arguments);
+    if (!response) return ToFmiStatus(instance, response.status);
+    if (operation == "setContinuousStates") return fmi2OK;
+    const JsonValue* raw_values = FindObjectValue(response.value, "values");
+    const JsonArray* values = raw_values == nullptr ? nullptr : raw_values->AsArray();
+    if (values == nullptr || values->size() != count) {
+        Log(instance, fmi2Error, "logStatusError", "Gateway returned an invalid Model Exchange vector");
+        return fmi2Error;
+    }
+    for (size_t index = 0; index < count; ++index) {
+        if (!(*values)[index].IsNumber() || !std::isfinite((*values)[index].AsNumber())) {
+            Log(instance, fmi2Error, "logStatusError", "Gateway returned a non-finite Model Exchange vector value");
+            return fmi2Error;
+        }
+        output[index] = (*values)[index].AsNumber();
+    }
+    return fmi2OK;
+}
+
 }  // namespace
 
 }  // namespace decentralabs::proxy
@@ -71,6 +119,9 @@ using decentralabs::proxy::AsInstance;
 using decentralabs::proxy::AttachLogger;
 using decentralabs::proxy::Fmi2Instance;
 using decentralabs::proxy::Fmi2StateHandle;
+using decentralabs::proxy::FindObjectValue;
+using decentralabs::proxy::JsonObject;
+using decentralabs::proxy::JsonValue;
 using decentralabs::proxy::kMaximumSerializedStateTokenBytes;
 using decentralabs::proxy::Log;
 using decentralabs::proxy::OperationResult;
@@ -95,7 +146,8 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
                               const fmi2CallbackFunctions* functions,
                               fmi2Boolean,
                               fmi2Boolean loggingOn) {
-    if (fmuType != fmi2CoSimulation || instanceName == nullptr || fmuResourceLocation == nullptr || functions == nullptr) {
+    if ((fmuType != fmi2CoSimulation && fmuType != fmi2ModelExchange)
+        || instanceName == nullptr || fmuResourceLocation == nullptr || functions == nullptr) {
         return nullptr;
     }
 
@@ -108,6 +160,13 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
     const OperationResult status = instance->runtime.Configure(instanceName, fmuResourceLocation);
     if (!status) {
         Log(instance, fmi2Error, "logStatusError", status.message);
+        delete instance;
+        return nullptr;
+    }
+    instance->model_exchange = fmuType == fmi2ModelExchange;
+    const OperationResult interface_status = instance->runtime.SetModelExchangeMode(instance->model_exchange);
+    if (!interface_status) {
+        Log(instance, fmi2Error, "logStatusError", interface_status.message);
         delete instance;
         return nullptr;
     }
@@ -134,7 +193,9 @@ fmi2Status fmi2SetupExperiment(fmi2Component c,
         ? std::optional<double>(stopTime)
         : std::nullopt;
     const double step = model.default_step_size.value_or(0.01);
-    return ToFmiStatus(instance, instance->runtime.SetupExperiment(startTime, effective_stop, step));
+    const auto status = instance->runtime.SetupExperiment(startTime, effective_stop, step);
+    if (status) instance->mode = Fmi2Instance::Mode::kInstantiated;
+    return ToFmiStatus(instance, status);
 }
 
 fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
@@ -142,7 +203,9 @@ fmi2Status fmi2EnterInitializationMode(fmi2Component c) {
     if (instance == nullptr) {
         return fmi2Fatal;
     }
-    return ToFmiStatus(instance, instance->runtime.EnterInitializationMode());
+    const auto status = instance->runtime.EnterInitializationMode();
+    if (status) instance->mode = Fmi2Instance::Mode::kInitialization;
+    return ToFmiStatus(instance, status);
 }
 
 fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
@@ -150,7 +213,132 @@ fmi2Status fmi2ExitInitializationMode(fmi2Component c) {
     if (instance == nullptr) {
         return fmi2Fatal;
     }
-    return ToFmiStatus(instance, instance->runtime.ExitInitializationMode());
+    const auto status = instance->runtime.ExitInitializationMode();
+    if (status) instance->mode = instance->model_exchange ? Fmi2Instance::Mode::kEvent : Fmi2Instance::Mode::kStep;
+    return ToFmiStatus(instance, status);
+}
+
+fmi2Status fmi2EnterEventMode(fmi2Component c) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange || instance->mode != Fmi2Instance::Mode::kContinuous) {
+        Log(instance, fmi2Error, "logStatusError", "Event Mode requires Model Exchange Continuous-Time Mode");
+        return fmi2Error;
+    }
+    const auto status = instance->runtime.EnterModelExchangeEventMode();
+    if (status) instance->mode = Fmi2Instance::Mode::kEvent;
+    return ToFmiStatus(instance, status);
+}
+
+fmi2Status fmi2NewDiscreteStates(fmi2Component c, fmi2EventInfo* eventInfo) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr || eventInfo == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange || instance->mode != Fmi2Instance::Mode::kEvent) {
+        Log(instance, fmi2Error, "logStatusError", "newDiscreteStates requires Model Exchange Event Mode");
+        return fmi2Error;
+    }
+    bool terminate = false;
+    bool next_defined = false;
+    bool next_update = false;
+    bool nominals_changed = false;
+    bool states_changed = false;
+    double next_time = 0.0;
+    const auto status = instance->runtime.UpdateDiscreteStates(
+        &terminate, &next_defined, &next_time, &next_update, &nominals_changed, &states_changed);
+    if (!status) return ToFmiStatus(instance, status);
+    eventInfo->newDiscreteStatesNeeded = next_update ? fmi2True : fmi2False;
+    eventInfo->terminateSimulation = terminate ? fmi2True : fmi2False;
+    eventInfo->nominalsOfContinuousStatesChanged = nominals_changed ? fmi2True : fmi2False;
+    eventInfo->valuesOfContinuousStatesChanged = states_changed ? fmi2True : fmi2False;
+    eventInfo->nextEventTimeDefined = next_defined ? fmi2True : fmi2False;
+    eventInfo->nextEventTime = next_defined ? next_time : 0.0;
+    return fmi2OK;
+}
+
+fmi2Status fmi2EnterContinuousTimeMode(fmi2Component c) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange || instance->mode != Fmi2Instance::Mode::kEvent) {
+        Log(instance, fmi2Error, "logStatusError", "Continuous-Time Mode requires Model Exchange Event Mode");
+        return fmi2Error;
+    }
+    const auto status = instance->runtime.EnterModelExchangeContinuousTimeMode();
+    if (status) instance->mode = Fmi2Instance::Mode::kContinuous;
+    return ToFmiStatus(instance, status);
+}
+
+fmi2Status fmi2SetTime(fmi2Component c, fmi2Real time) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange
+        || (instance->mode != Fmi2Instance::Mode::kContinuous && instance->mode != Fmi2Instance::Mode::kEvent)
+        || !std::isfinite(time)) {
+        Log(instance, fmi2Error, "logStatusError", "setTime requires Model Exchange Event or Continuous-Time Mode and a finite time");
+        return fmi2Error;
+    }
+    const JsonObject arguments = {{"time", JsonValue(time)}};
+    const auto result = instance->runtime.ModelExchangeCall("setTime", arguments);
+    return result ? fmi2OK : ToFmiStatus(instance, result.status);
+}
+
+fmi2Status fmi2SetContinuousStates(fmi2Component c, const fmi2Real x[], size_t nx) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange
+        || (instance->mode != Fmi2Instance::Mode::kContinuous && instance->mode != Fmi2Instance::Mode::kEvent)
+        || nx != instance->runtime.NumberOfContinuousStates()) return fmi2Error;
+    return ModelExchangeVector(instance, "setContinuousStates", x, nullptr, nx);
+}
+
+fmi2Status fmi2GetContinuousStates(fmi2Component c, fmi2Real x[], size_t nx) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange || !IsModelExchangeEvaluationMode(instance->mode)
+        || nx != instance->runtime.NumberOfContinuousStates()) return fmi2Error;
+    return ModelExchangeVector(instance, "getContinuousStates", nullptr, x, nx);
+}
+
+fmi2Status fmi2GetDerivatives(fmi2Component c, fmi2Real derivatives[], size_t nx) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange || !IsModelExchangeEvaluationMode(instance->mode)
+        || nx != instance->runtime.NumberOfContinuousStates()) return fmi2Error;
+    return ModelExchangeVector(instance, "getDerivatives", nullptr, derivatives, nx);
+}
+
+fmi2Status fmi2GetEventIndicators(fmi2Component c, fmi2Real eventIndicators[], size_t ni) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange || !IsModelExchangeEvaluationMode(instance->mode)
+        || ni != instance->runtime.NumberOfEventIndicators()) return fmi2Error;
+    return ModelExchangeVector(instance, "getEventIndicators", nullptr, eventIndicators, ni);
+}
+
+fmi2Status fmi2GetNominalsOfContinuousStates(fmi2Component c, fmi2Real x_nominal[], size_t nx) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange
+        || (instance->mode != Fmi2Instance::Mode::kContinuous && instance->mode != Fmi2Instance::Mode::kEvent)
+        || nx != instance->runtime.NumberOfContinuousStates()) return fmi2Error;
+    return ModelExchangeVector(instance, "getNominalsOfContinuousStates", nullptr, x_nominal, nx);
+}
+
+fmi2Status fmi2CompletedIntegratorStep(fmi2Component c,
+                                        fmi2Boolean noSetFMUStatePriorToCurrentPoint,
+                                        fmi2Boolean* enterEventMode,
+                                        fmi2Boolean* terminateSimulation) {
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) return fmi2Fatal;
+    if (!instance->model_exchange || instance->mode != Fmi2Instance::Mode::kContinuous) return fmi2Error;
+    const JsonObject arguments = {{"noSetFMUStatePriorToCurrentPoint", JsonValue(noSetFMUStatePriorToCurrentPoint == fmi2True)}};
+    const auto response = instance->runtime.ModelExchangeCall("completedIntegratorStep", arguments);
+    if (!response) return ToFmiStatus(instance, response.status);
+    const JsonValue* enter = FindObjectValue(response.value, "enterEventMode");
+    const JsonValue* terminate = FindObjectValue(response.value, "terminateSimulation");
+    if (enter == nullptr || !enter->IsBool() || terminate == nullptr || !terminate->IsBool()) return fmi2Error;
+    if (enterEventMode != nullptr) *enterEventMode = enter->AsBool() ? fmi2True : fmi2False;
+    if (terminateSimulation != nullptr) *terminateSimulation = terminate->AsBool() ? fmi2True : fmi2False;
+    return fmi2OK;
 }
 
 fmi2Status fmi2Terminate(fmi2Component c) {

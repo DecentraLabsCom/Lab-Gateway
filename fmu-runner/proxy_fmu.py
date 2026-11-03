@@ -229,14 +229,73 @@ def _validate_declared_type_references(model_metadata: dict, fmi_major_version: 
                 seen_values.add(item_value)
 
 
+def _execution_interfaces_for_proxy(model_metadata: dict) -> tuple[list[str], list[str]]:
+    available_interfaces = model_metadata.get("availableExecutionInterfaces")
+    if not isinstance(available_interfaces, list):
+        available_interfaces = [
+            name for name, supported in (
+                ("CoSimulation", model_metadata.get("supportsCoSimulation") is True),
+                ("ModelExchange", model_metadata.get("supportsModelExchange") is True),
+            ) if supported
+        ]
+    if "authorizedExecutionInterfaces" not in model_metadata:
+        authorized_interfaces = ["CoSimulation"] if "CoSimulation" in available_interfaces else list(available_interfaces)
+    else:
+        authorized_interfaces = model_metadata.get("authorizedExecutionInterfaces")
+        if not isinstance(authorized_interfaces, list) or not authorized_interfaces:
+            raise HTTPException(status_code=422, detail="Authorized FMI execution interfaces are invalid")
+    return available_interfaces, authorized_interfaces
+
+
 def _validate_proxy_generation_supported(model_metadata: dict):
-    simulation_kind = str(model_metadata.get("simulationKind") or "coSimulation").lower()
+    available_interfaces, authorized_interfaces = _execution_interfaces_for_proxy(model_metadata)
+    if (
+        any(name not in {"CoSimulation", "ModelExchange"} for name in available_interfaces)
+        or any(name not in available_interfaces for name in authorized_interfaces)
+        or len(authorized_interfaces) != len(set(authorized_interfaces))
+        or not authorized_interfaces
+    ):
+        raise HTTPException(status_code=422, detail="Authorized FMI execution interfaces do not match the source FMU")
     fmi_major_version = _parse_fmi_major_version(model_metadata.get("fmiVersion"))
-    if simulation_kind not in {"cosimulation", "modelexchange"} or fmi_major_version not in {2, 3}:
+    if not available_interfaces or fmi_major_version not in {2, 3}:
         raise HTTPException(
             status_code=422,
             detail="Generated proxy FMUs require an executable FMI 2 or FMI 3 Co-Simulation or Model Exchange source",
         )
+    if "ModelExchange" in authorized_interfaces:
+        model_structure = model_metadata.get("modelStructure")
+        if not isinstance(model_structure, dict):
+            raise HTTPException(status_code=422, detail="Model Exchange proxy requires the source FMI ModelStructure")
+        if (
+            isinstance(model_metadata.get("numberOfContinuousStates"), bool)
+            or not isinstance(model_metadata.get("numberOfContinuousStates"), int)
+            or model_metadata["numberOfContinuousStates"] < 0
+            or isinstance(model_metadata.get("numberOfEventIndicators"), bool)
+            or not isinstance(model_metadata.get("numberOfEventIndicators"), int)
+            or model_metadata["numberOfEventIndicators"] < 0
+        ):
+            raise HTTPException(status_code=422, detail="Model Exchange proxy requires valid state and event counts")
+        derivatives = model_structure.get("derivatives")
+        if not isinstance(derivatives, list):
+            raise HTTPException(status_code=422, detail="Model Exchange proxy requires ordered derivative metadata")
+        variables = model_metadata.get("modelVariables")
+        references = {
+            variable.get("valueReference")
+            for variable in variables or []
+            if isinstance(variable, dict) and isinstance(variable.get("valueReference"), int)
+            and not isinstance(variable.get("valueReference"), bool)
+        }
+        if model_metadata["numberOfContinuousStates"] > 0 and not derivatives:
+            raise HTTPException(status_code=422, detail="Model Exchange proxy has states but no ordered derivatives")
+        for derivative in derivatives:
+            if (
+                not isinstance(derivative, dict)
+                or derivative.get("valueReference") not in references
+                or isinstance(derivative.get("stateValueReference"), bool)
+                or not isinstance(derivative.get("stateValueReference"), int)
+                or derivative["stateValueReference"] not in references
+            ):
+                raise HTTPException(status_code=422, detail="Model Exchange proxy requires derivative-to-state mappings")
     _validate_declared_type_references(model_metadata, fmi_major_version)
     if fmi_major_version < 3:
         return
@@ -244,7 +303,7 @@ def _validate_proxy_generation_supported(model_metadata: dict):
     source_capabilities = model_metadata.get("capabilities")
     source_capabilities = source_capabilities if isinstance(source_capabilities, dict) else {}
     has_clock = False
-    source_uses_model_exchange = str(model_metadata.get("simulationKind") or "").lower() == "modelexchange"
+    source_uses_model_exchange = "ModelExchange" in authorized_interfaces
     model_variables = model_metadata.get("modelVariables", [])
     variables_by_reference = {
         variable.get("valueReference"): variable
@@ -350,7 +409,9 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         for name in ("canSerializeFMUstate", "canSerializeFMUState")
     )
     supports_serializable_fmu_state = can_get_and_set_fmu_state and can_serialize_fmu_state
-    supports_model_exchange = str(model_metadata.get("simulationKind") or "").lower() == "modelexchange"
+    available_interfaces, authorized_interfaces = _execution_interfaces_for_proxy(model_metadata)
+    supports_co_simulation = "CoSimulation" in authorized_interfaces
+    supports_model_exchange = "ModelExchange" in authorized_interfaces
     can_handle_variable_communication_step_size = supports_model_exchange or any(
         source_capabilities.get(name) is True
         for name in (
@@ -393,9 +454,42 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             "fmiVersion": "2.0",
             "guid": guid,
             "variableNamingConvention": model_metadata.get("variableNamingConvention") or "flat",
-            "numberOfEventIndicators": "0",
+            "numberOfEventIndicators": str(
+                model_metadata.get("numberOfEventIndicators", 0) if supports_model_exchange else 0
+            ),
         })
     root = ET.Element("fmiModelDescription", root_attributes)
+
+    if supports_model_exchange:
+        raw_me_capabilities = model_metadata.get("modelExchangeCapabilities")
+        me_capabilities = raw_me_capabilities if isinstance(raw_me_capabilities, dict) else {}
+        if fmi_major_version >= 3:
+            me_attributes = {"modelIdentifier": model_identifier}
+            for source_name, target_name, default in (
+                ("needsExecutionTool", "needsExecutionTool", False),
+                ("canBeInstantiatedOnlyOncePerProcess", "canBeInstantiatedOnlyOncePerProcess", False),
+                ("canGetAndSetFMUstate", "canGetAndSetFMUState", False),
+                ("canSerializeFMUstate", "canSerializeFMUState", False),
+                ("providesDirectionalDerivative", "providesDirectionalDerivative", False),
+                ("providesAdjointDerivatives", "providesAdjointDerivatives", False),
+                ("completedIntegratorStepNotNeeded", "completedIntegratorStepNotNeeded", False),
+            ):
+                value = me_capabilities.get(source_name, source_capabilities.get(source_name, default))
+                if source_name in {"providesDirectionalDerivative", "providesAdjointDerivatives"}:
+                    value = False
+                me_attributes[target_name] = str(value is True).lower()
+        else:
+            me_attributes = {"modelIdentifier": model_identifier}
+            for source_name in (
+                "needsExecutionTool", "canBeInstantiatedOnlyOncePerProcess",
+                "canNotUseMemoryManagementFunctions", "canGetAndSetFMUstate",
+                "canSerializeFMUstate", "providesDirectionalDerivative",
+            ):
+                value = me_capabilities.get(source_name, source_capabilities.get(source_name, False))
+                if source_name == "providesDirectionalDerivative":
+                    value = False
+                me_attributes[source_name] = str(value is True).lower()
+        ET.SubElement(root, "ModelExchange", me_attributes)
 
     if fmi_major_version >= 3:
         # A Co-Simulation proxy backed by a Model Exchange source can process
@@ -413,11 +507,8 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         }
         if fixed_internal_step_size is not None:
             co_simulation_attributes["fixedInternalStepSize"] = fixed_internal_step_size
-        ET.SubElement(
-            root,
-            "CoSimulation",
-            co_simulation_attributes,
-        )
+        if supports_co_simulation:
+            ET.SubElement(root, "CoSimulation", co_simulation_attributes)
     else:
         co_simulation_attributes = {
             "modelIdentifier": model_identifier,
@@ -433,11 +524,8 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         }
         if fixed_internal_step_size is not None:
             co_simulation_attributes["fixedInternalStepSize"] = fixed_internal_step_size
-        ET.SubElement(
-            root,
-            "CoSimulation",
-            co_simulation_attributes,
-        )
+        if supports_co_simulation:
+            ET.SubElement(root, "CoSimulation", co_simulation_attributes)
 
     source_unit_definitions: dict[str, dict[str, Any]] = {}
     for unit in model_metadata.get("unitDefinitions", []):
@@ -501,6 +589,37 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
     output_indexes = []
     initial_unknown_indexes = []
     written_index = 0  # 1-based position in ModelVariables (independent vars excluded)
+    written_indexes_by_reference: dict[int, int] = {}
+    written_indexes_by_name: dict[str, int] = {}
+    proxy_variable_indexes: dict[int, int] = {}
+    proxy_variable_index = 0
+    for source_index, source_variable in enumerate(model_metadata.get("modelVariables") or [], start=1):
+        if not isinstance(source_variable, dict):
+            continue
+        if fmi_major_version >= 3 and source_variable.get("aliasOf"):
+            continue
+        if fmi_major_version < 3 and str(source_variable.get("causality") or "").lower() == "independent":
+            continue
+        proxy_variable_index += 1
+        raw_source_reference = source_variable.get("valueReference", source_index)
+        if raw_source_reference is None:
+            raw_source_reference = source_index
+        if type(raw_source_reference) is not int or raw_source_reference < 0:
+            continue
+        source_reference = raw_source_reference
+        proxy_variable_indexes.setdefault(source_reference, proxy_variable_index)
+    model_structure = model_metadata.get("modelStructure")
+    derivative_state_by_reference: dict[int, int] = {}
+    if supports_model_exchange and isinstance(model_structure, dict):
+        for derivative in model_structure.get("derivatives", []) or []:
+            if not isinstance(derivative, dict):
+                continue
+            derivative_reference = derivative.get("valueReference")
+            state_reference = derivative.get("stateValueReference")
+            if type(derivative_reference) is not int or type(state_reference) is not int:
+                continue
+            derivative_state_by_reference[derivative_reference] = state_reference
+    continuous_state_references = set(derivative_state_by_reference.values())
 
     for index, var in enumerate(model_metadata.get("modelVariables", []), start=1):
         # FMI 3 aliases are emitted as child Alias elements of their primary
@@ -517,13 +636,31 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         var_type = str(var.get("type", "Real") or "Real")
         declared_type = var.get("declaredType") if isinstance(var.get("declaredType"), dict) else {}
         declared_type_name = _normalize_xml_value(declared_type.get("name"))
-        value_reference = var.get("valueReference")
-        if value_reference is None:
-            value_reference = index
+        raw_value_reference = var.get("valueReference")
+        if raw_value_reference is None:
+            numeric_reference = index
+        elif type(raw_value_reference) is int and raw_value_reference >= 0:
+            numeric_reference = raw_value_reference
+        else:
+            numeric_reference = index
+        value_reference = numeric_reference
+        written_indexes_by_reference.setdefault(numeric_reference, written_index)
+        variable_name = var.get("name")
+        if isinstance(variable_name, str) and variable_name:
+            written_indexes_by_name.setdefault(variable_name, written_index)
         scalar_attrs = {
             "name": str(var.get("name") or f"var_{index}"),
             "valueReference": str(value_reference),
         }
+        state_reference = derivative_state_by_reference.get(numeric_reference)
+        if state_reference is not None:
+            if fmi_major_version >= 3:
+                scalar_attrs["derivative"] = str(state_reference)
+            else:
+                state_index = proxy_variable_indexes.get(state_reference)
+                if state_index is None:
+                    raise HTTPException(status_code=422, detail="FMI 2 derivative references an unexported state variable")
+                scalar_attrs["derivative"] = str(state_index)
         variable_description = _normalize_xml_value(var.get("description"))
         if variable_description:
             scalar_attrs["description"] = variable_description
@@ -572,17 +709,17 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
                 if normalized_fmi3_type in {
                     "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64", "Enumeration",
                 }:
-                    try:
-                        integer_value = int(value)
-                    except (TypeError, ValueError, OverflowError):
+                    if not isinstance(value, int) or isinstance(value, bool):
                         continue
-                    type_attrs[field] = str(integer_value)
+                    type_attrs[field] = str(value)
                 elif isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
                     type_attrs[field] = format(value, ".17g")
         if fmi_major_version >= 3 and normalized_fmi3_type in {"Float32", "Float64"}:
             nominal = var.get("nominal")
             if isinstance(nominal, (int, float)) and not isinstance(nominal, bool) and math.isfinite(nominal):
                 type_attrs["nominal"] = format(nominal, ".17g")
+            if numeric_reference in continuous_state_references and isinstance(var.get("reinit"), bool):
+                type_attrs["reinit"] = str(var["reinit"]).lower()
             for field in ("relativeQuantity", "unbounded"):
                 value = var.get(field)
                 if isinstance(value, bool):
@@ -714,19 +851,90 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             initial_unknown_indexes.append(written_index)
 
     model_structure = ET.SubElement(root, "ModelStructure")
-    if fmi_major_version >= 3:
-        for _, value_reference in output_indexes:
-            ET.SubElement(model_structure, "Output", {"valueReference": str(value_reference)})
-        for value_reference in initial_unknown_indexes:
-            ET.SubElement(model_structure, "InitialUnknown", {"valueReference": str(value_reference)})
-    elif output_indexes:
-        outputs = ET.SubElement(model_structure, "Outputs")
-        for idx, _ in output_indexes:
-            ET.SubElement(outputs, "Unknown", {"index": str(idx)})
-    if fmi_major_version < 3 and initial_unknown_indexes:
-        initial_unknowns = ET.SubElement(model_structure, "InitialUnknowns")
-        for idx in initial_unknown_indexes:
-            ET.SubElement(initial_unknowns, "Unknown", {"index": str(idx)})
+    source_model_structure = model_metadata.get("modelStructure")
+    if supports_model_exchange and isinstance(source_model_structure, dict):
+        model_structure_fields = (
+            ("outputs", "Output"),
+            ("derivatives", "ContinuousStateDerivative"),
+            ("clockedStates", "ClockedState"),
+            ("initialUnknowns", "InitialUnknown"),
+            ("eventIndicators", "EventIndicator"),
+        )
+
+        def structure_reference(entry: dict, *, dependency_name: str | None = None) -> int | None:
+            if dependency_name:
+                return written_indexes_by_name.get(dependency_name)
+            name = entry.get("name")
+            if isinstance(name, str) and name in written_indexes_by_name:
+                return written_indexes_by_name[name]
+            reference = entry.get("valueReference")
+            if isinstance(reference, int) and not isinstance(reference, bool):
+                return written_indexes_by_reference.get(reference)
+            return None
+
+        if fmi_major_version >= 3:
+            for field, element_name in model_structure_fields:
+                for entry in source_model_structure.get(field, []) or []:
+                    if not isinstance(entry, dict):
+                        continue
+                    reference = entry.get("valueReference")
+                    if isinstance(reference, bool) or not isinstance(reference, int):
+                        continue
+                    element_attributes = {"valueReference": str(reference)}
+                    dependencies = entry.get("dependencies")
+                    if isinstance(dependencies, list):
+                        element_attributes["dependencies"] = " ".join(str(item) for item in dependencies)
+                    dependency_kinds = entry.get("dependenciesKind")
+                    if isinstance(dependency_kinds, list):
+                        element_attributes["dependenciesKind"] = " ".join(str(item) for item in dependency_kinds)
+                    ET.SubElement(model_structure, element_name, element_attributes)
+        else:
+            for field, container_name in (
+                ("outputs", "Outputs"),
+                ("derivatives", "Derivatives"),
+                ("initialUnknowns", "InitialUnknowns"),
+            ):
+                entries = source_model_structure.get(field, []) or []
+                if not entries:
+                    continue
+                container = ET.SubElement(model_structure, container_name)
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    index = structure_reference(entry)
+                    if index is None:
+                        raise HTTPException(status_code=422, detail="FMI 2 ModelStructure references an unexported variable")
+                    unknown_attributes = {"index": str(index)}
+                    dependencies = entry.get("dependencies")
+                    dependency_names = entry.get("dependencyNames")
+                    if isinstance(dependencies, list):
+                        mapped_dependencies = []
+                        for dependency_index, dependency in enumerate(dependencies):
+                            dependency_name = (
+                                dependency_names[dependency_index]
+                                if isinstance(dependency_names, list) and dependency_index < len(dependency_names)
+                                else None
+                            )
+                            mapped = structure_reference({"valueReference": dependency}, dependency_name=dependency_name)
+                            if mapped is None:
+                                raise HTTPException(status_code=422, detail="FMI 2 ModelStructure dependency is not exported")
+                            mapped_dependencies.append(str(mapped))
+                        unknown_attributes["dependencies"] = " ".join(mapped_dependencies)
+                    ET.SubElement(container, "Unknown", unknown_attributes)
+    else:
+        if fmi_major_version >= 3:
+            for _, value_reference in output_indexes:
+                ET.SubElement(model_structure, "Output", {"valueReference": str(value_reference)})
+            for value_reference in initial_unknown_indexes:
+                ET.SubElement(model_structure, "InitialUnknown", {"valueReference": str(value_reference)})
+        elif output_indexes:
+            outputs = ET.SubElement(model_structure, "Outputs")
+            for idx, _ in output_indexes:
+                ET.SubElement(outputs, "Unknown", {"index": str(idx)})
+        if fmi_major_version < 3 and initial_unknown_indexes:
+            initial_unknowns = ET.SubElement(model_structure, "InitialUnknowns")
+            for idx in initial_unknown_indexes:
+                ET.SubElement(initial_unknowns, "Unknown", {"index": str(idx)})
 
     xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     return xml_bytes

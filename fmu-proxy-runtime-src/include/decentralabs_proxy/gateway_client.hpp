@@ -44,7 +44,11 @@ public:
                                const ExperimentConfig& experiment,
                                const std::map<std::string, ScalarValue>& initial_inputs,
                                const std::map<std::string, ScalarValue>& initial_parameters,
-                               bool early_return_allowed = false);
+                               bool early_return_allowed = false,
+                               bool model_exchange = false,
+                               bool defer_initialization_exit = false);
+    ValueResult<JsonObject> ModelExchangeCall(const std::string& operation,
+                                              const JsonObject& arguments = {});
     OperationResult Reconfigure(const std::map<std::string, ScalarValue>& values);
     OperationResult SetInputs(const std::map<std::string, ScalarValue>& values,
                               bool* terminate_simulation = nullptr);

@@ -424,6 +424,9 @@ def _merge_raw_fmi_type_metadata(metadata: dict, fmu_path) -> dict:
                 value = _normalize_xml_value(source_attributes.get(field))
                 if value:
                     variable[field] = value[:maximum_length]
+            raw_reinit = source_attributes.get("reinit")
+            if raw_reinit in {"true", "false"}:
+                variable["reinit"] = raw_reinit == "true"
             display_unit = _normalize_xml_value(source_attributes.get("displayUnit"))
             if display_unit and not variable.get("displayUnit"):
                 variable["displayUnit"] = display_unit[:256]
@@ -584,6 +587,9 @@ def _model_metadata_from_model_description(
                 entry["aliases"] = aliases
         if hasattr(var, "initial") and var.initial:
             entry["initial"] = var.initial
+        reinit = getattr(var, "reinit", None)
+        if isinstance(reinit, bool):
+            entry["reinit"] = reinit
         unit = getattr(var, "unit", None) or getattr(declared_type, "unit", None)
         if unit:
             entry["unit"] = unit
@@ -808,6 +814,63 @@ def _model_metadata_from_model_description(
             type_entry["items"] = items
         type_definitions.append(type_entry)
 
+    def describe_model_structure(unknowns, *, include_state_reference=False):
+        entries = []
+        for unknown in unknowns or []:
+            variable = getattr(unknown, "variable", None)
+            reference = getattr(variable, "valueReference", None)
+            if isinstance(reference, bool) or not isinstance(reference, int) or reference < 0:
+                continue
+            entry: dict[str, Any] = {"valueReference": reference}
+            variable_name = getattr(variable, "name", None)
+            if isinstance(variable_name, str) and variable_name:
+                entry["name"] = variable_name
+            if include_state_reference:
+                state_variable = getattr(variable, "derivative", None)
+                state_reference = getattr(state_variable, "valueReference", None)
+                if isinstance(state_reference, int) and not isinstance(state_reference, bool) and state_reference >= 0:
+                    entry["stateValueReference"] = state_reference
+                    state_name = getattr(state_variable, "name", None)
+                    if isinstance(state_name, str) and state_name:
+                        entry["stateName"] = state_name
+            dependencies = []
+            dependency_names = []
+            for dependency in getattr(unknown, "dependencies", None) or []:
+                dependency_reference = getattr(dependency, "valueReference", None)
+                if isinstance(dependency_reference, int) and not isinstance(dependency_reference, bool) and dependency_reference >= 0:
+                    dependencies.append(dependency_reference)
+                    dependency_name = getattr(dependency, "name", None)
+                    if isinstance(dependency_name, str) and dependency_name:
+                        dependency_names.append(dependency_name)
+            if dependencies:
+                entry["dependencies"] = dependencies
+                if len(dependency_names) == len(dependencies):
+                    entry["dependencyNames"] = dependency_names
+                kinds = list(getattr(unknown, "dependenciesKind", None) or [])
+                if len(kinds) == len(dependencies):
+                    entry["dependenciesKind"] = kinds
+            entries.append(entry)
+        return entries
+
+    model_structure = {
+        "outputs": describe_model_structure(getattr(md, "outputs", None)),
+        "derivatives": describe_model_structure(getattr(md, "derivatives", None), include_state_reference=True),
+        "clockedStates": describe_model_structure(getattr(md, "clockedStates", None)),
+        "initialUnknowns": describe_model_structure(getattr(md, "initialUnknowns", None)),
+        "eventIndicators": describe_model_structure(getattr(md, "eventIndicators", None)),
+    }
+    model_exchange_capabilities = {}
+    model_exchange = getattr(md, "modelExchange", None)
+    if model_exchange is not None:
+        for attribute in (
+            "needsExecutionTool", "canBeInstantiatedOnlyOncePerProcess", "canNotUseMemoryManagementFunctions",
+            "canGetAndSetFMUstate", "canSerializeFMUstate", "providesDirectionalDerivative",
+            "providesAdjointDerivatives", "completedIntegratorStepNotNeeded", "needsCompletedIntegratorStep",
+        ):
+            value = getattr(model_exchange, attribute, None)
+            if value is not None:
+                model_exchange_capabilities[attribute] = bool(value)
+
     return {
         "modelName": _normalize_xml_value(getattr(md, "modelName", None)) or "DecentraLabsProxy",
         "guid": _normalize_xml_value(getattr(md, "guid", None)),
@@ -825,6 +888,8 @@ def _model_metadata_from_model_description(
         "defaultTolerance": default_tolerance,
         "numberOfContinuousStates": int(getattr(md, "numberOfContinuousStates", 0) or 0),
         "numberOfEventIndicators": int(getattr(md, "numberOfEventIndicators", 0) or 0),
+        **({"modelStructure": model_structure} if supports_me else {}),
+        **({"modelExchangeCapabilities": model_exchange_capabilities} if model_exchange_capabilities else {}),
         "modelVariables": variables,
         "description": _normalize_xml_value(getattr(md, "description", None)) or "",
         "author": _normalize_xml_value(getattr(md, "author", None)) or "",
@@ -861,7 +926,7 @@ def _public_model_metadata(metadata: dict) -> dict:
             "variability": variable.get("variability", "continuous"),
         }
         for optional_key in (
-            "valueReference", "alias", "aliasOf", "aliases", "initial", "intervalVariability", "unit", "start", "min", "max", "dimensions",
+            "valueReference", "alias", "aliasOf", "aliases", "initial", "reinit", "intervalVariability", "unit", "start", "min", "max", "dimensions",
             "description", "displayName", "displayUnit", "enumItems", "nominal",
             "quantity", "declaredType", "mimeType", "maxSize", "relativeQuantity", "unbounded",
             "canBeDeactivated", "priority", "intervalDecimal", "shiftDecimal", "supportsFraction",
@@ -920,6 +985,7 @@ def _public_model_metadata(metadata: dict) -> dict:
         "supportsExecution": supports_execution,
         "supportsCoSimulation": bool(metadata.get("supportsCoSimulation")),
         "supportsModelExchange": bool(metadata.get("supportsModelExchange")),
+        "availableExecutionInterfaces": list(metadata.get("availableExecutionInterfaces") or []),
         "supportsFmiLsDae": bool(metadata.get("supportsFmiLsDae")),
         "modelVariables": variables,
     }

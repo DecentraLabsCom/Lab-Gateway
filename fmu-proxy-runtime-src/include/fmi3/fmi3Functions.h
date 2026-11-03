@@ -107,6 +107,12 @@ FMI3_Export fmi3Status fmi3ExitInitializationMode(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3EnterConfigurationMode(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3ExitConfigurationMode(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3EnterEventMode(fmi3Instance instance);
+FMI3_Export fmi3Status fmi3EnterContinuousTimeMode(fmi3Instance instance);
+FMI3_Export fmi3Status fmi3CompletedIntegratorStep(
+    fmi3Instance instance,
+    fmi3Boolean noSetFMUStatePriorToCurrentPoint,
+    fmi3Boolean* enterEventMode,
+    fmi3Boolean* terminateSimulation);
 FMI3_Export fmi3Status fmi3EnterStepMode(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3UpdateDiscreteStates(
     fmi3Instance instance,
@@ -116,6 +122,29 @@ FMI3_Export fmi3Status fmi3UpdateDiscreteStates(
     fmi3Boolean* valuesOfContinuousStatesChanged,
     fmi3Boolean* nextEventTimeDefined,
     fmi3Float64* nextEventTime);
+FMI3_Export fmi3Status fmi3SetTime(fmi3Instance instance, fmi3Float64 time);
+FMI3_Export fmi3Status fmi3GetNumberOfContinuousStates(fmi3Instance instance, size_t* nContinuousStates);
+FMI3_Export fmi3Status fmi3GetNumberOfEventIndicators(fmi3Instance instance, size_t* nEventIndicators);
+FMI3_Export fmi3Status fmi3GetContinuousStates(
+    fmi3Instance instance,
+    fmi3Float64 continuousStates[],
+    size_t nContinuousStates);
+FMI3_Export fmi3Status fmi3SetContinuousStates(
+    fmi3Instance instance,
+    const fmi3Float64 continuousStates[],
+    size_t nContinuousStates);
+FMI3_Export fmi3Status fmi3GetContinuousStateDerivatives(
+    fmi3Instance instance,
+    fmi3Float64 derivatives[],
+    size_t nContinuousStates);
+FMI3_Export fmi3Status fmi3GetEventIndicators(
+    fmi3Instance instance,
+    fmi3Float64 eventIndicators[],
+    size_t nEventIndicators);
+FMI3_Export fmi3Status fmi3GetNominalsOfContinuousStates(
+    fmi3Instance instance,
+    fmi3Float64 nominals[],
+    size_t nContinuousStates);
 FMI3_Export fmi3Status fmi3Terminate(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3Reset(fmi3Instance instance);
 

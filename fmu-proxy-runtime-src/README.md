@@ -9,18 +9,21 @@ binary drop location mounted into `fmu-runner`.
 ## Current decisions
 
 - Transport: `WSS` from proxy runtime to Gateway
-- FMI target: `FMI 2.0.x Co-Simulation` for the MVP, with current `win64`
-  support extended to scalar/dimensioned `FMI 3.0 Co-Simulation`
+- FMI target: the source-declared Co-Simulation and/or Model Exchange
+  interface(s) authorized in the AAS `SimulationAccessControl` submodel. The
+  web application flow always uses remote Co-Simulation; only native proxy
+  FMUs expose the authorized interface choice.
 - Implementation language: `C++17` with the FMI C ABI export layer
 - Artifact model: generic runtime binaries plus reservation-specific
   `modelDescription.xml` and `resources/config.json`
 
 ## Current implementation status
 
-The files here now implement a functional `win64` runtime:
+The files here now implement functional `win64` and `linux64` runtimes:
 
-- FMI 2 Co-Simulation export layer
-- FMI 3 Co-Simulation export layer for scalar and dimensioned variables
+- FMI 2 Co-Simulation and Model Exchange export layers
+- FMI 3 Co-Simulation and Model Exchange export layers for scalar and
+  dimensioned variables
 - widened FMI 3 primitive type support in the runtime source and ABI:
   `Float32`, `Float64`, `Int8`, `UInt8`, `Int16`, `UInt16`, `Int32`,
   `UInt32`, `Int64`, `UInt64`, `Boolean`, `String`, `Binary`, `Clock`
@@ -66,7 +69,8 @@ What still is not finished:
 - FMI 3 support is still not validated across the full type matrix and tool matrix
 - FMI 3 `String` and `Binary` array starts are generated and parsed, but still need
   end-to-end validation against representative third-party FMUs and importers
-- The proxy binary itself exports Co-Simulation, not Model Exchange or Scheduled Execution. A provider source that uses Model Exchange is integrated by FMU Executor and still reached through the generated Co-Simulation proxy.
+- The native proxy exports the source-declared Co-Simulation and/or Model Exchange interface(s) authorized in the AAS `SimulationAccessControl` submodel. With Model Exchange, the importing tool owns integration and its FMI calls are forwarded to the provider-side source FMU; the source binary never leaves the provider. Co-Simulation remains the only interface exposed by the web application flow. FMI Scheduled Execution is not exported.
+- Model Exchange and remote FMI-LS-DAE have been compiled into the native runtime, but still need end-to-end validation with representative external importers. The existing FMPy validation list above does not claim that coverage.
 
 Promoted compiled binaries are copied into:
 

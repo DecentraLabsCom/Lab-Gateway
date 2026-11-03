@@ -10,9 +10,12 @@ from collections.abc import Collection, Mapping
 from typing import Any
 
 from aas_part4_policy import (
+    available_execution_interfaces,
     build_part4_access_rules,
     compile_part4_access_rules,
+    default_authorized_execution_interfaces,
     fmi_interface_digest,
+    normalize_authorized_execution_interfaces,
 )
 from fmi_variable_policy import (
     POLICY_VERSION,
@@ -127,6 +130,7 @@ def filter_model_description(
     payload: Any,
     *,
     include_proxy_dae_selector: bool = False,
+    include_proxy_model_exchange: bool = False,
 ) -> Any:
     """Retain readable and writable variables in a realtime description reply."""
     if not isinstance(payload, Mapping) or not isinstance(payload.get("modelVariables"), list):
@@ -139,14 +143,34 @@ def filter_model_description(
     filtered.pop("fmiLsDaeIssue", None)
     raw_permissions = policy.get("variables")
     permissions = raw_permissions if isinstance(raw_permissions, Mapping) else {}
-    safe_variables = visible_model_variables(policy, payload)
+    safe_variables = (
+        [dict(variable) for variable in payload.get("modelVariables", []) if isinstance(variable, Mapping)]
+        if include_proxy_model_exchange
+        else visible_model_variables(policy, payload)
+    )
     for variable in safe_variables:
         name = variable.get("name")
         permission = policy.get("variables", {}).get(name, {})
-        if permission.get("read") is not True:
+        if not include_proxy_model_exchange and permission.get("read") is not True:
             variable.pop("start", None)
     filtered["modelVariables"] = safe_variables
-    if include_proxy_dae_selector and isinstance(raw_fmi_ls_dae, Mapping):
+    if include_proxy_model_exchange:
+        model_structure = payload.get("modelStructure")
+        if not isinstance(model_structure, Mapping):
+            raise ValueError("Model Exchange metadata is missing FMI ModelStructure")
+        filtered["modelStructure"] = dict(model_structure)
+        for key in ("numberOfContinuousStates", "numberOfEventIndicators", "modelExchangeCapabilities"):
+            if key in payload:
+                filtered[key] = payload[key]
+        raw_authorized_interfaces = policy.get("authorizedExecutionInterfaces")
+        if isinstance(raw_authorized_interfaces, list):
+            filtered["authorizedExecutionInterfaces"] = list(raw_authorized_interfaces)
+        if isinstance(raw_fmi_ls_dae, Mapping):
+            # ME authorization is the explicit provider grant for publishing
+            # the equation interface. Variable writes remain checked against
+            # the AAS variable policy by the Gateway.
+            filtered["fmiLsDae"] = dict(raw_fmi_ls_dae)
+    if include_proxy_dae_selector and not include_proxy_model_exchange and isinstance(raw_fmi_ls_dae, Mapping):
         selector_name = raw_fmi_ls_dae.get("enableDAEParameter")
         selector_permission = permissions.get(selector_name) if isinstance(selector_name, str) else None
         selector_is_visible = any(
@@ -236,12 +260,15 @@ def filter_fmi_values(policy: Mapping[str, Any], payload: Any) -> Any:
 __all__ = [
     "AccessDenied",
     "POLICY_VERSION",
+    "available_execution_interfaces",
     "build_effective_policy",
     "build_part4_access_rules",
     "compile_part4_access_rules",
+    "default_authorized_execution_interfaces",
     "fmi_interface_digest",
     "filter_model_description",
     "filter_fmi_values",
+    "normalize_authorized_execution_interfaces",
     "validate_read_value_references",
     "validate_reads",
     "validate_writes",

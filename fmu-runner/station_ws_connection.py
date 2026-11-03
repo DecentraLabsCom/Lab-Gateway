@@ -63,6 +63,7 @@ class _GatewayStationSession:
     exp: Optional[int]
     access_policy: Optional[dict] = None
     model_metadata: Optional[dict] = None
+    model_exchange_mode: str = "instantiated"
     close_handler: Optional[Callable[[], Awaitable[None]]] = None
 
     def matches_claims(self, claims: dict, get_claim_lab_id) -> bool:
@@ -584,7 +585,7 @@ class StationWebSocketConnection:
                                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
                             if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
                                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
-                            self.manager._validate_session_message(message, access_policy)
+                            self.manager._validate_session_message(message, access_policy, model_metadata)
                         except AccessDenied:
                             response = self.manager.error_payload(
                                 code="VARIABLE_ACCESS_DENIED",
@@ -752,7 +753,12 @@ class StationWebSocketConnection:
 
                 if active_session and active_session.access_policy is not None:
                     try:
-                        self.manager._validate_session_message(message, active_session.access_policy)
+                        self.manager._validate_session_message(
+                            message,
+                            active_session.access_policy,
+                            active_session.model_metadata,
+                            active_session,
+                        )
                     except AccessDenied:
                         response = self.manager.error_payload(
                             code="VARIABLE_ACCESS_DENIED",

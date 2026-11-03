@@ -19,6 +19,7 @@ from aas_model_builders import (
     _MAX_FMI_VARIABLE_METADATA_BYTES,
     _SEMANTIC_ID_ACCESS_GENERATED_DIGEST,
     _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST,
+    _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
     _SEMANTIC_ID_ARBITRARY,
     _SEMANTIC_ID_ASSET_INTERFACES,
     _SEMANTIC_ID_CAPABILITY_DESCRIPTION,
@@ -85,6 +86,7 @@ from simulation_access_policy import (
     build_part4_access_rules,
     compile_part4_access_rules,
     fmi_interface_digest,
+    normalize_authorized_execution_interfaces,
 )
 
 logger = logging.getLogger("fmu-runner.aas")
@@ -762,6 +764,24 @@ async def _sync_aasx_package_resources(
             raw_rules = base64.b64decode(rules_blob["value"], validate=True)
             generated_digest = _find_property_value(policy_submodel, "GeneratedPolicyDigest")
             interface_digest = _find_property_value(policy_submodel, "InterfaceDigest")
+            configured_execution_interfaces = _find_property_value(
+                policy_submodel,
+                "AuthorizedExecutionInterfaces",
+            )
+            try:
+                execution_interfaces_value = (
+                    json.loads(configured_execution_interfaces)
+                    if configured_execution_interfaces is not None
+                    else None
+                )
+                authorized_execution_interfaces = normalize_authorized_execution_interfaces(
+                    metadata,
+                    execution_interfaces_value,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                logger.warning("Imported AASX execution-interface policy is invalid: %s", type(exc).__name__)
+                result["error"] = "FMU AASX execution-interface policy does not match its FMU"
+                return result
             source = "aas-generated" if (
                 generated_digest
                 and generated_digest == hashlib.sha256(raw_rules).hexdigest()
@@ -776,10 +796,20 @@ async def _sync_aasx_package_resources(
                     source=source,
                     allowed_submodel_ids=shell_submodel_ids,
                 )
+                imported_access_policy["authorizedExecutionInterfaces"] = authorized_execution_interfaces
             except (TypeError, ValueError) as exc:
                 logger.warning("Imported FMU AASX access policy is invalid: %s", type(exc).__name__)
                 result["error"] = "FMU AASX access policy does not match its FMU or AAS shell"
                 return result
+            if configured_execution_interfaces is None:
+                policy_submodel.setdefault("submodelElements", []).append(
+                    _standard_property(
+                        "AuthorizedExecutionInterfaces",
+                        "xs:string",
+                        json.dumps(authorized_execution_interfaces, separators=(",", ":")),
+                        _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
+                    )
+                )
             if source == "aas-provider":
                 struct_readable_variable_names: set[str] = set()
             else:

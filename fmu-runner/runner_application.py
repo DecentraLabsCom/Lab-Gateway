@@ -363,6 +363,19 @@ async def _aas_sync_access_policy_status(lab_id: str, access_key: str) -> dict:
     )
 
 
+async def _aas_sync_update_execution_interfaces(
+    lab_id: str,
+    access_key: str,
+    interfaces: Any,
+) -> list[str]:
+    metadata = await _aas_fmu_model_metadata(access_key)
+    return await _get_aas_access_policy_resolver().update_authorized_execution_interfaces(
+        {"labId": str(lab_id), "accessKey": access_key},
+        metadata,
+        interfaces,
+    )
+
+
 def _aas_sync_resolve_fmu_path(access_key: str):
     return _resolve_fmu_path(access_key)
 
@@ -446,6 +459,7 @@ _aas_sync_router = create_aas_sync_router(
     record_aasx=_record_aasx_association,
     invalidate_access_policy=lambda lab_id=None: _invalidate_aas_access_policy(lab_id),
     get_access_policy_status=_aas_sync_access_policy_status,
+    update_authorized_execution_interfaces=_aas_sync_update_execution_interfaces,
 )
 _aasx_router = create_aasx_router(
     association_service=AasAssociationService(
