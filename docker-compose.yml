@@ -1000,7 +1000,7 @@ services:
         limits:
           memory: 2G
           cpus: '2.0'
-          pids: 64
+          pids: 128
     logging:
       driver: "json-file"
       options:
