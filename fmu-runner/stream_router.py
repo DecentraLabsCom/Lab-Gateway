@@ -25,7 +25,14 @@ async def stream_authorized_simulation(
         if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
             raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
         try:
-            validate_writes(access_policy, req.parameters, phase="initialization")
+            # FMI 3 structural parameters are supplied before initialization,
+            # while the FMU is in Configuration Mode. Other initial values
+            # continue to use the normal initialization permission.
+            validate_writes(
+                access_policy,
+                req.parameters,
+                phase=("initialization", "configuration"),
+            )
             for event in req.inputSchedule:
                 validate_writes(access_policy, event.get("values", {}), phase="runtime")
         except AccessDenied as exc:

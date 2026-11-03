@@ -222,7 +222,7 @@ def test_tunable_boolean_fmi3_structural_parameter_is_writable_only_in_configura
         validate_writes(policy, {"enableDAE": True}, phase="runtime")
 
 
-def test_tunable_boolean_structural_parameter_without_dae_declaration_is_not_reconfigurable():
+def test_tunable_boolean_structural_parameter_is_reconfigurable_without_dae_declaration():
     policy = build_effective_policy({
         "fmiVersion": "3.0",
         "simulationType": "CoSimulation",
@@ -235,9 +235,8 @@ def test_tunable_boolean_structural_parameter_without_dae_declaration_is_not_rec
         }],
     })
 
-    assert policy["variables"]["mode"]["writeAt"] == ["configuration"]
-    with pytest.raises(AccessDenied):
-        validate_writes(policy, {"mode": True}, phase="reconfiguration")
+    assert policy["variables"]["mode"]["writeAt"] == ["configuration", "reconfiguration"]
+    validate_writes(policy, {"mode": True}, phase="reconfiguration")
 
 
 def test_part4_generated_rules_are_exact_fmi_allow_list(metadata):

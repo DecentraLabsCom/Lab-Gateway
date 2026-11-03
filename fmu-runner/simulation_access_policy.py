@@ -6,7 +6,7 @@ this module keeps the existing import surface for Gateway callers.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 from aas_part4_policy import (
@@ -30,10 +30,11 @@ def validate_writes(
     policy: Mapping[str, Any],
     values: Mapping[str, Any],
     *,
-    phase: str,
+    phase: str | Collection[str],
 ) -> None:
-    """Reject any value map containing a variable the consumer cannot write."""
-    if phase not in _PHASE_SET:
+    """Reject values not authorized in any requested FMI write phase."""
+    phases_to_accept = {phase} if isinstance(phase, str) else set(phase)
+    if not phases_to_accept or not phases_to_accept.issubset(_PHASE_SET):
         raise ValueError("unknown FMI write phase")
     if not isinstance(values, Mapping):
         raise AccessDenied
@@ -45,7 +46,7 @@ def validate_writes(
         if not isinstance(name, str) or not isinstance(permission, Mapping):
             raise AccessDenied
         phases = permission.get("writeAt")
-        if not isinstance(phases, list) or phase not in phases:
+        if not isinstance(phases, list) or not phases_to_accept.intersection(phases):
             raise AccessDenied
 
 

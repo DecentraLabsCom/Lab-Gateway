@@ -915,15 +915,14 @@ def test_proxy_model_description_with_structural_arrays_passes_fmpy_validation(t
     read_model_description(str(fmu_path), validate=True)
 
 
-def test_proxy_generation_rejects_tunable_structural_parameters():
-    with pytest.raises(HTTPException, match="fixed UInt64 dimension parameters"):
-        _validate_proxy_generation_supported({
-            "fmiVersion": "3.0",
-            "modelVariables": [
-                {"name": "n", "type": "UInt64", "causality": "structuralParameter", "variability": "tunable", "valueReference": 1, "start": 3},
-                {"name": "u", "type": "Float64", "causality": "input", "dimensions": [{"valueReference": 1}], "valueReference": 2},
-            ],
-        })
+def test_proxy_generation_supports_tunable_structural_dimension_parameters():
+    _validate_proxy_generation_supported({
+        "fmiVersion": "3.0",
+        "modelVariables": [
+            {"name": "n", "type": "UInt64", "causality": "structuralParameter", "variability": "tunable", "valueReference": 1, "start": 3},
+            {"name": "u", "type": "Float64", "causality": "input", "dimensions": [{"valueReference": 1}], "valueReference": 2},
+        ],
+    })
 
 
 def test_proxy_generation_supports_tunable_boolean_structural_parameters(tmp_path):

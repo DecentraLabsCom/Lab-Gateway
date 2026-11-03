@@ -74,3 +74,32 @@ def test_aas_denied_preview_write_never_reaches_the_executor():
 
     assert error.value.status_code == 403
     execute.assert_not_awaited()
+
+
+def test_stream_accepts_initial_parameters_authorized_for_fmi_configuration_mode():
+    claims = {
+        "labId": "local-demo-1",
+        "reservationKey": "preview-1",
+        "pucHash": "preview-1",
+        "accessKey": "model.fmu",
+        "resourceType": "fmu",
+    }
+    execute = AsyncMock(return_value=StreamingResponse(iter([]), media_type="application/x-ndjson"))
+    access_policy = AsyncMock(return_value={
+        "policySource": "aas-provider",
+        "variables": {
+            "mass": {"read": True, "writeAt": ["initialization"]},
+            "enableDAE": {"read": True, "writeAt": ["configuration", "reconfiguration"]},
+        },
+    })
+
+    asyncio.run(stream_authorized_simulation(
+        req=SimulationRequest(parameters={"mass": 2.0, "enableDAE": True}),
+        request=MagicMock(),
+        claims=claims,
+        enforce_fmu_claim=MagicMock(),
+        stream_station_simulation=execute,
+        get_effective_policy=access_policy,
+    ))
+
+    execute.assert_awaited_once()
