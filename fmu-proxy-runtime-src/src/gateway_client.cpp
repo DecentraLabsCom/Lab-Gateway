@@ -263,11 +263,9 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
         {"earlyReturnAllowed", JsonValue(early_return_allowed)},
         {"playbackSpeed", JsonValue(config.playback_speed)},
     };
-    if (model_exchange) {
-        options.emplace("executionInterface", JsonValue("ModelExchange"));
-        options.emplace("externalSolver", JsonValue(true));
-        options.emplace("deferInitializationExit", JsonValue(defer_initialization_exit));
-    }
+    options.emplace("executionInterface", JsonValue(model_exchange ? "ModelExchange" : "CoSimulation"));
+    options.emplace("externalSolver", JsonValue(model_exchange));
+    options.emplace("deferInitializationExit", JsonValue(defer_initialization_exit));
     if (experiment.stop_time.has_value()) {
         options.emplace("stopTime", JsonValue(*experiment.stop_time));
     }
@@ -285,6 +283,19 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
         request.emplace("parameters", JsonValue(scalar_value_codec::EncodeJsonObject(initial_parameters)));
     }
 
+    const auto response = SendRequest(request);
+    if (!response) {
+        return response.status;
+    }
+    return EnsureResponseType(response.value, kSimState);
+}
+
+OperationResult GatewayClient::ExitInitializationMode() {
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimExitInitializationMode))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+    };
     const auto response = SendRequest(request);
     if (!response) {
         return response.status;

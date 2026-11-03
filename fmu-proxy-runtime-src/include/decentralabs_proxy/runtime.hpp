@@ -93,7 +93,7 @@ private:
     OperationResult SetValue(const VariableInfo& variable, ScalarValue value);
     const ScalarValue* GetCachedValue(std::uint32_t value_reference) const;
     OperationResult ApplyOutputSnapshot(const OutputSnapshot& snapshot);
-    OperationResult EvaluateInitialization();
+    OperationResult EvaluateInitialization(bool read_initial_outputs = true);
     OperationResult EvaluateInitializationForValues(const std::uint32_t* value_references,
                                                     std::size_t count,
                                                     std::optional<std::size_t> value_count);
@@ -151,6 +151,7 @@ private:
     bool realtime_clock_started_ = false;
     bool initialization_evaluated_ = false;
     bool initialization_evaluation_dirty_ = false;
+    bool initialization_outputs_evaluated_ = false;
     std::map<std::uint32_t, ScalarValue> cached_values_;
     std::map<std::string, ScalarValue> initial_inputs_;
     std::map<std::string, ScalarValue> pending_inputs_;

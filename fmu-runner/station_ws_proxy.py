@@ -201,7 +201,9 @@ class StationRealtimeWsProxyManager:
                     raise AccessDenied
             if external_solver and requested_interface != "ModelExchange":
                 raise AccessDenied
-            if defer_initialization_exit and not external_solver:
+            if defer_initialization_exit and requested_interface not in {"CoSimulation", "ModelExchange"}:
+                raise AccessDenied
+            if defer_initialization_exit and requested_interface == "ModelExchange" and not external_solver:
                 raise AccessDenied
             checkpoint = message.get("checkpoint")
             if checkpoint is not None:
@@ -261,12 +263,6 @@ class StationRealtimeWsProxyManager:
                 validate_writes(state_policy, state_initial_values, phase="initialization")
             if "inputs" in options:
                 validate_writes(access_policy, options["inputs"], phase="initialization")
-            if active_session is not None:
-                active_session.model_exchange_mode = (
-                    "initialization" if external_solver and defer_initialization_exit
-                    else "event" if external_solver
-                    else "instantiated"
-                )
         elif msg_type == "sim.restoreFMUState":
             checkpoint = message.get("checkpoint")
             StationRealtimeWsProxyManager._validate_state_checkpoint(checkpoint)
@@ -279,21 +275,13 @@ class StationRealtimeWsProxyManager:
             ):
                 raise AccessDenied
             validate_reads(access_policy, variables)
-            checkpoint_simulation = checkpoint.get("simulation") if isinstance(checkpoint, dict) else None
-            external_solver = (
-                checkpoint_simulation.get("externalSolver")
-                if isinstance(checkpoint_simulation, dict)
-                else None
-            )
-            if isinstance(external_solver, dict):
-                restored_mode = external_solver.get("mode")
-                if (
-                    restored_mode not in {"initialization", "event", "continuous"}
-                    or "ModelExchange" not in access_policy.get("authorizedExecutionInterfaces", [])
-                ):
-                    raise AccessDenied
-                if active_session is not None:
-                    active_session.model_exchange_mode = restored_mode
+        elif msg_type == "sim.exitInitializationMode":
+            if (
+                active_session is None
+                or getattr(active_session, "execution_interface", None) != "CoSimulation"
+                or getattr(active_session, "deferred_initialization_exit", False) is not True
+            ):
+                raise AccessDenied
         elif msg_type == "sim.setInputs":
             validate_writes(access_policy, message.get("values", {}), phase="runtime")
         elif msg_type == "sim.reconfigure":

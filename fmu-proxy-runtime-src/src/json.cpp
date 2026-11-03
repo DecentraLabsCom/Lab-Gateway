@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -363,7 +364,7 @@ void SerializeValue(const JsonValue& value, std::ostringstream& out) {
         return;
     }
     if (value.IsNumber()) {
-        out << std::setprecision(15) << value.AsNumber();
+        out << std::setprecision(std::numeric_limits<double>::max_digits10) << value.AsNumber();
         return;
     }
     if (value.IsString()) {

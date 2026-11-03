@@ -113,6 +113,21 @@ void TestJsonParserAndSerializer() {
     CHECK(reparsed);
     CHECK(JsonString(*reparsed.value.AsObject(), "message") == "line\n\"quoted\"");
 
+    // Opaque checkpoint fixture sealed by FMU-Executor. Timestamp values must
+    // survive the proxy JSON round trip exactly so Executor's signature check
+    // receives the original token fields.
+    const auto checkpoint = ParseJson(
+        R"({"checkpointId":"0123456789abcdef0123456789abcdef","createdAt":1793736591.253394,"expiresAt":1793822991.253394,"format":"decentralabs-fmi-state-v1","scope":"f570a9dc38098cefc29a015b51298db88e7533ecd31745b6ca9a76291d8fbdf3","signature":"c2a2caaad4fcbc3d2d135c573cd47adb9a417ccea8e364ec262cec84e446b684"})");
+    CHECK(checkpoint);
+    const auto checkpoint_round_trip = ParseJson(SerializeJson(checkpoint.value));
+    CHECK(checkpoint_round_trip);
+    CHECK(JsonNumber(*checkpoint.value.AsObject(), "createdAt")
+          == JsonNumber(*checkpoint_round_trip.value.AsObject(), "createdAt"));
+    CHECK(JsonNumber(*checkpoint.value.AsObject(), "expiresAt")
+          == JsonNumber(*checkpoint_round_trip.value.AsObject(), "expiresAt"));
+    CHECK(JsonString(*checkpoint.value.AsObject(), "signature")
+          == JsonString(*checkpoint_round_trip.value.AsObject(), "signature"));
+
     const auto malformed = ParseJson(R"({"missing": 1} trailing)");
     CHECK(!malformed);
     CHECK(malformed.status.code == "JSON_PARSE_ERROR");
@@ -185,7 +200,7 @@ void TestProtocolAndSessionState() {
     CHECK(IsSupportedServerMessage(kSessionCreated));
     CHECK(IsSupportedServerMessage(kError));
     CHECK(!IsSupportedServerMessage("sim.unknown"));
-    CHECK(SupportedClientMessages().size() == 13);
+    CHECK(SupportedClientMessages().size() == 14);
     CHECK(SupportedServerMessages().size() == 11);
 
     CHECK(CanTransition(SessionState::kUnconfigured, SessionState::kInstantiated));
@@ -445,6 +460,7 @@ void TestProxyRuntimeLifecycle() {
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
     scripted->QueueResponse(
         R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{"output":0.0,"counter":0,"label":"initial","enabled":false}})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"initialized"})");
     CHECK_OK(runtime.ExitInitializationMode());
     CHECK(runtime.State() == SessionState::kInitialized);
 
@@ -456,7 +472,7 @@ void TestProxyRuntimeLifecycle() {
     CHECK_OK(runtime.SetReal(&input_reference, 1, &stepped_input_value));
 
     scripted->QueueResponse(
-        R"({"type":"sim.samples","requestId":"req-4","simTime":0.25,"finished":true,"samples":[{"time":0.25,"outputs":{"output":4.25,"counter":12,"label":"ready","enabled":true}}]})");
+        R"({"type":"sim.samples","requestId":"req-5","simTime":0.25,"finished":true,"samples":[{"time":0.25,"outputs":{"output":4.25,"counter":12,"label":"ready","enabled":true}}]})");
     CHECK_OK(runtime.DoStep(0.0, 0.25));
     CHECK(runtime.State() == SessionState::kRunning);
     CHECK_NEAR(runtime.CurrentTime(), 0.25, 1e-12);
@@ -493,7 +509,7 @@ void TestProxyRuntimeLifecycle() {
     const std::uint32_t unknown_reference = 999;
     CHECK(runtime.GetReal(&unknown_reference, 1, &output_value).code == "INVALID_ARGUMENT");
 
-    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-5","state":"reset"})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-6","state":"reset"})");
     CHECK_OK(runtime.Reset());
     CHECK(runtime.State() == SessionState::kInstantiated);
     CHECK_NEAR(runtime.CurrentTime(), 0.0, 1e-12);
@@ -505,18 +521,19 @@ void TestProxyRuntimeLifecycle() {
     CHECK_OK(runtime.GetReal(&input_reference, 1, &reset_input_value));
     CHECK_NEAR(reset_input_value, 1.0, 1e-12);
     CHECK_OK(runtime.EnterInitializationMode());
-    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-6","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-7","state":"initialized"})");
     scripted->QueueResponse(
-        R"({"type":"sim.outputs","requestId":"req-7","simTime":0.0,"values":{"output":1.0,"counter":0,"label":"initial","enabled":false}})");
+        R"({"type":"sim.outputs","requestId":"req-8","simTime":0.0,"values":{"output":1.0,"counter":0,"label":"initial","enabled":false}})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-9","state":"initialized"})");
     CHECK_OK(runtime.ExitInitializationMode());
-    const auto reinitialize_request = ParseJson(scripted->SentPayloads()[5]);
+    const auto reinitialize_request = ParseJson(scripted->SentPayloads()[6]);
     CHECK(reinitialize_request);
     const JsonObject& reinitialize_object = *reinitialize_request.value.AsObject();
     CHECK(JsonString(reinitialize_object, "type") == "sim.initialize");
     const JsonObject& reinitialize_options = *FindObjectValue(reinitialize_object, "options")->AsObject();
     CHECK(FindObjectValue(reinitialize_options, "inputs") == nullptr);
 
-    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-8","reason":"test complete"})");
+    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-10","reason":"test complete"})");
     CHECK_OK(runtime.Terminate());
     CHECK(runtime.State() == SessionState::kTerminated);
 }
@@ -564,9 +581,10 @@ void TestInitializationGetsEvaluateAndRefreshOutputs() {
     CHECK_NEAR(output_value, 3.5, 1e-12);
 
     const std::size_t requests_before_exit = scripted->SentPayloads().size();
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-7","state":"initialized"})");
     CHECK_OK(runtime.ExitInitializationMode());
     CHECK(runtime.State() == SessionState::kInitialized);
-    CHECK(scripted->SentPayloads().size() == requests_before_exit);
+    CHECK(scripted->SentPayloads().size() == requests_before_exit + 1);
 
     const auto initial_request = ParseJson(scripted->SentPayloads()[1]);
     CHECK(initial_request);
@@ -765,22 +783,60 @@ void TestModelExchangeStateCanBeCapturedAndRestoredDuringInitialization() {
     CHECK_OK(runtime.EnterInitializationMode());
 
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
-    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-3","result":{"values":[0.25]}})");
-    const auto state_result = runtime.ModelExchangeCall("getContinuousStates");
-    CHECK(state_result);
-
-    scripted->QueueResponse(R"({"type":"sim.fmuState","requestId":"req-4","checkpoint":{"opaque":"state"}})");
+    scripted->QueueResponse(R"({"type":"sim.fmuState","requestId":"req-3","checkpoint":{"opaque":"state"}})");
     std::string serialized_state;
     CHECK_OK(runtime.CaptureFmuState(serialized_state));
     const auto parsed_state = ParseJson(serialized_state);
     CHECK(parsed_state);
     CHECK(JsonBool(*parsed_state.value.AsObject(), "initializationMode"));
 
-    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-5","simTime":0.0,"outputs":{}})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","simTime":0.0,"outputs":{},"_restoredModelExchangeMode":"initialization"})");
     CHECK_OK(runtime.RestoreFmuState(serialized_state));
     CHECK(runtime.State() == SessionState::kSessionCreated);
 
-    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-6","result":{"mode":"event"}})");
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-5","result":{"mode":"event"}})");
+    CHECK_OK(runtime.ExitInitializationMode());
+    CHECK(runtime.State() == SessionState::kInitialized);
+}
+
+void TestCoSimulationStateCanBeCapturedDuringInitialization() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="2.0" modelName="StatefulCS" guid="stateful-cs-guid">
+          <CoSimulation modelIdentifier="stateful_cs" canGetAndSetFMUstate="true" canSerializeFMUstate="true"/>
+          <ModelVariables>
+            <ScalarVariable name="input" valueReference="1" causality="input" variability="continuous"><Real start="0"/></ScalarVariable>
+            <ScalarVariable name="output" valueReference="2" causality="output" variability="continuous"><Real start="0"/></ScalarVariable>
+          </ModelVariables>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("stateful-cs-instance", directory.path.string()));
+    CHECK_OK(runtime.SetupExperiment(0.0, 1.0, 0.1));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"stateful-cs-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.fmuState","requestId":"req-3","checkpoint":{"opaque":"state"}})");
+    std::string serialized_state;
+    CHECK_OK(runtime.CaptureFmuState(serialized_state));
+    const auto parsed_state = ParseJson(serialized_state);
+    CHECK(parsed_state);
+    CHECK(JsonBool(*parsed_state.value.AsObject(), "initializationMode"));
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","simTime":0.0,"outputs":{},"_restoredInitializationMode":true})");
+    CHECK_OK(runtime.RestoreFmuState(serialized_state));
+    CHECK(runtime.State() == SessionState::kSessionCreated);
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-5","simTime":0.0,"values":{"output":0.0}})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-6","state":"initialized"})");
     CHECK_OK(runtime.ExitInitializationMode());
     CHECK(runtime.State() == SessionState::kInitialized);
 }
@@ -811,13 +867,14 @@ void TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs() {
     CHECK_OK(runtime.EnterInitializationMode());
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
     scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{"output":0.0}})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"initialized"})");
     CHECK_OK(runtime.ExitInitializationMode());
 
     const std::uint32_t input_reference = 1;
     const double input_value = 4.0;
     CHECK_OK(runtime.SetReal(&input_reference, 1, &input_value));
-    scripted->QueueResponse(R"({"type":"sim.inputs.updated","requestId":"req-4"})");
-    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-5","simTime":0.0,"values":{"output":4.0},"nextEventTimeDefined":false})");
+    scripted->QueueResponse(R"({"type":"sim.inputs.updated","requestId":"req-5"})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-6","simTime":0.0,"values":{"output":4.0},"nextEventTimeDefined":false})");
     bool terminate = false;
     bool next_event_time_defined = true;
     double next_event_time = -1.0;
@@ -830,7 +887,7 @@ void TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs() {
     const std::uint32_t output_reference = 2;
     CHECK_OK(runtime.GetReal(&output_reference, 1, &output_value));
     CHECK_NEAR(output_value, 4.0, 1e-12);
-    const auto input_update = ParseJson(scripted->SentPayloads()[3]);
+    const auto input_update = ParseJson(scripted->SentPayloads()[4]);
     CHECK(input_update);
     CHECK(JsonString(*input_update.value.AsObject(), "type") == "sim.setInputs");
     const JsonObject& sent_values = *FindObjectValue(*input_update.value.AsObject(), "values")->AsObject();
@@ -863,6 +920,7 @@ void TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit() {
     CHECK_OK(runtime.EnterInitializationMode());
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
     scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{"output":0.0}})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"initialized"})");
     CHECK_OK(runtime.ExitInitializationMode());
     const auto sent_payloads = scripted->SentPayloads();
     CHECK(sent_payloads.size() >= 2);
@@ -871,7 +929,7 @@ void TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit() {
     const JsonObject& options = *FindObjectValue(*initialize_request.value.AsObject(), "options")->AsObject();
     CHECK(FindObjectValue(options, "stopTime") == nullptr);
 
-    scripted->QueueResponse(R"({"type":"sim.samples","requestId":"req-4","simTime":0.75,"samples":[{"time":0.75,"outputs":{"output":1.0}}]})");
+    scripted->QueueResponse(R"({"type":"sim.samples","requestId":"req-5","simTime":0.75,"samples":[{"time":0.75,"outputs":{"output":1.0}}]})");
     CHECK_OK(runtime.DoStep(0.0, 0.75));
     CHECK_NEAR(runtime.CurrentTime(), 0.75, 1e-12);
     CHECK(!runtime.SimulationFinished());
@@ -907,6 +965,7 @@ void TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation() {
     CHECK_OK(runtime.EnterInitializationMode());
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
     scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{}})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"initialized"})");
     CHECK_OK(runtime.ExitInitializationMode());
     const auto sent_payloads = scripted->SentPayloads();
     CHECK(sent_payloads.size() >= 2);
@@ -918,7 +977,7 @@ void TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation() {
     const bool disabled = false;
     CHECK_OK(runtime.EnterConfigurationMode());
     CHECK_OK(runtime.SetBoolean(&dae_reference, 1, &disabled));
-    scripted->QueueResponse(R"({"type":"sim.reconfigured","requestId":"req-4","simTime":0.0})");
+    scripted->QueueResponse(R"({"type":"sim.reconfigured","requestId":"req-5","simTime":0.0})");
     CHECK_OK(runtime.ExitConfigurationMode());
     const auto reconfiguration_request = ParseJson(scripted->SentPayloads().back());
     CHECK(reconfiguration_request);
@@ -958,6 +1017,7 @@ int main() {
     failures += RunTest("FMI 3 exact and approximate states can be set while instantiated", TestFmi3ExactAndApproxStatesCanBeSetWhileInstantiated);
     failures += RunTest("FMI 2 exact state can be set during initialization after a read", TestFmi2ExactStateCanBeSetDuringInitializationAfterARead);
     failures += RunTest("Model Exchange state can be captured and restored during initialization", TestModelExchangeStateCanBeCapturedAndRestoredDuringInitialization);
+    failures += RunTest("Co-Simulation state can be captured during initialization", TestCoSimulationStateCanBeCapturedDuringInitialization);
     failures += RunTest("discrete-state updates write inputs and refresh outputs", TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs);
     failures += RunTest("undefined stop time", TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit);
     failures += RunTest("FMI 3 runtime reconfiguration", TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation);

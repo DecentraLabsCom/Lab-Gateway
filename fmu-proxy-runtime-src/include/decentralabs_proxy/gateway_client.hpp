@@ -47,6 +47,7 @@ public:
                                bool early_return_allowed = false,
                                bool model_exchange = false,
                                bool defer_initialization_exit = false);
+    OperationResult ExitInitializationMode();
     ValueResult<JsonObject> ModelExchangeCall(const std::string& operation,
                                               const JsonObject& arguments = {});
     OperationResult Reconfigure(const std::map<std::string, ScalarValue>& values);

@@ -54,6 +54,40 @@ def _normalize_binding(value) -> str:
     return str(value or "").strip().lower()
 
 
+def _apply_internal_session_state(payload: dict[str, Any], session: Any | None) -> None:
+    """Apply trusted Executor phase metadata only after a successful state reply."""
+    restored_model_exchange_mode = payload.pop("_restoredModelExchangeMode", None)
+    restored_initialization_mode = payload.pop("_restoredInitializationMode", None)
+    deferred_initialization_exit = payload.pop("_deferredInitializationExit", None)
+    if payload.get("type") != "sim.state" or session is None:
+        return
+
+    if isinstance(restored_model_exchange_mode, str) and restored_model_exchange_mode in {
+        "instantiated", "initialization", "event", "continuous",
+    }:
+        session.model_exchange_mode = restored_model_exchange_mode
+    if type(restored_initialization_mode) is bool:
+        session.deferred_initialization_exit = restored_initialization_mode
+    if type(deferred_initialization_exit) is bool:
+        session.deferred_initialization_exit = deferred_initialization_exit
+        execution_interface = payload.get("executionInterface")
+        if execution_interface in {"CoSimulation", "ModelExchange"}:
+            session.execution_interface = execution_interface
+        if deferred_initialization_exit and session.execution_interface == "ModelExchange":
+            session.model_exchange_mode = "initialization"
+        elif not deferred_initialization_exit and session.execution_interface == "CoSimulation":
+            session.model_exchange_mode = "instantiated"
+    external_solver = payload.get("externalSolver")
+    if (
+        not isinstance(restored_model_exchange_mode, str)
+        and type(external_solver) is bool
+        and external_solver
+        and payload.get("executionInterface") == "ModelExchange"
+    ):
+        session.execution_interface = "ModelExchange"
+        session.model_exchange_mode = "initialization" if session.deferred_initialization_exit else "event"
+
+
 @dataclass
 class _GatewayStationSession:
     session_id: str
@@ -64,6 +98,8 @@ class _GatewayStationSession:
     access_policy: Optional[dict] = None
     model_metadata: Optional[dict] = None
     model_exchange_mode: str = "instantiated"
+    execution_interface: Optional[str] = None
+    deferred_initialization_exit: bool = False
     close_handler: Optional[Callable[[], Awaitable[None]]] = None
 
     def matches_claims(self, claims: dict, get_claim_lab_id) -> bool:
@@ -274,6 +310,7 @@ class StationWebSocketConnection:
                     if policy_session_id:
                         async with self.manager._sessions_lock:
                             policy_session = self.manager._sessions.get(policy_session_id)
+                        _apply_internal_session_state(payload, policy_session)
                         try:
                             access_policy = (
                                 await self.manager._refresh_session_access_policy(policy_session)

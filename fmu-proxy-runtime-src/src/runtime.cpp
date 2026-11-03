@@ -659,6 +659,7 @@ OperationResult ProxyRuntime::Configure(const std::string& instance_name, const 
     simulation_finished_ = false;
     initialization_evaluated_ = false;
     initialization_evaluation_dirty_ = false;
+    initialization_outputs_evaluated_ = false;
     gateway_client_ = std::make_unique<GatewayClient>(transport_factory_());
     SeedCacheFromModelDefaults();
     initial_inputs_.clear();
@@ -728,6 +729,11 @@ ValueResult<JsonObject> ProxyRuntime::ModelExchangeCall(
         }
     } else if (operation == "exitInitializationMode" || operation == "enterEventMode") {
         model_exchange_remote_mode_ = "event";
+        if (operation == "exitInitializationMode") {
+            initialization_mode_entered_ = false;
+            initialization_evaluated_ = true;
+            initialization_evaluation_dirty_ = false;
+        }
     } else if (operation == "enterContinuousTimeMode") {
         model_exchange_remote_mode_ = "continuous";
     }
@@ -1085,6 +1091,13 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
             SetError(exit_status.status.message);
             return exit_status.status;
         }
+    } else {
+        const auto exit_status = gateway_client_->ExitInitializationMode();
+        if (!exit_status) {
+            state_ = SessionState::kError;
+            SetError(exit_status.message);
+            return exit_status;
+        }
     }
     pending_inputs_.clear();
     realtime_sim_origin_ = current_time_;
@@ -1097,7 +1110,7 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
     return transition;
 }
 
-OperationResult ProxyRuntime::EvaluateInitialization() {
+OperationResult ProxyRuntime::EvaluateInitialization(const bool read_initial_outputs) {
     if (gateway_client_ == nullptr) {
         return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
     }
@@ -1105,6 +1118,21 @@ OperationResult ProxyRuntime::EvaluateInitialization() {
         return OperationResult::Failure("STATE_ERROR", "Initialization evaluation requires Initialization Mode");
     }
     if (initialization_evaluated_ && !initialization_evaluation_dirty_) {
+        if (!read_initial_outputs || initialization_outputs_evaluated_ || model_exchange_mode_) {
+            return OperationResult::Success();
+        }
+        std::vector<std::string> output_variables;
+        for (const auto& variable : model_.variables) {
+            if (variable.causality == "output") {
+                output_variables.push_back(variable.name);
+            }
+        }
+        const auto initial_outputs = gateway_client_->GetOutputs(output_variables);
+        if (!initial_outputs) {
+            return initial_outputs.status;
+        }
+        ApplyOutputSnapshot(initial_outputs.value);
+        initialization_outputs_evaluated_ = true;
         return OperationResult::Success();
     }
     if (initialization_evaluated_) {
@@ -1113,6 +1141,7 @@ OperationResult ProxyRuntime::EvaluateInitialization() {
             return reset_status;
         }
         SeedCacheFromModelDefaults();
+        initialization_outputs_evaluated_ = false;
         for (const auto& [name, value] : initial_inputs_) {
             const VariableInfo* variable = FindVariableByName(model_, name);
             if (variable != nullptr) {
@@ -1140,17 +1169,27 @@ OperationResult ProxyRuntime::EvaluateInitialization() {
         initialization_parameters,
         early_return_allowed_,
         model_exchange_mode_,
-        model_exchange_mode_);
+        true);
     if (!status) {
         return status;
     }
     model_exchange_external_solver_active_ = model_exchange_mode_;
     if (model_exchange_external_solver_active_) {
         model_exchange_remote_mode_ = "initialization";
+    } else {
+        model_exchange_remote_mode_ = "instantiated";
     }
     if (model_exchange_mode_) {
         initialization_evaluated_ = true;
         initialization_evaluation_dirty_ = false;
+        initialization_outputs_evaluated_ = false;
+        return OperationResult::Success();
+    }
+
+    initialization_evaluated_ = true;
+    initialization_evaluation_dirty_ = false;
+    initialization_outputs_evaluated_ = false;
+    if (!read_initial_outputs) {
         return OperationResult::Success();
     }
 
@@ -1167,6 +1206,7 @@ OperationResult ProxyRuntime::EvaluateInitialization() {
     ApplyOutputSnapshot(initial_outputs.value);
     initialization_evaluated_ = true;
     initialization_evaluation_dirty_ = false;
+    initialization_outputs_evaluated_ = true;
     return OperationResult::Success();
 }
 
@@ -1416,6 +1456,7 @@ OperationResult ProxyRuntime::Reset() {
     realtime_clock_started_ = false;
     initialization_evaluated_ = false;
     initialization_evaluation_dirty_ = false;
+    initialization_outputs_evaluated_ = false;
     model_exchange_external_solver_active_ = false;
     model_exchange_remote_mode_ = "instantiated";
     reconfiguration_values_.clear();
@@ -1427,15 +1468,16 @@ OperationResult ProxyRuntime::CaptureFmuState(std::string& serialized_state) {
     if (gateway_client_ == nullptr || !gateway_client_->IsConnected()) {
         return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "FMU state capture requires an active Gateway session");
     }
-    const bool model_exchange_initialization_state =
-        state_ == SessionState::kSessionCreated
-        && model_exchange_mode_
-        && model_exchange_external_solver_active_
-        && model_exchange_remote_mode_ == "initialization"
-        && initialization_mode_entered_
-        && initialization_evaluated_;
-    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning
-        && !model_exchange_initialization_state) {
+    if (state_ == SessionState::kSessionCreated && initialization_mode_entered_) {
+        const auto initialization_status = EvaluateInitialization(false);
+        if (!initialization_status) {
+            SetError(initialization_status.message);
+            return initialization_status;
+        }
+    }
+    const bool initialization_state = state_ == SessionState::kSessionCreated
+        && initialization_mode_entered_ && initialization_evaluated_;
+    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning && !initialization_state) {
         return OperationResult::Failure("STATE_ERROR", "FMU state capture requires an initialized simulation");
     }
     if (configuration_mode_) {
@@ -1472,7 +1514,7 @@ OperationResult ProxyRuntime::CaptureFmuState(std::string& serialized_state) {
         {"initialInputs", JsonValue(scalar_value_codec::EncodeJsonObject(initial_inputs_))},
         {"pendingInputs", JsonValue(scalar_value_codec::EncodeJsonObject(pending_inputs_))},
         {"cachedValues", JsonValue(scalar_value_codec::EncodeJsonObject(cached_by_name))},
-        {"initializationMode", JsonValue(model_exchange_initialization_state)},
+        {"initializationMode", JsonValue(initialization_state)},
         {"modelExchangeRemoteMode", JsonValue(model_exchange_external_solver_active_ ? model_exchange_remote_mode_ : "")},
     };
     serialized_state = SerializeJson(JsonValue(std::move(state)));
@@ -1483,15 +1525,16 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
     if (gateway_client_ == nullptr || !gateway_client_->IsConnected()) {
         return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "FMU state restore requires an active Gateway session");
     }
-    const bool model_exchange_initialization_state =
-        state_ == SessionState::kSessionCreated
-        && model_exchange_mode_
-        && model_exchange_external_solver_active_
-        && model_exchange_remote_mode_ == "initialization"
-        && initialization_mode_entered_
-        && initialization_evaluated_;
-    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning
-        && !model_exchange_initialization_state) {
+    if (state_ == SessionState::kSessionCreated && initialization_mode_entered_) {
+        const auto initialization_status = EvaluateInitialization(false);
+        if (!initialization_status) {
+            SetError(initialization_status.message);
+            return initialization_status;
+        }
+    }
+    const bool initialization_state = state_ == SessionState::kSessionCreated
+        && initialization_mode_entered_ && initialization_evaluated_;
+    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning && !initialization_state) {
         return OperationResult::Failure("STATE_ERROR", "FMU state restore requires an initialized simulation");
     }
     const auto parsed = ParseJson(serialized_state);
@@ -1534,10 +1577,11 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
     const std::string serialized_model_exchange_remote_mode =
         model_exchange_remote_mode_value == nullptr ? "" : model_exchange_remote_mode_value->AsString();
     if (restore_initialization_mode
-        && (!model_exchange_mode_
-            || !model_exchange_external_solver_active_
-            || serialized_model_exchange_remote_mode != "initialization")) {
-        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state does not match the active Model Exchange phase");
+        && ((model_exchange_mode_
+             && (!model_exchange_external_solver_active_
+                 || serialized_model_exchange_remote_mode != "initialization"))
+            || (!model_exchange_mode_ && !serialized_model_exchange_remote_mode.empty()))) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state does not match the active initialization phase");
     }
     const double serialized_time = time_value->AsNumber();
     if (!std::isfinite(serialized_time)) {
@@ -1616,11 +1660,16 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
         initialization_mode_entered_ = true;
         initialization_evaluated_ = true;
         initialization_evaluation_dirty_ = false;
-        model_exchange_external_solver_active_ = true;
-        model_exchange_remote_mode_ = "initialization";
+        initialization_outputs_evaluated_ = false;
+        model_exchange_external_solver_active_ = model_exchange_mode_;
+        model_exchange_remote_mode_ = model_exchange_mode_ ? "initialization" : "instantiated";
+        initialization_mode_entered_ = true;
     } else {
         state_ = running_value->AsBool() ? SessionState::kRunning : SessionState::kInitialized;
         initialization_mode_entered_ = false;
+        initialization_evaluated_ = true;
+        initialization_evaluation_dirty_ = false;
+        initialization_outputs_evaluated_ = true;
         if (model_exchange_mode_ && model_exchange_external_solver_active_
             && !serialized_model_exchange_remote_mode.empty()) {
             model_exchange_remote_mode_ = serialized_model_exchange_remote_mode;

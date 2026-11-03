@@ -12,6 +12,7 @@ from typing import cast
 from fmu_backend import StationFmuBackend
 from simulation_access_policy import AccessDenied, build_effective_policy
 from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession, _public_http_detail
+from station_ws_connection import _apply_internal_session_state
 
 
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu", "reservationKey": "res-1", "pucHash": "puc-user-1"}):
@@ -249,17 +250,28 @@ def test_fmi3_approx_state_cannot_be_set_after_entering_initialization_mode():
         )
 
 
-def test_restore_fmu_state_restores_external_model_exchange_phase():
+def test_restore_fmu_state_uses_opaque_token_and_waits_for_success_before_phase_update():
     policy = {
         "variables": {},
         "authorizedExecutionInterfaces": ["ModelExchange"],
     }
-    active_session = SimpleNamespace(model_exchange_mode="continuous")
+    active_session = SimpleNamespace(
+        model_exchange_mode="continuous",
+        deferred_initialization_exit=False,
+        execution_interface="ModelExchange",
+    )
 
     StationRealtimeWsProxyManager._validate_session_message(
         {
             "type": "sim.restoreFMUState",
-            "checkpoint": {"simulation": {"externalSolver": {"mode": "initialization"}}},
+            "checkpoint": {
+                "checkpointId": "opaque-checkpoint-token",
+                "createdAt": 1793736591.253394,
+                "expiresAt": 1793822991.253394,
+                "format": "decentralabs-fmi-state-v1",
+                "scope": "scope",
+                "signature": "signature",
+            },
             "variables": [],
         },
         policy,
@@ -267,7 +279,67 @@ def test_restore_fmu_state_restores_external_model_exchange_phase():
         active_session,
     )
 
+    assert active_session.model_exchange_mode == "continuous"
+
+    failed_restore = {
+        "type": "error",
+        "_restoredModelExchangeMode": "initialization",
+    }
+    _apply_internal_session_state(failed_restore, active_session)
+    assert active_session.model_exchange_mode == "continuous"
+
+    restored = {
+        "type": "sim.state",
+        "_restoredModelExchangeMode": "initialization",
+        "_restoredInitializationMode": True,
+    }
+    _apply_internal_session_state(restored, active_session)
     assert active_session.model_exchange_mode == "initialization"
+    assert active_session.deferred_initialization_exit is True
+    assert "_restoredModelExchangeMode" not in restored
+    assert "_restoredInitializationMode" not in restored
+
+
+def test_cosimulation_initialization_exit_requires_a_successfully_deferred_session():
+    message = {"type": "sim.exitInitializationMode"}
+    policy = {"authorizedExecutionInterfaces": ["CoSimulation"]}
+    active_session = SimpleNamespace(
+        execution_interface="CoSimulation",
+        deferred_initialization_exit=True,
+    )
+
+    StationRealtimeWsProxyManager._validate_session_message(message, policy, {}, active_session)
+
+    active_session.deferred_initialization_exit = False
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(message, policy, {}, active_session)
+
+
+def test_deferred_cosimulation_initialization_is_authorized_without_mutating_phase_early():
+    policy = {
+        "variables": {},
+        "authorizedExecutionInterfaces": ["CoSimulation"],
+        "modelVariables": [],
+    }
+    active_session = SimpleNamespace(
+        model_exchange_mode="continuous",
+        execution_interface="ModelExchange",
+        deferred_initialization_exit=False,
+    )
+    message = {
+        "type": "sim.initialize",
+        "options": {
+            "executionInterface": "CoSimulation",
+            "externalSolver": False,
+            "deferInitializationExit": True,
+        },
+    }
+
+    StationRealtimeWsProxyManager._validate_session_message(message, policy, {"modelVariables": []}, active_session)
+
+    assert active_session.model_exchange_mode == "continuous"
+    assert active_session.execution_interface == "ModelExchange"
+    assert active_session.deferred_initialization_exit is False
 
 
 def _claims():
