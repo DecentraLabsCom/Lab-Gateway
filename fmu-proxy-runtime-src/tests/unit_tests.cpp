@@ -382,12 +382,14 @@ void TestProxyRuntimeLifecycle() {
     const std::uint32_t input_reference = 1;
     const double input_value = 2.5;
     CHECK_OK(runtime.SetReal(&input_reference, 1, &input_value));
-    CHECK_OK(runtime.SetupExperiment(0.0, 5.0, 0.25));
+    CHECK_OK(runtime.SetupExperiment(0.0, 0.25, 0.25));
 
     scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"runtime-session"})");
     CHECK_OK(runtime.EnterInitializationMode());
     CHECK(runtime.State() == SessionState::kSessionCreated);
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(
+        R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{"output":0.0,"counter":0,"label":"initial","enabled":false}})");
     CHECK_OK(runtime.ExitInitializationMode());
     CHECK(runtime.State() == SessionState::kInitialized);
 
@@ -399,10 +401,18 @@ void TestProxyRuntimeLifecycle() {
     CHECK_OK(runtime.SetReal(&input_reference, 1, &stepped_input_value));
 
     scripted->QueueResponse(
-        R"({"type":"sim.samples","requestId":"req-3","simTime":0.25,"samples":[{"time":0.25,"outputs":{"output":4.25,"counter":12,"label":"ready","enabled":true}}]})");
+        R"({"type":"sim.samples","requestId":"req-4","simTime":0.25,"finished":true,"samples":[{"time":0.25,"outputs":{"output":4.25,"counter":12,"label":"ready","enabled":true}}]})");
     CHECK_OK(runtime.DoStep(0.0, 0.25));
     CHECK(runtime.State() == SessionState::kRunning);
     CHECK_NEAR(runtime.CurrentTime(), 0.25, 1e-12);
+    CHECK(runtime.SimulationFinished());
+
+    const std::size_t sent_payload_count = scripted->SentPayloads().size();
+    const double one_ulp_step = std::nextafter(0.25, 1.0) - 0.25;
+    const OperationResult no_advance = runtime.DoStep(0.25, one_ulp_step);
+    CHECK(!no_advance);
+    CHECK(no_advance.code == "NO_ADVANCE");
+    CHECK(scripted->SentPayloads().size() == sent_payload_count);
 
     const std::uint32_t output_reference = 2;
     double output_value = 0.0;
@@ -424,7 +434,7 @@ void TestProxyRuntimeLifecycle() {
     const std::uint32_t unknown_reference = 999;
     CHECK(runtime.GetReal(&unknown_reference, 1, &output_value).code == "INVALID_ARGUMENT");
 
-    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"reset"})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-5","state":"reset"})");
     CHECK_OK(runtime.Reset());
     CHECK(runtime.State() == SessionState::kInstantiated);
     CHECK_NEAR(runtime.CurrentTime(), 0.0, 1e-12);
@@ -432,7 +442,7 @@ void TestProxyRuntimeLifecycle() {
     CHECK_OK(runtime.GetReal(&output_reference, 1, &output_value));
     CHECK_NEAR(output_value, 0.0, 1e-12);
 
-    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-5","reason":"test complete"})");
+    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-6","reason":"test complete"})");
     CHECK_OK(runtime.Terminate());
     CHECK(runtime.State() == SessionState::kTerminated);
 }
@@ -462,13 +472,16 @@ void TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit() {
     scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"unbounded-session"})");
     CHECK_OK(runtime.EnterInitializationMode());
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{"output":0.0}})");
     CHECK_OK(runtime.ExitInitializationMode());
-    const auto initialize_request = ParseJson(scripted->SentPayloads().back());
+    const auto sent_payloads = scripted->SentPayloads();
+    CHECK(sent_payloads.size() >= 2);
+    const auto initialize_request = ParseJson(sent_payloads[1]);
     CHECK(initialize_request);
     const JsonObject& options = *FindObjectValue(*initialize_request.value.AsObject(), "options")->AsObject();
     CHECK(FindObjectValue(options, "stopTime") == nullptr);
 
-    scripted->QueueResponse(R"({"type":"sim.samples","requestId":"req-3","simTime":0.75,"samples":[{"time":0.75,"outputs":{"output":1.0}}]})");
+    scripted->QueueResponse(R"({"type":"sim.samples","requestId":"req-4","simTime":0.75,"samples":[{"time":0.75,"outputs":{"output":1.0}}]})");
     CHECK_OK(runtime.DoStep(0.0, 0.75));
     CHECK_NEAR(runtime.CurrentTime(), 0.75, 1e-12);
     CHECK(!runtime.SimulationFinished());
@@ -503,8 +516,11 @@ void TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation() {
     scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"dae-session"})");
     CHECK_OK(runtime.EnterInitializationMode());
     scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{}})");
     CHECK_OK(runtime.ExitInitializationMode());
-    const auto initialize_request = ParseJson(scripted->SentPayloads().back());
+    const auto sent_payloads = scripted->SentPayloads();
+    CHECK(sent_payloads.size() >= 2);
+    const auto initialize_request = ParseJson(sent_payloads[1]);
     CHECK(initialize_request);
     const JsonObject& parameters = *FindObjectValue(*initialize_request.value.AsObject(), "parameters")->AsObject();
     CHECK(JsonBool(parameters, "dae"));
@@ -512,7 +528,7 @@ void TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation() {
     const bool disabled = false;
     CHECK_OK(runtime.EnterConfigurationMode());
     CHECK_OK(runtime.SetBoolean(&dae_reference, 1, &disabled));
-    scripted->QueueResponse(R"({"type":"sim.reconfigured","requestId":"req-3","simTime":0.0})");
+    scripted->QueueResponse(R"({"type":"sim.reconfigured","requestId":"req-4","simTime":0.0})");
     CHECK_OK(runtime.ExitConfigurationMode());
     const auto reconfiguration_request = ParseJson(scripted->SentPayloads().back());
     CHECK(reconfiguration_request);

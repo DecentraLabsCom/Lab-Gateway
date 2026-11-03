@@ -136,7 +136,8 @@ fmi3Status ToFmiStatus(Fmi3Instance* instance, const OperationResult& status) {
     if (status) {
         return fmi3OK;
     }
-    if (status.code == "INPUT_UPDATE_RATE_LIMIT" || status.code == "OUTPUT_READ_RATE_LIMITED") {
+    if (status.code == "INPUT_UPDATE_RATE_LIMIT" || status.code == "OUTPUT_READ_RATE_LIMITED"
+        || status.code == "NO_ADVANCE") {
         Log(instance, fmi3Warning, "logStatusWarning", status.message);
         return fmi3Discard;
     }

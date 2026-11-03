@@ -952,9 +952,6 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
     if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
         return OperationResult::Failure("STATE_ERROR", "Runtime is not initialized");
     }
-    if (simulation_finished_) {
-        return OperationResult::Failure("STATE_ERROR", "Simulation has finished");
-    }
     if (!std::isfinite(current_time) || !std::isfinite(step_size) || step_size <= 0.0) {
         return OperationResult::Failure("INVALID_STEP", "Step time and size must be finite and step size positive");
     }
@@ -966,7 +963,19 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
     last_step_early_return_ = false;
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
-    const double requested_time = current_time + step_size;
+    // Use the last time confirmed by the Gateway as the communication point after
+    // accepting an importer timestamp within FMI's floating-point comparison tolerance.
+    const double effective_current_time = current_time_;
+    const double requested_time = effective_current_time + step_size;
+    constexpr double kMinimumExecutorAdvance = 1e-15;
+    if (requested_time <= effective_current_time + kMinimumExecutorAdvance) {
+        return OperationResult::Failure(
+            "NO_ADVANCE",
+            "Requested communication step does not advance beyond the current simulation time");
+    }
+    if (simulation_finished_) {
+        return OperationResult::Failure("STATE_ERROR", "Simulation has finished");
+    }
     const double stop_tolerance = experiment_.stop_time.has_value()
         ? std::max(1e-12, std::abs(*experiment_.stop_time) * 1e-12)
         : 0.0;
@@ -975,7 +984,7 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
         return OperationResult::Failure("INVALID_STEP", "Step would advance past stopTime");
     }
 
-    const auto snapshot = gateway_client_->Advance(current_time, step_size, pending_inputs_);
+    const auto snapshot = gateway_client_->Advance(effective_current_time, step_size, pending_inputs_);
     if (!snapshot) {
         if (snapshot.status.code == "INPUT_UPDATE_RATE_LIMIT"
             || snapshot.status.code == "OUTPUT_READ_RATE_LIMITED") {
@@ -1206,10 +1215,9 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
     pending_inputs_ = std::move(pending_inputs);
     cached_values_.clear();
     SeedCacheFromModelDefaults();
-    const OutputSnapshot output_snapshot{
-        restored.value.sim_time,
-        restored.value.values,
-    };
+    OutputSnapshot output_snapshot;
+    output_snapshot.sim_time = restored.value.sim_time;
+    output_snapshot.values = restored.value.values;
     ApplyOutputSnapshot(output_snapshot);
     for (const auto& [name, value] : cached_by_name) {
         const VariableInfo* variable = FindVariableByName(model_, name);

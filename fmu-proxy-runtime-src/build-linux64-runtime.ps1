@@ -14,6 +14,9 @@ $RuntimeOutput = Join-Path $RepoRoot "fmu-proxy-runtime/binaries/linux64/decentr
 
 Write-Host "== Building Linux builder image ==" -ForegroundColor Cyan
 docker build -f $Dockerfile -t $ImageTag $ScriptDir
+if ($LASTEXITCODE -ne 0) {
+    throw "Linux proxy builder image build failed with exit code $LASTEXITCODE."
+}
 
 Write-Host "== Building linux64 runtime inside Docker ==" -ForegroundColor Cyan
 if (Test-Path $BuildDir) {
@@ -23,6 +26,9 @@ docker run --rm `
   -v "${ScriptDir}:/workspace" `
   $ImageTag `
   bash -lc "cmake -S /workspace -B /workspace/build-linux64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON && cmake --build /workspace/build-linux64 -j && ctest --test-dir /workspace/build-linux64 --output-on-failure"
+if ($LASTEXITCODE -ne 0) {
+    throw "Linux proxy runtime build or tests failed with exit code $LASTEXITCODE; the runtime binary was not promoted."
+}
 
 $BuiltLibrary = Join-Path $BuildDir "libdecentralabs_proxy.so"
 if (-not (Test-Path $BuiltLibrary)) {
